@@ -6,11 +6,10 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // NewRunInput captures sealed inputs and the owner fence before placement preparation.
@@ -23,12 +22,12 @@ func NewRunInput(unit controllerwire.ClaimedUnit) (RunInput, error) {
 	runner.Labels = slices.Clone(runner.Labels)
 	input := RunInput{
 		RunID: unit.RunID, RequestHash: string(request.Hash), GrantedRunner: runner,
-		Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{
-			Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)},
+		Owner: runstate.Actor{Kind: runstate.ActorRunHost, Owner: runstate.OwnerLeaseRef{
+			Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)},
 		}},
 	}
 	if unit.Unit == capability.UnitEval || unit.Unit == capability.UnitNode {
-		input.Owner = store.Actor{}
+		input.Owner = runstate.Actor{}
 	}
 	var err error
 	input.SealedRequest, err = json.Marshal(request.Request)

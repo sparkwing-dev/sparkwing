@@ -8,11 +8,10 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial []nodeproto.JobSpec) ([]GeneratorReplay, error) {
@@ -30,7 +29,7 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 	for _, job := range initial {
 		declarations[job.ID] = job
 	}
-	parents := map[string]store.AcceptedExpansionRow{}
+	parents := map[string]runstate.AcceptedExpansionRow{}
 	for _, expansion := range snapshot.Expansions {
 		var plan nodeproto.PlanDoc
 		if expansion.Source.RunID != runspec.RunID(input.Accepted.RunID) || expansion.Source.NodeID == "" || expansion.SourceGeneration < 0 || json.Unmarshal(expansion.Body, &plan) != nil || plan.Jobs == nil {
@@ -65,7 +64,7 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 		}
 		visiting[id] = true
 		row, ok := ownerNode(snapshot, string(parent.Source.NodeID))
-		if !ok || row.Generation != runspec.ClaimGeneration(parent.SourceGeneration) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized {
+		if !ok || row.Generation != runspec.ClaimGeneration(parent.SourceGeneration) || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeSuccess && row.Outcome != runstate.NodeMemoized {
 			return nil, executorError(apierr.PlanDrift, "generator ancestry lost its successful source generation")
 		}
 		declaration := declarations[string(row.Ref.NodeID)]
@@ -194,7 +193,7 @@ func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, in
 		if !expected[generated.ID] {
 			return nil, executorError(apierr.PlanDrift, "generator replay changed the accepted member set")
 		}
-		row, err := h.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(generated.ID)})
+		row, err := h.Store.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(generated.ID)})
 		if err != nil {
 			return nil, executorError(apierr.PlanDrift, "generator replay added a job absent from the accepted expansion")
 		}

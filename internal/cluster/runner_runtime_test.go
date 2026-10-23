@@ -15,12 +15,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type cliClaim func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
@@ -198,7 +199,7 @@ func cliVersionIndex(t *testing.T) engine.VerifiedIndex {
 	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Now().UTC()
 	published := now.AddDate(0, -1, 0)
-	policy := engine.VersionIndex{Format: engine.VersionIndexFormat, PublishedAt: now, Latest: "v1.2.3", Versions: []engine.VersionInfo{{Version: "v1.2.3", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}}}
+	policy := engine.VersionIndex{Format: engine.VersionIndexFormat, PublishedAt: now, Latest: "v1.2.3", Versions: []engineid.VersionInfo{{Version: "v1.2.3", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}}}
 	body, err := json.Marshal(policy)
 	if err != nil {
 		t.Fatal(err)

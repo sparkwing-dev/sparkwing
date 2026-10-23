@@ -16,15 +16,15 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type hereTestController struct {
@@ -595,7 +595,7 @@ func FuzzHerePreparationCannotReplaceAward(f *testing.F) {
 				prepared := nodehost.RunInput{
 					RunID: run, RequestHash: run, SealedRequest: []byte(run),
 					GrantedRunner: nodeproto.RunnerIdentity{Name: run, Type: holder, Labels: []string{label}},
-					Owner:         store.Actor{Kind: store.ActorOperator, CapabilityPrefix: "bound-authority", Owner: store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: runspec.RunID(run), Holder: holder, Generation: runspec.ClaimGeneration(generation)}}},
+					Owner:         runstate.Actor{Kind: runstate.ActorOperator, CapabilityPrefix: "bound-authority", Owner: runstate.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: runspec.RunID(run), Holder: holder, Generation: runspec.ClaimGeneration(generation)}}},
 				}
 				award.Runner.Labels[0] = label
 				return hereHostSession{input: prepared, close: func() error { closed = true; return nil }, host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {

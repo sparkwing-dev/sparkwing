@@ -9,11 +9,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 const testGenerator = "targets/generate/0"
@@ -139,7 +138,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 			{ID: "leaf", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 			{ID: "sibling", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		}
-		state := &executorStore{nodes: map[string]store.NodeRow{}}
+		state := &executorStore{nodes: map[string]runstate.NodeRow{}}
 		snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run"}}
 		for _, job := range append([]nodeproto.JobSpec{source}, jobs...) {
 			raw, err := json.Marshal(job)
@@ -150,7 +149,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(job.ID)}, Spec: raw, SpecHash: string(hash)}
+			row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(job.ID)}, Spec: raw, SpecHash: string(hash)}
 			state.nodes[job.ID] = row
 			snapshot.Nodes = append(snapshot.Nodes, row)
 		}
@@ -162,7 +161,7 @@ func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		snapshot.Expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "targets"}, SourceGeneration: 1, Body: body, BodyHash: string(hash)}}
+		snapshot.Expansions = []runstate.AcceptedExpansionRow{{Source: runspec.NodeRef{RunID: "run", NodeID: "targets"}, SourceGeneration: 1, Body: body, BodyHash: string(hash)}}
 		if partial {
 			delete(state.nodes, "sibling")
 		}
@@ -190,20 +189,20 @@ func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 	for i := range children {
 		children[i] = nodeproto.JobSpec{ID: fmt.Sprintf("test-%d", i), Needs: []string{"targets"}, Groups: []string{testGenerator}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	}
-	fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+	fixture.Host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: children})
 		return raw, runspec.SecretRegistration{Version: 1}, nil, err
 	}
 	fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		if input.NodeID == "summary" {
 			for _, child := range children {
-				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: runspec.NodeID(child.ID)})
-				if err != nil || row.Outcome != store.NodeSuccess {
+				row, err := fixture.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: runspec.NodeID(child.ID)})
+				if err != nil || row.Outcome != runstate.NodeSuccess {
 					return fmt.Errorf("waiter ran before %s succeeded: %v", child.ID, err)
 				}
 			}
 		}
-		return fixture.report(ctx, input, store.NodeSuccess)
+		return fixture.report(ctx, input, runstate.NodeSuccess)
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -217,7 +216,7 @@ func TestExpansionFailureCancelsItsWaiter(t *testing.T) {
 	for _, mode := range []string{"generator-error", "source-failed", "source-skipped"} {
 		t.Run(mode, func(t *testing.T) {
 			fixture := newStoreHostFixture(t, fanOutDoc())
-			fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+			fixture.Host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 				if mode != "generator-error" {
 					t.Error("unsuccessful source evaluated a generator")
 				}
@@ -227,13 +226,13 @@ func TestExpansionFailureCancelsItsWaiter(t *testing.T) {
 				if input.NodeID == "summary" {
 					return fmt.Errorf("failed expansion released its waiter")
 				}
-				outcome := store.NodeSuccess
+				outcome := runstate.NodeSuccess
 				if input.NodeID == "targets" {
 					if mode == "source-failed" {
-						outcome = store.NodeFailed
+						outcome = runstate.NodeFailed
 					}
 					if mode == "source-skipped" {
-						outcome = store.NodeSkipped
+						outcome = runstate.NodeSkipped
 					}
 				}
 				return fixture.report(ctx, input, outcome)
@@ -241,9 +240,9 @@ func TestExpansionFailureCancelsItsWaiter(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			completion, err := fixture.Host.Run(ctx, fixture.Input)
-			wantRun, wantWaiter := "failed", store.NodeCancelled
+			wantRun, wantWaiter := "failed", runstate.NodeCancelled
 			if mode == "source-skipped" {
-				wantRun, wantWaiter = "success", store.NodeSkipped
+				wantRun, wantWaiter = "success", runstate.NodeSkipped
 			}
 			if err != nil || completion.Outcome != wantRun {
 				t.Fatalf("completion=%+v error=%v", completion, err)
@@ -259,7 +258,7 @@ func TestExpansionFailureCancelsItsWaiter(t *testing.T) {
 				if row.Ref.NodeID == "summary" && (row.Outcome != wantWaiter || row.StartedAt != nil) {
 					t.Fatalf("waiter=%+v", row)
 				}
-				if row.Ref.NodeID == "lint" && row.Outcome != store.NodeSuccess {
+				if row.Ref.NodeID == "lint" && row.Outcome != runstate.NodeSuccess {
 					t.Fatalf("independent job=%+v", row)
 				}
 			}

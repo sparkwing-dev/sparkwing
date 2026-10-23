@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestStoreRecoveryLocalOrphans(t *testing.T) {
@@ -35,11 +35,11 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.owner, f.ref = f.plan.Actor, controllerwire.NodeRef{RunID: runspec.RunID(f.plan.RunID)}
+			f.owner, f.ref = f.plan.Actor, runspec.NodeRef{RunID: runspec.RunID(f.plan.RunID)}
 			if _, err := f.tenant.AcceptPlan(ctx, f.plan); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.tenant.TransitionRun(ctx, store.RunTransition{RunID: f.ref.RunID, Actor: f.owner, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+			if _, err := f.tenant.TransitionRun(ctx, runstate.RunTransition{RunID: f.ref.RunID, Actor: f.owner, To: runstate.RunRunning, Cause: runstate.RunStart}); err != nil {
 				t.Fatal(err)
 			}
 			before, err := f.tenant.ReadRun(ctx, string(f.ref.RunID))
@@ -82,9 +82,9 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantState, wantOwner, wantEvent, disruptions := store.RunRunning, "pending", "run_requeued", 0
+			wantState, wantOwner, wantEvent, disruptions := runstate.RunRunning, "pending", "run_requeued", 0
 			if started {
-				wantState, wantOwner, wantEvent, disruptions = store.RunFailed, "failed", "run_failed", 1
+				wantState, wantOwner, wantEvent, disruptions = runstate.RunFailed, "failed", "run_failed", 1
 			}
 			if run.State != wantState || (run.FinishedAt != nil) != started || run.Number != before.Number {
 				t.Fatalf("reopened run: %+v", run)

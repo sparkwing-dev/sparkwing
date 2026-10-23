@@ -13,12 +13,13 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestNativeLocalPreparationResolvesRepositoryAlias(t *testing.T) {
@@ -91,7 +92,7 @@ func main() {
  sw.Main()
 }
 `)
-	pin, err := engine.ReadPin(dir, engine.GoSDK)
+	pin, err := engine.ReadPin(dir, engineid.GoSDK)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +102,7 @@ func main() {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build local probe: %v: %s", err, output)
 	}
-	resolved := engine.Resolved{Identity: engine.Identity{Pin: pin, Version: "v0.66.5"}}
+	resolved := engine.Resolved{Identity: engineid.Identity{Pin: pin, Version: "v0.66.5"}}
 	root, err := moduleRoot()
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +116,7 @@ func main() {
 	resolved.Executable = binary
 	resolved.Target = releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	entry, err := source.Acquire(t.Context(), source.Spec{RepoKey: "local:" + root, LocalCheckout: root, SHA: strings.TrimSpace(string(sha))}, source.Options{
-		SDK: engine.GoSDK, Target: resolved.Target, Engines: describeEngine{resolved}, ReadPin: func(string, engine.SDKKind) (engine.Pin, error) { return pin, nil },
+		SDK: engineid.GoSDK, Target: resolved.Target, Engines: describeEngine{resolved}, ReadPin: func(string, engineid.SDKKind) (engineid.Pin, error) { return pin, nil },
 		InstallSDK: func(_ context.Context, _ engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
 			directory, err := request.PipelineDirectory()
 			return engine.SDKCommand{Directory: directory, Command: []string{binary}}, err
@@ -141,7 +142,7 @@ func main() {
 	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}}}
 	planner := nodehost.SDKPlanner{
 		Start: processes.StartPlanning, Masker: masker,
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
 		Log: func(_ context.Context, frame nodeproto.FrameLog) error { t.Log(frame.Message); return nil },
@@ -170,10 +171,10 @@ func main() {
 
 type describeEngine struct{ resolved engine.Resolved }
 
-func (e describeEngine) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
+func (e describeEngine) Resolve(context.Context, engineid.Pin, releaseasset.Target) (engine.Resolved, error) {
 	return e.resolved, nil
 }
 
-func (e describeEngine) Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+func (e describeEngine) Ensure(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 	return e.resolved, nil
 }

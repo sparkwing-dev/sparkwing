@@ -10,13 +10,15 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestCheckoutPlanning(t *testing.T) {
@@ -66,7 +68,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		request.Pipeline, entrypoint = "deploy-prod", "Deploy"
 	}
 	project := []byte("defaults:\n  args: {explicit: defaults, inherited: defaults, default: defaults}\n  guards: {when: [where:controller]}\npipelines:\n  - name: " + request.Pipeline + "\n    entrypoint: " + entrypoint + "\n    args: {explicit: pipeline, inherited: pipeline}\n    guards: {when: " + when + ", unless: " + unless + "}\n    requires: [pool=build]\n")
-	identity := engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
+	identity := engineid.Identity{Version: "v1.0.0", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}
 	entry := &source.Entry{Engine: engine.Resolved{Identity: identity}, DefaultBranch: "trunk"}
 	if strings.HasPrefix(mode, "missing_default") {
 		entry.DefaultBranch = ""
@@ -80,14 +82,14 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		request.Git.DefaultBranch = runspec.Optional[string]{Set: true, Value: "trunk"}
 		entry.DefaultBranch = "changed-origin-head"
 	}
-	unit := store.OwnerLeaseRef{Kind: store.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
+	unit := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
 	sealed := runspec.SealedRequest{RunID: "run", Request: request, Hash: "request"}
-	s := newOwnerSealStore(store.RunRow{ID: "run", State: store.RunPending, Request: sealed, Owner: &unit})
+	s := newOwnerSealStore(store.RunRow{ID: "run", State: runstate.RunPending, Request: sealed, Owner: &unit})
 	var processes []*scriptedSDK
 	defaultArg, secretArg := "provided-by-sdk", "private-default"
 	planner := SDKPlanner{
 		Masker: secrets.NewMasker(), Log: func(context.Context, nodeproto.FrameLog) error { return nil },
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return entry.Engine, nil
 		},
 		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
@@ -108,7 +110,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completion, err := host.Run(t.Context(), RunInput{RunID: "run", RequestHash: "request", SealedRequest: raw, Owner: store.Actor{Kind: store.ActorRunHost, Owner: unit}})
+	completion, err := host.Run(t.Context(), RunInput{RunID: "run", RequestHash: "request", SealedRequest: raw, Owner: runstate.Actor{Kind: runstate.ActorRunHost, Owner: unit}})
 	if mode == "invalid" {
 		if err == nil || s.row.Spec != nil || len(processes) != 0 {
 			t.Fatal("invalid guard reached SDK startup or acceptance")
@@ -160,11 +162,11 @@ func checkCheckoutGuardMask(t *testing.T, value string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}}
+	resolved := engine.Resolved{Identity: engineid.Identity{Version: "v1.0.0", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}}
 	masker := secrets.NewMasker()
 	planner := SDKPlanner{
 		Masker: masker, Log: func(context.Context, nodeproto.FrameLog) error { return nil },
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
 		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {

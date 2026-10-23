@@ -9,9 +9,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type blobReadCandidate struct {
@@ -358,11 +358,11 @@ func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.H
 }
 
 func blobCandidateSelectedTx(ctx context.Context, tx *storeTx, team string, c blobReadCandidate) (bool, error) {
-	row, err := readNodeTx(ctx, tx, Team(team), controllerwire.NodeRef{RunID: runspec.RunID(c.run), NodeID: runspec.NodeID(c.node)})
+	row, err := readNodeTx(ctx, tx, Team(team), runspec.NodeRef{RunID: runspec.RunID(c.run), NodeID: runspec.NodeID(c.node)})
 	if err != nil {
 		return false, err
 	}
-	if row.Status != StatusDone {
+	if row.Status != runstate.StatusDone {
 		return false, nil
 	}
 	for _, key := range []*blob.RecordKey{row.OutputRecord, row.ManifestRecord} {

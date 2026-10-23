@@ -8,10 +8,10 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, error) {
@@ -51,8 +51,8 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 		return v, nil
 	}
 	if controller {
-		var owner OwnerLeaseRef
-		owner.Kind, owner.Name, owner.RunID = OwnerController, "controller.owner", runspec.RunID(id)
+		var owner runstate.OwnerLeaseRef
+		owner.Kind, owner.Name, owner.RunID = runstate.OwnerController, "controller.owner", runspec.RunID(id)
 		err = tx.QueryRowContext(ctx, `SELECT holder,generation FROM leases WHERE name='controller.owner'`).Scan(&owner.Holder, &owner.Generation)
 		if err == nil {
 			v.Owner = &owner
@@ -60,7 +60,7 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 			return v, err
 		}
 	} else {
-		owner := OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(id)}}
+		owner := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(id)}}
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation FROM triggers WHERE team=? AND id=?`, team, id).Scan(&owner.Holder, &owner.Generation)
 		if err == nil {
 			v.Owner = &owner
@@ -80,8 +80,8 @@ func runClaimWait(run RunRow) runspec.Setting[time.Duration] {
 
 const nodeReadColumns = `status,outcome,status_detail,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash,output_record,manifest_record`
 
-func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.NodeRef) (NodeRow, error) {
-	v := NodeRow{Ref: ref}
+func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef) (runstate.NodeRow, error) {
+	v := runstate.NodeRow{Ref: ref}
 	var ready, queued, lease, start, finish, cancel sql.NullInt64
 	var actor, execution, output, manifest []byte
 	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &output, &manifest)
@@ -129,12 +129,12 @@ func stateTime(v sql.NullInt64) *time.Time {
 	return &t
 }
 
-func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id string) ([]AcceptedExpansionRow, error) {
+func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id string) ([]runstate.AcceptedExpansionRow, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation,expansion_body,expansion_digest,expansion_registration FROM nodes WHERE team=? AND run_id=? AND expansion_body IS NOT NULL ORDER BY seq,node_id`, team, id)
 	if err != nil {
 		return nil, err
 	}
-	var out []AcceptedExpansionRow
+	var out []runstate.AcceptedExpansionRow
 	for rows.Next() {
 		var node string
 		var generation int64
@@ -145,7 +145,7 @@ func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id st
 			_ = rows.Close()
 			return out, err
 		}
-		ref := controllerwire.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)}
+		ref := runspec.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)}
 		if len(body) > 0 {
 			if len(registrationRaw) == 0 {
 				_ = rows.Close()
@@ -178,7 +178,7 @@ func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id st
 				_ = rows.Close()
 				return out, errors.New("persisted expansion registration differs from its accepted digest")
 			}
-			out = append(out, AcceptedExpansionRow{Source: ref, SourceGeneration: generation, Body: body, BodyHash: string(bodyHash), Registration: registration})
+			out = append(out, runstate.AcceptedExpansionRow{Source: ref, SourceGeneration: generation, Body: body, BodyHash: string(bodyHash), Registration: registration})
 		}
 	}
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
@@ -198,14 +198,14 @@ func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (Run
 	if err != nil {
 		return out, err
 	}
-	var refs []controllerwire.NodeRef
+	var refs []runspec.NodeRef
 	for rows.Next() {
 		var node string
 		if err := rows.Scan(&node); err != nil {
 			_ = rows.Close()
 			return out, err
 		}
-		refs = append(refs, controllerwire.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)})
+		refs = append(refs, runspec.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)})
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return out, err

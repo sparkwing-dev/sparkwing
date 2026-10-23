@@ -1,16 +1,16 @@
 package nodehost
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
-func recordNodeFailure(job string, result store.NodeResult, mask func(string) string) store.NodeResult {
+func recordNodeFailure(job string, result runstate.NodeResult, mask func(string) string) runstate.NodeResult {
 	result.MaskedError = limits.Error(mask(result.MaskedError))
 	result.Reason = limits.Error(mask(result.Reason))
-	if result.Outcome != store.NodeFailed {
+	if result.Outcome != runstate.NodeFailed {
 		result.Failure = nil
 		return result
 	}

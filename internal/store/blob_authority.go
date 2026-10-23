@@ -3,9 +3,9 @@ package store
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // ResolveBlobAuthority derives live scope and uploader identity from persisted authority.

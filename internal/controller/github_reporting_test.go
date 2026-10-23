@@ -9,13 +9,12 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func (f *githubCompletionFixture) pending() func() {
@@ -33,13 +32,13 @@ func (f *githubCompletionFixture) pending() func() {
 	actor := engineActor(capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}})
 	return func() {
 		f.t.Helper()
-		if _, err := f.tenant.TransitionRun(f.t.Context(), store.RunTransition{RunID: "run", Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+		if _, err := f.tenant.TransitionRun(f.t.Context(), runstate.RunTransition{RunID: "run", Actor: actor, To: runstate.RunRunning, Cause: runstate.RunStart}); err != nil {
 			f.t.Fatal(err)
 		}
 	}
 }
 
-func (f *githubCompletionFixture) addReportingNode(id string, outcome store.NodeState, text string) {
+func (f *githubCompletionFixture) addReportingNode(id string, outcome runstate.NodeState, text string) {
 	f.t.Helper()
 	run, err := f.tenant.ReadRun(f.t.Context(), "run")
 	if err != nil {
@@ -58,7 +57,7 @@ func (f *githubCompletionFixture) addReportingNode(id string, outcome store.Node
 	if err := teststore.SeedNode(f.server.store, f.t.Context(), store.Node{RunID: "run", NodeID: id, Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := teststore.SeedNodeFinish(f.server.store, f.t.Context(), "a", controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, store.NodeResult{Outcome: outcome, MaskedError: text}); err != nil {
+	if err := teststore.SeedNodeFinish(f.server.store, f.t.Context(), "a", runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, runstate.NodeResult{Outcome: outcome, MaskedError: text}); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -77,8 +76,8 @@ func TestGitHubAppRunReportsOneCheckRun(t *testing.T) {
 	}
 	start()
 	f.reconcile()
-	f.addReportingNode("compile", store.NodeSuccess, "")
-	f.finish(store.RunFailed)
+	f.addReportingNode("compile", runstate.NodeSuccess, "")
+	f.finish(runstate.RunFailed)
 	f.reconcile()
 	checks = f.api.checks
 	if len(checks) != 3 || checks[1].Status != "in_progress" || checks[2].Status != "completed" || checks[2].Conclusion != "failure" {
@@ -118,7 +117,7 @@ func TestGitHubAppWithoutChecksPermissionPostsStatuses(t *testing.T) {
 	f.reconcile()
 	start()
 	f.reconcile()
-	f.finish(store.RunSuccess)
+	f.finish(runstate.RunSuccess)
 	f.reconcile()
 	if len(f.api.checks) != 0 || len(f.api.statuses) != 2 || f.api.statuses[0].State != "pending" || f.api.statuses[1].State != "success" {
 		t.Fatalf("fallback checks=%+v statuses=%+v", f.api.checks, f.api.statuses)
@@ -168,9 +167,9 @@ func TestGitHubAppWithoutChecksPermissionPostsStatuses(t *testing.T) {
 func TestGitHubAppCheckRunSummaryIsBounded(t *testing.T) {
 	f := newGitHubCompletion(t)
 	for i := range 400 {
-		f.addReportingNode("node-"+strings.Repeat("x", 40)+"-"+strconv.Itoa(i), store.NodeFailed, strings.Repeat("é", 500))
+		f.addReportingNode("node-"+strings.Repeat("x", 40)+"-"+strconv.Itoa(i), runstate.NodeFailed, strings.Repeat("é", 500))
 	}
-	f.finish(store.RunFailed)
+	f.finish(runstate.RunFailed)
 	engineSQL(t, f.server.store, `UPDATE runs SET error=? WHERE team='a' AND id='run'`, strings.Repeat("ü", 100_000))
 	f.reconcile()
 	if len(f.api.checks) != 1 || f.api.checks[0].Status != "completed" {
@@ -184,8 +183,8 @@ func TestGitHubAppCheckRunSummaryIsBounded(t *testing.T) {
 
 func TestGitHubAppCheckRunSummaryKeepsPrivateRunDataInConsole(t *testing.T) {
 	f := newGitHubCompletion(t)
-	f.addReportingNode("secret-node-name", store.NodeFailed, "ghp_secret-looking-node-error")
-	f.finish(store.RunFailed)
+	f.addReportingNode("secret-node-name", runstate.NodeFailed, "ghp_secret-looking-node-error")
+	f.finish(runstate.RunFailed)
 	engineSQL(t, f.server.store, `UPDATE runs SET error='ghp_secret-looking-run-error' WHERE team='a' AND id='run'`)
 	f.reconcile()
 	if len(f.api.checks) != 1 {

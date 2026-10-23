@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
@@ -55,7 +56,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 		return "", err
 	}
 	if admitted.RunID == "" {
-		return "", missingEndpointPolicy()
+		return "", routepolicy.MissingEndpointPolicy()
 	}
 	if !admitted.Replayed {
 		l.server.recordQueueActivity(admitted.Request.AdmittedAt)

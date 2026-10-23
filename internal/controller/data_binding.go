@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type boundData struct {
@@ -17,7 +17,7 @@ type boundData struct {
 }
 
 func (s *DataController) dataTransactions(ctx context.Context, team string) (dataTransactions, error) {
-	return ScopedTenantPort[dataTransactions](ctx, store.Team(team), s.ResolveTenant)
+	return scopedTenantPort[dataTransactions](ctx, store.Team(team), s.ResolveTenant)
 }
 
 func (s *boundData) live(ctx context.Context, supplied blob.Authority) (blob.Authority, error) {

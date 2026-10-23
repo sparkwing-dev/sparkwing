@@ -3,8 +3,8 @@ package nodehost
 import (
 	"encoding/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func evalValue(result nodeproto.EvalResult, kind string) (json.RawMessage, error) {

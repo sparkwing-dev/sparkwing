@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestConcurrentClassificationNeverShrinksTheIntakeSeal(t *testing.T) {

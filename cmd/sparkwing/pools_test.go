@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type poolManager struct {
@@ -23,10 +23,12 @@ type poolManager struct {
 func (p *poolManager) ListPools(context.Context) (controllerwire.Pools, error) {
 	return controllerwire.Pools{Pools: []controllerwire.PoolDetail{{Name: "prod", Runners: []string{"runner-1"}, Rules: []controllerwire.PoolRule{{ID: "rule-1", Repos: []string{"acme/api"}, Branches: []string{"main"}, Source: "github", Route: true}}}}}, p.err
 }
+
 func (p *poolManager) AllowPool(_ context.Context, pool string, input controllerwire.PoolRuleWrite) (controllerwire.PoolRuleResult, error) {
 	p.pool, p.input = pool, input
 	return controllerwire.PoolRuleResult{Pool: pool, Rule: controllerwire.PoolRule{ID: "rule-2", Repos: input.Repos, Branches: input.Branches, Source: input.Source, Route: input.Route}, Replayed: true}, p.err
 }
+
 func (p *poolManager) DisallowPool(_ context.Context, pool, rule string) (controllerwire.PoolRuleDeletion, error) {
 	p.pool, p.rule = pool, rule
 	return controllerwire.PoolRuleDeletion{Pool: pool, RuleID: rule, Deleted: false}, p.err

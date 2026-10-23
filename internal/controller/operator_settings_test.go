@@ -12,9 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type operatorSettingsFixture struct {
@@ -156,7 +157,7 @@ func newOperatorSettingsFixture(t *testing.T) (*Server, *operatorSettingsFixture
 		},
 	}}
 	f := &operatorSettingsFixture{gate: store.SignUpGate{Mode: store.SignUpOpen}, quota: store.StorageQuota{Team: "customer", AllowanceBytes: 32}}
-	s := New(nil, nil).WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(a), Bindings: a})
+	s := New(nil, nil).WithAuthorization(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(a), Bindings: a})
 	s.operatorSettings = f
 	s.WithOperatorSettingsWriter(f)
 	return s, f, a

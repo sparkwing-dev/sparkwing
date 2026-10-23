@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func FuzzBlobAncestryStaysWithinTenantAndSealedDependencies(f *testing.F) {

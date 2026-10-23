@@ -11,10 +11,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 const testPrefix = "logs/r90/teams/acme/runs/run-1/jobs/build/a1-g1/"
@@ -71,7 +70,7 @@ func readLog(t *testing.T, objs *memObjects, opts storage.ReadOpts) (logseg.Read
 	t.Helper()
 	var out bytes.Buffer
 	reader := logseg.CommittedReader{Records: objs, Objects: objs}
-	result, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: objs.view.Subject}, &out)
+	result, err := reader.Read(t.Context(), runstate.Actor{}, blob.LogReadRequest{Subject: objs.view.Subject}, &out)
 	if err != nil {
 		return result, out.Bytes(), err
 	}

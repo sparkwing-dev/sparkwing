@@ -7,17 +7,17 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
-func pendingApprovalPredicate(row NodeRow) bool {
+func pendingApprovalPredicate(row runstate.NodeRow) bool {
 	var job nodeproto.JobSpec
-	return row.Status == StatusPending && row.ReadyAt == nil && row.ClaimedBy == "" && json.Unmarshal(row.Spec, &job) == nil && capability.EvaluationReadsDeclarations(job)
+	return row.Status == runstate.StatusPending && row.ReadyAt == nil && row.ClaimedBy == "" && json.Unmarshal(row.Spec, &job) == nil && capability.EvaluationReadsDeclarations(job)
 }
 
-func scheduleApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.NodeRef, actor Actor) (bool, bool, error) {
+func scheduleApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, actor runstate.Actor) (bool, bool, error) {
 	row, err := readNodeTx(ctx, tx, team, ref)
 	if err != nil || !pendingApprovalPredicate(row) {
 		return false, false, err
@@ -26,7 +26,7 @@ func scheduleApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, r
 	err = tx.QueryRowContext(ctx, `SELECT status FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, team, ref.RunID, ref.NodeID, row.Generation).Scan(&status)
 	if err == nil {
 		if status == "failed" {
-			_, err = transitionNodeStateTx(ctx, tx, team, nodeTransition{Ref: ref, Actor: actor, To: NodeFailed, Cause: causeOwnerPolicy, Extra: transitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: PolicyApprovalFail, Generation: row.Generation}, Result: &NodeResult{Outcome: NodeFailed, Reason: "approval evaluator lost"}}})
+			_, err = transitionNodeStateTx(ctx, tx, team, nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeFailed, Cause: causeOwnerPolicy, Extra: transitionExtra{OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyApprovalFail, Generation: row.Generation}, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: "approval evaluator lost"}}})
 			return true, err == nil, err
 		}
 		return true, false, nil
@@ -44,15 +44,15 @@ func scheduleApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, r
 	return true, false, nil
 }
 
-func checkApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change nodeTransition) error {
+func checkApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, change nodeTransition) error {
 	policy := change.Extra.OwnerPolicy
-	if change.Actor.Kind != ActorRunHost || change.Actor.Owner.Kind != OwnerEval || !pendingApprovalPredicate(row) || change.Cause != CauseApprovalOpen && (change.Cause != causeOwnerPolicy || policy == nil || policy.Kind != PolicyApprovalBypass && policy.Kind != PolicyApprovalFail) {
+	if change.Actor.Kind != runstate.ActorRunHost || change.Actor.Owner.Kind != runstate.OwnerEval || !pendingApprovalPredicate(row) || change.Cause != runstate.CauseApprovalOpen && (change.Cause != causeOwnerPolicy || policy == nil || policy.Kind != runstate.PolicyApprovalBypass && policy.Kind != runstate.PolicyApprovalFail) {
 		return holderRefusal()
 	}
 	return expansionAuthorityTx(ctx, tx, team, ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: change.Actor})
 }
 
-func finishApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change nodeTransition) error {
+func finishApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, change nodeTransition) error {
 	if err := finishExpansionBillingTx(ctx, tx, team, ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: change.Actor}); err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func finishApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, row
 }
 
 func evaluationSourceTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
-	row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
+	row, err := readNodeTx(ctx, tx, team, runspec.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
 	if err != nil {
 		return err
 	}
@@ -89,8 +89,8 @@ func evaluationSourceTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 	return holderRefusal()
 }
 
-func evaluationSourceCurrent(row NodeRow) bool {
-	return pendingApprovalPredicate(row) || row.Status == StatusDone && scheduleSucceeded(string(row.Outcome)) && row.Expansion == ExpansionExpected
+func evaluationSourceCurrent(row runstate.NodeRow) bool {
+	return pendingApprovalPredicate(row) || row.Status == runstate.StatusDone && scheduleSucceeded(string(row.Outcome)) && row.Expansion == runstate.ExpansionExpected
 }
 
 func evaluationSourceSQL(q *claimSQL, node string) string {
@@ -108,11 +108,11 @@ func approvalEvaluationReaderTx(ctx context.Context, tx *storeTx, c capability.C
 	if c.Unit != capability.UnitEval || b.Expansion == nil || b.Expansion.Kind != capability.UnitEval {
 		return false, nil
 	}
-	row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})
+	row, err := readNodeTx(ctx, tx, Team(c.Team), runspec.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})
 	if err != nil || !pendingApprovalPredicate(row) {
 		return false, err
 	}
-	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: row.Ref.RunID, SourceNodeID: row.Ref.NodeID, SourceGeneration: runspec.ClaimGeneration(b.Generation), Holder: b.Expansion.Holder, Generation: runspec.ClaimGeneration(b.Expansion.Generation)}}}
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerEval, EvalFence: runspec.EvalFence{RunID: row.Ref.RunID, SourceNodeID: row.Ref.NodeID, SourceGeneration: runspec.ClaimGeneration(b.Generation), Holder: b.Expansion.Holder, Generation: runspec.ClaimGeneration(b.Expansion.Generation)}}}
 	err = checkApprovalEvaluationTx(ctx, tx, Team(c.Team), row, OpenApprovalNode{Ref: row.Ref, Actor: actor}.nodeChange())
 	return err == nil, err
 }

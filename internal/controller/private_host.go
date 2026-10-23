@@ -7,19 +7,20 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
-func (s *Server) localHostEndpoints() []Endpoint {
+func (s *Server) localHostEndpoints() []controllerwire.Endpoint {
 	engine := s.engineController
-	return []Endpoint{
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/may-start", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostCapacity},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/release-evaluation", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostReleaseEvaluation},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/relinquish-start", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostRelinquishStart},
@@ -55,21 +56,21 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 			}
 			sources := map[string]blob.RecordKey{}
 			for _, source := range snapshot.Nodes {
-				if source.Ref == node.Ref || source.Status != store.StatusDone || source.ManifestRecord == nil || !slices.ContainsFunc(job.Consumes, func(edge nodeproto.ArtifactInput) bool { return runspec.NodeID(edge.Producer) == source.Ref.NodeID }) {
+				if source.Ref == node.Ref || source.Status != runstate.StatusDone || source.ManifestRecord == nil || !slices.ContainsFunc(job.Consumes, func(edge nodeproto.ArtifactInput) bool { return runspec.NodeID(edge.Producer) == source.Ref.NodeID }) {
 					continue
 				}
 				sources[string(source.Ref.NodeID)] = *source.ManifestRecord
 			}
 			ancestors := generatorSources(snapshot.Expansions, string(node.Ref.NodeID))
-			snapshot.Nodes = slices.DeleteFunc(snapshot.Nodes, func(row store.NodeRow) bool { return row.Ref != node.Ref && !ancestors[string(row.Ref.NodeID)] })
-			writeJSON(w, http.StatusOK, localhostwire.LocalNodeSnapshot{RunSnapshot: snapshot, ArtifactSources: sources})
+			snapshot.Nodes = slices.DeleteFunc(snapshot.Nodes, func(row runstate.NodeRow) bool { return row.Ref != node.Ref && !ancestors[string(row.Ref.NodeID)] })
+			writeJSON(w, http.StatusOK, localhostwire.LocalNodeSnapshot{RunSnapshot: hostSnapshot(snapshot), ArtifactSources: sources})
 			return nil
 		}
 	}
 	return engineLookupError(store.ErrNotFound)
 }
 
-func generatorSources(expansions []store.AcceptedExpansionRow, id string) map[string]bool {
+func generatorSources(expansions []runstate.AcceptedExpansionRow, id string) map[string]bool {
 	parents := map[string]string{}
 	for _, expansion := range expansions {
 		var plan nodeproto.PlanDoc
@@ -99,7 +100,7 @@ func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a cap
 		if err != nil {
 			return engineLookupError(err)
 		}
-		writeJSON(w, http.StatusOK, publication)
+		writeJSON(w, http.StatusOK, runstate.LocalPublication{RunSnapshot: hostSnapshot(publication.RunSnapshot), Records: publication.Records, Results: publication.Results})
 		return nil
 	} else {
 		snapshot, err = tenant.ReadOwnerSnapshot(ctx, a.Principal.Authority, a.Target.RunID)
@@ -107,7 +108,7 @@ func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusOK, snapshot)
+	writeJSON(w, http.StatusOK, hostSnapshot(snapshot))
 	return nil
 }
 
@@ -118,14 +119,14 @@ func (s *Server) localHostNode(w http.ResponseWriter, r *http.Request, a capabil
 	}
 	if a.Principal.Capability.Unit == capability.UnitTrigger {
 		ctx := s.placementContext(r.Context())
-		node, err := tenant.ReadOwnerNode(ctx, a.Principal.Authority, controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
+		node, err := tenant.ReadOwnerNode(ctx, a.Principal.Authority, runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
 		if err != nil {
 			return engineLookupError(err)
 		}
 		writeJSON(w, http.StatusOK, node)
 		return nil
 	}
-	node, err := tenant.ReadNode(r.Context(), controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
+	node, err := tenant.ReadNode(r.Context(), runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
 	if err != nil {
 		return engineLookupError(err)
 	}
@@ -152,20 +153,20 @@ func (s *Server) localHostRunEdge(w http.ResponseWriter, r *http.Request, a capa
 	} else if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
-	if !finish && (body.Cause != store.RunStart || body.To != store.RunRunning) {
+	if !finish && (body.Cause != runstate.RunStart || body.To != runstate.RunRunning) {
 		return invalidEngineBody("run transition requires start; terminal verdicts require atomic owner completion")
 	}
-	if a.Principal.Capability.Unit == capability.UnitPlan && (!finish || body.Cause != store.RunFinish || body.OwnerPolicy != nil) {
+	if a.Principal.Capability.Unit == capability.UnitPlan && (!finish || body.Cause != runstate.RunFinish || body.OwnerPolicy != nil) {
 		return invalidEngineBody("plan completion requires a preparation failure or cancellation")
 	}
 	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}
-	change := store.RunTransition{RunID: runspec.RunID(a.Target.RunID), Actor: engineActor(a), To: body.To, Cause: body.Cause, Reason: body.Reason, MaskedError: body.MaskedError, OwnerPolicy: body.OwnerPolicy}
-	var applied store.Applied
+	change := runstate.RunTransition{RunID: runspec.RunID(a.Target.RunID), Actor: engineActor(a), To: body.To, Cause: body.Cause, Reason: body.Reason, MaskedError: body.MaskedError, OwnerPolicy: body.OwnerPolicy}
+	var applied runstate.Applied
 	if finish {
-		applied, err = tenant.FinishRunAndUnit(r.Context(), store.FinishRunRequest{Transition: store.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, OwnerPolicy: change.OwnerPolicy, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: change.Actor.Owner})
+		applied, err = tenant.FinishRunAndUnit(r.Context(), runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, OwnerPolicy: change.OwnerPolicy, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: change.Actor.Owner})
 	} else {
 		applied, err = tenant.TransitionRun(r.Context(), change)
 	}
@@ -185,11 +186,11 @@ func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		return err
 	}
-	change, err := body.NodeCommand(controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a))
+	change, err := body.NodeCommand(runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a))
 	if err != nil {
 		return invalidEngineBody(err.Error())
 	}
-	if body.Cause == store.CauseStart && a.Principal.Capability.Unit == capability.UnitNode {
+	if body.Cause == runstate.CauseStart && a.Principal.Capability.Unit == capability.UnitNode {
 		if body.SourceAttempt == nil || *body.SourceAttempt < 0 || *body.SourceAttempt == math.MaxInt64 {
 			return invalidEngineBody("start requires a valid captured source attempt")
 		}
@@ -198,7 +199,7 @@ func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request,
 			return err
 		}
 		start := change.(store.StartNode)
-		start.Attempt = &store.NodeAttempt{
+		start.Attempt = &runstate.NodeAttempt{
 			Identity: runspec.AttemptIdentity{Team: a.Target.Team, RunID: a.Target.RunID, NodeID: a.Target.NodeID, Generation: a.Binding.Generation, Attempt: int64(*body.SourceAttempt + 1)},
 			Holder:   a.Binding.Holder, CapabilityPrefix: a.Principal.Capability.Prefix, ExecutorName: profile.Name, ExecutorKind: profile.Class, ExecutorLocation: profile.Location,
 		}
@@ -309,7 +310,7 @@ func (s *Server) localHostAuthority(ctx context.Context, a capability.Authorized
 	return capability.Principal{}, localHostRefusal()
 }
 
-func localHostOwnsNode(owner capability.Principal, node store.NodeRow, child capability.Principal) bool {
+func localHostOwnsNode(owner capability.Principal, node runstate.NodeRow, child capability.Principal) bool {
 	c, b := child.Capability, child.Capability.Binding
 	return owner.Authority.Kind == capability.AuthorityCapability && owner.Capability.Prefix != "" &&
 		owner.Capability.Unit == capability.UnitTrigger && owner.Capability.Binding.RunID != "" &&

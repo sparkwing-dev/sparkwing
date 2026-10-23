@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
 )
 
 func startSDKProcess(cmd *exec.Cmd, requests, frames *os.File) (sessionProcess, error) {

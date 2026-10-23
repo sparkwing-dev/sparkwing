@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 var _ controllerwire.Controller = (*engineClient)(nil)
@@ -148,7 +148,7 @@ func (c *engineClient) SyncLauncher(ctx context.Context, input controllerwire.La
 		}
 	}
 	for _, fence := range result.Retired {
-		if err := (controllerwire.LauncherObservation{Award: fence}).Validate(); err != nil {
+		if err := (capability.LauncherObservation{Award: fence}).Validate(); err != nil {
 			return controllerwire.LauncherSyncResponse{}, &apierr.Error{Code: apierr.ProtocolError, Message: "launcher retirement requires a complete award fence"}
 		}
 	}

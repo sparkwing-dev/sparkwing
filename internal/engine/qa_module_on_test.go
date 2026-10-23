@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 func TestQATrustBuildRoutesOnlyQAPinsThroughTheQAProxy(t *testing.T) {
@@ -17,15 +19,15 @@ func TestQATrustBuildRoutesOnlyQAPinsThroughTheQAProxy(t *testing.T) {
 	if err := os.WriteFile(written, []byte("GOPROXY=https://corp.example/proxy\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	qa := Pin{SDK: GoSDK, Version: "v0.68.0-qa.3"}
+	qa := engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0-qa.3"}
 	for _, tc := range []struct {
 		name     string
-		pin      Pin
+		pin      engineid.Pin
 		settings []string
 		want     []string
 	}{
-		{"release pin", Pin{SDK: GoSDK, Version: "v0.68.0"}, nil, nil},
-		{"replacement", Pin{SDK: GoSDK, Version: "v0.68.0-qa.3", Replacement: "../sdk"}, nil, nil},
+		{"release pin", engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}, nil, nil},
+		{"replacement", engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0-qa.3", Replacement: "../sdk"}, nil, nil},
 		{"defaults", qa, nil, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=github.com/sparkwing-dev/sparkwing"}},
 		{"go env -w", qa, []string{"GOENV=" + written}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://corp.example/proxy", "GONOSUMDB=github.com/sparkwing-dev/sparkwing"}},
 		{"GOPRIVATE seeds the exemption", qa, []string{"GOPRIVATE=example.com/private"}, []string{"GOPROXY=https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct", "GONOSUMDB=example.com/private,github.com/sparkwing-dev/sparkwing"}},

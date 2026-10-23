@@ -1,0 +1,413 @@
+# pkg/nodeproto
+
+type AnnotationRequest struct {
+	Level   string
+	Message string
+	File    string
+	Line    int
+	EndLine int
+	Column  int
+	Step    string
+}
+func ApplyArgumentDefaults(arguments []ArgumentDescription, raw map[string]string) map[string]string
+type ApprovalSpec struct {
+	Message   string
+	TimeoutMS *int64
+	OnTimeout string
+}
+func ArgumentDefaults(description PipelineDescription) (map[string]string, error)
+type ArgumentDescription struct {
+	Name        string
+	Short       string
+	Type        string
+	Required    bool
+	Description string
+	Default     *string
+	Enum        []string
+	Secret      bool
+	JobID       string
+}
+type ArtifactInput struct {
+	Producer string
+	Into     string
+}
+type CacheSpec struct {
+	Name     string
+	Path     string
+	Resolver string
+	KeyScope string
+	KeyFiles []string
+}
+const CapabilityAdmissionClass PlanCapability = "admission_class"
+const CapabilityApproval PlanCapability = "approval"
+const CapabilityApprovalCondition PlanCapability = "approval_condition"
+const CapabilityArtifacts PlanCapability = "artifacts"
+const CapabilityBodyEnv PlanCapability = "body_env"
+const CapabilityBoxConcurrency PlanCapability = "box_concurrency"
+const CapabilityCaches PlanCapability = "caches"
+const CapabilityClaimWait PlanCapability = "claim_wait"
+const CapabilityClosures PlanCapability = "closures"
+const CapabilityConsumes PlanCapability = "consumes"
+const CapabilityDependencies PlanCapability = "dependencies"
+const CapabilityDryRun PlanCapability = "dry_run"
+const CapabilityFailurePolicy PlanCapability = "failure_policy"
+const CapabilityGeneratedDependencies PlanCapability = "generated_dependencies"
+const CapabilityGenerators PlanCapability = "generators"
+const CapabilityGroups PlanCapability = "groups"
+const CapabilityInline PlanCapability = "inline"
+const CapabilityJobConcurrency PlanCapability = "job_concurrency"
+const CapabilityJobs PlanCapability = "jobs"
+const CapabilityMemo PlanCapability = "memo"
+const CapabilityNoProgressTimeout PlanCapability = "no_progress_timeout"
+const CapabilityOptionalDependencies PlanCapability = "optional_dependencies"
+const CapabilityPlanConcurrency PlanCapability = "plan_concurrency"
+const CapabilityPrefers PlanCapability = "prefers"
+const CapabilityPriority PlanCapability = "priority"
+const CapabilityRecovery PlanCapability = "recovery"
+const CapabilityReferences PlanCapability = "references"
+const CapabilityRequires PlanCapability = "requires"
+const CapabilityRetry PlanCapability = "retry"
+const CapabilityRisk PlanCapability = "risk"
+const CapabilitySkipBudget PlanCapability = "skip_budget"
+const CapabilitySource PlanCapability = "source"
+const CapabilityStartupEnv PlanCapability = "startup_env"
+const CapabilitySteps PlanCapability = "steps"
+func CapabilityTable() []PlacementCapability
+const CapabilityTimeout PlanCapability = "timeout"
+func CheckOutputSize(n int) error
+type ChildPipeline struct {
+	Pipeline   string
+	Repository string
+}
+type ClosureSpec struct {
+	SkipIf    []string
+	BeforeRun []string
+	Verify    string
+	AfterRun  []string
+	MemoKey   string
+	Generate  []string
+}
+type ConcurrencySpec struct {
+	Group          string
+	Scope          *string
+	Capacity       *int
+	Cost           *int
+	OnLimit        *string
+	QueueTimeoutMS *int64
+}
+type DescribeDoc struct {
+	Pipelines []PipelineDescription
+}
+func (d DescribeDoc) Pipeline(entrypoint string) (PipelineDescription, bool)
+type EngineIdentity struct {
+	Version string
+}
+type EnvValue struct {
+	Value   string
+	Startup bool
+}
+type EnvironmentDescription struct {
+	Name        string
+	Description string
+	Default     *string
+}
+var ErrDuplicateReply = errors.New("nodeproto: duplicate reply")
+var ErrLineTooLong = errors.New("nodeproto: line exceeds the maximum size")
+var ErrMalformed = errors.New("nodeproto: malformed line")
+var ErrUnknownReply = errors.New("nodeproto: reply to an unknown request")
+type ErrorUse struct {
+	Code    apierr.Code
+	Surface string
+	Reason  apierr.Reason
+}
+func ErrorUses() []ErrorUse
+type EvalResult struct {
+	Arguments         []ArgumentDescription
+	DeclarationsKnown bool
+	Value             json.RawMessage
+	Error             *apierr.Error
+}
+func (r EvalResult) ValidateValue(kind string) error
+type Frame struct {
+	Reply *Reply
+	Log   *FrameLog
+}
+type FrameLog struct {
+	Stream     string
+	StreamData string
+	StreamEnd  bool
+	TS         string
+	Level      string
+	Step       string
+	Event      string
+	Message    string
+	Attrs      json.RawMessage
+}
+type Git struct {
+	SHA           string
+	Branch        string
+	DefaultBranch string
+	Repo          string
+	RepoURL       string
+}
+type HelloResult struct {
+	Protocol int
+	SDK      SDKIdentity
+	Features []string
+}
+type JobFailure struct {
+	Job   string
+	Stage string
+	Error *apierr.Error
+}
+type JobSpec struct {
+	Arguments      []ArgumentDescription
+	ID             string
+	Needs          []string
+	NeedsIfPresent []string
+	NeedsGenerated []string
+	Groups         []string
+	Env            map[string]EnvValue
+	Artifacts      []string
+	Consumes       []ArtifactInput
+	References     []PipelineReference
+
+	Children            []ChildPipeline
+	Approval            *ApprovalSpec
+	OnFailureOf         string
+	Retry               *RetrySpec
+	TimeoutMS           *int64
+	NoProgressTimeoutMS *int64
+	Requires            []string
+	Prefers             []string
+	Inline              bool
+	Optional            bool
+	ContinueOnError     bool
+	Memo                *MemoSpec
+	Caches              []CacheSpec
+	Concurrency         []ConcurrencySpec
+	Closures            ClosureSpec
+	SkipIfBudgetMS      *int64
+	Steps               []StepSpec
+	ResultStep          string
+	FailurePolicy       string
+}
+type MaskRequest struct {
+	Value string
+}
+const MaxLineBytes = int(limits.NodeOutputBytes + limits.ProtocolEnvelopeBytes)
+type MemoInput struct {
+	Kind     string
+	Value    string
+	Patterns []string
+	Root     string
+	Names    []string
+	Parts    []any
+	Inputs   []MemoInput
+}
+func (input *MemoInput) UnmarshalJSON(raw []byte) error
+type MemoSpec struct {
+	TTLMS *int64
+	Input *MemoInput
+}
+func NewReader(r io.Reader) *Reader
+func NewWriter(w io.Writer) *Writer
+func NormalizeLabels(labels []string) []string
+type Op string
+const OpCancel Op = "cancel"
+const OpDescribe Op = "describe"
+const OpEval Op = "eval"
+const OpHello Op = "hello"
+const OpPlan Op = "plan"
+const OpRunStep Op = "run_step"
+func ParseFrame(line []byte) (Frame, error)
+func ParseRequest(line []byte) (Request, error)
+type PipelineDescription struct {
+	Name        string
+	Error       *apierr.Error
+	Short       string
+	Help        string
+	Examples    []UsageExample
+	Args        []ArgumentDescription
+	EnvVars     []EnvironmentDescription
+	Extra       bool
+	Risks       []string
+	RisksByStep []StepRisks
+	Secrets     []SecretDeclaration
+}
+type PipelineReference struct {
+	Pipeline string
+	Job      string
+}
+type Placement string
+type PlacementCapability struct {
+	Feature        PlanCapability
+	Local          bool
+	LocalTriggered bool
+	RunnerHosted   bool
+	Launcher       bool
+	Here           bool
+	GitHubActions  bool
+}
+const PlacementGitHubActions Placement = "github_actions"
+const PlacementHere Placement = "here"
+const PlacementLauncher Placement = "launcher"
+const PlacementLocal Placement = "local"
+const PlacementLocalTriggered Placement = "local_triggered"
+const PlacementRunnerHosted Placement = "runner_hosted"
+type PlanCapability string
+type PlanDoc struct {
+	Jobs           []JobSpec
+	Concurrency    []ConcurrencySpec
+	Priority       *int
+	ClaimWaitMS    *int64
+	AdmissionClass *string
+	Source         *SourceSpec
+}
+func PrepareJobArguments(arguments []ArgumentDescription, raw map[string]string) (map[string]string, error)
+type ProcessBinding struct {
+	RunID  string
+	JobID  string
+	Routes ProcessRoutes
+}
+type ProcessRoutes struct {
+	URL    string
+	Bearer string
+}
+type PullRequest struct {
+	Number  int
+	Action  string
+	BaseRef string
+	BaseSHA string
+	HeadRef string
+	HeadSHA string
+}
+type Reader struct {
+}
+func (r *Reader) Next() (Frame, error)
+func (r *Reader) NextRequest() (Request, error)
+func (r *Reader) ReadLine() ([]byte, error)
+type Reply struct {
+	ID     string
+	OK     bool
+	Result json.RawMessage
+	Error  *apierr.Error
+}
+func (r Reply) Decode(result any) error
+type Request struct {
+	ID       string
+	Op       Op
+	Protocol int
+	Engine   *EngineIdentity
+	Runner   *RunnerIdentity
+	Binding  *ProcessBinding
+	Pipeline string
+	Args     map[string]string
+	Run      *RunContext
+	Job      string
+	Step     string
+	Attempt  int
+	Settled  []string
+	Failure  *JobFailure
+	Closure  string
+	Input    json.RawMessage
+
+	Target string
+}
+func (r Request) Validate() error
+func ResolveArguments(description PipelineDescription, raw map[string]string) (map[string]string, error)
+type RetrySpec struct {
+	Attempts  int
+	BackoffMS *int64
+}
+type RunContext struct {
+	RunID     string
+	Pipeline  string
+	Git       *Git
+	Trigger   *Trigger
+	StartedAt time.Time
+	NoMemo    bool
+	DryRun    bool
+}
+type RunResult struct {
+	Outcome string
+	Error   *apierr.Error
+	Output  json.RawMessage
+}
+type RunnerIdentity struct {
+	Name   string
+	Type   string
+	Labels []string
+}
+type SDKIdentity struct {
+	Language string
+	Version  string
+}
+type SecretDeclaration struct {
+	Name     string
+	Optional bool
+}
+type SecretMatcher interface{ ContainsSecret(identifier string) bool }
+type ServiceAcknowledged struct{}
+type SourceSpec struct {
+	FullHistory *bool
+	Depth       *int
+	Tags        *bool
+	Submodules  *bool
+	LFS         *bool
+}
+type StepRisks struct {
+	JobID  string
+	StepID string
+	Labels []string
+}
+type StepSpec struct {
+	ID                string
+	Needs             []string
+	Groups            []string
+	Finally           bool
+	Risks             []string
+	Optional          bool
+	ContinueOnError   bool
+	HasDryRun         bool
+	SafeWithoutDryRun bool
+	Closures          ClosureSpec
+}
+type SummaryRequest struct {
+	Markdown string
+	Step     string
+}
+type Tracker struct {
+}
+func (t *Tracker) Pending() map[string]Op
+func (t *Tracker) Resolve(r Reply) (Op, error)
+func (t *Tracker) Start(op Op) string
+type Trigger struct {
+	Source      string
+	User        string
+	PullRequest *PullRequest
+}
+type UsageExample struct {
+	Comment string
+	Command string
+}
+func ValidateAnnotation(level string, line, endLine, column int) error
+func ValidateArgument(arg ArgumentDescription, value string) (string, error)
+func ValidateArgumentDeclarations(args []ArgumentDescription) error
+func ValidateInitialJobArguments(static []ArgumentDescription, jobs []JobSpec) error
+func ValidateJobArgumentNamespace(static []ArgumentDescription, jobs []JobSpec) error
+func ValidatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, error)
+func ValidateSecretDeclarations(declarations []SecretDeclaration) error
+type ValidationContext struct {
+	Placement           Placement
+	Secrets             SecretMatcher
+	Expansion           bool
+	ExistingJobs        []JobSpec
+	ExistingConcurrency []ConcurrencySpec
+	SourceJob           string
+}
+const Version = 2
+func VisitPlanIdentifiers(plan PlanDoc, visit func(value, path string) error) error
+type Writer struct {
+}
+func (w *Writer) Send(v any) error

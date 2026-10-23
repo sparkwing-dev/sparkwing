@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
 )
 
 // ErrOutsideSandboxHome reports a config write refused because it would have

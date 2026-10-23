@@ -12,10 +12,10 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestExecutorArtifactPublication(t *testing.T) {
@@ -50,7 +50,7 @@ func TestExecutorArtifactPublication(t *testing.T) {
 				return entry, err
 			}
 			if mode == "result_refused" {
-				state.reject = store.CauseReport
+				state.reject = runstate.CauseReport
 			}
 			err := host.Execute(t.Context(), input)
 			wantError := mode != "success" && mode != "body_failed"
@@ -62,11 +62,11 @@ func TestExecutorArtifactPublication(t *testing.T) {
 			}
 			last := state.reports[len(state.reports)-1]
 			result := last.Extra.Result
-			if last.Cause != store.CauseReport || result == nil {
+			if last.Cause != runstate.CauseReport || result == nil {
 				t.Fatalf("report=%+v", last)
 			}
 			wantSuccess := mode == "success" || mode == "result_refused"
-			if (result.Outcome == store.NodeSuccess) != wantSuccess || (result.ManifestRecord != nil) != wantSuccess {
+			if (result.Outcome == runstate.NodeSuccess) != wantSuccess || (result.ManifestRecord != nil) != wantSuccess {
 				t.Fatalf("result=%+v", result)
 			}
 			if mode == "body_failed" {

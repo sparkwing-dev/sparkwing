@@ -18,18 +18,18 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 type scriptedSegmentLogs struct {
 	view        store.RunView
-	actor       store.Actor
-	views       map[string]store.LogSegments
+	actor       runstate.Actor
+	views       map[string]runstate.LogSegments
 	objects     map[string][]byte
 	denied      bool
 	reads, gets int
@@ -45,17 +45,17 @@ func logSubjectID(subject blob.LogSubject) string {
 	return string(body)
 }
 
-func (f *scriptedSegmentLogs) ReadLogSegments(_ context.Context, actor store.Actor, request blob.LogReadRequest) (store.LogSegments, error) {
+func (f *scriptedSegmentLogs) ReadLogSegments(_ context.Context, actor runstate.Actor, request blob.LogReadRequest) (runstate.LogSegments, error) {
 	f.reads++
 	if f.onRead != nil {
 		f.onRead(request)
 	}
 	if f.denied || actor != f.actor {
-		return store.LogSegments{}, errors.New("reader authority ended")
+		return runstate.LogSegments{}, errors.New("reader authority ended")
 	}
 	view, ok := f.views[logSubjectID(request.Subject)]
 	if !ok {
-		return store.LogSegments{}, store.ErrNotFound
+		return runstate.LogSegments{}, store.ErrNotFound
 	}
 	view.Segments = nil
 	for _, segment := range f.views[logSubjectID(request.Subject)].Segments {
@@ -76,7 +76,7 @@ func (f *scriptedSegmentLogs) Get(_ context.Context, key string) (io.ReadCloser,
 }
 
 func newScriptedSegmentLogs() *scriptedSegmentLogs {
-	return &scriptedSegmentLogs{actor: store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "reader"}}, views: map[string]store.LogSegments{}, objects: map[string][]byte{}}
+	return &scriptedSegmentLogs{actor: runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "reader"}}, views: map[string]runstate.LogSegments{}, objects: map[string][]byte{}}
 }
 
 func (f *scriptedSegmentLogs) reader() segmentLogs {
@@ -99,7 +99,7 @@ func (f *scriptedSegmentLogs) add(t *testing.T, subject blob.LogSubject, body st
 	}
 	sum := sha256.Sum256(compressed.Bytes())
 	f.objects[key] = compressed.Bytes()
-	f.views[logSubjectID(subject)] = store.LogSegments{Subject: subject, Complete: complete, Segments: []store.Segment{{Index: 1, Offset: 0, Size: int64(len(body)), StoredBytes: int64(compressed.Len()), Digest: hex.EncodeToString(sum[:]), ObjectKey: key}}}
+	f.views[logSubjectID(subject)] = runstate.LogSegments{Subject: subject, Complete: complete, Segments: []runstate.Segment{{Index: 1, Offset: 0, Size: int64(len(body)), StoredBytes: int64(compressed.Len()), Digest: hex.EncodeToString(sum[:]), ObjectKey: key}}}
 	f.view.Logs = append(f.view.Logs, subject)
 }
 
@@ -206,7 +206,7 @@ func TestCommittedDashboardLogResumeUsesAttemptOrder(t *testing.T) {
 	f.add(t, jobLogSubject(2, 4), "second\n", true)
 	f.add(t, jobLogSubject(1, 3), "first\n", true)
 	now := time.Unix(100, 0)
-	f.view.Snapshot = store.RunSnapshot{Run: store.RunRow{FinishedAt: &now}, Nodes: []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusDone, Outcome: store.NodeSuccess}}}
+	f.view.Snapshot = store.RunSnapshot{Run: store.RunRow{FinishedAt: &now}, Nodes: []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess}}}
 	reader := f.reader()
 	var out bytes.Buffer
 	if err := reader.streamNode(t.Context(), "run", "job", logCursor{attempt: 0, off: 3}, &out); err != nil {
@@ -224,7 +224,7 @@ func TestCommittedDashboardLogUsesFinalStore(t *testing.T) {
 	engine, tenant := engineRuntimeStore(t)
 	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 	actor := engineActor(authorized)
-	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+	ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
 	ordinal := int64(0)
 	engineAdmitExecution(t, engine.Store, authorized.Principal)
 	started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal)})
@@ -239,7 +239,7 @@ func TestCommittedDashboardLogUsesFinalStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	ordinal = int64(started.Attempt)
-	if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal), Outcome: runstate.NodeSuccess, Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess}}); err != nil {
 		t.Fatal(err)
 	}
 	reader := segmentLogs{records: tenant, actor: actor, objs: objects}
@@ -314,12 +314,12 @@ func TestCommittedDashboardUnsealedLogGrace(t *testing.T) {
 			subject := jobLogSubject(1, 1)
 			records.add(t, subject, "tail\n", false)
 			records.view.Snapshot.StoreNow = now
-			attempt := store.NodeAttempt{Identity: *subject.Attempt}
+			attempt := runstate.NodeAttempt{Identity: *subject.Attempt}
 			if test.finished {
 				finished := now.Add(-test.age)
 				attempt.FinishedAt = &finished
 			}
-			records.view.Attempts = []store.NodeAttempt{attempt}
+			records.view.Attempts = []runstate.NodeAttempt{attempt}
 			verdict, found, err := records.reader().NodeLogCompleteness(t.Context(), "run", "job")
 			if err != nil || !found || verdict.State != test.state || records.gets != 1 {
 				t.Fatalf("verdict=%+v,found=%v,gets=%d,err=%v", verdict, found, records.gets, err)
@@ -336,13 +336,13 @@ func TestCommittedDashboardGraceUsesSelectedAttemptProperty(t *testing.T) {
 		now := time.Unix(1000, 0)
 		records.view.Snapshot.StoreNow = now
 		old := now.Add(-24 * time.Hour)
-		records.view.Snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusDone, FinishedAt: &old}}
-		selected := store.NodeAttempt{Identity: *subject.Attempt}
+		records.view.Snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusDone, FinishedAt: &old}}
+		selected := runstate.NodeAttempt{Identity: *subject.Attempt}
 		at := now.Add(-limits.LogSealGrace - time.Duration(age)*time.Nanosecond)
 		if finished {
 			selected.FinishedAt = &at
 		}
-		foreign := store.NodeAttempt{Identity: *subject.Attempt, FinishedAt: &old}
+		foreign := runstate.NodeAttempt{Identity: *subject.Attempt, FinishedAt: &old}
 		for _, dimension := range []string{"team", "run", "job", "attempt", "generation"} {
 			other := foreign
 			switch dimension {

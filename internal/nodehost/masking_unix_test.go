@@ -10,17 +10,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 const splitSecret = "hunter2-straddles-the-split"
@@ -34,7 +34,7 @@ func checkMaskedNativeFailure(t *testing.T, f *storeHostFixture, input NodeInput
 	if err == nil {
 		t.Fatal("failure was lost")
 	}
-	row, readErr := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
+	row, readErr := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
@@ -75,7 +75,7 @@ func maskingExecutorFixture(t *testing.T) (*storeHostFixture, NodeInput, Executo
 		t.Fatal(err)
 	}
 	input.Entry = entry
-	if response, err := f.Tenant.MayStart(t.Context(), store.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, executorActor(input)); err != nil || response.Kind != store.AcquireGranted {
+	if response, err := f.Tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, executorActor(input)); err != nil || response.Kind != runstate.AcquireGranted {
 		t.Fatalf("admission=%+v error=%v", response, err)
 	}
 	_, _, deps, _ := executorFixture(t)
@@ -83,7 +83,7 @@ func maskingExecutorFixture(t *testing.T) (*storeHostFixture, NodeInput, Executo
 	masker := secrets.NewMasker()
 	masker.Register(splitSecret)
 	deps.Masker = masker
-	deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+	deps.EnsureEngine = func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 		return input.Engine, nil
 	}
 	deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {

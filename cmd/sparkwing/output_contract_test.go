@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestOutputContractProcess(t *testing.T) {

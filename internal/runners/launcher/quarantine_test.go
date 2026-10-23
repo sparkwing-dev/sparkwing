@@ -19,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ktesting "k8s.io/client-go/testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func reservedNode(t *testing.T, name string, binding CloudJobBinding, reservation string) *corev1.Node {

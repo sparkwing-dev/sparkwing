@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // UploadVerifier checks an immutable object after an uncertain PUT. The controller

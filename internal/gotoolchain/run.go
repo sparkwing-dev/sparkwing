@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
 )
 
 const toolchainTerminationTimeout = 2*procgroup.DefaultTerminationGrace + 30*time.Second

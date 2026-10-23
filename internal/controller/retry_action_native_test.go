@@ -14,13 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func retryActionFixture(t *testing.T, value string, accepted bool) (*serverFixture, client.EngineOptions, string, store.RunRow) {
@@ -47,7 +48,7 @@ func retryActionFixture(t *testing.T, value string, accepted bool) (*serverFixtu
 	if accepted {
 		plan := json.RawMessage(`{"jobs":[{"id":"job"}]}`)
 		spec, err := runspec.SealSpec(runspec.SealInput{Request: sealed, Plan: plan, Now: time.Unix(2, 0), Resolved: runspec.Resolved{
-			Engine: engine.Identity{Version: "v1.2.3"}, Args: sealed.Request.RequestedArgs, SecretArgs: []string{"secret"}, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"job": {}}},
+			Engine: engineid.Identity{Version: "v1.2.3"}, Args: sealed.Request.RequestedArgs, SecretArgs: []string{"secret"}, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"job": {}}},
 		}})
 		if err != nil {
 			t.Fatal(err)
@@ -107,7 +108,7 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 					}
 				}
 				row, err := tenant.ReadRun(t.Context(), result.RunID)
-				if err != nil || row.State != store.RunPending || row.StartedAt != nil || row.FinishedAt != nil || row.Lineage.RetryOf != parent || !row.Lineage.Retrier.Set || row.Lineage.Retrier.Value.ID != "member" || !reflect.DeepEqual(row.Request, original.Request) || !reflect.DeepEqual(row.Spec, original.Spec) || !bytes.Equal(row.Plan, original.Plan) {
+				if err != nil || row.State != runstate.RunPending || row.StartedAt != nil || row.FinishedAt != nil || row.Lineage.RetryOf != parent || !row.Lineage.Retrier.Set || row.Lineage.Retrier.Value.ID != "member" || !reflect.DeepEqual(row.Request, original.Request) || !reflect.DeepEqual(row.Spec, original.Spec) || !bytes.Equal(row.Plan, original.Plan) {
 					t.Fatalf("retry did not retain execution inputs and independent lineage: %+v %v", row, err)
 				}
 				replay, err := control.Retry(t.Context(), selector, input)

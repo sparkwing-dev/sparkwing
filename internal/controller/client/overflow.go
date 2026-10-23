@@ -5,8 +5,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // NewOverflowManager uses authenticated transport for the account's Cloud allowance.

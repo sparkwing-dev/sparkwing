@@ -14,10 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // safety: these cells exercise the HTTP authorization boundary with committed-fact fakes.
@@ -74,13 +75,13 @@ func (b *credentialBoundary) CheckBinding(_ context.Context, _ capability.Princi
 
 func (b *credentialBoundary) router(t *testing.T) http.Handler {
 	t.Helper()
-	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(b), Bindings: b})
+	router := routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(b), Bindings: b})
 	for _, pattern := range []string{
 		"/api/v1/runs/{run}/jobs/{job}/transition",
 		"/api/v1/runs/{run}/jobs/{job}/log-manifest",
 		"/api/v1/runs/{run}/source-credential",
 	} {
-		if err := router.Register(controller.Endpoint{
+		if err := router.Register(controllerwire.Endpoint{
 			Method: "POST", Pattern: pattern, Authentication: capability.AuthCapability,
 			ResolveTarget: func(_ context.Context, _ capability.Principal, target capability.Target) (capability.Target, error) {
 				return target, nil

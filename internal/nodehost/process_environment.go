@@ -8,11 +8,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // SDKEnvironment projects sealed runtime facts and persisted job declarations
@@ -52,7 +51,7 @@ func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, 
 	if err := json.Unmarshal(accepted.Spec, &spec); err != nil || accepted.SpecHash == "" || accepted.PlanHash == "" || string(spec.Hash) != accepted.SpecHash || string(spec.PlanHash) != accepted.PlanHash {
 		return procenv.Env{}, procenv.Env{}, executorError(apierr.SpecDrift, "SDK environment differs from the accepted run")
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(accepted.RunID), NodeID: runspec.NodeID(nodeID)}
+	ref := runspec.NodeRef{RunID: runspec.RunID(accepted.RunID), NodeID: runspec.NodeID(nodeID)}
 	row, err := e.Store.ReadNode(ctx, ref)
 	if err != nil {
 		return procenv.Env{}, procenv.Env{}, err

@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func controllerCapacityFixture(t *testing.T, opts ...store.Option) (*serverFixture, *store.Tenant, capability.Principal) {
@@ -41,12 +41,12 @@ func controllerCapacityFixture(t *testing.T, opts ...store.Option) (*serverFixtu
 func TestControllerPlanAdmissionRefusalFinishesUnreleasedWork(t *testing.T) {
 	for _, test := range []struct {
 		policy string
-		run    store.RunState
-		node   store.NodeState
+		run    runstate.RunState
+		node   runstate.NodeState
 	}{
-		{"skip", store.RunSuccess, store.NodeSkipped},
-		{"fail", store.RunFailed, store.NodeFailed},
-		{"queue", store.RunFailed, store.NodeFailed},
+		{"skip", runstate.RunSuccess, runstate.NodeSkipped},
+		{"fail", runstate.RunFailed, runstate.NodeFailed},
+		{"queue", runstate.RunFailed, runstate.NodeFailed},
 	} {
 		t.Run(test.policy, func(t *testing.T) {
 			now := time.Now()
@@ -61,8 +61,8 @@ func TestControllerPlanAdmissionRefusalFinishesUnreleasedWork(t *testing.T) {
 				Jobs:        []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}},
 			})
 			if test.policy == "queue" {
-				row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "build"})
-				if err != nil || row.ReadyAt != nil || row.Status != store.StatusPending {
+				row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "build"})
+				if err != nil || row.ReadyAt != nil || row.Status != runstate.StatusPending {
 					t.Fatalf("queue released job before capacity: %+v %v", row, err)
 				}
 				now = now.Add(time.Second)
@@ -72,8 +72,8 @@ func TestControllerPlanAdmissionRefusalFinishesUnreleasedWork(t *testing.T) {
 			if err != nil || run.State != test.run || run.FinishedAt == nil {
 				t.Fatalf("controller admission policy did not finish run: %+v %v", run, err)
 			}
-			row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "build"})
-			if err != nil || row.Status != store.StatusDone || row.Outcome != test.node || row.ReadyAt != nil || row.Attempt != 0 {
+			row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "build"})
+			if err != nil || row.Status != runstate.StatusDone || row.Outcome != test.node || row.ReadyAt != nil || row.Attempt != 0 {
 				t.Fatalf("controller policy released refused job: %+v %v", row, err)
 			}
 			if test.policy == "queue" {
@@ -84,7 +84,7 @@ func TestControllerPlanAdmissionRefusalFinishesUnreleasedWork(t *testing.T) {
 				found := false
 				for _, event := range events {
 					if event.NodeID == "build" {
-						var result store.NodeResult
+						var result runstate.NodeResult
 						if err := json.Unmarshal(event.Payload, &result); err != nil || result.Reason != store.FailureQueueTimeout {
 							t.Fatalf("queue timeout lost policy reason: %+v %v", result, err)
 						}
@@ -129,23 +129,23 @@ func TestPrivateCapacityEvalUsesOnlyItsAwardedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := engineActor(capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run", NodeID: "build"}})
-	ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
-	if result, err := tenant.MayStart(t.Context(), store.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(source.Award.Generation)}, actor); err != nil || result.Kind != store.AcquireGranted {
+	ref := runspec.NodeRef{RunID: "run", NodeID: "build"}
+	if result, err := tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(source.Award.Generation)}, actor); err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("source admission: %+v %v", result, err)
 	}
 	started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, Outcome: store.NodeSuccess, SourceAttempt: &started.Attempt, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, Outcome: runstate.NodeSuccess, SourceAttempt: &started.Attempt, Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess}}); err != nil {
 		t.Fatal(err)
 	}
 	eval := claim(store.UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "build", SourceGeneration: int64(source.Award.Generation)})
-	binding := store.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(source.Award.Generation)}
+	binding := runstate.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(source.Award.Generation)}
 	if code := privateCapacityRequest(t, server, string(eval.Bearer), localhostwire.LocalCapacityRequest{Binding: binding}); code != http.StatusForbidden && code != http.StatusConflict {
 		t.Fatalf("eval award admitted source capacity: HTTP %d", code)
 	}
-	for _, wrong := range []store.CapacityBinding{
+	for _, wrong := range []runstate.CapacityBinding{
 		{RunID: "run", NodeID: "another-source", Generation: binding.Generation},
 		{RunID: "run", NodeID: binding.NodeID, Generation: binding.Generation + 1},
 		{RunID: "run", Generation: binding.Generation},
@@ -176,7 +176,7 @@ func TestControllerReleaseAcquiresPlanCapacityBeforeReleasingJobs(t *testing.T) 
 				Concurrency: []nodeproto.ConcurrencySpec{{Group: "serial", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}},
 				Jobs:        []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}},
 			})
-			row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "build"})
+			row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "build"})
 			if err != nil || (row.ReadyAt == nil) != occupied {
 				t.Fatalf("release escaped plan admission: node=%+v occupied=%v error=%v", row, occupied, err)
 			}

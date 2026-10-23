@@ -75,13 +75,15 @@ linters:
             - "!**/sparkwingtest/**"
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal
-              desc: "The public SDK shares procenv as its process boundary and swtags as build metadata. Other new SDK dependencies belong in the SDK or a leaf package; .guards/depguard-sdk-no-internal.allow lists the imports that predate this rule."
+              desc: "The SDK may import only the shared argument grammar, process boundary, build metadata and missing-secret sentinel. Other dependencies belong in the SDK or a shared leaf package."
           allow:
             - $gostd
             # Argument parsing and host registration share this leaf grammar.
             - github.com/sparkwing-dev/sparkwing/internal/argvalue
             - github.com/sparkwing-dev/sparkwing/internal/swtags
             - github.com/sparkwing-dev/sparkwing/internal/procenv
+            # The SDK exposes the shared missing-secret sentinel.
+            - github.com/sparkwing-dev/sparkwing/internal/secrets
 
         store-allowed-internal:
           list-mode: lax
@@ -96,9 +98,10 @@ linters:
             - github.com/sparkwing-dev/sparkwing/internal/capability
             - github.com/sparkwing-dev/sparkwing/internal/blob
             - github.com/sparkwing-dev/sparkwing/internal/runspec
-            - github.com/sparkwing-dev/sparkwing/internal/limits
-            - github.com/sparkwing-dev/sparkwing/internal/apierr
-            - github.com/sparkwing-dev/sparkwing/internal/nodeproto
+            - github.com/sparkwing-dev/sparkwing/internal/runstate
+            - github.com/sparkwing-dev/sparkwing/pkg/limits
+            - github.com/sparkwing-dev/sparkwing/pkg/apierr
+            - github.com/sparkwing-dev/sparkwing/pkg/nodeproto
             - github.com/sparkwing-dev/sparkwing/internal/settings
             - github.com/sparkwing-dev/sparkwing/internal/admission
             - github.com/sparkwing-dev/sparkwing/internal/cronspec
@@ -113,6 +116,8 @@ linters:
             - "**/pkg/wingwire/**"
             - "**/internal/localhostwire/**"
             - "**/internal/runspec/**"
+            - "**/internal/runstate/**"
+            - "**/internal/engineid/**"
             - "!$test"
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/store
@@ -121,11 +126,13 @@ linters:
               desc: "Server implementation belongs behind the controller wire contract."
             - pkg: github.com/sparkwing-dev/sparkwing/internal/controller/
               desc: "Wire and value packages are leaves; they must not reach the controller."
-            - pkg: github.com/sparkwing-dev/sparkwing/internal/engine
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/engine/
+              desc: "Wire and value packages must not reach engine implementation packages."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/engine$
               desc: "Wire and value packages are leaves; move the shared value to a leaf package such as engineid."
             - pkg: github.com/sparkwing-dev/sparkwing/internal/wingd
               desc: "Wire and value packages are leaves; they must not reach the local daemon."
-            - pkg: github.com/sparkwing-dev/sparkwing/internal/procgroup
+            - pkg: github.com/sparkwing-dev/sparkwing/pkg/procgroup
               desc: "Wire and value packages are leaves; they must not reach process machinery."
 
         controller-not-daemon:
@@ -164,8 +171,6 @@ linters:
           list-mode: lax
           files:
             - "**/internal/**"
-            - "!**/internal/sdkserve/**"
-            - "!**/internal/nodeproto/conformance/gofixture/**"
             - "!**/testdata/**"
             - "!$test"
           deny:

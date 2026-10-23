@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -20,8 +21,8 @@ func TestOwnerRenewalUsesItsSelfClaimsAuthorityBound(t *testing.T) {
 			demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 			owner, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: "a"}
-			self, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone})
-			if err != nil || self.Kind != Execute {
+			self, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceNone})
+			if err != nil || self.Kind != runstate.Execute {
 				t.Fatalf("self claim: %+v %v", self, err)
 			}
 			var body []byte
@@ -65,8 +66,8 @@ func TestOwnerCannotForgetExpiredSelfClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant := &Tenant{s: s, team: "a"}
-	self, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone})
-	if err != nil || self.Kind != Execute {
+	self, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceNone})
+	if err != nil || self.Kind != runstate.Execute {
 		t.Fatalf("self claim: %+v %v", self, err)
 	}
 	p, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: self.Claim.CapabilityPrefix})
@@ -78,7 +79,7 @@ func TestOwnerCannotForgetExpiredSelfClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	admitExecution(t, tenant, holder)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	*now = self.Claim.LeaseExpiresAt.Add(5 * time.Second)

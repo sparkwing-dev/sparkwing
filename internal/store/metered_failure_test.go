@@ -7,19 +7,19 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestMeteredFailureReportSettlesAndReleasesClaimProperty(t *testing.T) {
 	property := func(seed uint32, cloud, started bool) bool {
 		s, demand, now := meteredUnitFixture(t, cloud)
 		_, actor := meteredUnitClaim(t, s, demand)
-		tenant, ref := &Tenant{s: s, team: "a"}, controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+		tenant, ref := &Tenant{s: s, team: "a"}, runspec.NodeRef{RunID: "run", NodeID: "job"}
 		attempt := int64(0)
 		if started {
 			admitExecution(t, tenant, actor)
-			applied, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
+			applied, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -28,7 +28,7 @@ func TestMeteredFailureReportSettlesAndReleasesClaimProperty(t *testing.T) {
 		*now = now.Add(time.Duration(seed%15+1) * time.Second)
 		reason := []string{FailureCreditsExhausted, FailureComputeLimit}[seed%2]
 		message := fmt.Sprintf("stopped-%d", seed)
-		change := nodeTransition{Ref: ref, Actor: actor, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: reason, MaskedError: message}}}
+		change := nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeFailed, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(attempt), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: reason, MaskedError: message}}}
 		for replay := range 2 {
 			applied, err := tenant.TransitionNode(t.Context(), change)
 			if err != nil || applied.Replayed != (replay == 1) {
@@ -36,7 +36,7 @@ func TestMeteredFailureReportSettlesAndReleasesClaimProperty(t *testing.T) {
 			}
 		}
 		row, err := tenant.ReadNode(t.Context(), ref)
-		if err != nil || row.Status != StatusDone || row.Outcome != NodeFailed || row.ClaimedBy != "" || row.CapabilityPrefix != "" || row.LeaseExpiresAt != nil || row.Attempt != runspec.AttemptOrdinal(attempt) || row.FinishedAt == nil || !row.FinishedAt.Equal(*now) {
+		if err != nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeFailed || row.ClaimedBy != "" || row.CapabilityPrefix != "" || row.LeaseExpiresAt != nil || row.Attempt != runspec.AttemptOrdinal(attempt) || row.FinishedAt == nil || !row.FinishedAt.Equal(*now) {
 			t.Fatalf("failure retained claim: %+v: %v", row, err)
 		}
 		var savedReason, savedMessage string

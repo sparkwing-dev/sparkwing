@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -22,7 +23,7 @@ type Spec struct {
 	LocalCheckout     string
 	PipelineDir       string
 	Checkout          runspec.CheckoutPolicy
-	Engine            *engine.Identity
+	Engine            *engineid.Identity
 	NoBincache        bool
 	HashAllFiles      bool
 	// BundleDigest identifies an optional authorized source_bundle seed.
@@ -47,8 +48,8 @@ type Credential struct {
 
 // EngineResolver selects or restores an exact verified engine.
 type EngineResolver interface {
-	Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error)
-	Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
+	Resolve(context.Context, engineid.Pin, releaseasset.Target) (engine.Resolved, error)
+	Ensure(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error)
 }
 
 // Options supplies host-owned workspace and authority separately from sealed source data.
@@ -59,9 +60,9 @@ type Options struct {
 	Access           Access
 	Engines          EngineResolver
 	Target           releaseasset.Target
-	SDK              engine.SDKKind
+	SDK              engineid.SDKKind
 	// ReadPin defaults to engine.ReadPin and must not execute repository code.
-	ReadPin func(string, engine.SDKKind) (engine.Pin, error)
+	ReadPin func(string, engineid.SDKKind) (engineid.Pin, error)
 	// InstallSDK defaults to the verified selected engine's InstallSDK method.
 	InstallSDK func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error)
 	// BuildEnvironment defaults to procenv.Build; adapters may supply the shared policy implementation.

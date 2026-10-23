@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // DataUse constrains an opt-in separately from an executable claim's data authority.
@@ -208,7 +208,7 @@ type SignedObject struct {
 }
 
 // DataSigner gives S3/CloudFront and filesystem storage the same authorized signing boundary.
-// Data GETs expire after 60 seconds; log PUTs after 15 minutes, as owned by internal/limits.
+// Data GETs expire after 60 seconds; log PUTs after 15 minutes, as owned by pkg/limits.
 type DataSigner interface {
 	Sign(context.Context, ObjectToSign) (SignedObject, error)
 }

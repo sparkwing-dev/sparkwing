@@ -12,7 +12,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 func TestLocalRuntimeDashboardConnectionsHoldIdle(t *testing.T) {
@@ -25,8 +26,8 @@ func TestLocalRuntimeDashboardConnectionsHoldIdle(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f := &runtimeControllerFixture{}
 				entered := make(chan struct{})
-				f.http = func() LocalHTTP {
-					return LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				f.http = func() localhostwire.LocalHTTP {
+					return localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 						if !hijack {
 							w.WriteHeader(http.StatusNoContent)
 							return

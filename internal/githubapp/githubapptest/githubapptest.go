@@ -31,7 +31,7 @@ import (
 // AppID is the App the fake serves.
 const AppID = 4242
 
-// WebhookSecret signs the deliveries [GitHub.Sign] produces.
+// WebhookSecret signs the deliveries [Sign] produces.
 const WebhookSecret = "fake-app-webhook-secret"
 
 // Repo is a repository an installation covers.

@@ -6,6 +6,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
@@ -47,6 +48,6 @@ func (s *Server) capacityRead(read func(web.ProfileReader) http.HandlerFunc) fun
 	}
 }
 
-func (s *Server) dashboardLogs(tenant *store.Tenant, actor store.Actor) storage.LogStore {
+func (s *Server) dashboardLogs(tenant *store.Tenant, actor runstate.Actor) storage.LogStore {
 	return segmentLogs{records: tenant, actor: actor, live: s.liveLogs, objs: s.logObjects()}
 }

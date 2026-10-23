@@ -11,8 +11,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	award "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -53,14 +55,14 @@ func TestClaimedRunnerRefusesAwardWithoutSourceBeforeAcquisition(t *testing.T) {
 type hostingState struct {
 	nodehost.NativeHostStore
 	snapshot store.RunSnapshot
-	node     store.NodeRow
+	node     runstate.NodeRow
 }
 
 func (s *hostingState) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
 	return s.snapshot, nil
 }
 
-func (s *hostingState) ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
+func (s *hostingState) ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error) {
 	return s.node, nil
 }
 
@@ -68,7 +70,7 @@ func hostingStateFor(t *testing.T, kind capability.UnitKind) (controllerwire.Cla
 	t.Helper()
 	unit := hostingAward(kind)
 	if kind == capability.UnitNode {
-		unit.Engine.Pin = engine.Pin{SDK: engine.GoSDK, Version: unit.Engine.Version}
+		unit.Engine.Pin = engineid.Pin{SDK: engineid.GoSDK, Version: unit.Engine.Version}
 		unit.Engine.ManifestDigest = "manifest"
 		unit.Accepted.Spec.Resolved.Engine = *unit.Engine
 		unit.Accepted.Spec.PlanHash = unit.Accepted.PlanHash
@@ -78,14 +80,14 @@ func hostingStateFor(t *testing.T, kind capability.UnitKind) (controllerwire.Cla
 	p := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "award"}, Capability: capability.Capability{
 		Prefix: "award", Issuance: capability.Award, Team: "team", Unit: kind, UnitID: unit.UnitID, Purpose: unit.Purpose, Delivery: unit.Delivery, Binding: unit.Binding,
 	}}
-	row := store.RunRow{ID: unit.RunID, Team: "team", Request: unit.Request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)}}}
+	row := store.RunRow{ID: unit.RunID, Team: "team", Request: unit.Request, Owner: &runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)}}}
 	state := &hostingState{snapshot: store.RunSnapshot{Run: row}}
 	if kind == capability.UnitNode {
 		unit.Accepted.Spec.Request = unit.Request
 		state.snapshot.Run.Spec = &unit.Accepted.Spec
 		state.snapshot.Run.Plan = unit.Accepted.Plan
 		state.snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
-		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), Attempt: runspec.AttemptOrdinal(unit.Binding.Attempt), SpecHash: "job-hash", Status: store.StatusPending, Execution: *unit.Execution}
+		state.node = runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), Attempt: runspec.AttemptOrdinal(unit.Binding.Attempt), SpecHash: "job-hash", Status: runstate.StatusPending, Execution: *unit.Execution}
 	}
 	// safety: the store's snapshot must not share mutable objects with the received award.
 	body, err := json.Marshal(state.snapshot)

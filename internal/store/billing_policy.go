@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // LaunchAccountLimit is the number of accounts admitted without operator approval.

@@ -8,13 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestOwnerApprovalPolicies(t *testing.T) {
@@ -25,12 +26,12 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
 			planHash, _ := runspec.CanonicalHash(plan)
 			jobHash, _ := runspec.CanonicalHash(job)
-			identity := engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
+			identity := engineid.Identity{Version: "v1.0.0", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}
 			resolved := engine.Resolved{Identity: identity}
 			spec := runspec.Spec{Hash: "spec", PlanHash: planHash, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}, Engine: identity}}
 			rawSpec, _ := json.Marshal(spec)
 			rawJob, _ := json.Marshal(job)
-			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: marshalEventFixture(t, plan)}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "gate"}, Status: store.StatusPending, Spec: rawJob, SpecHash: string(jobHash)})
+			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: marshalEventFixture(t, plan)}, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "gate"}, Status: runstate.StatusPending, Spec: rawJob, SpecHash: string(jobHash)})
 			value := json.RawMessage("false")
 			if mode == "skip" {
 				value = json.RawMessage("true")
@@ -43,14 +44,14 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 			host, err := NewOwnerEvaluator(EvaluationDependencies{
 				Store: st,
 				Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil },
-				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+				EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return resolved, nil
 				},
 				ChildContext: func(ctx context.Context, budget, _ time.Duration) (context.Context, context.CancelFunc, error) {
 					bounded, cancel := context.WithTimeout(ctx, budget)
 					return bounded, cancel, nil
 				},
-				ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+				ReadOutput: func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error) {
 					return nil, errors.New("approval cannot read its own unexecuted output")
 				},
 				Masker:     testMasker("private"),
@@ -71,7 +72,7 @@ func TestOwnerApprovalPolicies(t *testing.T) {
 			if err != nil && strings.Contains(err.Error(), "private") {
 				t.Fatal("predicate error was not masked")
 			}
-			if !process.cleaned || len(process.calls) != 1 || st.node.Status != store.StatusPending || st.node.Attempt != 0 {
+			if !process.cleaned || len(process.calls) != 1 || st.node.Status != runstate.StatusPending || st.node.Attempt != 0 {
 				t.Fatal("policy did not clean up or modified execution state")
 			}
 		})

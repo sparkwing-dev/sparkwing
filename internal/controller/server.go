@@ -14,21 +14,22 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/crypto/ssh"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
-	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/sessionledger"
+	"golang.org/x/crypto/ssh"
 )
 
 // Server serves controller HTTP requests.
@@ -44,7 +45,7 @@ type Server struct {
 
 	credentialIssuer     CredentialIssuer
 	runnerMeteringWriter RunnerMeteringWriter
-	authorization        RouteAuthorization
+	authorization        routepolicy.Authorization
 	accountReads         AccountReader
 	accountWrites        AccountWriter
 	identityLinkWrites   IdentityLinkWriter
@@ -129,7 +130,7 @@ type Server struct {
 
 	dashboard                 *Dashboard
 	localHTTPOnce             sync.Once
-	localHTTP                 wingd.LocalHTTP
+	localHTTP                 localhostwire.LocalHTTP
 	localSessionMu            sync.Mutex
 	localSessions             *sessionledger.Ledger
 	localSchedules            *crons.Service
@@ -296,7 +297,7 @@ func (s *Server) rebuildRouters() *registeredMux {
 
 func (s *Server) buildRegisteredRouters() *registeredMux {
 	router := newRegisteredMux()
-	var endpoints []Endpoint
+	var endpoints []controllerwire.Endpoint
 	endpoints = append(endpoints, s.operatorEndpoints()...)
 	endpoints = append(endpoints, s.engineEndpoints()...)
 	endpoints = append(endpoints, s.localHostEndpoints()...)
@@ -332,7 +333,7 @@ func (s *Server) buildRegisteredRouters() *registeredMux {
 			router.HandleFunc("GET /api/v1/data/objects/{key...}", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
 					w.Header().Set("Allow", http.MethodGet)
-					writePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
+					routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
 					return
 				}
 				objects.ServeHTTP(w, r)
@@ -372,7 +373,7 @@ func (s *Server) RegisteredRoute(r *http.Request) bool {
 }
 
 func (s *Server) writeRouteMiss(w http.ResponseWriter, r *http.Request) {
-	writeRouteMiss(w, allowedRouteMethods(s.registeredRouters().ServeMux, r, routeProbeMethods))
+	routepolicy.WriteRouteMiss(w, routepolicy.AllowedRouteMethods(s.registeredRouters().ServeMux, r, routeProbeMethods))
 }
 
 var routeProbeMethods = []string{

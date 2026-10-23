@@ -6,10 +6,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // CredentialRotator rechecks team-admin authority and rotates one tenant's rows in one transaction.
@@ -88,7 +88,7 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request, a c
 	if result.Rotated < 0 || result.GitCredentials < 0 {
 		return errors.New("invalid rotation counts")
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, credentialRotationView(result))
 	return nil
 }
 
@@ -115,7 +115,7 @@ func (s *Server) handleRotateSealedValues(w http.ResponseWriter, r *http.Request
 	}
 	s.logger.Info("sealed values rotated", "verify", verify, "previous_key_only", result.PreviousKeyOnly, "secrets", result.Secrets, "git_credentials", result.GitCredentials,
 		"run_environments", result.RunEnvironments, "settings", result.Settings, "unreadable", len(result.Unreadable))
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, sealedRotationView(result))
 	return nil
 }
 

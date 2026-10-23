@@ -10,15 +10,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // PublicationInput supplies completed local state, verified bytes and controller-proxied logs.
 type PublicationInput struct {
-	State    store.LocalPublication
+	State    runstate.LocalPublication
 	OpenBlob func(context.Context, blob.Digest) (io.ReadCloser, int64, error)
 	Logs     controllerwire.LogReader
 }
@@ -77,7 +77,7 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 	return response.RunID, err
 }
 
-func publicationPlan(state store.LocalPublication) (nodeproto.PlanDoc, error) {
+func publicationPlan(state runstate.LocalPublication) (nodeproto.PlanDoc, error) {
 	var plan nodeproto.PlanDoc
 	if err := json.Unmarshal(state.Run.Plan, &plan); err != nil {
 		return plan, err
@@ -109,7 +109,7 @@ func publicationPlan(state store.LocalPublication) (nodeproto.PlanDoc, error) {
 	return plan, nil
 }
 
-func publishLocalJob(ctx context.Context, controller controllerwire.Controller, publisher ProfileData, input PublicationInput, node store.NodeRow) error {
+func publishLocalJob(ctx context.Context, controller controllerwire.Controller, publisher ProfileData, input PublicationInput, node runstate.NodeRow) error {
 	id := node.Ref.NodeID
 	result := controllerwire.JobResult{Outcome: string(node.Outcome), Reason: node.StatusDetail}
 	if stored, ok := input.State.Results[string(id)]; ok {
@@ -186,7 +186,7 @@ func publishLocalRecord(ctx context.Context, bytes blob.Store, records blob.Reco
 	return key, err
 }
 
-func publishLocalLogs(ctx context.Context, publisher ProfileData, reader controllerwire.LogReader, ref controllerwire.NodeRef, attempt runspec.AttemptIdentity) (resultErr error) {
+func publishLocalLogs(ctx context.Context, publisher ProfileData, reader controllerwire.LogReader, ref runspec.NodeRef, attempt runspec.AttemptIdentity) (resultErr error) {
 	uploader, err := publisher.PublicationLogs(attempt)
 	if err != nil {
 		return err

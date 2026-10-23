@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestNodeExecutorCarriesConstructedIdentityThroughHello(t *testing.T) {

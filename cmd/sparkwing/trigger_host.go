@@ -10,8 +10,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func runTriggerHost(inv clisurface.Invocation) error {

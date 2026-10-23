@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func registeredServiceRequest(t *testing.T, routes *serviceRegistrar, auth capability.Authorized, method, target, body string) *httptest.ResponseRecorder {

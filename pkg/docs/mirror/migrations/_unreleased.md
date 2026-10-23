@@ -1,5 +1,11 @@
 # Migrating to the next release
 
+## Secret missing sentinel
+
+Replace `secretname.ErrMissing` with `sparkwing.ErrSecretMissing` when checking
+secret lookup failures with `errors.Is`. The SDK keeps the same sentinel for
+stored-value misses, separate from transport and authorization failures.
+
 ## GitHub deliveries enter a durable inbox
 
 GitHub webhooks now answer 202 with `status: queued` after storing the signed
@@ -2751,7 +2757,8 @@ physical eviction still requires the final storage adapter.
 
 ## Fenced store metadata and approval transitions
 
-`StateStoreOld` is removed. Hosts use the tenant-scoped `StateStore` contract.
+`StateStoreOld` is removed. Hosts use the tenant-scoped ports in `internal/nodehost`,
+implemented by `*store.Tenant`.
 `Store.UpdatePlanSnapshot` and `Tenant.UpdatePlanSnapshot` are removed. Submit
 plans through `AcceptPlan` and generated declarations through `AcceptExpansion`.
 Neither accepted plan can be replaced through a raw snapshot writer.

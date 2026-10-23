@@ -8,10 +8,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func (s *Server) handleGetPipelineProfile(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -26,7 +27,7 @@ func (s *Server) handleGetPipelineProfile(w http.ResponseWriter, r *http.Request
 	if prof == nil {
 		return &apierr.Error{Code: apierr.NotFound, Message: "sizing record not found"}
 	}
-	writeJSON(w, http.StatusOK, prof)
+	writeJSON(w, http.StatusOK, controllerwire.PipelineProfile(*prof))
 	return nil
 }
 

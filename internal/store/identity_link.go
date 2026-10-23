@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // Identity is one sign-in method attached to an account: an identity

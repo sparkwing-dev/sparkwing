@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
 )
 
 // safety: set, the test binary acts as an SDK process (or, as "sleep", as a

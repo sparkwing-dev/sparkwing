@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func request() runspec.SealedRequest {
@@ -35,7 +35,7 @@ func TestSourceProjectionUsesCapturedAndAcceptedCheckoutWinners(t *testing.T) {
 		t.Fatalf("request projection = %+v", first)
 	}
 	accepted := runspec.Spec{Request: r, Resolved: runspec.Resolved{
-		Engine:     engine.Identity{Version: "v1.2.3", ManifestDigest: "manifest"},
+		Engine:     engineid.Identity{Version: "v1.2.3", ManifestDigest: "manifest"},
 		Entrypoint: "pipelines/release", DefaultBranch: runspec.Optional[string]{Set: true, Value: "accepted-default"},
 		Settings: runspec.ExecutionSettings{Options: runspec.Options{Checkout: runspec.Setting[runspec.CheckoutPolicy]{Optional: runspec.Optional[runspec.CheckoutPolicy]{Set: true, Value: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{FullHistory: new(true)}}}}}},
 	}}

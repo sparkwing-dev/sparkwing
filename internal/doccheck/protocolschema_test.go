@@ -2,12 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto/conformance"
 )
 
 func TestPublishedProtocolSchemasMatchFinalWireTypes(t *testing.T) {

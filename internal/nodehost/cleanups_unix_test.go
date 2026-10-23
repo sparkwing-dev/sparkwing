@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
 )
 
 // safety: the child ignores SIGTERM so only the escalation to SIGKILL ends it.

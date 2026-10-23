@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // BillingWriter commits hosted-page reservations, refill settings and standing requests under current team authority.
@@ -27,8 +29,8 @@ func (s *Server) billingWriter(r *http.Request, a capability.Authorized) (Billin
 	return tenantPort[BillingWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
-func (s *Server) billingEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) billingEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/team/billing/checkout", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingCheckout)},
 		{Method: "POST", Pattern: "/api/v1/team/billing/standing-request", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamStandingRequest)},
 		{Method: "POST", Pattern: "/api/v1/team/billing/card", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingCard)},
@@ -53,10 +55,10 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 		return billingMutationError(err)
 	}
 	if page.Kind != kind || page.Team != a.Target.Team || page.ReservationID == "" || kind == capability.BillingPageCredits && page.AmountCents != amount {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	if page.URL != "" && !validBillingPageURL(page.URL) {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	if page.URL == "" {
 		if err := s.checkout.openReservedPage(r.Context(), s.paymentDeployment, &page); err != nil {

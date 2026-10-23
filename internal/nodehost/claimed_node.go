@@ -8,22 +8,22 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // ClaimStore supplies persisted acceptance and renewal under the awarded identity.
 // RenewNodeClaim also keeps the claim's continuously live concurrency holders live.
 type ClaimStore interface {
 	NodeTransitionStore
-	RenewNodeClaim(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error)
+	RenewNodeClaim(context.Context, runspec.NodeRef, runstate.Actor) (runstate.LeaseBeat, error)
 }
 
 // ClaimedNodeHost owns source and lease lifetime for an awarded remote job.
@@ -68,7 +68,7 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 		return err
 	}
 	actor := executorActor(input)
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
+	ref := runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
 	ctx, stop := keepNode(parent, h.Lease, h.Store, ref, actor)
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
@@ -145,7 +145,7 @@ func (h *ClaimedNodeHost) sourceSpec(ctx context.Context, input NodeInput) (sour
 	if input.Engine.Identity != snapshot.Run.Spec.Resolved.Engine {
 		return source.Spec{}, executorError(apierr.SpecDrift, "job award differs from the accepted engine")
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
+	ref := runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
 	row, err := h.Store.ReadNode(ctx, ref)
 	if err != nil {
 		return source.Spec{}, err
@@ -167,10 +167,10 @@ func (h *ClaimedNodeHost) setupFailure(ctx context.Context, input NodeInput, fai
 	return claimSetupFailure(ctx, input, failure, h.Masker.Mask, h.Store.TransitionNode)
 }
 
-func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeCommand) (store.Applied, error)) error {
+func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask func(string) string, transition func(context.Context, store.NodeCommand) (runstate.Applied, error)) error {
 	var decision *AdmissionFailure
 	if errors.As(failure, &decision) && decision.committed {
-		if decision.Outcome == store.NodeSkipped {
+		if decision.Outcome == runstate.NodeSkipped {
 			return nil
 		}
 		return failure
@@ -187,20 +187,20 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 	if errors.As(failure, &structured) {
 		code = structured.Code
 	}
-	result := store.NodeResult{Outcome: store.NodeFailed, Reason: string(code), MaskedError: boundedNodeErrText(mask(failure.Error()))}
+	result := runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: string(code), MaskedError: boundedNodeErrText(mask(failure.Error()))}
 	var refused *AdmissionFailure
 	if errors.As(failure, &refused) && waitFailure(failure, refused) == nil {
 		result.Outcome, result.Reason = refused.Outcome, string(refused.Reason)
 	}
 	if ctx.Err() != nil {
-		result.Outcome, result.Reason = store.NodeCancelled, string(apierr.ReasonCancelled)
+		result.Outcome, result.Reason = runstate.NodeCancelled, string(apierr.ReasonCancelled)
 	}
 	result = recordNodeFailure(input.NodeID, result, mask)
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
-	_, err := transition(reportCtx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: executorActor(input), SourceAttempt: &input.Attempt, Result: &result, Outcome: result.Outcome})
+	_, err := transition(reportCtx, store.ReportNode{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: executorActor(input), SourceAttempt: &input.Attempt, Result: &result, Outcome: result.Outcome})
 	if refused != nil && waitFailure(failure, refused) == nil && ctx.Err() == nil {
-		if result.Outcome == store.NodeSkipped {
+		if result.Outcome == runstate.NodeSkipped {
 			return err
 		}
 		return errors.Join(failure, err)
@@ -227,8 +227,8 @@ func startHostKeeper(parent context.Context, keeper lease.Keeper) (context.Conte
 }
 
 func keepNode(parent context.Context, keeper lease.Keeper, state interface {
-	RenewNodeClaim(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error)
-}, ref controllerwire.NodeRef, actor store.Actor,
+	RenewNodeClaim(context.Context, runspec.NodeRef, runstate.Actor) (runstate.LeaseBeat, error)
+}, ref runspec.NodeRef, actor runstate.Actor,
 ) (context.Context, func()) {
 	if lease.Adopt(parent, lease.Identity{Kind: capability.UnitNode, RunID: string(ref.RunID), NodeID: string(ref.NodeID), Holder: actor.Holder, Generation: int64(actor.Generation)}, func() bool { return true }) {
 		return parent, func() {}

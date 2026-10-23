@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -57,7 +58,7 @@ func TestFoldRunProfilesPartialSamplesRaiseOnly(t *testing.T) {
 					t.Fatalf("sample %d: %v", i, err)
 				}
 			}
-			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, controllerwire.NodeRef{RunID: "partial", NodeID: "build"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {
+			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, runspec.NodeRef{RunID: "partial", NodeID: "build"}, runstate.NodeResult{Outcome: runstate.NodeState("success"), MaskedError: ""}); err != nil {
 				t.Fatal(err)
 			}
 			if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, "partial", "success", ""); err != nil {

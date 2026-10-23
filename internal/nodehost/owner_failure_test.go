@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestOwnerHostMasksEveryReturnedFailure(t *testing.T) {
@@ -110,7 +111,7 @@ func TestOwnerHostPreparationFailureFinishesRunAndUnit(t *testing.T) {
 			if !errors.Is(err, failure) {
 				t.Fatalf("error = %v", err)
 			}
-			if f.finished.Unit != in.Owner.Owner || f.finished.Transition.Cause != store.RunFinish {
+			if f.finished.Unit != in.Owner.Owner || f.finished.Transition.Cause != runstate.RunFinish {
 				t.Fatalf("unfinished preparation failure: %+v", f.finished)
 			}
 			if f.finished.Transition.MaskedError == failure.Error() {
@@ -178,7 +179,7 @@ func TestOwnerHostResumeAcquisitionFailureLeavesAcceptedWorkRecoverable(t *testi
 
 func TestOwnerHostPolicyFailureCannotHideBehindTerminalNode(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
-	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending}}
+	f.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: runstate.StatusPending}}
 	failure := errors.New("policy write refused")
 	h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 		if s.Nodes[0].Outcome != "" {
@@ -186,8 +187,8 @@ func TestOwnerHostPolicyFailureCannotHideBehindTerminalNode(t *testing.T) {
 		}
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
-	setTestPolicies(&h, func(ctx context.Context, _ testPolicyName, _ EvaluationInput, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
-		_, err := f.TransitionNode(ctx, store.DependencyNode{Ref: row.Ref, Outcome: store.NodeSkipped})
+	setTestPolicies(&h, func(ctx context.Context, _ testPolicyName, _ EvaluationInput, row runstate.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+		_, err := f.TransitionNode(ctx, store.DependencyNode{Ref: row.Ref, Outcome: runstate.NodeSkipped})
 		return OwnerLayerResult{}, errors.Join(failure, err)
 	})
 	_, err := h.Run(t.Context(), in)

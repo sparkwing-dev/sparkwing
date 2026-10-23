@@ -16,26 +16,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type claimEngine struct{ resolved engine.Resolved }
 
-func (r claimEngine) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
+func (r claimEngine) Resolve(context.Context, engineid.Pin, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("accepted execution must ensure its sealed engine")
 }
 
-func (r claimEngine) Ensure(_ context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+func (r claimEngine) Ensure(_ context.Context, identity engineid.Identity, target releaseasset.Target) (engine.Resolved, error) {
 	if identity != r.resolved.Identity || target != r.resolved.Target {
 		return engine.Resolved{}, errors.New("source changed the selected engine")
 	}
@@ -77,9 +78,9 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			host.Acquire = nil
 			installed := false
 			host.Source = source.Options{
-				Engines: claimEngine{resolved: resolved}, Target: resolved.Target, SDK: engine.GoSDK,
+				Engines: claimEngine{resolved: resolved}, Target: resolved.Target, SDK: engineid.GoSDK,
 				Base: procenv.Base{Local: true, Captured: []string{"PATH=/daemon/bin"}}, BuildEnvironment: sourcetest.BuildEnvironment,
-				ReadPin: func(string, engine.SDKKind) (engine.Pin, error) { return resolved.Identity.Pin, nil },
+				ReadPin: func(string, engineid.SDKKind) (engineid.Pin, error) { return resolved.Identity.Pin, nil },
 				InstallSDK: func(_ context.Context, got engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
 					directory, env := filepath.Join(request.Directory, request.PipelineDir), request.Environment
 					installed = true
@@ -136,7 +137,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 				}}, nil
 			}
 			deps.Masker = host.Masker
-			deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			deps.EnsureEngine = func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return resolved, nil
 			}
 			deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
@@ -153,18 +154,18 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			if outcome == "funding_refused" || outcome == "controller_lost" {
 				host.Lease = lease.Keeper{Interval: 10 * time.Millisecond, Lease: time.Minute}
 				var bound time.Time
-				s.renew = func(context.Context) (store.LeaseBeat, error) {
+				s.renew = func(context.Context) (runstate.LeaseBeat, error) {
 					if !entered.Load() {
-						return store.LeaseBeat{}, nil
+						return runstate.LeaseBeat{}, nil
 					}
 					if outcome == "funding_refused" {
-						return store.LeaseBeat{CancelRequested: true, CancelReason: "out of credits", ExpiresAt: time.Now().Add(time.Second)}, nil
+						return runstate.LeaseBeat{CancelRequested: true, CancelReason: "out of credits", ExpiresAt: time.Now().Add(time.Second)}, nil
 					}
 					if bound.IsZero() {
 						bound = time.Now().Add(100 * time.Millisecond)
-						return store.LeaseBeat{ExpiresAt: bound}, nil
+						return runstate.LeaseBeat{ExpiresAt: bound}, nil
 					}
-					return store.LeaseBeat{}, &apierr.Error{Code: apierr.Unavailable, Message: "controller unreachable"}
+					return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.Unavailable, Message: "controller unreachable"}
 				}
 			}
 			err = host.Execute(ctx, input)
@@ -197,16 +198,16 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 				t.Fatal("host removed the user's checkout:", err)
 			}
 			if outcome == "funding_refused" {
-				if len(s.changes) != 2 || s.changes[1].Extra.Result.Outcome != store.NodeCancelled {
+				if len(s.changes) != 2 || s.changes[1].Extra.Result.Outcome != runstate.NodeCancelled {
 					t.Fatalf("funding cancellation transitions = %+v", s.changes)
 				}
 			} else if lost {
 				for _, change := range s.changes {
-					if change.Cause == store.CauseReport {
+					if change.Cause == runstate.CauseReport {
 						t.Fatal("lost authority reported a terminal result")
 					}
 				}
-			} else if len(s.changes) != 2 || s.changes[1].Extra.Result.Outcome != store.NodeSuccess {
+			} else if len(s.changes) != 2 || s.changes[1].Extra.Result.Outcome != runstate.NodeSuccess {
 				t.Fatalf("transitions = %+v", s.changes)
 			}
 		})

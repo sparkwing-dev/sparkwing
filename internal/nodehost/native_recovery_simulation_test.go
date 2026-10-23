@@ -12,13 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestStartGateSeededRecovery(t *testing.T) {
@@ -47,7 +48,7 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 	_, running := claimRemote(t, f, "released")
 	releaseRemote(t, f, "expansion")
 	_, generator := claimRemote(t, f, "expansion")
-	if err := f.report(t.Context(), generator, store.NodeSuccess); err != nil {
+	if err := f.report(t.Context(), generator, runstate.NodeSuccess); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), `UPDATE concurrency_holders SET lease_expires_at=1 WHERE run_id=? AND node_id=''`, f.Input.RunID); err != nil {
@@ -57,7 +58,7 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 	releaseRemote(t, other, "hold")
 	config, _, _, _ := nativeHostFixture(t)
 	config.Store, config.Owner = f.State, ownerOperationsFixture(f.Host)
-	config.Owner.Local = func(row store.NodeRow) bool { return row.Ref.NodeID == "ready" }
+	config.Owner.Local = func(row runstate.NodeRow) bool { return row.Ref.NodeID == "ready" }
 	daemon := newFakeDaemon()
 	var machine *LocalAdmission
 	if compute {
@@ -76,7 +77,7 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 	var otherHeld, releasedDone, queued, expanded, approved atomic.Bool
 	otherHeld.Store(true)
 	if random.IntN(2) == 0 {
-		if err := f.report(t.Context(), running, store.NodeSuccess); err != nil {
+		if err := f.report(t.Context(), running, runstate.NodeSuccess); err != nil {
 			t.Fatal(err)
 		}
 		releasedDone.Store(true)
@@ -85,11 +86,11 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 		if otherHeld.Load() {
 			for _, row := range snapshot.Nodes {
 				if row.Ref.NodeID == "ready" || row.Ref.NodeID == "approval" {
-					if row.Status != store.StatusPending || row.ReadyAt != nil || row.ClaimedBy != "" {
+					if row.Status != runstate.StatusPending || row.ReadyAt != nil || row.ClaimedBy != "" {
 						return store.ScheduleSnapshot{}, fmt.Errorf("fresh work escaped lost plan: %+v", row)
 					}
 				}
-				if row.Ref.NodeID == "expansion" && row.Expansion != store.ExpansionExpected {
+				if row.Ref.NodeID == "expansion" && row.Expansion != runstate.ExpansionExpected {
 					return store.ScheduleSnapshot{}, errors.New("expansion escaped lost plan")
 				}
 			}
@@ -118,20 +119,20 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 			}
 		}
 		if !releasedDone.Swap(true) {
-			return f.report(t.Context(), running, store.NodeSuccess)
+			return f.report(t.Context(), running, runstate.NodeSuccess)
 		}
 		if otherHeld.Load() && queued.Load() {
-			if _, err := other.Tenant.TransitionNode(t.Context(), store.CancelNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(other.Input.RunID), NodeID: "hold"}, Actor: other.Actor}); err != nil {
+			if _, err := other.Tenant.TransitionNode(t.Context(), store.CancelNode{Ref: runspec.NodeRef{RunID: runspec.RunID(other.Input.RunID), NodeID: "hold"}, Actor: other.Actor}); err != nil {
 				return fmt.Errorf("cancel competitor: %w", err)
 			}
-			if _, err := other.Tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: other.Actor.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(other.Input.RunID), Actor: other.Actor, Cause: store.RunFinish}}); err != nil {
+			if _, err := other.Tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: other.Actor.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(other.Input.RunID), Actor: other.Actor, Cause: runstate.RunFinish}}); err != nil {
 				return fmt.Errorf("finish competitor: %w", err)
 			}
 			otherHeld.Store(false)
 			return nil
 		}
-		if row, ok := ownerNode(snapshot, "approval"); ok && row.Status == store.StatusApprovalPending {
-			if _, err := f.State.TransitionNode(t.Context(), store.ResolveApprovalNode{Ref: row.Ref, Actor: f.Control, Outcome: store.NodeSuccess, Approval: &store.ApprovalResolution{Decision: store.ApprovalResolutionApproved}}); err != nil {
+		if row, ok := ownerNode(snapshot, "approval"); ok && row.Status == runstate.StatusApprovalPending {
+			if _, err := f.State.TransitionNode(t.Context(), store.ResolveApprovalNode{Ref: row.Ref, Actor: f.Control, Outcome: runstate.NodeSuccess, Approval: &runstate.ApprovalResolution{Decision: store.ApprovalResolutionApproved}}); err != nil {
 				return err
 			}
 			approved.Store(true)
@@ -148,9 +149,9 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 		if otherHeld.Load() {
 			return errors.New("execution bypassed plan reacquisition")
 		}
-		return f.report(ctx, input, store.NodeSuccess)
+		return f.report(ctx, input, runstate.NodeSuccess)
 	})
-	owner.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+	owner.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		if otherHeld.Load() {
 			return nil, runspec.SecretRegistration{}, nil, errors.New("expansion bypassed plan reacquisition")
 		}
@@ -164,7 +165,7 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 		t.Fatalf("completion=%+v queued=%t expanded=%t approved=%t error=%v", completion, queued.Load(), expanded.Load(), approved.Load(), err)
 	}
 	for _, id := range []string{"released", "ready", "approval", "expansion"} {
-		if row := capacityRow(t, f, id); row.Outcome != store.NodeSuccess {
+		if row := capacityRow(t, f, id); row.Outcome != runstate.NodeSuccess {
 			t.Fatalf("unsettled %s: %+v", id, row)
 		}
 	}
@@ -196,7 +197,7 @@ func TestNativePredicateAdmissionSkipKeepsOutcomeKnownWS12J(t *testing.T) {
 						other = newStoreHostFixtureOn(t, f.Store, plan, runspec.Options{})
 						releaseRemote(t, other, "job")
 						_, holder := claimRemote(t, other, "job")
-						if _, err := other.Tenant.MayStart(t.Context(), store.CapacityBinding{RunID: holder.Accepted.RunID, NodeID: holder.NodeID, Generation: int64(holder.Generation)}, executorActor(holder)); err != nil {
+						if _, err := other.Tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: holder.Accepted.RunID, NodeID: holder.NodeID, Generation: int64(holder.Generation)}, executorActor(holder)); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -218,13 +219,13 @@ func TestNativePredicateAdmissionSkipKeepsOutcomeKnownWS12J(t *testing.T) {
 					}
 					_, _, deps, _ := executorFixture(t)
 					deps.Store, deps.Bind = f.State, nil
-					deps.EnsureEngine = func(_ context.Context, identity engine.Identity, _ releaseasset.Target) (engine.Resolved, error) {
+					deps.EnsureEngine = func(_ context.Context, identity engineid.Identity, _ releaseasset.Target) (engine.Resolved, error) {
 						return engine.Resolved{Identity: identity}, nil
 					}
 					evaluated := 0
 					deps.Start = func(ctx context.Context, input NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
 						row := capacityRow(t, f, input.NodeID)
-						if row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix || row.Attempt != input.Attempt || row.Status != store.StatusRunning {
+						if row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix || row.Attempt != input.Attempt || row.Status != runstate.StatusRunning {
 							return nil, errors.New("predicate lacks actual running job award")
 						}
 						return &executorProcess{plan: plan, answer: func(ctx context.Context, request nodeproto.Request) (any, error) {
@@ -264,7 +265,7 @@ func TestNativePredicateAdmissionSkipKeepsOutcomeKnownWS12J(t *testing.T) {
 					if policySkip {
 						wantEvaluated = 0
 					}
-					if err != nil || completion.Outcome != "success" || row.Outcome != store.NodeSkipped || evaluated != wantEvaluated {
+					if err != nil || completion.Outcome != "success" || row.Outcome != runstate.NodeSkipped || evaluated != wantEvaluated {
 						t.Fatalf("completion=%+v error=%v row=%+v evaluations=%d", completion, err, row, evaluated)
 					}
 					key := fixtureJobCapacityKey("db", scope, f.Input.RunID, f.Actor.Owner.Holder)
@@ -294,7 +295,7 @@ func TestRecoveredOwnerSettlesWithoutPlanReacquisition(t *testing.T) {
 			f := newStoreHostFixture(t, planGrouped("global", "queue", "released"))
 			releaseRemote(t, f, "released")
 			_, input := claimRemote(t, f, "released")
-			if err := f.report(t.Context(), input, store.NodeSuccess); err != nil {
+			if err := f.report(t.Context(), input, runstate.NodeSuccess); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), `UPDATE concurrency_holders SET lease_expires_at=1 WHERE run_id=? AND node_id=''`, f.Input.RunID); err != nil {

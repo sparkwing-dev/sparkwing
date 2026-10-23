@@ -8,23 +8,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
-func approvalEvaluationFixture(t *testing.T, prepare ...func(*Tenant, *PlanAcceptance)) (*Tenant, controllerwire.NodeRef, UnitClaim) {
+func approvalEvaluationFixture(t *testing.T, prepare ...func(*Tenant, *PlanAcceptance)) (*Tenant, runspec.NodeRef, UnitClaim) {
 	t.Helper()
 	tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"skip"}}}, {ID: "next", Needs: []string{"gate"}}}}, prepare...)
 	root := authorityRoot("approval-evaluator", "a")
 	root.Grants = []capability.Grant{capability.NodesClaim}
 	authorityPersist(t, tenant.s, root)
 	fundUnitClaim(t, tenant.s)
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "gate"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "gate"}
 	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitEval, RunID: ref.RunID, NodeID: ref.NodeID, SourceGeneration: 0}})
 	if err != nil {
 		t.Fatal(err)
@@ -32,8 +31,8 @@ func approvalEvaluationFixture(t *testing.T, prepare ...func(*Tenant, *PlanAccep
 	return tenant, ref, claim
 }
 
-func approvalEvaluationActor(claim UnitClaim) Actor {
-	return Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+func approvalEvaluationActor(claim UnitClaim) runstate.Actor {
+	return runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
 }
 
 func TestControllerApprovalPredicateSettlesUnderItsEvaluationFence(t *testing.T) {
@@ -67,13 +66,13 @@ func TestControllerApprovalPredicateSettlesUnderItsEvaluationFence(t *testing.T)
 			rewriteSchemaCount(t, tenant.s.db, "concurrency_holders", 0)
 			rewriteSchemaCount(t, tenant.s.db, "concurrency_waiters", 0)
 			rewriteSchemaCount(t, tenant.s.db, "approvals", 0)
-			change := nodeTransition{Ref: ref, Actor: actor, To: NodeApprovalPending, Cause: CauseApprovalOpen}
+			change := nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeApprovalPending, Cause: runstate.CauseApprovalOpen}
 			if outcome != "open" {
-				kind, state, reason := PolicyApprovalBypass, NodeSkipped, "skip_if"
+				kind, state, reason := runstate.PolicyApprovalBypass, runstate.NodeSkipped, "skip_if"
 				if outcome == "fail" {
-					kind, state, reason = PolicyApprovalFail, NodeFailed, "predicate failed"
+					kind, state, reason = runstate.PolicyApprovalFail, runstate.NodeFailed, "predicate failed"
 				}
-				change.To, change.Cause, change.Extra = state, causeOwnerPolicy, transitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: kind, Generation: 0}, Result: &NodeResult{Outcome: state, Reason: reason}}
+				change.To, change.Cause, change.Extra = state, causeOwnerPolicy, transitionExtra{OwnerPolicy: &runstate.OwnerPolicyResult{Kind: kind, Generation: 0}, Result: &runstate.NodeResult{Outcome: state, Reason: reason}}
 			}
 			wrong := change
 			wrong.Ref.NodeID = "next"
@@ -89,18 +88,18 @@ func TestControllerApprovalPredicateSettlesUnderItsEvaluationFence(t *testing.T)
 				t.Fatal(err)
 			}
 			row, err = tenant.ReadNode(t.Context(), ref)
-			if err != nil || row.Attempt != 0 || outcome == "open" && row.Status != StatusApprovalPending || outcome == "skip" && row.Outcome != NodeSkipped || outcome == "fail" && row.Outcome != NodeFailed {
+			if err != nil || row.Attempt != 0 || outcome == "open" && row.Status != runstate.StatusApprovalPending || outcome == "skip" && row.Outcome != runstate.NodeSkipped || outcome == "fail" && row.Outcome != runstate.NodeFailed {
 				t.Fatalf("approval outcome lost: %+v %v", row, err)
 			}
 			var status string
 			if err := tenant.s.db.QueryRow(`SELECT status FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=0`, tenant.team, ref.RunID, ref.NodeID).Scan(&status); err != nil || status != "done" {
 				t.Fatalf("evaluation did not settle atomically: %s %v", status, err)
 			}
-			next, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: ref.RunID, NodeID: "next"})
+			next, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: ref.RunID, NodeID: "next"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if outcome == "skip" && next.ReadyAt == nil || outcome == "fail" && next.Status != StatusDone {
+			if outcome == "skip" && next.ReadyAt == nil || outcome == "fail" && next.Status != runstate.StatusDone {
 				t.Fatalf("approval outcome did not reach shared Decide owner: %+v", next)
 			}
 			rewriteSchemaCount(t, tenant.s.db, "concurrency_holders", 0)
@@ -171,7 +170,7 @@ func TestControllerApprovalPredicateSettlesExhaustedEvaluator(t *testing.T) {
 		t.Fatalf("exhausted evaluator: %+v %v", reaped, err)
 	}
 	row, err := tenant.ReadNode(t.Context(), ref)
-	if err != nil || row.Status != StatusDone || row.Outcome != NodeFailed || row.Attempt != 0 {
+	if err != nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeFailed || row.Attempt != 0 {
 		t.Fatalf("exhausted approval remained pending: %+v %v", row, err)
 	}
 }

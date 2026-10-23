@@ -26,7 +26,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
 )
 
 // ErrDockerUnavailable is returned by every function that shells out

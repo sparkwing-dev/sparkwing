@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -40,8 +41,8 @@ type UnitClaim struct {
 	RunID            string
 	NodeID           string
 	SourceGeneration int64
-	Award            ClaimAward
-	Owner            OwnerLeaseRef
+	Award            runstate.ClaimAward
+	Owner            runstate.OwnerLeaseRef
 	// Bearer is the one-time C2 issuance result; trusted transport must deliver it without storing or logging it.
 	Bearer []byte `json:"-"`
 }
@@ -66,7 +67,7 @@ func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPref
 // RenewUnit derives the unit's team, identity and fences from its live capability.
 // Executing reports current owner compute, pausing billing during customer-runner waits; job starts use TransitionNode.
 // Cancelled units renew to drain and return CancelRequested without recording a new start.
-func (o *Operator) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error) {
+func (o *Operator) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (runstate.LeaseBeat, error) {
 	return o.s.renewUnit(ctx, capabilityPrefix, executing)
 }
 

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 func TestExecutorFailureRecords(t *testing.T) {
@@ -33,7 +33,7 @@ func TestExecutorFailureRecords(t *testing.T) {
 				if result == nil {
 					continue
 				}
-				if result.Outcome != store.NodeFailed {
+				if result.Outcome != runstate.NodeFailed {
 					if result.Failure != nil {
 						t.Fatal("successful retry retained a failed attempt")
 					}
@@ -95,7 +95,7 @@ func checkExecutorFailureMask(t *testing.T, value string, secretCode bool) {
 	}
 }
 
-func checkFailureRecord(t *testing.T, result store.NodeResult, job, stage, secret string) {
+func checkFailureRecord(t *testing.T, result runstate.NodeResult, job, stage, secret string) {
 	t.Helper()
 	failure := result.Failure
 	if failure == nil || failure.Job != job || failure.Stage != stage || failure.Error == nil {

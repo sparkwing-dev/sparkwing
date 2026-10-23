@@ -10,17 +10,17 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type runControlWriterFake struct {
 	RunTransactions
 	team     store.Team
 	seen     capability.Authorized
-	decision controllerwire.ApprovalDecision
+	decision store.ApprovalDecision
 	job      string
 	reason   string
 	key      string
@@ -46,12 +46,12 @@ func (f *runControlWriterFake) CreateAuthorizedDebugPause(_ context.Context, a c
 	return f.failure
 }
 
-func (f *runControlWriterFake) ResolveAuthorizedApproval(_ context.Context, a capability.Authorized, decision controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error) {
+func (f *runControlWriterFake) ResolveAuthorizedApproval(_ context.Context, a capability.Authorized, decision store.ApprovalDecision) (store.ApprovalResult, error) {
 	f.seen, f.decision = a, decision
 	f.calls++
 	now := time.Unix(100, 0).UTC()
-	return controllerwire.ApprovalResult{Approval: controllerwire.Approval{
-		RunID: a.Target.RunID, JobID: a.Target.NodeID, Resolution: decision.Resolution, Comment: decision.Comment,
+	return store.ApprovalResult{Approval: store.Approval{
+		RunID: a.Target.RunID, NodeID: a.Target.NodeID, Resolution: decision.Resolution, Comment: decision.Comment,
 		Approver: a.Principal.Capability.Subject.ID, RequestedAt: now, ResolvedAt: &now,
 	}}, f.failure
 }

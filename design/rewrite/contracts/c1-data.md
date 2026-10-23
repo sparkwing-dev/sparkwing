@@ -2004,11 +2004,9 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
   registered team and cannot widen itself to the raw store. `OperatorStore`
   exposes named deployment operations. `Store` keeps opening, handle creation,
   capability-derived claims and cross-team reaping.
-- `internal/storage.StateStore` is the final host-facing interface implemented by
-  `*store.Tenant`. The replaced interface and its old consumers have the `Old`
-  suffix solely to compile the old implementation beside the contract. There
-  is no forwarding alias or compatibility adapter. Retained account, billing,
-  approval and schedule implementations are not ported by this contract step.
+- `internal/nodehost` defines the host-facing ports. `OwnerStore` and
+  `ClaimStore` are implemented by `*store.Tenant`; `NativeHostStore` combines
+  them. Hosts borrow these tenant handles and never close the shared store.
 - `internal/runspec` owns immutable inputs and identity. It resolves no settings,
   authenticates no credential and validates no plan.
 - `internal/blob` owns byte integrity and reference-edge types. The controller
@@ -2905,11 +2903,11 @@ already pass. Each should run on SQLite and PostgreSQL where a store is involved
 | `ErrIllegalTransition`, blob errors | C2 maps holder_rights/stale_generation to lock_held; illegal_edge/terminal to illegal_transition; unreadable digest to forbidden with digest_not_readable. |
 | `PlanAcceptance`, `ExpansionSubmission`, `RunSnapshot` | C3 validates plan declarations. C1 projects a consistent snapshot and shares Decide between both owners. |
 | `AcceptedExpansion`, `NodeRow.SpecHash`, `AttemptIdentity` | C3 preserves source vs eval generations, exact node-wide attempt ordinal and persisted generated topology. |
-| `runspec.Setting`, `RunnerSelection`, `Ceilings`, `SealInput` | C4 applies the frozen precedence and refuses over-ceiling settings at the correct seal; the store supplies time, not the requester. |
+| `runspec.Setting`, `RunnerSelection`, `Ceilings`, `SealInput` | C4 applies the frozen precedence and refuses over-ceiling settings at the correct seal. Authority checks use the store transaction clock. Delivery inbox operations accept controller timestamps; deadlines, due times and query cursors remain caller inputs. |
 | `RetentionRequest`, `SegmentCommit` | C4 owns numeric limits and log class settings; C3 emits immutable attributed segments and terminal completeness. |
 | `blob.Authority`, upload identity, publication edge | C2 derives run/repo/ref/publisher scope; job receipts never transfer through possession of a digest or same-run membership. |
 | `billing_awards`, `billable_intervals` | C2 billing provenance and settlement use immutable award facts, exclude customer-runner wait and survive run/capability pruning. |
-| `StateStore`, `OperatorStore`, `blob.RecordStore` | C3 host seams consume these final interfaces; old implementation consumers are removed when ported, not adapted. |
+| `nodehost.OwnerStore`, `nodehost.ClaimStore`, `OperatorStore`, `blob.RecordStore` | Hosts use tenant-scoped ports; deployment maintenance uses the operator handle and blob records use their own port. |
 | C1-01 through C1-27 | T1 supplies executable cross-placement scenarios and aligns names with its independent catalog. |
 
 ## Intake replay
@@ -3022,7 +3020,7 @@ schema version is added.
 | Change | `internal/store/tenant.go` |
 | Create | `internal/blob/contracts.go` |
 | Create | `internal/runspec/contracts.go` |
-| Create | `internal/storage/state_contract.go` |
+| Change | `internal/nodehost/owner.go`, `claimed_node.go`, `native_host.go` |
 | Create | `internal/store/claim_contract.go` |
 | Create | `internal/store/completion.go` |
 | Delete | `internal/store/capacity_adoption.go` |
@@ -3037,10 +3035,10 @@ schema version is added.
 | Create | `internal/store/source_release.go` |
 | Create | `internal/store/state_contract.go` |
 
-The existing host, orchestrator, storage and client edits are mechanical
-`StateStore` to `StateStoreOld` renames. Store startup changes only its schema
-source and translator call. The existing dialect-shape test retains its purpose;
-its comment now describes translation. `c1-data.md` is this contract document.
+The host ports live in `internal/nodehost`; the replaced storage interfaces
+are removed. Store startup uses the neutral schema and dialect translator.
+The dialect-shape test compares translated schemas. `c1-data.md` is this
+contract document.
 
 ## Export inventory
 
@@ -3202,11 +3200,11 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `OutputData.Put` | Checks the output cap and uploader binding, obtains a verified receipt, then commits the output record. |
 | `OutputData.Read` | Looks up the authorized output record and consumes bounded bytes through verified EOF and successful close. |
 
-### internal/storage/state_contract.go
+### internal/nodehost host ports
 
 | Export | Purpose |
 |---|---|
-| `StateStore` | StateStore is the tenant-scoped host contract; status writes use transitions and source inputs use the two seals. A host borrows this handle and does not close the shared store. Claims and deployment maintenance stay unscoped. |
+| `OwnerStore`, `ClaimStore`, `NativeHostStore` | Tenant-scoped execution contracts implemented by `*store.Tenant`. Status writes use transitions and source inputs use the two seals. Hosts borrow the handle; composition owns its lifetime. |
 
 ### internal/store/claim_contract.go
 
@@ -4209,7 +4207,7 @@ returns 403 without disclosing outcomes.
 Scheduled intake locks its schedule FOR UPDATE before taking the intake lock.
 An aborted transaction does not write fire history or consume its due instant.
 The source and authority snapshots are rechecked at the committing boundary.
-Both schedule caps derive from internal/limits. Local principals retain their
+Both schedule caps derive from pkg/limits. Local principals retain their
 cap exemption.
 
 Unpriced job refusal now uses the existing node state owner. C1 adds the

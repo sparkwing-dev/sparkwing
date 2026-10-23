@@ -5,14 +5,15 @@ import (
 	"errors"
 	"reflect"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // StoreBinding supplies authenticated, tenant-scoped facts to native service construction.
@@ -25,8 +26,8 @@ type StoreBinding struct {
 
 // StoreHosting constructs the shared hosts over the controller's existing store handle.
 type StoreHosting struct {
-	Controller *controller.EngineController
-	router     *controller.PolicyRouter
+	Controller StoreEngine
+	router     *routepolicy.Router
 	Bind       func(context.Context, StoreBinding) (nodehost.NativeServices, error)
 }
 
@@ -53,7 +54,7 @@ func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUn
 	if err != nil {
 		return nodehost.NativeServices{}, storeInputs{}, err
 	}
-	tenant, err := controller.ScopedTenantPort[*store.Tenant](ctx, store.Team(principal.Capability.Team), h.Controller.ResolveTenant)
+	tenant, err := h.Controller.RunnerTenant(ctx, store.Team(principal.Capability.Team))
 	if err != nil {
 		return nodehost.NativeServices{}, storeInputs{}, err
 	}
@@ -107,7 +108,7 @@ func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 	}
 	var node nodehost.NodeInput
 	if unit.Unit == capability.UnitNode {
-		row, err := state.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)})
+		row, err := state.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)})
 		if err != nil {
 			return storeInputs{}, err
 		}
@@ -115,27 +116,27 @@ func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 		if err != nil {
 			return storeInputs{}, err
 		}
-		if row.Ref != (controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || row.Attempt != runspec.AttemptOrdinal(unit.Binding.Attempt) || !reflect.DeepEqual(row.Execution, *unit.Execution) {
+		if row.Ref != (runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || row.Attempt != runspec.AttemptOrdinal(unit.Binding.Attempt) || !reflect.DeepEqual(row.Execution, *unit.Execution) {
 			return storeInputs{}, awardMismatch()
 		}
 	} else if unit.Unit == capability.UnitEval {
 		binding := principal.Capability.Binding
-		row, err := state.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)})
+		row, err := state.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)})
 		if err != nil {
 			return storeInputs{}, err
 		}
-		if row.Generation != runspec.ClaimGeneration(unit.SourceGeneration) || row.Ref != (controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
+		if row.Generation != runspec.ClaimGeneration(unit.SourceGeneration) || row.Ref != (runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}) || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeSuccess && row.Outcome != runstate.NodeMemoized || row.Expansion != runstate.ExpansionExpected {
 			return storeInputs{}, awardMismatch()
 		}
-		input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID), Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}
+		input.Owner = runstate.Actor{Kind: runstate.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID), Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}
 	} else {
 		binding := principal.Capability.Binding
 		owner := snapshot.Run.Owner
-		if owner == nil || owner.Kind != store.OwnerTrigger || owner.RunID != runspec.RunID(binding.RunID) || owner.Holder != binding.Holder || owner.Generation != runspec.ClaimGeneration(binding.Generation) {
+		if owner == nil || owner.Kind != runstate.OwnerTrigger || owner.RunID != runspec.RunID(binding.RunID) || owner.Holder != binding.Holder || owner.Generation != runspec.ClaimGeneration(binding.Generation) {
 			return storeInputs{}, awardMismatch()
 		}
-		input.Owner = store.Actor{
-			Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix,
+		input.Owner = runstate.Actor{
+			Kind: runstate.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix,
 			Owner: *owner, NodeFence: runspec.NodeFence{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID), Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)},
 		}
 	}

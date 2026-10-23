@@ -5,11 +5,15 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
+	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // sourceTransactions commits source authorization and its release audit.
@@ -17,9 +21,44 @@ type sourceTransactions interface {
 	ReleaseSourceCredential(context.Context, capability.Authorized) (store.GitCredential, capability.SourceReleaseAudit, error)
 }
 
+// GitHubSourceProvider mints repository-scoped read tokens after store authorization.
+type GitHubSourceProvider interface {
+	InstallationTokenByIDs(context.Context, int64, []int64, map[string]string) (githubapp.Token, error)
+}
+
+type githubSourceTransactions interface {
+	PrepareGitHubSourceRelease(context.Context, capability.Authorized) (store.GitHubSourceGrant, error)
+	CommitGitHubSourceRelease(context.Context, capability.Authorized, store.GitHubSourceGrant, time.Time) error
+}
+
+func (s *SourceController) releaseGitHubSource(ctx context.Context, a capability.Authorized) (SourceCredentialResponse, error) {
+	tenant, err := scopedTenantPort[githubSourceTransactions](ctx, store.Team(a.Target.Team), s.ResolveTenant)
+	if err != nil {
+		return SourceCredentialResponse{}, engineLookupError(err)
+	}
+	grant, err := tenant.PrepareGitHubSourceRelease(ctx, a)
+	if err != nil {
+		return SourceCredentialResponse{}, err
+	}
+	token, err := s.GitHub.InstallationTokenByIDs(ctx, grant.Installation, grant.Repositories, map[string]string{"contents": "read"})
+	if errors.Is(err, githubapp.ErrNotInstalled) {
+		return SourceCredentialResponse{}, &apierr.Error{Code: apierr.Conflict, Message: "install the team's GitHub App on the approved repositories or update the owner's extras: " + strings.Join(grant.Names, ", ")}
+	}
+	if err != nil {
+		return SourceCredentialResponse{}, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub source token mint failed"}, err)
+	}
+	if token.Token == "" {
+		return SourceCredentialResponse{}, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub returned no live source token"}
+	}
+	if err := tenant.CommitGitHubSourceRelease(ctx, a, grant, token.ExpiresAt); err != nil {
+		return SourceCredentialResponse{}, err
+	}
+	return SourceCredentialResponse{Kind: "github_app", Host: "github.com", Secret: token.Token, ExtraRepositories: grant.Names[1:]}, nil
+}
+
 // SourceController releases source access only after its store audit commits.
 type SourceController struct {
-	GitHub        store.GitHubSourceProvider
+	GitHub        GitHubSourceProvider
 	Cipher        BoundCipher
 	ResolveTenant func(context.Context, store.Team) (TenantHandle, error)
 }
@@ -35,25 +74,19 @@ type SourceCredentialResponse struct {
 }
 
 func (s *SourceController) transactions(ctx context.Context, team string) (sourceTransactions, error) {
-	return ScopedTenantPort[sourceTransactions](ctx, store.Team(team), s.ResolveTenant)
+	return scopedTenantPort[sourceTransactions](ctx, store.Team(team), s.ResolveTenant)
 }
 
 // Release returns an App token or opens a stored credential after its audit commits.
 func (s *SourceController) Release(ctx context.Context, a capability.Authorized) (SourceCredentialResponse, error) {
 	if s == nil {
-		return SourceCredentialResponse{}, missingEndpointPolicy()
+		return SourceCredentialResponse{}, routepolicy.MissingEndpointPolicy()
 	}
 	var appMissing error
 	if s.GitHub != nil {
-		appTenant, err := ScopedTenantPort[interface {
-			ReleaseGitHubSourceCredential(context.Context, capability.Authorized, store.GitHubSourceProvider) (source.Credential, error)
-		}](ctx, store.Team(a.Target.Team), s.ResolveTenant)
-		if err != nil {
-			return SourceCredentialResponse{}, engineLookupError(err)
-		}
-		token, err := appTenant.ReleaseGitHubSourceCredential(ctx, a, s.GitHub)
+		token, err := s.releaseGitHubSource(ctx, a)
 		if err == nil {
-			return SourceCredentialResponse{Kind: token.Kind, Host: token.Host, Secret: token.Secret, ExtraRepositories: token.ExtraRepositories}, nil
+			return token, nil
 		}
 		if !errors.Is(err, store.ErrNotFound) {
 			return SourceCredentialResponse{}, err
@@ -64,7 +97,7 @@ func (s *SourceController) Release(ctx context.Context, a capability.Authorized)
 		}
 	}
 	if s.Cipher == nil {
-		return SourceCredentialResponse{}, missingEndpointPolicy()
+		return SourceCredentialResponse{}, routepolicy.MissingEndpointPolicy()
 	}
 	tenant, err := s.transactions(ctx, a.Target.Team)
 	if err != nil {
@@ -122,9 +155,9 @@ func (s *Server) sourceAdapter() *SourceController {
 	return source
 }
 
-func (s *Server) sourceEndpoints() []Endpoint {
+func (s *Server) sourceEndpoints() []controllerwire.Endpoint {
 	e := s.engineController
-	return []Endpoint{
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/source-credential", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleSourceRelease},
 	}
 }

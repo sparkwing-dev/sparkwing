@@ -7,9 +7,10 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -199,7 +200,7 @@ func TestSourceReleaseCannotWidenPersistedFacts(t *testing.T) {
 
 func TestSourceReleaseRechecksLeaseAfterEnrollment(t *testing.T) {
 	tenant, auth := sourceReleaseFixture(t)
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}

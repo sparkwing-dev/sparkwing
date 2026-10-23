@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestProcessAuthority(t *testing.T) {
@@ -71,7 +71,7 @@ func TestProcessAuthority(t *testing.T) {
 		t.Fatalf("process snapshot=%+v error=%v", snapshot, err)
 	}
 	auth := capability.Authorized{Principal: snapshot.Authorities[0].Principal, Binding: binding}
-	routes := &processServiceRoutes{endpoints: map[string]controller.Endpoint{}}
+	routes := &processServiceRoutes{endpoints: map[string]controllerwire.Endpoint{}}
 	if err := RegisterProcessServices(routes, authorities.Resolve); err != nil {
 		t.Fatal(err)
 	}

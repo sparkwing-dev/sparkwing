@@ -8,6 +8,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
@@ -26,7 +27,7 @@ func TestGoSDKInstallCacheIgnoresDisabledWorkspace(t *testing.T) {
 	workspace := filepath.Join(root, "go.work")
 	writeInput(t, root, "go.work", []byte("go 1.26\nuse (\n ./pipeline\n ./dependency\n)\n"))
 	t.Setenv("GOWORK", workspace)
-	pin, err := engine.ReadPin(dir, engine.GoSDK)
+	pin, err := engine.ReadPin(dir, engineid.GoSDK)
 	if err != nil {
 		t.Fatal(err)
 	}

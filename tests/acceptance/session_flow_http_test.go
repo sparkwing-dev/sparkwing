@@ -14,14 +14,15 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type sessionFlow struct {
@@ -264,7 +265,7 @@ func TestSessionFlowHTTPParentRevocationEndsRenewalAndLogout(t *testing.T) {
 			t.Fatal(err)
 		}
 		authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent.Capability.Prefix}
-		if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: authority, CapabilityPrefix: authority.ID}, authority); err != nil {
+		if err := tenant.RevokeAuthority(t.Context(), runstate.Actor{Authority: authority, CapabilityPrefix: authority.ID}, authority); err != nil {
 			t.Fatal(err)
 		}
 		path := "/api/v1/auth/session"

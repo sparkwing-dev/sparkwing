@@ -10,8 +10,8 @@ import (
 
 	// safety: initializes before every package that imports the SDK, so no
 	// init there can start a command that inherits the protocol pipes.
-	_ "github.com/sparkwing-dev/sparkwing/internal/protofd"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	_ "github.com/sparkwing-dev/sparkwing/pkg/protofd"
+	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
 )
 
 // Base is the marker embedded by every pipeline.

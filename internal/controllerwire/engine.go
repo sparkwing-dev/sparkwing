@@ -6,15 +6,14 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // Compatibility fixes the API boundary independently of an engine's matching node protocol.
@@ -28,7 +27,7 @@ type Compatibility struct {
 const APIMajor = 1
 
 // CompatibilityFor derives the API guarantee using calendar months from the verified release date.
-func CompatibilityFor(release engine.VersionInfo) Compatibility {
+func CompatibilityFor(release engineid.VersionInfo) Compatibility {
 	return Compatibility{
 		APIMajor: APIMajor, EngineRelease: release.Version,
 		ReleasedAt:      release.PublishedAt,
@@ -68,11 +67,11 @@ type PlanSubmission struct {
 }
 
 type PlanAccepted struct {
-	Spec     runspec.Spec    `json:"spec"`
-	Plan     json.RawMessage `json:"plan"`
-	PlanHash runspec.Hash    `json:"plan_hash"`
-	Replayed bool            `json:"replayed"`
-	Notices  []engine.Notice `json:"notices"`
+	Spec     runspec.Spec      `json:"spec"`
+	Plan     json.RawMessage   `json:"plan"`
+	PlanHash runspec.Hash      `json:"plan_hash"`
+	Replayed bool              `json:"replayed"`
+	Notices  []engineid.Notice `json:"notices"`
 }
 
 // ClaimRequest proposes selectors, labels and free capacity for a server-authorized award.
@@ -111,18 +110,11 @@ type ClaimedUnit struct {
 	AttemptDeadline        *time.Time                    `json:"attempt_deadline,omitempty"`
 	ParentCapabilityExpiry *time.Time                    `json:"parent_capability_expiry,omitempty"`
 	SourceGeneration       int64                         `json:"source_generation,omitempty"`
-	Engine                 *engine.Identity              `json:"engine,omitempty"`
+	Engine                 *engineid.Identity            `json:"engine,omitempty"`
 }
 
 type ClaimResponse struct {
 	Claim *ClaimedUnit `json:"claim,omitempty"`
-}
-
-// LauncherObservation reports one award's preparation state without Kubernetes identities.
-type LauncherObservation struct {
-	Award       capability.LeaseRef `json:"award"`
-	Reservation bool                `json:"reservation,omitempty"`
-	Rejected    bool                `json:"rejected,omitempty"`
 }
 
 // LauncherCapacityObservation reports demand without an execution placement.
@@ -130,19 +122,12 @@ type LauncherCapacityObservation struct {
 	Award capability.LeaseRef `json:"award"`
 }
 
-// LauncherActivation binds a verified execution reservation before its Job is unsuspended.
-type LauncherActivation struct {
-	Award         capability.LeaseRef `json:"award"`
-	NodeUID       string              `json:"node_uid"`
-	ReservationID string              `json:"reservation_id"`
-}
-
 // LauncherSyncRequest reconciles Jobs and node reservations against the launcher's awards.
 type LauncherSyncRequest struct {
-	Observed    []LauncherObservation         `json:"observed"`
-	Capacity    []LauncherCapacityObservation `json:"capacity,omitempty"`
-	Activations []LauncherActivation          `json:"activations,omitempty"`
-	Preparing   []capability.LeaseRef         `json:"preparing,omitempty"`
+	Observed    []capability.LauncherObservation `json:"observed"`
+	Capacity    []LauncherCapacityObservation    `json:"capacity,omitempty"`
+	Activations []capability.LauncherActivation  `json:"activations,omitempty"`
+	Preparing   []capability.LeaseRef            `json:"preparing,omitempty"`
 }
 
 // LauncherPreparation carries a bootstrap fence and its committed lease deadline.
@@ -349,21 +334,21 @@ type AttemptDetail struct {
 
 // RunDetail carries safe dashboard, local and remote status projections.
 type RunDetail struct {
-	ID                string            `json:"id"`
-	Number            int64             `json:"number"`
-	Team              string            `json:"team"`
-	Status            string            `json:"status"`
-	StateSeq          int64             `json:"state_seq"`
-	Inputs            runspec.Display   `json:"inputs"`
-	Jobs              []JobDetail       `json:"jobs"`
-	Attempts          []AttemptDetail   `json:"attempts"`
-	Steps             []StepDetail      `json:"steps,omitempty"`
-	Logs              []blob.LogSubject `json:"logs"`
-	StartedAt         *time.Time        `json:"started_at,omitempty"`
-	FinishedAt        *time.Time        `json:"finished_at,omitempty"`
-	CancelRequestedAt *time.Time        `json:"cancel_requested_at,omitempty"`
-	Engine            *engine.Identity  `json:"engine,omitempty"`
-	Notices           []engine.Notice   `json:"notices"`
+	ID                string             `json:"id"`
+	Number            int64              `json:"number"`
+	Team              string             `json:"team"`
+	Status            string             `json:"status"`
+	StateSeq          int64              `json:"state_seq"`
+	Inputs            runspec.Display    `json:"inputs"`
+	Jobs              []JobDetail        `json:"jobs"`
+	Attempts          []AttemptDetail    `json:"attempts"`
+	Steps             []StepDetail       `json:"steps,omitempty"`
+	Logs              []blob.LogSubject  `json:"logs"`
+	StartedAt         *time.Time         `json:"started_at,omitempty"`
+	FinishedAt        *time.Time         `json:"finished_at,omitempty"`
+	CancelRequestedAt *time.Time         `json:"cancel_requested_at,omitempty"`
+	Engine            *engineid.Identity `json:"engine,omitempty"`
+	Notices           []engineid.Notice  `json:"notices"`
 }
 
 // ScheduleSnapshot carries a consistent scheduling projection for the remote owner.

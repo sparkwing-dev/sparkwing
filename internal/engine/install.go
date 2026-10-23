@@ -13,11 +13,12 @@ import (
 	"strings"
 	"time"
 
-	strictjson "sigs.k8s.io/json"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	strictjson "sigs.k8s.io/json"
 )
 
 const (
@@ -27,14 +28,14 @@ const (
 
 // SDKInstallRequest gives the verified matching engine its acquired source and filtered install base.
 type SDKInstallRequest struct {
-	Directory           string          `json:"directory"`
-	PipelineDir         string          `json:"pipeline_dir"`
-	ExecutableDirectory string          `json:"executable_directory,omitempty"`
-	SDK                 SDKKind         `json:"sdk"`
-	NoBincache          bool            `json:"no_bincache,omitempty"`
-	HashAllFiles        bool            `json:"hash_all_files,omitempty"`
-	Environment         []string        `json:"-"`
-	Masker              *secrets.Masker `json:"-"`
+	Directory           string           `json:"directory"`
+	PipelineDir         string           `json:"pipeline_dir"`
+	ExecutableDirectory string           `json:"executable_directory,omitempty"`
+	SDK                 engineid.SDKKind `json:"sdk"`
+	NoBincache          bool             `json:"no_bincache,omitempty"`
+	HashAllFiles        bool             `json:"hash_all_files,omitempty"`
+	Environment         []string         `json:"-"`
+	Masker              *secrets.Masker  `json:"-"`
 }
 
 // UnmarshalJSON refuses ambiguous requests and credentials sent through the input pipe.
@@ -93,7 +94,7 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 		return SDKCommand{}, err
 	}
 	ownedDirectory := ""
-	if request.SDK == GoSDK {
+	if request.SDK == engineid.GoSDK {
 		ownedDirectory, err = os.MkdirTemp("", "sparkwing-sdk-executable-")
 		if err != nil {
 			return SDKCommand{}, err
@@ -135,7 +136,7 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 			return SDKCommand{}, errors.New("selected engine returned protocol arguments or a preload in its SDK command")
 		}
 	}
-	if request.SDK == GoSDK {
+	if request.SDK == engineid.GoSDK {
 		name := "pipeline"
 		if runtime.GOOS == "windows" {
 			name += ".exe"
@@ -185,7 +186,7 @@ func (request SDKInstallRequest) PipelineDirectory() (string, error) {
 }
 
 func (r Resolved) verifyInstalledEngine() error {
-	if r.Identity.Pin.SDK == GoSDK && r.Identity.Pin.Replacement != "" {
+	if r.Identity.Pin.SDK == engineid.GoSDK && r.Identity.Pin.Replacement != "" {
 		current, err := installedEngine(context.Background(), r.Identity.Pin, r.Target)
 		if err == nil && (current.Identity != r.Identity || current.AssetDigest != r.AssetDigest || current.Executable != r.Executable) {
 			err = integrity(errors.New("SDK installation requires the installed replacement-pin engine"))

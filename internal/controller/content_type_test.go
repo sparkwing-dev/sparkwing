@@ -10,8 +10,8 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestRoutes_RejectSimpleRequestContentTypes(t *testing.T) {

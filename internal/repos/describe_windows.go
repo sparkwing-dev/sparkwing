@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/protofd"
 )
 
 var describeJobs atomic.Uint64

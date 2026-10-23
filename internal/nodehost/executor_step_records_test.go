@@ -12,12 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type executorStepStore struct {
@@ -304,7 +305,7 @@ func TestNodeExecutorStepWriteRefusalPreventsSuccessAndJoinsWork(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = host.Execute(ctx, input)
-			if !errors.Is(err, refused) || st.changes[len(st.changes)-1].To != store.NodeFailed {
+			if !errors.Is(err, refused) || st.changes[len(st.changes)-1].To != runstate.NodeFailed {
 				t.Fatalf("step refusal was hidden: changes=%+v error=%v", st.changes, err)
 			}
 			if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 {
@@ -407,7 +408,7 @@ func TestNodeExecutorStepWriteRefusalJoinsParallelBodies(t *testing.T) {
 			default:
 				t.Fatal("parallel body outlived the failed execution")
 			}
-			if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 || st.changes[len(st.changes)-1].To != store.NodeFailed {
+			if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 || st.changes[len(st.changes)-1].To != runstate.NodeFailed {
 				t.Fatal("step refusal retried or escaped its process lifecycle")
 			}
 		})

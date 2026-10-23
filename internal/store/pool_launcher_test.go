@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
@@ -77,7 +77,7 @@ func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 	tenant := &Tenant{s: s, team: "a"}
 	ordinal := int64(0)
 	admitExecution(t, tenant, actor)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.AsOperator().RenewUnit(t.Context(), issued.Capability.Prefix, true); err != nil {
@@ -184,12 +184,12 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	admitExecution(t, tenant, actor)
-	for i, state := range []NodeState{NodeRunning, NodeSuccess} {
-		cause := CauseStart
+	for i, state := range []runstate.NodeState{runstate.NodeRunning, runstate.NodeSuccess} {
+		cause := runstate.CauseStart
 		if i > 0 {
-			cause = CauseReport
+			cause = runstate.CauseReport
 		}
-		if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "job"}, To: state, Cause: cause, Actor: actor, SourceAttempt: sourceAttempt(int64(i))}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "job"}, To: state, Cause: cause, Actor: actor, SourceAttempt: sourceAttempt(int64(i))}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -197,7 +197,7 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	run, err := tenant.ReadRun(ctx, admitted.RunID)
-	if err != nil || run.State != RunSuccess {
+	if err != nil || run.State != runstate.RunSuccess {
 		t.Fatalf("pool-pinned run: %+v %v", run, err)
 	}
 	rewriteSchemaCount(t, s.db, "billable_intervals", 0)

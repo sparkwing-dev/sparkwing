@@ -227,7 +227,7 @@ func Changelog() string { return changelogMD }
 // the embedded changelog with its heading and surrounding blank lines
 // stripped. version matches with or without a leading v and ignores
 // any trailing ` - <date>` on the heading; the label "Unreleased"
-// selects the `## [Unreleased]` block. ok is false when no such
+// selects the changelog's unreleased block. ok is false when no such
 // section exists (an older binary whose changelog predates the
 // version, or a name with no entry).
 func ChangelogSection(version string) (body string, ok bool) {

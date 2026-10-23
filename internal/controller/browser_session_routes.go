@@ -4,12 +4,13 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
-func (s *Server) browserSessionEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) browserSessionEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/logout", Authentication: capability.AuthBrowserFlow, Verify: s.verifyBrowserLogout, Handle: s.handleBrowserLogout},
 	}
 }

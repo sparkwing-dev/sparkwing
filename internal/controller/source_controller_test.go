@@ -2,12 +2,18 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -79,6 +85,59 @@ func TestSourceControllerUsesStoreAuditAndBoundCipher(t *testing.T) {
 				if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &got) != nil || audited.opens != 1 || got.Secret != "ephemeral-secret" || got.Host != "github.com" {
 					t.Fatalf("HTTP %d %s opens=%d", w.Code, w.Body.String(), audited.opens)
 				}
+			}
+		})
+	}
+}
+
+type sourceMintTransactions struct {
+	phase  int
+	refuse bool
+}
+
+func (*sourceMintTransactions) Team() store.Team { return "a" }
+
+func (f *sourceMintTransactions) PrepareGitHubSourceRelease(context.Context, capability.Authorized) (store.GitHubSourceGrant, error) {
+	f.phase = 1
+	return store.GitHubSourceGrant{Installation: 7, Repositories: []int64{1, 2}, Names: []string{"acme/repo", "acme/extra"}}, nil
+}
+
+func (f *sourceMintTransactions) CommitGitHubSourceRelease(_ context.Context, _ capability.Authorized, grant store.GitHubSourceGrant, expires time.Time) error {
+	if f.phase != 2 || grant.Installation != 7 || !slices.Equal(grant.Repositories, []int64{1, 2}) || expires.IsZero() {
+		return errors.New("invalid release ordering or grant")
+	}
+	f.phase = 3
+	if f.refuse {
+		return errors.New("consent revoked during mint")
+	}
+	return nil
+}
+
+type sourceMintProvider struct{ transactions *sourceMintTransactions }
+
+func (f sourceMintProvider) InstallationTokenByIDs(_ context.Context, installation int64, repositories []int64, permissions map[string]string) (githubapp.Token, error) {
+	if f.transactions.phase != 1 || installation != 7 || !slices.Equal(repositories, []int64{1, 2}) || len(permissions) != 1 || permissions["contents"] != "read" {
+		return githubapp.Token{}, errors.New("token mint preceded authorization or widened its grant")
+	}
+	f.transactions.phase = 2
+	return githubapp.Token{Token: "ephemeral-token", ExpiresAt: time.Unix(2000000000, 0)}, nil
+}
+
+func TestSourceControllerReturnsMintedTokenOnlyAfterReleaseCommit(t *testing.T) {
+	for _, refuse := range []bool{false, true} {
+		t.Run(fmt.Sprint(refuse), func(t *testing.T) {
+			transactions := &sourceMintTransactions{refuse: refuse}
+			controller := SourceController{GitHub: sourceMintProvider{transactions}, ResolveTenant: func(context.Context, store.Team) (TenantHandle, error) { return transactions, nil }}
+			got, err := controller.Release(t.Context(), capability.Authorized{Target: capability.Target{Team: "a"}})
+			if transactions.phase != 3 {
+				t.Fatalf("release stopped at phase %d: %v", transactions.phase, err)
+			}
+			if refuse {
+				if err == nil || got.Secret != "" {
+					t.Fatal("uncommitted token escaped")
+				}
+			} else if err != nil || got.Secret != "ephemeral-token" || !slices.Equal(got.ExtraRepositories, []string{"acme/extra"}) {
+				t.Fatalf("release: %+v %v", got, err)
 			}
 		})
 	}

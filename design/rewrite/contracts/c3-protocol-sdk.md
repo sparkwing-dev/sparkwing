@@ -301,8 +301,8 @@ Capabilities remain declarative; owner and executor operations encode lifecycle 
 
 | Concern | Owner and source |
 |---|---|
-| Hello, operations, frames, describe, flat plan and shared validation | `internal/nodeproto/*_contract.go` |
-| Windows inherited-handle argv spelling | `internal/protofd/transport_contract.go` |
+| Hello, operations, frames, describe, flat plan and shared validation | `pkg/nodeproto/*_contract.go` |
+| Windows inherited-handle argv spelling | `pkg/protofd/transport_contract.go` |
 | Run and node host roles, layer order, event-following reconciliation | `internal/nodehost/host.go` |
 | Pure graph decisions, selection dependency closure and consistent snapshot projection | `internal/store/scheduling_contract.go` |
 | Every unit's renewal loop | `internal/lease/keeper.go` |

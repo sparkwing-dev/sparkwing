@@ -5,9 +5,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // ProjectOrigin retains file, key and line and rejects unknown source values.

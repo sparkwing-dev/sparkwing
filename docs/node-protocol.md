@@ -5,8 +5,8 @@ host owns scheduling, placement, admission, retries, deadlines, storage, masking
 and state transitions. The SDK declares jobs and runs step bodies and closures
 when the host requests them. The Go and TypeScript SDKs use the same wire types.
 
-The declarations in `internal/nodeproto` define the wire. The schemas and corpus
-in `internal/nodeproto/conformance/testdata` exercise requests, replies, strict
+The declarations in `pkg/nodeproto` define the wire. The schemas and corpus
+in `pkg/nodeproto/conformance/testdata` exercise requests, replies, strict
 plans, errors and generated declarations across SDKs.
 
 ## Process startup
@@ -327,7 +327,7 @@ when supplied. The host masks text before applying record bounds.
 
 ## Limits
 
-`internal/limits` owns the limits used by both SDKs and the host.
+`pkg/limits` owns the limits used by both SDKs and the host.
 
 | Boundary | Limit |
 |---|---|

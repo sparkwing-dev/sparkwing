@@ -4,7 +4,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // Grant is an exact permission name; no wildcard or admin implication exists.

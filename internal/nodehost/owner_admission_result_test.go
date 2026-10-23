@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -59,7 +60,7 @@ func TestApprovalSkipPolicyPreservesSkip(t *testing.T) {
 		t.Fatal(err)
 	}
 	row = capacityRow(t, f, in.NodeID)
-	if row.Outcome != store.NodeSkipped || row.Attempt != 0 {
+	if row.Outcome != runstate.NodeSkipped || row.Attempt != 0 {
 		t.Fatalf("approval bypass=%+v", row)
 	}
 	snapshot, err := f.Tenant.ReadSnapshot(t.Context(), f.Input.RunID)
@@ -102,7 +103,7 @@ func TestOwnerDrainsPendingSupersessionIntent(t *testing.T) {
 				t.Fatalf("pending cancellation result=%+v err=%v", completion, err)
 			}
 			row := capacityRow(t, f, "old")
-			if row.Outcome != store.NodeCancelled || row.Attempt != 0 || row.CancelReason != "superseded" {
+			if row.Outcome != runstate.NodeCancelled || row.Attempt != 0 || row.CancelReason != "superseded" {
 				t.Fatalf("pending cancellation=%s attempt=%d", row.Outcome, row.Attempt)
 			}
 		})
@@ -119,7 +120,7 @@ func TestOwnerExecutionCancellationKeepsIndependentFailure(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 	fixture.Host.Executor = ownerNodeFunc(func(_ context.Context, input NodeInput) error {
-		if err := fixture.report(t.Context(), input, store.NodeCancelled); err != nil {
+		if err := fixture.report(t.Context(), input, runstate.NodeCancelled); err != nil {
 			return err
 		}
 		cause := &lease.CancelError{Reason: "superseded"}
@@ -130,18 +131,18 @@ func TestOwnerExecutionCancellationKeepsIndependentFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fixture.Host.execute(ctx, fixture.Input, fixture.Accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: fixture.Actor, Policy: store.SourceNone})
+	err = fixture.Host.execute(ctx, fixture.Input, fixture.Accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: fixture.Actor, Policy: runstate.SourceNone})
 	if !errors.Is(err, independent) {
 		t.Fatalf("cancellation hid executor cleanup failure: %v", err)
 	}
 }
 
 func FuzzOwnerPolicyAuthorityAndBinding(f *testing.F) {
-	f.Add(int64(0), int64(0), string(store.PolicyAdmissionFail), false)
-	f.Add(int64(1), int64(0), string(store.PolicyAdmissionSkip), false)
-	f.Add(int64(0), int64(1), string(store.PolicyAdmissionFail), false)
-	f.Add(int64(0), int64(0), string(store.PolicyApprovalBypass), false)
-	f.Add(int64(0), int64(0), string(store.PolicyAdmissionFail), true)
+	f.Add(int64(0), int64(0), string(runstate.PolicyAdmissionFail), false)
+	f.Add(int64(1), int64(0), string(runstate.PolicyAdmissionSkip), false)
+	f.Add(int64(0), int64(1), string(runstate.PolicyAdmissionFail), false)
+	f.Add(int64(0), int64(0), string(runstate.PolicyApprovalBypass), false)
+	f.Add(int64(0), int64(0), string(runstate.PolicyAdmissionFail), true)
 	f.Fuzz(func(t *testing.T, ownerDelta, generation int64, kind string, released bool) {
 		fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 		row := capacityRow(t, fixture, "job")
@@ -156,18 +157,18 @@ func FuzzOwnerPolicyAuthorityAndBinding(f *testing.F) {
 		}
 		actor := fixture.Actor
 		actor.Owner.Generation += runspec.ClaimGeneration(ownerDelta)
-		outcome, reason := store.NodeFailed, ""
-		if kind == string(store.PolicyAdmissionSkip) {
-			outcome = store.NodeSkipped
+		outcome, reason := runstate.NodeFailed, ""
+		if kind == string(runstate.PolicyAdmissionSkip) {
+			outcome = runstate.NodeSkipped
 		}
-		if kind == string(store.PolicyApprovalBypass) {
-			outcome, reason = store.NodeSuccess, "skip_if"
+		if kind == string(runstate.PolicyApprovalBypass) {
+			outcome, reason = runstate.NodeSuccess, "skip_if"
 		}
-		if kind == string(store.PolicyQueueTimeout) {
+		if kind == string(runstate.PolicyQueueTimeout) {
 			reason = store.FailureQueueTimeout
 		}
-		_, err = fixture.Tenant.TransitionNode(t.Context(), store.OwnerPolicyNode{Ref: row.Ref, Actor: actor, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.OwnerPolicyKind(kind), Generation: runspec.ClaimGeneration(generation)}, Result: &store.NodeResult{Outcome: outcome, Reason: reason}, Outcome: outcome})
-		valid := ownerDelta == 0 && runspec.ClaimGeneration(generation) == row.Generation && !released && (kind == string(store.PolicyAdmissionFail) || kind == string(store.PolicyAdmissionSkip) || kind == string(store.PolicyQueueTimeout))
+		_, err = fixture.Tenant.TransitionNode(t.Context(), store.OwnerPolicyNode{Ref: row.Ref, Actor: actor, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.OwnerPolicyKind(kind), Generation: runspec.ClaimGeneration(generation)}, Result: &runstate.NodeResult{Outcome: outcome, Reason: reason}, Outcome: outcome})
+		valid := ownerDelta == 0 && runspec.ClaimGeneration(generation) == row.Generation && !released && (kind == string(runstate.PolicyAdmissionFail) || kind == string(runstate.PolicyAdmissionSkip) || kind == string(runstate.PolicyQueueTimeout))
 		if (err == nil) != valid {
 			t.Fatalf("owner delta=%d generation=%d kind=%q released=%v error=%v", ownerDelta, generation, kind, released, err)
 		}
@@ -177,7 +178,7 @@ func FuzzOwnerPolicyAuthorityAndBinding(f *testing.F) {
 				t.Fatalf("refused policy appended events: %d -> %d %v", len(before), len(after), readErr)
 			}
 			current := capacityRow(t, fixture, "job")
-			if current.Status != store.StatusPending || current.Outcome != "" {
+			if current.Status != runstate.StatusPending || current.Outcome != "" {
 				t.Fatalf("refused policy changed state: %s/%s", current.Status, current.Outcome)
 			}
 		}

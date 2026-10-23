@@ -10,9 +10,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // IdentityLinkWriter rechecks the direct session and commits nonce consumption and identity attachment.
@@ -32,15 +34,15 @@ func (s *Server) identityLinkWriter() (IdentityLinkWriter, error) {
 		return s.identityLinkWrites, nil
 	}
 
-	return nil, missingEndpointPolicy()
+	return nil, routepolicy.MissingEndpointPolicy()
 }
 
 type identityLinkProofKey struct{}
 
 type identityLinkProof struct{ grant oauthGrant }
 
-func (s *Server) identityLinkEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) identityLinkEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/auth/{provider}/link", Authentication: capability.AuthBrowserFlow, Verify: s.verifyIdentityLinkStart, Handle: s.handleIdentityLinkStart},
 		{Method: "GET", Pattern: "/auth/{provider}/link/complete", Authentication: capability.AuthBrowserFlow, Verify: s.verifyIdentityLinkComplete, Handle: s.handleIdentityLinkComplete},
 	}
@@ -229,7 +231,7 @@ func identityLinkProviderError(err error) error {
 func (s *Server) handleIdentityLinkStart(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	proof, ok := r.Context().Value(identityLinkProofKey{}).(identityLinkProof)
 	if !ok || proof.grant.AuthorizeURL == "" {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	grant, label := proof.grant, providerLabels[r.PathValue("provider")]
 	if !setFlowCookie(w, oauthFlowCookieName, oauthFlow{Provider: r.PathValue("provider"), State: grant.State, Verifier: grant.Verifier, Mode: oauthFlowLink}, s.cookiesSecure()) {
@@ -241,7 +243,7 @@ func (s *Server) handleIdentityLinkStart(w http.ResponseWriter, r *http.Request,
 
 func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	if _, ok := r.Context().Value(identityLinkProofKey{}).(identityLinkProof); !ok {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	clearFlowCookie(w, oauthFlowCookieName, s.cookiesSecure())
 	noteAuditWrite(r.Context())

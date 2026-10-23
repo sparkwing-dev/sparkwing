@@ -4,13 +4,12 @@ import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func capacityGroupsTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) ([]runspec.Concurrency, error) {
 	if nodeID != "" {
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(nodeID)})
+		row, err := readNodeTx(ctx, tx, team, runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(nodeID)})
 		return row.Execution.Concurrency, err
 	}
 	run, err := readRunTx(ctx, tx, team, runID)

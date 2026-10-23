@@ -5,11 +5,10 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
 // StoreRunnerConfig binds an embedded claimant and native hosts to the controller's store.
@@ -21,9 +20,12 @@ type StoreRunnerConfig struct {
 }
 
 // NewStoreRunner constructs the shared queue without a transport or another store opener.
-func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) (*Loop, error) {
-	if engine == nil || engine.ResolveTenant == nil || engine.RunnerPolicy == nil || cfg.Bearer == nil || cfg.Bind == nil {
+func NewStoreRunner(engine StoreEngine, cfg StoreRunnerConfig) (*Loop, error) {
+	if engine == nil || cfg.Bearer == nil || cfg.Bind == nil {
 		return nil, errors.New("embedded runner requires the owned controller, claimant, signed policy and native services")
+	}
+	if err := engine.ValidateEmbeddedRunner(); err != nil {
+		return nil, err
 	}
 	if cfg.Loop.Version == "" || cfg.Loop.MaxConcurrent < 1 {
 		return nil, errors.New("embedded runner requires its release version and positive concurrency")
@@ -48,8 +50,8 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 
 // StoreController applies shared route policy to the embedded local queue.
 type StoreController struct {
-	Router *controller.PolicyRouter
-	Engine *controller.EngineController
+	Router *routepolicy.Router
+	Engine StoreEngine
 	Bearer func(context.Context) (string, error)
 }
 

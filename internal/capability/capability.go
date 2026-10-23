@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // CredentialPrefixLength is the persisted bearer lookup prefix length.

@@ -7,14 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type matchingEnrollment struct{ profile match.Profile }
@@ -89,7 +88,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 		if _, err := tenant.AcceptPlan(ctx, plan); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: "job"}, Actor: plan.Actor}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "job"}, Actor: plan.Actor}); err != nil {
 			t.Fatal(err)
 		}
 	}

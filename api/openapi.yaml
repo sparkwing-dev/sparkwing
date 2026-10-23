@@ -2,36 +2,6 @@
 # Regenerate with bash bin/gen-api-docs.sh.
 components:
   schemas:
-    internal.apierr.Envelope:
-      additionalProperties: true
-      properties:
-        error:
-          anyOf:
-            - $ref: '#/components/schemas/internal.apierr.Error'
-            - type: "null"
-      required:
-        - error
-      type: object
-      x-sparkwing-go-type: apierr.Envelope
-    internal.apierr.Error:
-      additionalProperties: true
-      properties:
-        code:
-          type: string
-        details:
-          anyOf:
-            - additionalProperties: {}
-              type: object
-            - type: "null"
-        hint:
-          type: string
-        message:
-          type: string
-      required:
-        - code
-        - message
-      type: object
-      x-sparkwing-go-type: apierr.Error
     internal.blob.LogSource:
       additionalProperties: true
       properties:
@@ -421,6 +391,34 @@ components:
         - verified_default_only
       type: object
       x-sparkwing-go-type: capability.DataScope
+    internal.capability.LauncherActivation:
+      additionalProperties: true
+      properties:
+        award:
+          $ref: '#/components/schemas/internal.capability.LeaseRef'
+        node_uid:
+          type: string
+        reservation_id:
+          type: string
+      required:
+        - award
+        - node_uid
+        - reservation_id
+      type: object
+      x-sparkwing-go-type: capability.LauncherActivation
+    internal.capability.LauncherObservation:
+      additionalProperties: true
+      properties:
+        award:
+          $ref: '#/components/schemas/internal.capability.LeaseRef'
+        rejected:
+          type: boolean
+        reservation:
+          type: boolean
+      required:
+        - award
+      type: object
+      x-sparkwing-go-type: capability.LauncherObservation
     internal.capability.LeaseRef:
       additionalProperties: true
       properties:
@@ -833,7 +831,7 @@ components:
           type: string
         engine:
           anyOf:
-            - $ref: '#/components/schemas/internal.engine.Identity'
+            - $ref: '#/components/schemas/internal.engineid.Identity'
             - type: "null"
         execution:
           anyOf:
@@ -863,7 +861,7 @@ components:
         run_id:
           type: string
         runner:
-          $ref: '#/components/schemas/internal.nodeproto.RunnerIdentity'
+          $ref: '#/components/schemas/pkg.nodeproto.RunnerIdentity'
         source_generation:
           type: integer
         submitted_env:
@@ -1645,7 +1643,7 @@ components:
         execution:
           $ref: '#/components/schemas/internal.runspec.JobExecutionSettings'
         job:
-          $ref: '#/components/schemas/internal.nodeproto.JobSpec'
+          $ref: '#/components/schemas/pkg.nodeproto.JobSpec'
         spec_hash:
           type: string
       required:
@@ -1686,7 +1684,7 @@ components:
         body: {}
         failure:
           anyOf:
-            - $ref: '#/components/schemas/internal.apierr.Error'
+            - $ref: '#/components/schemas/pkg.apierr.Error'
             - type: "null"
         registration:
           $ref: '#/components/schemas/internal.runspec.SecretRegistration'
@@ -1701,7 +1699,7 @@ components:
       properties:
         error:
           anyOf:
-            - $ref: '#/components/schemas/internal.apierr.Error'
+            - $ref: '#/components/schemas/pkg.apierr.Error'
             - type: "null"
         reason:
           type: string
@@ -1857,7 +1855,7 @@ components:
             - type: "null"
         failure:
           anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.JobFailure'
+            - $ref: '#/components/schemas/pkg.nodeproto.JobFailure'
             - type: "null"
         manifest:
           anyOf:
@@ -1972,21 +1970,6 @@ components:
         - cause
       type: object
       x-sparkwing-go-type: controllerwire.JobTransitionRequest
-    internal.controllerwire.LauncherActivation:
-      additionalProperties: true
-      properties:
-        award:
-          $ref: '#/components/schemas/internal.capability.LeaseRef'
-        node_uid:
-          type: string
-        reservation_id:
-          type: string
-      required:
-        - award
-        - node_uid
-        - reservation_id
-      type: object
-      x-sparkwing-go-type: controllerwire.LauncherActivation
     internal.controllerwire.LauncherCapacityObservation:
       additionalProperties: true
       properties:
@@ -1996,19 +1979,6 @@ components:
         - award
       type: object
       x-sparkwing-go-type: controllerwire.LauncherCapacityObservation
-    internal.controllerwire.LauncherObservation:
-      additionalProperties: true
-      properties:
-        award:
-          $ref: '#/components/schemas/internal.capability.LeaseRef'
-        rejected:
-          type: boolean
-        reservation:
-          type: boolean
-      required:
-        - award
-      type: object
-      x-sparkwing-go-type: controllerwire.LauncherObservation
     internal.controllerwire.LauncherPreparation:
       additionalProperties: true
       properties:
@@ -2037,7 +2007,7 @@ components:
         activations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.LauncherActivation'
+                $ref: '#/components/schemas/internal.capability.LauncherActivation'
               type: array
             - type: "null"
         capacity:
@@ -2049,7 +2019,7 @@ components:
         observed:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.LauncherObservation'
+                $ref: '#/components/schemas/internal.capability.LauncherObservation'
               type: array
             - type: "null"
         preparing:
@@ -2198,18 +2168,6 @@ components:
         - state_seq
       type: object
       x-sparkwing-go-type: controllerwire.MaterializedResultSource
-    internal.controllerwire.NodeRef:
-      additionalProperties: true
-      properties:
-        job_id:
-          type: string
-        run_id:
-          type: string
-      required:
-        - run_id
-        - job_id
-      type: object
-      x-sparkwing-go-type: controllerwire.NodeRef
     internal.controllerwire.ObjectStoreBreaker:
       additionalProperties: true
       properties:
@@ -2603,7 +2561,7 @@ components:
         notices:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.engine.Notice'
+                $ref: '#/components/schemas/internal.engineid.Notice'
               type: array
             - type: "null"
         plan: {}
@@ -3135,7 +3093,7 @@ components:
             - type: "null"
         engine:
           anyOf:
-            - $ref: '#/components/schemas/internal.engine.Identity'
+            - $ref: '#/components/schemas/internal.engineid.Identity'
             - type: "null"
         finished_at:
           anyOf:
@@ -3161,7 +3119,7 @@ components:
         notices:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.engine.Notice'
+                $ref: '#/components/schemas/internal.engineid.Notice'
               type: array
             - type: "null"
         number:
@@ -3432,7 +3390,7 @@ components:
         claimed:
           type: boolean
         declaration:
-          $ref: '#/components/schemas/internal.nodeproto.JobSpec'
+          $ref: '#/components/schemas/pkg.nodeproto.JobSpec'
         expansion:
           type: string
         finished_at:
@@ -3471,35 +3429,6 @@ components:
         - claimed
       type: object
       x-sparkwing-go-type: controllerwire.ScheduleJob
-    internal.controllerwire.ScheduleOverride:
-      additionalProperties: true
-      properties:
-        args:
-          anyOf:
-            - anyOf:
-                - additionalProperties:
-                    type: string
-                  type: object
-                - type: "null"
-            - type: "null"
-        catch_up:
-          anyOf:
-            - type: string
-            - type: "null"
-        cron:
-          anyOf:
-            - type: string
-            - type: "null"
-        overlap:
-          anyOf:
-            - type: string
-            - type: "null"
-        tz:
-          anyOf:
-            - type: string
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: controllerwire.ScheduleOverride
     internal.controllerwire.ScheduleOverview:
       additionalProperties: true
       properties:
@@ -4253,13 +4182,42 @@ components:
         - detail
       type: object
       x-sparkwing-go-type: controllerwire.TimerStateView
-    internal.engine.Identity:
+    internal.cronspec.Override:
+      additionalProperties: true
+      properties:
+        args:
+          anyOf:
+            - anyOf:
+                - additionalProperties:
+                    type: string
+                  type: object
+                - type: "null"
+            - type: "null"
+        catch_up:
+          anyOf:
+            - type: string
+            - type: "null"
+        cron:
+          anyOf:
+            - type: string
+            - type: "null"
+        overlap:
+          anyOf:
+            - type: string
+            - type: "null"
+        tz:
+          anyOf:
+            - type: string
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: cronspec.Override
+    internal.engineid.Identity:
       additionalProperties: true
       properties:
         manifest_digest:
           type: string
         pin:
-          $ref: '#/components/schemas/internal.engine.Pin'
+          $ref: '#/components/schemas/internal.engineid.Pin'
         version:
           type: string
       required:
@@ -4267,8 +4225,8 @@ components:
         - version
         - manifest_digest
       type: object
-      x-sparkwing-go-type: engine.Identity
-    internal.engine.Notice:
+      x-sparkwing-go-type: engineid.Identity
+    internal.engineid.Notice:
       additionalProperties: true
       properties:
         enforce_at:
@@ -4293,8 +4251,8 @@ components:
         - kind
         - reason
       type: object
-      x-sparkwing-go-type: engine.Notice
-    internal.engine.Pin:
+      x-sparkwing-go-type: engineid.Notice
+    internal.engineid.Pin:
       additionalProperties: true
       properties:
         inputs_digest:
@@ -4315,12 +4273,12 @@ components:
         - manifest
         - inputs_digest
       type: object
-      x-sparkwing-go-type: engine.Pin
+      x-sparkwing-go-type: engineid.Pin
     internal.localhostwire.LocalCapacityRequest:
       additionalProperties: true
       properties:
         binding:
-          $ref: '#/components/schemas/internal.store.CapacityBinding'
+          $ref: '#/components/schemas/internal.runstate.CapacityBinding'
       required:
         - binding
       type: object
@@ -4340,17 +4298,17 @@ components:
         Expansions:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.store.AcceptedExpansionRow'
+                $ref: '#/components/schemas/internal.runstate.AcceptedExpansionRow'
               type: array
             - type: "null"
         Nodes:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.store.NodeRow'
+                $ref: '#/components/schemas/internal.runstate.NodeRow'
               type: array
             - type: "null"
         Run:
-          $ref: '#/components/schemas/internal.store.RunRow'
+          $ref: '#/components/schemas/internal.runstate.RunRow'
         StoreNow:
           format: date-time
           type: string
@@ -4367,527 +4325,6 @@ components:
         - StoreNow
       type: object
       x-sparkwing-go-type: localhostwire.LocalNodeSnapshot
-    internal.nodeproto.AnnotationRequest:
-      additionalProperties: true
-      properties:
-        column:
-          type: integer
-        end_line:
-          type: integer
-        file:
-          type: string
-        level:
-          type: string
-        line:
-          type: integer
-        message:
-          type: string
-        step:
-          type: string
-      required:
-        - level
-        - message
-      type: object
-      x-sparkwing-go-type: nodeproto.AnnotationRequest
-    internal.nodeproto.ApprovalSpec:
-      additionalProperties: true
-      properties:
-        message:
-          type: string
-        on_timeout:
-          type: string
-        timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: nodeproto.ApprovalSpec
-    internal.nodeproto.ArgumentDescription:
-      additionalProperties: true
-      properties:
-        default:
-          anyOf:
-            - type: string
-            - type: "null"
-        desc:
-          type: string
-        enum:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        job_id:
-          type: string
-        name:
-          type: string
-        required:
-          type: boolean
-        secret:
-          type: boolean
-        short:
-          type: string
-        type:
-          type: string
-      required:
-        - name
-        - type
-        - required
-      type: object
-      x-sparkwing-go-type: nodeproto.ArgumentDescription
-    internal.nodeproto.ArtifactInput:
-      additionalProperties: true
-      properties:
-        into:
-          type: string
-        producer:
-          type: string
-      required:
-        - producer
-      type: object
-      x-sparkwing-go-type: nodeproto.ArtifactInput
-    internal.nodeproto.CacheSpec:
-      additionalProperties: true
-      properties:
-        key_files:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        key_scope:
-          type: string
-        name:
-          type: string
-        path:
-          type: string
-        resolver:
-          type: string
-      required:
-        - name
-        - key_files
-      type: object
-      x-sparkwing-go-type: nodeproto.CacheSpec
-    internal.nodeproto.ChildPipeline:
-      additionalProperties: true
-      properties:
-        pipeline:
-          type: string
-        repository:
-          type: string
-      required:
-        - pipeline
-      type: object
-      x-sparkwing-go-type: nodeproto.ChildPipeline
-    internal.nodeproto.ClosureSpec:
-      additionalProperties: true
-      properties:
-        after_run:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        before_run:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        generate:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        memo_key:
-          type: string
-        skip_if:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        verify:
-          type: string
-      type: object
-      x-sparkwing-go-type: nodeproto.ClosureSpec
-    internal.nodeproto.ConcurrencySpec:
-      additionalProperties: true
-      properties:
-        capacity:
-          anyOf:
-            - type: integer
-            - type: "null"
-        cost:
-          anyOf:
-            - type: integer
-            - type: "null"
-        group:
-          type: string
-        on_limit:
-          anyOf:
-            - type: string
-            - type: "null"
-        queue_timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-        scope:
-          anyOf:
-            - type: string
-            - type: "null"
-      required:
-        - group
-      type: object
-      x-sparkwing-go-type: nodeproto.ConcurrencySpec
-    internal.nodeproto.EnvValue:
-      additionalProperties: true
-      properties:
-        startup:
-          type: boolean
-        value:
-          type: string
-      required:
-        - value
-      type: object
-      x-sparkwing-go-type: nodeproto.EnvValue
-    internal.nodeproto.JobFailure:
-      additionalProperties: true
-      properties:
-        error:
-          anyOf:
-            - $ref: '#/components/schemas/internal.apierr.Error'
-            - type: "null"
-        job:
-          type: string
-        stage:
-          type: string
-      required:
-        - job
-        - stage
-        - error
-      type: object
-      x-sparkwing-go-type: nodeproto.JobFailure
-    internal.nodeproto.JobSpec:
-      additionalProperties: true
-      properties:
-        approval:
-          anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.ApprovalSpec'
-            - type: "null"
-        arguments:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.ArgumentDescription'
-              type: array
-            - type: "null"
-        artifacts:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        caches:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.CacheSpec'
-              type: array
-            - type: "null"
-        children:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.ChildPipeline'
-              type: array
-            - type: "null"
-        closures:
-          $ref: '#/components/schemas/internal.nodeproto.ClosureSpec'
-        concurrency:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.ConcurrencySpec'
-              type: array
-            - type: "null"
-        consumes:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.ArtifactInput'
-              type: array
-            - type: "null"
-        continue_on_error:
-          type: boolean
-        deps:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        deps_if_present:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        env:
-          anyOf:
-            - additionalProperties:
-                $ref: '#/components/schemas/internal.nodeproto.EnvValue'
-              type: object
-            - type: "null"
-        failure_policy:
-          type: string
-        groups:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        id:
-          type: string
-        inline:
-          type: boolean
-        memo:
-          anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.MemoSpec'
-            - type: "null"
-        needs_generated:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        no_progress_timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-        on_failure_of:
-          type: string
-        optional:
-          type: boolean
-        pipeline_refs:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.PipelineReference'
-              type: array
-            - type: "null"
-        prefers:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        requires:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        result_step:
-          type: string
-        retry:
-          anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.RetrySpec'
-            - type: "null"
-        skip_if_budget_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-        steps:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.StepSpec'
-              type: array
-            - type: "null"
-        timeout_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-      required:
-        - id
-      type: object
-      x-sparkwing-go-type: nodeproto.JobSpec
-    internal.nodeproto.MaskRequest:
-      additionalProperties: true
-      properties:
-        value:
-          type: string
-      required:
-        - value
-      type: object
-      x-sparkwing-go-type: nodeproto.MaskRequest
-    internal.nodeproto.MemoInput:
-      additionalProperties: true
-      properties:
-        inputs:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.nodeproto.MemoInput'
-              type: array
-            - type: "null"
-        kind:
-          type: string
-        names:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        parts:
-          anyOf:
-            - items: {}
-              type: array
-            - type: "null"
-        patterns:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        root:
-          type: string
-        value:
-          type: string
-      required:
-        - kind
-      type: object
-      x-sparkwing-go-type: nodeproto.MemoInput
-    internal.nodeproto.MemoSpec:
-      additionalProperties: true
-      properties:
-        input:
-          anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.MemoInput'
-            - type: "null"
-        ttl_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: nodeproto.MemoSpec
-    internal.nodeproto.PipelineReference:
-      additionalProperties: true
-      properties:
-        job:
-          type: string
-        pipeline:
-          type: string
-      required:
-        - pipeline
-        - job
-      type: object
-      x-sparkwing-go-type: nodeproto.PipelineReference
-    internal.nodeproto.RetrySpec:
-      additionalProperties: true
-      properties:
-        attempts:
-          type: integer
-        backoff_ms:
-          anyOf:
-            - type: integer
-            - type: "null"
-      required:
-        - attempts
-      type: object
-      x-sparkwing-go-type: nodeproto.RetrySpec
-    internal.nodeproto.RunnerIdentity:
-      additionalProperties: true
-      properties:
-        labels:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        name:
-          type: string
-        type:
-          type: string
-      required:
-        - name
-        - type
-        - labels
-      type: object
-      x-sparkwing-go-type: nodeproto.RunnerIdentity
-    internal.nodeproto.ServiceAcknowledged:
-      additionalProperties: true
-      properties: {}
-      type: object
-      x-sparkwing-go-type: nodeproto.ServiceAcknowledged
-    internal.nodeproto.SourceSpec:
-      additionalProperties: true
-      properties:
-        depth:
-          anyOf:
-            - type: integer
-            - type: "null"
-        full_history:
-          anyOf:
-            - type: boolean
-            - type: "null"
-        lfs:
-          anyOf:
-            - type: boolean
-            - type: "null"
-        submodules:
-          anyOf:
-            - type: boolean
-            - type: "null"
-        tags:
-          anyOf:
-            - type: boolean
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: nodeproto.SourceSpec
-    internal.nodeproto.StepSpec:
-      additionalProperties: true
-      properties:
-        closures:
-          $ref: '#/components/schemas/internal.nodeproto.ClosureSpec'
-        continue_on_error:
-          type: boolean
-        finally:
-          type: boolean
-        groups:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        has_dry_run:
-          type: boolean
-        id:
-          type: string
-        needs:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        optional:
-          type: boolean
-        risks:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        safe_without_dry_run:
-          type: boolean
-      required:
-        - id
-      type: object
-      x-sparkwing-go-type: nodeproto.StepSpec
-    internal.nodeproto.SummaryRequest:
-      additionalProperties: true
-      properties:
-        markdown:
-          type: string
-        step:
-          type: string
-      required:
-        - markdown
-      type: object
-      x-sparkwing-go-type: nodeproto.SummaryRequest
     internal.runspec.Actor:
       additionalProperties: true
       properties:
@@ -4982,7 +4419,7 @@ components:
         allowed_admission_classes:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
         allowed_sources:
-          $ref: '#/components/schemas/internal.runspec.Setting...github.com.sparkwing-dev.sparkwing.internal.nodeproto.SourceSpec.'
+          $ref: '#/components/schemas/internal.runspec.Setting...github.com.sparkwing-dev.sparkwing.pkg.nodeproto.SourceSpec.'
         claim_wait:
           $ref: '#/components/schemas/internal.runspec.Setting.time.Duration.'
         memo_ttl:
@@ -5052,7 +4489,7 @@ components:
               type: object
             - type: "null"
         policy:
-          $ref: '#/components/schemas/internal.nodeproto.SourceSpec'
+          $ref: '#/components/schemas/pkg.nodeproto.SourceSpec'
       required:
         - policy
         - origins
@@ -5306,6 +4743,18 @@ components:
         - retrier
       type: object
       x-sparkwing-go-type: runspec.Lineage
+    internal.runspec.NodeRef:
+      additionalProperties: true
+      properties:
+        job_id:
+          type: string
+        run_id:
+          type: string
+      required:
+        - run_id
+        - job_id
+      type: object
+      x-sparkwing-go-type: runspec.NodeRef
     internal.runspec.Optional...string.:
       additionalProperties: true
       properties:
@@ -5705,7 +5154,7 @@ components:
         argument_declarations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.nodeproto.ArgumentDescription'
+                $ref: '#/components/schemas/pkg.nodeproto.ArgumentDescription'
               type: array
             - type: "null"
         default_branch:
@@ -5713,7 +5162,7 @@ components:
         default_branch_source:
           type: string
         engine:
-          $ref: '#/components/schemas/internal.engine.Identity'
+          $ref: '#/components/schemas/internal.engineid.Identity'
         entrypoint:
           type: string
         env:
@@ -5870,7 +5319,7 @@ components:
         - raw
       type: object
       x-sparkwing-go-type: runspec.SecretValue
-    internal.runspec.Setting...github.com.sparkwing-dev.sparkwing.internal.nodeproto.SourceSpec.:
+    internal.runspec.Setting...github.com.sparkwing-dev.sparkwing.pkg.nodeproto.SourceSpec.:
       additionalProperties: true
       properties:
         origin:
@@ -5880,7 +5329,7 @@ components:
         value:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.nodeproto.SourceSpec'
+                $ref: '#/components/schemas/pkg.nodeproto.SourceSpec'
               type: array
             - type: "null"
       required:
@@ -5888,7 +5337,7 @@ components:
         - value
         - origin
       type: object
-      x-sparkwing-go-type: runspec.Setting[[]github.com/sparkwing-dev/sparkwing/internal/nodeproto.SourceSpec]
+      x-sparkwing-go-type: runspec.Setting[[]github.com/sparkwing-dev/sparkwing/pkg/nodeproto.SourceSpec]
     internal.runspec.Setting...string.:
       additionalProperties: true
       properties:
@@ -6133,7 +5582,7 @@ components:
         - sealed_at
       type: object
       x-sparkwing-go-type: runspec.Spec
-    internal.store.AcceptedExpansionRow:
+    internal.runstate.AcceptedExpansionRow:
       additionalProperties: true
       properties:
         Body: {}
@@ -6142,7 +5591,7 @@ components:
         Registration:
           $ref: '#/components/schemas/internal.runspec.SecretRegistration'
         Source:
-          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
+          $ref: '#/components/schemas/internal.runspec.NodeRef'
         SourceGeneration:
           type: integer
       required:
@@ -6152,8 +5601,8 @@ components:
         - BodyHash
         - Registration
       type: object
-      x-sparkwing-go-type: store.AcceptedExpansionRow
-    internal.store.AcquireSlotResponse:
+      x-sparkwing-go-type: runstate.AcceptedExpansionRow
+    internal.runstate.AcquireSlotResponse:
       additionalProperties: true
       properties:
         DriftNote:
@@ -6165,7 +5614,7 @@ components:
         Holders:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.store.ConcurrencyHolder'
+                $ref: '#/components/schemas/internal.runstate.ConcurrencyHolder'
               type: array
             - type: "null"
         Kind:
@@ -6197,8 +5646,8 @@ components:
         - QueueLength
         - Holders
       type: object
-      x-sparkwing-go-type: store.AcquireSlotResponse
-    internal.store.Actor:
+      x-sparkwing-go-type: runstate.AcquireSlotResponse
+    internal.runstate.Actor:
       additionalProperties: true
       properties:
         Authority:
@@ -6218,7 +5667,7 @@ components:
         NodeID:
           type: string
         Owner:
-          $ref: '#/components/schemas/internal.store.OwnerLeaseRef'
+          $ref: '#/components/schemas/internal.runstate.OwnerLeaseRef'
         Result:
           anyOf:
             - $ref: '#/components/schemas/internal.capability.RecordedResult'
@@ -6237,8 +5686,8 @@ components:
         - Generation
         - Owner
       type: object
-      x-sparkwing-go-type: store.Actor
-    internal.store.Applied:
+      x-sparkwing-go-type: runstate.Actor
+    internal.runstate.Applied:
       additionalProperties: true
       properties:
         Attempt:
@@ -6267,8 +5716,8 @@ components:
         - Generation
         - Attempt
       type: object
-      x-sparkwing-go-type: store.Applied
-    internal.store.CapacityBinding:
+      x-sparkwing-go-type: runstate.Applied
+    internal.runstate.CapacityBinding:
       additionalProperties: true
       properties:
         Generation:
@@ -6282,8 +5731,8 @@ components:
         - NodeID
         - Generation
       type: object
-      x-sparkwing-go-type: store.CapacityBinding
-    internal.store.ConcurrencyHolder:
+      x-sparkwing-go-type: runstate.CapacityBinding
+    internal.runstate.ConcurrencyHolder:
       additionalProperties: true
       properties:
         ClaimedAt:
@@ -6321,24 +5770,24 @@ components:
         - Cost
         - DeclaredCapacity
       type: object
-      x-sparkwing-go-type: store.ConcurrencyHolder
-    internal.store.LocalPublication:
+      x-sparkwing-go-type: runstate.ConcurrencyHolder
+    internal.runstate.LocalPublication:
       additionalProperties: true
       properties:
         Expansions:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.store.AcceptedExpansionRow'
+                $ref: '#/components/schemas/internal.runstate.AcceptedExpansionRow'
               type: array
             - type: "null"
         Nodes:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.store.NodeRow'
+                $ref: '#/components/schemas/internal.runstate.NodeRow'
               type: array
             - type: "null"
         Run:
-          $ref: '#/components/schemas/internal.store.RunRow'
+          $ref: '#/components/schemas/internal.runstate.RunRow'
         StoreNow:
           format: date-time
           type: string
@@ -6351,7 +5800,7 @@ components:
         publication_results:
           anyOf:
             - additionalProperties:
-                $ref: '#/components/schemas/internal.store.NodeResult'
+                $ref: '#/components/schemas/internal.runstate.NodeResult'
               type: object
             - type: "null"
       required:
@@ -6360,20 +5809,20 @@ components:
         - Expansions
         - StoreNow
       type: object
-      x-sparkwing-go-type: store.LocalPublication
-    internal.store.MaterializedResultSource:
+      x-sparkwing-go-type: runstate.LocalPublication
+    internal.runstate.MaterializedResultSource:
       additionalProperties: true
       properties:
         Ref:
-          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
+          $ref: '#/components/schemas/internal.runspec.NodeRef'
         StateSeq:
           type: integer
       required:
         - Ref
         - StateSeq
       type: object
-      x-sparkwing-go-type: store.MaterializedResultSource
-    internal.store.NodeResult:
+      x-sparkwing-go-type: runstate.MaterializedResultSource
+    internal.runstate.NodeResult:
       additionalProperties: true
       properties:
         ExitCode:
@@ -6382,7 +5831,7 @@ components:
             - type: "null"
         Failure:
           anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.JobFailure'
+            - $ref: '#/components/schemas/pkg.nodeproto.JobFailure'
             - type: "null"
         ManifestRecord:
           anyOf:
@@ -6407,8 +5856,8 @@ components:
         - ManifestRecord
         - Failure
       type: object
-      x-sparkwing-go-type: store.NodeResult
-    internal.store.NodeRow:
+      x-sparkwing-go-type: runstate.NodeResult
+    internal.runstate.NodeRow:
       additionalProperties: true
       properties:
         ApplicationRetries:
@@ -6460,7 +5909,7 @@ components:
           type: string
         OwnerExecution:
           anyOf:
-            - $ref: '#/components/schemas/internal.store.OwnerExecution'
+            - $ref: '#/components/schemas/internal.runstate.OwnerExecution'
             - type: "null"
         QueueStartedAt:
           anyOf:
@@ -6473,7 +5922,7 @@ components:
               type: string
             - type: "null"
         Ref:
-          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
+          $ref: '#/components/schemas/internal.runspec.NodeRef'
         Spec: {}
         SpecHash:
           type: string
@@ -6483,7 +5932,7 @@ components:
               type: string
             - type: "null"
         StateActor:
-          $ref: '#/components/schemas/internal.store.Actor'
+          $ref: '#/components/schemas/internal.runstate.Actor'
         StateDigest:
           type: string
         StateSeq:
@@ -6522,8 +5971,8 @@ components:
         - OutputRecord
         - ManifestRecord
       type: object
-      x-sparkwing-go-type: store.NodeRow
-    internal.store.OwnerExecution:
+      x-sparkwing-go-type: runstate.NodeRow
+    internal.runstate.OwnerExecution:
       additionalProperties: true
       properties:
         Allowed:
@@ -6531,7 +5980,7 @@ components:
         Generation:
           type: integer
         Node:
-          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
+          $ref: '#/components/schemas/internal.runspec.NodeRef'
         NodeGeneration:
           type: integer
         Owner:
@@ -6549,8 +5998,8 @@ components:
         - SpecHash
         - Allowed
       type: object
-      x-sparkwing-go-type: store.OwnerExecution
-    internal.store.OwnerLeaseRef:
+      x-sparkwing-go-type: runstate.OwnerExecution
+    internal.runstate.OwnerLeaseRef:
       additionalProperties: true
       properties:
         Generation:
@@ -6576,8 +6025,8 @@ components:
         - Holder
         - Generation
       type: object
-      x-sparkwing-go-type: store.OwnerLeaseRef
-    internal.store.RetrySelection:
+      x-sparkwing-go-type: runstate.OwnerLeaseRef
+    internal.runstate.RetrySelection:
       additionalProperties: true
       properties:
         mode:
@@ -6585,15 +6034,15 @@ components:
         results:
           anyOf:
             - additionalProperties:
-                $ref: '#/components/schemas/internal.store.MaterializedResultSource'
+                $ref: '#/components/schemas/internal.runstate.MaterializedResultSource'
               type: object
             - type: "null"
       required:
         - mode
         - results
       type: object
-      x-sparkwing-go-type: store.RetrySelection
-    internal.store.RunRow:
+      x-sparkwing-go-type: runstate.RetrySelection
+    internal.runstate.RunRow:
       additionalProperties: true
       properties:
         AllowedPools:
@@ -6627,7 +6076,7 @@ components:
           type: integer
         Owner:
           anyOf:
-            - $ref: '#/components/schemas/internal.store.OwnerLeaseRef'
+            - $ref: '#/components/schemas/internal.runstate.OwnerLeaseRef'
             - type: "null"
         Pipeline:
           type: string
@@ -6638,7 +6087,7 @@ components:
           $ref: '#/components/schemas/internal.runspec.SealedRequest'
         Retry:
           anyOf:
-            - $ref: '#/components/schemas/internal.store.RetrySelection'
+            - $ref: '#/components/schemas/internal.runstate.RetrySelection'
             - type: "null"
         Spec:
           anyOf:
@@ -6652,7 +6101,7 @@ components:
         State:
           type: string
         StateActor:
-          $ref: '#/components/schemas/internal.store.Actor'
+          $ref: '#/components/schemas/internal.runstate.Actor'
         StateDigest:
           type: string
         StateSeq:
@@ -6683,7 +6132,37 @@ components:
         - StateDigest
         - StateActor
       type: object
-      x-sparkwing-go-type: store.RunRow
+      x-sparkwing-go-type: runstate.RunRow
+    pkg.apierr.Envelope:
+      additionalProperties: true
+      properties:
+        error:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.apierr.Error'
+            - type: "null"
+      required:
+        - error
+      type: object
+      x-sparkwing-go-type: apierr.Envelope
+    pkg.apierr.Error:
+      additionalProperties: true
+      properties:
+        code:
+          type: string
+        details:
+          anyOf:
+            - additionalProperties: {}
+              type: object
+            - type: "null"
+        hint:
+          type: string
+        message:
+          type: string
+      required:
+        - code
+        - message
+      type: object
+      x-sparkwing-go-type: apierr.Error
     pkg.match.Resources:
       additionalProperties: true
       properties:
@@ -6696,6 +6175,527 @@ components:
         - memory_bytes
       type: object
       x-sparkwing-go-type: match.Resources
+    pkg.nodeproto.AnnotationRequest:
+      additionalProperties: true
+      properties:
+        column:
+          type: integer
+        end_line:
+          type: integer
+        file:
+          type: string
+        level:
+          type: string
+        line:
+          type: integer
+        message:
+          type: string
+        step:
+          type: string
+      required:
+        - level
+        - message
+      type: object
+      x-sparkwing-go-type: nodeproto.AnnotationRequest
+    pkg.nodeproto.ApprovalSpec:
+      additionalProperties: true
+      properties:
+        message:
+          type: string
+        on_timeout:
+          type: string
+        timeout_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: nodeproto.ApprovalSpec
+    pkg.nodeproto.ArgumentDescription:
+      additionalProperties: true
+      properties:
+        default:
+          anyOf:
+            - type: string
+            - type: "null"
+        desc:
+          type: string
+        enum:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        job_id:
+          type: string
+        name:
+          type: string
+        required:
+          type: boolean
+        secret:
+          type: boolean
+        short:
+          type: string
+        type:
+          type: string
+      required:
+        - name
+        - type
+        - required
+      type: object
+      x-sparkwing-go-type: nodeproto.ArgumentDescription
+    pkg.nodeproto.ArtifactInput:
+      additionalProperties: true
+      properties:
+        into:
+          type: string
+        producer:
+          type: string
+      required:
+        - producer
+      type: object
+      x-sparkwing-go-type: nodeproto.ArtifactInput
+    pkg.nodeproto.CacheSpec:
+      additionalProperties: true
+      properties:
+        key_files:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        key_scope:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        resolver:
+          type: string
+      required:
+        - name
+        - key_files
+      type: object
+      x-sparkwing-go-type: nodeproto.CacheSpec
+    pkg.nodeproto.ChildPipeline:
+      additionalProperties: true
+      properties:
+        pipeline:
+          type: string
+        repository:
+          type: string
+      required:
+        - pipeline
+      type: object
+      x-sparkwing-go-type: nodeproto.ChildPipeline
+    pkg.nodeproto.ClosureSpec:
+      additionalProperties: true
+      properties:
+        after_run:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        before_run:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        generate:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        memo_key:
+          type: string
+        skip_if:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        verify:
+          type: string
+      type: object
+      x-sparkwing-go-type: nodeproto.ClosureSpec
+    pkg.nodeproto.ConcurrencySpec:
+      additionalProperties: true
+      properties:
+        capacity:
+          anyOf:
+            - type: integer
+            - type: "null"
+        cost:
+          anyOf:
+            - type: integer
+            - type: "null"
+        group:
+          type: string
+        on_limit:
+          anyOf:
+            - type: string
+            - type: "null"
+        queue_timeout_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+        scope:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - group
+      type: object
+      x-sparkwing-go-type: nodeproto.ConcurrencySpec
+    pkg.nodeproto.EnvValue:
+      additionalProperties: true
+      properties:
+        startup:
+          type: boolean
+        value:
+          type: string
+      required:
+        - value
+      type: object
+      x-sparkwing-go-type: nodeproto.EnvValue
+    pkg.nodeproto.JobFailure:
+      additionalProperties: true
+      properties:
+        error:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.apierr.Error'
+            - type: "null"
+        job:
+          type: string
+        stage:
+          type: string
+      required:
+        - job
+        - stage
+        - error
+      type: object
+      x-sparkwing-go-type: nodeproto.JobFailure
+    pkg.nodeproto.JobSpec:
+      additionalProperties: true
+      properties:
+        approval:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.nodeproto.ApprovalSpec'
+            - type: "null"
+        arguments:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.nodeproto.ArgumentDescription'
+              type: array
+            - type: "null"
+        artifacts:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        caches:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.nodeproto.CacheSpec'
+              type: array
+            - type: "null"
+        children:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.nodeproto.ChildPipeline'
+              type: array
+            - type: "null"
+        closures:
+          $ref: '#/components/schemas/pkg.nodeproto.ClosureSpec'
+        concurrency:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.nodeproto.ConcurrencySpec'
+              type: array
+            - type: "null"
+        consumes:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.nodeproto.ArtifactInput'
+              type: array
+            - type: "null"
+        continue_on_error:
+          type: boolean
+        deps:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        deps_if_present:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        env:
+          anyOf:
+            - additionalProperties:
+                $ref: '#/components/schemas/pkg.nodeproto.EnvValue'
+              type: object
+            - type: "null"
+        failure_policy:
+          type: string
+        groups:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        id:
+          type: string
+        inline:
+          type: boolean
+        memo:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.nodeproto.MemoSpec'
+            - type: "null"
+        needs_generated:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        no_progress_timeout_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+        on_failure_of:
+          type: string
+        optional:
+          type: boolean
+        pipeline_refs:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.nodeproto.PipelineReference'
+              type: array
+            - type: "null"
+        prefers:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        requires:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        result_step:
+          type: string
+        retry:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.nodeproto.RetrySpec'
+            - type: "null"
+        skip_if_budget_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+        steps:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.nodeproto.StepSpec'
+              type: array
+            - type: "null"
+        timeout_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+      required:
+        - id
+      type: object
+      x-sparkwing-go-type: nodeproto.JobSpec
+    pkg.nodeproto.MaskRequest:
+      additionalProperties: true
+      properties:
+        value:
+          type: string
+      required:
+        - value
+      type: object
+      x-sparkwing-go-type: nodeproto.MaskRequest
+    pkg.nodeproto.MemoInput:
+      additionalProperties: true
+      properties:
+        inputs:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.nodeproto.MemoInput'
+              type: array
+            - type: "null"
+        kind:
+          type: string
+        names:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        parts:
+          anyOf:
+            - items: {}
+              type: array
+            - type: "null"
+        patterns:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        root:
+          type: string
+        value:
+          type: string
+      required:
+        - kind
+      type: object
+      x-sparkwing-go-type: nodeproto.MemoInput
+    pkg.nodeproto.MemoSpec:
+      additionalProperties: true
+      properties:
+        input:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.nodeproto.MemoInput'
+            - type: "null"
+        ttl_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: nodeproto.MemoSpec
+    pkg.nodeproto.PipelineReference:
+      additionalProperties: true
+      properties:
+        job:
+          type: string
+        pipeline:
+          type: string
+      required:
+        - pipeline
+        - job
+      type: object
+      x-sparkwing-go-type: nodeproto.PipelineReference
+    pkg.nodeproto.RetrySpec:
+      additionalProperties: true
+      properties:
+        attempts:
+          type: integer
+        backoff_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+      required:
+        - attempts
+      type: object
+      x-sparkwing-go-type: nodeproto.RetrySpec
+    pkg.nodeproto.RunnerIdentity:
+      additionalProperties: true
+      properties:
+        labels:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        name:
+          type: string
+        type:
+          type: string
+      required:
+        - name
+        - type
+        - labels
+      type: object
+      x-sparkwing-go-type: nodeproto.RunnerIdentity
+    pkg.nodeproto.ServiceAcknowledged:
+      additionalProperties: true
+      properties: {}
+      type: object
+      x-sparkwing-go-type: nodeproto.ServiceAcknowledged
+    pkg.nodeproto.SourceSpec:
+      additionalProperties: true
+      properties:
+        depth:
+          anyOf:
+            - type: integer
+            - type: "null"
+        full_history:
+          anyOf:
+            - type: boolean
+            - type: "null"
+        lfs:
+          anyOf:
+            - type: boolean
+            - type: "null"
+        submodules:
+          anyOf:
+            - type: boolean
+            - type: "null"
+        tags:
+          anyOf:
+            - type: boolean
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: nodeproto.SourceSpec
+    pkg.nodeproto.StepSpec:
+      additionalProperties: true
+      properties:
+        closures:
+          $ref: '#/components/schemas/pkg.nodeproto.ClosureSpec'
+        continue_on_error:
+          type: boolean
+        finally:
+          type: boolean
+        groups:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        has_dry_run:
+          type: boolean
+        id:
+          type: string
+        needs:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        optional:
+          type: boolean
+        risks:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        safe_without_dry_run:
+          type: boolean
+      required:
+        - id
+      type: object
+      x-sparkwing-go-type: nodeproto.StepSpec
+    pkg.nodeproto.SummaryRequest:
+      additionalProperties: true
+      properties:
+        markdown:
+          type: string
+        step:
+          type: string
+      required:
+        - markdown
+      type: object
+      x-sparkwing-go-type: nodeproto.SummaryRequest
     pkg.wingwire.BudgetState:
       additionalProperties: true
       properties:
@@ -7093,7 +7093,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /.well-known/jwks.json
       x-sparkwing-policy:
@@ -7113,7 +7113,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /.well-known/openid-configuration
       x-sparkwing-policy:
@@ -7143,7 +7143,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: List pending approvals
       x-sparkwing-policy:
@@ -7167,7 +7167,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/auth/logout
       x-sparkwing-policy:
@@ -7187,7 +7187,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/auth/session
       x-sparkwing-policy:
@@ -7207,7 +7207,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/auth/whoami
       x-sparkwing-policy:
@@ -7241,7 +7241,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read engine compatibility
       x-sparkwing-policy:
@@ -7277,7 +7277,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Renew a claim
       x-sparkwing-policy:
@@ -7312,7 +7312,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/claims/{claim}/log-manifest
       x-sparkwing-policy:
@@ -7348,7 +7348,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/claims/{claim}/log-segments
       x-sparkwing-policy:
@@ -7384,7 +7384,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/claims/{claim}/logs
       x-sparkwing-policy:
@@ -7419,7 +7419,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Exchange a one-use bootstrap
       x-sparkwing-policy:
@@ -7443,7 +7443,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/credits
       x-sparkwing-policy:
@@ -7468,7 +7468,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/credits/history
       x-sparkwing-policy:
@@ -7493,7 +7493,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/credits/settings
       x-sparkwing-policy:
@@ -7518,7 +7518,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/data/capabilities
       x-sparkwing-policy:
@@ -7566,7 +7566,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Commit verified uploaded bytes
       x-sparkwing-policy:
@@ -7606,7 +7606,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Look up an authorized dependency cache
       x-sparkwing-policy:
@@ -7651,7 +7651,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Sign an authorized object download
       x-sparkwing-policy:
@@ -7701,7 +7701,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read authorized object presence
       x-sparkwing-policy:
@@ -7746,7 +7746,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Copy memo references to the authenticated attempt
       x-sparkwing-policy:
@@ -7782,7 +7782,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Look up authorized memo references
       x-sparkwing-policy:
@@ -7822,7 +7822,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/data/objects/{key...}
       x-sparkwing-policy:
@@ -7880,7 +7880,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Look up an authorized record
       x-sparkwing-policy:
@@ -7937,7 +7937,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Commit a record
       x-sparkwing-policy:
@@ -7977,7 +7977,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Reserve a source snapshot upload
       x-sparkwing-policy:
@@ -8021,7 +8021,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Commit a verified source snapshot
       x-sparkwing-policy:
@@ -8074,7 +8074,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Reserve an object upload
       x-sparkwing-policy:
@@ -8109,7 +8109,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/data/uploads/{upload}
       x-sparkwing-policy:
@@ -8129,7 +8129,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/health
       x-sparkwing-policy:
@@ -8160,7 +8160,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/invitations/{invitation}/accept
       x-sparkwing-policy:
@@ -8195,7 +8195,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Claim work without automatic replay
       x-sparkwing-policy:
@@ -8230,7 +8230,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Reconcile observed launcher jobs
       x-sparkwing-policy:
@@ -8254,7 +8254,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/local/doctor
       x-sparkwing-policy:
@@ -8285,7 +8285,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/log-segments/{key...}
       x-sparkwing-policy:
@@ -8305,7 +8305,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/me
       x-sparkwing-policy:
@@ -8335,7 +8335,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/me/active-team
       x-sparkwing-policy:
@@ -8359,7 +8359,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/me/identities
       x-sparkwing-policy:
@@ -8389,7 +8389,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/me/identities/{provider}
       x-sparkwing-policy:
@@ -8413,7 +8413,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/me/team-deletions
       x-sparkwing-policy:
@@ -8443,7 +8443,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/operator/accounts/{account}
       x-sparkwing-policy:
@@ -8468,7 +8468,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/operator/credits/settings
       x-sparkwing-policy:
@@ -8499,7 +8499,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/operator/github-app/installations/{installation}
       x-sparkwing-policy:
@@ -8529,7 +8529,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read deployment operational guards
       x-sparkwing-policy:
@@ -8568,7 +8568,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Set deployment operational guards
       x-sparkwing-policy:
@@ -8597,7 +8597,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/operator/object-store
       x-sparkwing-policy:
@@ -8632,7 +8632,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read object-store request budgets
       x-sparkwing-policy:
@@ -8667,7 +8667,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/operator/object-store/quotas/{team}
       x-sparkwing-policy:
@@ -8703,7 +8703,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/operator/object-store/quotas/{team}/allowance
       x-sparkwing-policy:
@@ -8744,7 +8744,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Reset object-store request budgets
       x-sparkwing-policy:
@@ -8773,7 +8773,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/operator/object-store/settings
       x-sparkwing-policy:
@@ -8814,7 +8814,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/operator/runners/{runner}/metered
       x-sparkwing-policy:
@@ -8839,7 +8839,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/operator/secrets/rotate
       x-sparkwing-policy:
@@ -8869,7 +8869,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/operator/signups
       x-sparkwing-policy:
@@ -8898,7 +8898,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/operator/signups
       x-sparkwing-policy:
@@ -8933,7 +8933,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: List open standing requests
       x-sparkwing-policy:
@@ -8957,7 +8957,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/operator/teams
       x-sparkwing-policy:
@@ -8992,7 +8992,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Create a team and its first administrator
       x-sparkwing-policy:
@@ -9027,7 +9027,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/operator/teams/{team}
       x-sparkwing-policy:
@@ -9057,7 +9057,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/operator/teams/{team}
       x-sparkwing-policy:
@@ -9098,7 +9098,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/operator/teams/{team}/freeze
       x-sparkwing-policy:
@@ -9134,7 +9134,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/operator/teams/{team}/grants
       x-sparkwing-policy:
@@ -9181,7 +9181,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Record a completed provider refund
       x-sparkwing-policy:
@@ -9227,7 +9227,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Decline a team's open standing request
       x-sparkwing-policy:
@@ -9262,7 +9262,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/operator/teams/{team}/trust
       x-sparkwing-policy:
@@ -9298,7 +9298,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/operator/teams/{team}/unfreeze
       x-sparkwing-policy:
@@ -9347,7 +9347,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: List credential metadata
       x-sparkwing-policy:
@@ -9386,7 +9386,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Issue a credential once
       x-sparkwing-policy:
@@ -9422,7 +9422,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Revoke a credential
       x-sparkwing-policy:
@@ -9461,7 +9461,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read credential metadata
       x-sparkwing-policy:
@@ -9518,7 +9518,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Rotate a credential once
       x-sparkwing-policy:
@@ -9547,7 +9547,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/operator/waitlist
       x-sparkwing-policy:
@@ -9578,7 +9578,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/operator/waitlist/approve
       x-sparkwing-policy:
@@ -9608,7 +9608,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read the account overflow allowance
       x-sparkwing-policy:
@@ -9642,7 +9642,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Set the account overflow allowance
       x-sparkwing-policy:
@@ -9666,7 +9666,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/pipelines
       x-sparkwing-policy:
@@ -9697,7 +9697,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/pipelines/{name}/latest
       x-sparkwing-policy:
@@ -9733,7 +9733,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/pipelines/{name}/sizing
       x-sparkwing-policy:
@@ -9769,7 +9769,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/pipelines/{name}/sizing/contention
       x-sparkwing-policy:
@@ -9800,7 +9800,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/pipelines/{name}/sizing/observations
       x-sparkwing-policy:
@@ -9831,7 +9831,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/pipelines/{name}/sizing/pin
       x-sparkwing-policy:
@@ -9862,7 +9862,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/pipelines/{name}/sizing/waits
       x-sparkwing-policy:
@@ -9892,7 +9892,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: List reserved pools and rules
       x-sparkwing-policy:
@@ -9938,7 +9938,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Add a pool rule
       x-sparkwing-policy:
@@ -9978,7 +9978,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Remove a pool rule
       x-sparkwing-policy:
@@ -10007,7 +10007,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read admission state
       x-sparkwing-policy:
@@ -10042,7 +10042,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read a concurrency group
       x-sparkwing-policy:
@@ -10098,7 +10098,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Change queued priority
       x-sparkwing-policy:
@@ -10127,7 +10127,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: List granted runner observations
       x-sparkwing-policy:
@@ -10161,7 +10161,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Enroll a runner once
       x-sparkwing-policy:
@@ -10191,7 +10191,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/runners/{runner}
       x-sparkwing-policy:
@@ -10227,7 +10227,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Claim work without automatic replay
       x-sparkwing-policy:
@@ -10256,7 +10256,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runners/github
       x-sparkwing-policy:
@@ -10286,7 +10286,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runners/github
       x-sparkwing-policy:
@@ -10317,7 +10317,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/runners/github/{repository}
       x-sparkwing-policy:
@@ -10342,7 +10342,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runners/github/exchange
       x-sparkwing-policy:
@@ -10446,7 +10446,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: List runs
       x-sparkwing-policy:
@@ -10486,7 +10486,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Create a run
       x-sparkwing-policy:
@@ -10522,7 +10522,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Delete a run
       x-sparkwing-policy:
@@ -10556,7 +10556,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read public run detail
       x-sparkwing-policy:
@@ -10601,7 +10601,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read run approvals
       x-sparkwing-policy:
@@ -10646,7 +10646,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/approvals/{job}
       x-sparkwing-policy:
@@ -10707,7 +10707,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Resolve an approval
       x-sparkwing-policy:
@@ -10742,7 +10742,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read public retry history
       x-sparkwing-policy:
@@ -10793,7 +10793,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Request run cancellation
       x-sparkwing-policy:
@@ -10828,7 +10828,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/children
       x-sparkwing-policy:
@@ -10864,7 +10864,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/children/{child}
       x-sparkwing-policy:
@@ -10910,7 +10910,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read an authorized child output
       x-sparkwing-policy:
@@ -10951,7 +10951,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Claim work without automatic replay
       x-sparkwing-policy:
@@ -10986,7 +10986,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/debug-pauses
       x-sparkwing-policy:
@@ -11031,7 +11031,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/debug-pauses
       x-sparkwing-policy:
@@ -11062,7 +11062,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/events
       x-sparkwing-policy:
@@ -11098,7 +11098,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/events/stream
       x-sparkwing-policy:
@@ -11145,7 +11145,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Finish an owned run
       x-sparkwing-policy:
@@ -11180,7 +11180,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/heartbeat
       x-sparkwing-policy:
@@ -11211,7 +11211,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/jobs
       x-sparkwing-policy:
@@ -11257,7 +11257,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read a public job and its execution location
       x-sparkwing-policy:
@@ -11302,7 +11302,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/jobs/{job}/activity
       x-sparkwing-policy:
@@ -11350,7 +11350,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Add a job annotation
       x-sparkwing-policy:
@@ -11400,7 +11400,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/jobs/{job}/attempts
       x-sparkwing-policy:
@@ -11457,7 +11457,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Request job cancellation
       x-sparkwing-policy:
@@ -11508,7 +11508,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Claim work without automatic replay
       x-sparkwing-policy:
@@ -11548,7 +11548,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read a public job pause
       x-sparkwing-policy:
@@ -11604,7 +11604,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Accept a generated expansion
       x-sparkwing-policy:
@@ -11648,14 +11648,14 @@ paths:
             application/json:
               schema:
                 anyOf:
-                  - $ref: '#/components/schemas/internal.nodeproto.JobFailure'
+                  - $ref: '#/components/schemas/pkg.nodeproto.JobFailure'
                   - type: "null"
           description: Successful response.
         default:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read an authorized persisted failure
       x-sparkwing-policy:
@@ -11690,7 +11690,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/jobs/{job}/heartbeat
       x-sparkwing-policy:
@@ -11731,7 +11731,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/jobs/{job}/log-manifest
       x-sparkwing-policy:
@@ -11772,7 +11772,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/jobs/{job}/log-segments
       x-sparkwing-policy:
@@ -11858,7 +11858,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read persisted job logs
       x-sparkwing-policy:
@@ -11902,7 +11902,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/jobs/{job}/logs
       x-sparkwing-policy:
@@ -11943,7 +11943,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/jobs/{job}/logs/completeness
       x-sparkwing-policy:
@@ -11989,7 +11989,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/jobs/{job}/logs/stream
       x-sparkwing-policy:
@@ -12035,7 +12035,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/jobs/{job}/metrics
       x-sparkwing-policy:
@@ -12080,7 +12080,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/jobs/{job}/metrics
       x-sparkwing-policy:
@@ -12131,7 +12131,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read an authorized committed job output
       x-sparkwing-policy:
@@ -12192,7 +12192,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Reconcile persisted job execution
       x-sparkwing-policy:
@@ -12227,7 +12227,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/jobs/{job}/resume
       x-sparkwing-policy:
@@ -12263,7 +12263,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/jobs/{job}/steps
       x-sparkwing-policy:
@@ -12316,7 +12316,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Add a step annotation
       x-sparkwing-policy:
@@ -12367,7 +12367,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Persist an attempt-fenced step report
       x-sparkwing-policy:
@@ -12418,7 +12418,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Persist an attempt-fenced step report
       x-sparkwing-policy:
@@ -12469,7 +12469,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Persist an attempt-fenced step report
       x-sparkwing-policy:
@@ -12509,7 +12509,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/jobs/{job}/steps/summary
       x-sparkwing-policy:
@@ -12550,7 +12550,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/jobs/{job}/summary
       x-sparkwing-policy:
@@ -12612,7 +12612,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Apply a fenced job transition
       x-sparkwing-policy:
@@ -12657,7 +12657,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/jobs/{job}/usage
       x-sparkwing-policy:
@@ -12698,7 +12698,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/local-host/authentication
       x-sparkwing-policy:
@@ -12739,7 +12739,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/local-host/binding
       x-sparkwing-policy:
@@ -12780,7 +12780,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/local-host/data-authority
       x-sparkwing-policy:
@@ -12821,7 +12821,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/local-host/finish
       x-sparkwing-policy:
@@ -12862,13 +12862,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.store.AcquireSlotResponse'
+                $ref: '#/components/schemas/internal.runstate.AcquireSlotResponse'
           description: Successful response.
         default:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Ask to start a job under its current award
       x-sparkwing-policy:
@@ -12903,7 +12903,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/local-host/nodes/{job}
       x-sparkwing-policy:
@@ -12954,7 +12954,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/local-host/nodes/{job}/authentication
       x-sparkwing-policy:
@@ -13000,7 +13000,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/local-host/nodes/{job}/binding
       x-sparkwing-policy:
@@ -13046,7 +13046,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/runs/{run}/local-host/nodes/{job}/data-authority
       x-sparkwing-policy:
@@ -13087,7 +13087,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read awarded job state and declared terminal artifact selectors
       x-sparkwing-policy:
@@ -13132,7 +13132,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/local-host/nodes/{job}/transition
       x-sparkwing-policy:
@@ -13178,13 +13178,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.store.Applied'
+                $ref: '#/components/schemas/internal.runstate.Applied'
           description: Successful response.
         default:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Release source expansion under plan admission
       x-sparkwing-policy:
@@ -13221,7 +13221,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Relinquish a provisional burst job award
       x-sparkwing-policy:
@@ -13250,13 +13250,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.store.LocalPublication'
+                $ref: '#/components/schemas/internal.runstate.LocalPublication'
           description: Successful response.
         default:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read awarded execution state or export completed local history as the verified local peer
       x-sparkwing-policy:
@@ -13301,7 +13301,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/local-host/transition
       x-sparkwing-policy:
@@ -13377,7 +13377,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read persisted run logs
       x-sparkwing-policy:
@@ -13457,7 +13457,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Search persisted run logs
       x-sparkwing-policy:
@@ -13492,7 +13492,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/oidc-token
       x-sparkwing-policy:
@@ -13534,7 +13534,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Accept a sealed plan
       x-sparkwing-policy:
@@ -13574,7 +13574,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read a run receipt
       x-sparkwing-policy:
@@ -13630,7 +13630,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Retry a sealed run
       x-sparkwing-policy:
@@ -13665,7 +13665,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read private scheduling state
       x-sparkwing-policy:
@@ -13695,7 +13695,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/runs/{run}/source-credential
       x-sparkwing-policy:
@@ -13736,7 +13736,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read run steps
       x-sparkwing-policy:
@@ -13866,7 +13866,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Search logs across runs
       x-sparkwing-policy:
@@ -13904,7 +13904,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: List schedules and health
       x-sparkwing-policy:
@@ -13939,7 +13939,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Delete a schedule
       x-sparkwing-policy:
@@ -13981,7 +13981,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read a schedule and fire history
       x-sparkwing-policy:
@@ -14016,7 +14016,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Reset a schedule override
       x-sparkwing-policy:
@@ -14043,7 +14043,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.controllerwire.ScheduleOverride'
+              $ref: '#/components/schemas/internal.cronspec.Override'
         required: true
       responses:
         2XX:
@@ -14056,7 +14056,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Replace a schedule override
       x-sparkwing-policy:
@@ -14091,7 +14091,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Pause a schedule
       x-sparkwing-policy:
@@ -14121,7 +14121,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/schedules/{schedule}/pin
       x-sparkwing-policy:
@@ -14157,7 +14157,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Resume a schedule
       x-sparkwing-policy:
@@ -14197,7 +14197,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Trigger a scheduled run
       x-sparkwing-policy:
@@ -14227,7 +14227,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/schedules/{schedule}/unpin
       x-sparkwing-policy:
@@ -14252,7 +14252,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/schedules/local/repos
       x-sparkwing-policy:
@@ -14277,7 +14277,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/schedules/local/tick
       x-sparkwing-policy:
@@ -14312,7 +14312,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Remove repository schedules
       x-sparkwing-policy:
@@ -14346,7 +14346,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Register repository schedules
       x-sparkwing-policy:
@@ -14375,7 +14375,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: List secret metadata
       x-sparkwing-policy:
@@ -14420,7 +14420,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Write a secret or variable
       x-sparkwing-policy:
@@ -14459,7 +14459,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Delete an exact secret row
       x-sparkwing-policy:
@@ -14497,7 +14497,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read an authorized secret value
       x-sparkwing-policy:
@@ -14548,7 +14548,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Rotate encrypted secrets
       x-sparkwing-policy:
@@ -14572,7 +14572,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/services
       x-sparkwing-policy:
@@ -14614,7 +14614,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: List pipeline sizing
       x-sparkwing-policy:
@@ -14638,7 +14638,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/sizing/explain
       x-sparkwing-policy:
@@ -14663,7 +14663,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/storage
       x-sparkwing-policy:
@@ -14688,7 +14688,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/team
       x-sparkwing-policy:
@@ -14712,7 +14712,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PATCH /api/v1/team
       x-sparkwing-policy:
@@ -14737,7 +14737,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/billing
       x-sparkwing-policy:
@@ -14768,7 +14768,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/team/billing/card
       x-sparkwing-policy:
@@ -14799,7 +14799,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/team/billing/checkout
       x-sparkwing-policy:
@@ -14824,7 +14824,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/team/billing/refill
       x-sparkwing-policy:
@@ -14860,7 +14860,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Contact operators for High standing, higher limits or larger payments
       x-sparkwing-policy:
@@ -14884,7 +14884,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/build-trust
       x-sparkwing-policy:
@@ -14908,7 +14908,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/team/build-trust
       x-sparkwing-policy:
@@ -14933,7 +14933,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/git-credentials
       x-sparkwing-policy:
@@ -14963,7 +14963,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/team/git-credentials
       x-sparkwing-policy:
@@ -14994,7 +14994,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/team/git-credentials/{host}
       x-sparkwing-policy:
@@ -15030,7 +15030,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/team/git-credentials/{host}/confirm
       x-sparkwing-policy:
@@ -15055,7 +15055,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/git-credentials/releases
       x-sparkwing-policy:
@@ -15080,7 +15080,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/github-app
       x-sparkwing-policy:
@@ -15105,7 +15105,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/team/github-app/automation
       x-sparkwing-policy:
@@ -15129,7 +15129,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/github-app/automation
       x-sparkwing-policy:
@@ -15153,7 +15153,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/team/github-app/automation
       x-sparkwing-policy:
@@ -15184,7 +15184,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/team/github-app/deliveries/{delivery}/process-again
       x-sparkwing-policy:
@@ -15209,7 +15209,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/github-app/deliveries/failed
       x-sparkwing-policy:
@@ -15234,7 +15234,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/github-app/extra-repos
       x-sparkwing-policy:
@@ -15258,7 +15258,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/team/github-app/extra-repos
       x-sparkwing-policy:
@@ -15289,7 +15289,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/team/github-app/installations/{installation}
       x-sparkwing-policy:
@@ -15320,7 +15320,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/github-app/installations/{installation}/repositories
       x-sparkwing-policy:
@@ -15345,7 +15345,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/team/github-app/triggers
       x-sparkwing-policy:
@@ -15369,7 +15369,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/github-app/triggers
       x-sparkwing-policy:
@@ -15393,7 +15393,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PUT /api/v1/team/github-app/triggers
       x-sparkwing-policy:
@@ -15418,7 +15418,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/invitations
       x-sparkwing-policy:
@@ -15448,7 +15448,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/team/invitations
       x-sparkwing-policy:
@@ -15479,7 +15479,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/team/invitations/{invitation}
       x-sparkwing-policy:
@@ -15504,7 +15504,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/team/members
       x-sparkwing-policy:
@@ -15535,7 +15535,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /api/v1/team/members/{account}
       x-sparkwing-policy:
@@ -15565,7 +15565,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: PATCH /api/v1/team/members/{account}
       x-sparkwing-policy:
@@ -15595,7 +15595,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read team machine enrollment settings and claim ranking
       x-sparkwing-policy:
@@ -15629,7 +15629,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Change and audit team machine enrollment settings and claim ranking
       x-sparkwing-policy:
@@ -15659,7 +15659,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /api/v1/teams
       x-sparkwing-policy:
@@ -15707,7 +15707,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: List credential metadata
       x-sparkwing-policy:
@@ -15741,7 +15741,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Issue a credential once
       x-sparkwing-policy:
@@ -15772,7 +15772,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Revoke a credential
       x-sparkwing-policy:
@@ -15806,7 +15806,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Read credential metadata
       x-sparkwing-policy:
@@ -15858,7 +15858,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Rotate a credential once
       x-sparkwing-policy:
@@ -15882,7 +15882,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /api/v1/trends
       x-sparkwing-policy:
@@ -15913,7 +15913,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /auth/{provider}/callback
       x-sparkwing-policy:
@@ -15939,7 +15939,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /auth/{provider}/link
       x-sparkwing-policy:
@@ -15965,7 +15965,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /auth/{provider}/link/complete
       x-sparkwing-policy:
@@ -15991,7 +15991,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /auth/{provider}/start
       x-sparkwing-policy:
@@ -16011,7 +16011,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /github/app/available
       x-sparkwing-policy:
@@ -16031,7 +16031,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /github/app/callback
       x-sparkwing-policy:
@@ -16051,7 +16051,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /github/app/complete
       x-sparkwing-policy:
@@ -16071,7 +16071,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /github/app/connect
       x-sparkwing-policy:
@@ -16091,7 +16091,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /github/app/connect/existing
       x-sparkwing-policy:
@@ -16111,7 +16111,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /github/app/select
       x-sparkwing-policy:
@@ -16131,7 +16131,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /github/app/setup
       x-sparkwing-policy:
@@ -16151,7 +16151,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /login
       x-sparkwing-policy:
@@ -16170,7 +16170,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /login
       x-sparkwing-policy:
@@ -16190,7 +16190,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /logout
       x-sparkwing-policy:
@@ -16210,7 +16210,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /metrics
       x-sparkwing-policy:
@@ -16238,20 +16238,20 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.nodeproto.AnnotationRequest'
+              $ref: '#/components/schemas/pkg.nodeproto.AnnotationRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.nodeproto.ServiceAcknowledged'
+                $ref: '#/components/schemas/pkg.nodeproto.ServiceAcknowledged'
           description: Successful response.
         default:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Write a masked annotation
       x-sparkwing-policy:
@@ -16290,7 +16290,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /node/v1/children
       x-sparkwing-policy:
@@ -16326,7 +16326,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /node/v1/children/{run}/await
       x-sparkwing-policy:
@@ -16356,7 +16356,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /node/v1/cleanups
       x-sparkwing-policy:
@@ -16402,7 +16402,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: DELETE /node/v1/cleanups/{cleanup}
       x-sparkwing-policy:
@@ -16448,7 +16448,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /node/v1/jobs/{job}/output
       x-sparkwing-policy:
@@ -16476,20 +16476,20 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.nodeproto.MaskRequest'
+              $ref: '#/components/schemas/pkg.nodeproto.MaskRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.nodeproto.ServiceAcknowledged'
+                $ref: '#/components/schemas/pkg.nodeproto.ServiceAcknowledged'
           description: Successful response.
         default:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Register a mask across host sinks
       x-sparkwing-policy:
@@ -16528,7 +16528,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /node/v1/oidc-token
       x-sparkwing-policy:
@@ -16564,7 +16564,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /node/v1/pipelines/{name}/latest
       x-sparkwing-policy:
@@ -16600,7 +16600,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: GET /node/v1/secrets/{name}
       x-sparkwing-policy:
@@ -16628,20 +16628,20 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.nodeproto.SummaryRequest'
+              $ref: '#/components/schemas/pkg.nodeproto.SummaryRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.nodeproto.ServiceAcknowledged'
+                $ref: '#/components/schemas/pkg.nodeproto.ServiceAcknowledged'
           description: Successful response.
         default:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: Write a masked summary
       x-sparkwing-policy:
@@ -16680,7 +16680,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /webhooks/github-app
       x-sparkwing-policy:
@@ -16700,7 +16700,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
+                $ref: '#/components/schemas/pkg.apierr.Envelope'
           description: Canonical API failure.
       summary: POST /webhooks/stripe
       x-sparkwing-policy:

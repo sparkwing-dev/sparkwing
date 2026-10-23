@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // Compute guards use zero for an unlimited operator ceiling.
@@ -127,7 +127,7 @@ var computeLimitFields = map[string]func(*ComputeLimits) *int64{
 }
 
 // ComputeLimitNames returns every guard name, sorted, which is the set
-// [Store.SetComputeLimit] accepts.
+// [Operator.SetComputeLimits] accepts.
 func ComputeLimitNames() []string {
 	out := make([]string, 0, len(computeLimitFields))
 	for name := range computeLimitFields {

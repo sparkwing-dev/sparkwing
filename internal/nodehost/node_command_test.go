@@ -1,20 +1,21 @@
 package nodehost
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type capturedNodeCommand struct {
 	Command store.NodeCommand
-	Ref     controllerwire.NodeRef
-	Actor   store.Actor
+	Ref     runspec.NodeRef
+	Actor   runstate.Actor
 	store.NodeCommandPayload
 	Extra capturedCommandExtra
 }
 type capturedCommandExtra struct {
-	store.NodeCommandExtra
-	Attempt *store.NodeAttempt
+	runstate.NodeCommandExtra
+	Attempt *runstate.NodeAttempt
 }
 
 func captureNodeCommand(command store.NodeCommand) capturedNodeCommand {

@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
 )
 
 func failToolchainCleanup(t *testing.T) error {

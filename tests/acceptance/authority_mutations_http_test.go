@@ -12,11 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func authorityServer(t *testing.T, b *credentialBoundary, f *engineTransactions) http.Handler {
@@ -167,7 +168,7 @@ func TestAuthorityMutationHTTP(t *testing.T) {
 				if !operator && b.bindingTarget.Team != "team" || operator && b.bindingTarget.Team != "" {
 					t.Fatalf("binding target = %+v", b.bindingTarget)
 				}
-				if f.authorityActor.Authority != b.snapshot.Authorities[0].Principal.Authority || f.authorityActor.Kind != store.ActorOperator || f.authorityActor.Holder != "" || f.authorityActor.Generation != 0 {
+				if f.authorityActor.Authority != b.snapshot.Authorities[0].Principal.Authority || f.authorityActor.Kind != runstate.ActorOperator || f.authorityActor.Holder != "" || f.authorityActor.Generation != 0 {
 					t.Fatalf("actor = %+v", f.authorityActor)
 				}
 				if strings.Contains(route.path, "/tokens/") {

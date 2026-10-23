@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {

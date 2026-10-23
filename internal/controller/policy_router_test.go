@@ -10,9 +10,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type policyAuth struct {
@@ -62,8 +63,8 @@ func TestPolicyRouterOrderingAndErrorBoundary(t *testing.T) {
 				Team: "team", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Audience: capability.Controller,
 				Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{tc.grant},
 			}}
-			mux := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: policyAuth{p, tc.authErr, &order}, Bindings: policyBindings{order: &order}})
-			err := mux.Register(controller.Endpoint{
+			mux := routepolicy.New(routepolicy.Authorization{Authenticator: policyAuth{p, tc.authErr, &order}, Bindings: policyBindings{order: &order}})
+			err := mux.Register(controllerwire.Endpoint{
 				Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
 				ResolveTarget: func(_ context.Context, _ capability.Principal, target capability.Target) (capability.Target, error) {
 					return target, nil
@@ -119,8 +120,8 @@ func TestPolicyRouterResolvesTeamLocalTargets(t *testing.T) {
 				Team: tc.team, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Audience: capability.Controller,
 				Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead},
 			}}
-			router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: policyAuth{p, nil, &order}, Bindings: policyBindings{order: &order}})
-			if err := router.Register(controller.Endpoint{
+			router := routepolicy.New(routepolicy.Authorization{Authenticator: policyAuth{p, nil, &order}, Bindings: policyBindings{order: &order}})
+			if err := router.Register(controllerwire.Endpoint{
 				Method: "GET", Pattern: "/api/v1/tokens/{token}", Authentication: capability.AuthCapability,
 				Decode: func(r *http.Request) (capability.RequestEvidence, error) {
 					return capability.RequestEvidence{Target: capability.Target{Team: tc.targetTeam, TokenPrefix: r.PathValue("token")}}, nil
@@ -148,9 +149,9 @@ func TestPolicyRouterResolvesTeamLocalTargets(t *testing.T) {
 }
 
 func TestPolicyRouterMissingRoutesAndPolicies(t *testing.T) {
-	mux := controller.NewPolicyRouter(controller.RouteAuthorization{})
+	mux := routepolicy.New(routepolicy.Authorization{})
 	called := false
-	if err := mux.Register(controller.Endpoint{
+	if err := mux.Register(controllerwire.Endpoint{
 		Method: "GET", Pattern: "/without-policy", Authentication: capability.AuthCapability,
 		Handle: func(http.ResponseWriter, *http.Request, capability.Authorized) error { called = true; return nil },
 	}); err != nil {
@@ -174,8 +175,8 @@ func TestPolicyRouterMissingRoutesAndPolicies(t *testing.T) {
 
 func TestPolicyRouterExternalProofCannotBePublic(t *testing.T) {
 	called := false
-	mux := controller.NewPolicyRouter(controller.RouteAuthorization{})
-	if err := mux.Register(controller.Endpoint{
+	mux := routepolicy.New(routepolicy.Authorization{})
+	if err := mux.Register(controllerwire.Endpoint{
 		Method: "POST", Pattern: "/webhooks/stripe", Authentication: capability.AuthPublic,
 		Handle: func(http.ResponseWriter, *http.Request, capability.Authorized) error { called = true; return nil },
 	}); err != nil {
@@ -193,8 +194,8 @@ func TestPolicyRouterExternalProofRunsBeforeHandler(t *testing.T) {
 	for _, valid := range []bool{false, true} {
 		t.Run(fmt.Sprint(valid), func(t *testing.T) {
 			var order []string
-			mux := controller.NewPolicyRouter(controller.RouteAuthorization{})
-			if err := mux.Register(controller.Endpoint{
+			mux := routepolicy.New(routepolicy.Authorization{})
+			if err := mux.Register(controllerwire.Endpoint{
 				Method: "POST", Pattern: "/webhooks/stripe", Authentication: capability.AuthPaymentWebhook,
 				Verify: func(*http.Request) error {
 					order = append(order, "proof")
@@ -235,7 +236,7 @@ func TestPolicyRouterSessionCSRFAndBearerPrecedence(t *testing.T) {
 				Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"},
 				Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorConsole},
 			}}
-			a := controller.RouteAuthorization{
+			a := routepolicy.Authorization{
 				Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
 				Identify: func(*http.Request) (capability.Presentation, error) {
 					order = append(order, "session")
@@ -251,8 +252,8 @@ func TestPolicyRouterSessionCSRFAndBearerPrecedence(t *testing.T) {
 					return nil
 				}
 			}
-			mux := controller.NewPolicyRouter(a)
-			if err := mux.Register(controller.Endpoint{
+			mux := routepolicy.New(a)
+			if err := mux.Register(controllerwire.Endpoint{
 				Method: "POST", Pattern: "/api/v1/operator/teams/{team}/trust", Authentication: capability.AuthCapability,
 				Decode: func(*http.Request) (capability.RequestEvidence, error) { return capability.RequestEvidence{}, nil },
 				Handle: func(w http.ResponseWriter, _ *http.Request, _ capability.Authorized) error {
@@ -290,11 +291,11 @@ func TestPolicyRouterSessionCSRFAndBearerPrecedence(t *testing.T) {
 
 func TestPolicyRouterDeadCredentialHidesDecoderError(t *testing.T) {
 	var order []string
-	mux := controller.NewPolicyRouter(controller.RouteAuthorization{
+	mux := routepolicy.New(routepolicy.Authorization{
 		Authenticator: policyAuth{order: &order, err: &apierr.Error{Code: apierr.Unauthenticated, Message: "unknown credential"}},
 		Bindings:      policyBindings{order: &order},
 	})
-	if err := mux.Register(controller.Endpoint{
+	if err := mux.Register(controllerwire.Endpoint{
 		Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
 		ResolveTarget: func(_ context.Context, _ capability.Principal, target capability.Target) (capability.Target, error) {
 			return target, nil
@@ -332,8 +333,8 @@ func assertPolicyError(t *testing.T, w *httptest.ResponseRecorder, code apierr.C
 
 func TestPolicyRouterRunSelectorsRequireResolver(t *testing.T) {
 	var order []string
-	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: policyAuth{order: &order}, Bindings: policyBindings{order: &order}})
-	endpoint := controller.Endpoint{
+	router := routepolicy.New(routepolicy.Authorization{Authenticator: policyAuth{order: &order}, Bindings: policyBindings{order: &order}})
+	endpoint := controllerwire.Endpoint{
 		Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
 		Decode: func(*http.Request) (capability.RequestEvidence, error) { return capability.RequestEvidence{}, nil },
 		Handle: func(http.ResponseWriter, *http.Request, capability.Authorized) error {
@@ -361,8 +362,8 @@ func TestPolicyRouterEmbeddedUsesRunResolver(t *testing.T) {
 		Team: "team", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Audience: capability.Controller,
 		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead},
 	}}
-	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: policyAuth{p, nil, &order}, Bindings: policyBindings{order: &order}})
-	if err := router.Register(controller.Endpoint{
+	router := routepolicy.New(routepolicy.Authorization{Authenticator: policyAuth{p, nil, &order}, Bindings: policyBindings{order: &order}})
+	if err := router.Register(controllerwire.Endpoint{
 		Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
 		Decode: func(*http.Request) (capability.RequestEvidence, error) { return capability.RequestEvidence{}, nil },
 		ResolveTarget: func(_ context.Context, principal capability.Principal, target capability.Target) (capability.Target, error) {

@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	strictjson "sigs.k8s.io/json"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 
-	"golang.org/x/mod/semver"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"golang.org/x/mod/semver"
+	strictjson "sigs.k8s.io/json"
 )
 
 // VerifyIndex checks signature and policy invariants before accepting authority.
@@ -41,7 +41,7 @@ func validatePolicy(p VersionIndex) error {
 	if p.Format != VersionIndexFormat || p.PublishedAt.IsZero() || !releaseVersion(p.Latest) || len(p.Versions) == 0 {
 		return fmt.Errorf("version index has missing or unsupported fields")
 	}
-	versions := map[string]VersionInfo{}
+	versions := map[string]engineid.VersionInfo{}
 	for _, v := range p.Versions {
 		if !releaseVersion(v.Version) || v.PublishedAt.IsZero() || v.PublishedAt.After(p.PublishedAt) || !v.SupportUntil.Equal(v.PublishedAt.AddDate(0, limits.ControllerCompatibilityMonths, 0)) {
 			return fmt.Errorf("invalid support window for %s", v.Version)
@@ -102,7 +102,7 @@ func validateRestriction(r Restriction, p VersionIndex, minimum bool) error {
 // Policy returns an independent policy snapshot.
 func (v VerifiedIndex) Policy() VersionIndex {
 	p := v.index
-	p.Versions = append([]VersionInfo(nil), p.Versions...)
+	p.Versions = append([]engineid.VersionInfo(nil), p.Versions...)
 	p.Revoked = append([]Restriction(nil), p.Revoked...)
 	return p
 }
@@ -114,7 +114,7 @@ func (v VerifiedIndex) Development() bool { return v.development }
 func (v VerifiedIndex) Offline() bool { return v.offline }
 
 // Evaluate applies signed restrictions without treating age as a revocation.
-func Evaluate(index VerifiedIndex, version string, now time.Time) ([]Notice, error) {
+func Evaluate(index VerifiedIndex, version string, now time.Time) ([]engineid.Notice, error) {
 	if index.offline {
 		return nil, nil
 	}
@@ -122,13 +122,13 @@ func Evaluate(index VerifiedIndex, version string, now time.Time) ([]Notice, err
 }
 
 // EvaluateRunner uses runner repair guidance while leaving claim renewals to their owner.
-func EvaluateRunner(index VerifiedIndex, version string, now time.Time) ([]Notice, error) {
+func EvaluateRunner(index VerifiedIndex, version string, now time.Time) ([]engineid.Notice, error) {
 	return evaluate(index, version, now, runnerHint)
 }
 
 const runnerHint = "Allow the runner to update automatically, then restart its existing service; check connectivity if the update fails."
 
-func evaluate(index VerifiedIndex, version string, now time.Time, hint string) ([]Notice, error) {
+func evaluate(index VerifiedIndex, version string, now time.Time, hint string) ([]engineid.Notice, error) {
 	if index.development {
 		return nil, nil
 	}
@@ -141,8 +141,8 @@ func evaluate(index VerifiedIndex, version string, now time.Time, hint string) (
 	return evaluatePolicy(index.index, version, now, hint)
 }
 
-func evaluatePolicy(p VersionIndex, version string, now time.Time, hint string) ([]Notice, error) {
-	var notices []Notice
+func evaluatePolicy(p VersionIndex, version string, now time.Time, hint string) ([]engineid.Notice, error) {
+	var notices []engineid.Notice
 	found := false
 	for _, v := range p.Versions {
 		if v.Version != version {
@@ -151,10 +151,10 @@ func evaluatePolicy(p VersionIndex, version string, now time.Time, hint string) 
 		found = true
 		if !now.Before(v.SupportUntil) {
 			until := v.SupportUntil
-			notices = append(notices, Notice{Kind: NoticeSupportEnded, Version: version, Reason: "The support window has ended; this release remains permitted.", Hint: hint, SupportUntil: &until})
+			notices = append(notices, engineid.Notice{Kind: engineid.NoticeSupportEnded, Version: version, Reason: "The support window has ended; this release remains permitted.", Hint: hint, SupportUntil: &until})
 		} else if !now.Before(v.SupportUntil.AddDate(0, -1, 0)) {
 			until := v.SupportUntil
-			notices = append(notices, Notice{Kind: NoticeSupportEnding, Version: version, Reason: "The support window ends within one month.", Hint: hint, SupportUntil: &until})
+			notices = append(notices, engineid.Notice{Kind: engineid.NoticeSupportEnding, Version: version, Reason: "The support window ends within one month.", Hint: hint, SupportUntil: &until})
 		}
 	}
 	if !found {
@@ -182,9 +182,9 @@ func restrictionError(code apierr.Code, version string, r Restriction, hint stri
 	return &apierr.Error{Code: code, Message: fmt.Sprintf("Release %s is blocked: %s", version, r.Reason), Hint: hint, Details: map[string]any{"version": version, "minimum": r.Version, "reason": r.Reason, "security": r.Security}}
 }
 
-func restrictionNotice(version string, r Restriction, hint string) Notice {
+func restrictionNotice(version string, r Restriction, hint string) engineid.Notice {
 	at := r.EffectiveAt
-	return Notice{Kind: NoticeEnforcement, Version: version, Reason: r.Reason, Hint: hint, EnforceAt: &at}
+	return engineid.Notice{Kind: engineid.NoticeEnforcement, Version: version, Reason: r.Reason, Hint: hint, EnforceAt: &at}
 }
 
 func integrity(err error) error {

@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // Each route is an indexed requirement set, not a remembered scan position.

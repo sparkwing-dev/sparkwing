@@ -14,7 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 func fixture(t *testing.T) (*githubapptest.GitHub, *githubapp.Client) {

@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 func TestSDKCheckRejectsFIFO(t *testing.T) {
@@ -70,14 +71,14 @@ func TestInstalledArtifactInspectionRejectsFIFO(t *testing.T) {
 
 func TestSDKPinInspectionRejectsUnsafeInputsProperty(t *testing.T) {
 	inputs := []struct {
-		sdk  engine.SDKKind
+		sdk  engineid.SDKKind
 		name string
 	}{
-		{engine.GoSDK, "go.mod"},
-		{engine.GoSDK, "go.sum"},
-		{engine.TypeScriptSDK, "package.json"},
-		{engine.TypeScriptSDK, "package-lock.json"},
-		{engine.TypeScriptSDK, "npm-shrinkwrap.json"},
+		{engineid.GoSDK, "go.mod"},
+		{engineid.GoSDK, "go.sum"},
+		{engineid.TypeScriptSDK, "package.json"},
+		{engineid.TypeScriptSDK, "package-lock.json"},
+		{engineid.TypeScriptSDK, "npm-shrinkwrap.json"},
 	}
 	property := func(selection, kind uint8, payload string) bool {
 		dir := t.TempDir()

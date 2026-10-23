@@ -6,13 +6,12 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type nodeClaims struct {
@@ -20,7 +19,7 @@ type nodeClaims struct {
 	bindings  capability.BindingChecker
 	masker    *secrets.Masker
 	current   func(context.Context) (capability.Principal, error)
-	readNode  func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
+	readNode  func(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 	processes *NativeProcesses
 	services  func(context.Context, capability.Principal, nodeproto.JobSpec) (ProcessServices, error)
 	mu        sync.Mutex
@@ -33,13 +32,13 @@ type nodeClaim struct {
 	generation int64
 }
 
-func (c *nodeClaims) adopt(ctx context.Context, result store.ReconciledNode) error {
+func (c *nodeClaims) adopt(ctx context.Context, result runstate.ReconciledNode) error {
 	owner, err := c.current(ctx)
 	if err != nil {
 		return err
 	}
 	row, claim := result.Node, result.Claim
-	if result.Kind != store.Execute || claim == nil || len(result.Bearer) == 0 || row.OwnerCapabilityPrefix != owner.Capability.Prefix || row.Ref.RunID != runspec.RunID(owner.Capability.Binding.RunID) || row.Ref.NodeID == "" || row.Generation != claim.Generation || row.CapabilityPrefix != claim.CapabilityPrefix || row.ClaimedBy != claim.Holder {
+	if result.Kind != runstate.Execute || claim == nil || len(result.Bearer) == 0 || row.OwnerCapabilityPrefix != owner.Capability.Prefix || row.Ref.RunID != runspec.RunID(owner.Capability.Binding.RunID) || row.Ref.NodeID == "" || row.Generation != claim.Generation || row.CapabilityPrefix != claim.CapabilityPrefix || row.ClaimedBy != claim.Holder {
 		return nodeClaimMismatch()
 	}
 	award := nodeClaim{raw: string(result.Bearer), prefix: row.CapabilityPrefix, generation: int64(row.Generation)}
@@ -106,11 +105,11 @@ func (c *nodeClaims) delegate(ctx context.Context, node string, generation, atte
 		return ProcessGrant{}, err
 	}
 	fence := principal.Capability.Binding
-	row, err := c.readNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fence.RunID), NodeID: runspec.NodeID(node)})
+	row, err := c.readNode(ctx, runspec.NodeRef{RunID: runspec.RunID(fence.RunID), NodeID: runspec.NodeID(node)})
 	if err != nil {
 		return ProcessGrant{}, err
 	}
-	if row.Ref != (controllerwire.NodeRef{RunID: runspec.RunID(fence.RunID), NodeID: runspec.NodeID(node)}) || row.Generation != runspec.ClaimGeneration(generation) || row.Attempt != runspec.AttemptOrdinal(attempt) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != fence.Holder {
+	if row.Ref != (runspec.NodeRef{RunID: runspec.RunID(fence.RunID), NodeID: runspec.NodeID(node)}) || row.Generation != runspec.ClaimGeneration(generation) || row.Attempt != runspec.AttemptOrdinal(attempt) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != fence.Holder {
 		return ProcessGrant{}, nodeClaimMismatch()
 	}
 	var job nodeproto.JobSpec

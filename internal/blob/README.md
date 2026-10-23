@@ -78,7 +78,7 @@ The executor cache layer uses the artifact binding for signed-data restores and
 refreshes it after successful execution before saving. A refused binding runs
 cold or skips the save. A download is verified before archive extraction publishes
 files. Without an injected backend, dependency caches use local files.
-The SDK and host share `internal/depcachekey` for workspace-contained lockfile
+The SDK and host share `pkg/depcachekey` for workspace-contained lockfile
 reads and full SHA-256 keys. The common executor hashes captured lockfile bytes
 through that same key function. Candidate inputs outside the workspace, including
 escaping symlinks, disable caching. The protocol's Go resolver is `go-modules`.

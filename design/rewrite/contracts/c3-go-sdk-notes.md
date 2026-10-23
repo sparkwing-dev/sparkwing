@@ -69,7 +69,7 @@ calls. Active callbacks remain cancellable when callers use `context.WithoutCanc
 New calls fail after closing begins, including service calls whose contexts detach
 cancellation from the fixture. Close runs outside those calls.
 
-The shared v2 corpus at `internal/nodeproto/conformance/testdata/v2-corpus.json`
+The shared v2 corpus at `pkg/nodeproto/conformance/testdata/v2-corpus.json`
 contains declaration and error vectors in addition to process sessions. Its
 `plans` rows include raw JSON, canonical JSON, SHA-256, expected validation code,
 and any expansion or secret context. `inner_errors` supplies the shared decoder

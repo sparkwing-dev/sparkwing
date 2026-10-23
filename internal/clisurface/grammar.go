@@ -65,7 +65,7 @@ const (
 	ExitUnknown ExitCode = 3
 )
 
-// ErrorFormat describes stderr framing owned by internal/apierr.
+// ErrorFormat describes stderr framing owned by pkg/apierr.
 type ErrorFormat struct {
 	Text        string
 	Hint        string
@@ -78,7 +78,7 @@ func Errors() ErrorFormat {
 	return ErrorFormat{
 		Text:        "<binary>: <command path without binary>: <message>",
 		Hint:        "hint: <hint>",
-		JSONOwner:   "internal/apierr",
+		JSONOwner:   "pkg/apierr",
 		JSONFraming: "one compact error envelope per line on stderr",
 	}
 }

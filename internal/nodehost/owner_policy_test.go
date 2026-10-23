@@ -10,11 +10,11 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput, *executorStore, EvaluationDependencies, *[]*executorProcess) {
@@ -48,7 +48,7 @@ func policyFixture(t *testing.T, edit func(*nodeproto.JobSpec)) (EvaluationInput
 	}
 	st.row.SpecHash, in.SpecHash = string(hash), string(hash)
 	st.row.Generation, in.Generation = 0, 0
-	st.row.Status, st.row.Outcome, st.row.Expansion = store.StatusPending, "", store.ExpansionNone
+	st.row.Status, st.row.Outcome, st.row.Expansion = runstate.StatusPending, "", runstate.ExpansionNone
 	processes := []*executorProcess{}
 	deps.Start = func(context.Context, EvaluationInput) (ExecutorProcess, error) {
 		p := &executorProcess{plan: in.Accepted.Plan}
@@ -356,11 +356,11 @@ func TestExecutorPolicyMemoFailuresPreventBody(t *testing.T) {
 					t.Fatalf("memo process count = %d, error = %v", len(*processes), err)
 				}
 				if mode != "cancel" {
-					if len(st.changes) != 2 || st.changes[0].Cause != store.CauseStart || st.changes[1].Cause != store.CauseReport {
+					if len(st.changes) != 2 || st.changes[0].Cause != runstate.CauseStart || st.changes[1].Cause != runstate.CauseReport {
 						t.Fatalf("memo failure did not start and settle the job: %+v", st.changes)
 					}
 					result := st.changes[len(st.changes)-1].Extra.Result
-					if result == nil || result.Outcome != store.NodeFailed || strings.Contains(result.MaskedError, "private") {
+					if result == nil || result.Outcome != runstate.NodeFailed || strings.Contains(result.MaskedError, "private") {
 						t.Fatalf("memo failure became a successful result: %+v", result)
 					}
 				}

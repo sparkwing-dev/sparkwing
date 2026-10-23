@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -29,7 +29,7 @@ func checkStoreTransitions(t *testing.T) (err error) {
 	if _, err := tenant.AcceptPlan(ctx, plan); err != nil {
 		return err
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "alpha"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "alpha"}
 	ready := store.ReadyNode{Ref: ref, Actor: plan.Actor}
 	withdraw := store.RevokeNode{Ref: ref, Actor: plan.Actor}
 	for _, change := range []store.NodeCommand{ready, withdraw} {
@@ -79,7 +79,7 @@ func checkStoreHeldTransitions(ctx context.Context, tenant *store.Tenant, withdr
 	if err != nil || !reflect.DeepEqual(before, after) {
 		return fmt.Errorf("refused withdrawal changed holder: %v", err)
 	}
-	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	holder := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	stale := holder
 	stale.Generation++
 	if _, err := tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: stale, SourceAttempt: acceptanceAttempt(0)}); err == nil {
@@ -89,14 +89,14 @@ func checkStoreHeldTransitions(ctx context.Context, tenant *store.Tenant, withdr
 	if err != nil || !reflect.DeepEqual(before, after) {
 		return fmt.Errorf("refused start changed holder: %v", err)
 	}
-	if admitted, err := tenant.MayStart(ctx, store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(holder.Generation)}, holder); err != nil || admitted.Kind != store.AcquireGranted {
+	if admitted, err := tenant.MayStart(ctx, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(holder.Generation)}, holder); err != nil || admitted.Kind != runstate.AcquireGranted {
 		return fmt.Errorf("execution admission: %+v, %v", admitted, err)
 	}
 	start, err := tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil || start.Attempt != 1 {
 		return fmt.Errorf("first start: %+v, %v", start, err)
 	}
-	finish := store.ReportNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(int64(start.Attempt)), Outcome: store.NodeSuccess}
+	finish := store.ReportNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(int64(start.Attempt)), Outcome: runstate.NodeSuccess}
 	if _, err := tenant.TransitionNode(ctx, finish); err != nil {
 		return err
 	}
@@ -112,11 +112,11 @@ func checkStoreTerminalReplay(ctx context.Context, tenant *store.Tenant, finish 
 		}
 	}
 	before, err := tenant.ReadNode(ctx, ref)
-	if err != nil || before.Outcome != store.NodeSuccess || before.ClaimedBy != "" || before.LeaseExpiresAt != nil || before.CapabilityPrefix != "" {
+	if err != nil || before.Outcome != runstate.NodeSuccess || before.ClaimedBy != "" || before.LeaseExpiresAt != nil || before.CapabilityPrefix != "" {
 		return fmt.Errorf("terminal claim not cleared: %+v, %v", before, err)
 	}
 	conflict := finish
-	conflict.Outcome = store.NodeFailed
+	conflict.Outcome = runstate.NodeFailed
 	ready := store.ReadyNode{Ref: ref, Actor: withdraw.Actor}
 	for _, change := range []store.NodeCommand{ready, withdraw, conflict} {
 		if _, err := tenant.TransitionNode(ctx, change); err == nil {

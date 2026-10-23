@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestAuthenticationSnapshotReadsAncestryAndCurrentJob(t *testing.T) {
@@ -38,7 +39,7 @@ func TestAuthenticationSnapshotReadsAncestryAndCurrentJob(t *testing.T) {
 
 func TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState(t *testing.T) {
 	tenant, _, actor := liveHolderFixture(t)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(3)}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,prefix,retention_class,sealed_at,created_at,updated_at) VALUES ('a','run','job-stream','job_attempt','job',3,2,'logs','r30',1,1,1)`)
@@ -161,16 +162,16 @@ func TestAuthenticationCancellationReasonKeepsJobIntentProperty(t *testing.T) {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			tenant, _, owner := reconcileFixture(t)
 			operator := authorityMember(t, tenant.s, "operator", RoleOwner)
-			operator.Kind = ActorOperator
+			operator.Kind = runstate.ActorOperator
 			reason := fmt.Sprintf("%s/%x", []string{"user_cancelled", "雪\n\x00", "' OR 1=1 --"}[random.IntN(3)], random.Uint64())
 			if i == 0 {
 				reason = ""
 			}
-			_, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: owner, To: NodeCancelled, Cause: causeCancel, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}})
+			_, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: owner, To: runstate.NodeCancelled, Cause: causeCancel, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: reason}}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", Actor: operator, To: RunCancelled, Cause: RunCancel, Reason: "run reason"}); err != nil {
+			if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: "run", Actor: operator, To: runstate.RunCancelled, Cause: runstate.RunCancel, Reason: "run reason"}); err != nil {
 				t.Fatal(err)
 			}
 			for _, prefix := range []string{"claim", owner.CapabilityPrefix} {

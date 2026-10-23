@@ -6,10 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func sourceAttempt[T ~int | ~int64](attempt T) *runspec.AttemptOrdinal {
@@ -23,14 +22,14 @@ func TestHolderReportsAffectOnlyTheirSourceAttemptProperty(t *testing.T) {
 		tenant, _, actor := liveHolderFixture(t)
 		retries := 2 + random.IntN(5)
 		rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET execution_json=?`, []byte(fmt.Sprintf(`{"retry":{"set":true,"value":%d}}`, retries)))
-		ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+		ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
 		var previous nodeTransition
 		for ordinal := int64(3); ordinal < int64(3+retries); ordinal++ {
 			before, err := tenant.ReadNode(t.Context(), ref)
 			if err != nil {
 				t.Fatal(err)
 			}
-			change := nodeTransition{Ref: ref, To: NodeRunning, Actor: actor, Cause: CauseRetry, SourceAttempt: sourceAttempt(ordinal), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify", MaskedError: "same failure"}}}
+			change := nodeTransition{Ref: ref, To: runstate.NodeRunning, Actor: actor, Cause: runstate.CauseRetry, SourceAttempt: sourceAttempt(ordinal), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: "verify", MaskedError: "same failure"}}}
 			applied, err := tenant.TransitionNode(t.Context(), change)
 			if err != nil || applied.Replayed || int64(applied.Attempt) != ordinal+1 {
 				t.Fatalf("retry %d: %+v, %v", ordinal, applied, err)
@@ -46,7 +45,7 @@ func TestHolderReportsAffectOnlyTheirSourceAttemptProperty(t *testing.T) {
 				t.Fatalf("retry lost claim: %+v, %v", after, err)
 			}
 			for _, fence := range []*runspec.AttemptOrdinal{nil, sourceAttempt(-1), sourceAttempt(ordinal), sourceAttempt(ordinal + 2 + random.Int64N(100))} {
-				stale := nodeTransition{Ref: ref, To: NodeSuccess, Actor: actor, Cause: CauseReport, SourceAttempt: fence}
+				stale := nodeTransition{Ref: ref, To: runstate.NodeSuccess, Actor: actor, Cause: runstate.CauseReport, SourceAttempt: fence}
 				if _, err := tenant.TransitionNode(t.Context(), stale); err == nil {
 					t.Fatalf("incorrect source attempt %v changed attempt %d", fence, ordinal+1)
 				}
@@ -63,7 +62,7 @@ func TestHolderReportsAffectOnlyTheirSourceAttemptProperty(t *testing.T) {
 			rewriteSchemaCount(t, tenant.s.db, "events", int(applied.StateSeq))
 			previous = change
 		}
-		finish := nodeTransition{Ref: ref, To: NodeSuccess, Actor: actor, Cause: CauseReport, SourceAttempt: sourceAttempt(int64(3 + retries))}
+		finish := nodeTransition{Ref: ref, To: runstate.NodeSuccess, Actor: actor, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(int64(3 + retries))}
 		for replay := range 2 {
 			applied, err := tenant.TransitionNode(t.Context(), finish)
 			if err != nil || applied.Replayed != (replay == 1) || int64(applied.Attempt) != int64(3+retries) {
@@ -75,18 +74,18 @@ func TestHolderReportsAffectOnlyTheirSourceAttemptProperty(t *testing.T) {
 
 func TestSourceAttemptFencesUnstartedAndResumedClaims(t *testing.T) {
 	for _, ordinal := range []int64{0, 3} {
-		for _, cause := range []TransitionCause{CauseStart, CauseReport, CauseRelease} {
+		for _, cause := range []runstate.TransitionCause{runstate.CauseStart, runstate.CauseReport, runstate.CauseRelease} {
 			t.Run(fmt.Sprintf("%s/%d", cause, ordinal), func(t *testing.T) {
 				tenant, _, actor := liveHolderFixture(t)
 				rewriteSchemaExec(t, tenant.s.db, `DELETE FROM node_attempts`)
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='pending',started_at=NULL,attempt=?`, ordinal)
 				to := nodePending
-				if cause == CauseStart {
-					to = NodeRunning
-				} else if cause == CauseReport {
-					to = NodeFailed
+				if cause == runstate.CauseStart {
+					to = runstate.NodeRunning
+				} else if cause == runstate.CauseReport {
+					to = runstate.NodeFailed
 				}
-				change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: to, Actor: actor, Cause: cause}
+				change := nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, To: to, Actor: actor, Cause: cause}
 				if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
 					t.Fatal("omitted source attempt accepted")
 				}
@@ -97,7 +96,7 @@ func TestSourceAttemptFencesUnstartedAndResumedClaims(t *testing.T) {
 				change.SourceAttempt = sourceAttempt(ordinal)
 				applied, err := tenant.TransitionNode(t.Context(), change)
 				want := ordinal
-				if cause == CauseStart {
+				if cause == runstate.CauseStart {
 					want++
 				}
 				if err != nil || int64(applied.Attempt) != want {
@@ -114,7 +113,7 @@ func TestSourceAttemptFencesUnstartedAndResumedClaims(t *testing.T) {
 
 func TestOwnerAndReaperDoNotSelectExecutionAttempts(t *testing.T) {
 	tenant, _, reaper := stateFixture(t)
-	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: nodePending, Cause: CauseLeaseLapse, Actor: reaper, SourceAttempt: sourceAttempt(3)}
+	change := nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, To: nodePending, Cause: runstate.CauseLeaseLapse, Actor: reaper, SourceAttempt: sourceAttempt(3)}
 	if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
 		t.Fatal("reaper accepted a caller-selected attempt")
 	}
@@ -125,7 +124,7 @@ func TestOwnerAndReaperDoNotSelectExecutionAttempts(t *testing.T) {
 	root := authorityRoot("owner", "a")
 	root.Grants = []capability.Grant{capability.RunsControl}
 	authorityPersist(t, tenant.s, root)
-	change = nodeTransition{Ref: change.Ref, To: NodeCancelled, Cause: causeCancel, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}}, SourceAttempt: sourceAttempt(3)}
+	change = nodeTransition{Ref: change.Ref, To: runstate.NodeCancelled, Cause: causeCancel, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}}, SourceAttempt: sourceAttempt(3)}
 	if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
 		t.Fatal("operator selected an execution attempt")
 	}

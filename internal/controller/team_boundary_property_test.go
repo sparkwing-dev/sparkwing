@@ -10,11 +10,12 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
@@ -115,7 +116,7 @@ func TestTeamBoundaryRunPrivacyProperty(t *testing.T) {
 				}
 			}
 			row, err := f.teamA.ReadRun(t.Context(), id)
-			if err != nil || row.State != store.RunRunning || row.CancelRequestedAt != nil || row.Request.Request.RequestedArgs["private"] != private {
+			if err != nil || row.State != runstate.RunRunning || row.CancelRequestedAt != nil || row.Request.Request.RequestedArgs["private"] != private {
 				t.Fatalf("foreign mutation: %+v: %v", row, err)
 			}
 			own, err := f.teamB.ListRuns(t.Context(), store.RunFilter{Limit: 100})

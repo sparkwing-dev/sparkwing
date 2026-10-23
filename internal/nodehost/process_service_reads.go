@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // ProcessOutput carries an authorized recorded output, including explicit null.

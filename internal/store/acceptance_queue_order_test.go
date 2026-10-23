@@ -9,11 +9,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestStoreQueueOrder(t *testing.T) {
@@ -46,11 +45,11 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a-blocked", "job", "z-preferred"} {
-		if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(id)}, Actor: plan.Actor}); err != nil {
+		if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(id)}, Actor: plan.Actor}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	before, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "a-blocked"})
+	before, err := tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "a-blocked"})
 	if err != nil {
 		t.Fatal(err)
 	}

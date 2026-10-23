@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
-	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/sessionledger"
 )
 
 // recordStepSession writes the ledger record a sweep outside this process

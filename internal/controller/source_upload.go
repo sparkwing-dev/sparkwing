@@ -7,17 +7,17 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
-func (s *Server) sourceUploadEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) sourceUploadEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/data/source", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSourceUpload},
 		{Method: "POST", Pattern: "/api/v1/data/source/{upload}/commit", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSourceCommit},
 	}

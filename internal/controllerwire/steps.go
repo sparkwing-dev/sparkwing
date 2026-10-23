@@ -3,7 +3,7 @@ package controllerwire
 import (
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // StepReportRequest names an observed attempt; authorization supplies its actor and current fence.

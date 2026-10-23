@@ -8,8 +8,8 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 func TestLogObjectKeysKeepEveryIdentityDistinct(t *testing.T) {

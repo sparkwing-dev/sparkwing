@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // GitHubConnectWriter rechecks session authority and linked identity when connecting an installation.
@@ -31,8 +33,8 @@ type githubBrowserProof struct {
 	csrfToken  string
 }
 
-func (s *Server) githubBrowserEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) githubBrowserEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		s.githubBrowserEndpoint("POST", "/github/app/connect", s.verifyGitHubAppBrowser, s.handleGitHubAppConnect(false)),
 		s.githubBrowserEndpoint("POST", "/github/app/connect/existing", s.verifyGitHubAppBrowser, s.handleGitHubAppConnect(true)),
 		s.githubBrowserEndpoint("GET", "/github/app/setup", s.verifyGitHubAppReturn, s.handleGitHubAppSetup),
@@ -43,8 +45,8 @@ func (s *Server) githubBrowserEndpoints() []Endpoint {
 	}
 }
 
-func (s *Server) githubBrowserEndpoint(method, pattern string, verify func(*http.Request) error, handle http.HandlerFunc) Endpoint {
-	return Endpoint{
+func (s *Server) githubBrowserEndpoint(method, pattern string, verify func(*http.Request) error, handle http.HandlerFunc) controllerwire.Endpoint {
+	return controllerwire.Endpoint{
 		Method: method, Pattern: pattern, Authentication: capability.AuthBrowserFlow, Verify: verify,
 		Handle: func(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 			handle(w, r)
@@ -62,7 +64,7 @@ func (s *Server) verifyGitHubAppBrowser(r *http.Request) error {
 		return err
 	}
 	if s.authorization.Authenticator == nil || s.authorization.Bindings == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	route, _ := capability.LookupRoute("PUT", "/api/v1/team/github-app/extra-repos")
 	authenticated, err := s.authorization.Authenticator.Authenticate(r.Context(), capability.Presentation{

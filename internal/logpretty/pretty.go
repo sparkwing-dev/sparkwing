@@ -15,7 +15,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type PrettyRenderer struct {
@@ -27,10 +26,10 @@ type PrettyRenderer struct {
 	nodeSlot  map[string]int
 	nextSlot  int
 
-	pendingNodeStart  *sparkwing.LogRecord
-	pendingStepEnd    *sparkwing.LogRecord
-	pendingRunSummary *sparkwing.LogRecord
-	pendingRunStart   *sparkwing.LogRecord
+	pendingNodeStart  *Record
+	pendingStepEnd    *Record
+	pendingRunSummary *Record
+	pendingRunStart   *Record
 }
 
 func NewPrettyRenderer() *PrettyRenderer {
@@ -64,10 +63,6 @@ func (p *PrettyRenderer) hueFor(name string) string {
 		p.nextSlot++
 	}
 	return nodePalette[slot]
-}
-
-func (p *PrettyRenderer) Log(level, msg string) {
-	p.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
 }
 
 const (
@@ -115,7 +110,7 @@ func (p *PrettyRenderer) sanitize(s string) string {
 
 func (p *PrettyRenderer) sanitizeInline(s string) string { return foldLines(p.sanitize(s)) }
 
-func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
+func (p *PrettyRenderer) Emit(rec Record) {
 	rec.Msg = p.sanitize(rec.Msg)
 	rec.JobID = p.sanitizeInline(rec.JobID)
 	rec.Step = p.sanitizeInline(rec.Step)
@@ -274,7 +269,7 @@ func (p *PrettyRenderer) Flush() {
 	}
 }
 
-func (p *PrettyRenderer) breadcrumb(rec sparkwing.LogRecord, nodeHue string) string {
+func (p *PrettyRenderer) breadcrumb(rec Record, nodeHue string) string {
 	if rec.JobID == "" && rec.Step == "" {
 		return ""
 	}
@@ -312,7 +307,7 @@ func (p *PrettyRenderer) levelize(level, msg string) string {
 	}
 }
 
-func (p *PrettyRenderer) writePlan(w io.Writer, rec sparkwing.LogRecord) {
+func (p *PrettyRenderer) writePlan(w io.Writer, rec Record) {
 	raw, _ := rec.Attrs["nodes"].([]any)
 	type stepRow struct {
 		id     string
@@ -573,7 +568,7 @@ func (p *PrettyRenderer) sectionRule(label string) string {
 		p.color(strings.Repeat("─", pad), ansiDim)
 }
 
-func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.LogRecord) {
+func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *Record) {
 	var runID, status string
 	var dms int64
 	if finish != nil {
@@ -957,13 +952,13 @@ func splitStepErrorPrefix(s string) (stepID, body string) {
 	return rest[:end], rest[end+len(`": `):]
 }
 
-func (p *PrettyRenderer) writeStepStart(w io.Writer, rec sparkwing.LogRecord) {
+func (p *PrettyRenderer) writeStepStart(w io.Writer, rec Record) {
 	glyph := "●"
 	code := ansiBlue
 	fmt.Fprintln(w, p.color(fmt.Sprintf("  %s %s", glyph, foldLines(rec.Msg)), code))
 }
 
-func (p *PrettyRenderer) writeStepEnd(w io.Writer, rec sparkwing.LogRecord) {
+func (p *PrettyRenderer) writeStepEnd(w io.Writer, rec Record) {
 	outcome, _ := rec.Attrs["outcome"].(string)
 	glyph, code := outcomeIcon(outcome)
 	if outcome == "success" || outcome == "cached" {
@@ -982,7 +977,7 @@ func (p *PrettyRenderer) writeStepEnd(w io.Writer, rec sparkwing.LogRecord) {
 	}
 }
 
-func (p *PrettyRenderer) writeStepSkipped(w io.Writer, rec sparkwing.LogRecord) {
+func (p *PrettyRenderer) writeStepSkipped(w io.Writer, rec Record) {
 	glyph, code := outcomeIcon("skipped")
 	reason, _ := rec.Attrs["reason"].(string)
 	tail := ""
@@ -992,7 +987,7 @@ func (p *PrettyRenderer) writeStepSkipped(w io.Writer, rec sparkwing.LogRecord) 
 	fmt.Fprintln(w, p.color(fmt.Sprintf("  %s %s", glyph, foldLines(rec.Msg)), code)+tail)
 }
 
-func (p *PrettyRenderer) writeSetupBlock(w io.Writer, runStart, plan *sparkwing.LogRecord) {
+func (p *PrettyRenderer) writeSetupBlock(w io.Writer, runStart, plan *Record) {
 	if runStart == nil && plan == nil {
 		return
 	}

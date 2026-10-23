@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func runOwnerSession(ctx context.Context, award controllerwire.ClaimedUnit, input nodehost.RunInput,

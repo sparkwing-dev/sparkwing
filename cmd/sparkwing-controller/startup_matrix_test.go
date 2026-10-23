@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
 )
 
 // Every row is a misdeclared deployment that used to start in some weaker

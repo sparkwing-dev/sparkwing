@@ -3,7 +3,7 @@ package capability
 import (
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // RunnerHeadroom carries accepted capacity and its store-owned observation time.

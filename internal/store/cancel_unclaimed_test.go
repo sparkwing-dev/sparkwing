@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
-func cancellationFixture(t *testing.T, kind capability.UnitKind) (*Store, *Tenant, UnitDemand, RunTransition) {
+func cancellationFixture(t *testing.T, kind capability.UnitKind) (*Store, *Tenant, UnitDemand, runstate.RunTransition) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
 	fundUnitClaim(t, s)
@@ -30,8 +31,8 @@ func cancellationFixture(t *testing.T, kind capability.UnitKind) (*Store, *Tenan
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
 	}
 	actor := authorityMember(t, s, "operator", RoleOwner)
-	actor.Kind = ActorOperator
-	return s, &Tenant{s: s, team: "a"}, demand, RunTransition{RunID: "run", To: RunCancelled, Cause: RunCancel, Actor: actor, Reason: "user_cancelled"}
+	actor.Kind = runstate.ActorOperator
+	return s, &Tenant{s: s, team: "a"}, demand, runstate.RunTransition{RunID: "run", To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: actor, Reason: "user_cancelled"}
 }
 
 func TestRunCancellationPreventsUnclaimedAwards(t *testing.T) {
@@ -60,7 +61,7 @@ func TestRunCancellationPreventsUnclaimedAwards(t *testing.T) {
 				}
 			}
 			row, err := tenant.ReadRun(t.Context(), "run")
-			if err != nil || row.State != RunCancelled || row.FinishedAt == nil || row.CancelReason != change.Reason {
+			if err != nil || row.State != runstate.RunCancelled || row.FinishedAt == nil || row.CancelReason != change.Reason {
 				t.Fatalf("unclaimed cancellation: %+v, %v", row, err)
 			}
 			rewriteSchemaCount(t, s.db, "billing_awards", 0)
@@ -197,7 +198,7 @@ func TestRunCancellationCannotOverwriteTerminalProperty(t *testing.T) {
 	for i := range 24 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			s, tenant, _, change := cancellationFixture(t, capability.UnitTrigger)
-			state := []RunState{RunSuccess, RunFailed, RunCancelled}[random.IntN(3)]
+			state := []runstate.RunState{runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled}[random.IntN(3)]
 			rewriteSchemaExec(t, s.db, `UPDATE runs SET status=?,finished_at=?`, state, s.now().UnixNano())
 			before, err := tenant.ReadRun(t.Context(), "run")
 			if err != nil {

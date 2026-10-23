@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestRewriteRetentionKeepsPinsEffectsAndFinancialRows(t *testing.T) {
@@ -12,9 +14,9 @@ func TestRewriteRetentionKeepsPinsEffectsAndFinancialRows(t *testing.T) {
 	ctx := context.Background()
 	old := now.Add(-120 * 24 * time.Hour).UnixNano()
 	for i, id := range []string{"old_failure", "old_success", "pinned", "undelivered", "fresh"} {
-		state := RunSuccess
+		state := runstate.RunSuccess
 		if id == "old_failure" {
-			state = RunFailed
+			state = runstate.RunFailed
 		}
 		maintenanceRun(t, s, id, i+1, state)
 		if id != "fresh" {
@@ -66,7 +68,7 @@ VALUES ('digest','expired','a','account','one','controller',?,'delegate',1,?,'no
 
 func TestRewriteRetentionDefaultLeavesSelfHostedRuns(t *testing.T) {
 	s, _, now := maintenanceStore(t)
-	maintenanceRun(t, s, "old", 1, RunFailed)
+	maintenanceRun(t, s, "old", 1, runstate.RunFailed)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET finished_at = ? WHERE team = 'a' AND id = 'old'`, now.Add(-365*24*time.Hour).UnixNano())
 	lease, err := s.AsOperator().AcquireSingletonLease(context.Background(), "maintenance", "worker", time.Hour)
 	if err != nil {

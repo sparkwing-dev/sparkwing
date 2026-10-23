@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
 )
 
 func TestSparkwingHome_HonorsSparkwingHomeEnv(t *testing.T) {

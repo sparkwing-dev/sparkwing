@@ -14,27 +14,34 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	authenticationv1 "k8s.io/api/authentication/v1"
+
 	batchv1 "k8s.io/api/batch/v1"
+
 	corev1 "k8s.io/api/core/v1"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+
+	ktesting "k8s.io/client-go/testing"
 )
 
 type cloudDispatch struct {
@@ -144,7 +151,7 @@ func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
 	}
 	cloud := newCloudDispatchLauncher(t, f)
 	planned := cloud.launch(t, capability.UnitPlan, "")
-	engineID := engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, ManifestDigest: strings.Repeat("b", 64)}
+	engineID := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, ManifestDigest: strings.Repeat("b", 64)}
 	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "source", Steps: []nodeproto.StepSpec{{ID: "run"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"expand"}}}}}
 	body, err := json.Marshal(doc)
 	if err != nil {
@@ -176,7 +183,7 @@ func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
 	cloud.finish(t)
 	cloud.complete(t, cloud.launch(t, capability.UnitNode, "generated"))
 	detail, err := f.member.ReadRun(t.Context(), created.RunID)
-	if err != nil || detail.Status != string(store.RunSuccess) || len(detail.Jobs) != 2 {
+	if err != nil || detail.Status != string(runstate.RunSuccess) || len(detail.Jobs) != 2 {
 		t.Fatalf("launcher-run outcome: %+v %v", detail, err)
 	}
 	if want := []capability.UnitKind{capability.UnitPlan, capability.UnitNode, capability.UnitEval, capability.UnitNode}; strings.Join(unitKinds(cloud.claimed), ",") != strings.Join(unitKinds(want), ",") {
@@ -224,9 +231,9 @@ func TestCloudTriggerNoticesWorkNobodyHasClaimed(t *testing.T) {
 				t.Fatal(err)
 			}
 			detail, err = f.member.ReadRun(t.Context(), created.RunID)
-			kind, reason := engine.NoticeUnclaimed, "no runner or launcher has claimed the run's"
+			kind, reason := engineid.NoticeUnclaimed, "no runner or launcher has claimed the run's"
 			if runner == "" {
-				kind, reason = engine.NoticeNoEligibleRunner, "no runner of the allowed tiers"
+				kind, reason = engineid.NoticeNoEligibleRunner, "no runner of the allowed tiers"
 			}
 			if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != kind || !strings.Contains(detail.Notices[0].Reason, reason) {
 				t.Fatalf("unclaimed run notice: %+v %v", detail.Notices, err)
@@ -252,7 +259,7 @@ func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail, err := f.member.ReadRun(t.Context(), created.RunID)
-	if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engine.NoticeCreditHold || !strings.HasPrefix(detail.Notices[0].Reason, "out of credits:") {
+	if err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engineid.NoticeCreditHold || !strings.HasPrefix(detail.Notices[0].Reason, "out of credits:") {
 		t.Fatalf("unfunded run notice: %+v %v", detail.Notices, err)
 	}
 	tenant, err := f.state.ForTeam(t.Context(), store.DefaultTeam)
@@ -262,7 +269,7 @@ func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "late-funding", CreatedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
-	if detail, err = f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engine.NoticeUnclaimed {
+	if detail, err = f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engineid.NoticeUnclaimed {
 		t.Fatalf("funded but unclaimed run notice: %+v %v", detail.Notices, err)
 	}
 	if claimed, err := f.open(f.launcher, true).Claim(t.Context(), poll); err != nil || claimed.Claim == nil || claimed.Claim.RunID != created.RunID {
@@ -417,7 +424,7 @@ func (l *cloudDispatchLauncher) complete(t *testing.T, unit controllerwire.Claim
 		t.Fatal(err)
 	}
 	defer host.Close()
-	if result, err := host.MayStart(t.Context(), store.CapacityBinding{RunID: unit.RunID, NodeID: unit.JobID, Generation: unit.Binding.Generation}, store.Actor{}); err != nil || result.Kind != store.AcquireGranted {
+	if result, err := host.MayStart(t.Context(), runstate.CapacityBinding{RunID: unit.RunID, NodeID: unit.JobID, Generation: unit.Binding.Generation}, runstate.Actor{}); err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("Cloud %s admission: %+v: %v", unit.JobID, result, err)
 	}
 	started, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &unit.Binding.Attempt})

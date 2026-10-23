@@ -7,12 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
-
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // SeedRun inserts reporting facts without admitting executable work.
@@ -98,7 +97,7 @@ func SeedRunFinish(s *store.Store, ctx context.Context, team store.Team, id, sta
 }
 
 // SeedNodeFinish sets terminal facts for fixtures that do not exercise job execution.
-func SeedNodeFinish(s *store.Store, ctx context.Context, team store.Team, ref controllerwire.NodeRef, result store.NodeResult) error {
+func SeedNodeFinish(s *store.Store, ctx context.Context, team store.Team, ref runspec.NodeRef, result runstate.NodeResult) error {
 	query := `UPDATE nodes SET status='done',outcome=?,error=?,failure_reason=?,exit_code=?,finished_at=?,
 claimed_by=NULL,lease_expires_at=NULL,capability_prefix='',owner_capability_prefix=''
 WHERE team=? AND run_id=? AND node_id=?`

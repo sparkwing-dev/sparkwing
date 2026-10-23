@@ -5,18 +5,17 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // ReadFailure returns the persisted masked failure and stage for a declared recovery source.
 // The transaction checks the reader's recovery edge and exact source generation.
 // A terminal status without recorded failure is not a synthetic SDK failure.
-func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef, generation int64, actor Actor) (*nodeproto.JobFailure, error) {
+func (t *Tenant) ReadFailure(ctx context.Context, source runspec.NodeRef, generation int64, actor runstate.Actor) (*nodeproto.JobFailure, error) {
 	if source.RunID == "" || source.NodeID == "" || generation < 0 {
 		return nil, authorityError(apierr.BadRequest, "failure read requires a source generation")
 	}
@@ -44,21 +43,21 @@ func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef,
 		if snapshot.Run.CancelRequestedAt != nil || snapshot.Run.FinishedAt != nil {
 			return holderRefusal()
 		}
-		if actor.Kind == ActorRunHost {
+		if actor.Kind == runstate.ActorRunHost {
 			if err := checkOwnerTx(ctx, tx, t.team, actor, string(source.RunID)); err != nil {
 				return err
 			}
-		} else if actor.Kind != ActorHolder || c.Binding.Kind != capability.BindingNode || runspec.RunID(c.Binding.RunID) != source.RunID {
+		} else if actor.Kind != runstate.ActorHolder || c.Binding.Kind != capability.BindingNode || runspec.RunID(c.Binding.RunID) != source.RunID {
 			return holderRefusal()
 		}
 		declared := false
-		var parent *NodeRow
+		var parent *runstate.NodeRow
 		for i := range snapshot.Nodes {
 			row := &snapshot.Nodes[i]
 			if row.Ref == source {
 				parent = row
 			}
-			if actor.Kind == ActorHolder && row.Ref.NodeID != runspec.NodeID(c.Binding.NodeID) {
+			if actor.Kind == runstate.ActorHolder && row.Ref.NodeID != runspec.NodeID(c.Binding.NodeID) {
 				continue
 			}
 			var job nodeproto.JobSpec
@@ -68,17 +67,17 @@ func (t *Tenant) ReadFailure(ctx context.Context, source controllerwire.NodeRef,
 			if runspec.NodeID(job.OnFailureOf) != source.NodeID {
 				continue
 			}
-			if actor.Kind == ActorHolder {
+			if actor.Kind == runstate.ActorHolder {
 				if err := checkHolderTx(ctx, tx, t.team, *row, actor); err != nil {
 					return err
 				}
 			}
 			declared = true
 		}
-		if !declared || parent == nil || parent.Status != StatusDone || parent.Generation != runspec.ClaimGeneration(generation) {
+		if !declared || parent == nil || parent.Status != runstate.StatusDone || parent.Generation != runspec.ClaimGeneration(generation) {
 			return holderRefusal()
 		}
-		if parent.Outcome != NodeFailed {
+		if parent.Outcome != runstate.NodeFailed {
 			return nil
 		}
 		var raw []byte

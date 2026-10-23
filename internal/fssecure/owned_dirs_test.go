@@ -15,7 +15,7 @@ import (
 
 var configDirPackages = map[string]bool{
 	"internal/fssecure":   true,
-	"internal/paths":      true,
+	"pkg/paths":           true,
 	"internal/profile":    true,
 	"internal/repos":      true,
 	"internal/secrets":    true,

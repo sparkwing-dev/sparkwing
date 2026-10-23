@@ -9,10 +9,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func derivedIssuanceSession(lifetime uint16) *credentialBoundary {
@@ -91,7 +90,7 @@ func TestTokenLoginDescendantEndsWithOriginalToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: limited.Capability.Prefix}
-	actor := store.Actor{Authority: ref, CapabilityPrefix: ref.ID}
+	actor := runstate.Actor{Authority: ref, CapabilityPrefix: ref.ID}
 	if err := tenant.RevokeAuthority(t.Context(), actor, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: limited.Capability.Prefix}); err != nil {
 		t.Fatal(err)
 	}

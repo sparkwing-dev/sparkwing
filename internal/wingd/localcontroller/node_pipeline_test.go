@@ -25,14 +25,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -143,11 +145,11 @@ func pipelineHTTP(t *testing.T, handler http.Handler) *http.Client {
 
 type pipelineEngine struct{ resolved engine.Resolved }
 
-func (p pipelineEngine) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
+func (p pipelineEngine) Resolve(context.Context, engineid.Pin, releaseasset.Target) (engine.Resolved, error) {
 	return p.resolved, nil
 }
 
-func (p pipelineEngine) Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+func (p pipelineEngine) Ensure(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 	return p.resolved, nil
 }
 
@@ -251,7 +253,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.Finish = private.FinishRunAndUnit
-	actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Owner: award.Owner}
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Owner: award.Owner}
 	plan := localAwardPlan()
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})
@@ -262,7 +264,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected := engine.Resolved{Identity: engine.Identity{Version: "v1.2.3", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}}, Executable: executable, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
+	selected := engine.Resolved{Identity: engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}}, Executable: executable, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
 	body, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -271,7 +273,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	services, err := nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{Home: b.Home, Admission: nodehost.ComposeStartGate(private, &nodehost.LocalAdmission{Daemon: pipelineAdmission{}}, true), Local: func(store.NodeRow) bool { return true }, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: private.Principal, Renew: b.Store.AsOperator().RenewUnit, Source: source.Options{Engines: pipelineEngine{selected}, Base: procenv.Base{Local: true}}}, private))
+	services, err := nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{Home: b.Home, Admission: nodehost.ComposeStartGate(state, &nodehost.LocalAdmission{Daemon: pipelineAdmission{}}, true), Local: func(runstate.NodeRow) bool { return true }, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: private.Principal, Renew: b.Store.AsOperator().RenewUnit, Source: source.Options{Engines: pipelineEngine{selected}, Base: procenv.Base{Local: true}}}, private))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,17 +283,17 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		}
 	})
 	adopt := services.Config.Owner.AdoptClaim
-	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim store.ReconciledNode) error {
+	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim runstate.ReconciledNode) error {
 		if err := private.AdoptClaim(ctx, claim); err != nil {
 			return err
 		}
-		actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: claim.Node.Ref.RunID, NodeID: claim.Node.Ref.NodeID, Holder: claim.Claim.Holder, Generation: claim.Claim.Generation}}
+		actor := runstate.Actor{Kind: runstate.ActorHolder, CapabilityPrefix: claim.Claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: claim.Node.Ref.RunID, NodeID: claim.Node.Ref.NodeID, Holder: claim.Claim.Holder, Generation: claim.Claim.Generation}}
 		beat, err := state.RenewNodeClaim(ctx, claim.Node.Ref, actor)
 		if err != nil {
 			return fmt.Errorf("renew unstarted local job: %w", err)
 		}
 		row, err := private.ReadNode(ctx, claim.Node.Ref)
-		if err != nil || row.Status != store.StatusPending || row.Attempt != 0 || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.Equal(beat.ExpiresAt) {
+		if err != nil || row.Status != runstate.StatusPending || row.Attempt != 0 || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.Equal(beat.ExpiresAt) {
 			return fmt.Errorf("unstarted local renewal changed claim: %+v: %w", row, err)
 		}
 		return adopt(ctx, claim)
@@ -353,7 +355,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		t.Fatal("completed owner retained private authority")
 	}
 	stored, err := b.Tenant.ReadSnapshot(ctx, admitted.RunID)
-	if err != nil || stored.Run.State != store.RunSuccess || len(stored.Nodes) != 2 {
+	if err != nil || stored.Run.State != runstate.RunSuccess || len(stored.Nodes) != 2 {
 		t.Fatalf("persisted pipeline: %+v: %v", stored, err)
 	}
 	for _, row := range stored.Nodes {
@@ -363,7 +365,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		if row.OutputRecord == nil {
 			t.Fatalf("job output was not committed: %+v", row)
 		}
-		if row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.StateActor.Authority.ID != parents[string(row.Ref.NodeID)] {
+		if row.Outcome != runstate.NodeSuccess || row.Attempt != 1 || row.StateActor.Authority.ID != parents[string(row.Ref.NodeID)] {
 			t.Fatalf("job used another award: %+v", row)
 		}
 	}

@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
 )
 
 func TestFundedBoundKillsUncooperativeSDKTree(t *testing.T) {

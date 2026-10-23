@@ -7,13 +7,14 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
 )
 
 // Dashboard configures the browser surface a controller serves beside its
@@ -121,7 +122,7 @@ func (s *Server) pageGate(pages http.Handler) http.Handler {
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			writePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "page method is not registered"})
+			routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "page method is not registered"})
 			return
 		}
 		secure := s.cookiesSecure()
@@ -132,7 +133,7 @@ func (s *Server) pageGate(pages http.Handler) http.Handler {
 			case err == nil:
 				session = sess
 			case sessionFlowUnavailable(err):
-				writePolicyError(w, err)
+				routepolicy.WritePolicyError(w, err)
 				return
 			default:
 				clearSessionCookies(w, secure)

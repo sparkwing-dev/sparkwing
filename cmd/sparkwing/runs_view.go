@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func renderObservedRun(ctx context.Context, reader controllerwire.RunReader, out io.Writer, detail controllerwire.RunDetail, opts runStatusOptions) error {
@@ -227,7 +227,7 @@ func displayTime(value *time.Time) string {
 	return value.Format(time.RFC3339Nano)
 }
 
-func writeEngineNotices(out io.Writer, notices []engine.Notice) error {
+func writeEngineNotices(out io.Writer, notices []engineid.Notice) error {
 	for _, notice := range notices {
 		if _, err := fmt.Fprintf(out, "warning: %s\n", notice.Reason); err != nil {
 			return err

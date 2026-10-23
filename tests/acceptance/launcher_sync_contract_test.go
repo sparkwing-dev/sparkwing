@@ -15,7 +15,7 @@ import (
 
 func TestSurfaceLauncherSyncAwardRetirement(t *testing.T) {
 	fence := capability.LeaseRef{Kind: capability.UnitNode, ID: "stable-unit", Holder: "launcher", Generation: 7}
-	input := controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{{Award: fence}}}
+	input := controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{{Award: fence}}}
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		t.Run(endpoint, func(t *testing.T) {
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {

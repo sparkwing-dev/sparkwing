@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 const maxPipelinesListed = 200
@@ -27,10 +27,17 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request, aut
 	if err != nil {
 		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusOK, pipelinesList{Pipelines: pipelines})
+	var out []controllerwire.PipelineSummary
+	if pipelines != nil {
+		out = make([]controllerwire.PipelineSummary, len(pipelines))
+	}
+	for i, row := range pipelines {
+		out[i] = controllerwire.PipelineSummary(row)
+	}
+	writeJSON(w, http.StatusOK, pipelinesList{Pipelines: out})
 	return nil
 }
 
 type pipelinesList struct {
-	Pipelines []store.PipelineSummary `json:"pipelines"`
+	Pipelines []controllerwire.PipelineSummary `json:"pipelines"`
 }

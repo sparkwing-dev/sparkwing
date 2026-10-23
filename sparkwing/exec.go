@@ -15,9 +15,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/execdiag"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/pkg/execdiag"
+	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
 )
 
 // ExitNotStarted marks an ExecError where the child process never

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // LogPutSigner issues PUT-only URLs bound to exact bytes and their required

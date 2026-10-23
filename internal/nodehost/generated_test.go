@@ -6,27 +6,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func claimedFixtureNode(t *testing.T, f *storeHostFixture, id string) NodeInput {
 	t.Helper()
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)}
+	ref := runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)}
 	if _, err := f.State.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 		t.Fatal(err)
 	}
-	awarded, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
-	if err != nil || awarded.Kind != store.Execute {
+	awarded, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: runstate.SourceNone})
+	if err != nil || awarded.Kind != runstate.Execute {
 		t.Fatalf("claim=%+v error=%v", awarded, err)
 	}
 	var acceptedSpec struct {
-		Resolved struct{ Engine engine.Identity }
+		Resolved struct{ Engine engineid.Identity }
 	}
 	if err := json.Unmarshal(f.Accepted.Spec, &acceptedSpec); err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func acceptedFixtureExpansion(t *testing.T, f *storeHostFixture, source NodeInpu
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(source.NodeID)})
+	row, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(source.NodeID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,31 +66,31 @@ func TestAResumedRunKeepsAFailedGeneratedNode(t *testing.T) {
 	doc := fanOutDoc()
 	f := newStoreHostFixture(t, doc)
 	source := claimedFixtureNode(t, f, "targets")
-	if err := f.report(t.Context(), source, store.NodeSuccess); err != nil {
+	if err := f.report(t.Context(), source, runstate.NodeSuccess); err != nil {
 		t.Fatal(err)
 	}
 	child := nodeproto.JobSpec{ID: "test-a", Groups: []string{testGenerator}, Needs: []string{"targets"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	acceptedFixtureExpansion(t, f, source, child)
-	if err := f.report(t.Context(), claimedFixtureNode(t, f, child.ID), store.NodeFailed); err != nil {
+	if err := f.report(t.Context(), claimedFixtureNode(t, f, child.ID), runstate.NodeFailed); err != nil {
 		t.Fatal(err)
 	}
-	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+	f.Host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		t.Error("accepted expansion evaluated again")
 		return nil, runspec.SecretRegistration{}, nil, nil
 	}
-	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeSuccess) })
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, runstate.NodeSuccess) })
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	completion, err := f.Host.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "failed" {
 		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(child.ID)})
-	if err != nil || row.Outcome != store.NodeFailed {
+	row, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(child.ID)})
+	if err != nil || row.Outcome != runstate.NodeFailed {
 		t.Fatalf("child=%+v error=%v", row, err)
 	}
-	summary, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "summary"})
-	if err != nil || summary.Outcome != store.NodeCancelled {
+	summary, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "summary"})
+	if err != nil || summary.Outcome != runstate.NodeCancelled {
 		t.Fatalf("waiter=%+v error=%v", summary, err)
 	}
 }
@@ -100,11 +100,11 @@ func TestAResumedRunGeneratesASourcesUnrecordedNodes(t *testing.T) {
 		t.Run(map[bool]string{false: "child", true: "empty"}[empty], func(t *testing.T) {
 			f := newStoreHostFixture(t, fanOutDoc())
 			source := claimedFixtureNode(t, f, "targets")
-			if err := f.report(t.Context(), source, store.NodeSuccess); err != nil {
+			if err := f.report(t.Context(), source, runstate.NodeSuccess); err != nil {
 				t.Fatal(err)
 			}
 			calls := 0
-			f.Host.Expand = func(_ context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+			f.Host.Expand = func(_ context.Context, input EvaluationInput, row runstate.NodeRow, _ StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 				calls++
 				if input.NodeID != source.NodeID || runspec.ClaimGeneration(input.Generation) != source.Generation || row.Ref.NodeID != runspec.NodeID(source.NodeID) {
 					t.Error("expansion lost source fence")
@@ -116,7 +116,7 @@ func TestAResumedRunGeneratesASourcesUnrecordedNodes(t *testing.T) {
 				body, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 				return body, runspec.SecretRegistration{Version: 1}, nil, err
 			}
-			f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeSuccess) })
+			f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, runstate.NodeSuccess) })
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			completion, err := f.Host.Run(ctx, f.Input)
@@ -137,7 +137,7 @@ func TestAResumeKeepsACompleteBatchBesideAnEmptyOne(t *testing.T) {
 	doc.Jobs[1].NeedsGenerated = append(doc.Jobs[1].NeedsGenerated, "targets/generate/1")
 	f := newStoreHostFixture(t, doc)
 	source := claimedFixtureNode(t, f, "targets")
-	if err := f.report(t.Context(), source, store.NodeSuccess); err != nil {
+	if err := f.report(t.Context(), source, runstate.NodeSuccess); err != nil {
 		t.Fatal(err)
 	}
 	child := nodeproto.JobSpec{ID: "test-a", Groups: []string{testGenerator}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
@@ -146,11 +146,11 @@ func TestAResumeKeepsACompleteBatchBesideAnEmptyOne(t *testing.T) {
 	if !replayed.Replayed || replayed.BodyHash != accepted.BodyHash {
 		t.Fatal("accepted complete/empty groups did not replay immutably")
 	}
-	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+	f.Host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		t.Error("accepted generators ran again")
 		return nil, runspec.SecretRegistration{}, nil, nil
 	}
-	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeSuccess) })
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, runstate.NodeSuccess) })
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	completion, err := f.Host.Run(ctx, f.Input)
@@ -163,8 +163,8 @@ func TestExpansionFailureWithoutAWaiterFailsTheRun(t *testing.T) {
 	doc := fanOutDoc()
 	doc.Jobs = doc.Jobs[:1]
 	f := newStoreHostFixture(t, doc)
-	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeSuccess) })
-	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, runstate.NodeSuccess) })
+	f.Host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		return nil, runspec.SecretRegistration{}, &store.ExpansionFailure{Code: apierr.SDKError, MaskedError: "generator failed"}, nil
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -174,7 +174,7 @@ func TestExpansionFailureWithoutAWaiterFailsTheRun(t *testing.T) {
 		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
 	snapshot, err := f.Tenant.ReadSnapshot(t.Context(), f.Accepted.RunID)
-	if err != nil || len(snapshot.Nodes) != 1 || snapshot.Nodes[0].Expansion != store.ExpansionFailed {
+	if err != nil || len(snapshot.Nodes) != 1 || snapshot.Nodes[0].Expansion != runstate.ExpansionFailed {
 		t.Fatalf("source expansion did not persist failure: %v", err)
 	}
 }

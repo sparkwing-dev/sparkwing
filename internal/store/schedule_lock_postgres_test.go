@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -24,7 +23,7 @@ func scheduleLockFixture(t *testing.T, target *storetest.Target) (*store.Store, 
 	a := storetest.AccountAuthority(t, s, member.Account.ID)
 	a.Target.Team = string(tenant.Team())
 	remote := "https://93.184.216.34/acme/repo.git"
-	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: remote, Branch: "main", SHA: sourcetest.FixedRemote(t, remote), Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}}}
+	body := store.ScheduleRepoRequest{Mode: store.ScheduleReplace, RepoURL: remote, Branch: "main", SHA: sourcetest.FixedRemote(t, remote), Schedules: []store.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}}}
 	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
 	if err != nil {
 		t.Fatal(err)

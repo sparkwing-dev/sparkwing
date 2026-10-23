@@ -7,12 +7,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 type actionsProofKey struct{}
@@ -28,8 +30,8 @@ func (s *Server) WithGitHubRunnerBindingLookup(lookup func(context.Context, stor
 	return s
 }
 
-func (s *Server) actionsEndpoints() []Endpoint {
-	return []Endpoint{{
+func (s *Server) actionsEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{{
 		Method: "POST", Pattern: "/api/v1/runners/github/exchange", Authentication: capability.AuthGitHubActions,
 		Verify: s.verifyActionsExchange, Handle: s.issueActionsCredential,
 	}}
@@ -69,7 +71,7 @@ func (s *Server) readActionsBinding(ctx context.Context, team store.Team, reposi
 		return s.githubRunners.lookup(ctx, team, repositoryID)
 	}
 	if s.operator == nil {
-		return store.GitHubRunnerBinding{}, missingEndpointPolicy()
+		return store.GitHubRunnerBinding{}, routepolicy.MissingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(ctx, team)
 	if err != nil {
@@ -108,7 +110,7 @@ func (s *Server) actionsProvision(ctx context.Context, team store.Team, claims g
 func (s *Server) issueActionsCredential(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	proof, ok := r.Context().Value(actionsProofKey{}).(actionsProof)
 	if !ok || s.credentialIssuer == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	issued, err := s.credentialIssuer.ProvisionCapability(r.Context(), proof.spec)
 	if errors.Is(err, store.ErrGitHubRunnerCredentialLimit) {

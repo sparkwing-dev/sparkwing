@@ -7,10 +7,10 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -221,7 +221,7 @@ func launcherClaimant(c capability.Capability) bool {
 	return capability.Launcher(c)
 }
 
-func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref controllerwire.NodeRef) (UnitClaim, error) {
+func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, ref runspec.NodeRef) (UnitClaim, error) {
 	if err := checkOwnerTx(ctx, tx, team, actor, string(ref.RunID)); err != nil {
 		return UnitClaim{}, err
 	}

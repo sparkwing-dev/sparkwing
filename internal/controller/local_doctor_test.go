@@ -11,9 +11,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/sessionledger"
 )
 
 func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
@@ -45,7 +46,7 @@ func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
 					listener := &localScheduleListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 					ctx, cancel := context.WithCancel(t.Context())
 					done := make(chan error, 1)
-					go func() { done <- server.HTTP().ServeAPI(ctx, listener) }()
+					go func() { done <- wingd.ServeAPI(ctx, listener, server.HTTP()) }()
 					peer, _ := localControllerIdentity(t)
 					transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
 						local, remote := net.Pipe()

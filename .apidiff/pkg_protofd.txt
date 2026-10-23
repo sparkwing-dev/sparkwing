@@ -1,0 +1,5 @@
+# pkg/protofd
+
+const Arg = "--sw-node-protocol"
+const HandlesArg = "--sw-protocol-handles"
+func Pipes() (request, frame *os.File, err error)

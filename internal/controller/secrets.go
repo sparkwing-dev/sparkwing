@@ -4,10 +4,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type secretSetReq struct {
@@ -69,16 +69,6 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 	noteAuditTarget(r.Context(), "secret_name", req.Name)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
-}
-
-// safety: responses carry credentials or tenant data that browser disk caches
-// and intermediaries must not keep.
-func noStore(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Pragma", "no-cache")
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

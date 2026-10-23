@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // safety: Optional preserves an explicitly selected zero separately from absence.
@@ -421,7 +421,7 @@ type Guards struct {
 type Resolved struct {
 	ArgumentDeclarations []nodeproto.ArgumentDescription `json:"argument_declarations,omitempty"`
 	// Engine pins the portable verified release identity; executors resolve their own platform asset.
-	Engine              engine.Identity     `json:"engine"`
+	Engine              engineid.Identity   `json:"engine"`
 	Args                map[string]string   `json:"args"`
 	SecretArgs          []string            `json:"secret_args"`
 	SecretRegistration  SecretRegistration  `json:"secret_registration"`

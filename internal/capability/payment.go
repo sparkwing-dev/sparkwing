@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // PaymentMode selects provider credentials without changing verification or settlement code.

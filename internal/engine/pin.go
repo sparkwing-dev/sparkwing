@@ -9,44 +9,44 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // ReadPin resolves the repository SDK requirement without executing repository code.
-func ReadPin(checkout string, sdk SDKKind) (Pin, error) {
-	var pin Pin
+func ReadPin(checkout string, sdk engineid.SDKKind) (engineid.Pin, error) {
+	var pin engineid.Pin
 	var err error
 	switch sdk {
-	case GoSDK:
+	case engineid.GoSDK:
 		pin, err = readGoPin(checkout)
-	case TypeScriptSDK:
+	case engineid.TypeScriptSDK:
 		pin, err = readNpmPin(checkout)
 	default:
-		return Pin{}, invalid("unknown SDK kind", "Select go or typescript.")
+		return engineid.Pin{}, invalid("unknown SDK kind", "Select go or typescript.")
 	}
 	if err != nil {
-		return Pin{}, invalid(err.Error(), "Pin a published SDK release in the manifest and update its native lockfile.")
+		return engineid.Pin{}, invalid(err.Error(), "Pin a published SDK release in the manifest and update its native lockfile.")
 	}
 	if _, err = VersionForPin(pin); err != nil {
-		return Pin{}, err
+		return engineid.Pin{}, err
 	}
 	pin.InputsDigest, err = pinInputsDigest(checkout, pin)
 	return pin, err
 }
 
 // VersionForPin selects the exact release or installed engine for an SDK replacement.
-func VersionForPin(pin Pin) (string, error) {
-	if pin.SDK == GoSDK && pin.Replacement != "" && pin.Version != "" {
+func VersionForPin(pin engineid.Pin) (string, error) {
+	if pin.SDK == engineid.GoSDK && pin.Replacement != "" && pin.Version != "" {
 		return installedEngineVersion()
 	}
 	version := pin.Version
 	switch pin.SDK {
-	case GoSDK:
-	case TypeScriptSDK:
+	case engineid.GoSDK:
+	case engineid.TypeScriptSDK:
 		version = "v" + version
 	default:
 		return "", invalid("unknown SDK kind", "Select go or typescript.")
@@ -61,20 +61,20 @@ func releaseVersion(version string) bool {
 	return semver.IsValid(version) && semver.Canonical(version) == version && semver.Build(version) == "" && !module.IsPseudoVersion(version)
 }
 
-func readGoPin(dir string) (Pin, error) {
+func readGoPin(dir string) (engineid.Pin, error) {
 	body, err := readPinFile(filepath.Join(dir, "go.mod"))
 	if err != nil {
-		return Pin{}, err
+		return engineid.Pin{}, err
 	}
 	file, err := modfile.Parse("go.mod", body, nil)
 	if err != nil {
-		return Pin{}, err
+		return engineid.Pin{}, err
 	}
-	pin := Pin{SDK: GoSDK, Manifest: "go.mod"}
+	pin := engineid.Pin{SDK: engineid.GoSDK, Manifest: "go.mod"}
 	for _, require := range file.Require {
 		if require.Mod.Path == GoModule {
 			if pin.Version != "" {
-				return Pin{}, fmt.Errorf("duplicate SDK requirement")
+				return engineid.Pin{}, fmt.Errorf("duplicate SDK requirement")
 			}
 			pin.Version = require.Mod.Version
 		}
@@ -89,13 +89,13 @@ func readGoPin(dir string) (Pin, error) {
 	}
 	for _, exclude := range file.Exclude {
 		if exclude.Mod.Path == GoModule && exclude.Mod.Version == pin.Version {
-			return Pin{}, fmt.Errorf("SDK pin is excluded")
+			return engineid.Pin{}, fmt.Errorf("SDK pin is excluded")
 		}
 	}
 	if _, err := os.Lstat(filepath.Join(dir, "go.sum")); err == nil {
 		pin.Lockfile = "go.sum"
 	} else if !os.IsNotExist(err) {
-		return Pin{}, err
+		return engineid.Pin{}, err
 	}
 	return pin, nil
 }
@@ -120,16 +120,16 @@ func sdkRequirement(body []byte) (string, error) {
 	return spec, nil
 }
 
-func readNpmPin(dir string) (Pin, error) {
+func readNpmPin(dir string) (engineid.Pin, error) {
 	body, err := readPinFile(filepath.Join(dir, "package.json"))
 	if err != nil {
-		return Pin{}, err
+		return engineid.Pin{}, err
 	}
 	spec, err := sdkRequirement(body)
 	if err != nil {
-		return Pin{}, err
+		return engineid.Pin{}, err
 	}
-	pin := Pin{SDK: TypeScriptSDK, Manifest: "package.json"}
+	pin := engineid.Pin{SDK: engineid.TypeScriptSDK, Manifest: "package.json"}
 	var lockBody []byte
 	for _, name := range []string{"npm-shrinkwrap.json", "package-lock.json"} {
 		body, err := readPinFile(filepath.Join(dir, name))
@@ -137,10 +137,10 @@ func readNpmPin(dir string) (Pin, error) {
 			continue
 		}
 		if err != nil {
-			return Pin{}, err
+			return engineid.Pin{}, err
 		}
 		if pin.Lockfile != "" {
-			return Pin{}, fmt.Errorf("conflicting npm lockfiles")
+			return engineid.Pin{}, fmt.Errorf("conflicting npm lockfiles")
 		}
 		pin.Lockfile = name
 		lockBody = body
@@ -150,7 +150,7 @@ func readNpmPin(dir string) (Pin, error) {
 			pin.Version = spec
 			return pin, nil
 		}
-		return Pin{}, fmt.Errorf("SDK range requires an exact npm lockfile resolution")
+		return engineid.Pin{}, fmt.Errorf("SDK range requires an exact npm lockfile resolution")
 	}
 	var lock struct {
 		LockfileVersion int `json:"lockfileVersion"`
@@ -163,10 +163,10 @@ func readNpmPin(dir string) (Pin, error) {
 		} `json:"dependencies"`
 	}
 	if err := decodeUniqueJSON(lockBody, &lock); err != nil {
-		return Pin{}, err
+		return engineid.Pin{}, err
 	}
 	if lock.LockfileVersion < 1 || lock.LockfileVersion > 3 {
-		return Pin{}, fmt.Errorf("unsupported npm lockfile version")
+		return engineid.Pin{}, fmt.Errorf("unsupported npm lockfile version")
 	}
 	if lock.LockfileVersion == 1 {
 		pin.Version = lock.Dependencies[TypeScriptPackage].Version
@@ -175,23 +175,23 @@ func readNpmPin(dir string) (Pin, error) {
 		root := lock.Packages[""]
 		rootBody, err := json.Marshal(root)
 		if err != nil {
-			return Pin{}, err
+			return engineid.Pin{}, err
 		}
 		rootSpec, err := sdkRequirement(rootBody)
 		if err != nil || rootSpec != spec {
-			return Pin{}, fmt.Errorf("package manifest and npm lockfile disagree")
+			return engineid.Pin{}, fmt.Errorf("package manifest and npm lockfile disagree")
 		}
 		if legacy := lock.Dependencies[TypeScriptPackage].Version; legacy != "" && legacy != pin.Version {
-			return Pin{}, fmt.Errorf("conflicting SDK lockfile resolutions")
+			return engineid.Pin{}, fmt.Errorf("conflicting SDK lockfile resolutions")
 		}
 	}
 	if !npmSatisfies(spec, pin.Version) {
-		return Pin{}, fmt.Errorf("SDK lockfile resolution does not satisfy its manifest requirement")
+		return engineid.Pin{}, fmt.Errorf("SDK lockfile resolution does not satisfy its manifest requirement")
 	}
 	return pin, nil
 }
 
-func pinInputsDigest(dir string, pin Pin) (string, error) {
+func pinInputsDigest(dir string, pin engineid.Pin) (string, error) {
 	var buf bytes.Buffer
 	for _, path := range []string{pin.Manifest, pin.Lockfile} {
 		if path == "" {

@@ -6,10 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestMeteredRootPolicyCannotRewriteAwardProperty(t *testing.T) {
@@ -48,12 +47,12 @@ func TestMeteredRootPolicyCannotRewriteAwardProperty(t *testing.T) {
 			setMarker(!metered)
 			tenant := &Tenant{s: s, team: "a"}
 			admitExecution(t, tenant, actor)
-			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
+			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)})
 			if err != nil {
 				t.Fatal(err)
 			}
 			*now = now.Add(time.Duration(i+1) * time.Second)
-			change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(int64(started.Attempt))}
+			change := nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(int64(started.Attempt))}
 			for replay := range 2 {
 				applied, err := tenant.TransitionNode(t.Context(), change)
 				if err != nil || applied.Replayed != (replay == 1) {

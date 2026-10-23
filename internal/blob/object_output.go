@@ -6,7 +6,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // ReadOutput consumes and verifies a controller-authorized output object.

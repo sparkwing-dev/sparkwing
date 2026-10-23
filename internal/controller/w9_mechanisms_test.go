@@ -13,22 +13,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
+
 	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -84,13 +86,13 @@ func w9Entry(t *testing.T) (*source.Entry, runspec.Source, string) {
 		t.Fatal(err)
 	}
 	entry.Command = []string{exe, "-test.run=^TestW9MechanismSDKProcess$", "--", "w9-sdk-process"}
-	entry.Engine = engine.Resolved{Identity: engine.Identity{Version: "v1.2.3", ManifestDigest: "verified-test-engine", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}}}
+	entry.Engine = engine.Resolved{Identity: engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified-test-engine", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}}}
 	return entry, code, sha
 }
 
 func w9Planner(entry *source.Entry, base procenv.Base) nodehost.SDKPlanner {
 	sessions := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: base}}
-	return nodehost.SDKPlanner{Start: sessions.StartPlanning, Masker: base.Masker, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+	return nodehost.SDKPlanner{Start: sessions.StartPlanning, Masker: base.Masker, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 		return entry.Engine, nil
 	}, Log: func(context.Context, nodeproto.FrameLog) error { return nil }}
 }
@@ -320,8 +322,8 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 		t.Fatal(err)
 	}
 	controller.EngineClaimHTTP(t, handler, claim.Capability, "POST", "/api/v1/runs/run/jobs/source/expansion", string(submission), 200)
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "source"})
-	if err != nil || row.Expansion != store.ExpansionAccepted || row.ExpansionDigest != string(digest) {
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "source"})
+	if err != nil || row.Expansion != runstate.ExpansionAccepted || row.ExpansionDigest != string(digest) {
 		t.Fatalf("generator did not settle: %+v %v", row, err)
 	}
 }

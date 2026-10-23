@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
+	"github.com/sparkwing-dev/sparkwing/pkg/depcachekey"
 )
 
 var keyRE = regexp.MustCompile(`^dep-[a-f0-9]{64}$`)

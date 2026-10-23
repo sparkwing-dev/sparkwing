@@ -8,20 +8,22 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type hostingOwnerState struct {
@@ -35,7 +37,7 @@ func (s hostingOwnerState) ReadSnapshot(context.Context, string) (store.RunSnaps
 
 type hostingOwnerEngines struct{ source.EngineResolver }
 
-func (hostingOwnerEngines) Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+func (hostingOwnerEngines) Ensure(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("unexpected engine acquisition")
 }
 
@@ -45,7 +47,7 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 		spec := runspec.Spec{Request: unit.Request, Hash: "spec", PlanHash: "plan", Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}}}
 		unit.Accepted = &controllerwire.PlanAccepted{Spec: spec, Plan: []byte(`{"jobs":[]}`), PlanHash: "plan"}
 		state := hostingOwnerState{snapshot: original.snapshot}
-		state.snapshot.Run.State = store.RunRunning
+		state.snapshot.Run.State = runstate.RunRunning
 		state.snapshot.Run.Spec, state.snapshot.Run.Plan, state.snapshot.Run.PlanHash = &spec, unit.Accepted.Plan, "plan"
 		s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
 		if err != nil {
@@ -68,7 +70,7 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 				return nodehost.NativeServices{Config: nodehost.NativeHostConfig{
 					Store: state, Lease: lease.Keeper{Lease: time.Minute, Interval: time.Second}, Source: source.Options{Engines: hostingOwnerEngines{}},
 					Masks:       nodehost.NewMaskRegistry(secrets.NewMasker()),
-					Router:      controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities}),
+					Router:      routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities}),
 					Processes:   &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
 					PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
 					Executor: nodehost.ExecutionOperations{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
@@ -78,15 +80,15 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 						return nodehost.ProcessGrant{}, errors.New("unexpected evaluation")
 					}},
 					Owner: nodehost.OwnerOperations{
-						Renew: func(_ context.Context, actor store.Actor, computing bool) (store.LeaseBeat, error) {
+						Renew: func(_ context.Context, actor runstate.Actor, computing bool) (runstate.LeaseBeat, error) {
 							renewals++
 							if actor.Authority != principal.Authority || computing != (renewals == 1) {
 								t.Error("owner renewal lost authority or current activity")
 							}
 							if renewals == 2 {
-								return store.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
+								return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
 							}
-							return store.LeaseBeat{}, nil
+							return runstate.LeaseBeat{}, nil
 						},
 						Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) { return &source.Entry{}, nil },
 						Decide:  func(store.ScheduleSnapshot) store.ScheduleDecision { return store.ScheduleDecision{} },

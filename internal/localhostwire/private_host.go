@@ -3,7 +3,7 @@ package localhostwire
 import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // LocalDataAuthority carries the controller's canonical live storage projection.
@@ -13,25 +13,25 @@ type LocalDataAuthority struct {
 
 // LocalNodeSnapshot keeps artifact selectors outside the executable job namespace.
 type LocalNodeSnapshot struct {
-	store.RunSnapshot
+	runstate.RunSnapshot
 	ArtifactSources map[string]blob.RecordKey `json:"artifact_sources,omitempty"`
 }
 
 // LocalRunTransition carries a lifecycle edge without actor authority.
 type LocalRunTransition struct {
-	To          store.RunState           `json:"to"`
-	Cause       store.RunCause           `json:"cause"`
-	Reason      string                   `json:"reason"`
-	MaskedError string                   `json:"masked_error"`
-	OwnerPolicy *store.OwnerPolicyResult `json:"owner_policy,omitempty"`
+	To          runstate.RunState           `json:"to"`
+	Cause       runstate.RunCause           `json:"cause"`
+	Reason      string                      `json:"reason"`
+	MaskedError string                      `json:"masked_error"`
+	OwnerPolicy *runstate.OwnerPolicyResult `json:"owner_policy,omitempty"`
 }
 
 // LocalRunCompletion requests the store-derived verdict without choosing an outcome.
 type LocalRunCompletion struct {
-	Cause       store.RunCause           `json:"cause"`
-	Reason      string                   `json:"reason"`
-	MaskedError string                   `json:"masked_error"`
-	OwnerPolicy *store.OwnerPolicyResult `json:"owner_policy,omitempty"`
+	Cause       runstate.RunCause           `json:"cause"`
+	Reason      string                      `json:"reason"`
+	MaskedError string                      `json:"masked_error"`
+	OwnerPolicy *runstate.OwnerPolicyResult `json:"owner_policy,omitempty"`
 }
 
 // LocalAuthenticationRequest selects an authority within the host's awarded run.
@@ -60,7 +60,7 @@ type LocalBindingChecked struct {
 
 // LocalCapacityRequest names a job under its authenticated award.
 type LocalCapacityRequest struct {
-	Binding store.CapacityBinding `json:"binding"`
+	Binding runstate.CapacityBinding `json:"binding"`
 }
 
 // LocalEvaluationRelease proposes expansion work under the current run owner.

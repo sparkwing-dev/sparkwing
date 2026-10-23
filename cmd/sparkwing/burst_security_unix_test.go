@@ -17,12 +17,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestHostileProjectCannotAuthorizeBurst(t *testing.T) {
@@ -221,7 +222,7 @@ func burstCLIClaimantBoundary(t *testing.T, personal, listed, allowed bool, forg
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := owner.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeReady), Cause: string(store.CauseRelease)}); err != nil {
+	if _, err := owner.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(runstate.NodeReady), Cause: string(runstate.CauseRelease)}); err != nil {
 		t.Fatal(err)
 	}
 	session, _, _, err := state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)

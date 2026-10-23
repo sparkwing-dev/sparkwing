@@ -7,9 +7,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func attemptExecutorTx(ctx context.Context, tx *storeTx, actor Actor, observed *NodeAttempt) (kind, name, location string, err error) {
+func attemptExecutorTx(ctx context.Context, tx *storeTx, actor runstate.Actor, observed *runstate.NodeAttempt) (kind, name, location string, err error) {
 	chain, err := authorityChainTx(ctx, tx, actor.Authority, false)
 	if err != nil {
 		return "", "", "", err

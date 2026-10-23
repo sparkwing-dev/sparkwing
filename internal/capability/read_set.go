@@ -3,7 +3,7 @@ package capability
 import (
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // ReadsJobOutput reports the declared same-run output edge between two jobs.

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -23,8 +24,8 @@ func engineAdmitExecution(t *testing.T, st *store.Store, principal capability.Pr
 		engineAcceptedFixturePlan(t, &engineFixture{Store: st}, store.Team(c.Team), c.Binding.RunID, c.Binding.NodeID)
 	}
 	a := capability.Authorized{Principal: principal, Binding: c.Binding, Target: capability.Target{Team: c.Team, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID}}
-	binding := store.CapacityBinding{RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Generation: c.Binding.Generation}
-	if result, err := tenant.MayStart(t.Context(), binding, engineActor(a)); err != nil || result.Kind != store.AcquireGranted {
+	binding := runstate.CapacityBinding{RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Generation: c.Binding.Generation}
+	if result, err := tenant.MayStart(t.Context(), binding, engineActor(a)); err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("execution admission: %+v, %v", result, err)
 	}
 }

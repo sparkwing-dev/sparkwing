@@ -3,19 +3,20 @@ package controller
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func (s *DataController) persistedDataAuthority(ctx context.Context, a capability.Authorized) (blob.Authority, error) {
 	c := a.Principal.Capability
 	if a.Principal.Authority.Kind != capability.AuthorityCapability || c.Prefix == "" || a.Principal.Authority.ID != c.Prefix || c.Team == "" {
-		return blob.Authority{}, missingEndpointPolicy()
+		return blob.Authority{}, routepolicy.MissingEndpointPolicy()
 	}
-	tenant, err := ScopedTenantPort[interface {
+	tenant, err := scopedTenantPort[interface {
 		ResolveDataAuthority(context.Context, capability.Authorized) (blob.Authority, error)
 	}](ctx, store.Team(c.Team), s.ResolveTenant)
 	if err != nil {

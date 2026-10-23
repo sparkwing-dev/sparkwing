@@ -6,60 +6,41 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
-// OwnerPolicyKind identifies a decision made before execution is released.
-type OwnerPolicyKind string
-
-// Owner policy outcomes distinguish admission refusal from approval bypass.
-const (
-	PolicyAdmissionSkip  OwnerPolicyKind = "admission_skip"
-	PolicyAdmissionFail  OwnerPolicyKind = "admission_fail"
-	PolicyQueueTimeout   OwnerPolicyKind = "admission_queue_timeout"
-	PolicyApprovalFail OwnerPolicyKind = "approval_fail"
- PolicyApprovalBypass OwnerPolicyKind = "approval_bypass"
-)
-
-// OwnerPolicyResult binds a declared decision to its captured work generation.
-type OwnerPolicyResult struct {
-	Kind       OwnerPolicyKind
-	Generation runspec.ClaimGeneration
-}
-
-func (p OwnerPolicyResult) outcome() NodeState {
+func policyOutcome(p runstate.OwnerPolicyResult) runstate.NodeState {
 	switch p.Kind {
-	case PolicyAdmissionSkip:
-		return NodeSkipped
-	case PolicyAdmissionFail, PolicyQueueTimeout, PolicyApprovalFail:
-		return NodeFailed
-	case PolicyApprovalBypass:
-		return NodeSkipped
+	case runstate.PolicyAdmissionSkip:
+		return runstate.NodeSkipped
+	case runstate.PolicyAdmissionFail, runstate.PolicyQueueTimeout, runstate.PolicyApprovalFail:
+		return runstate.NodeFailed
+	case runstate.PolicyApprovalBypass:
+		return runstate.NodeSkipped
 	default:
 		return ""
 	}
 }
 
-func checkNodeOwnerPolicy(row NodeRow, change nodeTransition) error {
+func checkNodeOwnerPolicy(row runstate.NodeRow, change nodeTransition) error {
 	policy, result := change.Extra.OwnerPolicy, change.Extra.Result
-	if policy == nil || policy.Generation < 0 || policy.Generation != row.Generation || row.ReadyAt != nil || result == nil || policy.outcome() == "" || policy.outcome() != change.To {
+	if policy == nil || policy.Generation < 0 || policy.Generation != row.Generation || row.ReadyAt != nil || result == nil || policyOutcome(*policy) == "" || policyOutcome(*policy) != change.To {
 		return holderRefusal()
 	}
-	if policy.Kind == PolicyQueueTimeout && result.Reason != FailureQueueTimeout {
+	if policy.Kind == runstate.PolicyQueueTimeout && result.Reason != FailureQueueTimeout {
 		return errors.New("queue timeout requires its policy reason")
 	}
-	if policy.Kind == PolicyApprovalBypass || policy.Kind==PolicyApprovalFail {
+	if policy.Kind == runstate.PolicyApprovalBypass || policy.Kind == runstate.PolicyApprovalFail {
 		var job nodeproto.JobSpec
-		if json.Unmarshal(row.Spec, &job) != nil || job.Approval == nil || len(job.Closures.SkipIf) == 0 || policy.Kind==PolicyApprovalBypass && result.Reason != "skip_if" {
+		if json.Unmarshal(row.Spec, &job) != nil || job.Approval == nil || len(job.Closures.SkipIf) == 0 || policy.Kind == runstate.PolicyApprovalBypass && result.Reason != "skip_if" {
 			return errors.New("approval bypass requires its declared skip predicate")
 		}
 	}
 	return nil
 }
 
-func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunRow, change RunTransition, now time.Time) error {
+func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunRow, change runstate.RunTransition, now time.Time) error {
 	if err := checkOwnerTx(ctx, tx, team, change.Actor, row.ID); err != nil {
 		return err
 	}
@@ -67,7 +48,7 @@ func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunR
 	if policy == nil || policy.Generation != change.Actor.Owner.Generation || row.Spec == nil || row.CancelRequestedAt != nil {
 		return holderRefusal()
 	}
-	if policy.Kind != PolicyAdmissionSkip && policy.Kind != PolicyAdmissionFail && policy.Kind != PolicyQueueTimeout {
+	if policy.Kind != runstate.PolicyAdmissionSkip && policy.Kind != runstate.PolicyAdmissionFail && policy.Kind != runstate.PolicyQueueTimeout {
 		return errors.New("invalid plan admission policy result")
 	}
 	snapshot, err := readSnapshotTx(ctx, tx, team, row.ID)
@@ -75,15 +56,15 @@ func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunR
 		return err
 	}
 	for _, node := range snapshot.Nodes {
-		if node.Status == StatusDone {
+		if node.Status == runstate.StatusDone {
 			continue
 		}
-		if node.Status != StatusPending || node.ReadyAt != nil || node.ClaimedBy != "" {
+		if node.Status != runstate.StatusPending || node.ReadyAt != nil || node.ClaimedBy != "" {
 			return errors.New("plan admission refusal requires unreleased work")
 		}
 		_, err := transitionNodeStateTx(ctx, tx, team, nodeTransition{
-			Ref: node.Ref, Actor: change.Actor, To: policy.outcome(), Cause: causeOwnerPolicy,
-			Extra: transitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: policy.Kind, Generation: node.Generation}, Result: &NodeResult{Outcome: policy.outcome(), Reason: change.Reason, MaskedError: change.MaskedError}},
+			Ref: node.Ref, Actor: change.Actor, To: policyOutcome(*policy), Cause: causeOwnerPolicy,
+			Extra: transitionExtra{OwnerPolicy: &runstate.OwnerPolicyResult{Kind: policy.Kind, Generation: node.Generation}, Result: &runstate.NodeResult{Outcome: policyOutcome(*policy), Reason: change.Reason, MaskedError: change.MaskedError}},
 		})
 		if err != nil {
 			return err

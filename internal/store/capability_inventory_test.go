@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
-func inventoryAuthorization(t *testing.T, s *Store, actor Actor, team, prefix string) capability.Authorized {
+func inventoryAuthorization(t *testing.T, s *Store, actor runstate.Actor, team, prefix string) capability.Authorized {
 	t.Helper()
 	p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
@@ -197,7 +198,7 @@ func TestCapabilityInventoryDeploymentIsolation(t *testing.T) {
 	delegated.Digest = [32]byte{1}
 	delegated.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
 	authorityPersist(t, s, delegated)
-	a := inventoryAuthorization(t, s, Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}}, "", "")
+	a := inventoryAuthorization(t, s, runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}}, "", "")
 	operator := s.AsOperator()
 	if operator.Team() != "" {
 		t.Fatal("operator has a tenant")
@@ -218,7 +219,7 @@ func TestCapabilityInventoryDeploymentIsolation(t *testing.T) {
 	}
 }
 
-func inventoryMemberRoot(t *testing.T, s *Store, actor Actor) capability.Issued {
+func inventoryMemberRoot(t *testing.T, s *Store, actor runstate.Actor) capability.Issued {
 	t.Helper()
 	p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
@@ -281,7 +282,7 @@ func TestCapabilityRotationBearerAndRollback(t *testing.T) {
 	s := authorityStore(t)
 	actor := authorityMember(t, s, "member", RoleEditor)
 	old := inventoryMemberRoot(t, s, actor)
-	actor = Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}}
+	actor = runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}}
 	tenant := &Tenant{s: s, team: "a"}
 	a := inventoryAuthorization(t, s, actor, "a", old.Capability.Prefix)
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_rotation BEFORE UPDATE OF revoked_at ON capabilities BEGIN SELECT RAISE(ABORT,'refused'); END`)
@@ -357,7 +358,7 @@ func TestCapabilityRotationRegisteredOrigins(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			actor := Actor{}
+			actor := runstate.Actor{}
 			if kind == capability.ProvisionBootstrap {
 				actor.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}
 			} else {
@@ -435,7 +436,7 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			actor := Actor{Authority: *spec.Authority}
+			actor := runstate.Actor{Authority: *spec.Authority}
 			tenant := &Tenant{s: s, team: "a"}
 			expires := new(s.now().Add(2 * time.Hour))
 			if problem == "parent_expiry" {
@@ -596,7 +597,7 @@ func TestCapabilityRotationRetainsMeteredMachine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "owner"}}
+	actor := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "owner"}}
 	a := inventoryAuthorization(t, s, actor, "a", old.Capability.Prefix)
 	rotation, err := (&Tenant{s: s, team: "a"}).RotateCapability(t.Context(), a, time.Hour, nil)
 	if err != nil || !rotation.Issued.Capability.RootMetered || rotation.Previous.CreatedBy != "operator" {
@@ -630,7 +631,7 @@ func TestCapabilityRotationBearerCannotExtendExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bearer := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}}
+	bearer := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}}
 	tenant := &Tenant{s: s, team: "a"}
 	a := inventoryAuthorization(t, s, bearer, "a", old.Capability.Prefix)
 	for _, later := range []time.Time{expiry.Add(time.Second), expiry.Add(30 * 24 * time.Hour)} {
@@ -672,7 +673,7 @@ func TestCapabilityRotationSessionMayExtendExpiry(t *testing.T) {
 	}
 }
 
-func adminRotationToken(t *testing.T, s *Store, owner Actor, expiry time.Time) capability.Issued {
+func adminRotationToken(t *testing.T, s *Store, owner runstate.Actor, expiry time.Time) capability.Issued {
 	t.Helper()
 	p, err := s.AsOperator().ResolveAuthority(t.Context(), owner.Authority)
 	if err != nil {
@@ -702,7 +703,7 @@ func TestCapabilityRotationBearersNeverExtendExpiry(t *testing.T) {
 			} else {
 				caller = adminRotationToken(t, s, owner, hour.Add(-time.Minute))
 			}
-			bearer := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: caller.Capability.Prefix}}
+			bearer := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: caller.Capability.Prefix}}
 			tenant := &Tenant{s: s, team: "a"}
 			a := inventoryAuthorization(t, s, bearer, "a", target.Capability.Prefix)
 			later := hour.Add(30 * 24 * time.Hour)

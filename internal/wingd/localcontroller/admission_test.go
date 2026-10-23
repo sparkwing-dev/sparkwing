@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
@@ -46,7 +47,7 @@ func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
 		t.Fatalf("live run: terminal=%t error=%v", terminal, err)
 	}
 	started := time.Unix(0, 1)
-	if err := teststore.SeedTriggerClaim(binding.Store, t.Context(), binding.Tenant.Team(), "run", store.Actor{CapabilityPrefix: "owner", NodeFence: runspec.NodeFence{RunID: "run", Holder: "owner", Generation: 7}}, time.Now().Add(limits.DefaultLease), &started); err != nil {
+	if err := teststore.SeedTriggerClaim(binding.Store, t.Context(), binding.Tenant.Team(), "run", runstate.Actor{CapabilityPrefix: "owner", NodeFence: runspec.NodeFence{RunID: "run", Holder: "owner", Generation: 7}}, time.Now().Add(limits.DefaultLease), &started); err != nil {
 		t.Fatal(err)
 	}
 	cancel()

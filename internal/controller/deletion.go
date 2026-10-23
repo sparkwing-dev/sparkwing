@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // TeamDeletionInterval is how often the controller finishes pending team
@@ -65,7 +66,7 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request, a capa
 		return accountMutationError(err)
 	}
 	if del.Team != store.Team(a.Target.Team) {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	s.logger.Info("team deletion requested", "team", string(del.Team), "by", a.Principal.Capability.Subject.ID)
 	writeJSON(w, http.StatusAccepted, teamDeletionBody(del))

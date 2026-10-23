@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -30,7 +29,7 @@ func awardExecutionHost(chain []authorityNode, sealed runspec.SealedRequest, her
 
 // Only authenticated activation of a reserved execution node seals launcher placement.
 // Capacity demand and reservation observations never supply an execution host.
-func (s *Store) sealLauncherHost(ctx context.Context, authority capability.AuthorityRef, observation controllerwire.LauncherActivation) error {
+func (s *Store) sealLauncherHost(ctx context.Context, authority capability.AuthorityRef, observation capability.LauncherActivation) error {
 	if _, err := decodeAwardUnit(observation.Award.Kind, observation.Award.ID); err != nil {
 		return nil
 	}

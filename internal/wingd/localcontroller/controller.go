@@ -11,10 +11,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // State supplies the local recovery and activity projection over the owned store.
@@ -36,7 +37,7 @@ type Binding struct {
 type Services struct {
 	Policies store.Policies
 	State    State
-	HTTP     wingd.LocalHTTP
+	HTTP     localhostwire.LocalHTTP
 	Runner   runners.StoreRunnerConfig
 	Close    func() error
 	Maintain func(context.Context)
@@ -118,7 +119,7 @@ type localController struct {
 	closeErr error
 }
 
-func (c *localController) HTTP() wingd.LocalHTTP { return c.services.HTTP }
+func (c *localController) HTTP() localhostwire.LocalHTTP { return c.services.HTTP }
 
 func (c *localController) Reconcile(ctx context.Context) (wingd.LocalActivity, error) {
 	c.mu.Lock()

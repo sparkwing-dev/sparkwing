@@ -10,12 +10,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type identityConfig struct {
@@ -108,7 +109,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		engine := s.engineController
 		result, err := engine.Compatibility(r.Context(), versions[0])
 		if err != nil {
-			writePolicyError(w, err)
+			routepolicy.WritePolicyError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, result)

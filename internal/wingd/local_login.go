@@ -12,7 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // DashboardLoginPath is the api.sock route that mints a one-time dashboard sign-in link.
@@ -31,12 +32,12 @@ type DashboardLogin struct {
 }
 
 type pendingLogin struct {
-	peer    LocalPeerIdentity
+	peer    localhostwire.LocalPeerIdentity
 	expires time.Time
 }
 
 type dashboardSession struct {
-	peer              LocalPeerIdentity
+	peer              localhostwire.LocalPeerIdentity
 	lastSeen, expires time.Time
 	ended             chan struct{}
 }
@@ -80,7 +81,7 @@ func (l *dashboardLogins) socketRoutes(api http.Handler) http.Handler {
 			writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "dashboard sign-in links are minted with POST"})
 			return
 		}
-		peer, ok := LocalPeer(r.Context())
+		peer, ok := localhostwire.LocalPeer(r.Context())
 		if !ok {
 			writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "dashboard sign-in links need a verified local peer"})
 			return
@@ -98,7 +99,7 @@ func (l *dashboardLogins) socketRoutes(api http.Handler) http.Handler {
 	})
 }
 
-func (l *dashboardLogins) mint(peer LocalPeerIdentity) (DashboardLogin, *apierr.Error) {
+func (l *dashboardLogins) mint(peer localhostwire.LocalPeerIdentity) (DashboardLogin, *apierr.Error) {
 	token, err := randomToken()
 	if err != nil {
 		return DashboardLogin{}, &apierr.Error{Code: apierr.Internal, Message: "dashboard sign-in token: " + err.Error()}
@@ -115,7 +116,7 @@ func (l *dashboardLogins) mint(peer LocalPeerIdentity) (DashboardLogin, *apierr.
 		}
 	}
 	expires := now.Add(dashboardLoginLifetime)
-	l.pending[sha256.Sum256([]byte(token))] = pendingLogin{peer: copyPeerIdentity(peer), expires: expires}
+	l.pending[sha256.Sum256([]byte(token))] = pendingLogin{peer: peer.Clone(), expires: expires}
 	return DashboardLogin{URL: l.origin + "/login?" + url.Values{"token": {token}}.Encode(), ExpiresAt: expires}, nil
 }
 
@@ -172,12 +173,12 @@ func (l *dashboardLogins) session(r *http.Request) (dashboardSession, time.Durat
 	}
 	current.lastSeen = now
 	l.sessions[key] = current
-	current.peer = copyPeerIdentity(current.peer)
+	current.peer = current.peer.Clone()
 	return current, current.expires.Sub(now), true
 }
 
 func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, next http.Handler, current dashboardSession, remaining time.Duration) {
-	ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), localPeerKey{}, current.peer), remaining)
+	ctx, cancel := context.WithTimeout(localhostwire.WithLocalPeer(r.Context(), current.peer), remaining)
 	defer cancel()
 	go func() {
 		select {

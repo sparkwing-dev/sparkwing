@@ -15,8 +15,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type reportingFacts struct {
@@ -95,7 +96,7 @@ func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 				r.Header.Set("Authorization", "Bearer "+raw)
 				r.Header.Set("X-Sparkwing-Team", "forged")
 				w := httptest.NewRecorder()
-				s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
+				s.WithAuthorization(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
 				s.Handler().ServeHTTP(w, r)
 				if w.Code != status || facts.checks != 0 {
 					t.Logf("mutation=%d: HTTP %d %s; binding checks=%d", mutation%7+1, w.Code, w.Body, facts.checks)

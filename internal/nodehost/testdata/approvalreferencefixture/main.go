@@ -4,8 +4,8 @@ import (
 	"context"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
 )
 
 // The protocol permits approval read declarations that the Go builder cannot express.

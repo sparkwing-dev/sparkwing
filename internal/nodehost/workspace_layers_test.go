@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func acquiredLayerEntry(t *testing.T, depth uint8) *source.Entry {
@@ -55,7 +55,7 @@ func FuzzArtifactLayerUsesExecutionWorkspace(f *testing.F) {
 		if err != nil || finish == nil {
 			t.Fatalf("prepare: %v", err)
 		}
-		result := store.NodeResult{Outcome: store.NodeSuccess}
+		result := runstate.NodeResult{Outcome: runstate.NodeSuccess}
 		if err := finish(t.Context(), input, &result); err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +83,7 @@ func TestDepcacheLayerUsesExecutionWorkspace(t *testing.T) {
 		t.Fatalf("prepare cache: %v", err)
 	}
 	writePublishedFile(t, root, "vendor/module/file", "downloaded dependency", 0o600)
-	result := store.NodeResult{Outcome: store.NodeSuccess}
+	result := runstate.NodeResult{Outcome: runstate.NodeSuccess}
 	if err := finish(t.Context(), input, &result); err != nil || backend.commit == nil {
 		t.Fatalf("save checkout cache: %v, committed=%v", err, backend.commit != nil)
 	}

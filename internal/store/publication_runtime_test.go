@@ -8,10 +8,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func publicationFixture(t *testing.T) (*Tenant, *time.Time, nodeTransition) {
@@ -32,7 +32,7 @@ func publicationFixtureWithDispatch(t *testing.T, dispatch runspec.Dispatch) (*T
 	publisher.Binding = capability.Binding{Kind: capability.BindingRun, RunID: admitted.RunID}
 	publisher.Data = &capability.DataScope{Use: capability.DataPublish, RunID: admitted.RunID, RepositoryKey: "gh:1"}
 	authorityPersist(t, tenant.s, publisher)
-	actor := Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: publisher.Prefix}, CapabilityPrefix: publisher.Prefix}
+	actor := runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: publisher.Prefix}, CapabilityPrefix: publisher.Prefix}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "imported"}}}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: plan})
 	if err != nil {
@@ -45,7 +45,7 @@ func publicationFixtureWithDispatch(t *testing.T, dispatch runspec.Dispatch) (*T
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tenant, now, nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "imported"}, Actor: actor, To: NodeSuccess, Cause: CausePublish, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
+	return tenant, now, nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "imported"}, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CausePublish, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess}}}
 }
 
 func TestPublicationUsesNoControllerExecution(t *testing.T) {
@@ -58,16 +58,16 @@ func TestPublicationUsesNoControllerExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	run, err := tenant.ReadRun(t.Context(), string(result.Ref.RunID))
-	if err != nil || run.State != RunPending || run.Owner != nil {
+	if err != nil || run.State != runstate.RunPending || run.Owner != nil {
 		t.Fatalf("controller settled publication before publisher finish: %+v, %v", run, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "triggers", 0)
 	rewriteSchemaCount(t, tenant.s.db, "eval_units", 0)
-	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: runspec.RunID(run.ID), To: RunSuccess, Cause: RunFinish, Actor: Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{RunID: runspec.RunID(run.ID), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}}); err == nil {
+	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(run.ID), To: runstate.RunSuccess, Cause: runstate.RunFinish, Actor: runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{RunID: runspec.RunID(run.ID), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}}); err == nil {
 		t.Fatal("controller finished a published run")
 	}
 	*now = now.Add(time.Second)
-	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: runspec.RunID(run.ID), To: RunSuccess, Cause: RunPublish, Actor: result.Actor}); err != nil {
+	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(run.ID), To: runstate.RunSuccess, Cause: runstate.RunPublish, Actor: result.Actor}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -117,7 +117,7 @@ func TestPublicationRequiresScopedAuthorityForJobsAndRun(t *testing.T) {
 				if boundary == "job" {
 					_, err = tenant.TransitionNode(t.Context(), result)
 				} else {
-					_, err = tenant.TransitionRun(t.Context(), RunTransition{RunID: result.Ref.RunID, To: RunSuccess, Cause: RunPublish, Actor: result.Actor})
+					_, err = tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: result.Ref.RunID, To: runstate.RunSuccess, Cause: runstate.RunPublish, Actor: result.Actor})
 				}
 				if err == nil {
 					t.Fatal("invalid publisher committed")
@@ -141,7 +141,7 @@ func TestPublicationRecordRefusalRollsBackResult(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode != "missing_adapter" {
-				tenant.s.resultRecords = nodeResultRecordsFunc(func(ctx context.Context, tx *storeTx, team Team, actor Actor, row NodeRow, record NodeResult) error {
+				tenant.s.resultRecords = nodeResultRecordsFunc(func(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, row runstate.NodeRow, record runstate.NodeResult) error {
 					if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('published-record',?)`, []byte("yes")); err != nil {
 						return err
 					}
@@ -156,7 +156,7 @@ func TestPublicationRecordRefusalRollsBackResult(t *testing.T) {
 				t.Fatal("invalid result committed")
 			}
 			row, err := tenant.ReadNode(t.Context(), result.Ref)
-			if err != nil || row.Status != StatusPending || row.StateSeq != 0 {
+			if err != nil || row.Status != runstate.StatusPending || row.StateSeq != 0 {
 				t.Fatalf("refused result changed job: %+v, %v", row, err)
 			}
 			after, err := tenant.ReadStateEvents(t.Context(), string(result.Ref.RunID), 0, 20)
@@ -176,7 +176,7 @@ func TestPublicationCommitsResultsAndCompletionOnce(t *testing.T) {
 			t.Fatalf("publish result %d: %+v, %v", i, applied, err)
 		}
 	}
-	finish := RunTransition{RunID: result.Ref.RunID, Actor: result.Actor, To: RunSuccess, Cause: RunPublish}
+	finish := runstate.RunTransition{RunID: result.Ref.RunID, Actor: result.Actor, To: runstate.RunSuccess, Cause: runstate.RunPublish}
 	for i := range 2 {
 		applied, err := tenant.TransitionRun(t.Context(), finish)
 		if err != nil || applied.Replayed != (i == 1) {
@@ -184,7 +184,7 @@ func TestPublicationCommitsResultsAndCompletionOnce(t *testing.T) {
 		}
 	}
 	run, err := tenant.ReadRun(t.Context(), string(result.Ref.RunID))
-	if err != nil || run.State != RunSuccess || run.FinishedAt == nil || run.Owner != nil {
+	if err != nil || run.State != runstate.RunSuccess || run.FinishedAt == nil || run.Owner != nil {
 		t.Fatalf("published run: %+v, %v", run, err)
 	}
 	events, err := tenant.ReadStateEvents(t.Context(), run.ID, 0, 20)
@@ -206,11 +206,11 @@ func TestPublicationCommitsResultsAndCompletionOnce(t *testing.T) {
 
 func TestPublicationCompletionChecksPersistedVerdict(t *testing.T) {
 	tenant, _, result := publicationFixture(t)
-	finish := RunTransition{RunID: result.Ref.RunID, Actor: result.Actor, To: RunSuccess, Cause: RunPublish}
+	finish := runstate.RunTransition{RunID: result.Ref.RunID, Actor: result.Actor, To: runstate.RunSuccess, Cause: runstate.RunPublish}
 	if _, err := tenant.TransitionRun(t.Context(), finish); err == nil {
 		t.Fatal("publication completed before its jobs")
 	}
-	result.To, result.Extra.Result.Outcome = NodeFailed, NodeFailed
+	result.To, result.Extra.Result.Outcome = runstate.NodeFailed, runstate.NodeFailed
 	if _, err := tenant.TransitionNode(t.Context(), result); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestPublicationCompletionChecksPersistedVerdict(t *testing.T) {
 		t.Fatal(err)
 	}
 	run, err := tenant.ReadRun(t.Context(), string(finish.RunID))
-	if err != nil || run.State != RunFailed {
+	if err != nil || run.State != runstate.RunFailed {
 		t.Fatalf("persisted job verdict: %s, %v", run.State, err)
 	}
 }

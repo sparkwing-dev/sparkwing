@@ -7,7 +7,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // ReadMemo verifies the output, manifest and every member through an authorized

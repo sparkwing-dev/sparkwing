@@ -8,8 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // PoolAccessRule is one canonical repository and branch selector persisted for a pool.
@@ -90,7 +91,7 @@ func readPoolRulesTx(ctx context.Context, tx *storeTx, team Team, id string) ([]
 }
 
 // WritePoolAccess atomically rechecks administration and bound installations before persisting selectors.
-func (t *Tenant) WritePoolAccess(ctx context.Context, actor Actor, id string, rules []PoolAccessRule) (bool, error) {
+func (t *Tenant) WritePoolAccess(ctx context.Context, actor runstate.Actor, id string, rules []PoolAccessRule) (bool, error) {
 	if id == "" || len(rules) == 0 {
 		return false, authorityError(apierr.BadRequest, "pool rule requires selectors")
 	}
@@ -142,7 +143,7 @@ func (t *Tenant) WritePoolAccess(ctx context.Context, actor Actor, id string, ru
 }
 
 // DeletePoolAccess removes this pool's selected rule under current team administration.
-func (t *Tenant) DeletePoolAccess(ctx context.Context, actor Actor, pool, id string) (bool, error) {
+func (t *Tenant) DeletePoolAccess(ctx context.Context, actor runstate.Actor, pool, id string) (bool, error) {
 	if pool == "" || id == "" {
 		return false, authorityError(apierr.BadRequest, "pool and rule are required")
 	}

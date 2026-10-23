@@ -3,8 +3,8 @@ package settings
 import (
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // ResolveConcurrency preserves declarations and fills omitted policy fields.

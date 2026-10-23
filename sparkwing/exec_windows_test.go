@@ -14,9 +14,9 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
-	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/sessionledger"
 )
 
 func TestExec_WindowsLongBashProgram(t *testing.T) {

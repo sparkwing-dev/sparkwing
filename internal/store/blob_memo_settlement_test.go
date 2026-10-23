@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestMemoReuseRequiresCommittedProducerSuccess(t *testing.T) {
@@ -31,22 +32,22 @@ func TestMemoReuseRequiresCommittedProducerSuccess(t *testing.T) {
 			recordsTemplate := &blobRecords{manifests: records.manifests}
 			s.resultRecords, s.materializations = recordsTemplate, recordsTemplate
 			_, tenant, request := materializationTarget(t, s, records.tenant, change.Ref)
-			request.Policy, request.Source, request.MaterializeOnly = SourceMemo, &MaterializeSource{Kind: SourceMemo, Record: memo.Key}, true
-			assertMaterialization := func(want ReconcileKind) {
+			request.Policy, request.Source, request.MaterializeOnly = runstate.SourceMemo, &runstate.MaterializeSource{Kind: runstate.SourceMemo, Record: memo.Key}, true
+			assertMaterialization := func(want runstate.ReconcileKind) {
 				t.Helper()
 				got, err := tenant.ReconcileNode(t.Context(), request)
 				if err != nil || got.Kind != want {
 					t.Fatalf("materialization=%+v error=%v, want %s", got, err, want)
 				}
 			}
-			assertMaterialization(Dispatch)
+			assertMaterialization(runstate.Dispatch)
 			switch outcome {
 			case "success":
 				if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 					t.Fatal(err)
 				}
 				rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
-				assertMaterialization(Materialize)
+				assertMaterialization(runstate.Materialize)
 			case "rollback":
 				rollback := errors.New("caller rollback")
 				err := s.inBlobTx(t.Context(), func(tx *storeTx) error {
@@ -59,22 +60,22 @@ func TestMemoReuseRequiresCommittedProducerSuccess(t *testing.T) {
 					t.Fatal(err)
 				}
 				assertBlobResultUnchanged(t, records, change)
-				assertMaterialization(Dispatch)
+				assertMaterialization(runstate.Dispatch)
 			case "refused":
 				change.Actor.NodeFence.Generation++
 				if _, err := records.tenant.TransitionNode(t.Context(), change); err == nil {
 					t.Fatal("stale producer report accepted")
 				}
-				assertMaterialization(Dispatch)
+				assertMaterialization(runstate.Dispatch)
 			case "failed", "cancelled":
-				change.To, change.Extra.Result = NodeState(outcome), &NodeResult{Outcome: NodeState(outcome)}
+				change.To, change.Extra.Result = runstate.NodeState(outcome), &runstate.NodeResult{Outcome: runstate.NodeState(outcome)}
 				if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 					t.Fatal(err)
 				}
-				assertMaterialization(Dispatch)
+				assertMaterialization(runstate.Dispatch)
 			case "retired":
 				rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
-				assertMaterialization(Dispatch)
+				assertMaterialization(runstate.Dispatch)
 			}
 		})
 	}

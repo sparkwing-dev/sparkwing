@@ -3,12 +3,14 @@ package controller
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // TransitionJob carries only the requested edge and result to the transaction.
@@ -38,9 +40,9 @@ func (s *EngineController) Finish(ctx context.Context, a capability.Authorized, 
 	if err != nil {
 		return controllerwire.Applied{}, err
 	}
-	var applied store.Applied
-	if request.Transition.Cause == store.RunPublish {
-		applied, err = tenant.TransitionRun(ctx, store.RunTransition{RunID: request.Transition.RunID, Actor: request.Transition.Actor, Cause: request.Transition.Cause, Reason: request.Transition.Reason, MaskedError: request.Transition.MaskedError})
+	var applied runstate.Applied
+	if request.Transition.Cause == runstate.RunPublish {
+		applied, err = tenant.TransitionRun(ctx, runstate.RunTransition{RunID: request.Transition.RunID, Actor: request.Transition.Actor, Cause: request.Transition.Cause, Reason: request.Transition.Reason, MaskedError: request.Transition.MaskedError})
 	} else {
 		applied, err = tenant.FinishRunAndUnit(ctx, request)
 	}
@@ -53,9 +55,9 @@ func (s *EngineController) Cancel(ctx context.Context, a capability.Authorized, 
 	if err != nil {
 		return controllerwire.Applied{}, err
 	}
-	actor := store.Actor{Authority: a.Principal.Authority, Kind: store.ActorOperator, CapabilityPrefix: principalCapabilityPrefix(a.Principal)}
-	applied, err := tenant.TransitionRun(ctx, store.RunTransition{
-		RunID: runspec.RunID(a.Target.RunID), To: store.RunCancelled, Cause: store.RunCancel, Actor: actor, Reason: body.Reason,
+	actor := runstate.Actor{Authority: a.Principal.Authority, Kind: runstate.ActorOperator, CapabilityPrefix: principalCapabilityPrefix(a.Principal)}
+	applied, err := tenant.TransitionRun(ctx, runstate.RunTransition{
+		RunID: runspec.RunID(a.Target.RunID), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: actor, Reason: body.Reason,
 	})
 	return appliedResponse(applied), engineLookupError(err)
 }
@@ -79,22 +81,22 @@ func (s *EngineController) Retry(ctx context.Context, a capability.Authorized, b
 
 // UnitRenewer preserves the store's atomic unit liveness and execution-start boundary.
 type UnitRenewer interface {
-	RenewUnit(context.Context, string, bool) (store.LeaseBeat, error)
+	RenewUnit(context.Context, string, bool) (runstate.LeaseBeat, error)
 }
 
 // Renew renews the authenticated unit and records execution using the store clock.
 func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
 	p := a.Principal
 	if p.Authority.Kind != capability.AuthorityCapability || p.Authority.ID == "" || p.Authority.ID != p.Capability.Prefix {
-		return controllerwire.RenewalResponse{}, missingEndpointPolicy()
+		return controllerwire.RenewalResponse{}, routepolicy.MissingEndpointPolicy()
 	}
 	units := s.Units
 	if units == nil {
-		return controllerwire.RenewalResponse{}, missingEndpointPolicy()
+		return controllerwire.RenewalResponse{}, routepolicy.MissingEndpointPolicy()
 	}
 	if body.LocalSecrets != nil {
 		if s.authority == nil {
-			return controllerwire.RenewalResponse{}, missingEndpointPolicy()
+			return controllerwire.RenewalResponse{}, routepolicy.MissingEndpointPolicy()
 		}
 		if err := s.authority.ResupplyHereSecrets(ctx, p.Authority, body.LocalSecrets); err != nil {
 			return controllerwire.RenewalResponse{}, err
@@ -110,7 +112,7 @@ func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, b
 	}, nil
 }
 
-func appliedResponse(applied store.Applied) controllerwire.Applied {
+func appliedResponse(applied runstate.Applied) controllerwire.Applied {
 	return controllerwire.Applied{
 		Outcome: string(applied.Outcome), Reason: applied.Reason,
 		Replayed: applied.Replayed, CancelRequested: applied.CancelRequested,
@@ -132,14 +134,14 @@ func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTran
 	if a.Target.RunID == "" || a.Target.NodeID == "" {
 		return nil, invalidEngineBody("transition requires a job")
 	}
-	ref, actor := controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a)
-	var resultForStore *store.NodeResult
+	ref, actor := runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a)
+	var resultForStore *runstate.NodeResult
 	if result := body.Result; result != nil {
 		if int64(len(result.MaskedError)) > limits.ErrorBytes {
 			return nil, invalidEngineBody("masked result error exceeds its byte limit")
 		}
-		resultForStore = &store.NodeResult{
-			Outcome: store.NodeState(result.Outcome), Reason: result.Reason,
+		resultForStore = &runstate.NodeResult{
+			Outcome: runstate.NodeState(result.Outcome), Reason: result.Reason,
 			MaskedError: result.MaskedError,
 			ExitCode:    result.ExitCode, OutputRecord: result.Output, ManifestRecord: result.Manifest, Failure: result.Failure,
 		}
@@ -154,14 +156,14 @@ func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTran
 			resultForStore.MaskedError = masked
 		}
 	}
-	switch store.TransitionCause(body.Cause) {
-	case store.CauseStart, store.CauseRetry, store.CauseReport, store.CausePublish, store.CausePublishAttempt, store.CauseRelease:
+	switch runstate.TransitionCause(body.Cause) {
+	case runstate.CauseStart, runstate.CauseRetry, runstate.CauseReport, runstate.CausePublish, runstate.CausePublishAttempt, runstate.CauseRelease:
 	default:
 		return nil, invalidEngineBody("unsupported node command")
 	}
 	command, err := (store.NodeCommandPayload{
-		To: store.NodeState(body.To), Cause: store.TransitionCause(body.Cause), SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt),
-		Extra: store.NodeCommandExtra{Result: resultForStore, RetryAt: body.RetryAt, Publication: body.Publication},
+		To: runstate.NodeState(body.To), Cause: runstate.TransitionCause(body.Cause), SourceAttempt: (*runspec.AttemptOrdinal)(body.SourceAttempt),
+		Extra: runstate.NodeCommandExtra{Result: resultForStore, RetryAt: body.RetryAt, Publication: body.Publication},
 	}).NodeCommand(ref, actor)
 	if err != nil {
 		return nil, invalidEngineBody(err.Error())
@@ -169,20 +171,20 @@ func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTran
 	return command, nil
 }
 
-func finishForStore(a capability.Authorized, body controllerwire.FinishRequest) (store.FinishRunRequest, error) {
+func finishForStore(a capability.Authorized, body controllerwire.FinishRequest) (runstate.FinishRunRequest, error) {
 	masked, err := engineMaskedError(body.Error)
 	if err != nil {
-		return store.FinishRunRequest{}, err
+		return runstate.FinishRunRequest{}, err
 	}
 	if a.Target.RunID == "" {
-		return store.FinishRunRequest{}, invalidEngineBody("finish requires a run")
+		return runstate.FinishRunRequest{}, invalidEngineBody("finish requires a run")
 	}
-	change := store.RunTransition{
+	change := runstate.RunTransition{
 		RunID: runspec.RunID(a.Target.RunID), Actor: engineActor(a),
-		Cause: store.RunFinish, Reason: body.Reason, MaskedError: masked,
+		Cause: runstate.RunFinish, Reason: body.Reason, MaskedError: masked,
 	}
 	if a.Access.Credential == capability.CredentialPublisher {
-		change.Cause = store.RunPublish
+		change.Cause = runstate.RunPublish
 	}
-	return store.FinishRunRequest{Transition: store.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, OwnerPolicy: change.OwnerPolicy, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: change.Actor.Owner}, nil
+	return runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, OwnerPolicy: change.OwnerPolicy, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: change.Actor.Owner}, nil
 }

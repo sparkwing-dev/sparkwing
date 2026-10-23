@@ -13,11 +13,12 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func loginCapability(t *testing.T, f sessionFlow) capability.Issued {
@@ -110,7 +111,7 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}
-	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: ref, CapabilityPrefix: ref.ID}, ref); err != nil {
+	if err := tenant.RevokeAuthority(t.Context(), runstate.Actor{Authority: ref, CapabilityPrefix: ref.ID}, ref); err != nil {
 		t.Fatal(err)
 	}
 	w = httptest.NewRecorder()

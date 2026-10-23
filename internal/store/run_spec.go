@@ -8,13 +8,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // IntakeRequest carries client input and server-derived tagged authority, re-resolved
@@ -43,7 +43,7 @@ type AdmissionResult struct {
 	Number               int64
 	Request              runspec.SealedRequest
 	Inputs               runspec.Display
-	OwnerUnit            *OwnerLeaseRef
+	OwnerUnit            *runstate.OwnerLeaseRef
 	HereCapabilityPrefix string
 	// HereBearer reaches only the requesting host; C2 owns its encoding and it never enters persisted run JSON.
 	HereBearer []byte `json:"-"`
@@ -53,7 +53,7 @@ type AdmissionResult struct {
 // PlanAcceptance binds the second seal and C3 plan to a live owner, or a live run-bound publisher for publish intake.
 type PlanAcceptance struct {
 	RunID string
-	Actor Actor
+	Actor runstate.Actor
 	Seal  runspec.SealInput
 }
 
@@ -62,7 +62,7 @@ type AcceptedPlan struct {
 	Spec     runspec.Spec
 	Plan     json.RawMessage
 	PlanHash string
-	Owner    *OwnerLeaseRef
+	Owner    *runstate.OwnerLeaseRef
 	Replayed bool
 }
 
@@ -70,9 +70,9 @@ type AcceptedPlan struct {
 // Exactly one of a nonempty Body or Failure is required. An empty successful
 // expansion is an explicit jobs array, never an omitted or null body.
 type ExpansionSubmission struct {
-	Source           controllerwire.NodeRef
+	Source           runspec.NodeRef
 	SourceGeneration runspec.ClaimGeneration
-	Actor            Actor
+	Actor            runstate.Actor
 	Body             json.RawMessage
 	Registration     runspec.SecretRegistration
 	Failure          *ExpansionFailure
@@ -86,11 +86,11 @@ type ExpansionFailure struct {
 
 // AcceptedExpansion reports persisted topology; deterministic code reconstruction must reproduce each SpecHash.
 type AcceptedExpansion struct {
-	Source           controllerwire.NodeRef
+	Source           runspec.NodeRef
 	SourceGeneration runspec.ClaimGeneration
-	State            ExpansionState
+	State            runstate.ExpansionState
 	BodyHash         string
-	Nodes            []NodeRow
+	Nodes            []runstate.NodeRow
 	Replayed         bool
 }
 
@@ -178,7 +178,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		if err != nil {
 			return err
 		}
-		if snapshot.Run.Spec == nil || snapshot.Run.CancelRequestedAt != nil || snapshot.Run.State != RunRunning && snapshot.Run.State != RunPending {
+		if snapshot.Run.Spec == nil || snapshot.Run.CancelRequestedAt != nil || snapshot.Run.State != runstate.RunRunning && snapshot.Run.State != runstate.RunPending {
 			return authorityError(apierr.IllegalTransition, "expansion run is no longer executable")
 		}
 		if _, err := snapshot.Scheduling(); err != nil {
@@ -188,7 +188,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		if err != nil {
 			return err
 		}
-		if source.Status != StatusDone || !scheduleSucceeded(string(source.Outcome)) || source.Generation != request.SourceGeneration {
+		if source.Status != runstate.StatusDone || !scheduleSucceeded(string(source.Outcome)) || source.Generation != request.SourceGeneration {
 			return holderRefusal()
 		}
 		result = AcceptedExpansion{Source: request.Source, SourceGeneration: request.SourceGeneration}
@@ -211,7 +211,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 			result.Replayed = true
 			return nil
 		}
-		if source.Expansion != ExpansionExpected {
+		if source.Expansion != runstate.ExpansionExpected {
 			return authorityError(apierr.IllegalTransition, "expansion differs from its accepted submission")
 		}
 		if request.Failure == nil {
@@ -288,7 +288,7 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,owner_generation FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration).Scan(&status, &holder, &prefix, &generation, &until, &ownerGeneration)
 		stored := runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: holder, Generation: runspec.ClaimGeneration(generation)}
 		credential := runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), SourceNodeID: runspec.NodeID(c.Binding.NodeID), SourceGeneration: runspec.ClaimGeneration(c.Binding.Generation), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}
-		if err == nil && (prefix != c.Prefix || ownerGeneration != controllerGeneration || request.Actor.Owner.Kind != OwnerEval || stored != request.Actor.Owner.EvalFence || request.Actor.Owner.EvalFence != credential) {
+		if err == nil && (prefix != c.Prefix || ownerGeneration != controllerGeneration || request.Actor.Owner.Kind != runstate.OwnerEval || stored != request.Actor.Owner.EvalFence || request.Actor.Owner.EvalFence != credential) {
 			return holderRefusal()
 		}
 	default:
@@ -307,7 +307,7 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 	return nil
 }
 
-func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUnit, status string, actor Actor, now time.Time) error {
+func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUnit, status string, actor runstate.Actor, now time.Time) error {
 	if err := checkReaperTx(ctx, tx, actor); err != nil {
 		return err
 	}
@@ -322,10 +322,10 @@ func resolveExpansionLossTx(ctx context.Context, tx *storeTx, target expiredUnit
 	if pendingApprovalPredicate(source) {
 		return settleControllerTx(ctx, tx, target.team, string(target.ref.RunID), now)
 	}
-	state := ExpansionFailed
+	state := runstate.ExpansionFailed
 	failure := &ExpansionFailure{Code: apierr.Unavailable, MaskedError: "generator evaluator lost"}
 	if status == "cancelled" {
-		state, failure = ExpansionNone, nil
+		state, failure = runstate.ExpansionNone, nil
 	}
 	body, err := json.Marshal(failure)
 	if err != nil {
@@ -461,11 +461,11 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		if err != nil {
 			return err
 		}
-		expansion := ExpansionAbsent
+		expansion := runstate.ExpansionAbsent
 		if len(job.Closures.Generate) > 0 {
-			expansion = ExpansionExpected
+			expansion = runstate.ExpansionExpected
 		}
-		if err = insertNodeTx(ctx, tx, team, NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(job.ID)}, Status: StatusPending, Spec: raw, SpecHash: string(hash), Execution: execution, Expansion: expansion}); err != nil {
+		if err = insertNodeTx(ctx, tx, team, runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(job.ID)}, Status: runstate.StatusPending, Spec: raw, SpecHash: string(hash), Execution: execution, Expansion: expansion}); err != nil {
 			return err
 		}
 	}
@@ -478,7 +478,7 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 }
 
 func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcceptance, now time.Time) (AcceptedPlan, error) {
-	var controller *Actor
+	var controller *runstate.Actor
 	var dispatch string
 	if err := tx.QueryRowContext(ctx, `SELECT dispatch FROM runs WHERE team=? AND id=?`, team, request.RunID).Scan(&dispatch); err != nil {
 		return AcceptedPlan{}, err
@@ -491,7 +491,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 			return AcceptedPlan{}, err
 		}
 		if err == nil && until > now.UnixNano() {
-			controller = &Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{RunID: runspec.RunID(request.RunID), Holder: holder, Generation: runspec.ClaimGeneration(generation)}}}
+			controller = &runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{RunID: runspec.RunID(request.RunID), Holder: holder, Generation: runspec.ClaimGeneration(generation)}}}
 		}
 	}
 	if err := planAuthorityTx(ctx, tx, team, request); err != nil {
@@ -541,8 +541,8 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 		if err = acceptControllerPlanTx(ctx, tx, team, request, *controller, replay); err != nil {
 			return AcceptedPlan{}, err
 		}
-		if run.State == RunPending {
-			if _, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: runspec.RunID(run.ID), To: RunRunning, Actor: *controller, Cause: RunStart}); err != nil {
+		if run.State == runstate.RunPending {
+			if _, err = transitionRunTx(ctx, tx, team, runstate.RunTransition{RunID: runspec.RunID(run.ID), To: runstate.RunRunning, Actor: *controller, Cause: runstate.RunStart}); err != nil {
 				return AcceptedPlan{}, err
 			}
 		}

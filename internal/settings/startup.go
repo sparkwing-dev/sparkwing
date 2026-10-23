@@ -10,8 +10,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // safety: Compound settings merge only present fields; zero and empty collections are values.

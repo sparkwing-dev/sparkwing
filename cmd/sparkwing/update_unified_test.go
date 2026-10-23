@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
@@ -97,7 +98,7 @@ func checkUpdate(t *testing.T, args ...string) (updateCheckReport, int) {
 }
 
 func readPinSummary(dir string) *InfoSDKPin {
-	return gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, engine.GoSDK, engine.ReadPin, engine.VersionForPin)
+	return gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, engineid.GoSDK, engine.ReadPin, engine.VersionForPin)
 }
 
 func TestUnifiedUpdateCheckReleaseStatesAndProvenance(t *testing.T) {

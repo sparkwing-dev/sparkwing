@@ -7,7 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -43,8 +43,8 @@ func (c *localController) FinalizeCancelledRuns(runIDs []string, reason string) 
 	if closed || lease.Name == "" {
 		return errors.New("wingd: admission cancellation requires a reconciled open controller")
 	}
-	actor := store.Actor{Kind: store.ActorReaper, Owner: store.OwnerLeaseRef{
-		Kind: store.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
+	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{
+		Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
 	}}
 	var result error
 	for _, runID := range runIDs {
@@ -58,14 +58,14 @@ func (c *localController) FinalizeCancelledRuns(runIDs []string, reason string) 
 	return result
 }
 
-func (c *localController) cancelRun(runID, reason string, actor store.Actor) error {
+func (c *localController) cancelRun(runID, reason string, actor runstate.Actor) error {
 	ctx := context.Background()
 	row, err := c.tenant.ReadRun(ctx, runID)
 	if err != nil || terminal(row.State) || row.CancelRequestedAt != nil {
 		return err
 	}
-	_, err = c.tenant.TransitionRun(ctx, store.RunTransition{
-		RunID: runspec.RunID(runID), To: store.RunCancelled, Cause: store.RunCancel, Actor: actor, Reason: reason,
+	_, err = c.tenant.TransitionRun(ctx, runstate.RunTransition{
+		RunID: runspec.RunID(runID), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: actor, Reason: reason,
 	})
 	if err != nil {
 		var transition *store.ErrIllegalTransition
@@ -76,6 +76,6 @@ func (c *localController) cancelRun(runID, reason string, actor store.Actor) err
 	return err
 }
 
-func terminal(state store.RunState) bool {
-	return state == store.RunSuccess || state == store.RunFailed || state == store.RunCancelled
+func terminal(state runstate.RunState) bool {
+	return state == runstate.RunSuccess || state == runstate.RunFailed || state == runstate.RunCancelled
 }

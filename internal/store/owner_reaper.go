@@ -6,8 +6,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 type ownerRecovery struct {
@@ -17,7 +18,7 @@ type ownerRecovery struct {
 	lease, deadline, started, cancelled sql.NullInt64
 }
 
-func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor Actor, now time.Time) (*ReapedUnit, error) {
+func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor runstate.Actor, now time.Time) (*ReapedUnit, error) {
 	var owner ownerRecovery
 	err := tx.QueryRowContext(ctx, `SELECT status,capability_prefix,generation,disruptions,lease_expires_at,expires_at,started_at,cancel_requested_at FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), target.team, target.ref.RunID).Scan(&owner.status, &owner.prefix, &owner.generation, &owner.disruptions, &owner.lease, &owner.deadline, &owner.started, &owner.cancelled)
 	if err != nil {
@@ -78,7 +79,7 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 		return nil, err
 	}
 	if cancelled && run.CancelRequestedAt == nil {
-		if _, err := transitionRunTx(ctx, tx, target.team, RunTransition{RunID: runspec.RunID(run.ID), To: RunCancelled, Cause: RunCancel, Actor: actor}); err != nil {
+		if _, err := transitionRunTx(ctx, tx, target.team, runstate.RunTransition{RunID: runspec.RunID(run.ID), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: actor}); err != nil {
 			return nil, err
 		}
 	}
@@ -92,10 +93,10 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	if claims != 0 {
 		return result, nil
 	}
-	to, reason, message := RunFailed, "agent_lost", "owner execution lost"
-	cause := RunOwnerLost
+	to, reason, message := runstate.RunFailed, "agent_lost", "owner execution lost"
+	cause := runstate.RunOwnerLost
 	if cancelled {
-		to, reason, message = RunCancelled, "cancelled", ""
+		to, reason, message = runstate.RunCancelled, "cancelled", ""
 	} else if stopped {
 		reason, message = award.stop, ""
 	} else if expired {
@@ -105,15 +106,15 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 		}
 	} else if queuedOut {
 		reason, message = "queue_timeout", "owner queue deadline exceeded"
-		if run.State == RunPending {
-			cause = RunQueueTimeout
+		if run.State == runstate.RunPending {
+			cause = runstate.RunQueueTimeout
 		}
 	}
-	_, err = transitionRunTx(ctx, tx, target.team, RunTransition{RunID: runspec.RunID(run.ID), To: to, Actor: actor, Cause: cause, Reason: reason, MaskedError: message})
+	_, err = transitionRunTx(ctx, tx, target.team, runstate.RunTransition{RunID: runspec.RunID(run.ID), To: to, Actor: actor, Cause: cause, Reason: reason, MaskedError: message})
 	return result, err
 }
 
-func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor Actor, now time.Time) (*ReapedUnit, error) {
+func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor runstate.Actor, now time.Time) (*ReapedUnit, error) {
 	var unit ownerRecovery
 	err := tx.QueryRowContext(ctx, `SELECT status,capability_prefix,generation,disruptions,lease_expires_at,expires_at,started_at FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration).Scan(&unit.status, &unit.prefix, &unit.generation, &unit.disruptions, &unit.lease, &unit.deadline, &unit.started)
 	if err != nil {
@@ -142,10 +143,10 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	}
 	if !evaluationSourceCurrent(source) {
 		status := "done"
-		if source.Expansion == ExpansionFailed {
+		if source.Expansion == runstate.ExpansionFailed {
 			status = "failed"
 		}
-		if source.Expansion == ExpansionNone {
+		if source.Expansion == runstate.ExpansionNone {
 			status = "cancelled"
 		}
 		if err := writeEvalRecoveryTx(ctx, tx, target, unit, status, now); err != nil {

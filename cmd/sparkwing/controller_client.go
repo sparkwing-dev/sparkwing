@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"path/filepath"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func resolveEngineController(ctx context.Context, profileName string) (controllerwire.Controller, func(), error) {

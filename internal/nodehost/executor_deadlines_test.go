@@ -8,12 +8,12 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type executorCleanupProcess struct {
@@ -46,7 +46,7 @@ func TestRetryLeavesTheRowRunningThroughItsBackoff(t *testing.T) {
 			t.Fatal("executor returned before backoff:", err)
 		default:
 		}
-		if len(state.changes) != 2 || state.changes[0].Cause != store.CauseStart || state.changes[1].Cause != store.CauseRetry || state.changes[1].To != store.NodeRunning || state.changes[1].Actor.Generation != input.Generation || len(*processes) != 1 {
+		if len(state.changes) != 2 || state.changes[0].Cause != runstate.CauseStart || state.changes[1].Cause != runstate.CauseRetry || state.changes[1].To != runstate.NodeRunning || state.changes[1].Actor.Generation != input.Generation || len(*processes) != 1 {
 			t.Fatalf("backoff changed lifecycle: transitions=%+v processes=%d", state.changes, len(*processes))
 		}
 		cancel()
@@ -54,7 +54,7 @@ func TestRetryLeavesTheRowRunningThroughItsBackoff(t *testing.T) {
 		if err := <-done; !errors.Is(err, context.Canceled) {
 			t.Fatal("cancel during backoff:", err)
 		}
-		if len(state.changes) != 3 || state.changes[2].To != store.NodeCancelled || len(*processes) != 1 {
+		if len(state.changes) != 3 || state.changes[2].To != runstate.NodeCancelled || len(*processes) != 1 {
 			t.Fatalf("backoff cancellation started work or lost its terminal write: %+v", state.changes)
 		}
 	})
@@ -88,7 +88,7 @@ func TestNodeExecutorCleanupDoesNotConsumeAttemptBudget(t *testing.T) {
 		if err = host.Execute(t.Context(), input); err != nil {
 			t.Fatal(err)
 		}
-		if got := s.changes[len(s.changes)-1].To; got != store.NodeSuccess {
+		if got := s.changes[len(s.changes)-1].To; got != runstate.NodeSuccess {
 			t.Fatalf("cleanup changed successful attempt to %s", got)
 		}
 	})
@@ -141,7 +141,7 @@ func TestNodeExecutorTimeoutRunsFinallyAndAfterRun(t *testing.T) {
 		t.Fatalf("timeout cleanup: finally=%v after_run=%v", finally, after)
 	}
 	result := s.changes[len(s.changes)-1].Extra.Result
-	if result.Outcome != store.NodeFailed || result.Reason != string(apierr.DeadlineExceeded) {
+	if result.Outcome != runstate.NodeFailed || result.Reason != string(apierr.DeadlineExceeded) {
 		t.Fatalf("timeout result=%+v", result)
 	}
 }
@@ -278,7 +278,7 @@ func TestNodeExecutorLeaseLossStopsAwaitAndSDKCleanup(t *testing.T) {
 	if err = host.Execute(ctx, input); !errors.Is(err, lease.ErrLeaseLost) {
 		t.Fatalf("error=%v", err)
 	}
-	if len(s.changes) != 1 || s.changes[0].Cause != store.CauseStart || (*processes)[0].cleaned != 1 {
+	if len(s.changes) != 1 || s.changes[0].Cause != runstate.CauseStart || (*processes)[0].cleaned != 1 {
 		t.Fatalf("changes=%+v registered cleanup=%d", s.changes, (*processes)[0].cleaned)
 	}
 }
@@ -408,7 +408,7 @@ func TestNodeExecutorClosureTimeoutRunsAfterRun(t *testing.T) {
 			if err = host.Execute(t.Context(), input); err != nil {
 				t.Fatal(err)
 			}
-			if afterCalls != 1 || s.changes[len(s.changes)-1].To != store.NodeFailed {
+			if afterCalls != 1 || s.changes[len(s.changes)-1].To != runstate.NodeFailed {
 				t.Fatalf("after_run calls=%d changes=%+v", afterCalls, s.changes)
 			}
 		})

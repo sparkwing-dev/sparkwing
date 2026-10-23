@@ -3,13 +3,9 @@
 package secretname
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
-
-// ErrMissing classifies a name absent from a secret source.
-var ErrMissing = errors.New("secret missing")
 
 const nameCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-"
 

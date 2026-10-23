@@ -16,12 +16,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 var runAnywhereKinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}
@@ -37,7 +38,7 @@ func runAnywherePoll(t *testing.T, f cloudDispatch, raw string, freeSlots int) *
 
 func runAnywherePlan(t *testing.T, f cloudDispatch, created controllerwire.CreateRunResponse, bearer string) {
 	t.Helper()
-	engineID := engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, ManifestDigest: strings.Repeat("b", 64)}
+	engineID := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, ManifestDigest: strings.Repeat("b", 64)}
 	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "verify", Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
 	body, err := json.Marshal(doc)
 	if err != nil {
@@ -66,7 +67,7 @@ func runAnywhereComplete(t *testing.T, f cloudDispatch, unit *controllerwire.Cla
 			t.Error(err)
 		}
 	})
-	if decision, err := host.MayStart(t.Context(), store.CapacityBinding{RunID: unit.RunID, NodeID: unit.JobID, Generation: unit.Binding.Generation}, store.Actor{}); err != nil || decision.Kind != store.AcquireGranted {
+	if decision, err := host.MayStart(t.Context(), runstate.CapacityBinding{RunID: unit.RunID, NodeID: unit.JobID, Generation: unit.Binding.Generation}, runstate.Actor{}); err != nil || decision.Kind != runstate.AcquireGranted {
 		t.Fatalf("node admission: %+v: %v", decision, err)
 	}
 	started, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &unit.Binding.Attempt})
@@ -112,7 +113,7 @@ func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing
 	}
 	runAnywhereComplete(t, f, job)
 	detail, err := f.member.ReadRun(t.Context(), created.RunID)
-	if err != nil || detail.Status != string(store.RunSuccess) {
+	if err != nil || detail.Status != string(runstate.RunSuccess) {
 		t.Fatalf("run-anywhere outcome: %+v %v", detail, err)
 	}
 	var charges, metered int

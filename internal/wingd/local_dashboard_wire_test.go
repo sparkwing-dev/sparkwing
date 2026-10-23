@@ -10,6 +10,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -136,11 +137,11 @@ func TestLocalDashboardWireServiceFailureJoinsShutdown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		entered := make(chan struct{})
 		var calls atomic.Int32
-		f := &runtimeControllerFixture{http: func() LocalHTTP {
+		f := &runtimeControllerFixture{http: func() localhostwire.LocalHTTP {
 			if calls.Add(1) == 2 {
 				close(entered)
 			}
-			return LocalHTTP{API: http.NotFoundHandler()}
+			return localhostwire.LocalHTTP{API: http.NotFoundHandler()}
 		}}
 		r := newRuntimeFixture(t, f)
 		lifecycle := NewLocalLifecycle(r, nil)

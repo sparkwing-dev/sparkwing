@@ -3,8 +3,8 @@ package client
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func (c *engineClient) ReadStanding(ctx context.Context) (controllerwire.TeamStanding, error) {

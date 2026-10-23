@@ -9,9 +9,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // sessions is fixed when the server is built: a one-team deployment has no
@@ -93,11 +94,11 @@ func (b policyStoreBindings) CheckBinding(ctx context.Context, p capability.Prin
 	return b.server.operator.CheckBinding(ctx, p, rule, target)
 }
 
-func (s *Server) storeRouteAuthorization() RouteAuthorization {
+func (s *Server) storeRouteAuthorization() routepolicy.Authorization {
 	if s.operator == nil {
-		return RouteAuthorization{}
+		return routepolicy.Authorization{}
 	}
-	return RouteAuthorization{
+	return routepolicy.Authorization{
 		Authenticator: policyStoreAuthenticator{s}, Bindings: policyStoreBindings{s},
 		CheckCSRF: s.checkSessionCSRF,
 		Identify: func(r *http.Request) (capability.Presentation, error) {

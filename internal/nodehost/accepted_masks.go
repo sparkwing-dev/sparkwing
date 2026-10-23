@@ -6,12 +6,13 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
-func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runspec.Resolved, plan *nodeproto.PlanDoc, nodes []store.NodeRow) error {
+func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runspec.Resolved, plan *nodeproto.PlanDoc, nodes []runstate.NodeRow) error {
 	if r == nil {
 		return nil
 	}

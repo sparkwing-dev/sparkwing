@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
-func approvalReaperFixture(t *testing.T, policy string) (*Tenant, controllerwire.NodeRef, *time.Time, SingletonLease, nodeTransition) {
+func approvalReaperFixture(t *testing.T, policy string) (*Tenant, runspec.NodeRef, *time.Time, SingletonLease, nodeTransition) {
 	t.Helper()
 	timeout := int64(1000)
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
@@ -43,11 +43,11 @@ func approvalReaperFixture(t *testing.T, policy string) (*Tenant, controllerwire
 	approver := authorityRoot("approver", "a")
 	approver.Grants = []capability.Grant{capability.Grant("approvals.write")}
 	authorityPersist(t, tenant.s, approver)
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "gate"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "gate"}
 	resolve := nodeTransition{
-		Ref: ref, To: NodeFailed, Cause: causeApprovalResolve,
-		Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: approver.Prefix}},
-		Extra: transitionExtra{Approval: &ApprovalResolution{Decision: "denied", Comment: "declined"}},
+		Ref: ref, To: runstate.NodeFailed, Cause: causeApprovalResolve,
+		Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: approver.Prefix}},
+		Extra: transitionExtra{Approval: &runstate.ApprovalResolution{Decision: "denied", Comment: "declined"}},
 	}
 	return tenant, ref, now, lease, resolve
 }
@@ -71,15 +71,15 @@ func TestApprovalReaperUsesDeadlineAndPolicyOnce(t *testing.T) {
 			if err != nil || gate.StateSeq != 2 || gate.FinishedAt == nil {
 				t.Fatalf("gate: %+v, %v", gate, err)
 			}
-			after, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: ref.RunID, NodeID: "after"})
+			after, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: ref.RunID, NodeID: "after"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if policy == "approve" {
-				if gate.Outcome != NodeSuccess || after.ReadyAt == nil || after.Status != StatusPending {
+				if gate.Outcome != runstate.NodeSuccess || after.ReadyAt == nil || after.Status != runstate.StatusPending {
 					t.Fatalf("approved gate/dependent: %+v, %+v", gate, after)
 				}
-			} else if gate.Outcome != NodeFailed || after.Outcome != NodeCancelled {
+			} else if gate.Outcome != runstate.NodeFailed || after.Outcome != runstate.NodeCancelled {
 				t.Fatalf("failed gate/dependent: %+v, %+v", gate, after)
 			}
 			var resolved int64
@@ -119,8 +119,8 @@ func TestApprovalReaperLeavesIndefiniteAndResolvedGates(t *testing.T) {
 func TestApprovalReaperRecordsLeaseIdentity(t *testing.T) {
 	tenant, ref, now, lease, _ := approvalReaperFixture(t, "approve")
 	*now = now.Add(time.Second)
-	actor := Actor{Kind: ActorReaper, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "forged"}, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, To: NodeSuccess, Cause: causeApprovalTimeout, Actor: actor}); err != nil {
+	actor := runstate.Actor{Kind: runstate.ActorReaper, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "forged"}, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, To: runstate.NodeSuccess, Cause: causeApprovalTimeout, Actor: actor}); err != nil {
 		t.Fatal(err)
 	}
 	var approver string
@@ -156,9 +156,9 @@ func TestApprovalResolutionAndReaperHaveOneWinner(t *testing.T) {
 		if err != nil || gate.StateSeq != 2 {
 			t.Fatalf("gate: %+v, %v", gate, err)
 		}
-		want := NodeSuccess
+		want := runstate.NodeSuccess
 		if humanWon {
-			want = NodeFailed
+			want = runstate.NodeFailed
 		}
 		if gate.Outcome != want {
 			t.Fatalf("outcome %s, expected %s", gate.Outcome, want)
@@ -184,7 +184,7 @@ func TestApprovalReaperRollsBackResolutionWithLifecycle(t *testing.T) {
 				t.Fatalf("failed persistence: %+v, %v", got, err)
 			}
 			gate, err := tenant.ReadNode(t.Context(), ref)
-			if err != nil || gate.Status != StatusApprovalPending || gate.StateSeq != 1 || gate.FinishedAt != nil {
+			if err != nil || gate.Status != runstate.StatusApprovalPending || gate.StateSeq != 1 || gate.FinishedAt != nil {
 				t.Fatalf("partial gate: %+v, %v", gate, err)
 			}
 			var resolved sql.NullInt64

@@ -12,11 +12,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type tenantRunnerPolicy struct{}
@@ -119,7 +120,7 @@ func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) 
 			}
 		}
 		row, err := f.teamB.ReadRun(t.Context(), admitted.RunID)
-		if err != nil || row.State != store.RunSuccess || row.Spec == nil || row.PlanHash == "" {
+		if err != nil || row.State != runstate.RunSuccess || row.Spec == nil || row.PlanHash == "" {
 			t.Fatalf("run did not seal and finish: %+v: %v", row, err)
 		}
 	})

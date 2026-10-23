@@ -5,12 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestReleasedJobAdmissionDoesNotReacquirePlan(t *testing.T) {
@@ -21,12 +20,12 @@ func TestReleasedJobAdmissionDoesNotReacquirePlan(t *testing.T) {
 	if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s, `UPDATE concurrency_holders SET lease_expires_at=1 WHERE team=? AND run_id=? AND node_id=''`), f.tenant.Team(), f.ref.RunID); err != nil {
 		t.Fatal(err)
 	}
-	occupied, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: competitor, Generation: int64(owner.Owner.Generation)}, owner)
-	if err != nil || occupied.Kind != store.AcquireGranted {
+	occupied, err := f.tenant.MayStart(ctx, runstate.CapacityBinding{RunID: competitor, Generation: int64(owner.Owner.Generation)}, owner)
+	if err != nil || occupied.Kind != runstate.AcquireGranted {
 		t.Fatalf("occupy elapsed plan: %+v, %v", occupied, err)
 	}
-	result, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
-	if err != nil || result.Kind != store.AcquireGranted {
+	result, err := f.tenant.MayStart(ctx, runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
+	if err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("released job blocked on parent: %+v, %v", result, err)
 	}
 	for _, key := range []string{"job:global:node", "job:global:deploy"} {
@@ -55,11 +54,11 @@ func TestAdmissionGroupSetIsAtomicAndUsesOneArrival(t *testing.T) {
 		doc.Concurrency = nil
 		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "node", Scope: new("global"), Capacity: new(1), OnLimit: new("queue")}}
 	})
-	admissionWant(t, f, blocker, award, store.AcquireGranted)
-	binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+	admissionWant(t, f, blocker, award, runstate.AcquireGranted)
+	binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 	for range 3 {
 		result, err := f.tenant.MayStart(ctx, binding, f.holder)
-		if err != nil || result.Kind != store.AcquireQueued {
+		if err != nil || result.Kind != runstate.AcquireQueued {
 			t.Fatalf("group set admission: %+v %v", result, err)
 		}
 		var holders, waiters, arrivals int
@@ -83,7 +82,7 @@ func TestAdmissionGroupSetIsAtomicAndUsesOneArrival(t *testing.T) {
 			t.Fatalf("single-key release promoted a partial set: %s %+v %v", key, state, err)
 		}
 	}
-	if result, err := f.tenant.MayStart(ctx, binding, f.holder); err != nil || result.Kind != store.AcquireGranted {
+	if result, err := f.tenant.MayStart(ctx, binding, f.holder); err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("complete set did not progress: %+v %v", result, err)
 	}
 }
@@ -104,21 +103,21 @@ func TestAdmissionQueueTimeoutOnlyAppliesWhileWaiting(t *testing.T) {
 						t.Fatal(err)
 					}
 					f.s.SetTestClock(t, func() time.Time { return now })
-					want := store.AcquireGranted
+					want := runstate.AcquireGranted
 					if queued {
 						blocker, actor := admissionPolicyBlocker(t, f)
-						if result, err := f.tenant.MayStart(t.Context(), blocker, actor); err != nil || result.Kind != store.AcquireGranted {
+						if result, err := f.tenant.MayStart(t.Context(), blocker, actor); err != nil || result.Kind != runstate.AcquireGranted {
 							t.Fatalf("blocker: %+v %v", result, err)
 						}
-						want = store.AcquireQueued
+						want = runstate.AcquireQueued
 					}
-					binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+					binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 					if result, err := f.tenant.MayStart(t.Context(), binding, f.holder); err != nil || result.Kind != want {
 						t.Fatalf("initial admission: %+v %v", result, err)
 					}
 					now = now.Add(2 * time.Second)
 					if queued {
-						want = store.AcquireFailed
+						want = runstate.AcquireFailed
 					}
 					result, err := f.tenant.MayStart(t.Context(), binding, f.holder)
 					if err != nil || result.Kind != want || queued && result.FailureReason != store.FailureQueueTimeout {
@@ -137,14 +136,14 @@ func TestAdmissionQueueTimeoutOnlyAppliesWhileWaiting(t *testing.T) {
 
 func TestAdmissionRequiresActualJobAward(t *testing.T) {
 	f := newRecoveryCapacityFixture(t)
-	binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+	binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 	if _, err := f.tenant.MayStart(t.Context(), binding, f.owner); err == nil {
 		t.Fatal("coordinator acquired executable job groups")
 	}
-	for _, alter := range []func(*store.Actor){
-		func(a *store.Actor) { a.Holder = "another-host" },
-		func(a *store.Actor) { a.Generation++ },
-		func(a *store.Actor) { a.NodeID = "another-job" },
+	for _, alter := range []func(*runstate.Actor){
+		func(a *runstate.Actor) { a.Holder = "another-host" },
+		func(a *runstate.Actor) { a.Generation++ },
+		func(a *runstate.Actor) { a.NodeID = "another-job" },
 	} {
 		actor := f.holder
 		alter(&actor)
@@ -178,8 +177,8 @@ func TestClaimedAdmissionRetainsPlanThroughOwnerRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(f.ref.RunID), Generation: int64(owner.Owner.Generation)}, owner)
-	if err != nil || result.Kind != store.AcquireGranted {
+	result, err := f.tenant.MayStart(ctx, runstate.CapacityBinding{RunID: string(f.ref.RunID), Generation: int64(owner.Owner.Generation)}, owner)
+	if err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("successor admission: %+v, %v", result, err)
 	}
 	after, err := f.tenant.GetConcurrencyState(ctx, "plan:global:plan")
@@ -203,8 +202,8 @@ func TestJobBoxScopeUsesExecutingAward(t *testing.T) {
 	if owner.Capability.ExecutionHost == holder.Capability.ExecutionHost {
 		t.Fatal("fixture did not split owner from execution host")
 	}
-	result, err := f.tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
-	if err != nil || result.Kind != store.AcquireGranted {
+	result, err := f.tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
+	if err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("execution admission: %+v %v", result, err)
 	}
 	key := runspec.ConcurrencyKey("job", "box", holder.Capability.ExecutionHost, "deploy")
@@ -235,13 +234,13 @@ func TestWaitingGroupSetDoesNotPreemptEarlierGroup(t *testing.T) {
 		if group == "a-cancel" {
 			competitor = blocker.RunID
 		}
-		admissionWant(t, f, blocker, award, store.AcquireGranted)
+		admissionWant(t, f, blocker, award, runstate.AcquireGranted)
 	}
-	result, err := f.tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
-	if err != nil || result.Kind != store.AcquireQueued {
+	result, err := f.tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
+	if err != nil || result.Kind != runstate.AcquireQueued {
 		t.Fatalf("group set did not wait: %+v %v", result, err)
 	}
-	row, err := f.tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(competitor), NodeID: "job"})
+	row, err := f.tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(competitor), NodeID: "job"})
 	if err != nil || row.CancelRequestedAt != nil {
 		t.Fatalf("waiting set cancelled earlier group's victim: %+v %v", row, err)
 	}
@@ -261,8 +260,8 @@ func TestAdmissionReapsCapacityWhenClaimAndOwnerBothEnd(t *testing.T) {
 				doc.Concurrency = []nodeproto.ConcurrencySpec{{Group: "plan", Scope: new("global"), Capacity: new(1)}}
 				doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "job", Scope: new("global"), Capacity: new(1)}}
 			})
-			binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
-			if result, err := f.tenant.MayStart(t.Context(), binding, f.holder); err != nil || result.Kind != store.AcquireGranted {
+			binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+			if result, err := f.tenant.MayStart(t.Context(), binding, f.holder); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("initial admission: %+v %v", result, err)
 			}
 			for _, table := range []string{"triggers", "nodes"} {
@@ -275,7 +274,7 @@ func TestAdmissionReapsCapacityWhenClaimAndOwnerBothEnd(t *testing.T) {
 				}
 			}
 			competitor, award := admissionPolicyBlocker(t, f)
-			if result, err := f.tenant.MayStart(t.Context(), competitor, award); err != nil || result.Kind != store.AcquireGranted {
+			if result, err := f.tenant.MayStart(t.Context(), competitor, award); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("dead work still consumes capacity: %+v %v", result, err)
 			}
 			var count int

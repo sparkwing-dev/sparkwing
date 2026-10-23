@@ -3,10 +3,11 @@ package controller
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -15,7 +16,7 @@ import (
 type EngineController struct {
 	authority         engineAuthority
 	operator          AuthorityRevoker
-	authorization     RouteAuthorization
+	authorization     routepolicy.Authorization
 	RunnerPolicy      RunnerAdmissionPolicy
 	LocalRunnerPolicy RunnerAdmissionPolicy
 	VersionPolicy     *SignedEngineVersionPolicy
@@ -34,7 +35,7 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 	if err != nil {
 		return controllerwire.ReconcileResponse{}, err
 	}
-	request := store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: runspec.RunID(authorized.Target.RunID), NodeID: runspec.NodeID(authorized.Target.NodeID)}, Actor: actor, Policy: store.SourcePolicy(body.Policy), MaterializeOnly: body.MaterializeOnly}
+	request := store.ReconcileRequest{Ref: runspec.NodeRef{RunID: runspec.RunID(authorized.Target.RunID), NodeID: runspec.NodeID(authorized.Target.NodeID)}, Actor: actor, Policy: runstate.SourcePolicy(body.Policy), MaterializeOnly: body.MaterializeOnly}
 	if body.Source != nil {
 		source := reconcileSourceForStore(*body.Source)
 		request.Source = &source

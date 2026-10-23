@@ -9,26 +9,27 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // NodeTransitionStore is the executor's fenced state boundary.
 type NodeTransitionStore interface {
-	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
+	ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
-	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
+	TransitionNode(context.Context, store.NodeCommand) (runstate.Applied, error)
 	RecordStep(context.Context, store.StepReport) error
 }
 
@@ -45,7 +46,7 @@ type ExecutorProcess interface {
 // ExecutorFinalizer saves an executor layer's state after its inner layers end.
 // Finalizers receive the last committed attempt and its refreshed storage binding.
 // Artifact publication returns verified references; the store authorizes attachment.
-type ExecutorFinalizer func(context.Context, NodeInput, *store.NodeResult) error
+type ExecutorFinalizer func(context.Context, NodeInput, *runstate.NodeResult) error
 
 // ExecutorActivity connects logs and authorized child waits to the idle budget.
 // Await pauses that budget until its returned function is called. Concurrent
@@ -72,15 +73,15 @@ type ExecutorDependencies struct {
 	Store            NodeTransitionStore
 	Bind             func(context.Context, NodeInput) (ProcessGrant, error)
 	Start            func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error)
-	EnsureEngine     func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
+	EnsureEngine     func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error)
 	ChildContext     func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	Validation       nodeproto.ValidationContext
 	PrepareArtifacts func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
 	PrepareCaches    func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
 	PublishOutput    func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
 	Annotate         func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
-	ReadFailure      func(context.Context, controllerwire.NodeRef, int64) (*nodeproto.JobFailure, error)
-	ReadOutput       func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	ReadFailure      func(context.Context, runspec.NodeRef, int64) (*nodeproto.JobFailure, error)
+	ReadOutput       func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error)
 	Masker           *secrets.Masker
 	Masks            *MaskRegistry
 }
@@ -133,7 +134,7 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 		return h.report(ctx, input, h.failure(context.Cause(ctx)), context.Cause(ctx))
 	}
 	if row.CancelRequestedAt != nil {
-		return h.report(ctx, input, store.NodeResult{Outcome: store.NodeCancelled, Reason: string(apierr.ReasonCancelled)}, nil)
+		return h.report(ctx, input, runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(apierr.ReasonCancelled)}, nil)
 	}
 	input, err = h.startExecution(ctx, input, spec)
 	if err != nil {
@@ -153,10 +154,10 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 		}
 	}
 	if decision.Skip {
-		return h.report(ctx, input, store.NodeResult{Outcome: store.NodeSkipped, Reason: "skip_if"}, nil)
+		return h.report(ctx, input, runstate.NodeResult{Outcome: runstate.NodeSkipped, Reason: "skip_if"}, nil)
 	}
 	var memoHash runspec.Hash
-	var memoResult *store.NodeResult
+	var memoResult *runstate.NodeResult
 	if job.Memo != nil || job.Closures.MemoKey != "" {
 		err = h.withProcess(ctx, input, spec, func(session *executorSession, code NodeInput) error {
 			memoHash, memoResult, err = h.memo(ctx, session, code, job, spec)
@@ -169,8 +170,8 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 			return h.report(ctx, input, *memoResult, nil)
 		}
 	}
-	result, runErr := h.layers(ctx, &input, job, func() (store.NodeResult, error) { return h.attempts(ctx, &input, spec, row, job) })
-	if runErr == nil && result.Outcome == store.NodeSuccess {
+	result, runErr := h.layers(ctx, &input, job, func() (runstate.NodeResult, error) { return h.attempts(ctx, &input, spec, row, job) })
+	if runErr == nil && result.Outcome == runstate.NodeSuccess {
 		if err := h.saveMemo(ctx, input, memoHash, result); err != nil {
 			if cause := context.Cause(ctx); cause != nil {
 				runErr, result = errors.Join(cause, err), h.failure(errors.Join(cause, err))
@@ -182,9 +183,9 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 	return h.report(ctx, input, result, runErr)
 }
 
-func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.Spec, store.NodeRow, nodeproto.JobSpec, error) {
+func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.Spec, runstate.NodeRow, nodeproto.JobSpec, error) {
 	var spec runspec.Spec
-	var row store.NodeRow
+	var row runstate.NodeRow
 	var job nodeproto.JobSpec
 	if input.Accepted.RunID == "" || input.NodeID == "" || input.Attempt < 0 || input.Generation < 1 || input.Authority.Holder == "" || input.Authority.CapabilityPrefix == "" || input.Entry == nil {
 		return spec, row, job, errors.New("node execution lacks an accepted claim or source entry")
@@ -208,7 +209,7 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	if string(hash) != input.Accepted.PlanHash {
 		return spec, row, job, executorError(apierr.PlanDrift, "accepted plan hash does not match its declarations")
 	}
-	row, err = h.deps.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
+	row, err = h.deps.Store.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 	if err != nil {
 		return spec, row, job, err
 	}
@@ -238,7 +239,7 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	return spec, row, job, nil
 }
 
-func (h *nodeExecutor) layers(ctx context.Context, input *NodeInput, job nodeproto.JobSpec, body func() (store.NodeResult, error)) (result store.NodeResult, err error) {
+func (h *nodeExecutor) layers(ctx context.Context, input *NodeInput, job nodeproto.JobSpec, body func() (runstate.NodeResult, error)) (result runstate.NodeResult, err error) {
 	var finalizers []ExecutorFinalizer
 	defer func() {
 		for i := len(finalizers) - 1; i >= 0; i-- {
@@ -283,7 +284,7 @@ func (h *nodeExecutor) startExecution(ctx context.Context, input NodeInput, spec
 	}
 	sourceAttempt := input.Attempt
 	expected := sourceAttempt + 1
-	applied, err := h.transition(ctx, input, store.StartNode{SourceAttempt: &sourceAttempt, Attempt: &store.NodeAttempt{
+	applied, err := h.transition(ctx, input, store.StartNode{SourceAttempt: &sourceAttempt, Attempt: &runstate.NodeAttempt{
 		Identity: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: int64(expected), Generation: int64(input.Generation)},
 		Holder:   input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, ExecutorName: input.GrantedRunner.Name, ExecutorKind: input.GrantedRunner.Type,
 	}})
@@ -297,14 +298,14 @@ func (h *nodeExecutor) startExecution(ctx context.Context, input NodeInput, spec
 	return input, nil
 }
 
-func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runspec.Spec, row store.NodeRow, job nodeproto.JobSpec) (store.NodeResult, error) {
+func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runspec.Spec, row runstate.NodeRow, job nodeproto.JobSpec) (runstate.NodeResult, error) {
 	remaining := max(0, input.Execution.Retry.Value-row.ApplicationRetries)
 	for retry := 0; ; retry++ {
 		result, err := h.attempt(ctx, *input, spec, job, retry < remaining)
 		if ctx.Err() != nil {
 			return h.failure(context.Cause(ctx)), context.Cause(ctx)
 		}
-		if err != nil || result.Outcome != store.NodeFailed || retry >= remaining {
+		if err != nil || result.Outcome != runstate.NodeFailed || retry >= remaining {
 			return result, err
 		}
 		if input.Attempt == math.MaxInt64 {
@@ -343,11 +344,11 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 	}
 }
 
-func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, command store.NodeCommand) (store.Applied, error) {
+func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, command store.NodeCommand) (runstate.Applied, error) {
 	if err := context.Cause(ctx); err != nil {
-		return store.Applied{}, err
+		return runstate.Applied{}, err
 	}
-	command = store.BindNodeCommand(command, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, executorActor(input))
+	command = store.BindNodeCommand(command, runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, executorActor(input))
 	applied, err := h.deps.Store.TransitionNode(ctx, command)
 	if err != nil {
 		return applied, &executorTransitionError{err: err}
@@ -355,11 +356,11 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, command 
 	return applied, nil
 }
 
-func executorActor(input NodeInput) store.Actor {
-	return store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
+func executorActor(input NodeInput) runstate.Actor {
+	return runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
 }
 
-func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store.NodeResult, runErr error) error {
+func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runstate.NodeResult, runErr error) error {
 	var refused *executorTransitionError
 	if errors.As(runErr, &refused) {
 		return runErr
@@ -368,9 +369,9 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store
 		return errors.Join(runErr, err)
 	}
 	if ctx.Err() != nil {
-		result = store.NodeResult{Outcome: store.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: limits.Error(h.deps.Masker.Mask(context.Cause(ctx).Error()))}
+		result = runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: limits.Error(h.deps.Masker.Mask(context.Cause(ctx).Error()))}
 		var admission *AdmissionFailure
-		if errors.As(context.Cause(ctx), &admission) && admission.Outcome == store.NodeSuperseded {
+		if errors.As(context.Cause(ctx), &admission) && admission.Outcome == runstate.NodeSuperseded {
 			result.Outcome, result.Reason = admission.Outcome, admission.Reason
 		}
 	}
@@ -390,12 +391,12 @@ type executorTransitionError struct{ err error }
 func (e *executorTransitionError) Error() string { return e.err.Error() }
 func (e *executorTransitionError) Unwrap() error { return e.err }
 
-func (h *nodeExecutor) failure(err error) store.NodeResult {
+func (h *nodeExecutor) failure(err error) runstate.NodeResult {
 	return h.failureAt(err, "action")
 }
 
-func (h *nodeExecutor) failureAt(err error, stage string) store.NodeResult {
-	result := store.NodeResult{Outcome: store.NodeFailed}
+func (h *nodeExecutor) failureAt(err error, stage string) runstate.NodeResult {
+	result := runstate.NodeResult{Outcome: runstate.NodeFailed}
 	if err != nil {
 		result.MaskedError = limits.Error(h.deps.Masker.Mask(err.Error()))
 	}

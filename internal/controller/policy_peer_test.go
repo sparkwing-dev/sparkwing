@@ -11,8 +11,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type peerBoundary struct{ lookup capability.CredentialLookup }
@@ -31,7 +32,7 @@ func (b *peerBoundary) ReadAuthentication(_ context.Context, lookup capability.C
 
 func (*peerBoundary) CheckBinding(_ context.Context, _ capability.Principal, rule capability.BindingRule, _ capability.Target) error {
 	if rule != capability.BindNone {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	return nil
 }

@@ -12,9 +12,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // DefaultCacheDirectory is shared by execution placements on this machine.
@@ -53,20 +54,20 @@ func NewResolver(config Config) (*Resolver, error) {
 }
 
 // Resolve obtains the exact pin's permitted executable, including on a warm cache.
-func (r *Resolver) Resolve(ctx context.Context, pin Pin, target releaseasset.Target) (Resolved, error) {
-	if pin.SDK == GoSDK && pin.Replacement != "" {
+func (r *Resolver) Resolve(ctx context.Context, pin engineid.Pin, target releaseasset.Target) (Resolved, error) {
+	if pin.SDK == engineid.GoSDK && pin.Replacement != "" {
 		return installedEngine(ctx, pin, target)
 	}
 	version, err := VersionForPin(pin)
 	if err != nil {
 		return Resolved{}, err
 	}
-	return r.resolve(ctx, Identity{Pin: pin, Version: version}, target)
+	return r.resolve(ctx, engineid.Identity{Pin: pin, Version: version}, target)
 }
 
 // Ensure binds another machine's executable to the accepted portable identity.
-func (r *Resolver) Ensure(ctx context.Context, identity Identity, target releaseasset.Target) (Resolved, error) {
-	if identity.Pin.SDK == GoSDK && identity.Pin.Replacement != "" {
+func (r *Resolver) Ensure(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, error) {
+	if identity.Pin.SDK == engineid.GoSDK && identity.Pin.Replacement != "" {
 		resolved, err := installedEngine(ctx, identity.Pin, target)
 		if err == nil && resolved.Identity != identity {
 			err = integrity(fmt.Errorf("installed engine differs from the accepted replacement-pin engine"))
@@ -83,7 +84,7 @@ func (r *Resolver) Ensure(ctx context.Context, identity Identity, target release
 	return r.resolve(ctx, identity, target)
 }
 
-func (r *Resolver) resolve(ctx context.Context, identity Identity, target releaseasset.Target) (Resolved, error) {
+func (r *Resolver) resolve(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, error) {
 	if target.Binary != releaseasset.Sparkwing {
 		return Resolved{}, invalid("pipeline engines require the sparkwing executable", "Select the pipeline engine target.")
 	}
@@ -123,7 +124,7 @@ func (r *Resolver) resolve(ctx context.Context, identity Identity, target releas
 	return resolved, err
 }
 
-func (r *Resolver) findCached(ctx context.Context, identity Identity, target releaseasset.Target) (Resolved, bool, error) {
+func (r *Resolver) findCached(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, bool, error) {
 	if identity.ManifestDigest != "" {
 		return r.Cached(ctx, identity, target)
 	}
@@ -152,7 +153,7 @@ func (r *Resolver) findCached(ctx context.Context, identity Identity, target rel
 }
 
 // Cached re-verifies signatures, metadata and executable bytes; it grants no policy permission.
-func (r *Resolver) Cached(ctx context.Context, identity Identity, target releaseasset.Target) (Resolved, bool, error) {
+func (r *Resolver) Cached(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return Resolved{}, false, err
 	}
@@ -214,7 +215,7 @@ func readCachedRelease(version string, target releaseasset.Target, executable st
 }
 
 // StoreVerified publishes a complete verified cache entry by an atomic directory rename.
-func (r *Resolver) StoreVerified(ctx context.Context, pin Pin, release VerifiedRelease) (resolved Resolved, result error) {
+func (r *Resolver) StoreVerified(ctx context.Context, pin engineid.Pin, release VerifiedRelease) (resolved Resolved, result error) {
 	if err := ctx.Err(); err != nil {
 		return Resolved{}, err
 	}
@@ -225,7 +226,7 @@ func (r *Resolver) StoreVerified(ctx context.Context, pin Pin, release VerifiedR
 	if version != release.version || release.asset.Name() == "" {
 		return Resolved{}, integrity(fmt.Errorf("release capability does not match SDK pin"))
 	}
-	identity := Identity{Pin: pin, Version: version, ManifestDigest: digest(release.bundle.Manifest)}
+	identity := engineid.Identity{Pin: pin, Version: version, ManifestDigest: digest(release.bundle.Manifest)}
 	if cached, ok, err := r.Cached(ctx, identity, release.target); err != nil || ok {
 		return cached, err
 	}

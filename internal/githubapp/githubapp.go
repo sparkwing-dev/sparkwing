@@ -35,7 +35,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // GitHub's production endpoints.

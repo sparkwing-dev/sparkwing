@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestAttemptExecutorComesFromClaimAncestryProperty(t *testing.T) {
@@ -41,12 +41,12 @@ func TestAttemptExecutorComesFromClaimAncestryProperty(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					actor := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, Kind: ActorHolder, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+					actor := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, Kind: runstate.ActorHolder, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 					identity := runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: int64(claim.Award.Generation)}
 					forged := fmt.Sprintf("cloud:' OR 1=1 --/%x", random.Uint64())
 					tenant := &Tenant{s: s, team: "a"}
 					admitExecution(t, tenant, actor)
-					_, err = tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal), Extra: transitionExtra{Attempt: &NodeAttempt{Identity: identity, ExecutorKind: forged, ExecutorName: forged, ExecutorLocation: forged}}})
+					_, err = tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, To: runstate.NodeRunning, Cause: runstate.CauseStart, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal), Extra: transitionExtra{Attempt: &runstate.NodeAttempt{Identity: identity, ExecutorKind: forged, ExecutorName: forged, ExecutorLocation: forged}}})
 					if err != nil {
 						t.Fatal(err)
 					}

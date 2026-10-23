@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // Unselected memberships need the same immutable fence as the active team.

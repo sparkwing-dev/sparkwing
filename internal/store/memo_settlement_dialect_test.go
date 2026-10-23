@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestMemoPublicationCommitsWithProducerOutcome(t *testing.T) {
@@ -19,7 +19,7 @@ func TestMemoPublicationCommitsWithProducerOutcome(t *testing.T) {
 		target func(*testing.T) *storetest.Target
 	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
 		t.Run(dialect.name, func(t *testing.T) {
-			for _, outcome := range []store.NodeState{store.NodeSuccess, store.NodeCancelled} {
+			for _, outcome := range []runstate.NodeState{runstate.NodeSuccess, runstate.NodeCancelled} {
 				t.Run(string(outcome), func(t *testing.T) {
 					f := newStoreRecoveryFixtureAt(t, true, dialect.target(t), func(doc *nodeproto.PlanDoc) {
 						doc.Jobs[0].Memo = &nodeproto.MemoSpec{}
@@ -47,10 +47,10 @@ func TestMemoPublicationCommitsWithProducerOutcome(t *testing.T) {
 						t.Fatal(err)
 					}
 					binding, reader := admissionPolicyBlocker(t, f)
-					if granted, err := f.tenant.MayStart(t.Context(), binding, reader); err != nil || granted.Kind != store.AcquireGranted {
+					if granted, err := f.tenant.MayStart(t.Context(), binding, reader); err != nil || granted.Kind != runstate.AcquireGranted {
 						t.Fatalf("reader admission=%+v %v", granted, err)
 					}
-					readerRef := controllerwire.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)}
+					readerRef := runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)}
 					if _, err := f.tenant.TransitionNode(t.Context(), store.StartNode{Ref: readerRef, Actor: reader, SourceAttempt: acceptanceAttempt(0)}); err != nil {
 						t.Fatal(err)
 					}
@@ -58,11 +58,11 @@ func TestMemoPublicationCommitsWithProducerOutcome(t *testing.T) {
 					if hit, err := f.tenant.LookupMemo(t.Context(), lookup); err != nil || hit.Found {
 						t.Fatalf("unsettled producer reusable: %+v %v", hit, err)
 					}
-					if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: &row.Attempt, Outcome: outcome, Result: &store.NodeResult{Outcome: outcome}}); err != nil {
+					if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: &row.Attempt, Outcome: outcome, Result: &runstate.NodeResult{Outcome: outcome}}); err != nil {
 						t.Fatal(err)
 					}
 					hit, err := f.tenant.LookupMemo(t.Context(), lookup)
-					if err != nil || hit.Found != (outcome == store.NodeSuccess) {
+					if err != nil || hit.Found != (outcome == runstate.NodeSuccess) {
 						t.Fatalf("producer %s reuse=%+v %v", outcome, hit, err)
 					}
 				})

@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type uploadQuotaDimension struct {

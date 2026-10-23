@@ -13,7 +13,7 @@ import (
 	"unicode"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // SignLogPut signs a PUT of exact bytes to one server-derived log key. Writer

@@ -5,21 +5,23 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // WithAuthorization configures the policy router's committed-fact verifier,
 // resource bindings and transport identity/CSRF adapters before Handler is built.
 // Missing dependencies fail closed.
-func (s *Server) WithAuthorization(authorization RouteAuthorization) *Server {
+func (s *Server) WithAuthorization(authorization routepolicy.Authorization) *Server {
 	s.authorization = authorization
 	return s
 }
 
-func (s *Server) operatorEndpoints() []Endpoint {
-	endpoints := []Endpoint{
+func (s *Server) operatorEndpoints() []controllerwire.Endpoint {
+	endpoints := []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/operator/limits", Handle: s.handleComputeLimitsShow},
 		{Method: "PUT", Pattern: "/api/v1/operator/limits", Handle: s.handleComputeLimitsSet},
 		{Method: "GET", Pattern: "/api/v1/operator/signups", Handle: s.handleSignUpStatus},
@@ -59,10 +61,10 @@ func (s *Server) operatorEndpoints() []Endpoint {
 	return endpoints
 }
 
-func (s *Server) registerPolicyEndpoints(mux *registeredMux, endpoints []Endpoint) {
-	router := NewPolicyRouter(s.authorization)
-	router.mux = mux.ServeMux
-	router.resolveTenant = s.resolveTenant
+func (s *Server) registerPolicyEndpoints(mux *registeredMux, endpoints []controllerwire.Endpoint) {
+	router := routepolicy.New(controllerAuthorization(s.authorization, s.resolveTenant))
+	router.Mux = mux.ServeMux
+
 	for _, endpoint := range endpoints {
 		if err := router.Register(s.tenantEndpoint(endpoint)); err != nil {
 			panic(err)
@@ -73,7 +75,7 @@ func (s *Server) registerPolicyEndpoints(mux *registeredMux, endpoints []Endpoin
 	for _, endpoint := range endpoints {
 		if !paths[endpoint.Pattern] {
 			mux.HandleFunc(endpoint.Pattern, func(w http.ResponseWriter, r *http.Request) {
-				writeRouteMiss(w, router.allowedMethods(r))
+				routepolicy.WriteRouteMiss(w, router.AllowedMethods(r))
 			})
 			paths[endpoint.Pattern] = true
 		}

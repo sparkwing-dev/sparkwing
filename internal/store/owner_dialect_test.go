@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
@@ -34,11 +34,11 @@ VALUES ('acme','local','job','pending',?,?)`, []byte(`{"id":"job"}`), []byte(`{}
 		t.Fatalf("reaped owners: %+v, %v", reaped, err)
 	}
 	run, err := tenant.ReadRun(t.Context(), "local")
-	if err != nil || run.State != store.RunFailed || run.FinishedAt == nil {
+	if err != nil || run.State != runstate.RunFailed || run.FinishedAt == nil {
 		t.Fatalf("local owner: %+v, %v", run, err)
 	}
-	job, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "local", NodeID: "job"})
-	if err != nil || job.Outcome != store.NodeCancelled || job.StateSeq != 1 {
+	job, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "local", NodeID: "job"})
+	if err != nil || job.Outcome != runstate.NodeCancelled || job.StateSeq != 1 {
 		t.Fatalf("unstarted job: %+v, %v", job, err)
 	}
 }

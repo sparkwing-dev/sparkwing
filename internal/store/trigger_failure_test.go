@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -18,7 +18,7 @@ func TestFailedRunClosesOwnerAndKeepsVerdict(t *testing.T) {
 		t.Fatal(err)
 	}
 	const reason = "pipeline missing is not defined in acme/web@abc; defined: build"
-	finish := store.FinishRunRequest{Unit: plan.Actor.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(plan.RunID), Actor: plan.Actor, Cause: store.RunFinish, MaskedError: reason}}
+	finish := runstate.FinishRunRequest{Unit: plan.Actor.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(plan.RunID), Actor: plan.Actor, Cause: runstate.RunFinish, MaskedError: reason}}
 	for replay := range 2 {
 		applied, err := tenant.FinishRunAndUnit(t.Context(), finish)
 		if err != nil || applied.Replayed != (replay == 1) {
@@ -52,11 +52,11 @@ func TestFinishWithoutAcceptedPlanDerivesFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A raw run edge cannot bypass the same verdict owner as atomic finish.
-	if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: runspec.RunID(plan.RunID), Actor: plan.Actor, Cause: store.RunFinish, To: store.RunSuccess}); err != nil {
+	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(plan.RunID), Actor: plan.Actor, Cause: runstate.RunFinish, To: runstate.RunSuccess}); err != nil {
 		t.Fatal(err)
 	}
 	row, err := tenant.ReadRun(t.Context(), plan.RunID)
-	if err != nil || row.State != store.RunFailed {
+	if err != nil || row.State != runstate.RunFailed {
 		t.Fatalf("unaccepted plan completed as %s: %v", row.State, err)
 	}
 }

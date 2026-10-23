@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-func reconcileFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
+func reconcileFixture(t *testing.T) (*Tenant, *time.Time, runstate.Actor) {
 	t.Helper()
 	tenant, now, _ := liveHolderFixture(t)
 	expiry := now.Add(time.Hour)
@@ -23,19 +23,19 @@ func reconcileFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
 	owner.ExpiresAt = &expiry
 	authorityPersist(t, tenant.s, owner)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES ('a','run','claimed','trigger',1,1,'host','owner',1,?,?,?,1)`, expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
-	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, CapabilityPrefix: "owner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}}
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, CapabilityPrefix: "owner", Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}}
 	return tenant, now, actor
 }
 
 func TestReconcileWaitsForHolderUntilReaperCommits(t *testing.T) {
 	tenant, now, actor := reconcileFixture(t)
-	request := ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone}
+	request := ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceNone}
 	for _, expired := range []bool{false, true} {
 		if expired {
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=? WHERE run_id='run'`, now.Add(-time.Nanosecond).UnixNano())
 		}
 		got, err := tenant.ReconcileNode(t.Context(), request)
-		if err != nil || got.Kind != WaitHolder || got.Claim != nil || got.Node.Generation != 2 || got.Node.StateSeq != 0 {
+		if err != nil || got.Kind != runstate.WaitHolder || got.Claim != nil || got.Node.Generation != 2 || got.Node.StateSeq != 0 {
 			t.Fatalf("reconcile expired=%v: %+v, %v", expired, got, err)
 		}
 	}
@@ -44,13 +44,13 @@ func TestReconcileWaitsForHolderUntilReaperCommits(t *testing.T) {
 
 func TestReconcileKeepsTerminalWithoutSourceOrNewEvent(t *testing.T) {
 	tenant, _, actor := reconcileFixture(t)
-	holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3)}); err != nil {
+	holder := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: holder, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(3)}); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
-		got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceResume})
-		if err != nil || got.Kind != KeepTerminal || got.Node.Outcome != NodeSuccess || got.Claim != nil {
+		got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceResume})
+		if err != nil || got.Kind != runstate.KeepTerminal || got.Node.Outcome != runstate.NodeSuccess || got.Claim != nil {
 			t.Fatalf("terminal reconciliation: %+v, %v", got, err)
 		}
 	}
@@ -61,7 +61,7 @@ func TestReconcileRechecksOwnerAndSourcePolicy(t *testing.T) {
 	for _, problem := range []string{"team", "owner_expired", "owner_generation", "revoked", "kind", "source_none", "source_mismatch", "policy"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, now, actor := reconcileFixture(t)
-			request := ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone}
+			request := ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceNone}
 			switch problem {
 			case "team":
 				tenant.team = "b"
@@ -72,11 +72,11 @@ func TestReconcileRechecksOwnerAndSourcePolicy(t *testing.T) {
 			case "revoked":
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='owner'`)
 			case "kind":
-				request.Actor.Kind = ActorHolder
+				request.Actor.Kind = runstate.ActorHolder
 			case "source_none":
-				request.Source = &MaterializeSource{Kind: SourceMemo}
+				request.Source = &runstate.MaterializeSource{Kind: runstate.SourceMemo}
 			case "source_mismatch":
-				request.Policy, request.Source = SourceMemo, &MaterializeSource{Kind: SourceManualRetry}
+				request.Policy, request.Source = runstate.SourceMemo, &runstate.MaterializeSource{Kind: runstate.SourceManualRetry}
 			case "policy":
 				request.Policy = "any"
 			}
@@ -98,13 +98,13 @@ func TestReconcileRacingOwnersReclaimOneReapedJob(t *testing.T) {
 		t.Fatalf("reap: %+v, %v", reaped, err)
 	}
 	var wg sync.WaitGroup
-	results := make(chan ReconciledNode, 2)
+	results := make(chan runstate.ReconciledNode, 2)
 	errors := make(chan error, 2)
 	start := make(chan struct{})
 	for range 2 {
 		wg.Go(func() {
 			<-start
-			got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceResume})
+			got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceResume})
 			results <- got
 			errors <- err
 		})
@@ -121,12 +121,12 @@ func TestReconcileRacingOwnersReclaimOneReapedJob(t *testing.T) {
 	var execute, wait int
 	for got := range results {
 		switch got.Kind {
-		case Execute:
+		case runstate.Execute:
 			execute++
 			if got.Claim == nil || got.Claim.Generation != 3 || got.Claim.Holder != "host" || len(got.Bearer) == 0 {
 				t.Fatalf("claim: %+v", got)
 			}
-		case WaitHolder:
+		case runstate.WaitHolder:
 			wait++
 		default:
 			t.Fatalf("unexpected reconciliation: %+v", got)
@@ -148,7 +148,7 @@ func TestReconcileDoesNotExecuteUnresolvedDependency(t *testing.T) {
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,started_at=NULL,ready_at=NULL,spec_json=?`, []byte(`{"id":"job","needs":["dependency"]}`))
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','dependency','pending',?,?)`, []byte(`{"id":"dependency"}`), []byte(`{}`))
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET plan_json=?,plan_hash='plan',spec_json=?,spec_hash='spec',sealed_at=1 WHERE id='run'`, []byte(`{"jobs":[{"id":"dependency"},{"id":"job","needs":["dependency"]}]}`), []byte(`{}`))
-	if _, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone}); err == nil {
+	if _, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceNone}); err == nil {
 		t.Fatal("executed before dependency")
 	}
 	rewriteSchemaCount(t, tenant.s.db, "events", 0)
@@ -161,8 +161,8 @@ func TestReconcileSelfClaimRenewalKeepsOwnerFence(t *testing.T) {
 			tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 			rewriteSchemaExec(t, tenant.s.db, `DELETE FROM node_attempts`)
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,started_at=NULL,ready_at=1`)
-			got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone})
-			if err != nil || got.Kind != Execute || got.Node.OwnerCapabilityPrefix != actor.CapabilityPrefix {
+			got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceNone})
+			if err != nil || got.Kind != runstate.Execute || got.Node.OwnerCapabilityPrefix != actor.CapabilityPrefix {
 				t.Fatalf("self claim: %+v, %v", got, err)
 			}
 			before := *got.Node.LeaseExpiresAt
@@ -189,7 +189,7 @@ func TestReconcileSelfClaimRenewalKeepsOwnerFence(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil {
 				t.Fatal(err)
 			}

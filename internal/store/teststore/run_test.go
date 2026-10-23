@@ -8,8 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -47,7 +46,7 @@ func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 	if err := teststore.SeedNodeReady(s, t.Context(), seed.RunID, seed.NodeID); err != nil {
 		t.Fatal(err)
 	}
-	first, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(seed.RunID), NodeID: runspec.NodeID(seed.NodeID)})
+	first, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(seed.RunID), NodeID: runspec.NodeID(seed.NodeID)})
 	if err != nil || first.ReadyAt == nil {
 		t.Fatalf("ready seed: %+v %v", first, err)
 	}
@@ -62,16 +61,16 @@ func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 	if err := teststore.SeedNode(s, t.Context(), seed); err != nil {
 		t.Fatal(err)
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(seed.RunID), NodeID: runspec.NodeID(seed.NodeID)}
+	ref := runspec.NodeRef{RunID: runspec.RunID(seed.RunID), NodeID: runspec.NodeID(seed.NodeID)}
 	running, err := tenant.ReadNode(t.Context(), ref)
-	if err != nil || running.Status != store.StatusRunning || running.StartedAt == nil || !running.StartedAt.Equal(now) || running.LeaseExpiresAt == nil || !running.LeaseExpiresAt.Equal(now.Add(time.Hour)) || running.Attempt != 1 || running.ClaimedBy == "" || running.CapabilityPrefix == "" || running.Generation != 1 {
+	if err != nil || running.Status != runstate.StatusRunning || running.StartedAt == nil || !running.StartedAt.Equal(now) || running.LeaseExpiresAt == nil || !running.LeaseExpiresAt.Equal(now.Add(time.Hour)) || running.Attempt != 1 || running.ClaimedBy == "" || running.CapabilityPrefix == "" || running.Generation != 1 {
 		t.Fatalf("running fixture: %+v %v", running, err)
 	}
-	if err := teststore.SeedNodeFinish(s, t.Context(), store.DefaultTeam, ref, store.NodeResult{Outcome: store.NodeSuccess}); err != nil {
+	if err := teststore.SeedNodeFinish(s, t.Context(), store.DefaultTeam, ref, runstate.NodeResult{Outcome: runstate.NodeSuccess}); err != nil {
 		t.Fatal(err)
 	}
 	done, err := tenant.ReadNode(t.Context(), ref)
-	if err != nil || done.Status != store.StatusDone || done.ClaimedBy != "" || done.CapabilityPrefix != "" || done.LeaseExpiresAt != nil || done.FinishedAt == nil {
+	if err != nil || done.Status != runstate.StatusDone || done.ClaimedBy != "" || done.CapabilityPrefix != "" || done.LeaseExpiresAt != nil || done.FinishedAt == nil {
 		t.Fatalf("finished fixture: %+v %v", done, err)
 	}
 	seed.RunID = "missing"

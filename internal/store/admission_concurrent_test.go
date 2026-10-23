@@ -7,11 +7,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {
@@ -35,12 +35,12 @@ func runConcurrentAdmissionSuite(t *testing.T, target func(*testing.T) *storetes
 				}
 			})
 			type contender struct {
-				binding       store.CapacityBinding
-				actor         store.Actor
+				binding       runstate.CapacityBinding
+				actor         runstate.Actor
 				started, done bool
 			}
 			work := make([]contender, 8)
-			work[0].binding = store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+			work[0].binding = runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 			work[0].actor = f.holder
 			for i := 1; i < len(work); i++ {
 				work[i].binding, work[i].actor = admissionPolicyBlocker(t, f)
@@ -49,16 +49,16 @@ func runConcurrentAdmissionSuite(t *testing.T, target func(*testing.T) *storetes
 				if w.done {
 					return nil
 				}
-				ref := controllerwire.NodeRef{RunID: runspec.RunID(w.binding.RunID), NodeID: runspec.NodeID(w.binding.NodeID)}
+				ref := runspec.NodeRef{RunID: runspec.RunID(w.binding.RunID), NodeID: runspec.NodeID(w.binding.NodeID)}
 				if !w.started {
 					result, err := f.tenant.MayStart(t.Context(), w.binding, w.actor)
 					if err != nil {
 						return fmt.Errorf("admit %s: %w", ref.RunID, err)
 					}
-					if result.Kind == store.AcquireQueued {
+					if result.Kind == runstate.AcquireQueued {
 						return nil
 					}
-					if result.Kind != store.AcquireGranted {
+					if result.Kind != runstate.AcquireGranted {
 						return fmt.Errorf("admit %s: unexpected %s", ref.RunID, result.Kind)
 					}
 					_, err = f.tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: w.actor, SourceAttempt: acceptanceAttempt(0)})
@@ -68,7 +68,7 @@ func runConcurrentAdmissionSuite(t *testing.T, target func(*testing.T) *storetes
 					w.started = true
 					return nil
 				}
-				_, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: w.actor, Outcome: store.NodeSuccess, SourceAttempt: acceptanceAttempt(1)})
+				_, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: w.actor, Outcome: runstate.NodeSuccess, SourceAttempt: acceptanceAttempt(1)})
 				if err != nil {
 					return fmt.Errorf("settle %s: %w", ref.RunID, err)
 				}
@@ -77,7 +77,7 @@ func runConcurrentAdmissionSuite(t *testing.T, target func(*testing.T) *storetes
 			}
 			rng := rand.New(rand.NewSource(seed))
 			for _, i := range rng.Perm(len(work)) {
-				if result, err := f.tenant.MayStart(t.Context(), work[i].binding, work[i].actor); err != nil || result.Kind != store.AcquireGranted && result.Kind != store.AcquireQueued {
+				if result, err := f.tenant.MayStart(t.Context(), work[i].binding, work[i].actor); err != nil || result.Kind != runstate.AcquireGranted && result.Kind != runstate.AcquireQueued {
 					t.Fatalf("initial admission: %+v, %v", result, err)
 				}
 			}

@@ -6,10 +6,10 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // CheckBinding checks committed resource relations against current authority in one snapshot.
@@ -85,7 +85,7 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 	case capability.BindRunOfTrigger:
 		allowed = b.Kind == capability.BindingTrigger && c.Unit == capability.UnitTrigger && b.RunID != "" && b.RunID == target.RunID
 		if allowed && target.NodeID != "" {
-			_, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)})
+			_, err := readNodeTx(ctx, tx, Team(c.Team), runspec.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)})
 			if errors.Is(err, ErrNotFound) {
 				return bindingRefusal()
 			}
@@ -127,7 +127,7 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 			return bindingDeclaredReadTx(ctx, tx, c, target)
 		}
 		if rule == capability.BindData && c.Data != nil && c.Data.Use == capability.DataPublish && target.RunID == c.Data.RunID {
-			return checkPublisherTx(ctx, tx, Team(c.Team), Actor{Kind: ActorOperator, Authority: p.Authority, CapabilityPrefix: c.Prefix}, target.RunID)
+			return checkPublisherTx(ctx, tx, Team(c.Team), runstate.Actor{Kind: runstate.ActorOperator, Authority: p.Authority, CapabilityPrefix: c.Prefix}, target.RunID)
 		}
 	case capability.BindSource:
 		return bindingSourceTx(ctx, tx, c, target)

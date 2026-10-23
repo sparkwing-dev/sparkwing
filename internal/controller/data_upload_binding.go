@@ -12,8 +12,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 func validDataDigest(digest blob.Digest) bool {
@@ -40,7 +41,7 @@ func (s *boundData) Upload(ctx context.Context, intent blob.UploadIntent) (blob.
 		return blob.UploadTicket{}, err
 	}
 	if s.controller.Objects == nil {
-		return blob.UploadTicket{}, missingEndpointPolicy()
+		return blob.UploadTicket{}, routepolicy.MissingEndpointPolicy()
 	}
 	id := rand.Text()
 	expires := time.Now().UTC().Add(limits.DataUploadURLTTL)
@@ -103,7 +104,7 @@ func (s *boundData) Commit(ctx context.Context, request blob.CommitUpload) (blob
 		return blob.Receipt{}, err
 	}
 	if s.controller.Objects == nil {
-		return blob.Receipt{}, missingEndpointPolicy()
+		return blob.Receipt{}, routepolicy.MissingEndpointPolicy()
 	}
 	reservation, err := tenant.LookupBlobUpload(ctx, authority, request.TicketID)
 	if err != nil {

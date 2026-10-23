@@ -5,14 +5,16 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 )
 
-func (s *Server) reportingEndpoints() []Endpoint {
+func (s *Server) reportingEndpoints() []controllerwire.Endpoint {
 	engine := s.engineController
-	endpoints := []Endpoint{
+	endpoints := []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/metrics", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleGetJobMetrics},
 		{Method: "GET", Pattern: "/api/v1/runs", Decode: authorityTarget, Handle: s.handleListRuns},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/receipt", Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleGetRunReceipt},
@@ -66,7 +68,7 @@ func reportingPipelineTarget(r *http.Request) (capability.RequestEvidence, error
 
 func (s *Server) reportingTenant(r *http.Request, a capability.Authorized) (*store.Tenant, error) {
 	if a.Target.Team == "" || s.operator == nil {
-		return nil, missingEndpointPolicy()
+		return nil, routepolicy.MissingEndpointPolicy()
 	}
 	return s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 }

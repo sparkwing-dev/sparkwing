@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"sync/atomic"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
 )
 
 var cleanupJobSequence atomic.Uint64

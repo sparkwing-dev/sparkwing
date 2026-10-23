@@ -6,9 +6,8 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty(t *testing.T) {
@@ -27,7 +26,7 @@ func TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty(t *t
 		if err != nil || len(accepted.Nodes) != 1 {
 			t.Fatalf("expansion: %+v, %v", accepted, err)
 		}
-		row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: request.Source.RunID, NodeID: runspec.NodeID(id)})
+		row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: request.Source.RunID, NodeID: runspec.NodeID(id)})
 		if err != nil {
 			t.Fatal(err)
 		}

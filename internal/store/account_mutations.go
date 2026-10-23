@@ -6,8 +6,8 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func accountSessionTx(ctx context.Context, tx *storeTx, a capability.Authorized, target ...Team) (capability.Principal, error) {

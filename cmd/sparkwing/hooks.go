@@ -16,8 +16,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 

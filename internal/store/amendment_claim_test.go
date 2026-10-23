@@ -4,8 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestClaimSelectionRejectsEveryInvalidKindBeforeAward(t *testing.T) {
@@ -49,7 +50,7 @@ func TestMixedClaimSelectionUsesOneRankedQueue(t *testing.T) {
 			s, demand := unitClaimFixture(t)
 			demand.Target = nil
 			demand.Kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
-			maintenanceRun(t, s, "other", 2, RunRunning)
+			maintenanceRun(t, s, "other", 2, runstate.RunRunning)
 			rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,'other',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done',finished_at=? WHERE id='other'`, s.now().UnixNano())
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET run_id='other'`)

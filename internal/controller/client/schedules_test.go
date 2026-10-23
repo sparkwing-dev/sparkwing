@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
@@ -87,7 +89,7 @@ func TestScheduleManagerValidatesBeforeHTTP(t *testing.T) {
 		t.Fatal("unkeyed launch accepted")
 	}
 	bad := "invalid"
-	for _, input := range []controllerwire.ScheduleOverride{{}, {Cron: &bad}, {TZ: &bad}, {Overlap: &bad}, {CatchUp: &bad}} {
+	for _, input := range []cronspec.Override{{}, {Cron: &bad}, {TZ: &bad}, {Overlap: &bad}, {CatchUp: &bad}} {
 		if _, err := c.OverrideSchedule(t.Context(), "s1", input); err == nil {
 			t.Fatalf("invalid edit accepted: %+v", input)
 		}
@@ -202,7 +204,7 @@ func TestScheduleManagerPreservesCanonicalResolutionAndConfirmsOverrides(t *test
 	}
 	tz, catchUp := "", "0s"
 	args := map[string]string{}
-	edit := controllerwire.ScheduleOverride{TZ: &tz, CatchUp: &catchUp, Args: &args}
+	edit := cronspec.Override{TZ: &tz, CatchUp: &catchUp, Args: &args}
 	if _, err := c.OverrideSchedule(t.Context(), "s1", edit); err == nil {
 		t.Fatal("lost explicit override was accepted")
 	}
@@ -214,7 +216,7 @@ func TestScheduleManagerPreservesCanonicalResolutionAndConfirmsOverrides(t *test
 
 func TestScheduleOverrideConfirmsRedactedArguments(t *testing.T) {
 	args := map[string]string{"token": "private-token"}
-	want := controllerwire.ScheduleOverride{Args: &args}
+	want := cronspec.Override{Args: &args}
 	got := controllerwire.OverrideView{Fields: []string{"args"}, Args: controllerwire.DisplayScheduleArgs(args)}
 	if !confirmsScheduleOverride(got, want) {
 		t.Fatal("redacted argument confirmation compared private values")

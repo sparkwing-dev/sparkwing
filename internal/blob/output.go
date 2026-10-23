@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // OutputData binds job outputs to their exact uploader and authorized records.

@@ -10,12 +10,13 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
@@ -118,7 +119,7 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if run.State != store.RunPending || run.Request.Hash == "" || run.Request.Request.Origin != runspec.OriginSchedule || run.Request.Request.Actor.ID != sched.ArmedBy {
+	if run.State != runstate.RunPending || run.Request.Hash == "" || run.Request.Request.Origin != runspec.OriginSchedule || run.Request.Request.Actor.ID != sched.ArmedBy {
 		t.Errorf("scheduled run = %+v", run)
 	}
 	stored, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)

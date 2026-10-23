@@ -10,11 +10,11 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // WithEngineController supplies the engine and authority transaction adapter before
@@ -27,9 +27,9 @@ func (s *Server) WithEngineController(engine *EngineController) *Server {
 	return s
 }
 
-func (s *Server) engineEndpoints() []Endpoint {
+func (s *Server) engineEndpoints() []controllerwire.Endpoint {
 	engine := s.engineController
-	return []Endpoint{
+	return []controllerwire.Endpoint{
 		{
 			Method: "POST", Pattern: "/api/v1/runs", Authentication: capability.AuthCapability,
 			Decode: engine.intakeTarget, Handle: s.handleIntake(engine),

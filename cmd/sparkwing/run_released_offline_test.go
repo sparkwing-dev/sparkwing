@@ -21,16 +21,19 @@ import (
 	"time"
 
 	"golang.org/x/mod/module"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+
 	modzip "golang.org/x/mod/zip"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
@@ -79,7 +82,7 @@ func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
 		fmt.Fprintf(&manifest, "%x  %s\n", sha256.Sum256(body), entry)
 	}
 	now := time.Now().UTC().Add(-time.Minute)
-	policy, err := json.Marshal(engine.VersionIndex{Format: 1, PublishedAt: now, Latest: version, Versions: []engine.VersionInfo{{Version: version, PublishedAt: now, SupportUntil: now.AddDate(1, 0, 0)}}})
+	policy, err := json.Marshal(engine.VersionIndex{Format: 1, PublishedAt: now, Latest: version, Versions: []engineid.VersionInfo{{Version: version, PublishedAt: now, SupportUntil: now.AddDate(1, 0, 0)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +136,7 @@ func main(){sw.Register("offline",func()sw.Pipeline[sw.NoInputs]{return pipeline
 	if out, err := tidy.CombinedOutput(); err != nil {
 		t.Fatalf("warm released SDK: %v\n%s", err, out)
 	}
-	options := source.Options{SDK: engine.GoSDK, Engines: resolver, Target: target, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}}
+	options := source.Options{SDK: engineid.GoSDK, Engines: resolver, Target: target, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}}
 	spec := source.Spec{RepoKey: "local:released-fixture", LocalCheckout: repo, PipelineDir: ".sparkwing"}
 	selected := inspectReleasedOffline(t, spec, options)
 	if selected.Identity.Pin.Replacement != "" || selected.Identity.Version != version || downloads != 6 {

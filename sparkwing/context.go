@@ -109,7 +109,7 @@ const (
 	keyResourceReporter
 )
 
-// ResourceSample is one measured resource reading for a spawned command:
+// resourceSample is one measured resource reading for a spawned command:
 // the CPU it drew, averaged over its wall-clock span, and the peak resident
 // memory of its process subtree.
 type resourceSample struct {
@@ -125,7 +125,7 @@ type resourceSample struct {
 	CPUTime time.Duration
 }
 
-// ResourceReporter absorbs a [ResourceSample] measured when a spawned
+// resourceReporter absorbs a [resourceSample] measured when a spawned
 // command finishes.
 type resourceReporter func(resourceSample)
 

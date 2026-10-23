@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // ReapUnits recovers expired work under the elected reaper fence.
@@ -42,7 +40,7 @@ func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit in
 			if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
 				return err
 			}
-			actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
+			actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
 			var err error
 			if target.kind == capability.UnitNode {
 				result, err = reapNodeUnitTx(ctx, tx, target, actor, now)
@@ -66,7 +64,7 @@ func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit in
 
 type expiredUnit struct {
 	team             Team
-	ref              controllerwire.NodeRef
+	ref              runspec.NodeRef
 	kind             capability.UnitKind
 	sourceGeneration int64
 }
@@ -119,7 +117,7 @@ func (o *Operator) expiredUnits(ctx context.Context, limit int) ([]expiredUnit, 
 	return targets, rows.Err()
 }
 
-func reapNodeUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor Actor, now time.Time) (*ReapedUnit, error) {
+func reapNodeUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor runstate.Actor, now time.Time) (*ReapedUnit, error) {
 	if err := lockStateRunTx(ctx, tx, target.team, string(target.ref.RunID)); err != nil {
 		return nil, err
 	}
@@ -128,7 +126,7 @@ func reapNodeUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 		return nil, err
 	}
 	now = tx.now(ctx)
-	if row.Status == StatusDone {
+	if row.Status == runstate.StatusDone {
 		return nil, nil
 	}
 	run, err := readRunTx(ctx, tx, target.team, string(target.ref.RunID))
@@ -143,23 +141,23 @@ func reapNodeUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	}
 	to := nodePending
 	if row.CancelRequestedAt != nil || run.CancelRequestedAt != nil {
-		to = NodeCancelled
-	} else if row.Status == StatusRunning && row.Disruptions+1 >= limits.MaxDisruptions {
-		to = NodeFailed
+		to = runstate.NodeCancelled
+	} else if row.Status == runstate.StatusRunning && row.Disruptions+1 >= limits.MaxDisruptions {
+		to = runstate.NodeFailed
 	}
-	if _, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: actor, Cause: CauseLeaseLapse}); err != nil {
+	if _, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: actor, Cause: runstate.CauseLeaseLapse}); err != nil {
 		return nil, err
 	}
 	disruptions := row.Disruptions
-	if row.Status == StatusRunning && to != NodeCancelled {
+	if row.Status == runstate.StatusRunning && to != runstate.NodeCancelled {
 		disruptions++
 	}
-	return &ReapedUnit{Team: target.team, RunID: string(target.ref.RunID), NodeID: string(target.ref.NodeID), Kind: string(target.kind), Generation: int64(row.Generation), Disruptions: disruptions, Requeued: to == nodePending, Cancelled: to == NodeCancelled, Failed: to == NodeFailed}, nil
+	return &ReapedUnit{Team: target.team, RunID: string(target.ref.RunID), NodeID: string(target.ref.NodeID), Kind: string(target.kind), Generation: int64(row.Generation), Disruptions: disruptions, Requeued: to == nodePending, Cancelled: to == runstate.NodeCancelled, Failed: to == runstate.NodeFailed}, nil
 }
 
-func reapUnclaimedNodeTx(ctx context.Context, tx *storeTx, target expiredUnit, actor Actor, row NodeRow, run RunRow, now time.Time) (*ReapedUnit, error) {
-	to, cause := NodeFailed, CauseQueueTimeout
-	if row.Status == StatusApprovalPending {
+func reapUnclaimedNodeTx(ctx context.Context, tx *storeTx, target expiredUnit, actor runstate.Actor, row runstate.NodeRow, run RunRow, now time.Time) (*ReapedUnit, error) {
+	to, cause := runstate.NodeFailed, runstate.CauseQueueTimeout
+	if row.Status == runstate.StatusApprovalPending {
 		var policy string
 		var requested, timeout int64
 		var resolved sql.NullInt64
@@ -174,19 +172,19 @@ func reapUnclaimedNodeTx(ctx context.Context, tx *storeTx, target expiredUnit, a
 		to = approvalTimeoutOutcome(policy)
 	} else {
 		wait := runClaimWait(run)
-		if row.Status != StatusPending || row.QueueStartedAt == nil || !wait.Set || wait.Value <= 0 || row.QueueStartedAt.Add(wait.Value).After(now) {
+		if row.Status != runstate.StatusPending || row.QueueStartedAt == nil || !wait.Set || wait.Value <= 0 || row.QueueStartedAt.Add(wait.Value).After(now) {
 			return nil, nil
 		}
 	}
 	if row.CancelRequestedAt != nil || run.CancelRequestedAt != nil {
-		to, cause = NodeCancelled, causeCancel
+		to, cause = runstate.NodeCancelled, causeCancel
 	}
 	change := nodeTransition{Ref: target.ref, To: to, Cause: cause, Actor: actor}
-	if to == NodeFailed {
-		change.Extra.Result = &NodeResult{Outcome: to, Reason: string(cause)}
+	if to == runstate.NodeFailed {
+		change.Extra.Result = &runstate.NodeResult{Outcome: to, Reason: string(cause)}
 	}
 	if _, err := transitionNodeTx(ctx, tx, target.team, change); err != nil {
 		return nil, err
 	}
-	return &ReapedUnit{Team: target.team, RunID: string(target.ref.RunID), NodeID: string(target.ref.NodeID), Kind: "node", Generation: int64(row.Generation), Disruptions: row.Disruptions, Failed: to == NodeFailed, Cancelled: to == NodeCancelled}, nil
+	return &ReapedUnit{Team: target.team, RunID: string(target.ref.RunID), NodeID: string(target.ref.NodeID), Kind: "node", Generation: int64(row.Generation), Disruptions: row.Disruptions, Failed: to == runstate.NodeFailed, Cancelled: to == runstate.NodeCancelled}, nil
 }

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestSDKPlanningUnknownPipelineNeverPlans(t *testing.T) {

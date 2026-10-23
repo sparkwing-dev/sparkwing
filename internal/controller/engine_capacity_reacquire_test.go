@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -39,8 +39,8 @@ func TestControllerPlanContinuityLapseWaitsWithoutStoppingReleasedWork(t *testin
 				t.Fatal(err)
 			}
 			actor := engineActor(capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run", NodeID: "first"}})
-			ref := controllerwire.NodeRef{RunID: "run", NodeID: "first"}
-			if result, err := tenant.MayStart(t.Context(), store.CapacityBinding{RunID: "run", NodeID: "first", Generation: int64(claim.Award.Generation)}, actor); err != nil || result.Kind != store.AcquireGranted {
+			ref := runspec.NodeRef{RunID: "run", NodeID: "first"}
+			if result, err := tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: "run", NodeID: "first", Generation: int64(claim.Award.Generation)}, actor); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("admission: %+v %v", result, err)
 			}
 			started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
@@ -67,15 +67,15 @@ func TestControllerPlanContinuityLapseWaitsWithoutStoppingReleasedWork(t *testin
 				t.Fatalf("queue lost reacquisition state: %+v %v", queue, err)
 			}
 			row, err := tenant.ReadNode(t.Context(), ref)
-			if err != nil || row.Status != store.StatusRunning || row.CancelRequestedAt != nil {
+			if err != nil || row.Status != runstate.StatusRunning || row.CancelRequestedAt != nil {
 				t.Fatalf("lapse stopped released work: %+v %v", row, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, Outcome: store.NodeSuccess, SourceAttempt: &started.Attempt, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, Outcome: runstate.NodeSuccess, SourceAttempt: &started.Attempt, Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess}}); err != nil {
 				t.Fatalf("released work could not finish: %v", err)
 			}
-			next := controllerwire.NodeRef{RunID: "run", NodeID: "next"}
+			next := runspec.NodeRef{RunID: "run", NodeID: "next"}
 			row, err = tenant.ReadNode(t.Context(), next)
-			if err != nil || row.ReadyAt != nil || row.Status != store.StatusPending {
+			if err != nil || row.ReadyAt != nil || row.Status != runstate.StatusPending {
 				t.Fatalf("next job released before reacquisition: %+v %v", row, err)
 			}
 			if err := teststore.SeedRunFinish(server.store, t.Context(), "a", "other", "success", ""); err != nil {

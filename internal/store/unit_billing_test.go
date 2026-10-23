@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func meteredUnitFixture(t *testing.T, cloud bool) (*Store, UnitDemand, *time.Time) {
@@ -35,7 +35,7 @@ func meteredUnitFixture(t *testing.T, cloud bool) (*Store, UnitDemand, *time.Tim
 	return s, demand, &now
 }
 
-func meteredUnitClaim(t *testing.T, s *Store, demand UnitDemand) (UnitClaim, Actor) {
+func meteredUnitClaim(t *testing.T, s *Store, demand UnitDemand) (UnitClaim, runstate.Actor) {
 	t.Helper()
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
@@ -81,7 +81,7 @@ func TestMeteredUnitClaimAndReservationCommitTogether(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "billing_awards", 0)
 	rewriteSchemaCount(t, s.db, "credit_charges", 0)
-	row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+	row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 	if err != nil || row.Generation != 0 || row.ClaimedBy != "" || row.StateSeq != 0 {
 		t.Fatalf("failed reservation changed job: %+v, %v", row, err)
 	}
@@ -164,7 +164,7 @@ func TestMeteredUnitEvalSettlementUsesPersistedLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = now.Add(11 * time.Second)
-	request.Actor = Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: "eval-host", Generation: 8}}}
+	request.Actor = runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerEval, EvalFence: runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: "eval-host", Generation: 8}}}
 	request.Failure.Code = apierr.SDKError
 	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestMeteredUnitNodeLifecycleUsesImmutableAward(t *testing.T) {
 			*now = now.Add(5 * time.Second)
 			tenant := &Tenant{s: s, team: "a"}
 			admitExecution(t, tenant, actor)
-			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
+			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -199,7 +199,7 @@ func TestMeteredUnitNodeLifecycleUsesImmutableAward(t *testing.T) {
 				t.Fatal(err)
 			}
 			*now = now.Add(10 * time.Second)
-			finish := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(int64(started.Attempt))}
+			finish := nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(int64(started.Attempt))}
 			for replay := range 2 {
 				applied, err := tenant.TransitionNode(t.Context(), finish)
 				if err != nil || applied.Replayed != (replay == 1) {
@@ -241,8 +241,8 @@ func TestMeteredUnitCloudRenewalStartsComputeWithoutAnAttempt(t *testing.T) {
 	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
-	row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || row.Status != StatusPending || row.Attempt != 0 || row.StartedAt != nil {
+	row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || row.Status != runstate.StatusPending || row.Attempt != 0 || row.StartedAt != nil {
 		t.Fatalf("renewal consumed an attempt: %+v, %v", row, err)
 	}
 	var began int64
@@ -312,7 +312,7 @@ func TestMeteredUnitOwnerWaitBillingFollowsPlacement(t *testing.T) {
 				}
 				*now = now.Add(10 * time.Second)
 			}
-			finish := FinishRunRequest{Unit: actor.Owner, Transition: RunCompletion{RunID: "run", Cause: RunFinish, Actor: actor}}
+			finish := runstate.FinishRunRequest{Unit: actor.Owner, Transition: runstate.RunCompletion{RunID: "run", Cause: runstate.RunFinish, Actor: actor}}
 			if kind == capability.UnitPlan {
 			}
 			for replay := range 2 {
@@ -336,7 +336,7 @@ func TestMeteredUnitReaperSettlesAtLeaseLapse(t *testing.T) {
 	start := *now
 	claim, actor := meteredUnitClaim(t, s, demand)
 	admitExecution(t, &Tenant{s: s, team: "a"}, actor)
-	if _, err := (&Tenant{s: s, team: "a"}).TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := (&Tenant{s: s, team: "a"}).TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	*now = claim.Award.LeaseExpiresAt.Add(time.Hour)
@@ -360,17 +360,17 @@ func TestMeteredUnitApplicationRetryKeepsOneReservation(t *testing.T) {
 	_, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
 	admitExecution(t, tenant, actor)
-	start := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}
+	start := nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}
 	if _, err := tenant.TransitionNode(t.Context(), start); err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(2 * time.Second)
-	retry := nodeTransition{Ref: start.Ref, Actor: actor, To: NodeRunning, Cause: CauseRetry, SourceAttempt: sourceAttempt(1), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify", MaskedError: "try again"}}}
+	retry := nodeTransition{Ref: start.Ref, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseRetry, SourceAttempt: sourceAttempt(1), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: "verify", MaskedError: "try again"}}}
 	if applied, err := tenant.TransitionNode(t.Context(), retry); err != nil || applied.Attempt != 2 {
 		t.Fatalf("retry: %+v, %v", applied, err)
 	}
 	*now = now.Add(3 * time.Second)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: start.Ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(2)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: start.Ref, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(2)}); err != nil {
 		t.Fatal(err)
 	}
 	unitBillingTotal(t, s, 600, true)
@@ -391,11 +391,11 @@ func TestMeteredUnitStaleReportCannotSettleReplacementProperty(t *testing.T) {
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=?`, now.UnixNano())
 		_, replacement := meteredUnitClaim(t, s, demand)
 		actor.Generation += runspec.ClaimGeneration(random.IntN(2))
-		if _, err := (&Tenant{s: s, team: "a"}).TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeFailed, Cause: CauseReport, SourceAttempt: sourceAttempt(0)}); err == nil {
+		if _, err := (&Tenant{s: s, team: "a"}).TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeFailed, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(0)}); err == nil {
 			t.Fatal("stale report settled replacement")
 		}
 		unitBillingTotal(t, s, 600, false)
-		row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+		row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 		if err != nil || row.CapabilityPrefix != replacement.CapabilityPrefix {
 			t.Fatalf("replacement changed: %+v, %v", row, err)
 		}
@@ -408,7 +408,7 @@ func TestMeteredLeaseNeverOutrunsWhatWasPaid(t *testing.T) {
 	claim, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
 	admitExecution(t, tenant, actor)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	paid := func() int64 {
@@ -427,7 +427,7 @@ func TestMeteredLeaseNeverOutrunsWhatWasPaid(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+		row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 		if err != nil || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.Equal(beat.ExpiresAt) {
 			t.Fatalf("beat %v differs from the lease %+v, %v", beat.ExpiresAt, row.LeaseExpiresAt, err)
 		}

@@ -10,18 +10,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	ktesting "k8s.io/client-go/testing"
 )
 
 type launcherWireFake struct {
@@ -60,7 +61,7 @@ func (f launcherWireFake) SyncLauncher(ctx context.Context, request controllerwi
 
 func wireAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	deadline := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
-	identity := engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}
+	identity := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}
 	unit := controllerwire.ClaimedUnit{
 		LeaseExpiresAt: deadline.Add(time.Hour),
 		Runner:         nodeproto.RunnerIdentity{Name: "server-holder", Type: "cloud"},
@@ -271,8 +272,8 @@ func TestControllerSyncUsesPersistedObservationsAndExactFences(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-				want := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: binding.Holder, Generation: int64(binding.Generation)}}
-				if !slices.Equal(request.Observed, []controllerwire.LauncherObservation{want}) {
+				want := capability.LauncherObservation{Award: capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: binding.Holder, Generation: int64(binding.Generation)}}
+				if !slices.Equal(request.Observed, []capability.LauncherObservation{want}) {
 					t.Fatalf("observation=%+v", request.Observed)
 				}
 				return test.response(), nil

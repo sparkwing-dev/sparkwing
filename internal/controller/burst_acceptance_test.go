@@ -15,15 +15,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestBurstAcceptanceLocalOwnerPersonalWorkerAndCancellation(t *testing.T) {
@@ -55,7 +56,7 @@ type BurstExecutionProof struct {
 	Secret        string
 	Pipeline      string
 	Plan          nodeproto.PlanDoc
-	Engine        engine.Identity
+	Engine        engineid.Identity
 	Source        func(*testing.T) (string, string)
 	Execute       func(client.EngineOptions, controllerwire.ClaimedUnit, controllerwire.Controller)
 	ClaimCloud    func(client.EngineOptions) controllerwire.ClaimedUnit
@@ -170,7 +171,7 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 	if err != nil || accepted.Spec.Hash == "" || accepted.Spec.Request.Request.Source.BundleDigest.Value != digest {
 		t.Fatalf("sealed burst plan: %+v %v", accepted, err)
 	}
-	if _, err := owner.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeReady), Cause: string(store.CauseRelease)}); err != nil {
+	if _, err := owner.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(runstate.NodeReady), Cause: string(runstate.CauseRelease)}); err != nil {
 		t.Fatalf("owner releases job: %v", err)
 	}
 	laterClaimants := []controllerwire.Controller{cloud}
@@ -292,16 +293,16 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 		previousAttempt := int64(2)
 		workerClient := newClient(awarded.Claim.Capability, false)
 		engineAdmitBearer(t, s.store, awarded.Claim.Capability)
-		started, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeRunning), Cause: string(store.CauseStart), SourceAttempt: &previousAttempt})
+		started, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(runstate.NodeRunning), Cause: string(runstate.CauseStart), SourceAttempt: &previousAttempt})
 		if err != nil || started.Attempt != 3 {
 			t.Fatalf("retry start: %+v %v", started, err)
 		}
-		replayed, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeRunning), Cause: string(store.CauseStart), SourceAttempt: &previousAttempt})
+		replayed, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(runstate.NodeRunning), Cause: string(runstate.CauseStart), SourceAttempt: &previousAttempt})
 		if err != nil || !replayed.Replayed || replayed.Attempt != 3 || replayed.StateSeq != started.StateSeq {
 			t.Fatalf("retry start replay: %+v %v", replayed, err)
 		}
 		forged := int64(1)
-		if _, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeRunning), Cause: string(store.CauseStart), SourceAttempt: &forged}); err == nil {
+		if _, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(runstate.NodeRunning), Cause: string(runstate.CauseStart), SourceAttempt: &forged}); err == nil {
 			t.Fatal("forged transition source ordinal accepted")
 		}
 		burstAcceptanceCheckout(t, workerOptions, created.RunID, spec)
@@ -317,7 +318,7 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 	if proof != nil {
 		proof.Execute(workerOptions, *awarded.Claim, owner)
 		completed, err := owner.ReadSnapshot(t.Context(), created.RunID)
-		if err != nil || len(completed.Jobs) != 1 || completed.Jobs[0].Outcome != string(store.NodeSuccess) {
+		if err != nil || len(completed.Jobs) != 1 || completed.Jobs[0].Outcome != string(runstate.NodeSuccess) {
 			t.Fatalf("owner did not observe successful SDK execution: %+v %v", completed, err)
 		}
 	}
@@ -325,7 +326,7 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 		workerClient := newClient(awarded.Claim.Capability, false)
 		engineAdmitBearer(t, s.store, awarded.Claim.Capability)
 		sourceAttempt := int64(0)
-		if _, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(store.NodeRunning), Cause: string(store.CauseStart), SourceAttempt: &sourceAttempt}); err != nil {
+		if _, err := workerClient.TransitionJob(t.Context(), created.RunID, "job", controllerwire.JobTransitionRequest{To: string(runstate.NodeRunning), Cause: string(runstate.CauseStart), SourceAttempt: &sourceAttempt}); err != nil {
 			t.Fatalf("worker start before cancellation: %v", err)
 		}
 	}

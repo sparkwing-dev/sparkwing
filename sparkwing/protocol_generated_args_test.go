@@ -6,7 +6,7 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type generatedArgsInputs struct {

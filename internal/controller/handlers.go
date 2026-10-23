@@ -14,13 +14,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -85,11 +86,12 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request, authoriz
 		return engineLookupError(err)
 	}
 
-	if runs == nil {
-		runs = []*store.Run{}
+	out := make([]controllerwire.RunSummary, len(runs))
+	for i, row := range runs {
+		out[i] = runSummary(*row)
 	}
 	w.Header().Set("X-Sparkwing-Run-Filter-Version", store.RunFilterVersion)
-	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+	writeJSON(w, http.StatusOK, map[string]any{"runs": out})
 	return nil
 }
 
@@ -131,7 +133,7 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, au
 	if err != nil {
 		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusOK, run)
+	writeJSON(w, http.StatusOK, runSummary(*run))
 	return nil
 }
 
@@ -301,7 +303,12 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request, author
 	if events == nil {
 		events = []store.Event{}
 	}
-	writeJSON(w, http.StatusOK, api.PublicEvents(events))
+	public := api.PublicEvents(events)
+	out := make([]controllerwire.RunEvent, len(public))
+	for i, event := range public {
+		out[i] = controllerwire.RunEvent(event)
+	}
+	writeJSON(w, http.StatusOK, out)
 	return nil
 }
 
@@ -315,9 +322,10 @@ func (s *Server) handleListDebugPauses(w http.ResponseWriter, r *http.Request, a
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if pauses == nil {
-		pauses = []*store.DebugPause{}
+	out := make([]controllerwire.PauseHistory, len(pauses))
+	for i, row := range pauses {
+		out[i] = controllerwire.PauseHistory(*row)
 	}
-	writeJSON(w, http.StatusOK, pauses)
+	writeJSON(w, http.StatusOK, out)
 	return nil
 }

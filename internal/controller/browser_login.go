@@ -11,9 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 const loginHTML = `<!doctype html>
@@ -127,7 +128,7 @@ func (s *Server) renderLoginPage(w http.ResponseWriter, r *http.Request, data lo
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	proof, ok := r.Context().Value(loginProofKey{}).(loginProof)
 	if !ok {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	data := loginPageData{Next: safeNext(r.URL.Query().Get("next"))}
 	if proof.session != nil {
@@ -143,7 +144,7 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request, _ capab
 func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	proof, ok := r.Context().Value(loginProofKey{}).(loginProof)
 	if !ok || proof.raw == "" || proof.session == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	s.endPriorSession(r, proof.raw)
 	noteAuditWrite(r.Context())

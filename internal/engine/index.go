@@ -11,9 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // Index refreshes signed policy and retains verified fallback without an age cutoff.
@@ -90,11 +91,11 @@ func (r *Resolver) localIndex(now time.Time) IndexResult {
 		}
 	}
 	if r.index.index.Format == 0 {
-		notice := Notice{Kind: NoticePolicyUnavailable, Reason: "No verified version policy is cached; local-only execution continues without policy enforcement.", Hint: "Controller runners still require a verified version policy."}
+		notice := engineid.Notice{Kind: engineid.NoticePolicyUnavailable, Reason: "No verified version policy is cached; local-only execution continues without policy enforcement.", Hint: "Controller runners still require a verified version policy."}
 		if err != nil {
 			notice.Reason += fmt.Sprintf(" Cached policy could not be read: %v", err)
 		}
-		return IndexResult{Index: VerifiedIndex{offline: true}, Notices: []Notice{notice}}
+		return IndexResult{Index: VerifiedIndex{offline: true}, Notices: []engineid.Notice{notice}}
 	}
 	return indexResult(r.index, errors.Join(fmt.Errorf("local-only execution uses cached policy without a network refresh"), err))
 }
@@ -119,7 +120,7 @@ func checkPolicyAdvance(previous, next VerifiedIndex) error {
 	if after.Before(before) || (after.Equal(before) && !bytes.Equal(previous.signed.Body, next.signed.Body)) {
 		return fmt.Errorf("refused version policy rollback or changed body at the same publication time")
 	}
-	records := map[string]VersionInfo{}
+	records := map[string]engineid.VersionInfo{}
 	for _, record := range next.index.Versions {
 		records[record.Version] = record
 	}
@@ -220,7 +221,7 @@ func indexResult(index VerifiedIndex, err error) IndexResult {
 	result := IndexResult{Index: index}
 	if err != nil {
 		result.Fallback = true
-		result.Notices = []Notice{{Kind: NoticeIndexFallback, Reason: fmt.Sprintf("Using the last verified version policy: %v", err), Hint: "Check connectivity to sparkwing.dev and retry."}}
+		result.Notices = []engineid.Notice{{Kind: engineid.NoticeIndexFallback, Reason: fmt.Sprintf("Using the last verified version policy: %v", err), Hint: "Check connectivity to sparkwing.dev and retry."}}
 	}
 	return result
 }

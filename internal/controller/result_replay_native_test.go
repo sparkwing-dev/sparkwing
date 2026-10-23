@@ -12,14 +12,14 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func nativeClaimPresentation(t *testing.T, e *engineFixture, a capability.Authorized) string {
@@ -67,7 +67,7 @@ func TestNativeTerminalResultReplayUsesCommittedProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := quick.Check(func(selector uint8, input []byte) bool {
-		var actor store.Actor
+		var actor runstate.Actor
 		if err := json.Unmarshal(original, &actor); err != nil {
 			t.Fatal(err)
 		}

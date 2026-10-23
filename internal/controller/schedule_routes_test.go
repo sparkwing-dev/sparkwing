@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type scheduleWriterRefusal struct {
@@ -23,7 +24,7 @@ type scheduleWriterRefusal struct {
 	failure error
 }
 
-func (f *scheduleWriterRefusal) ReplaceAuthorizedSchedules(context.Context, capability.Authorized, controllerwire.ScheduleRepoRequest) ([]string, []string, error) {
+func (f *scheduleWriterRefusal) ReplaceAuthorizedSchedules(context.Context, capability.Authorized, store.ScheduleRepoRequest) ([]string, []string, error) {
 	return nil, nil, f.failure
 }
 
@@ -73,7 +74,7 @@ func newDeploymentScheduleHTTPFixture(t *testing.T, cfg deployment.Config) sched
 		t.Fatal(err)
 	}
 	facts := &reportingFacts{digest: issued.Digest, snapshot: snapshot}
-	s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
+	s.WithAuthorization(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
 	return scheduleHTTPFixture{s, writer, raw, facts}
 }
 

@@ -23,8 +23,9 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 var qaVersion = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-qa\.[1-9][0-9]*$`)
@@ -107,6 +108,6 @@ func nextIndex(index engine.VersionIndex, version string, now time.Time) (engine
 	if index.Latest == "" || semver.Compare(version, index.Latest) > 0 {
 		index.Latest = version
 	}
-	index.Versions = append(index.Versions, engine.VersionInfo{Version: version, PublishedAt: now, SupportUntil: now.AddDate(0, limits.ControllerCompatibilityMonths, 0)})
+	index.Versions = append(index.Versions, engineid.VersionInfo{Version: version, PublishedAt: now, SupportUntil: now.AddDate(0, limits.ControllerCompatibilityMonths, 0)})
 	return index, nil
 }

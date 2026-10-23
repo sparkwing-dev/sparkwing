@@ -5,10 +5,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -84,7 +86,7 @@ func wireOperations() map[string]wireOperation {
 		"DELETE /api/v1/schedules/{schedule}":                  operation("Delete a schedule", nil, wire.ScheduleDeletion{}),
 		"POST /api/v1/schedules/{schedule}/pause":              operation("Pause a schedule", nil, wire.ScheduleEnvelope{}),
 		"POST /api/v1/schedules/{schedule}/resume":             operation("Resume a schedule", nil, wire.ScheduleEnvelope{}),
-		"PUT /api/v1/schedules/{schedule}/override":            operation("Replace a schedule override", wire.ScheduleOverride{}, wire.ScheduleEnvelope{}),
+		"PUT /api/v1/schedules/{schedule}/override":            operation("Replace a schedule override", cronspec.Override{}, wire.ScheduleEnvelope{}),
 		"DELETE /api/v1/schedules/{schedule}/override":         operation("Reset a schedule override", nil, wire.ScheduleEnvelope{}),
 		"POST /api/v1/schedules/{schedule}/run":                operation("Trigger a scheduled run", nil, wire.ScheduleRun{}),
 		"PUT /api/v1/schedules/repos":                          operation("Register repository schedules", wire.ScheduleRepoRequest{}, wire.ScheduleRepoWritten{}),
@@ -103,10 +105,10 @@ func wireOperations() map[string]wireOperation {
 		"POST /node/v1/summary":                                operation("Write a masked summary", nodeproto.SummaryRequest{}, nodeproto.ServiceAcknowledged{}),
 	}
 	result["POST /api/v1/operator/teams"] = operation("Create a team and its first administrator", wire.OperatorTeamCreate{}, wire.OperatorTeamCreated{})
-	result["POST /api/v1/runs/{run}/local-host/may-start"] = operation("Ask to start a job under its current award", localhostwire.LocalCapacityRequest{}, store.AcquireSlotResponse{})
-	result["POST /api/v1/runs/{run}/local-host/release-evaluation"] = operation("Release source expansion under plan admission", localhostwire.LocalEvaluationRelease{}, store.Applied{})
+	result["POST /api/v1/runs/{run}/local-host/may-start"] = operation("Ask to start a job under its current award", localhostwire.LocalCapacityRequest{}, runstate.AcquireSlotResponse{})
+	result["POST /api/v1/runs/{run}/local-host/release-evaluation"] = operation("Release source expansion under plan admission", localhostwire.LocalEvaluationRelease{}, runstate.Applied{})
 	result["POST /api/v1/runs/{run}/local-host/relinquish-start"] = operation("Relinquish a provisional burst job award", localhostwire.LocalCapacityRequest{}, nil)
-	result["GET /api/v1/runs/{run}/local-host/snapshot"] = operation("Read awarded execution state or export completed local history as the verified local peer", nil, store.LocalPublication{})
+	result["GET /api/v1/runs/{run}/local-host/snapshot"] = operation("Read awarded execution state or export completed local history as the verified local peer", nil, runstate.LocalPublication{})
 	result["GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot"] = operation("Read awarded job state and declared terminal artifact selectors", nil, localhostwire.LocalNodeSnapshot{})
 
 	result["POST /api/v1/operator/teams/{team}/refunds"] = operation("Record a completed provider refund", wire.OperatorRefund{}, wire.OperatorRefundRecorded{})

@@ -5,10 +5,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestARetryNeverCopiesOverARowItsRunAlreadyHolds(t *testing.T) {
@@ -18,22 +17,22 @@ func TestARetryNeverCopiesOverARowItsRunAlreadyHolds(t *testing.T) {
 			releaseRemote(t, f, "job")
 			_, input := claimRemote(t, f, "job")
 			if terminal {
-				if err := f.report(t.Context(), input, store.NodeFailed); err != nil {
+				if err := f.report(t.Context(), input, runstate.NodeFailed); err != nil {
 					t.Fatal(err)
 				}
 			}
-			ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "job"}
+			ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "job"}
 			before, err := f.Tenant.ReadNode(t.Context(), ref)
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceManualRetry, MaterializeOnly: true, Source: &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: ref, StateSeq: 1}}})
+			result, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: runstate.SourceManualRetry, MaterializeOnly: true, Source: &runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &runstate.MaterializedResultSource{Ref: ref, StateSeq: 1}}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := store.WaitHolder
+			want := runstate.WaitHolder
 			if terminal {
-				want = store.KeepTerminal
+				want = runstate.KeepTerminal
 			}
 			if result.Kind != want || !reflect.DeepEqual(result.Node, before) {
 				t.Fatalf("retry probe = %+v, want unchanged %+v", result, before)

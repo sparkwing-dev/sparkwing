@@ -9,13 +9,14 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type claimExecutor func(context.Context, NodeInput) error
@@ -29,7 +30,7 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 	for _, mode := range []string{"success", "rejected", "cancelled", "silent", "lost_during_work"} {
 		t.Run(mode, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				identity := engine.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
+				identity := engineid.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}
 				plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
 				request := runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "build"}}
 				request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://example.com/acme/repo.git", PipelineDir: ".sparkwing"}
@@ -43,8 +44,8 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 4, SpecHash: "job-spec"}
-				s := newClaimedHostStore(store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: ownerPlanHash, Plan: body}, Nodes: []store.NodeRow{row}}, mode)
+				row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 4, SpecHash: "job-spec"}
+				s := newClaimedHostStore(store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: ownerPlanHash, Plan: body}, Nodes: []runstate.NodeRow{row}}, mode)
 				input, err := NewNodeInput(AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: ownerPlanHash, Plan: plan}, row, engine.Resolved{Identity: identity}, nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}})
 				if err != nil {
 					t.Fatal(err)
@@ -83,7 +84,7 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 					}
 				case "cancelled":
 					var cancelled *lease.CancelError
-					if !errors.As(err, &cancelled) || cancelled.Reason != "operator requested stop" || acquired || len(s.reports) != 1 || s.reports[0].To != store.NodeCancelled {
+					if !errors.As(err, &cancelled) || cancelled.Reason != "operator requested stop" || acquired || len(s.reports) != 1 || s.reports[0].To != runstate.NodeCancelled {
 						t.Fatalf("cancellation: acquired=%t reports=%+v error=%v", acquired, s.reports, err)
 					}
 				default:

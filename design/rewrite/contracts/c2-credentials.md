@@ -1061,7 +1061,7 @@ precedence, not native UID/SID or full local-runtime acceptance.
 
 `internal/capability` owns the credential vocabulary, issuance rules, route
 policy, liveness classes, billing provenance and release/signing boundaries.
-`internal/apierr` owns the error object and code registry. `store.Issue` is
+`pkg/apierr` owns the error object and code registry. `store.Issue` is
 the only persistent issuer and participates in the caller's transaction.
 
 C1 owns persistence, the store clock, claims, sealed source facts, blob

@@ -10,14 +10,13 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -27,6 +26,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
@@ -173,7 +174,7 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 		return source.Options{}, err
 	}
 	return source.Options{
-		Engines: engines, SDK: engine.GoSDK,
+		Engines: engines, SDK: engineid.GoSDK,
 		Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Ambient: captured, SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: masker},
 		GitAccess: gitAccess(local),

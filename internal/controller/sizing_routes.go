@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -33,8 +34,8 @@ func (s *Server) sizingReader(ctx context.Context, team string) (SizingReader, e
 	return tenantPort[SizingReader](ctx, s, store.Team(team))
 }
 
-func (s *Server) sizingEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) sizingEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/pipelines/{name}/sizing", Authentication: capability.AuthCapability, Decode: sizingTarget, Handle: s.handleGetPipelineProfile},
 		{Method: "PUT", Pattern: "/api/v1/pipelines/{name}/sizing/pin", Authentication: capability.AuthCapability, Decode: sizingTarget, Handle: s.handleSetPipelinePin},
 		{Method: "POST", Pattern: "/api/v1/pipelines/{name}/sizing/observations", Authentication: capability.AuthCapability, Decode: sizingTarget, Handle: s.handleRecordProfileObservation},

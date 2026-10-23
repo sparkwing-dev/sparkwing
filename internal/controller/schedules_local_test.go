@@ -19,19 +19,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
-
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func FuzzLocalSchedulesRequireVerifiedTransportPeer(f *testing.F) {
@@ -91,10 +91,10 @@ func (*localScheduleListener) Addr() net.Addr { return &net.UnixAddr{Name: "api.
 
 type localScheduleConnection struct {
 	net.Conn
-	peer wingd.LocalPeerIdentity
+	peer localhostwire.LocalPeerIdentity
 }
 
-func (c localScheduleConnection) PeerIdentity() wingd.LocalPeerIdentity { return c.peer }
+func (c localScheduleConnection) PeerIdentity() localhostwire.LocalPeerIdentity { return c.peer }
 
 func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	st := newStoreForAuth(t)
@@ -121,7 +121,7 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	listener := &localScheduleListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- server.HTTP().ServeAPI(ctx, listener) }()
+	go func() { done <- wingd.ServeAPI(ctx, listener, server.HTTP()) }()
 	peer, _ := localControllerIdentity(t)
 	transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
 		client, host := net.Pipe()
@@ -217,7 +217,7 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	cron := "0 2 * * *"
-	if _, err := controls.OverrideSchedule(t.Context(), id, controllerwire.ScheduleOverride{Cron: &cron}); err != nil {
+	if _, err := controls.OverrideSchedule(t.Context(), id, cronspec.Override{Cron: &cron}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := controls.DeleteSchedule(t.Context(), id); err != nil {
@@ -342,7 +342,7 @@ func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- server.HTTP().ServeAPI(ctx, listener) }()
+	go func() { done <- wingd.ServeAPI(ctx, listener, server.HTTP()) }()
 	t.Cleanup(func() {
 		transport.CloseIdleConnections()
 		cancel()

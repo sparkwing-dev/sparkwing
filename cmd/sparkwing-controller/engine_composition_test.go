@@ -15,14 +15,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func composedClaimants(t *testing.T, version string, policy *http.Client) map[string]controllerwire.Controller {
@@ -123,12 +124,12 @@ func TestControllerCompositionEnforcesSignedRunnerPolicy(t *testing.T) {
 	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
 	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Now().UTC().Truncate(time.Second)
-	release := func(version string) engine.VersionInfo {
-		return engine.VersionInfo{Version: version, PublishedAt: now.Add(-time.Hour), SupportUntil: now.Add(-time.Hour).AddDate(0, 12, 0)}
+	release := func(version string) engineid.VersionInfo {
+		return engineid.VersionInfo{Version: version, PublishedAt: now.Add(-time.Hour), SupportUntil: now.Add(-time.Hour).AddDate(0, 12, 0)}
 	}
 	policy := engine.VersionIndex{
 		Format: 1, PublishedAt: now, Latest: "v0.30.0",
-		Versions: []engine.VersionInfo{release("v0.10.0"), release("v0.25.0"), release("v0.30.0")},
+		Versions: []engineid.VersionInfo{release("v0.10.0"), release("v0.25.0"), release("v0.30.0")},
 		Minimum:  engine.Restriction{Version: "v0.20.0", Reason: "minimum fixture", Security: true, AnnouncedAt: now, EffectiveAt: now},
 		Revoked:  []engine.Restriction{{Version: "v0.25.0", Reason: "revocation fixture", Security: true, AnnouncedAt: now, EffectiveAt: now}},
 	}

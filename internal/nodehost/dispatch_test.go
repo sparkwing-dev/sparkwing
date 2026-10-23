@@ -7,17 +7,17 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func releaseRemote(t *testing.T, f *storeHostFixture, node string) {
 	t.Helper()
-	f.Host.Local = func(store.NodeRow) bool { return false }
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(node)}
+	f.Host.Local = func(runstate.NodeRow) bool { return false }
+	ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(node)}
 	row, err := f.Tenant.ReadNode(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func claimRemote(t *testing.T, f *storeHostFixture, node string) (store.UnitClai
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(node)})
+	row, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(node)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,15 +64,15 @@ func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
 	for _, id := range []string{"build", "test"} {
 		releaseRemote(t, f, id)
 		_, input := claimRemote(t, f, id)
-		if err := f.report(t.Context(), input, store.NodeSuccess); err != nil {
+		if err := f.report(t.Context(), input, runstate.NodeSuccess); err != nil {
 			t.Fatal(err)
 		}
-		before, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(id)})
+		before, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(id)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := FollowReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: before.Ref, Actor: f.Actor, Policy: store.SourceNone}, nil)
-		if err != nil || result.Kind != store.KeepTerminal || result.Node.Outcome != store.NodeSuccess || result.Node.StateSeq != before.StateSeq || result.Node.Attempt != 1 || result.Node.Generation != input.Generation {
+		result, err := FollowReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: before.Ref, Actor: f.Actor, Policy: runstate.SourceNone}, nil)
+		if err != nil || result.Kind != runstate.KeepTerminal || result.Node.Outcome != runstate.NodeSuccess || result.Node.StateSeq != before.StateSeq || result.Node.Attempt != 1 || result.Node.Generation != input.Generation {
 			t.Fatalf("adopted = %+v, error %v", result, err)
 		}
 	}
@@ -88,21 +88,21 @@ func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "flaky", Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 	releaseRemote(t, f, "flaky")
 	_, input := claimRemote(t, f, "flaky")
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "flaky"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "flaky"}
 	held, err := f.Tenant.ReadNode(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {
-		result, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
-		if err != nil || result.Kind != store.WaitHolder || result.Node.Generation != held.Generation || result.Node.StateSeq != held.StateSeq {
+		result, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: runstate.SourceNone})
+		if err != nil || result.Kind != runstate.WaitHolder || result.Node.Generation != held.Generation || result.Node.StateSeq != held.StateSeq {
 			t.Fatalf("held reconciliation = %+v, error %v", result, err)
 		}
 	}
 	if _, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}}); err == nil {
 		t.Fatal("held node awarded twice")
 	}
-	if err := f.report(t.Context(), input, store.NodeFailed); err != nil {
+	if err := f.report(t.Context(), input, runstate.NodeFailed); err != nil {
 		t.Fatal(err)
 	}
 	completion, err := f.Host.Run(t.Context(), f.Input)
@@ -115,8 +115,8 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 	f := newStoreHostFixture(t, remotePlan())
 	releaseRemote(t, f, "build")
 	_, input := claimRemote(t, f, "build")
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"}
-	if _, err := f.Tenant.TransitionRun(t.Context(), store.RunTransition{RunID: ref.RunID, Actor: f.Control, To: store.RunCancelled, Cause: store.RunCancel}); err != nil {
+	ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"}
+	if _, err := f.Tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: ref.RunID, Actor: f.Control, To: runstate.RunCancelled, Cause: runstate.RunCancel}); err != nil {
 		t.Fatal(err)
 	}
 	f.State.notify()
@@ -128,7 +128,7 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 	if err != nil || held.ClaimedBy != input.Authority.Holder || held.Generation != input.Generation || held.Outcome != "" || held.CancelRequestedAt == nil {
 		t.Fatalf("cancelled holder = %+v, error %v", held, err)
 	}
-	if err := f.report(t.Context(), input, store.NodeCancelled); err != nil {
+	if err := f.report(t.Context(), input, runstate.NodeCancelled); err != nil {
 		t.Fatal(err)
 	}
 	entry, err := f.Host.Acquire(t.Context(), f.Input)
@@ -139,8 +139,8 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 	if err != nil || completion.Outcome != "cancelled" {
 		t.Fatalf("completion = %+v, error %v", completion, err)
 	}
-	dependent, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: ref.RunID, NodeID: "test"})
-	if err != nil || dependent.Outcome != store.NodeCancelled || dependent.Attempt != 0 {
+	dependent, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: ref.RunID, NodeID: "test"})
+	if err != nil || dependent.Outcome != runstate.NodeCancelled || dependent.Attempt != 0 {
 		t.Fatalf("dependent = %+v, error %v", dependent, err)
 	}
 }
@@ -162,7 +162,7 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 					if mode == "claimed" {
 						_, claims["build"] = claimRemote(t, f, "build")
 					}
-					f.Host.Local = func(store.NodeRow) bool { return false }
+					f.Host.Local = func(runstate.NodeRow) bool { return false }
 					d := newFakeDaemon()
 					d.hostGate = make(chan struct{})
 					var machine *LocalAdmission
@@ -207,7 +207,7 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 							if err != nil || len(state.Holders) != 1 || state.Holders[0].NodeID != id {
 								return fmt.Errorf("claimed job lost concurrency: %+v %v", state, err)
 							}
-							return f.report(ctx, input, store.NodeSuccess)
+							return f.report(ctx, input, runstate.NodeSuccess)
 						}); err != nil {
 							t.Fatal(err)
 						}
@@ -239,7 +239,7 @@ func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 	plan.Jobs = plan.Jobs[:1]
 	plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "db", Scope: new("global"), OnLimit: new("cancel_others")}}
 	f := newStoreHostFixture(t, plan)
-	f.Host.Local = func(store.NodeRow) bool { return false }
+	f.Host.Local = func(runstate.NodeRow) bool { return false }
 	d := newFakeDaemon()
 	f.Host.executionAdmission = ComposeStartGate(f.Tenant, &LocalAdmission{Daemon: d}, false)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -283,7 +283,7 @@ func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 		}
 		row, _ := ownerNode(snapshot, "build")
 		if row.CancelRequestedAt != nil {
-			if row.Status == store.StatusDone || row.ClaimedBy != input.Authority.Holder || row.Generation != input.Generation {
+			if row.Status == runstate.StatusDone || row.ClaimedBy != input.Authority.Holder || row.Generation != input.Generation {
 				t.Fatal("cancellation replaced the holder's result authority")
 			}
 			break
@@ -315,7 +315,7 @@ func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 		t.Fatalf("owner returned before the remote holder drained: %v", err)
 	default:
 	}
-	if err := f.report(ctx, input, store.NodeCancelled); err != nil {
+	if err := f.report(ctx, input, runstate.NodeCancelled); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {

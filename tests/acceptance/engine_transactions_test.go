@@ -14,13 +14,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type engineTransactions struct {
@@ -28,21 +30,21 @@ type engineTransactions struct {
 	plan              store.PlanAcceptance
 	expansion         store.ExpansionSubmission
 	run               store.RunRow
-	node              store.NodeRow
+	node              runstate.NodeRow
 	admitted          store.AdmissionResult
 	accepted          store.AcceptedPlan
 	expanded          store.AcceptedExpansion
 	nodeChange        store.NodeCommand
-	runChange         store.RunTransition
-	finish            store.FinishRunRequest
+	runChange         runstate.RunTransition
+	finish            runstate.FinishRunRequest
 	renewPrefix       string
 	renewExecuting    bool
-	beat              store.LeaseBeat
-	applied           store.Applied
+	beat              runstate.LeaseBeat
+	applied           runstate.Applied
 	annotation        store.AnnotationWrite
 	summary           store.SummaryWrite
 	step              store.StepReport
-	authorityActor    store.Actor
+	authorityActor    runstate.Actor
 	revokedAuthority  capability.AuthorityRef
 	membership        store.MembershipUpdate
 	members           []store.Membership
@@ -53,17 +55,17 @@ type engineTransactions struct {
 	readErr           error
 	runReadErr        error
 	failure           *nodeproto.JobFailure
-	failureRef        controllerwire.NodeRef
+	failureRef        runspec.NodeRef
 	failureGeneration int64
-	failureActor      store.Actor
+	failureActor      runstate.Actor
 	failureReads      int
 }
 
-func (f *engineTransactions) ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error) {
-	return store.ReconciledNode{}, f.err
+func (f *engineTransactions) ReconcileNode(context.Context, store.ReconcileRequest) (runstate.ReconciledNode, error) {
+	return runstate.ReconciledNode{}, f.err
 }
 
-func (f *engineTransactions) ReadFailure(_ context.Context, source controllerwire.NodeRef, generation int64, actor store.Actor) (*nodeproto.JobFailure, error) {
+func (f *engineTransactions) ReadFailure(_ context.Context, source runspec.NodeRef, generation int64, actor runstate.Actor) (*nodeproto.JobFailure, error) {
 	f.failureRef, f.failureGeneration, f.failureActor = source, generation, actor
 	f.failureReads++
 	return f.failure, f.readErr
@@ -74,7 +76,7 @@ func (f *engineTransactions) Members(context.Context) ([]store.Membership, error
 	return f.members, f.readErr
 }
 
-func (f *engineTransactions) RevokeAuthority(_ context.Context, actor store.Actor, target capability.AuthorityRef) error {
+func (f *engineTransactions) RevokeAuthority(_ context.Context, actor runstate.Actor, target capability.AuthorityRef) error {
 	f.authorityActor, f.revokedAuthority = actor, target
 	f.writes++
 	if f.err == nil && f.commitAuthority != nil {
@@ -83,7 +85,7 @@ func (f *engineTransactions) RevokeAuthority(_ context.Context, actor store.Acto
 	return f.err
 }
 
-func (f *engineTransactions) UpdateMembership(_ context.Context, actor store.Actor, change store.MembershipUpdate) error {
+func (f *engineTransactions) UpdateMembership(_ context.Context, actor runstate.Actor, change store.MembershipUpdate) error {
 	f.authorityActor, f.membership = actor, change
 	f.writes++
 	if f.err == nil && f.commitAuthority != nil {
@@ -110,25 +112,25 @@ func (f *engineTransactions) WriteAnnotation(_ context.Context, annotation store
 	return f.err
 }
 
-func (f *engineTransactions) TransitionNode(_ context.Context, change store.NodeCommand) (store.Applied, error) {
+func (f *engineTransactions) TransitionNode(_ context.Context, change store.NodeCommand) (runstate.Applied, error) {
 	f.nodeChange = change
 	f.writes++
 	return f.applied, f.err
 }
 
-func (f *engineTransactions) TransitionRun(_ context.Context, change store.RunTransition) (store.Applied, error) {
+func (f *engineTransactions) TransitionRun(_ context.Context, change runstate.RunTransition) (runstate.Applied, error) {
 	f.runChange = change
 	f.writes++
 	return f.applied, f.err
 }
 
-func (f *engineTransactions) FinishRunAndUnit(_ context.Context, finish store.FinishRunRequest) (store.Applied, error) {
+func (f *engineTransactions) FinishRunAndUnit(_ context.Context, finish runstate.FinishRunRequest) (runstate.Applied, error) {
 	f.finish = finish
 	f.writes++
 	return f.applied, f.err
 }
 
-func (f *engineTransactions) RenewUnit(_ context.Context, prefix string, executing bool) (store.LeaseBeat, error) {
+func (f *engineTransactions) RenewUnit(_ context.Context, prefix string, executing bool) (runstate.LeaseBeat, error) {
 	f.renewPrefix, f.renewExecuting = prefix, executing
 	f.writes++
 	return f.beat, f.err
@@ -156,9 +158,9 @@ func (f *engineTransactions) ReadSnapshot(context.Context, string) (store.RunSna
 	return store.RunSnapshot{}, f.readErr
 }
 
-func (f *engineTransactions) ReadNode(_ context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
+func (f *engineTransactions) ReadNode(_ context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
 	if ref != f.node.Ref {
-		return store.NodeRow{}, &apierr.Error{Code: apierr.NotFound, Message: "job not found"}
+		return runstate.NodeRow{}, &apierr.Error{Code: apierr.NotFound, Message: "job not found"}
 	}
 	return f.node, f.readErr
 }
@@ -194,8 +196,8 @@ func TestEngineAdaptersCallFinalTransactions(t *testing.T) {
 		run:      store.RunRow{ID: "run", Team: "team", Request: runspec.SealedRequest{RunID: "run", Hash: "persisted-first-seal"}},
 		accepted: store.AcceptedPlan{PlanHash: "second-seal", Plan: json.RawMessage(`{"jobs":[]}`), Replayed: true},
 		expanded: store.AcceptedExpansion{
-			SourceGeneration: 4, State: store.ExpansionAccepted, BodyHash: "expansion-seal", Replayed: true,
-			Nodes: []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "generated"}, Spec: json.RawMessage(`{"id":"generated"}`), SpecHash: "generated-seal", Status: store.StatusRunning, Generation: 8, Attempt: 3, StateSeq: 12, ClaimedBy: "current-holder", ApplicationRetries: 2, Disruptions: 1}},
+			SourceGeneration: 4, State: runstate.ExpansionAccepted, BodyHash: "expansion-seal", Replayed: true,
+			Nodes: []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "generated"}, Spec: json.RawMessage(`{"id":"generated"}`), SpecHash: "generated-seal", Status: runstate.StatusRunning, Generation: 8, Attempt: 3, StateSeq: 12, ClaimedBy: "current-holder", ApplicationRetries: 2, Disruptions: 1}},
 		},
 	}
 	e := fakeEngine(t, f)
@@ -209,7 +211,7 @@ func TestEngineAdaptersCallFinalTransactions(t *testing.T) {
 	planner.Binding.Kind, planner.Binding.NodeID = capability.BindingRun, ""
 	planned, err := e.AcceptPlan(t.Context(), planner, body)
 	if err != nil || planned.PlanHash != "second-seal" || !planned.Replayed || f.plan.Seal.Request.Hash != "persisted-first-seal" ||
-		!f.plan.Seal.Now.IsZero() || f.plan.Actor.Authority != a.Principal.Authority || f.plan.Actor.Kind != store.ActorRunHost || !reflect.DeepEqual(body.Declarations, f.plan.Seal.Declarations) {
+		!f.plan.Seal.Now.IsZero() || f.plan.Actor.Authority != a.Principal.Authority || f.plan.Actor.Kind != runstate.ActorRunHost || !reflect.DeepEqual(body.Declarations, f.plan.Seal.Declarations) {
 		t.Fatalf("plan = %+v, %+v, %v", planned, f.plan, err)
 	}
 	expanded, err := e.AcceptExpansion(t.Context(), a, controllerwire.ExpansionSubmission{SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[]}`)})
@@ -240,7 +242,7 @@ func TestEnginePlanPublisherKeepsSessionAuthority(t *testing.T) {
 	a.Access = capability.AccessRule{Credential: capability.CredentialPublisher, Grants: []capability.Grant{capability.DataWrite}, Binding: capability.BindData, Liveness: capability.LiveCredential}
 	f := &engineTransactions{run: store.RunRow{ID: "run", Team: "team", Request: runspec.SealedRequest{RunID: "run"}}}
 	_, err := fakeEngine(t, f).AcceptPlan(t.Context(), a, controllerwire.PlanSubmission{Plan: json.RawMessage(`{"jobs":[]}`)})
-	if err != nil || f.plan.Actor.Kind != store.ActorOperator || f.plan.Actor.Authority != a.Principal.Authority || f.plan.Actor.CapabilityPrefix != "" || f.plan.Actor.Owner != (store.OwnerLeaseRef{}) {
+	if err != nil || f.plan.Actor.Kind != runstate.ActorOperator || f.plan.Actor.Authority != a.Principal.Authority || f.plan.Actor.CapabilityPrefix != "" || f.plan.Actor.Owner != (runstate.OwnerLeaseRef{}) {
 		t.Fatalf("publisher actor = %+v, %v", f.plan.Actor, err)
 	}
 	f.run.Team = "other"
@@ -267,7 +269,7 @@ func TestEngineRetryPlanKeepsSourceSeal(t *testing.T) {
 func expansionServer(t *testing.T, b *credentialBoundary, f *engineTransactions) http.Handler {
 	t.Helper()
 	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).
-		WithAuthorization(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(b), Bindings: b}).
+		WithAuthorization(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(b), Bindings: b}).
 		WithEngineController(fakeEngine(t, f)).Handler()
 }
 
@@ -282,8 +284,8 @@ func TestEngineExpansionHTTP(t *testing.T) {
 			b.snapshot.Binding.FinishedAt = &finished
 			b.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *a.Binding.Expansion, ExpiresAt: leaseUntil, ControllerLeaseExpiresAt: &leaseUntil}
 			f := &engineTransactions{
-				node:     store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Generation: 4},
-				expanded: store.AcceptedExpansion{SourceGeneration: 4, State: store.ExpansionAccepted, BodyHash: "committed"},
+				node:     runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Generation: 4},
+				expanded: store.AcceptedExpansion{SourceGeneration: 4, State: runstate.ExpansionAccepted, BodyHash: "committed"},
 			}
 			path := "/api/v1/runs/run/jobs/job/expansion"
 			body := `{"source_generation":4,"body":{"jobs":[]}}`
@@ -291,7 +293,7 @@ func TestEngineExpansionHTTP(t *testing.T) {
 			switch name {
 			case "failure":
 				body = `{"source_generation":4,"failure":{"code":"unavailable","message":"generator failed"}}`
-				f.expanded.State = store.ExpansionFailed
+				f.expanded.State = runstate.ExpansionFailed
 			case "replay":
 				f.expanded.Replayed = true
 			case "owner":
@@ -383,7 +385,7 @@ func TestEngineExpansionHTTP(t *testing.T) {
 				f.err = errors.New("private database credential")
 				status, code = 500, apierr.Internal
 			case "corrupt persisted expansion":
-				f.expanded.Nodes = []store.NodeRow{{Spec: json.RawMessage(`null`)}}
+				f.expanded.Nodes = []runstate.NodeRow{{Spec: json.RawMessage(`null`)}}
 				status, code = 500, apierr.Internal
 			}
 			r := httptest.NewRequest("POST", path, strings.NewReader(body))

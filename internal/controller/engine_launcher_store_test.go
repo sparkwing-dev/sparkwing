@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -28,15 +29,15 @@ func TestEngineLauncherSyncUsesStoreSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e.EngineController).Handler()
-	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}}
+	observation := capability.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}}
 	principal, err := e.Store.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	observation.Award.ID = principal.Capability.UnitID
-	request := func(o controllerwire.LauncherObservation) controllerwire.LauncherSyncResponse {
+	request := func(o capability.LauncherObservation) controllerwire.LauncherSyncResponse {
 		t.Helper()
-		body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{o}})
+		body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{o}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -81,8 +82,8 @@ func TestEngineLauncherSyncUsesStoreSnapshot(t *testing.T) {
 	if len(response.Awards) != 0 || len(response.Retired) != 1 || response.Retired[0] != observation.Award {
 		t.Fatalf("cancelled award retained: %+v", response)
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || row.Generation != claim.Award.Generation || row.ClaimedBy != claim.Award.Holder || row.Status != store.StatusPending {
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || row.Generation != claim.Award.Generation || row.ClaimedBy != claim.Award.Holder || row.Status != runstate.StatusPending {
 		t.Fatalf("sync changed holder state: %+v, %v", row, err)
 	}
 }
@@ -91,10 +92,10 @@ func TestEngineLauncherSyncRejectsAmbiguousJobObservations(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "launcher"}}}
-	first := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitPlan, ID: "run", Holder: "launcher", Generation: 1}}
+	first := capability.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitPlan, ID: "run", Holder: "launcher", Generation: 1}}
 	second := first
 	second.Rejected = true
-	if response, err := e.SyncLauncher(t.Context(), a, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{first, second}}); err == nil || len(response.Retired) != 0 || len(response.Awards) != 0 {
+	if response, err := e.SyncLauncher(t.Context(), a, controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{first, second}}); err == nil || len(response.Retired) != 0 || len(response.Awards) != 0 {
 		t.Fatalf("duplicate award returned decisions: %+v %v", response, err)
 	}
 }
@@ -115,8 +116,8 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}, Rejected: true}
-	body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{observation}})
+	observation := capability.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}, Rejected: true}
+	body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{observation}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,8 +132,8 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 			t.Fatalf("rejection not acknowledged: %+v", response)
 		}
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || row.Outcome != store.NodeFailed || row.ClaimedBy != "" {
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || row.Outcome != runstate.NodeFailed || row.ClaimedBy != "" {
 		t.Fatalf("rejection did not fail persisted award: %+v %v", row, err)
 	}
 }
@@ -160,7 +161,7 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 			engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 			engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,lineage_json,log_retention_class,log_retention_days) SELECT team,'sibling',2,pipeline,status,CAST(REPLACE(CAST(request_json AS TEXT),'"run"','"sibling"') AS BLOB),request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,lineage_json,log_retention_class,log_retention_days FROM runs WHERE id='run'`)
 			engineSQL(t, e.Store, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,'sibling',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
-			var observed []controllerwire.LauncherObservation
+			var observed []capability.LauncherObservation
 			var preparing []capability.LeaseRef
 			var badPrefix string
 			for _, id := range []string{"run", "sibling"} {
@@ -175,7 +176,7 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 					t.Fatal(err)
 				}
 				fence := capability.LeaseRef{Kind: capability.UnitNode, ID: principal.Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
-				observed = append(observed, controllerwire.LauncherObservation{Award: fence})
+				observed = append(observed, capability.LauncherObservation{Award: fence})
 				preparing = append(preparing, fence)
 				if id == "run" {
 					badPrefix = claim.Award.CapabilityPrefix

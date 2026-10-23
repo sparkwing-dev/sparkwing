@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -29,5 +30,5 @@ func (s *Server) settingsWriter() (OperatorSettingsWriter, error) {
 	if s.operator != nil {
 		return s.operator, nil
 	}
-	return nil, missingEndpointPolicy()
+	return nil, routepolicy.MissingEndpointPolicy()
 }

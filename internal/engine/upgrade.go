@@ -14,21 +14,21 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/mod/modfile"
-	"golang.org/x/mod/semver"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 )
 
 // UpgradeRequest chooses an exact release or the signed index's latest permitted release.
 type UpgradeRequest struct {
 	Checkout string
-	SDK      SDKKind
+	SDK      engineid.SDKKind
 	Version  string
 	DryRun   bool
 }
@@ -42,11 +42,11 @@ type PinEdit struct {
 
 // UpgradePlan contains concrete pin edits and the matching verified engine selection.
 type UpgradePlan struct {
-	Before       Pin
-	After        Pin
+	Before       engineid.Pin
+	After        engineid.Pin
 	Edits        []PinEdit
-	Engine       Identity
-	Notices      []Notice
+	Engine       engineid.Identity
+	Notices      []engineid.Notice
 	inputDigests map[string]string
 }
 
@@ -69,7 +69,7 @@ type SoftwareUpdate struct {
 	Version        string
 	Release        VerifiedRelease
 	Required       bool
-	Notices        []Notice
+	Notices        []engineid.Notice
 }
 
 // Upgrade verifies staged code before applying digest-fenced manifest and lockfile edits.
@@ -207,9 +207,9 @@ func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest, p
 	return stage, plan, resolved, nil
 }
 
-func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk SDKKind, version string) error {
+func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk engineid.SDKKind, version string) error {
 	switch sdk {
-	case GoSDK:
+	case engineid.GoSDK:
 		body, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 		if err != nil {
 			return err
@@ -228,8 +228,8 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk SDKKind,
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), body, 0o600); err != nil {
 			return err
 		}
-		return r.nativeCommand(ctx, dir, Pin{SDK: GoSDK, Version: version}, "go", "mod", "tidy")
-	case TypeScriptSDK:
+		return r.nativeCommand(ctx, dir, engineid.Pin{SDK: engineid.GoSDK, Version: version}, "go", "mod", "tidy")
+	case engineid.TypeScriptSDK:
 		body, err := os.ReadFile(filepath.Join(dir, "package.json"))
 		if err != nil {
 			return err
@@ -268,13 +268,13 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk SDKKind,
 		if err := os.WriteFile(filepath.Join(dir, "package.json"), body, 0o600); err != nil {
 			return err
 		}
-		return r.nativeCommand(ctx, dir, Pin{SDK: TypeScriptSDK, Version: version}, "npm", "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund")
+		return r.nativeCommand(ctx, dir, engineid.Pin{SDK: engineid.TypeScriptSDK, Version: version}, "npm", "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund")
 	default:
 		return invalid("unknown SDK kind", "Select go or typescript.")
 	}
 }
 
-func (r *Resolver) nativeCommand(ctx context.Context, dir string, pin Pin, name string, args ...string) error {
+func (r *Resolver) nativeCommand(ctx context.Context, dir string, pin engineid.Pin, name string, args ...string) error {
 	if r.command != nil {
 		return r.command(ctx, dir, name, args...)
 	}
@@ -391,7 +391,7 @@ func copyCheckout(ctx context.Context, source, destination string) error {
 	})
 }
 
-func collectPinEdits(stage string, before, after Pin, inputs map[string]string) ([]PinEdit, error) {
+func collectPinEdits(stage string, before, after engineid.Pin, inputs map[string]string) ([]PinEdit, error) {
 	paths := []string{before.Manifest}
 	if before.Lockfile != "" {
 		paths = append(paths, before.Lockfile)
@@ -504,7 +504,7 @@ func (r *Resolver) PrepareRunnerUpdate(ctx context.Context, currentVersion strin
 		update.Version = currentVersion
 		return update, nil
 	}
-	identity := Identity{Pin: Pin{SDK: GoSDK, Version: version}, Version: version}
+	identity := engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: version}, Version: version}
 	cached, ok, err := r.findCached(ctx, identity, target)
 	if err != nil {
 		return update, err
@@ -523,9 +523,9 @@ func (r *Resolver) PrepareRunnerUpdate(ctx context.Context, currentVersion strin
 	return update, nil
 }
 
-func readPinInputDigests(checkout string, sdk SDKKind) (map[string]string, error) {
+func readPinInputDigests(checkout string, sdk engineid.SDKKind) (map[string]string, error) {
 	paths := []string{"go.mod", "go.sum"}
-	if sdk == TypeScriptSDK {
+	if sdk == engineid.TypeScriptSDK {
 		paths = []string{"package.json", "package-lock.json", "npm-shrinkwrap.json"}
 	}
 	inputs := map[string]string{}

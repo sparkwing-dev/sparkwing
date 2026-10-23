@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestScheduleManagerRetainsUpcomingAndEffectiveCadence(t *testing.T) {
@@ -62,7 +64,7 @@ func TestScheduleManagerConfirmsCronOverrideAndDeclaredReset(t *testing.T) {
 		}
 		return scheduleTestResponse(t, controllerwire.ScheduleEnvelope{Schedule: row}), nil
 	})
-	overridden, err := c.OverrideSchedule(t.Context(), row.ID, controllerwire.ScheduleOverride{Cron: &cron})
+	overridden, err := c.OverrideSchedule(t.Context(), row.ID, cronspec.Override{Cron: &cron})
 	if err != nil || overridden.Effective.Cron != cron || overridden.Cron != declared.Cron {
 		t.Fatalf("override replaced declaration: %+v %v", overridden, err)
 	}

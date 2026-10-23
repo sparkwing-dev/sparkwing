@@ -10,11 +10,11 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestRawStdoutCountsAsProgress(t *testing.T) {
@@ -182,7 +182,7 @@ func TestResumedOwnerLoadsAcceptedExpansionRegistrations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state.snapshot.Expansions = append(state.snapshot.Expansions, store.AcceptedExpansionRow{Registration: projection})
+	state.snapshot.Expansions = append(state.snapshot.Expansions, runstate.AcceptedExpansionRow{Registration: projection})
 	accepted, err := ownerAccepted(state.snapshot.Run)
 	if err != nil {
 		t.Fatal(err)

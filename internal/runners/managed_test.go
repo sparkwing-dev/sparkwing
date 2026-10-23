@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 )
@@ -175,7 +176,7 @@ func runnerPolicyFixtures(t *testing.T) (engine.VerifiedIndex, engine.VerifiedIn
 	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Now().UTC()
 	published := now.AddDate(0, -1, 0)
-	policy := engine.VersionIndex{Format: engine.VersionIndexFormat, PublishedAt: now.Add(-time.Minute), Latest: "v0.10.0", Versions: []engine.VersionInfo{{Version: "v0.10.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}}}
+	policy := engine.VersionIndex{Format: engine.VersionIndexFormat, PublishedAt: now.Add(-time.Minute), Latest: "v0.10.0", Versions: []engineid.VersionInfo{{Version: "v0.10.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}}}
 	verify := func() engine.VerifiedIndex {
 		body, err := json.Marshal(policy)
 		if err != nil {
@@ -190,7 +191,7 @@ func runnerPolicyFixtures(t *testing.T) (engine.VerifiedIndex, engine.VerifiedIn
 	initial := verify()
 	policy.PublishedAt = now
 	policy.Latest = "v0.20.0"
-	policy.Versions = append(policy.Versions, engine.VersionInfo{Version: "v0.20.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)})
+	policy.Versions = append(policy.Versions, engineid.VersionInfo{Version: "v0.20.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)})
 	policy.Minimum = engine.Restriction{Version: "v0.20.0", Reason: "security fixture", Security: true, AnnouncedAt: now.Add(-time.Minute), EffectiveAt: now.Add(-time.Second)}
 	return initial, verify()
 }

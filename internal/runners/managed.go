@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"golang.org/x/mod/semver"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"golang.org/x/mod/semver"
 )
 
 // SoftwarePolicy is the engine resolver's signed runner-update boundary.
@@ -25,7 +25,7 @@ type ManagedRunner struct {
 	Versions     SoftwarePolicy
 	Installation RunnerInstallation
 	Target       releaseasset.Target
-	Notices      func([]engine.Notice)
+	Notices      func([]engineid.Notice)
 }
 
 var errRunnerUpdate = errors.New("runner software update required")

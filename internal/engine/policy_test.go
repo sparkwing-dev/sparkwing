@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func FuzzSignedPolicyRejectsDuplicateKeys(f *testing.F) {
@@ -65,7 +66,7 @@ func testSigningKey(t *testing.T) ed25519.PrivateKey {
 
 func policyFixture() (VersionIndex, time.Time) {
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
-	return VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0", Versions: []VersionInfo{
+	return VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0", Versions: []engineid.VersionInfo{
 		{Version: "v0.10.2", PublishedAt: now.AddDate(-2, 0, 0), SupportUntil: now.AddDate(-1, 0, 0)},
 		{Version: "v0.20.0", PublishedAt: now.AddDate(0, -1, 0), SupportUntil: now.AddDate(0, 11, 0)},
 	}}, now
@@ -96,7 +97,7 @@ func TestSignedPolicyExpiryRevocationAndMinimum(t *testing.T) {
 		t.Fatal(err)
 	}
 	notices, err := Evaluate(index, "v0.10.2", now)
-	if err != nil || len(notices) != 1 || notices[0].Kind != NoticeSupportEnded {
+	if err != nil || len(notices) != 1 || notices[0].Kind != engineid.NoticeSupportEnded {
 		t.Fatalf("%+v %v", notices, err)
 	}
 	restriction := Restriction{Version: "v0.10.2", Reason: "critical fixture vulnerability", Security: true, AnnouncedAt: now, EffectiveAt: now}

@@ -12,9 +12,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
@@ -66,11 +68,10 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 				}
 				state.LocalSecrets[name] = value
 			}
-			if _, err := state.RenewOwner(ctx, store.Actor{}, false); err != nil {
+			if _, err := state.RenewOwner(ctx, runstate.Actor{}, false); err != nil {
 				return hereHostSession{}, err
 			}
 		}
-
 	}
 	sourceOptions, err := hostSourceOptions(home, os.Environ(), secrets.NewMasker(), award.Request.Request.Source.Location.LocalCheckout != "")
 	if err != nil {
@@ -103,8 +104,8 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 		SubmittedEnv: award.SubmittedEnv, SubmitAccept: procenv.SubmitAcceptAll(),
 		Home: home, Store: state, Parent: private, Bindings: private,
 		Principal: principal, Refresh: refresh, Source: sourceOptions, Local: store.OwnerCanExecute(principal),
-		Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
-			return state.RenewOwner(ctx, store.Actor{}, computing)
+		Renew: func(ctx context.Context, _ string, computing bool) (runstate.LeaseBeat, error) {
+			return state.RenewOwner(ctx, runstate.Actor{}, computing)
 		},
 	}, private))
 	if err != nil {
@@ -112,7 +113,7 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 	}
 	closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
 	adopt := services.Config.Owner.AdoptClaim
-	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim store.ReconciledNode) error {
+	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim runstate.ReconciledNode) error {
 		if err := private.AdoptClaim(ctx, claim); err != nil {
 			return err
 		}
@@ -124,6 +125,6 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 	}
 	return hereHostSession{host: host, close: closeResources, input: nodehost.RunInput{
 		Storage: services.Storage, Engines: engines,
-		Owner: store.Actor{Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix},
+		Owner: runstate.Actor{Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix},
 	}}, nil
 }

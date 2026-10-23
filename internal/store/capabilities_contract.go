@@ -12,8 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // CapabilityRecord preserves the complete authority independently of its lookup indexes.
@@ -554,7 +555,7 @@ func (tx *storeTx) ResolveAuthority(ctx context.Context, ref capability.Authorit
 	return chain[0].principal, nil
 }
 
-func resolveActorTx(ctx context.Context, tx *storeTx, actor Actor) (capability.Principal, error) {
+func resolveActorTx(ctx context.Context, tx *storeTx, actor runstate.Actor) (capability.Principal, error) {
 	if (actor.Authority.Kind == capability.AuthoritySession && actor.CapabilityPrefix != "") || (actor.Authority.Kind == capability.AuthorityCapability && actor.CapabilityPrefix != "" && actor.CapabilityPrefix != actor.Authority.ID) {
 		return capability.Principal{}, authorityError(apierr.Forbidden, "actor authority and fence disagree")
 	}
@@ -562,7 +563,7 @@ func resolveActorTx(ctx context.Context, tx *storeTx, actor Actor) (capability.P
 }
 
 // RevokeAuthority revokes a member's own authority or a tenant administrator's target.
-func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error {
+func (t *Tenant) RevokeAuthority(ctx context.Context, actor runstate.Actor, target capability.AuthorityRef) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority, target}, target.ID); err != nil {
 			return err
@@ -600,7 +601,7 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capabi
 }
 
 // RevokeAuthority limits deployment revocation to service and operator roots.
-func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error {
+func (o *Operator) RevokeAuthority(ctx context.Context, actor runstate.Actor, target capability.AuthorityRef) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority, target}, target.ID); err != nil {
 			return err

@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -167,8 +167,8 @@ func TestCloudStoreBootstrapW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(held.RunID), NodeID: runspec.NodeID(held.JobID)})
-	if err != nil || row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.Generation != award.Binding.Generation || row.ClaimedBy != "" {
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(held.RunID), NodeID: runspec.NodeID(held.JobID)})
+	if err != nil || row.Outcome != runstate.NodeSuccess || row.Attempt != 1 || row.Generation != award.Binding.Generation || row.ClaimedBy != "" {
 		t.Fatalf("Cloud persisted completion: outcome=%s attempt=%d generation=%d error=%v", row.Outcome, row.Attempt, row.Generation, err)
 	}
 }

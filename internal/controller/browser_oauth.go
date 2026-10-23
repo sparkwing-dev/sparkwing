@@ -4,8 +4,9 @@ import (
 	"html/template"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // safety: the flow cookie is what proves the browser finishing a sign-in is the one that started it; without it a
@@ -43,7 +44,7 @@ func oauthCallbackPath(provider string) string {
 func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	proof, ok := r.Context().Value(oauthProofKey{}).(oauthProof)
 	if !ok || proof.grant.AuthorizeURL == "" {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	if !setFlowCookie(w, oauthFlowCookieName, proof.flow, s.cookiesSecure()) {
 		return &apierr.Error{Code: apierr.Internal, Message: "could not start sign-in"}
@@ -55,13 +56,13 @@ func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request, _ capa
 func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	proof, ok := r.Context().Value(oauthProofKey{}).(oauthProof)
 	if !ok {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	if proof.flow.Mode == oauthFlowLink {
 		return s.continueIdentityLink(w, r, proof.flow)
 	}
 	if proof.session == nil || proof.raw == "" {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	clearFlowCookie(w, oauthFlowCookieName, s.cookiesSecure())
 	noteAuditWrite(r.Context())

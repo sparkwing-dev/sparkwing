@@ -135,13 +135,13 @@ func TestLauncherControllerW8Components(t *testing.T) {
 			return controllerwire.ClaimResponse{}, nil
 		},
 		sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-			want := []controllerwire.LauncherObservation{
+			want := []capability.LauncherObservation{
 				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: award.Binding.UnitID, Holder: award.Binding.Holder, Generation: int64(award.Binding.Generation)}},
 				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: second.Binding.UnitID, Holder: second.Binding.Holder, Generation: int64(second.Binding.Generation)}},
 			}
-			slices.SortFunc(want, func(a, b controllerwire.LauncherObservation) int { return strings.Compare(a.Award.ID, b.Award.ID) })
+			slices.SortFunc(want, func(a, b capability.LauncherObservation) int { return strings.Compare(a.Award.ID, b.Award.ID) })
 			observed := slices.Clone(request.Observed)
-			slices.SortFunc(observed, func(a, b controllerwire.LauncherObservation) int { return strings.Compare(a.Award.ID, b.Award.ID) })
+			slices.SortFunc(observed, func(a, b capability.LauncherObservation) int { return strings.Compare(a.Award.ID, b.Award.ID) })
 			if !slices.Equal(observed, want) {
 				t.Fatalf("restart lost persisted observation: %+v", request.Observed)
 			}

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func billingModelFixture(t *testing.T) (*Store, UnitDemand, *time.Time) {
@@ -286,7 +286,7 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 			claim, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: "a"}
 			admitExecution(t, tenant, actor)
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
 			switch {
@@ -315,7 +315,7 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 			if !beat.ExpiresAt.After(*now) || beat.ExpiresAt.After(claim.Award.LeaseExpiresAt) {
 				t.Fatalf("lease runs to %v from %v; want a drain within the funded slice", beat.ExpiresAt, *now)
 			}
-			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil || node.CancelRequestedAt == nil || !strings.Contains(node.CancelReason, hold.says) {
 				t.Fatalf("the stop left the job uncancelled: %+v %v", node, err)
 			}

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func FuzzNativeStartupGrantIsolation(f *testing.F) {

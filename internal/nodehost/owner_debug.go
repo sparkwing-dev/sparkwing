@@ -7,19 +7,19 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 const defaultDebugPauseTimeout = 30 * time.Minute
 
 // DebugBoundary binds an owner-selected pause to persisted execution and sealed policy.
 type DebugBoundary struct {
-	Ref        controllerwire.NodeRef
+	Ref        runspec.NodeRef
 	Generation int64
-	Actor      store.Actor
+	Actor      runstate.Actor
 	Reason     string
 	Timeout    time.Duration
 }
@@ -29,7 +29,7 @@ type DebugBoundaryWaiter interface {
 	WaitDebugBoundary(context.Context, DebugBoundary) error
 }
 
-func (h *OwnerHost) debugBoundary(ctx context.Context, input RunInput, accepted AcceptedRun, row store.NodeRow, before bool) error {
+func (h *OwnerHost) debugBoundary(ctx context.Context, input RunInput, accepted AcceptedRun, row runstate.NodeRow, before bool) error {
 	boundary, err := debugBoundary(input, accepted, row, before)
 	if err != nil || boundary == nil {
 		return err
@@ -40,7 +40,7 @@ func (h *OwnerHost) debugBoundary(ctx context.Context, input RunInput, accepted 
 	return h.Debug.WaitDebugBoundary(ctx, *boundary)
 }
 
-func debugBoundary(input RunInput, accepted AcceptedRun, row store.NodeRow, before bool) (*DebugBoundary, error) {
+func debugBoundary(input RunInput, accepted AcceptedRun, row runstate.NodeRow, before bool) (*DebugBoundary, error) {
 	var spec runspec.Spec
 	var job nodeproto.JobSpec
 	if json.Unmarshal(accepted.Spec, &spec) != nil {
@@ -62,7 +62,7 @@ func debugBoundary(input RunInput, accepted AcceptedRun, row store.NodeRow, befo
 		reason = store.PauseReasonBefore
 	case !before && job.Approval == nil && slices.Contains(pause.After.Value, job.ID):
 		reason = store.PauseReasonAfter
-	case !before && job.Approval == nil && pause.OnFailure.Value && row.Outcome == store.NodeFailed:
+	case !before && job.Approval == nil && pause.OnFailure.Value && row.Outcome == runstate.NodeFailed:
 		reason = store.PauseReasonOnFailure
 	}
 	if reason == "" {

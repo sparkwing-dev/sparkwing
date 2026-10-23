@@ -6,14 +6,13 @@ import (
 	"errors"
 	"reflect"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // Plan accepts a controller-owned run's plan under its planning lease and leaves scheduling to the controller.
@@ -23,7 +22,7 @@ func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted Accep
 	}
 	defer func() { err = maskHostError(errors.Join(err, context.Cause(parent)), h.Masker) }()
 	owner := input.Owner.Owner
-	if owner.Kind != store.OwnerTrigger || owner.RunID != runspec.RunID(input.RunID) || owner.Holder == "" || owner.Generation <= 0 {
+	if owner.Kind != runstate.OwnerTrigger || owner.RunID != runspec.RunID(input.RunID) || owner.Holder == "" || owner.Generation <= 0 {
 		return accepted, errors.New("plan unit requires its planning lease")
 	}
 	ctx, stop := h.keepUnit(parent, lease.Identity{Kind: capability.UnitPlan, RunID: input.RunID, Holder: owner.Holder, Generation: int64(owner.Generation)}, input.Owner, func() bool { return true })
@@ -84,9 +83,9 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	if err := h.Masks.initializeSnapshot(snapshot, accepted); err != nil {
 		return err
 	}
-	var row store.NodeRow
+	var row runstate.NodeRow
 	for _, current := range snapshot.Nodes {
-		if current.Ref == (controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: runspec.NodeID(sourceID)}) {
+		if current.Ref == (runspec.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: runspec.NodeID(sourceID)}) {
 			row = current
 			break
 		}
@@ -96,7 +95,7 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 		return errors.New("evaluation requires accepted declaration")
 	}
 	if job.Approval != nil {
-		if row.Generation != runspec.ClaimGeneration(generation) || row.Status != store.StatusPending || row.ReadyAt != nil || row.ClaimedBy != "" || row.Outcome != "" {
+		if row.Generation != runspec.ClaimGeneration(generation) || row.Status != runstate.StatusPending || row.ReadyAt != nil || row.ClaimedBy != "" || row.Outcome != "" {
 			return errors.New("approval evaluation requires its unreleased source")
 		}
 		return h.evaluateApproval(ctx, input, accepted, row, snapshot.Run)
@@ -104,7 +103,7 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	if h.Expand == nil {
 		return errors.New("source expansion requires evaluator")
 	}
-	if row.Ref.NodeID == "" || row.Generation != runspec.ClaimGeneration(generation) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
+	if row.Ref.NodeID == "" || row.Generation != runspec.ClaimGeneration(generation) || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeSuccess && row.Outcome != runstate.NodeMemoized || row.Expansion != runstate.ExpansionExpected {
 		return errors.New("eval source is outside the awarded expansion")
 	}
 	work := func(ctx context.Context) (err error) {
@@ -131,13 +130,13 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 }
 
 func (h *OwnerHost) unitReady(input RunInput) error {
-	if h.Store == nil || h.Masker == nil || h.Renew == nil || h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval || input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost {
+	if h.Store == nil || h.Masker == nil || h.Renew == nil || h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval || input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != runstate.ActorRunHost {
 		return errors.New("awarded unit requires state, renewal, masking and sealed input")
 	}
 	return nil
 }
 
-func (h *OwnerHost) commitExpansion(ctx context.Context, row store.NodeRow, actor store.Actor, body json.RawMessage, registration runspec.SecretRegistration, failure *store.ExpansionFailure) error {
+func (h *OwnerHost) commitExpansion(ctx context.Context, row runstate.NodeRow, actor runstate.Actor, body json.RawMessage, registration runspec.SecretRegistration, failure *store.ExpansionFailure) error {
 	if (len(body) == 0) == (failure == nil) {
 		return errors.New("generator must return declarations or a structured failure")
 	}
@@ -155,7 +154,7 @@ func (h *OwnerHost) commitExpansion(ctx context.Context, row store.NodeRow, acto
 	return commit()
 }
 
-func (h *OwnerHost) evaluateApproval(ctx context.Context, input RunInput, accepted AcceptedRun, row store.NodeRow, run store.RunRow) (err error) {
+func (h *OwnerHost) evaluateApproval(ctx context.Context, input RunInput, accepted AcceptedRun, row runstate.NodeRow, run store.RunRow) (err error) {
 	if h.SkipPolicy == nil {
 		return errors.New("approval evaluation requires predicate policy")
 	}
@@ -168,7 +167,7 @@ func (h *OwnerHost) evaluateApproval(ctx context.Context, input RunInput, accept
 		if context.Cause(ctx) != nil {
 			return errors.Join(err, context.Cause(ctx))
 		}
-		result.Transition = store.OwnerPolicyNode{Outcome: store.NodeFailed, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyApprovalFail, Generation: row.Generation}, Result: &store.NodeResult{Outcome: store.NodeFailed, Reason: string(apierr.PlanFailed), MaskedError: "approval evaluation source acquisition failed"}}
+		result.Transition = store.OwnerPolicyNode{Outcome: runstate.NodeFailed, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyApprovalFail, Generation: row.Generation}, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: string(apierr.PlanFailed), MaskedError: "approval evaluation source acquisition failed"}}
 	} else {
 		result, err = h.SkipPolicy(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
 		if err != nil {

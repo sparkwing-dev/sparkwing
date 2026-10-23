@@ -5,8 +5,8 @@ import (
 	"database/sql"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // rejectLauncherAwards fails only exact awards issued under the authenticated launcher's ancestry.
@@ -42,8 +42,8 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 			if !live {
 				continue
 			}
-			actor := Actor{Kind: ActorLauncher, Authority: authority, CapabilityPrefix: row.prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}
-			target := expiredUnit{team: award.Claim.Team, ref: controllerwire.NodeRef{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID)}, kind: fence.Kind, sourceGeneration: award.Claim.SourceGeneration}
+			actor := runstate.Actor{Kind: runstate.ActorLauncher, Authority: authority, CapabilityPrefix: row.prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}
+			target := expiredUnit{team: award.Claim.Team, ref: runspec.NodeRef{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID)}, kind: fence.Kind, sourceGeneration: award.Claim.SourceGeneration}
 			recovery := ownerRecovery{generation: fence.Generation, lease: sql.NullInt64{Valid: true, Int64: award.Claim.Award.LeaseExpiresAt.UnixNano()}}
 			if fence.Kind == capability.UnitPlan {
 				err = tx.QueryRowContext(ctx, `SELECT started_at FROM triggers WHERE team=? AND id=?`, target.team, target.ref.RunID).Scan(&recovery.started)
@@ -56,9 +56,9 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 			switch fence.Kind {
 			case capability.UnitNode:
 
-				_, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: NodeFailed, Actor: actor, Cause: CauseLaunchRejected, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"}}})
+				_, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: runstate.NodeFailed, Actor: actor, Cause: runstate.CauseLaunchRejected, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"}}})
 			case capability.UnitPlan:
-				_, err = transitionRunTx(ctx, tx, target.team, RunTransition{RunID: target.ref.RunID, To: RunFailed, Actor: actor, Cause: RunLaunchRejected, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"})
+				_, err = transitionRunTx(ctx, tx, target.team, runstate.RunTransition{RunID: target.ref.RunID, To: runstate.RunFailed, Actor: actor, Cause: runstate.RunLaunchRejected, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"})
 				if err == nil {
 					err = writeOwnerRecoveryTx(ctx, tx, target, recovery, "failed", actor, tx.now(ctx))
 				}
@@ -77,13 +77,13 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 	})
 }
 
-func checkLauncherActorTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor) (LauncherAward, error) {
+func checkLauncherActorTx(ctx context.Context, tx *storeTx, team Team, runID string, actor runstate.Actor) (LauncherAward, error) {
 	chain, err := authorityChainTx(ctx, tx, actor.Authority, true)
 	if err != nil {
 		return LauncherAward{}, err
 	}
 	claimant := chain[0].principal.Capability
-	if actor.Kind != ActorLauncher || actor.Authority.Kind != capability.AuthorityCapability || claimant.Audience != capability.Controller || !launcherClaimant(claimant) {
+	if actor.Kind != runstate.ActorLauncher || actor.Authority.Kind != capability.AuthorityCapability || claimant.Audience != capability.Controller || !launcherClaimant(claimant) {
 		return LauncherAward{}, bindingRefusal()
 	}
 	award, live, err := readLauncherAwardTx(ctx, tx, actor.CapabilityPrefix, claimant, chain[len(chain)-1].principal)

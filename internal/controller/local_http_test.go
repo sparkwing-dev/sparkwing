@@ -15,23 +15,25 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 type localControllerConn struct {
 	net.Conn
-	peer wingd.LocalPeerIdentity
+	peer localhostwire.LocalPeerIdentity
 }
 
-func (c localControllerConn) PeerIdentity() wingd.LocalPeerIdentity { return c.peer }
+func (c localControllerConn) PeerIdentity() localhostwire.LocalPeerIdentity { return c.peer }
 
-func localControllerIdentity(t *testing.T) (wingd.LocalPeerIdentity, string) {
+func localControllerIdentity(t *testing.T) (localhostwire.LocalPeerIdentity, string) {
 	t.Helper()
 	subject, err := wingd.CurrentLocalSubject()
 	if err != nil {
 		t.Fatal(err)
 	}
-	peer := wingd.LocalPeerIdentity{GOOS: runtime.GOOS}
+	peer := localhostwire.LocalPeerIdentity{GOOS: runtime.GOOS}
 	account := strings.TrimPrefix(subject, "local:")
 	if runtime.GOOS == "windows" {
 		peer.SID = account
@@ -73,7 +75,7 @@ func testLocalControllerHTTP(t *testing.T, native bool) {
 	s := New(newStoreForAuth(t), nil)
 	b := &peerBoundary{}
 	if !native {
-		s.WithAuthorization(RouteAuthorization{
+		s.WithAuthorization(routepolicy.Authorization{
 			Authenticator: capability.NewAuthenticator(b), Bindings: b,
 			Identify: func(r *http.Request) (capability.Presentation, error) {
 				if len(r.CookiesNamed("__Host-sw_session")) > 0 {
@@ -89,7 +91,7 @@ func testLocalControllerHTTP(t *testing.T, native bool) {
 	listener := &localControllerListener{connections: make(chan net.Conn), done: make(chan struct{})}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- services.ServeAPI(ctx, listener) }()
+	go func() { done <- wingd.ServeAPI(ctx, listener, services) }()
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		client, server := net.Pipe()
 		select {

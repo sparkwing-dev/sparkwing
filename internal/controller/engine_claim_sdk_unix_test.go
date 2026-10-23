@@ -20,8 +20,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -33,6 +33,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
@@ -65,16 +66,16 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin, err := engine.ReadPin(directory, engine.GoSDK)
+	pin, err := engine.ReadPin(directory, engineid.GoSDK)
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected := engine.Resolved{Identity: engine.Identity{Pin: pin, Version: "development"}, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
+	selected := engine.Resolved{Identity: engineid.Identity{Pin: pin, Version: "development"}, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
 	masker := secrets.NewMasker()
 	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: procenv.Base{Captured: os.Environ(), Masker: masker}}}
 	planner := nodehost.SDKPlanner{
 		Start: processes.StartPlanning, Masker: masker,
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return selected, nil
 		},
 		Log: func(_ context.Context, frame nodeproto.FrameLog) error { t.Log(frame.Message); return nil },

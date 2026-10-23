@@ -10,9 +10,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 func TestLogPersistenceRetainedBytesCountSegmentsOnce(t *testing.T) {
@@ -23,10 +23,10 @@ func TestLogPersistenceRetainedBytesCountSegmentsOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, change := range []func(*Segment){
-		func(s *Segment) { s.Digest = "b" + s.Digest[1:] },
-		func(s *Segment) { s.Size++ },
-		func(s *Segment) { s.Size = limits.LogSegmentUploadBytes + 1 },
+	for _, change := range []func(*runstate.Segment){
+		func(s *runstate.Segment) { s.Digest = "b" + s.Digest[1:] },
+		func(s *runstate.Segment) { s.Size++ },
+		func(s *runstate.Segment) { s.Size = limits.LogSegmentUploadBytes + 1 },
 	} {
 		bad := commit
 		bad.Segments = slices.Clone(commit.Segments)
@@ -40,7 +40,7 @@ func TestLogPersistenceRetainedBytesCountSegmentsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commit.Segments = []Segment{{Index: 2, Offset: 3, Size: 2, StoredBytes: 2, Digest: commit.Segments[0].Digest, ObjectKey: key}}
+	commit.Segments = []runstate.Segment{{Index: 2, Offset: 3, Size: 2, StoredBytes: 2, Digest: commit.Segments[0].Digest, ObjectKey: key}}
 	commit.Final = true
 	for range 2 {
 		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
@@ -111,7 +111,7 @@ func TestLogPersistenceAttemptByteLimitPreservesCommittedBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 		segment.ObjectKey = key
-		commit.Segments = []Segment{segment}
+		commit.Segments = []runstate.Segment{segment}
 		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +123,7 @@ func TestLogPersistenceAttemptByteLimitPreservesCommittedBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	segment.ObjectKey = key
-	commit.Segments = []Segment{segment}
+	commit.Segments = []runstate.Segment{segment}
 	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
 		t.Fatal("accepted a segment above the attempt byte limit")
 	}
@@ -180,8 +180,8 @@ func TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace(t *testing.T) {
 			t.Logf("offset=%d retained bytes=%d: %v", offset, size, err)
 			return false
 		}
-		row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-		if err != nil || row.Status != StatusDone || row.Outcome != NodeSuccess || row.FinishedAt == nil || !row.FinishedAt.Equal(nodeFinished) {
+		row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+		if err != nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeSuccess || row.FinishedAt == nil || !row.FinishedAt.Equal(nodeFinished) {
 			t.Logf("log mutation changed job: %+v: %v", row, err)
 			return false
 		}
@@ -309,7 +309,7 @@ func TestLogPersistenceOwnerUnitsHaveIndependentFences(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			s, claim := releaseFixture(t, kind)
 			tenant := &Tenant{s: s, team: "a"}
-			actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+			actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogUnitKind(kind), Generation: int64(claim.Award.Generation)}}
 			if kind == capability.UnitEval {
 				subject.Unit.Source = &blob.LogSource{NodeID: "job", Generation: claim.SourceGeneration}
@@ -373,7 +373,7 @@ func TestLogPersistenceTriggerReadRechecksItsOwnerLease(t *testing.T) {
 		t.Run(stale, func(t *testing.T) {
 			s, claim := releaseFixture(t, capability.UnitTrigger)
 			tenant := &Tenant{s: s, team: "a"}
-			actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+			actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: int64(claim.Award.Generation)}}
 			if err := tenant.RecordSegments(t.Context(), SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Final: true}); err != nil {
 				t.Fatal(err)

@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestReconcileMaterializeOnlyMissDoesNotAwardOrRelease(t *testing.T) {
@@ -18,12 +18,12 @@ func TestReconcileMaterializeOnlyMissDoesNotAwardOrRelease(t *testing.T) {
 			if ready {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET ready_at=1`)
 			}
-			before, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			before, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: before.Ref, Actor: actor, Policy: SourceMemo, MaterializeOnly: true})
-			if err != nil || got.Kind != Dispatch || got.Claim != nil || len(got.Bearer) != 0 || !reflect.DeepEqual(got.Node, before) {
+			got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: before.Ref, Actor: actor, Policy: runstate.SourceMemo, MaterializeOnly: true})
+			if err != nil || got.Kind != runstate.Dispatch || got.Claim != nil || len(got.Bearer) != 0 || !reflect.DeepEqual(got.Node, before) {
 				t.Fatalf("probe changed execution authority: %+v, %v", got, err)
 			}
 			rewriteSchemaCount(t, tenant.s.db, "events", 0)
@@ -34,30 +34,30 @@ func TestReconcileMaterializeOnlyMissDoesNotAwardOrRelease(t *testing.T) {
 
 func TestReconcileMaterializeOnlyPreservesHolderAndTerminal(t *testing.T) {
 	tenant, _, actor := reconcileFixture(t)
-	request := ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone, MaterializeOnly: true}
+	request := ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceNone, MaterializeOnly: true}
 	got, err := tenant.ReconcileNode(t.Context(), request)
-	if err != nil || got.Kind != WaitHolder || got.Claim != nil || len(got.Bearer) != 0 {
+	if err != nil || got.Kind != runstate.WaitHolder || got.Claim != nil || len(got.Bearer) != 0 {
 		t.Fatalf("held probe: %+v, %v", got, err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='done',outcome='failed',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,finished_at=1`)
 	got, err = tenant.ReconcileNode(t.Context(), request)
-	if err != nil || got.Kind != KeepTerminal || got.Node.Outcome != NodeFailed {
+	if err != nil || got.Kind != runstate.KeepTerminal || got.Node.Outcome != runstate.NodeFailed {
 		t.Fatalf("terminal probe: %+v, %v", got, err)
 	}
 }
 
 func TestReconcileMaterializeOnlyHitCommitsSourceResult(t *testing.T) {
-	tenant, request := materializationFixture(t, SourceManualRetry)
+	tenant, request := materializationFixture(t, runstate.SourceManualRetry)
 	request.MaterializeOnly = true
 	got, err := tenant.ReconcileNode(t.Context(), request)
-	if err != nil || got.Kind != Materialize || got.Node.Outcome != NodeSuccess || got.Claim != nil || len(got.Bearer) != 0 {
+	if err != nil || got.Kind != runstate.Materialize || got.Node.Outcome != runstate.NodeSuccess || got.Claim != nil || len(got.Bearer) != 0 {
 		t.Fatalf("materialization: %+v, %v", got, err)
 	}
 }
 
 func TestRunHostCancelPreservesHolderResultRights(t *testing.T) {
 	tenant, _, actor := reconcileFixture(t)
-	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeCancelled, Cause: causeCancel}
+	change := nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeCancelled, Cause: causeCancel}
 	first, err := tenant.TransitionNode(t.Context(), change)
 	if err != nil || !first.CancelRequested {
 		t.Fatalf("owner cancellation: %+v, %v", first, err)
@@ -67,11 +67,11 @@ func TestRunHostCancelPreservesHolderResultRights(t *testing.T) {
 		t.Fatalf("cancel replay: %+v, %v", second, err)
 	}
 	row, err := tenant.ReadNode(t.Context(), change.Ref)
-	if err != nil || row.Status != StatusRunning || row.CapabilityPrefix != "claim" || row.CancelRequestedAt == nil {
+	if err != nil || row.Status != runstate.StatusRunning || row.CapabilityPrefix != "claim" || row.CancelRequestedAt == nil {
 		t.Fatalf("holder overwritten: %+v, %v", row, err)
 	}
-	change.Actor = Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
-	change.Cause = CauseReport
+	change.Actor = runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
+	change.Cause = runstate.CauseReport
 	change.SourceAttempt = sourceAttempt(3)
 	if _, err := tenant.TransitionNode(t.Context(), change); err != nil {
 		t.Fatal(err)

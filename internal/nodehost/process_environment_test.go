@@ -9,11 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T) {
@@ -144,8 +143,8 @@ func sdkTestEnvironment(st EvaluationStore) SDKEnvironment {
 	}
 }
 
-func (s environmentReadError) ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
-	return store.NodeRow{}, s.err
+func (s environmentReadError) ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error) {
+	return runstate.NodeRow{}, s.err
 }
 
 func testProcessEnv(t testing.TB, values ...string) procenv.Env {

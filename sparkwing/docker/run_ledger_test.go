@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/sessionledger"
 )
 
 func dockerReachable(t *testing.T) {

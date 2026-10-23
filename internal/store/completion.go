@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // Effect identifies one revisioned desired-state row per team and run.
@@ -37,7 +39,7 @@ type DesiredRunEffect struct {
 	RunID        string
 	Effect       Effect
 	Phase        EffectPhase
-	State        RunState
+	State        runstate.RunState
 	Reason       string
 	Payload      json.RawMessage
 	DesiredRev   int64
@@ -108,14 +110,14 @@ WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?
 			effect.ObservedAt = observedAt
 			effect.Phase = effectPhase(effect.State)
 			effect.Payload, err = json.Marshal(struct {
-				Version  int      `json:"version"`
-				RunID    string   `json:"run_id"`
-				Pipeline string   `json:"pipeline"`
-				State    RunState `json:"state"`
-				SHA      string   `json:"git_sha"`
-				Branch   string   `json:"git_branch"`
-				Error    string   `json:"error"`
-				Reason   string   `json:"reason,omitempty"`
+				Version  int               `json:"version"`
+				RunID    string            `json:"run_id"`
+				Pipeline string            `json:"pipeline"`
+				State    runstate.RunState `json:"state"`
+				SHA      string            `json:"git_sha"`
+				Branch   string            `json:"git_branch"`
+				Error    string            `json:"error"`
+				Reason   string            `json:"reason,omitempty"`
 			}{1, effect.RunID, pipeline, effect.State, sha, branch, runError, effect.Reason})
 			if err != nil {
 				return nil, errors.Join(err, rows.Close())
@@ -193,19 +195,19 @@ func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, 
 	})
 }
 
-func effectPhase(state RunState) EffectPhase {
+func effectPhase(state runstate.RunState) EffectPhase {
 	switch state {
-	case RunPending:
+	case runstate.RunPending:
 		return EffectPending
-	case RunRunning:
+	case runstate.RunRunning:
 		return EffectRunning
 	default:
 		return EffectTerminal
 	}
 }
 
-func writeRunEffectsTx(ctx context.Context, tx *storeTx, team Team, runID string, state RunState, now time.Time) error {
-	if state != RunPending && state != RunRunning && state != RunSuccess && state != RunFailed && state != RunCancelled {
+func writeRunEffectsTx(ctx context.Context, tx *storeTx, team Team, runID string, state runstate.RunState, now time.Time) error {
+	if state != runstate.RunPending && state != runstate.RunRunning && state != runstate.RunSuccess && state != runstate.RunFailed && state != runstate.RunCancelled {
 		return fmt.Errorf("invalid effect state %q", state)
 	}
 	phase := effectPhase(state)
@@ -213,7 +215,7 @@ func writeRunEffectsTx(ctx context.Context, tx *storeTx, team Team, runID string
 		if effect != EffectGitHubCheck && phase != EffectTerminal {
 			continue
 		}
-		var prior RunState
+		var prior runstate.RunState
 		err := tx.QueryRowContext(ctx, `SELECT desired_state FROM run_effects WHERE team = ? AND run_id = ? AND effect = ?`+tx.forUpdate(), team, runID, effect).Scan(&prior)
 		if errors.Is(err, sql.ErrNoRows) {
 			_, err = tx.ExecContext(ctx, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES (?,?,?,?,1,?)`, team, runID, effect, state, now.UnixNano())

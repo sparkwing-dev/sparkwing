@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 )

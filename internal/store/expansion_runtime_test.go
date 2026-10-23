@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func expansionFixture(t *testing.T) (*Tenant, *time.Time, ExpansionSubmission) {
@@ -31,7 +31,7 @@ func expansionFixture(t *testing.T) (*Tenant, *time.Time, ExpansionSubmission) {
 	expansion.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}
 	expansion.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: 2, Expansion: &capability.LeaseRef{Kind: capability.UnitTrigger, ID: "run", Holder: "host", Generation: 5}}
 	authorityPersist(t, tenant.s, expansion)
-	request := ExpansionSubmission{Source: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, SourceGeneration: 2, Failure: &ExpansionFailure{Code: apierr.SDKError, MaskedError: "generator failed"}, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expansion.Prefix}, CapabilityPrefix: expansion.Prefix}}
+	request := ExpansionSubmission{Source: runspec.NodeRef{RunID: "run", NodeID: "job"}, SourceGeneration: 2, Failure: &ExpansionFailure{Code: apierr.SDKError, MaskedError: "generator failed"}, Actor: runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expansion.Prefix}, CapabilityPrefix: expansion.Prefix}}
 	return tenant, now, request
 }
 
@@ -41,14 +41,14 @@ func TestExpansionFailureIsAtomicAndReplayable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.State != ExpansionFailed || accepted.Replayed || accepted.BodyHash == "" || len(accepted.Nodes) != 0 {
+	if accepted.State != runstate.ExpansionFailed || accepted.Replayed || accepted.BodyHash == "" || len(accepted.Nodes) != 0 {
 		t.Fatalf("failure = %+v", accepted)
 	}
 	row, err := tenant.ReadNode(t.Context(), request.Source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.Expansion != ExpansionFailed || row.Outcome != NodeSuccess || row.ExpansionDigest != accepted.BodyHash {
+	if row.Expansion != runstate.ExpansionFailed || row.Outcome != runstate.NodeSuccess || row.ExpansionDigest != accepted.BodyHash {
 		t.Fatalf("persisted failure = %+v", row)
 	}
 	replay, err := tenant.AcceptExpansion(t.Context(), request)
@@ -127,7 +127,7 @@ func TestExpansionEvalKeepsSourceAndLeaseFencesSeparate(t *testing.T) {
 			eval.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: 2, Expansion: &capability.LeaseRef{Kind: capability.UnitEval, ID: unitID, Holder: "eval-host", Generation: 8}}
 			authorityPersist(t, tenant.s, eval)
 			request.Actor.Authority.ID, request.Actor.CapabilityPrefix = eval.Prefix, eval.Prefix
-			request.Actor.Owner = OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: "eval-host", Generation: 8}}
+			request.Actor.Owner = runstate.OwnerLeaseRef{Kind: runstate.OwnerEval, EvalFence: runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: "eval-host", Generation: 8}}
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Minute).UnixNano())
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,claimed_at,started_at) VALUES ('a','run','job',2,'running',8,'eval-host','evaluation',?,4,1,1)`, now.Add(time.Minute).UnixNano())
@@ -150,11 +150,11 @@ func TestExpansionEvalKeepsSourceAndLeaseFencesSeparate(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || accepted.SourceGeneration != 2 || accepted.State != ExpansionFailed {
+			if err != nil || accepted.SourceGeneration != 2 || accepted.State != runstate.ExpansionFailed {
 				t.Fatalf("eval expansion = %+v, %v", accepted, err)
 			}
 			run, err := tenant.ReadRun(t.Context(), "run")
-			if err != nil || run.State != RunFailed {
+			if err != nil || run.State != runstate.RunFailed {
 				t.Fatalf("failed expansion did not settle controller run: %+v, %v", run, err)
 			}
 		})

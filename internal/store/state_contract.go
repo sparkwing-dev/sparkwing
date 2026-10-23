@@ -6,28 +6,28 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // RunRow is the immutable request/spec plus the mutable lifecycle read model used by hosts.
 type RunRow struct {
-	expansions        []AcceptedExpansionRow
+	expansions        []runstate.AcceptedExpansionRow
 	ID                string
 	Number            int64
 	Team              Team
 	Pipeline          string
-	State             RunState
+	State             runstate.RunState
 	Request           runspec.SealedRequest
 	Lineage           runspec.Lineage
 	admission         admissionIdentity
-	Retry             *RetrySelection
+	Retry             *runstate.RetrySelection
 	Spec              *runspec.Spec
 	Plan              json.RawMessage
 	PlanHash          string
 	Dispatch          string
 	AllowedPools      []string
-	Owner             *OwnerLeaseRef
+	Owner             *runstate.OwnerLeaseRef
 	CreatedAt         time.Time
 	CancelRequestedAt *time.Time
 	CancelReason      string
@@ -35,78 +35,25 @@ type RunRow struct {
 	FinishedAt        *time.Time
 	StateSeq          int64
 	StateDigest       string
-	StateActor        Actor
-}
-
-// AcceptedExpansionRow preserves the exact declaration bytes committed by expansion acceptance.
-// Membership is reconstructed from these declarations, never from live jobs alone.
-type AcceptedExpansionRow struct {
-	Source           controllerwire.NodeRef
-	SourceGeneration int64
-	Body             json.RawMessage
-	BodyHash         string
-	Registration     runspec.SecretRegistration
+	StateActor        runstate.Actor
 }
 
 // RunSnapshot contains one consistent read, including accepted expansions in insertion order.
 type RunSnapshot struct {
 	Run        RunRow
-	Nodes      []NodeRow
-	Expansions []AcceptedExpansionRow
+	Nodes      []runstate.NodeRow
+	Expansions []runstate.AcceptedExpansionRow
 	StoreNow   time.Time
 }
 
-// SourcePolicy keeps resume, retry, memo and coalescing authority distinct at reconciliation.
-type SourcePolicy string
-
-// Reconciliation policies authorize a source only through the matching recorded read edge.
-const (
-	SourceNone        SourcePolicy = "none"
-	SourceResume      SourcePolicy = "resume"
-	SourceManualRetry SourcePolicy = "manual_retry"
-	SourceMemo        SourcePolicy = "memo"
-	SourceCoalesced   SourcePolicy = "coalesced"
-)
-
-// ReconcileKind tells a host whether it may execute; only Execute carries a newly fenced claim.
-type ReconcileKind string
-
-// Reconciliation outcomes avoid treating another holder's unfinished row as a result.
-const (
-	KeepTerminal ReconcileKind = "keep_terminal"
-	WaitHolder   ReconcileKind = "wait_holder"
-	Execute      ReconcileKind = "execute"
-	Materialize  ReconcileKind = "materialize"
-	Dispatch     ReconcileKind = "dispatch"
-)
-
 // ReconcileRequest names a possible source; the store checks it rather than trusting the host's cache hit.
 type ReconcileRequest struct {
-	Ref    controllerwire.NodeRef
-	Actor  Actor
-	Policy SourcePolicy
-	Source *MaterializeSource
+	Ref    runspec.NodeRef
+	Actor  runstate.Actor
+	Policy runstate.SourcePolicy
+	Source *runstate.MaterializeSource
 	// MaterializeOnly returns Dispatch on a source miss without awarding execution.
 	MaterializeOnly bool
-}
-
-// ReconciledNode is decided with any self-claim in the same transaction.
-type ReconciledNode struct {
-	Kind   ReconcileKind
-	Node   NodeRow
-	Claim  *ClaimAward
-	Source *MaterializeSource
-	// Bearer is delivered only to the executing host after the self-claim commits.
-	Bearer []byte `json:"-"`
-}
-
-// LeaseBeat delivers cancellation and watched jobs without changing the owner heartbeat cadence.
-type LeaseBeat struct {
-	ExpiresAt       time.Time
-	CancelRequested bool
-	CancelReason    string
-	Watched         bool
-	WatchedNodes    []string
 }
 
 // StateEvent uses a single per-run sequence and a unique node state sequence for lifecycle writes.
@@ -131,10 +78,10 @@ func (t *Tenant) ReadRun(ctx context.Context, runID string) (RunRow, error) {
 }
 
 // ReadNode returns persisted state without interpreting an elapsed lease as an implicit requeue.
-func (t *Tenant) ReadNode(ctx context.Context, ref controllerwire.NodeRef) (NodeRow, error) {
+func (t *Tenant) ReadNode(ctx context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
-		return NodeRow{}, err
+		return runstate.NodeRow{}, err
 	}
 	defer rollbackOrLog(tx)
 	return readNodeTx(ctx, tx, t.team, ref)
@@ -178,7 +125,7 @@ func (t *Tenant) ReadStateEvents(ctx context.Context, runID string, after int64,
 // ReconcileNode decides and self-claims atomically; WaitHolder callers reconcile again after requeue.
 // Materialization reads outcome and authorized result edges from persisted source state,
 // never from a caller assertion. Source.Kind must match Policy; SourceNone forbids Source.
-func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (ReconciledNode, error) {
+func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (runstate.ReconciledNode, error) {
 	return t.reconcileNode(ctx, request)
 }
 
@@ -186,8 +133,8 @@ func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (R
 // StateEventRule makes every lifecycle event name store-owned on customer surfaces.
 type StateEventRule struct {
 	RequestOnly bool
-	Cause       TransitionCause
-	To          NodeState
+	Cause       runstate.TransitionCause
+	To          runstate.NodeState
 	Kind        string
 }
 
@@ -195,22 +142,22 @@ type StateEventRule struct {
 // Cancellation requests emit job_cancel_requested while preserving claimed/running state until the holder drains.
 func NodeEvents() []StateEventRule {
 	return []StateEventRule{
-		{false, CausePublishAttempt, nodePending, "job_attempt_imported"},
-		{false, CauseRelease, NodeReady, "job_ready"},
-		{false, CauseRelease, nodePending, "job_requeued"},
-		{false, CauseRevoke, nodePending, "job_revoked"},
-		{false, CauseAward, NodeClaimed, "job_claimed"},
-		{false, CauseApprovalOpen, NodeApprovalPending, "job_approval_pending"},
-		{false, CauseStart, NodeRunning, "job_started"},
-		{false, CauseRetry, NodeRunning, "job_retrying"},
-		{false, CauseLeaseLapse, nodePending, "job_requeued"},
-		{true, causeCancel, NodeCancelled, "job_cancel_requested"},
-		{false, "", NodeSuccess, "job_succeeded"},
-		{false, "", NodeFailed, "job_failed"},
-		{false, "", NodeCancelled, "job_cancelled"},
-		{false, "", NodeSkipped, "job_skipped"},
-		{false, "", NodeSuperseded, "job_superseded"},
-		{false, "", NodeMemoized, "job_memoized"},
+		{false, runstate.CausePublishAttempt, nodePending, "job_attempt_imported"},
+		{false, runstate.CauseRelease, runstate.NodeReady, "job_ready"},
+		{false, runstate.CauseRelease, nodePending, "job_requeued"},
+		{false, runstate.CauseRevoke, nodePending, "job_revoked"},
+		{false, runstate.CauseAward, runstate.NodeClaimed, "job_claimed"},
+		{false, runstate.CauseApprovalOpen, runstate.NodeApprovalPending, "job_approval_pending"},
+		{false, runstate.CauseStart, runstate.NodeRunning, "job_started"},
+		{false, runstate.CauseRetry, runstate.NodeRunning, "job_retrying"},
+		{false, runstate.CauseLeaseLapse, nodePending, "job_requeued"},
+		{true, causeCancel, runstate.NodeCancelled, "job_cancel_requested"},
+		{false, "", runstate.NodeSuccess, "job_succeeded"},
+		{false, "", runstate.NodeFailed, "job_failed"},
+		{false, "", runstate.NodeCancelled, "job_cancelled"},
+		{false, "", runstate.NodeSkipped, "job_skipped"},
+		{false, "", runstate.NodeSuperseded, "job_superseded"},
+		{false, "", runstate.NodeMemoized, "job_memoized"},
 	}
 }
 

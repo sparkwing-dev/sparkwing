@@ -4,20 +4,19 @@ import (
 	"context"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
-func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (ReconciledNode, error) {
+func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (runstate.ReconciledNode, error) {
 	if err := validateReconcileRequest(request); err != nil {
-		return ReconciledNode{}, err
+		return runstate.ReconciledNode{}, err
 	}
-	var result ReconciledNode
+	var result runstate.ReconciledNode
 	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
-		result = ReconciledNode{}
+		result = runstate.ReconciledNode{}
 
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
@@ -50,11 +49,11 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 		}
 		now := tx.now(ctx)
 		switch {
-		case result.Node.Status == StatusDone:
-			result.Kind = KeepTerminal
+		case result.Node.Status == runstate.StatusDone:
+			result.Kind = runstate.KeepTerminal
 			return nil
-		case result.Node.ClaimedBy != "" && (request.Source == nil || result.Node.Status != StatusPending || result.Node.OwnerCapabilityPrefix != request.Actor.CapabilityPrefix || result.Node.ClaimedBy != request.Actor.Owner.Holder || result.Node.LeaseExpiresAt == nil || !result.Node.LeaseExpiresAt.After(now)):
-			result.Kind = WaitHolder
+		case result.Node.ClaimedBy != "" && (request.Source == nil || result.Node.Status != runstate.StatusPending || result.Node.OwnerCapabilityPrefix != request.Actor.CapabilityPrefix || result.Node.ClaimedBy != request.Actor.Owner.Holder || result.Node.LeaseExpiresAt == nil || !result.Node.LeaseExpiresAt.After(now)):
+			result.Kind = runstate.WaitHolder
 			return nil
 		}
 		run, err := readRunTx(ctx, tx, t.team, string(request.Ref.RunID))
@@ -71,18 +70,18 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 				return err
 			}
 			if materialized {
-				result.Kind, result.Source = Materialize, request.Source
+				result.Kind, result.Source = runstate.Materialize, request.Source
 			}
 		}
-		if result.Kind == Materialize {
+		if result.Kind == runstate.Materialize {
 			result.Node, err = readNodeTx(ctx, tx, t.team, request.Ref)
 			return err
 		}
 		if request.MaterializeOnly {
-			result.Kind = Dispatch
+			result.Kind = runstate.Dispatch
 			return nil
 		} else {
-			if result.Node.Status != StatusPending {
+			if result.Node.Status != runstate.StatusPending {
 				return authorityError(apierr.IllegalTransition, "job is not executable")
 			}
 			if result.Node.ReadyAt == nil {
@@ -90,9 +89,14 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 					return err
 				}
 			}
- result.Node,err=readNodeTx(ctx,tx,t.team,request.Ref)
- if err!=nil{return err}
- if result.Node.ReadyAt==nil || result.Node.Status==StatusDone {result.Kind=Dispatch;return nil}
+			result.Node, err = readNodeTx(ctx, tx, t.team, request.Ref)
+			if err != nil {
+				return err
+			}
+			if result.Node.ReadyAt == nil || result.Node.Status == runstate.StatusDone {
+				result.Kind = runstate.Dispatch
+				return nil
+			}
 			owner, err := tx.ResolveAuthority(ctx, request.Actor.Authority)
 			if err != nil {
 				return err
@@ -102,7 +106,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 				return err
 			}
 			if !eligible {
-				result.Kind = Dispatch
+				result.Kind = runstate.Dispatch
 				result.Node, err = readNodeTx(ctx, tx, t.team, request.Ref)
 				return err
 			}
@@ -110,38 +114,38 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 			if err != nil {
 				return err
 			}
-			result.Kind, result.Claim, result.Bearer = Execute, &claim.Award, claim.Bearer
+			result.Kind, result.Claim, result.Bearer = runstate.Execute, &claim.Award, claim.Bearer
 		}
 		result.Node, err = readNodeTx(ctx, tx, t.team, request.Ref)
 		return err
 	})
 	if err != nil {
-		return ReconciledNode{}, err
+		return runstate.ReconciledNode{}, err
 	}
 	return result, nil
 }
 
 func validateReconcileRequest(request ReconcileRequest) error {
-	if request.Ref.RunID == "" || request.Ref.NodeID == "" || request.Actor.Kind != ActorRunHost {
+	if request.Ref.RunID == "" || request.Ref.NodeID == "" || request.Actor.Kind != runstate.ActorRunHost {
 		return authorityError(apierr.BadRequest, "reconciliation requires a job and run host")
 	}
-	if !slices.Contains([]SourcePolicy{SourceNone, SourceResume, SourceManualRetry, SourceMemo, SourceCoalesced}, request.Policy) {
+	if !slices.Contains([]runstate.SourcePolicy{runstate.SourceNone, runstate.SourceResume, runstate.SourceManualRetry, runstate.SourceMemo, runstate.SourceCoalesced}, request.Policy) {
 		return authorityError(apierr.BadRequest, "unknown reconciliation source policy")
 	}
-	if request.Source != nil && (request.Policy == SourceNone || request.Source.Kind != request.Policy) {
+	if request.Source != nil && (request.Policy == runstate.SourceNone || request.Source.Kind != request.Policy) {
 		return authorityError(apierr.BadRequest, "reconciliation source does not match its policy")
 	}
 	return nil
 }
 
-func lockReconcileRunsTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.NodeRef, source *MaterializeSource) error {
+func lockReconcileRunsTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, source *runstate.MaterializeSource) error {
 	ids := []string{string(ref.RunID)}
 	if source != nil {
 		sourceRef, err := materializationRef(team, *source)
 		if err != nil {
 			return err
 		}
-		if source.Kind != SourceMemo {
+		if source.Kind != runstate.SourceMemo {
 			ids = append(ids, string(sourceRef.RunID))
 		}
 	}
@@ -166,7 +170,7 @@ func releaseReconciledNodeTx(ctx context.Context, tx *storeTx, team Team, reques
 	for _, decision := range Decide(graph).Nodes {
 		if runspec.NodeID(decision.NodeID) == request.Ref.NodeID && decision.Kind == DecisionReady {
 
-			_, err := transitionNodeTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease})
+			_, err := transitionNodeTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, To: runstate.NodeReady, Cause: runstate.CauseRelease})
 			return err
 		}
 	}

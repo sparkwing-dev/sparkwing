@@ -4,13 +4,13 @@ import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // consoleWriteTransactions rechecks a direct operator session in every committing transaction.
 type consoleWriteTransactions interface {
-	ConsoleRefund(context.Context, capability.Authorized, controllerwire.OperatorRefund, string) (store.CreditReversal, error)
+	ConsoleRefund(context.Context, capability.Authorized, store.OperatorRefund, string) (store.CreditReversal, error)
 	ConsoleGrantCredit(context.Context, capability.Authorized, store.CreditGrantRequest) (store.CreditGrantResult, error)
 	ConsoleSetBillingTrust(context.Context, capability.Authorized, store.BillingTrustChange) (store.BillingStanding, error)
 	ConsoleDeclineStandingRequest(context.Context, capability.Authorized, string, string) (store.StandingRequest, error)
@@ -28,7 +28,7 @@ func (s *Server) consoleWriter() (consoleWriteTransactions, error) {
 		return s.consoleWrites, nil
 	}
 
-	return nil, missingEndpointPolicy()
+	return nil, routepolicy.MissingEndpointPolicy()
 }
 
 var _ consoleWriteTransactions = (*store.Console)(nil)

@@ -1,0 +1,4 @@
+# pkg/gitcmd
+
+func CloneRepository(ctx context.Context, remote, destination string, depth int, environment []string) error
+func Output(ctx context.Context, cmd *exec.Cmd, combined bool) ([]byte, error)

@@ -5,8 +5,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -30,7 +31,7 @@ func TestUnmeteredNodeRenewalKeepsCapabilityExpiry(t *testing.T) {
 			}
 			tenant := &Tenant{s: s, team: "a"}
 			admitExecution(t, tenant, actor)
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
 			now = now.Add(time.Second)
@@ -102,9 +103,9 @@ func TestCancelledUnstartedMeteredOwnerCannotRenewRefundedAward(t *testing.T) {
 				t.Fatal(err)
 			}
 			operator := authorityMember(t, s, "operator", RoleOwner)
-			operator.Kind = ActorOperator
+			operator.Kind = runstate.ActorOperator
 			tenant := &Tenant{s: s, team: "a"}
-			if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunCancelled, Cause: RunCancel, Actor: operator, Reason: "user_cancelled"}); err != nil {
+			if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: "run", To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: operator, Reason: "user_cancelled"}); err != nil {
 				t.Fatal(err)
 			}
 			unitBillingTotal(t, s, 0, true)
@@ -122,8 +123,8 @@ func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
-	self, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone})
-	if err != nil || self.Kind != Execute || self.Node.OwnerCapabilityPrefix != actor.CapabilityPrefix {
+	self, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceNone})
+	if err != nil || self.Kind != runstate.Execute || self.Node.OwnerCapabilityPrefix != actor.CapabilityPrefix {
 		t.Fatalf("metered self claim: %+v %v", self, err)
 	}
 	principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: self.Claim.CapabilityPrefix})
@@ -135,7 +136,7 @@ func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	admitExecution(t, tenant, holder)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.TestOnlyHoldForDispute(t.Context(), "dispute", "", "dispute opened", *now); err != nil {
@@ -162,8 +163,8 @@ func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
-	self, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: SourceNone})
-	if err != nil || self.Kind != Execute {
+	self, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceNone})
+	if err != nil || self.Kind != runstate.Execute {
 		t.Fatalf("self claim: %+v %v", self, err)
 	}
 	principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: self.Claim.CapabilityPrefix})
@@ -175,7 +176,7 @@ func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	admitExecution(t, tenant, holder)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=120+(SELECT SUM(amount_micro) FROM credit_charges WHERE team='a') WHERE team='a'`)

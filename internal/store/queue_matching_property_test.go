@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -29,7 +28,7 @@ func TestClaimQueueMismatchPreservesPositionProperty(t *testing.T) {
 		demand.Kinds = []capability.UnitKind{capability.UnitNode}
 		demand.Labels = []string{label + "-other", "name=forged", "class=cloud", "pool=prod"}
 		tenant := &Tenant{s: s, team: "a"}
-		before, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+		before, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -38,7 +37,7 @@ func TestClaimQueueMismatchPreservesPositionProperty(t *testing.T) {
 				t.Fatalf("mismatched queue poll: %v", err)
 			}
 		}
-		after, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+		after, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 		if err != nil || !reflect.DeepEqual(before, after) {
 			t.Fatalf("mismatch changed queue: %+v -> %+v, %v", before, after, err)
 		}
@@ -65,7 +64,7 @@ func TestClaimQueuePreferenceHasNoOfferWindow(t *testing.T) {
 			if err != nil || claim.NodeID != "job" {
 				t.Fatalf("immediate preferred or fallback claim: %+v, %v", claim, err)
 			}
-			row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil || row.ReadyAt == nil || !row.ReadyAt.Equal(s.now()) {
 				t.Fatalf("claim changed arrival: %+v, %v", row, err)
 			}

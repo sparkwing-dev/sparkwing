@@ -7,16 +7,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // RunView keeps status, attempt history and committed log identities in one snapshot.
 // Snapshot contains private execution inputs; public adapters must project its seals.
 type RunView struct {
 	Snapshot RunSnapshot
-	Attempts []NodeAttempt
+	Attempts []runstate.NodeAttempt
 	Logs     []blob.LogSubject
 	Failures []string
 	Waiting  *UnclaimedUnit
@@ -113,15 +114,15 @@ func (t *Tenant) ListRunViews(ctx context.Context, after, through int64, limit i
 	return views, tx.Commit()
 }
 
-func readRunAttemptsTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]NodeAttempt, error) {
+func readRunAttemptsTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]runstate.NodeAttempt, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason FROM node_attempts WHERE team=? AND run_id=? ORDER BY node_id,attempt`, team, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	attempts := []NodeAttempt{}
+	attempts := []runstate.NodeAttempt{}
 	for rows.Next() {
-		attempt := NodeAttempt{Identity: runspec.AttemptIdentity{Team: string(team), RunID: runID}}
+		attempt := runstate.NodeAttempt{Identity: runspec.AttemptIdentity{Team: string(team), RunID: runID}}
 		var started int64
 		var finished sql.NullInt64
 		if err := rows.Scan(&attempt.Identity.NodeID, &attempt.Identity.Attempt, &attempt.Identity.Generation, &attempt.Holder, &attempt.CapabilityPrefix, &attempt.ExecutorKind, &attempt.ExecutorName, &attempt.ExecutorLocation, &started, &finished, &attempt.Outcome, &attempt.FailureReason); err != nil {

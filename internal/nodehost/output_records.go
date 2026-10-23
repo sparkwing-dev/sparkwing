@@ -6,11 +6,11 @@ import (
 	"errors"
 	"io"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // JobUpload carries server-derived job authority and its destination record key.
@@ -33,8 +33,8 @@ type OutputRecords struct {
 }
 
 // ReadResult reads the exact output selector committed with a terminal result.
-func (o OutputRecords) ReadResult(ctx context.Context, row store.NodeRow, authority blob.Authority) (json.RawMessage, error) {
-	if row.Status != store.StatusDone || row.OutputRecord == nil {
+func (o OutputRecords) ReadResult(ctx context.Context, row runstate.NodeRow, authority blob.Authority) (json.RawMessage, error) {
+	if row.Status != runstate.StatusDone || row.OutputRecord == nil {
 		return nil, blob.ErrNotFound
 	}
 	return o.ReadOutput(ctx, blob.RecordLookup{Authority: authority, Key: *row.OutputRecord})

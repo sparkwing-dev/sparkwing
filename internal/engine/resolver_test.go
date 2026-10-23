@@ -16,10 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 type fixtureTransport struct {
@@ -189,7 +190,7 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 	r, transport, key, policy, now := fixtureResolver(t)
 	ctx := context.Background()
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
-	pin := Pin{SDK: GoSDK, Version: "v0.10.2"}
+	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v0.10.2"}
 	bundle := signedBundle(t, key, pin.Version, target, fixtureExecutable(t, pin.Version, target))
 	transport.release(t, pin.Version, target, bundle)
 	cold, err := r.Resolve(ctx, pin, target)

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestLauncherSnapshotRejectsMalformedScalarWithoutLosingHealthyAwards(t *testing.T) {
@@ -28,7 +29,7 @@ func TestLauncherSnapshotRejectsMalformedScalarWithoutLosingHealthyAwards(t *tes
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("snapshot=%+v, %v", rows, err)
 	}
-	want := map[string]ClaimAward{first.NodeID: first.Award, second.NodeID: second.Award}
+	want := map[string]runstate.ClaimAward{first.NodeID: first.Award, second.NodeID: second.Award}
 	for _, row := range rows {
 		award, ok := want[row.Claim.NodeID]
 		if !ok || row.Failure != nil || row.Gone || row.Claim.Award != award {

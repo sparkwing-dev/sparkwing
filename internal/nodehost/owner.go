@@ -9,16 +9,16 @@ import (
 	"slices"
 	"sync/atomic"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // OwnerStore is the transactional boundary used by every run-host placement.
@@ -27,12 +27,12 @@ type OwnerStore interface {
 	Reconciler
 	ExpansionStore
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
-	RenewNodeClaim(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error)
-	ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error)
+	RenewNodeClaim(context.Context, runspec.NodeRef, runstate.Actor) (runstate.LeaseBeat, error)
+	ReleaseEvaluation(context.Context, runspec.NodeRef, runstate.Actor) (runstate.Applied, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
-	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
-	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
-	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
+	TransitionRun(context.Context, runstate.RunTransition) (runstate.Applied, error)
+	TransitionNode(context.Context, store.NodeCommand) (runstate.Applied, error)
+	FinishRunAndUnit(context.Context, runstate.FinishRunRequest) (runstate.Applied, error)
 }
 
 // OwnerPlanning supplies checkout facts and SDK planning without replacing intake.
@@ -62,7 +62,7 @@ type OwnerHost struct {
 	Store              OwnerStore
 	Lease              lease.Keeper
 	// Renew reports current compute through the authenticated unit renewal transaction.
-	Renew       func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
+	Renew       func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error)
 	Computing   func(string) bool
 	Source      source.Options
 	Acquire     func(context.Context, RunInput) (*source.Entry, error)
@@ -76,13 +76,13 @@ type OwnerHost struct {
 	Debug       DebugBoundaryWaiter
 	DebugPolicy OwnerPolicy
 	SkipPolicy  OwnerPolicy
-	Local       func(store.NodeRow) bool
+	Local       func(runstate.NodeRow) bool
 	// AdoptClaim retains the private award for per-attempt process delegation.
-	AdoptClaim     func(context.Context, store.ReconciledNode) error
+	AdoptClaim     func(context.Context, runstate.ReconciledNode) error
 	Delegator      OwnerDelegator
-	ExpansionActor func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
+	ExpansionActor func(context.Context, RunInput, runstate.NodeRow) (runstate.Actor, error)
 	Executor       NodeHost
-	Expand         func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error)
+	Expand         func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error)
 	// Masker shares the source and SDK secret registry and protects returned errors.
 	Masker *secrets.Masker
 	// Masks serializes accepted identifiers with the shared process service registry.
@@ -111,7 +111,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		}
 		err = maskHostError(err, h.Masker)
 	}()
-	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != runspec.RunID(input.RunID) {
+	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != runstate.ActorRunHost || input.Owner.Owner.RunID != runspec.RunID(input.RunID) {
 		return completion, errors.New("run host requires a bound owner and sealed request")
 	}
 	if h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval {
@@ -185,8 +185,8 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	if err != nil {
 		return completion, err
 	}
-	if snapshot.Run.State == store.RunPending {
-		_, err = h.Store.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(input.RunID), To: store.RunRunning, Actor: input.Owner, Cause: store.RunStart})
+	if snapshot.Run.State == runstate.RunPending {
+		_, err = h.Store.TransitionRun(ctx, runstate.RunTransition{RunID: runspec.RunID(input.RunID), To: runstate.RunRunning, Actor: input.Owner, Cause: runstate.RunStart})
 		if err != nil {
 			return completion, err
 		}
@@ -224,11 +224,11 @@ func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRo
 	return source.Acquire(ctx, spec, options)
 }
 
-func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor, computing func() bool) (context.Context, func()) {
+func (h *OwnerHost) keepOwner(parent context.Context, actor runstate.Actor, computing func() bool) (context.Context, func()) {
 	return h.keepUnit(parent, lease.Identity{Kind: capability.UnitKind(actor.Owner.Kind), RunID: string(actor.Owner.RunID), Holder: actor.Owner.Holder, Generation: int64(actor.Owner.Generation)}, actor, computing)
 }
 
-func (h *OwnerHost) keepUnit(parent context.Context, identity lease.Identity, actor store.Actor, computing func() bool) (context.Context, func()) {
+func (h *OwnerHost) keepUnit(parent context.Context, identity lease.Identity, actor runstate.Actor, computing func() bool) (context.Context, func()) {
 	if lease.Adopt(parent, identity, computing) {
 		return parent, func() {}
 	}
@@ -348,11 +348,11 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 	// safety: setup errors can contain credentials before describe establishes masking; persist only the stage.
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
-	_, err := h.Store.FinishRunAndUnit(finishCtx, store.FinishRunRequest{
+	_, err := h.Store.FinishRunAndUnit(finishCtx, runstate.FinishRunRequest{
 		Unit: input.Owner.Owner,
-		Transition: store.RunCompletion{
+		Transition: runstate.RunCompletion{
 			RunID: runspec.RunID(input.RunID), Actor: input.Owner,
-			Cause: store.RunFinish, Reason: reason, MaskedError: message,
+			Cause: runstate.RunFinish, Reason: reason, MaskedError: message,
 		},
 	})
 	return errors.Join(failure, err)
@@ -375,4 +375,4 @@ func ownerAccepted(row store.RunRow) (AcceptedRun, error) {
 }
 
 // OwnerPolicy evaluates one owner decision before dispatch.
-type OwnerPolicy func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)
+type OwnerPolicy func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (OwnerLayerResult, error)

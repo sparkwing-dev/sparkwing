@@ -10,6 +10,7 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -128,7 +129,7 @@ func TestEngineRecoveryLoopSettlesPersistedControllerRuns(t *testing.T) {
 	}
 	server.reconcileOwnedRuns(t.Context())
 	run, err := tenant.ReadRun(t.Context(), "run")
-	if err != nil || run.State != store.RunRunning || run.StateSeq != 0 {
+	if err != nil || run.State != runstate.RunRunning || run.StateSeq != 0 {
 		t.Fatalf("foreign controller changed state=%s sequence=%d err=%v", run.State, run.StateSeq, err)
 	}
 	engineSQL(t, s, `UPDATE leases SET holder=? WHERE name='controller.owner' AND generation=?`, server.leaseHolder, foreign.Generation)
@@ -136,7 +137,7 @@ func TestEngineRecoveryLoopSettlesPersistedControllerRuns(t *testing.T) {
 		server.reconcileOwnedRuns(t.Context())
 	}
 	run, err = tenant.ReadRun(t.Context(), "run")
-	if err != nil || run.State != store.RunSuccess || run.StateSeq != 1 || run.FinishedAt == nil {
+	if err != nil || run.State != runstate.RunSuccess || run.StateSeq != 1 || run.FinishedAt == nil {
 		t.Fatalf("resumed state=%s sequence=%d finished=%v err=%v", run.State, run.StateSeq, run.FinishedAt, err)
 	}
 	events, err := tenant.ReadStateEvents(t.Context(), "run", 0, 10)
@@ -155,12 +156,12 @@ func TestEngineRecoverySeparatesControllerInstancesOnOneMachine(t *testing.T) {
 	}
 	second.reconcileOwnedRuns(t.Context())
 	run, err := tenant.ReadRun(t.Context(), "run")
-	if err != nil || run.State != store.RunRunning || run.StateSeq != 0 {
+	if err != nil || run.State != runstate.RunRunning || run.StateSeq != 0 {
 		t.Fatalf("another instance used the owner's fence: state=%s sequence=%d err=%v", run.State, run.StateSeq, err)
 	}
 	first.reconcileOwnedRuns(t.Context())
 	run, err = tenant.ReadRun(t.Context(), "run")
-	if err != nil || run.State != store.RunSuccess {
+	if err != nil || run.State != runstate.RunSuccess {
 		t.Fatalf("elected instance did not settle: state=%s err=%v", run.State, err)
 	}
 }

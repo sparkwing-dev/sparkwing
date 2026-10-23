@@ -5,8 +5,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func (s *Server) handleFailedGitHubDeliveries(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -18,7 +19,11 @@ func (s *Server) handleFailedGitHubDeliveries(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return accountMutationError(err)
 	}
-	writeJSON(w, http.StatusOK, deliveries)
+	response := make([]controllerwire.FailedGitHubDelivery, len(deliveries))
+	for i, delivery := range deliveries {
+		response[i] = controllerwire.FailedGitHubDelivery(delivery)
+	}
+	writeJSON(w, http.StatusOK, response)
 	return nil
 }
 

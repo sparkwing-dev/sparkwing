@@ -8,15 +8,15 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
-func (h *nodeExecutor) memo(ctx context.Context, session *executorSession, input NodeInput, job nodeproto.JobSpec, spec runspec.Spec) (runspec.Hash, *store.NodeResult, error) {
+func (h *nodeExecutor) memo(ctx context.Context, session *executorSession, input NodeInput, job nodeproto.JobSpec, spec runspec.Spec) (runspec.Hash, *runstate.NodeResult, error) {
 	key, err := h.memoKey(ctx, session, input, job)
 	if err != nil || key == "" {
 		return "", nil, err
@@ -77,7 +77,7 @@ func (h *nodeExecutor) memoKey(ctx context.Context, session *executorSession, in
 	return memoValueKey(json.RawMessage(value))
 }
 
-func (h *nodeExecutor) restoreMemo(ctx context.Context, input NodeInput, pipeline string, hash runspec.Hash) (*store.NodeResult, error) {
+func (h *nodeExecutor) restoreMemo(ctx context.Context, input NodeInput, pipeline string, hash runspec.Hash) (*runstate.NodeResult, error) {
 	storage := input.Storage
 	if storage.Bytes == nil || storage.Records == nil || !storage.Authority.Attempt.Set {
 		return nil, errors.New("memo requires bound attempt storage")
@@ -131,7 +131,7 @@ func (h *nodeExecutor) restoreMemo(ctx context.Context, input NodeInput, pipelin
 		}
 		hit = copied
 	}
-	result := &store.NodeResult{Outcome: store.NodeMemoized}
+	result := &runstate.NodeResult{Outcome: runstate.NodeMemoized}
 	if len(output) > 0 {
 		outputKey := blob.ResultRecordKey(storage.Authority.Attempt.Value, key.Repo, key.Ref, pipeline, blob.KindOutput)
 		result.OutputRecord = &outputKey
@@ -193,8 +193,8 @@ func executorMemoIdentity(authority blob.Authority) blob.UploadIdentity {
 	return blob.UploadIdentity{Kind: blob.UploadJob, Team: authority.Attempt.Value.Team, RunID: authority.Attempt.Value.RunID, Principal: authority.Principal, CapabilityRef: authority.CapabilityRef, Attempt: authority.Attempt}
 }
 
-func (h *nodeExecutor) saveMemo(ctx context.Context, input NodeInput, hash runspec.Hash, result store.NodeResult) error {
-	if hash == "" || result.Outcome != store.NodeSuccess {
+func (h *nodeExecutor) saveMemo(ctx context.Context, input NodeInput, hash runspec.Hash, result runstate.NodeResult) error {
+	if hash == "" || result.Outcome != runstate.NodeSuccess {
 		return nil
 	}
 	storage := input.Storage

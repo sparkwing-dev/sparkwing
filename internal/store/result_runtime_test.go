@@ -8,12 +8,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
-func resultFixture(t *testing.T) (*Store, *Tenant, Actor, runspec.AttemptIdentity) {
+func resultFixture(t *testing.T) (*Store, *Tenant, runstate.Actor, runspec.AttemptIdentity) {
 	t.Helper()
 	s := authorityStore(t)
 	s.clock = func() time.Time { return time.Unix(1000, 0).UTC() }
@@ -32,7 +32,7 @@ func resultFixture(t *testing.T) (*Store, *Tenant, Actor, runspec.AttemptIdentit
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "machine", Generation: 7}}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "machine", Generation: 7}}
 	admitExecution(t, &Tenant{s: s, team: "a"}, actor)
 	return s, &Tenant{s: s, team: "a"}, actor, runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 2, Generation: 7}
 }
@@ -97,7 +97,7 @@ func TestResultAnnotationsSummariesAndStaleWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := 12
-	annotation := AnnotationWrite{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, StepID: "compile", Level: "warning", Message: "masked", File: "src/main.go", Line: &line}
+	annotation := AnnotationWrite{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, StepID: "compile", Level: "warning", Message: "masked", File: "src/main.go", Line: &line}
 	if err := tenant.WriteAnnotation(t.Context(), annotation); err != nil {
 		t.Fatal(err)
 	}
@@ -126,13 +126,13 @@ func TestResultAnnotationsSummariesAndStaleWrites(t *testing.T) {
 	}
 }
 
-func logCommit(actor Actor, attempt runspec.AttemptIdentity) SegmentCommit {
+func logCommit(actor runstate.Actor, attempt runspec.AttemptIdentity) SegmentCommit {
 	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: attempt.Team, RunID: attempt.RunID, Attempt: &attempt}
 	key, err := blob.LogObjectKey(subject, "r30", 1)
 	if err != nil {
 		panic(err)
 	}
-	return SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Segments: []Segment{{Index: 1, Offset: 0, Size: 3, StoredBytes: 3, Digest: strings.Repeat("a", 64), ObjectKey: key}}}
+	return SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Segments: []runstate.Segment{{Index: 1, Offset: 0, Size: 3, StoredBytes: 3, Digest: strings.Repeat("a", 64), ObjectKey: key}}}
 }
 
 func TestResultSegmentsRoundTripContiguityAndSeal(t *testing.T) {
@@ -148,7 +148,7 @@ func TestResultSegmentsRoundTripContiguityAndSeal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commit.Segments = []Segment{{Index: 2, Offset: 4, Size: 2, StoredBytes: 2, Digest: strings.Repeat("b", 64), ObjectKey: key}}
+	commit.Segments = []runstate.Segment{{Index: 2, Offset: 4, Size: 2, StoredBytes: 2, Digest: strings.Repeat("b", 64), ObjectKey: key}}
 	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
 		t.Fatal("non-contiguous offset accepted")
 	}
@@ -217,7 +217,7 @@ func TestResultFinalLogsUseExactWriterAndBoundedGrace(t *testing.T) {
 func TestResultJobMetadataStartsEmptyOnEveryAttempt(t *testing.T) {
 	s, tenant, actor, attempt := resultFixture(t)
 	rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(`{"retry":{"set":true,"value":2}}`))
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID)}
+	ref := runspec.NodeRef{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID)}
 	for retry := range 2 {
 		if err := tenant.WriteSummary(t.Context(), SummaryWrite{Ref: ref, Actor: actor, Markdown: "old result"}); err != nil {
 			t.Fatal(err)
@@ -225,7 +225,7 @@ func TestResultJobMetadataStartsEmptyOnEveryAttempt(t *testing.T) {
 		if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: ref, Actor: actor, Level: "warning", Message: "old annotation"}); err != nil {
 			t.Fatal(err)
 		}
-		applied, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseRetry, SourceAttempt: sourceAttempt(attempt.Attempt + int64(retry)), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}})
+		applied, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseRetry, SourceAttempt: sourceAttempt(attempt.Attempt + int64(retry)), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: "verify"}}})
 		if err != nil {
 			t.Fatal(err)
 		}

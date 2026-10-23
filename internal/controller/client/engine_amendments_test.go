@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestEngineClientMixedClaimsUseOneQueue(t *testing.T) {
@@ -118,7 +118,7 @@ func TestEngineClientRecoveryAndLauncherMethods(t *testing.T) {
 			return c.CancelJob(t.Context(), "r1", "source/build", controllerwire.CancelRequest{Reason: "owner cancelled"})
 		}},
 		{"launcher-sync", "POST", "/api/v1/launcher/sync", controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Retired: []capability.LeaseRef{{Kind: capability.UnitNode, ID: "unit", Holder: "launcher", Generation: 1}}}, func(c controllerwire.Controller) (any, error) {
-			return c.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit-1", Holder: "launcher", Generation: 3}}}})
+			return c.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit-1", Holder: "launcher", Generation: 3}}}})
 		}},
 		{"exchange", "POST", "/api/v1/claims/exchange", controllerwire.ExchangeResponse{Claim: controllerwire.ClaimedUnit{RunID: "r1", Capability: "private-exchanged", Unit: capability.UnitNode}}, func(c controllerwire.Controller) (any, error) { return c.Exchange(t.Context()) }},
 	} {
@@ -139,7 +139,7 @@ func TestEngineClientRecoveryAndLauncherMethods(t *testing.T) {
 				}
 				if tt.name == "launcher-sync" {
 					var input controllerwire.LauncherSyncRequest
-					if err := json.NewDecoder(req.Body).Decode(&input); err != nil || !reflect.DeepEqual(input.Observed, []controllerwire.LauncherObservation{{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit-1", Holder: "launcher", Generation: 3}}}) {
+					if err := json.NewDecoder(req.Body).Decode(&input); err != nil || !reflect.DeepEqual(input.Observed, []capability.LauncherObservation{{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit-1", Holder: "launcher", Generation: 3}}}) {
 						t.Fatalf("launcher observations changed: %+v %v", input, err)
 					}
 				}
@@ -176,7 +176,7 @@ func TestEngineClientReconcilePreservesExecutionState(t *testing.T) {
 	claim := &controllerwire.ClaimedUnit{
 		Unit: capability.UnitNode, RunID: "r1", JobID: "build", UnitID: "unit-1", Capability: "private-award", Runner: nodeproto.RunnerIdentity{Name: "granted-runner", Type: "agent", Labels: []string{"linux"}},
 		SourceGeneration: 3, OwnerDeadline: &now, AttemptDeadline: &now, ParentCapabilityExpiry: &now, LeaseExpiresAt: now,
-		Engine: &engine.Identity{Version: "v1.2.3", ManifestDigest: "verified-manifest"}, Execution: &job.Execution,
+		Engine: &engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified-manifest"}, Execution: &job.Execution,
 	}
 	claim.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://example.com/team/repo.git", PipelineDir: "ci"}
 	claim.Request.Request.Git.SHA = "sealed-sha"

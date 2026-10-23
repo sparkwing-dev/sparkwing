@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
 )
 
 func TestSDKZeroValueServiceRequestsConformToHostDecoder(t *testing.T) {

@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 const ownerPlanHash = "0a5796e93f9b57ddf7c45f860485cbb7353fc0eda3dca753a444d0fd2a1573fe"
@@ -29,13 +30,13 @@ func TestOwnerSeals(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
-			owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 3}}
+			owner := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 3}}
 			request := runspec.Request{Pipeline: "build", PullRequest: runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 42}}}
 			sealed, err := json.Marshal(request)
 			if err != nil {
 				t.Fatal(err)
 			}
-			s := newOwnerSealStore(store.RunRow{ID: "run", State: store.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &owner})
+			s := newOwnerSealStore(store.RunRow{ID: "run", State: runstate.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &owner})
 			if mode == "resume" {
 				s.row.Spec = &runspec.Spec{Request: s.row.Request, Hash: "spec", PlanHash: ownerPlanHash, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}}}
 				s.row.Plan, s.row.PlanHash = json.RawMessage(`{"jobs":[]}`), ownerPlanHash
@@ -50,7 +51,7 @@ func TestOwnerSeals(t *testing.T) {
 				s.renewError = &apierr.Error{Code: apierr.LockHeld}
 			}
 			if mode == "cancelled_owner" {
-				s.beat = store.LeaseBeat{CancelRequested: true, CancelReason: "operator requested stop"}
+				s.beat = runstate.LeaseBeat{CancelRequested: true, CancelReason: "operator requested stop"}
 			}
 			if mode == "secret_accept_failure" {
 				s.refused = secretFailure
@@ -93,7 +94,7 @@ func TestOwnerSeals(t *testing.T) {
 					return errors.New("unexpected wait")
 				},
 			}
-			result, err := host.Run(ctx, RunInput{RunID: "run", SealedRequest: sealed, RequestHash: "request", Owner: store.Actor{Kind: store.ActorRunHost, Owner: owner}})
+			result, err := host.Run(ctx, RunInput{RunID: "run", SealedRequest: sealed, RequestHash: "request", Owner: runstate.Actor{Kind: runstate.ActorRunHost, Owner: owner}})
 			want := []string{"acquire", "prepare", "plan", "accept", "start", "finish"}
 			switch mode {
 			case "resume":

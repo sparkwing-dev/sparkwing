@@ -6,12 +6,12 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func (s *EngineController) handleSnapshot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -53,7 +53,7 @@ func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot
 	if err != nil {
 		return controllerwire.ScheduleSnapshot{}, err
 	}
-	nodes := make(map[string]store.NodeRow, len(snapshot.Nodes))
+	nodes := make(map[string]runstate.NodeRow, len(snapshot.Nodes))
 	for _, node := range snapshot.Nodes {
 		if node.Ref.RunID != runspec.RunID(snapshot.Run.ID) || node.Ref.NodeID == "" {
 			return controllerwire.ScheduleSnapshot{}, errors.New("invalid persisted snapshot job")
@@ -105,7 +105,7 @@ func snapshotExpansions(snapshot store.RunSnapshot) ([]controllerwire.AcceptedEx
 	return out, nil
 }
 
-func executionJob(node store.NodeRow) controllerwire.ExecutionJob {
+func executionJob(node runstate.NodeRow) controllerwire.ExecutionJob {
 	return controllerwire.ExecutionJob{
 		JobDetail: snapshotJob(node), Spec: node.Spec, SpecHash: node.SpecHash, Execution: node.Execution,
 		ClaimedBy: node.ClaimedBy, CapabilityPrefix: node.CapabilityPrefix, OwnerCapabilityPrefix: node.OwnerCapabilityPrefix, ReadyAt: node.ReadyAt, LeaseExpiresAt: node.LeaseExpiresAt,
@@ -114,7 +114,7 @@ func executionJob(node store.NodeRow) controllerwire.ExecutionJob {
 	}
 }
 
-func snapshotJob(node store.NodeRow) controllerwire.JobDetail {
+func snapshotJob(node runstate.NodeRow) controllerwire.JobDetail {
 	return controllerwire.JobDetail{
 		ID: string(node.Ref.NodeID), Status: string(node.Status), Outcome: string(node.Outcome), StatusDetail: node.StatusDetail,
 		Generation: int64(node.Generation), Attempt: int64(node.Attempt), StateSeq: node.StateSeq, Expansion: string(node.Expansion),

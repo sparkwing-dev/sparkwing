@@ -207,7 +207,7 @@ commit. The subprocess adapter uses `pipeline plan --pipeline NAME`.
 | Concern | Authoritative source |
 | --- | --- |
 | Env classes, names and process policies | `internal/procenv` |
-| Typed bounds and deadline helpers | `internal/limits` |
+| Typed bounds and deadline helpers | `pkg/limits` |
 | Precedence, per-setting signatures and source table | `internal/settings` |
 | Project YAML schema | `pkg/projectconfig.Config` |
 | Machine YAML schema | `internal/userconfig.Config` |
@@ -659,22 +659,22 @@ family files and complete tables; temporary Old implementations are excluded.
 | [`Validate`](../../../internal/procenv/contracts.go#L131) | Validate refuses invalid names and engine-owned assignments without exposing secret values in its errors. |
 | [`Registry`](../../../internal/procenv/registry.go#L5) | Registry is the single classification table for environment generation and reference documentation. |
 
-### internal/limits
+### pkg/limits
 
 | Export | Purpose |
 | --- | --- |
-| [`ErrNoTime`](../../../internal/limits/deadline.go#L11) | ErrNoTime means the parent's remaining budget cannot leave the requested settlement margin. |
-| [`Child`](../../../internal/limits/deadline.go#L17) | Child derives a deadline, leaving margin before parent; a zero parent means unbounded. |
-| [`ChildContext`](../../../internal/limits/deadline.go#L22) | ChildContext applies Child to ctx.Deadline, retaining cancellation when the result is unbounded. |
-| [`Renew`](../../../internal/limits/deadline.go#L27) | Renew returns ttl/3; callers validate positive TTLs before constructing a lease keeper. |
-| [`CheckRenewal`](../../../internal/limits/deadline.go#L30) | CheckRenewal refuses nonpositive values or a cadence that cannot renew twice strictly before expiry. |
-| [`JobDeadline`](../../../internal/limits/deadline.go#L35) | JobDeadline adds JobSlack to attemptDeadline and caps the result at ownerDeadline. |
-| [`Error`](../../../internal/limits/deadline.go#L40) | Error bounds already-masked UTF-8 error text with a head and tail within ErrorBytes. |
-| [`Record`](../../../internal/limits/deadline.go#L43) | Record bounds already-masked UTF-8 summary or annotation text within AnnotationBytes with an elision note. |
-| [`Failure`](../../../internal/limits/deadline.go#L46) | Failure refuses an oversized already-masked failure record rather than producing malformed structured bytes. |
-| [`Class`](../../../internal/limits/table.go#L4) | Class distinguishes author refusals, operator ceilings and internal coordination budgets. |
-| [`Limit`](../../../internal/limits/table.go#L14) | Limit carries a typed value (duration, int64 bytes, or int count) with its documented enforcement. |
-| [`Table`](../../../internal/limits/table.go#L22) | Table returns independent rows for every shared constant; documentation renders the typed values. |
+| [`ErrNoTime`](../../../pkg/limits/deadline.go#L11) | ErrNoTime means the parent's remaining budget cannot leave the requested settlement margin. |
+| [`Child`](../../../pkg/limits/deadline.go#L17) | Child derives a deadline, leaving margin before parent; a zero parent means unbounded. |
+| [`ChildContext`](../../../pkg/limits/deadline.go#L22) | ChildContext applies Child to ctx.Deadline, retaining cancellation when the result is unbounded. |
+| [`Renew`](../../../pkg/limits/deadline.go#L27) | Renew returns ttl/3; callers validate positive TTLs before constructing a lease keeper. |
+| [`CheckRenewal`](../../../pkg/limits/deadline.go#L30) | CheckRenewal refuses nonpositive values or a cadence that cannot renew twice strictly before expiry. |
+| [`JobDeadline`](../../../pkg/limits/deadline.go#L35) | JobDeadline adds JobSlack to attemptDeadline and caps the result at ownerDeadline. |
+| [`Error`](../../../pkg/limits/deadline.go#L40) | Error bounds already-masked UTF-8 error text with a head and tail within ErrorBytes. |
+| [`Record`](../../../pkg/limits/deadline.go#L43) | Record bounds already-masked UTF-8 summary or annotation text within AnnotationBytes with an elision note. |
+| [`Failure`](../../../pkg/limits/deadline.go#L46) | Failure refuses an oversized already-masked failure record rather than producing malformed structured bytes. |
+| [`Class`](../../../pkg/limits/table.go#L4) | Class distinguishes author refusals, operator ceilings and internal coordination budgets. |
+| [`Limit`](../../../pkg/limits/table.go#L14) | Limit carries a typed value (duration, int64 bytes, or int count) with its documented enforcement. |
+| [`Table`](../../../pkg/limits/table.go#L22) | Table returns independent rows for every shared constant; documentation renders the typed values. |
 
 ### internal/settings
 
@@ -769,7 +769,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`Command`](../../../internal/clisurface/grammar.go) | Command separates parser metadata from handlers; Flags adds to GlobalFlags. |
 | [`GlobalFlags`](../../../internal/clisurface/grammar.go) | GlobalFlags is inherited everywhere; profile selection is command-local, but an accepted --profile may appear before the verb. |
 | [`ExitCode`](../../../internal/clisurface/grammar.go) | ExitCode keeps usage failures distinguishable from incomplete observations. |
-| [`ErrorFormat`](../../../internal/clisurface/grammar.go) | ErrorFormat delegates JSON encoding and codes to internal/apierr; the CLI must not create another error envelope or leak pipeline secrets in hints. |
+| [`ErrorFormat`](../../../internal/clisurface/grammar.go) | ErrorFormat delegates JSON encoding and codes to pkg/apierr; the CLI must not create another error envelope or leak pipeline secrets in hints. |
 | [`Errors`](../../../internal/clisurface/grammar.go) | Errors keeps diagnostics on stderr even when stdout contains records. |
 | [`CommonRules`](../../../internal/clisurface/grammar.go) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
 | [`Validate`](../../../internal/clisurface/grammar.go) | Validate catches grammar drift before a parser or help generator consumes it. |
@@ -858,18 +858,18 @@ New contract and test files:
 - `internal/clisurface/grammar.go`
 - `internal/clisurface/contract_test.go`
 - `internal/clisurface/registry.go`
-- `internal/limits/billing.go`
-- `internal/limits/claim.go`
-- `internal/limits/cron.go`
-- `internal/limits/deadline.go`
-- `internal/limits/identity.go`
-- `internal/limits/node.go`
-- `internal/limits/operator.go`
-- `internal/limits/run.go`
-- `internal/limits/storage.go`
-- `internal/limits/table.go`
-- `internal/limits/table_test.go`
-- `internal/limits/wire.go`
+- `pkg/limits/billing.go`
+- `pkg/limits/claim.go`
+- `pkg/limits/cron.go`
+- `pkg/limits/deadline.go`
+- `pkg/limits/identity.go`
+- `pkg/limits/node.go`
+- `pkg/limits/operator.go`
+- `pkg/limits/run.go`
+- `pkg/limits/storage.go`
+- `pkg/limits/table.go`
+- `pkg/limits/table_test.go`
+- `pkg/limits/wire.go`
 - `internal/procenv/contracts.go`
 - `internal/procenv/contracts_test.go`
 - `internal/procenv/registry.go`

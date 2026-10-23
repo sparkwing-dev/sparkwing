@@ -6,12 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func renewalFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitDemand, UnitClaim, *time.Time) {
@@ -70,7 +68,7 @@ func TestRenewUnitRecordsOwnerExecutionForRecovery(t *testing.T) {
 			}
 			*now = now.Add(time.Second)
 			firstStart := now.UnixNano()
-			var beat LeaseBeat
+			var beat runstate.LeaseBeat
 			for range 2 {
 				var err error
 				beat, err = s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
@@ -191,9 +189,9 @@ func TestRenewUnitNodeRequiresCommittedStart(t *testing.T) {
 		t.Fatal("renewal invented a job start")
 	}
 	tenant := &Tenant{s: s, team: claim.Team}
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	admitExecution(t, tenant, actor)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, To: runstate.NodeRunning, Cause: runstate.CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(time.Second)
@@ -257,7 +255,7 @@ func revokeClaimRoot(t *testing.T, s *Store, prefix string, team Team) {
 		operator.Subject.Kind = capability.SubjectOperator
 		operator.Grants = []capability.Grant{capability.OperatorTokens}
 		authorityPersist(t, s, operator)
-		err = s.AsOperator().RevokeAuthority(t.Context(), Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}}, ref)
+		err = s.AsOperator().RevokeAuthority(t.Context(), runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}}, ref)
 	}
 	if err != nil {
 		t.Fatal(err)

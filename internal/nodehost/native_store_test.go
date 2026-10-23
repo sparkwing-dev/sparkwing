@@ -22,18 +22,19 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestNativeHostFromIntakeThroughSDKAndPersistedCompletion(t *testing.T) {
@@ -72,7 +73,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	f := newStoreOwnerFixture(t, database, request)
 	outputs := nativeStoreOutputRecords(t, ctx, f, request, objects)
 	resolved := engine.Resolved{
-		Identity:   engine.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: sdkVersion}},
+		Identity:   engineid.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: sdkVersion}},
 		Executable: bin, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 	}
 	engines := &ownerSourceEngine{claimEngine: claimEngine{resolved: resolved}}
@@ -95,9 +96,9 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 			return nil
 		},
 	}
-	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
-	var award store.ReconciledNode
-	f.Host.AdoptClaim = func(_ context.Context, claim store.ReconciledNode) error { award = claim; return nil }
+	router := routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
+	var award runstate.ReconciledNode
+	f.Host.AdoptClaim = func(_ context.Context, claim runstate.ReconciledNode) error { award = claim; return nil }
 	f.Host.DebugPolicy, f.Host.SkipPolicy = nil, nil
 	bind := func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
 		if award.Node.Ref.NodeID != runspec.NodeID(input.NodeID) || len(award.Bearer) == 0 {
@@ -133,8 +134,8 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		Admission:  ComposeStartGate(f.Tenant, &LocalAdmission{Daemon: newFakeDaemon()}, false),
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
 		Source: source.Options{
-			Engines: engines, Target: resolved.Target, SDK: engine.GoSDK, Base: procenv.Base{Local: true},
-			ReadPin: func(string, engine.SDKKind) (engine.Pin, error) { return resolved.Identity.Pin, nil },
+			Engines: engines, Target: resolved.Target, SDK: engineid.GoSDK, Base: procenv.Base{Local: true},
+			ReadPin: func(string, engineid.SDKKind) (engineid.Pin, error) { return resolved.Identity.Pin, nil },
 			InstallSDK: func(_ context.Context, selected engine.Resolved, input engine.SDKInstallRequest) (engine.SDKCommand, error) {
 				if !reflect.DeepEqual(selected, resolved) || filepath.Join(input.Directory, input.PipelineDir) != root {
 					return engine.SDKCommand{}, errors.New("installer lost the selected engine or sealed checkout")
@@ -144,7 +145,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		},
 		PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
 		Executor:    ExecutionOperations{Bind: bind, PublishOutput: outputs.PublishOutput},
-		ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+		ReadOutput: func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error) {
 			return nil, errors.New("unexpected source output read")
 		},
 		Evaluation: EvaluationOperations{
@@ -174,11 +175,11 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		t.Fatalf("completion=%+v error=%v failure=%s read=%v logs=%v", completion, err, failure, readErr, logs)
 	}
 	snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
-	if err != nil || snapshot.Run.State != store.RunSuccess || snapshot.Run.Spec == nil || len(snapshot.Nodes) != 1 {
+	if err != nil || snapshot.Run.State != runstate.RunSuccess || snapshot.Run.Spec == nil || len(snapshot.Nodes) != 1 {
 		t.Fatalf("snapshot=%+v error=%v", snapshot, err)
 	}
 	row := snapshot.Nodes[0]
-	if row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.Generation != 1 || row.ClaimedBy != "" || snapshot.Run.Spec.Resolved.Engine != resolved.Identity {
+	if row.Outcome != runstate.NodeSuccess || row.Attempt != 1 || row.Generation != 1 || row.ClaimedBy != "" || snapshot.Run.Spec.Resolved.Engine != resolved.Identity {
 		t.Fatalf("persisted completion lost seals or execution identity: %+v", row)
 	}
 	const output = `"result-from-a"`
@@ -277,7 +278,7 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 	}}
 }
 
-func nativeStoreClaim(t *testing.T, ctx context.Context, f *storeHostFixture, host *OwnerHost, resolved engine.Resolved) (NodeInput, store.ReconciledNode) {
+func nativeStoreClaim(t *testing.T, ctx context.Context, f *storeHostFixture, host *OwnerHost, resolved engine.Resolved) (NodeInput, runstate.ReconciledNode) {
 	t.Helper()
 	row, err := f.Tenant.ReadRun(ctx, f.Input.RunID)
 	if err != nil {
@@ -291,14 +292,14 @@ func nativeStoreClaim(t *testing.T, ctx context.Context, f *storeHostFixture, ho
 	if err = errors.Join(err, entry.Close()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(f.Input.RunID), To: store.RunRunning, Actor: f.Actor, Cause: store.RunStart}); err != nil {
+	if _, err := f.Tenant.TransitionRun(ctx, runstate.RunTransition{RunID: runspec.RunID(f.Input.RunID), To: runstate.RunRunning, Actor: f.Actor, Cause: runstate.RunStart}); err != nil {
 		t.Fatal(err)
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "output"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "output"}
 	if _, err := f.State.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 		t.Fatal(err)
 	}
-	award, err := f.State.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
+	award, err := f.State.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: runstate.SourceNone})
 	if err != nil {
 		t.Fatal(err)
 	}

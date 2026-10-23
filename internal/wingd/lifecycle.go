@@ -4,19 +4,14 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 // LocalActivity counts live state, not historical runs or configured schedules.
 type LocalActivity struct {
 	Runs, QueuedTriggers, HeldLeases, DashboardConnections int
 	IdleSince                                              time.Time
-}
-
-// LocalPeerIdentity comes from the transport's kernel credentials, never request input.
-type LocalPeerIdentity struct {
-	GOOS string
-	UID  *uint32
-	SID  string
 }
 
 // CurrentLocalSubject identifies the controller process from its OS account.
@@ -29,7 +24,7 @@ func CurrentLocalSubject() (string, error) {
 }
 
 // LocalSubject checks the peer against the controller's OS account before minting local authority.
-func LocalSubject(peer, owner LocalPeerIdentity) (string, error) {
+func LocalSubject(peer, owner localhostwire.LocalPeerIdentity) (string, error) {
 	if peer.GOOS != owner.GOOS {
 		return "", fmt.Errorf("wingd: peer platform does not match controller platform")
 	}
@@ -105,11 +100,6 @@ type ManagedUnitManager interface {
 	Inspect(context.Context) ([]ManagedUnit, error)
 }
 
-// LocalDoctorFinding makes incompatible stores, version skew and removed unit verbs actionable.
-type LocalDoctorFinding struct {
-	Code, Unit, Message, Hint string
-}
-
 // LocalLifecycle starts on demand and shares the runtime used by explicit dashboard commands.
 type LocalLifecycle interface {
 	EnsureStarted(context.Context, LocalStartOptions) (LocalStatus, error)
@@ -117,7 +107,7 @@ type LocalLifecycle interface {
 	InstallController(context.Context, LocalStartOptions) (LocalStatus, error)
 	Stop(context.Context) error
 	Status(context.Context) (LocalStatus, error)
-	Doctor(context.Context, string) ([]LocalDoctorFinding, error)
+	Doctor(context.Context, string) ([]localhostwire.LocalDoctorFinding, error)
 }
 
 // NewLocalLifecycle keeps service management outside controller request handling.

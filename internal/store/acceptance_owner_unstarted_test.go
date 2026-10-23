@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -80,7 +81,7 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 			return err
 		}
 		snapshot, err := tenant.ReadSnapshot(ctx, plan.RunID)
-		if err != nil || snapshot.Run.State != store.RunPending || snapshot.Run.Spec != nil || snapshot.Run.FinishedAt != nil || snapshot.Run.Request.Hash != initial.Request.Hash || !snapshot.Run.CreatedAt.Equal(initial.CreatedAt) || len(snapshot.Nodes) != 0 {
+		if err != nil || snapshot.Run.State != runstate.RunPending || snapshot.Run.Spec != nil || snapshot.Run.FinishedAt != nil || snapshot.Run.Request.Hash != initial.Request.Hash || !snapshot.Run.CreatedAt.Equal(initial.CreatedAt) || len(snapshot.Nodes) != 0 {
 			return fmt.Errorf("recovered intake changed across restart: %+v: %v", snapshot, err)
 		}
 		if _, err := tenant.AcceptPlan(ctx, plan); err == nil {
@@ -93,7 +94,7 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 		if err != nil || claim.Award.Generation != plan.Actor.Owner.Generation+1 || len(claim.Bearer) == 0 || claim.RunID != plan.RunID {
 			return fmt.Errorf("owner reclaim: %+v: %v", claim, err)
 		}
-		plan.Actor = store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+		plan.Actor = runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
 	}
 	if _, err := tenant.AcceptPlan(ctx, plan); err != nil {
 		return err

@@ -17,23 +17,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
+
 	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -75,7 +77,7 @@ func TestBurstSDKExecutesHerePersonalAndCloudAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity := engine.Identity{Version: "v1.2.3", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}}
+	identity := engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}}
 	for _, placement := range []string{"here", "personal", "cloud"} {
 		t.Run(placement, func(t *testing.T) {
 			controller.BurstExecutionAcceptance(t, placement, controller.BurstExecutionProof{
@@ -131,7 +133,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 		t.Fatal(err)
 	}
 	accepted := nodehost.AcceptedRun{RunID: award.RunID, Spec: raw, SpecHash: string(snapshot.Run.Spec.Hash), Plan: plan, PlanHash: snapshot.Run.PlanHash}
-	row, err := state.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(award.RunID), NodeID: runspec.NodeID(award.JobID)})
+	row, err := state.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(award.RunID), NodeID: runspec.NodeID(award.JobID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +160,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 		t.Fatal(err)
 	}
 	defer authorities.Close()
-	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
+	router := routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 	if err := nodehost.RegisterProcessServices(router, authorities.Resolve); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +212,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 			if err != nil || finish == nil {
 				return finish, err
 			}
-			return func(ctx context.Context, current nodehost.NodeInput, result *store.NodeResult) error {
+			return func(ctx context.Context, current nodehost.NodeInput, result *runstate.NodeResult) error {
 				if err := finish(ctx, current, result); err != nil {
 					return err
 				}
@@ -254,7 +256,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 			logs.Write(frame.Attrs)
 			return nil
 		},
-		EnsureEngine: func(ctx context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (engine.Resolved, error) {
 			if native != nil && native.engines != nil {
 				return native.engines.Ensure(ctx, identity, target)
 			}
@@ -284,7 +286,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	if native != nil && native.source != nil {
 		host := &nodehost.ClaimedNodeHost{
 			Store: state, Lease: lease.Keeper{Lease: time.Minute, Interval: 20 * time.Second},
-			Admission: nodehost.ComposeStartGate(private, nil, false),
+			Admission: nodehost.ComposeStartGate(state, nil, false),
 			Source:    *native.source, Executor: executor, Masker: masker, Masks: masks,
 			Acquire: func(ctx context.Context, spec source.Spec, options source.Options) (*source.Entry, error) {
 				entry, err := native.acquire(ctx, spec, options)
@@ -299,8 +301,8 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 		execute = host.Execute
 	}
 	if native == nil || native.source == nil {
-		decision, err := private.MayStart(ctx, store.CapacityBinding{RunID: award.RunID, NodeID: award.JobID, Generation: int64(row.Generation)}, store.Actor{})
-		if err != nil || decision.Kind != store.AcquireGranted {
+		decision, err := private.MayStart(ctx, runstate.CapacityBinding{RunID: award.RunID, NodeID: award.JobID, Generation: int64(row.Generation)}, runstate.Actor{})
+		if err != nil || decision.Kind != runstate.AcquireGranted {
 			t.Fatalf("SDK start admission: %+v, %v", decision, err)
 		}
 	}
@@ -375,7 +377,7 @@ func (s *burstSDKServices) Emit(frame nodeproto.FrameLog) {
 
 type burstSDKProcess struct {
 	runner   nodeproto.RunnerIdentity
-	identity engine.Identity
+	identity engineid.Identity
 	services *burstSDKServices
 	plan     any
 	run      nodeproto.RunContext

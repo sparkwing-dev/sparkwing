@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func admissionGroup(capacity, cost int) nodeproto.ConcurrencySpec {
@@ -24,11 +24,11 @@ func admissionFixture(t *testing.T, target *storetest.Target, capacity, cost int
 	})
 }
 
-func admissionBinding(f *storeRecoveryFixture) store.CapacityBinding {
-	return store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+func admissionBinding(f *storeRecoveryFixture) runstate.CapacityBinding {
+	return runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 }
 
-func admissionWant(t *testing.T, f *storeRecoveryFixture, binding store.CapacityBinding, actor store.Actor, want store.AcquireKind) store.AcquireSlotResponse {
+func admissionWant(t *testing.T, f *storeRecoveryFixture, binding runstate.CapacityBinding, actor runstate.Actor, want runstate.AcquireKind) runstate.AcquireSlotResponse {
 	t.Helper()
 	got, err := f.tenant.MayStart(t.Context(), binding, actor)
 	if err != nil || got.Kind != want {
@@ -37,13 +37,13 @@ func admissionWant(t *testing.T, f *storeRecoveryFixture, binding store.Capacity
 	return got
 }
 
-func admissionFinishJob(t *testing.T, f *storeRecoveryFixture, binding store.CapacityBinding, actor store.Actor) {
+func admissionFinishJob(t *testing.T, f *storeRecoveryFixture, binding runstate.CapacityBinding, actor runstate.Actor) {
 	t.Helper()
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)}
+	ref := runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)}
 	if _, err := f.tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: acceptanceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, Outcome: store.NodeSuccess, SourceAttempt: acceptanceAttempt(1)}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: ref, Actor: actor, Outcome: runstate.NodeSuccess, SourceAttempt: acceptanceAttempt(1)}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -75,12 +75,12 @@ func TestAdmissionClaimOrOwnerLossRetainsLiveFIFO(t *testing.T) {
 				t.Run(loss, func(t *testing.T) {
 					f := admissionFixture(t, target(t), 1, 1)
 					leader, leaderAward := admissionPolicyBlocker(t, f)
-					admissionWant(t, f, leader, leaderAward, store.AcquireGranted)
+					admissionWant(t, f, leader, leaderAward, runstate.AcquireGranted)
 					oldest, oldAward := admissionBinding(f), f.holder
-					admissionWant(t, f, oldest, oldAward, store.AcquireQueued)
+					admissionWant(t, f, oldest, oldAward, runstate.AcquireQueued)
 					before := admissionState(t, f).Waiters[0]
 					later, laterAward := admissionPolicyBlocker(t, f)
-					admissionWant(t, f, later, laterAward, store.AcquireQueued)
+					admissionWant(t, f, later, laterAward, runstate.AcquireQueued)
 					now, err := f.s.TestOnlyDatabaseTime(t.Context())
 					if err != nil {
 						t.Fatal(err)
@@ -92,9 +92,9 @@ func TestAdmissionClaimOrOwnerLossRetainsLiveFIFO(t *testing.T) {
 						admissionExpiry(t, f, "triggers", oldest.RunID, now)
 					}
 					admissionFinishJob(t, f, leader, leaderAward)
-					want := store.AcquireQueued
+					want := runstate.AcquireQueued
 					if loss == "both" {
-						want = store.AcquireGranted
+						want = runstate.AcquireGranted
 					}
 					admissionWant(t, f, later, laterAward, want)
 					state := admissionState(t, f)
@@ -111,21 +111,21 @@ func TestAdmissionClaimOrOwnerLossRetainsLiveFIFO(t *testing.T) {
 						if reaped, err := f.s.AsOperator().ReapUnits(t.Context(), f.lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 							t.Fatalf("reap: %+v %v", reaped, err)
 						}
-						next, err := f.tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: f.ref, Actor: f.owner, Policy: store.SourceResume})
+						next, err := f.tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: f.ref, Actor: f.owner, Policy: runstate.SourceResume})
 						if err != nil || next.Claim == nil {
 							t.Fatalf("reaward: %+v %v", next, err)
 						}
 						c := next.Claim
-						oldAward = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.CapabilityPrefix}, CapabilityPrefix: c.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: f.ref.RunID, NodeID: f.ref.NodeID, Holder: c.Holder, Generation: c.Generation}}
+						oldAward = runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.CapabilityPrefix}, CapabilityPrefix: c.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: f.ref.RunID, NodeID: f.ref.NodeID, Holder: c.Holder, Generation: c.Generation}}
 						oldest.Generation = int64(c.Generation)
 					}
-					admissionWant(t, f, oldest, oldAward, store.AcquireGranted)
+					admissionWant(t, f, oldest, oldAward, runstate.AcquireGranted)
 					state = admissionState(t, f)
 					if len(state.Holders) != 1 || !state.Holders[0].QueueArrivedAt.Equal(before.ArrivedAt) || len(state.Waiters) != 1 {
 						t.Fatalf("promotion changed arrival or left waiter: %+v", state)
 					}
 					admissionFinishJob(t, f, oldest, oldAward)
-					admissionWant(t, f, later, laterAward, store.AcquireGranted)
+					admissionWant(t, f, later, laterAward, runstate.AcquireGranted)
 
 				})
 			}
@@ -137,7 +137,7 @@ func TestAdmissionWeightedCapacityAndBackfill(t *testing.T) {
 	type action struct {
 		index  int
 		finish bool
-		want   store.AcquireKind
+		want   runstate.AcquireKind
 	}
 	for name, target := range map[string]func(*testing.T) *storetest.Target{"sqlite": storetest.NewSQLite, "postgres": storetest.NewPostgres} {
 		t.Run(name, func(t *testing.T) {
@@ -147,17 +147,17 @@ func TestAdmissionWeightedCapacityAndBackfill(t *testing.T) {
 				declarations   [][2]int
 				actions        []action
 			}{
-				{"weighted", 8, 4, [][2]int{{8, 4}, {8, 4}}, []action{{0, false, store.AcquireGranted}, {1, false, store.AcquireGranted}, {2, false, store.AcquireQueued}, {0, true, ""}, {2, false, store.AcquireGranted}}},
-				{"backfill", 8, 6, [][2]int{{8, 6}, {8, 2}}, []action{{0, false, store.AcquireGranted}, {1, false, store.AcquireQueued}, {2, false, store.AcquireGranted}, {0, true, ""}, {1, false, store.AcquireGranted}}},
-				{"promotion_backfill", 8, 6, [][2]int{{8, 2}, {8, 6}, {8, 2}}, []action{{0, false, store.AcquireGranted}, {1, false, store.AcquireGranted}, {2, false, store.AcquireQueued}, {3, false, store.AcquireQueued}, {1, true, ""}, {3, false, store.AcquireGranted}, {2, false, store.AcquireQueued}, {0, true, ""}, {2, false, store.AcquireGranted}}},
-				{"bounded_backfill", 10, 5, [][2]int{{10, 8}, {10, 5}, {10, 5}}, []action{{0, false, store.AcquireGranted}, {1, false, store.AcquireQueued}, {2, false, store.AcquireGranted}, {3, false, store.AcquireQueued}, {0, true, ""}, {3, false, store.AcquireQueued}, {2, true, ""}, {1, false, store.AcquireGranted}}},
-				{"minimum_participant_capacity", 5, 1, [][2]int{{2, 1}, {5, 1}}, []action{{0, false, store.AcquireGranted}, {1, false, store.AcquireGranted}, {2, false, store.AcquireQueued}, {1, true, ""}, {2, false, store.AcquireGranted}}},
-				{"parked_shrink", 4, 4, [][2]int{{4, 2}, {1, 1}}, []action{{0, false, store.AcquireGranted}, {1, false, store.AcquireQueued}, {2, false, store.AcquireQueued}, {0, true, ""}, {1, false, store.AcquireGranted}, {2, false, store.AcquireQueued}, {1, true, ""}, {2, false, store.AcquireGranted}}},
+				{"weighted", 8, 4, [][2]int{{8, 4}, {8, 4}}, []action{{0, false, runstate.AcquireGranted}, {1, false, runstate.AcquireGranted}, {2, false, runstate.AcquireQueued}, {0, true, ""}, {2, false, runstate.AcquireGranted}}},
+				{"backfill", 8, 6, [][2]int{{8, 6}, {8, 2}}, []action{{0, false, runstate.AcquireGranted}, {1, false, runstate.AcquireQueued}, {2, false, runstate.AcquireGranted}, {0, true, ""}, {1, false, runstate.AcquireGranted}}},
+				{"promotion_backfill", 8, 6, [][2]int{{8, 2}, {8, 6}, {8, 2}}, []action{{0, false, runstate.AcquireGranted}, {1, false, runstate.AcquireGranted}, {2, false, runstate.AcquireQueued}, {3, false, runstate.AcquireQueued}, {1, true, ""}, {3, false, runstate.AcquireGranted}, {2, false, runstate.AcquireQueued}, {0, true, ""}, {2, false, runstate.AcquireGranted}}},
+				{"bounded_backfill", 10, 5, [][2]int{{10, 8}, {10, 5}, {10, 5}}, []action{{0, false, runstate.AcquireGranted}, {1, false, runstate.AcquireQueued}, {2, false, runstate.AcquireGranted}, {3, false, runstate.AcquireQueued}, {0, true, ""}, {3, false, runstate.AcquireQueued}, {2, true, ""}, {1, false, runstate.AcquireGranted}}},
+				{"minimum_participant_capacity", 5, 1, [][2]int{{2, 1}, {5, 1}}, []action{{0, false, runstate.AcquireGranted}, {1, false, runstate.AcquireGranted}, {2, false, runstate.AcquireQueued}, {1, true, ""}, {2, false, runstate.AcquireGranted}}},
+				{"parked_shrink", 4, 4, [][2]int{{4, 2}, {1, 1}}, []action{{0, false, runstate.AcquireGranted}, {1, false, runstate.AcquireQueued}, {2, false, runstate.AcquireQueued}, {0, true, ""}, {1, false, runstate.AcquireGranted}, {2, false, runstate.AcquireQueued}, {1, true, ""}, {2, false, runstate.AcquireGranted}}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					f := admissionFixture(t, target(t), tc.capacity, tc.cost)
-					bindings := []store.CapacityBinding{admissionBinding(f)}
-					actors := []store.Actor{f.holder}
+					bindings := []runstate.CapacityBinding{admissionBinding(f)}
+					actors := []runstate.Actor{f.holder}
 					for _, d := range tc.declarations {
 						b, a := admissionPolicyBlocker(t, f, func(doc *nodeproto.PlanDoc) {
 							doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{admissionGroup(d[0], d[1])}
@@ -190,12 +190,12 @@ func TestAdmissionWeightedCapacityAndBackfill(t *testing.T) {
 func TestAdmissionExpiredWaiterReturnsBehindLiveArrival(t *testing.T) {
 	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
 	leader, leaderAward := admissionPolicyBlocker(t, f)
-	admissionWant(t, f, leader, leaderAward, store.AcquireGranted)
+	admissionWant(t, f, leader, leaderAward, runstate.AcquireGranted)
 	returning := admissionBinding(f)
-	admissionWant(t, f, returning, f.holder, store.AcquireQueued)
+	admissionWant(t, f, returning, f.holder, runstate.AcquireQueued)
 	old := admissionState(t, f).Waiters[0].ArrivedAt
 	earlier, earlierAward := admissionPolicyBlocker(t, f)
-	admissionWant(t, f, earlier, earlierAward, store.AcquireQueued)
+	admissionWant(t, f, earlier, earlierAward, runstate.AcquireQueued)
 	now, err := f.s.TestOnlyDatabaseTime(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -203,23 +203,23 @@ func TestAdmissionExpiredWaiterReturnsBehindLiveArrival(t *testing.T) {
 	for _, table := range []string{"concurrency_waiters", "admission_work"} {
 		admissionExpiry(t, f, table, returning.RunID, now)
 	}
-	admissionWant(t, f, returning, f.holder, store.AcquireQueued)
+	admissionWant(t, f, returning, f.holder, runstate.AcquireQueued)
 	state := admissionState(t, f)
 	if len(state.Waiters) != 2 || state.Waiters[0].RunID != earlier.RunID || !state.Waiters[1].ArrivedAt.After(old) {
 		t.Fatalf("expired waiter retained place: %+v", state)
 	}
 	admissionFinishJob(t, f, leader, leaderAward)
-	admissionWant(t, f, returning, f.holder, store.AcquireQueued)
-	admissionWant(t, f, earlier, earlierAward, store.AcquireGranted)
+	admissionWant(t, f, returning, f.holder, runstate.AcquireQueued)
+	admissionWant(t, f, earlier, earlierAward, runstate.AcquireGranted)
 	admissionFinishJob(t, f, earlier, earlierAward)
-	admissionWant(t, f, returning, f.holder, store.AcquireGranted)
+	admissionWant(t, f, returning, f.holder, runstate.AcquireGranted)
 }
 
 func TestAdmissionFIFOIsIndependentOfClockRegression(t *testing.T) {
 	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
 	leader, leaderAward := admissionPolicyBlocker(t, f)
 	later, award := admissionPolicyBlocker(t, f)
-	admissionWant(t, f, leader, leaderAward, store.AcquireGranted)
+	admissionWant(t, f, leader, leaderAward, runstate.AcquireGranted)
 	now, err := f.s.TestOnlyDatabaseTime(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -228,13 +228,13 @@ func TestAdmissionFIFOIsIndependentOfClockRegression(t *testing.T) {
 	now = now.Add(time.Second)
 	f.s.SetTestClock(t, func() time.Time { return now })
 	oldest := admissionBinding(f)
-	admissionWant(t, f, oldest, f.holder, store.AcquireQueued)
+	admissionWant(t, f, oldest, f.holder, runstate.AcquireQueued)
 	before := admissionState(t, f).Waiters[0]
 	now = original
 	for range 3 {
-		admissionWant(t, f, oldest, f.holder, store.AcquireQueued)
+		admissionWant(t, f, oldest, f.holder, runstate.AcquireQueued)
 	}
-	admissionWant(t, f, later, award, store.AcquireQueued)
+	admissionWant(t, f, later, award, runstate.AcquireQueued)
 	state := admissionState(t, f)
 	if len(state.Waiters) != 2 || state.Waiters[0].RunID != oldest.RunID || !state.Waiters[0].ArrivedAt.Equal(before.ArrivedAt) || !state.Waiters[1].ArrivedAt.After(before.ArrivedAt) {
 		t.Fatalf("clock regression reordered queue: %+v", state)
@@ -244,7 +244,7 @@ func TestAdmissionFIFOIsIndependentOfClockRegression(t *testing.T) {
 func TestAdmissionExpiredCapacityCannotReviveOnClaimRenewal(t *testing.T) {
 	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
 	binding := admissionBinding(f)
-	admitted := admissionWant(t, f, binding, f.holder, store.AcquireGranted)
+	admitted := admissionWant(t, f, binding, f.holder, runstate.AcquireGranted)
 	now, err := f.s.TestOnlyDatabaseTime(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -260,14 +260,14 @@ func TestAdmissionExpiredCapacityCannotReviveOnClaimRenewal(t *testing.T) {
 		t.Fatalf("renewal revived expired capacity: %d %v", expiry, err)
 	}
 	competitor, award := admissionPolicyBlocker(t, f)
-	admissionWant(t, f, competitor, award, store.AcquireGranted)
-	admissionWant(t, f, binding, f.holder, store.AcquireQueued)
+	admissionWant(t, f, competitor, award, runstate.AcquireGranted)
+	admissionWant(t, f, binding, f.holder, runstate.AcquireQueued)
 	state := admissionState(t, f)
 	if len(state.Holders) != 1 || state.Holders[0].HolderID == admitted.HolderID || len(state.Waiters) != 1 {
 		t.Fatalf("expired owner duplicated capacity: %+v", state)
 	}
 	admissionFinishJob(t, f, competitor, award)
-	admissionWant(t, f, binding, f.holder, store.AcquireGranted)
+	admissionWant(t, f, binding, f.holder, runstate.AcquireGranted)
 }
 
 func TestAdmissionPlanWaitingHandoffPreservesFIFO(t *testing.T) {
@@ -286,17 +286,17 @@ func TestAdmissionPlanWaitingHandoffPreservesFIFO(t *testing.T) {
 				t.Fatal(err)
 			}
 			blocker, blockOwner := admissionAcceptedPlan(t, f)
-			blockBinding := store.CapacityBinding{RunID: blocker.RunID, Generation: int64(blockOwner.Owner.Generation)}
-			admissionWant(t, f, blockBinding, blockOwner, store.AcquireGranted)
-			own := store.CapacityBinding{RunID: string(f.ref.RunID), Generation: int64(f.owner.Owner.Generation)}
-			admissionWant(t, f, own, f.owner, store.AcquireQueued)
+			blockBinding := runstate.CapacityBinding{RunID: blocker.RunID, Generation: int64(blockOwner.Owner.Generation)}
+			admissionWant(t, f, blockBinding, blockOwner, runstate.AcquireGranted)
+			own := runstate.CapacityBinding{RunID: string(f.ref.RunID), Generation: int64(f.owner.Owner.Generation)}
+			admissionWant(t, f, own, f.owner, runstate.AcquireQueued)
 			before, err := f.tenant.GetConcurrencyState(t.Context(), "plan:global:key")
 			if err != nil || len(before.Waiters) != 1 {
 				t.Fatalf("plan waiters: %+v %v", before, err)
 			}
 			later, laterOwner := admissionAcceptedPlan(t, f)
-			laterBinding := store.CapacityBinding{RunID: later.RunID, Generation: int64(laterOwner.Owner.Generation)}
-			admissionWant(t, f, laterBinding, laterOwner, store.AcquireQueued)
+			laterBinding := runstate.CapacityBinding{RunID: later.RunID, Generation: int64(laterOwner.Owner.Generation)}
+			admissionWant(t, f, laterBinding, laterOwner, runstate.AcquireQueued)
 			admissionExpiry(t, f, "triggers", own.RunID, now)
 			if reaped, err := f.s.AsOperator().ReapUnits(t.Context(), f.lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 				t.Fatalf("owner reaping: %+v %v", reaped, err)
@@ -306,15 +306,15 @@ func TestAdmissionPlanWaitingHandoffPreservesFIFO(t *testing.T) {
 				t.Fatal(err)
 			}
 			own.Generation = int64(successor.Owner.Generation)
-			admissionWant(t, f, own, successor, store.AcquireQueued)
-			if _, err := f.tenant.TransitionRun(t.Context(), store.RunTransition{RunID: runspec.RunID(blocker.RunID), To: store.RunCancelled, Cause: store.RunCancel, Actor: store.Actor{Kind: store.ActorOperator, Authority: f.plan.Seal.Request.AuthorityRef}, Reason: "user_cancelled"}); err != nil {
+			admissionWant(t, f, own, successor, runstate.AcquireQueued)
+			if _, err := f.tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(blocker.RunID), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: f.plan.Seal.Request.AuthorityRef}, Reason: "user_cancelled"}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: blockOwner.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(blocker.RunID), Actor: blockOwner, Cause: store.RunFinish}}); err != nil {
+			if _, err := f.tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: blockOwner.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(blocker.RunID), Actor: blockOwner, Cause: runstate.RunFinish}}); err != nil {
 				t.Fatal(err)
 			}
-			admissionWant(t, f, laterBinding, laterOwner, store.AcquireQueued)
-			admissionWant(t, f, own, successor, store.AcquireGranted)
+			admissionWant(t, f, laterBinding, laterOwner, runstate.AcquireQueued)
+			admissionWant(t, f, own, successor, runstate.AcquireGranted)
 			after, err := f.tenant.GetConcurrencyState(t.Context(), "plan:global:key")
 			if err != nil || len(after.Holders) != 1 || after.Holders[0].HolderID != own.RunID+"/-" || !after.Holders[0].QueueArrivedAt.Equal(before.Waiters[0].ArrivedAt) || len(after.Waiters) != 1 {
 				t.Fatalf("handoff replaced plan reservation: %+v %v", after, err)
@@ -331,7 +331,7 @@ func TestAdmissionTenantScopesRemainIndependent(t *testing.T) {
 	a := newStoreRecoveryFixtureForAt(t, false, target, "alpha", edit)
 	b := newStoreRecoveryFixtureForAt(t, false, target, "beta", edit)
 	for _, f := range []*storeRecoveryFixture{a, b} {
-		admissionWant(t, f, admissionBinding(f), f.holder, store.AcquireGranted)
+		admissionWant(t, f, admissionBinding(f), f.holder, runstate.AcquireGranted)
 	}
 	for _, pair := range [][2]*storeRecoveryFixture{{a, b}, {b, a}} {
 		if _, err := pair[0].tenant.MayStart(t.Context(), admissionBinding(pair[1]), pair[1].holder); err == nil {
@@ -357,8 +357,8 @@ func TestAdmissionAcrossSQLiteConnectionsSerializes(t *testing.T) {
 				group.OnLimit = new(policy)
 				doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{group}
 			})
-			bindings := []store.CapacityBinding{admissionBinding(f)}
-			actors := []store.Actor{f.holder}
+			bindings := []runstate.CapacityBinding{admissionBinding(f)}
+			actors := []runstate.Actor{f.holder}
 			for range 7 {
 				b, a := admissionPolicyBlocker(t, f)
 				bindings = append(bindings, b)
@@ -382,7 +382,7 @@ func TestAdmissionAcrossSQLiteConnectionsSerializes(t *testing.T) {
 				tenants = append(tenants, tenant)
 			}
 			type result struct {
-				admission store.AcquireSlotResponse
+				admission runstate.AcquireSlotResponse
 				err       error
 			}
 			results := make([]result, len(bindings))
@@ -402,16 +402,16 @@ func TestAdmissionAcrossSQLiteConnectionsSerializes(t *testing.T) {
 			close(start)
 			syncCalls.Wait()
 			granted, limited := 0, 0
-			want := store.AcquireQueued
+			want := runstate.AcquireQueued
 			if policy == "fail" {
-				want = store.AcquireFailed
+				want = runstate.AcquireFailed
 			}
 			for _, result := range results {
 				if result.err != nil {
 					t.Fatal(result.err)
 				}
 				switch result.admission.Kind {
-				case store.AcquireGranted:
+				case runstate.AcquireGranted:
 					granted++
 				case want:
 					limited++
@@ -430,11 +430,11 @@ func TestAdmissionAcrossSQLiteConnectionsSerializes(t *testing.T) {
 func TestAdmissionCancelledWaiterCannotBlockLiveWork(t *testing.T) {
 	f := admissionFixture(t, storetest.NewSQLite(t), 1, 1)
 	leader, leaderAward := admissionPolicyBlocker(t, f)
-	admissionWant(t, f, leader, leaderAward, store.AcquireGranted)
-	admissionWant(t, f, admissionBinding(f), f.holder, store.AcquireQueued)
+	admissionWant(t, f, leader, leaderAward, runstate.AcquireGranted)
+	admissionWant(t, f, admissionBinding(f), f.holder, runstate.AcquireQueued)
 	later, award := admissionPolicyBlocker(t, f)
-	admissionWant(t, f, later, award, store.AcquireQueued)
-	if _, err := f.tenant.TransitionRun(t.Context(), store.RunTransition{RunID: f.ref.RunID, To: store.RunCancelled, Cause: store.RunCancel, Actor: store.Actor{Kind: store.ActorOperator, Authority: f.plan.Seal.Request.AuthorityRef}, Reason: "user_cancelled"}); err != nil {
+	admissionWant(t, f, later, award, runstate.AcquireQueued)
+	if _, err := f.tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: f.ref.RunID, To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: f.plan.Seal.Request.AuthorityRef}, Reason: "user_cancelled"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.expireHolder(t.Context()); err != nil {
@@ -444,11 +444,11 @@ func TestAdmissionCancelledWaiterCannotBlockLiveWork(t *testing.T) {
 		t.Fatalf("cancel recovery: %+v %v", reaped, err)
 	}
 
-	if _, err := f.tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: f.owner.Owner, Transition: store.RunCompletion{RunID: f.ref.RunID, Actor: f.owner, Cause: store.RunFinish}}); err != nil {
+	if _, err := f.tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: f.owner.Owner, Transition: runstate.RunCompletion{RunID: f.ref.RunID, Actor: f.owner, Cause: runstate.RunFinish}}); err != nil {
 		t.Fatal(err)
 	}
 	admissionFinishJob(t, f, leader, leaderAward)
-	admissionWant(t, f, later, award, store.AcquireGranted)
+	admissionWant(t, f, later, award, runstate.AcquireGranted)
 	state := admissionState(t, f)
 	if len(state.Waiters) != 0 || len(state.Holders) != 1 || state.Holders[0].RunID != later.RunID {
 		t.Fatalf("terminal waiter retained reservation: %+v", state)

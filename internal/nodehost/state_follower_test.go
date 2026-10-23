@@ -8,32 +8,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type followerReader struct {
 	snapshot func(context.Context, string) (store.RunSnapshot, error)
-	node     func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
+	node     func(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 }
 
 func (r followerReader) ReadSnapshot(ctx context.Context, run string) (store.RunSnapshot, error) {
 	return r.snapshot(ctx, run)
 }
 
-func (r followerReader) ReadNode(ctx context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
+func (r followerReader) ReadNode(ctx context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
 	return r.node(ctx, ref)
 }
 
 func TestStateFollowerCatchesUpAfterSubscribing(t *testing.T) {
 	for _, terminal := range []bool{false, true} {
 		t.Run(map[bool]string{false: "requeue", true: "terminal"}[terminal], func(t *testing.T) {
-			ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
-			row := store.NodeRow{Ref: ref, StateSeq: 7, Status: store.StatusRunning, Generation: 2, Attempt: 5}
+			ref := runspec.NodeRef{RunID: "run", NodeID: "build"}
+			row := runstate.NodeRow{Ref: ref, StateSeq: 7, Status: runstate.StatusRunning, Generation: 2, Attempt: 5}
 			subscribed, closed := false, false
 			f := StateFollower{
-				Store: followerReader{node: func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
+				Store: followerReader{node: func(context.Context, runspec.NodeRef) (runstate.NodeRow, error) {
 					if !subscribed {
 						t.Fatal("read preceded subscription")
 					}
@@ -45,9 +45,9 @@ func TestStateFollowerCatchesUpAfterSubscribing(t *testing.T) {
 					}
 					subscribed = true
 					row.StateSeq++
-					row.Status = store.StatusPending
+					row.Status = runstate.StatusPending
 					if terminal {
-						row.Status, row.Outcome = store.StatusDone, store.NodeSuccess
+						row.Status, row.Outcome = runstate.StatusDone, runstate.NodeSuccess
 					}
 					return StateSubscription{Changed: make(chan struct{}), Close: func() error { closed = true; return nil }}, nil
 				},
@@ -60,7 +60,7 @@ func TestStateFollowerCatchesUpAfterSubscribing(t *testing.T) {
 }
 
 func TestStateFollowerNotificationsAreOnlyHints(t *testing.T) {
-	ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
+	ref := runspec.NodeRef{RunID: "run", NodeID: "build"}
 	changed := make(chan struct{}, 1)
 	changed <- struct{}{}
 	reads := make(chan int)
@@ -69,13 +69,13 @@ func TestStateFollowerNotificationsAreOnlyHints(t *testing.T) {
 	defer cancel(nil)
 	cause := errors.New("owner lost")
 	f := StateFollower{
-		Store: followerReader{node: func(ctx context.Context, _ controllerwire.NodeRef) (store.NodeRow, error) {
+		Store: followerReader{node: func(ctx context.Context, _ runspec.NodeRef) (runstate.NodeRow, error) {
 			select {
 			case reads <- 1:
 			case <-ctx.Done():
 			}
 			expired := time.Unix(0, 0)
-			return store.NodeRow{Ref: ref, StateSeq: 7, Status: store.StatusRunning, LeaseExpiresAt: &expired}, nil
+			return runstate.NodeRow{Ref: ref, StateSeq: 7, Status: runstate.StatusRunning, LeaseExpiresAt: &expired}, nil
 		}},
 		Subscribe: func(context.Context, string) (StateSubscription, error) {
 			return StateSubscription{Changed: changed, Close: func() error { return nil }}, nil
@@ -91,14 +91,14 @@ func TestStateFollowerNotificationsAreOnlyHints(t *testing.T) {
 }
 
 func TestStateFollowerReadsCommittedChangeAfterNotification(t *testing.T) {
-	ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
+	ref := runspec.NodeRef{RunID: "run", NodeID: "build"}
 	changed, read := make(chan struct{}, 1), make(chan struct{}, 1)
 	var mu sync.Mutex
 	sequence := int64(7)
 	f := StateFollower{
-		Store: followerReader{node: func(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
+		Store: followerReader{node: func(context.Context, runspec.NodeRef) (runstate.NodeRow, error) {
 			mu.Lock()
-			row := store.NodeRow{Ref: ref, StateSeq: sequence, Status: store.StatusRunning}
+			row := runstate.NodeRow{Ref: ref, StateSeq: sequence, Status: runstate.StatusRunning}
 			mu.Unlock()
 			select {
 			case read <- struct{}{}:
@@ -125,9 +125,9 @@ func TestStateFollowerReadsCommittedChangeAfterNotification(t *testing.T) {
 func followerSnapshot() store.RunSnapshot {
 	return store.RunSnapshot{
 		Run: store.RunRow{ID: "run", StateSeq: 3},
-		Nodes: []store.NodeRow{
-			{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, StateSeq: 5},
-			{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "test"}, StateSeq: 1},
+		Nodes: []runstate.NodeRow{
+			{Ref: runspec.NodeRef{RunID: "run", NodeID: "build"}, StateSeq: 5},
+			{Ref: runspec.NodeRef{RunID: "run", NodeID: "test"}, StateSeq: 1},
 		},
 	}
 }
@@ -143,11 +143,11 @@ func TestStateFollowerWaitsForPersistedGraphChanges(t *testing.T) {
 			case "job":
 				current.Nodes[0].StateSeq++
 			case "new job":
-				current.Nodes = append(current.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "generated"}})
+				current.Nodes = append(current.Nodes, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "generated"}})
 			case "empty expansion":
-				current.Expansions = []store.AcceptedExpansionRow{{Source: current.Nodes[0].Ref, SourceGeneration: 0, BodyHash: "empty"}}
+				current.Expansions = []runstate.AcceptedExpansionRow{{Source: current.Nodes[0].Ref, SourceGeneration: 0, BodyHash: "empty"}}
 			case "failed expansion":
-				before.Nodes[0].Expansion, current.Nodes[0].Expansion = store.ExpansionExpected, store.ExpansionFailed
+				before.Nodes[0].Expansion, current.Nodes[0].Expansion = runstate.ExpansionExpected, runstate.ExpansionFailed
 			case "accepted empty plan":
 				current.Run.Spec, current.Run.PlanHash = &runspec.Spec{Hash: "accepted"}, "empty-plan"
 			case "reordered jobs":
@@ -245,8 +245,8 @@ func TestStateFollowerRejectsRegressedOrForeignState(t *testing.T) {
 			case "job sequence":
 				current.Nodes[0].StateSeq--
 			case "expansion":
-				before.Expansions = []store.AcceptedExpansionRow{{Source: before.Nodes[0].Ref, BodyHash: "old"}}
-				current.Expansions = []store.AcceptedExpansionRow{{Source: current.Nodes[0].Ref, BodyHash: "replaced"}}
+				before.Expansions = []runstate.AcceptedExpansionRow{{Source: before.Nodes[0].Ref, BodyHash: "old"}}
+				current.Expansions = []runstate.AcceptedExpansionRow{{Source: current.Nodes[0].Ref, BodyHash: "replaced"}}
 			}
 			f := StateFollower{
 				Store: followerReader{snapshot: func(context.Context, string) (store.RunSnapshot, error) { return current, nil }},

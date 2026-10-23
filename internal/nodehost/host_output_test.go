@@ -14,13 +14,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 var outputRefused = errors.New("output backend refused")
@@ -204,7 +205,7 @@ func TestExecutorOutputCommit(t *testing.T) {
 			input, records, b, st := outputFixture(t, mode)
 			input.Attempt--
 			if mode == "result_refused" {
-				st.reject = store.CauseReport
+				st.reject = runstate.CauseReport
 			}
 			var trace []string
 			process := newExecutionSDK(input.Accepted.Plan, input, "output_refused", &trace)
@@ -220,7 +221,7 @@ func TestExecutorOutputCommit(t *testing.T) {
 					process.input = in
 					return process, nil
 				},
-				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+				EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return input.Engine, nil
 				},
 				ChildContext: func(ctx context.Context, _, _ time.Duration) (context.Context, context.CancelFunc, error) {
@@ -238,15 +239,15 @@ func TestExecutorOutputCommit(t *testing.T) {
 			if (err == nil) != (mode == "success") || !process.closed || !process.cleaned {
 				t.Fatalf("closed=%v cleanup=%v error=%v", process.closed, process.cleaned, err)
 			}
-			if len(st.reports) != 2 || st.reports[0].Cause != store.CauseStart || st.reports[1].Cause != store.CauseReport {
+			if len(st.reports) != 2 || st.reports[0].Cause != runstate.CauseStart || st.reports[1].Cause != runstate.CauseReport {
 				t.Fatalf("transitions=%+v", st.reports)
 			}
 			result := st.reports[1].Extra.Result
 			if mode == "put" || mode == "commit" {
-				if result == nil || result.Outcome != store.NodeFailed || result.OutputRecord != nil {
+				if result == nil || result.Outcome != runstate.NodeFailed || result.OutputRecord != nil {
 					t.Fatalf("refused output reported %+v", result)
 				}
-			} else if result == nil || result.Outcome != store.NodeSuccess || result.OutputRecord == nil || *result.OutputRecord != b.upload.Key || b.commit == nil {
+			} else if result == nil || result.Outcome != runstate.NodeSuccess || result.OutputRecord == nil || *result.OutputRecord != b.upload.Key || b.commit == nil {
 				t.Fatalf("committed output reported %+v", result)
 			}
 		})

@@ -10,13 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
@@ -154,8 +153,8 @@ func (t *Tenant) resolveScheduleTx(ctx context.Context, tx *storeTx, selector st
 }
 
 // ReplaceAuthorizedSchedules atomically publishes a tenant's complete repository declaration set.
-func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Authorized, body controllerwire.ScheduleRepoRequest) ([]string, []string, error) {
-	if a.Target.Team != string(t.team) || body.Mode != controllerwire.ScheduleReplace && body.Mode != controllerwire.ScheduleUpsert {
+func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Authorized, body ScheduleRepoRequest) ([]string, []string, error) {
+	if a.Target.Team != string(t.team) || body.Mode != ScheduleReplace && body.Mode != ScheduleUpsert {
 		return nil, nil, ErrInvalidInput
 	}
 	remote, err := sourceurl.ValidateCloneURL(body.RepoURL)
@@ -193,7 +192,7 @@ func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Au
 		rows = append(rows, row)
 		requests = append(requests, request)
 	}
-	return t.replaceConsentedSchedules(ctx, &a, nil, remote, rows, requests, body.Mode == controllerwire.ScheduleReplace)
+	return t.replaceConsentedSchedules(ctx, &a, nil, remote, rows, requests, body.Mode == ScheduleReplace)
 }
 
 // ReplaceAuthorizedLocalSchedules persists prepared checkout declarations and captured inputs together.
@@ -471,7 +470,7 @@ func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Autho
 }
 
 // OverrideAuthorizedSchedule validates and persists an effective cadence atomically.
-func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, body *controllerwire.ScheduleOverride) (string, error) {
+func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, body *cronspec.Override) (string, error) {
 	return t.editSchedule(ctx, a, id, func(tx *storeTx, row CronSchedule) error {
 		if body == nil {
 			row.Override = nil

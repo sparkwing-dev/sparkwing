@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite(t *testing.T) {
@@ -20,9 +20,9 @@ func TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite(t *testing.T) {
 			if err != nil || before.ResolvedAt != nil {
 				t.Fatalf("pending gate: %+v, %v", before, err)
 			}
-			change.Extra.Approval = &ApprovalResolution{Decision: decision, Comment: "decision comment"}
+			change.Extra.Approval = &runstate.ApprovalResolution{Decision: decision, Comment: "decision comment"}
 			if decision == "approved" {
-				change.To = NodeSuccess
+				change.To = runstate.NodeSuccess
 			}
 			foreign := &Tenant{s: tenant.s, team: "b"}
 			if _, err := foreign.TransitionNode(t.Context(), change); err == nil {
@@ -47,8 +47,8 @@ func TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite(t *testing.T) {
 			if err != nil || !replay.Replayed {
 				t.Fatalf("decision replay: %+v, %v", replay, err)
 			}
-			change.To = NodeFailed
-			change.Extra.Approval = &ApprovalResolution{Decision: "denied", Comment: "replacement"}
+			change.To = runstate.NodeFailed
+			change.Extra.Approval = &runstate.ApprovalResolution{Decision: "denied", Comment: "replacement"}
 			if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
 				t.Fatal("changed decision overwrote approval")
 			}
@@ -88,7 +88,7 @@ func TestApprovalTransitionsKeepPendingRequestOrder(t *testing.T) {
 	}
 	for _, id := range []string{"a", "b", "c"} {
 		*now = now.Add(time.Second)
-		if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: runspec.NodeID(id)}, Actor: request.Actor, To: NodeApprovalPending, Cause: CauseApprovalOpen}); err != nil {
+		if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: runspec.NodeID(id)}, Actor: request.Actor, To: runstate.NodeApprovalPending, Cause: runstate.CauseApprovalOpen}); err != nil {
 			t.Fatal(err)
 		}
 	}

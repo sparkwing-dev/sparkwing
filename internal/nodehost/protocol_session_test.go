@@ -16,13 +16,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func protocolTestCodec(line []byte) (nodeproto.Frame, error) {
@@ -604,8 +605,8 @@ func TestSDKPlanningNativeProcessesMaskStreamsAndPlanEveryTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	input.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "planner"}
-	input.Entry.Engine.Identity.Pin.SDK, input.Entry.Engine.Identity.Pin.Version = engine.GoSDK, "v1.0.0"
-	p.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+	input.Entry.Engine.Identity.Pin.SDK, input.Entry.Engine.Identity.Pin.Version = engineid.GoSDK, "v1.0.0"
+	p.EnsureEngine = func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 		return input.Entry.Engine, nil
 	}
 	var mu sync.Mutex

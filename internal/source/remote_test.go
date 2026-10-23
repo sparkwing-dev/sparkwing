@@ -12,10 +12,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestPrepareCheckoutLFSKeepsAuthorizedSSHTransport(t *testing.T) {

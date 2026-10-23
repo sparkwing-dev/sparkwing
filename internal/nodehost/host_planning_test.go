@@ -8,14 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestPlanningDefaults(t *testing.T) {
@@ -62,7 +64,7 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 		Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
 		Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}},
 	})
-	resolved := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}}
+	resolved := engine.Resolved{Identity: engineid.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}}
 	directory := t.TempDir()
 	f.Host.Acquire = func(context.Context, RunInput) (*source.Entry, error) {
 		return &source.Entry{Engine: resolved, Directory: directory}, nil
@@ -75,7 +77,7 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 	var processes []*scriptedSDK
 	f.Host.Planner = &SDKPlanner{
 		Masker: masks, Log: func(context.Context, nodeproto.FrameLog) error { return nil },
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
 		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
@@ -112,7 +114,7 @@ func checkPlanningDefaults(t *testing.T, secret, field string) {
 		if strings.Contains(err.Error()+failure.Message+failure.Hint+fmt.Sprint(failure.Details), secret) {
 			t.Fatal("refusal exposed its secret default")
 		}
-		if snapshot.Run.State != store.RunFailed || snapshot.Run.Spec != nil || len(snapshot.Run.Plan) != 0 || len(snapshot.Nodes) != 0 {
+		if snapshot.Run.State != runstate.RunFailed || snapshot.Run.Spec != nil || len(snapshot.Run.Plan) != 0 || len(snapshot.Nodes) != 0 {
 			t.Fatal("refused plan persisted declarations or failed to finish intake")
 		}
 	}

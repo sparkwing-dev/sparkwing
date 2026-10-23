@@ -8,13 +8,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type localLogs struct {
@@ -23,7 +22,7 @@ type localLogs struct {
 	masker   *secrets.Masker
 	current  func(context.Context) (capability.Principal, error)
 	claims   *nodeClaims
-	readNode func(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
+	readNode func(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 	upload   func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
 	sinks    map[string]*logseg.Sink
 	closed   bool
@@ -53,19 +52,19 @@ func (s logHostStore) AcceptExpansion(ctx context.Context, request store.Expansi
 	return s.NativeHostStore.AcceptExpansion(ctx, request)
 }
 
-func (s logHostStore) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
+func (s logHostStore) FinishRunAndUnit(ctx context.Context, request runstate.FinishRunRequest) (runstate.Applied, error) {
 	if err := s.logs.close(context.WithoutCancel(ctx)); err != nil {
-		return store.Applied{}, err
+		return runstate.Applied{}, err
 	}
 	return s.NativeHostStore.FinishRunAndUnit(ctx, request)
 }
 
-func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeCommand) (store.Applied, error) {
+func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeCommand) (runstate.Applied, error) {
 	switch request.(type) {
 	case store.ReportNode, store.RetryNode, store.ReleaseNode:
 		ref, _ := store.NodeCommandAuthority(request)
 		if err := s.logs.closeNode(context.WithoutCancel(ctx), string(ref.NodeID)); err != nil {
-			return store.Applied{}, err
+			return runstate.Applied{}, err
 		}
 	}
 	return s.NativeHostStore.TransitionNode(ctx, request)
@@ -101,14 +100,14 @@ func (l *localLogs) subject(ctx context.Context, node string) (capability.Princi
 		subject.Unit.Source = &blob.LogSource{NodeID: b.NodeID, Generation: b.Generation}
 	}
 	if node != "" {
-		row, err := l.readNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(node)})
+		row, err := l.readNode(ctx, runspec.NodeRef{RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(node)})
 		if err != nil {
 			return p, blob.LogSubject{}, err
 		}
-		if row.Ref != (controllerwire.NodeRef{RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(node)}) {
+		if row.Ref != (runspec.NodeRef{RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(node)}) {
 			return p, blob.LogSubject{}, nodeClaimMismatch()
 		}
-		if row.Status == store.StatusRunning && row.Attempt > 0 && row.CapabilityPrefix != "" {
+		if row.Status == runstate.StatusRunning && row.Attempt > 0 && row.CapabilityPrefix != "" {
 			p, err = l.claims.principal(ctx, node, int64(row.Generation), int64(row.Attempt))
 			if err != nil {
 				return p, blob.LogSubject{}, err

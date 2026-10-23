@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func (w *Work) beginStep(attempt int, current *WorkStep, settled []string) error {

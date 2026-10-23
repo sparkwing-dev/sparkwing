@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -30,11 +31,11 @@ func TestAcquireDetectsUnacceptedTypeScriptAfterCheckout(t *testing.T) {
 	options, _, _ := acquisitionOptions(t, pipeline)
 	options.SDK = ""
 	reached := errors.New("TypeScript pin selected")
-	options.ReadPin = func(_ string, sdk engine.SDKKind) (engine.Pin, error) {
-		if sdk != engine.TypeScriptSDK {
-			return engine.Pin{}, errors.New("wrong SDK selected before checkout")
+	options.ReadPin = func(_ string, sdk engineid.SDKKind) (engineid.Pin, error) {
+		if sdk != engineid.TypeScriptSDK {
+			return engineid.Pin{}, errors.New("wrong SDK selected before checkout")
 		}
-		return engine.Pin{}, reached
+		return engineid.Pin{}, reached
 	}
 	_, err := source.Acquire(t.Context(), source.Spec{RepoKey: "local:" + directory, LocalCheckout: directory, SHA: sha}, options)
 	if !errors.Is(err, reached) {
@@ -42,7 +43,7 @@ func TestAcquireDetectsUnacceptedTypeScriptAfterCheckout(t *testing.T) {
 	}
 }
 
-func (r *engineResolver) Resolve(_ context.Context, pin engine.Pin, target releaseasset.Target) (engine.Resolved, error) {
+func (r *engineResolver) Resolve(_ context.Context, pin engineid.Pin, target releaseasset.Target) (engine.Resolved, error) {
 	r.calls = append(r.calls, "resolve")
 	if r.resolved.Identity.Pin != pin || r.resolved.Target != target {
 		return engine.Resolved{}, errors.New("wrong pin or target")
@@ -50,7 +51,7 @@ func (r *engineResolver) Resolve(_ context.Context, pin engine.Pin, target relea
 	return r.resolved, r.err
 }
 
-func (r *engineResolver) Ensure(_ context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+func (r *engineResolver) Ensure(_ context.Context, identity engineid.Identity, target releaseasset.Target) (engine.Resolved, error) {
 	r.calls = append(r.calls, "ensure")
 	if r.resolved.Identity != identity || r.resolved.Target != target {
 		return engine.Resolved{}, errors.New("wrong sealed identity or target")
@@ -63,7 +64,7 @@ type cancelledEngine struct {
 	cancel context.CancelCauseFunc
 }
 
-func (r cancelledEngine) Ensure(ctx context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+func (r cancelledEngine) Ensure(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (engine.Resolved, error) {
 	resolved, err := r.EngineResolver.Ensure(ctx, identity, target)
 	r.cancel(lease.ErrLeaseLost)
 	return resolved, err
@@ -78,7 +79,7 @@ func TestAcquireAuthorityLossBeforeInstallationStartsNoInstaller(t *testing.T) {
 			defer cancel(nil)
 			if stage == "pin" {
 				read := options.ReadPin
-				options.ReadPin = func(path string, sdk engine.SDKKind) (engine.Pin, error) {
+				options.ReadPin = func(path string, sdk engineid.SDKKind) (engineid.Pin, error) {
 					pin, err := read(path, sdk)
 					cancel(lease.ErrLeaseLost)
 					return pin, err
@@ -99,17 +100,17 @@ func TestAcquireAuthorityLossBeforeInstallationStartsNoInstaller(t *testing.T) {
 
 func acquisitionOptions(t *testing.T, directory string) (source.Options, *engineResolver, *int) {
 	t.Helper()
-	pin := engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: "sealed-pin"}
+	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: "sealed-pin"}
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: "linux", GOARCH: "amd64"}
 	resolver := &engineResolver{resolved: engine.Resolved{
-		Identity: engine.Identity{Pin: pin, Version: "v1.2.3", ManifestDigest: "signed-manifest"},
+		Identity: engineid.Identity{Pin: pin, Version: "v1.2.3", ManifestDigest: "signed-manifest"},
 		Target:   target, Executable: filepath.Join(t.TempDir(), "matched-engine"),
 	}}
 	installed := new(int)
 	options := source.Options{
-		Engines: resolver, Target: target, SDK: engine.GoSDK,
+		Engines: resolver, Target: target, SDK: engineid.GoSDK,
 		Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment,
-		ReadPin: func(checkout string, sdk engine.SDKKind) (engine.Pin, error) {
+		ReadPin: func(checkout string, sdk engineid.SDKKind) (engineid.Pin, error) {
 			if checkout != directory || sdk != pin.SDK {
 				t.Fatalf("read pin from %s for %s", checkout, sdk)
 			}
@@ -119,7 +120,7 @@ func acquisitionOptions(t *testing.T, directory string) (source.Options, *engine
 			checkout := filepath.Join(request.Directory, request.PipelineDir)
 			environment := request.Environment
 			*installed++
-			if len(resolver.calls) != 1 || !reflect.DeepEqual(resolved, resolver.resolved) || checkout != directory || len(environment) != 2 || request.SDK != engine.GoSDK {
+			if len(resolver.calls) != 1 || !reflect.DeepEqual(resolved, resolver.resolved) || checkout != directory || len(environment) != 2 || request.SDK != engineid.GoSDK {
 				t.Fatalf("install did not receive the resolved engine and isolated environment: %+v, %s, %v", resolved, checkout, environment)
 			}
 			return engine.SDKCommand{Directory: checkout, Command: []string{filepath.Join(directory, "entry")}}, nil
@@ -168,7 +169,7 @@ func TestAcquireDoesNotInstallWithChangedPinOrRejectedEngine(t *testing.T) {
 				sealed.Pin.InputsDigest = "previous-lockfile"
 				spec.Engine = &sealed
 			case "pin read":
-				options.ReadPin = func(string, engine.SDKKind) (engine.Pin, error) { return engine.Pin{}, sentinel }
+				options.ReadPin = func(string, engineid.SDKKind) (engineid.Pin, error) { return engineid.Pin{}, sentinel }
 			case "engine policy":
 				resolver.err = sentinel
 			}
@@ -191,7 +192,7 @@ func TestAcquireRemovesRemoteCheckoutAfterInstallationFailure(t *testing.T) {
 		t.Run(failure, func(t *testing.T) {
 			options, resolver, _ := acquisitionOptions(t, "")
 			options.Workspace, options.Access = t.TempDir(), &access{}
-			options.ReadPin = func(string, engine.SDKKind) (engine.Pin, error) { return resolver.resolved.Identity.Pin, nil }
+			options.ReadPin = func(string, engineid.SDKKind) (engineid.Pin, error) { return resolver.resolved.Identity.Pin, nil }
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			sentinel := errors.New("installer failed")
@@ -244,7 +245,7 @@ func TestAcquireUsesSharedEnvironmentPolicyForGitAndInstallation(t *testing.T) {
 			installed := false
 			options.InstallSDK = func(_ context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
 				installed = true
-				if !reflect.DeepEqual(selected, resolver.resolved) || request.Directory != dir || request.PipelineDir != ".sparkwing" || request.SDK != engine.GoSDK || !reflect.DeepEqual(request.Environment, []string{"PATH=/filtered/install"}) {
+				if !reflect.DeepEqual(selected, resolver.resolved) || request.Directory != dir || request.PipelineDir != ".sparkwing" || request.SDK != engineid.GoSDK || !reflect.DeepEqual(request.Environment, []string{"PATH=/filtered/install"}) {
 					t.Fatalf("selected-engine request=%+v", request)
 				}
 				return engine.SDKCommand{Directory: filepath.Join(dir, ".sparkwing"), Command: []string{"entry"}}, nil

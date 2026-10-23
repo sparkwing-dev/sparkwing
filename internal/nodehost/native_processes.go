@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // NativeProcesses binds native SDK startup to the delegated process's services and cleanup ledger.

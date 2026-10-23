@@ -9,9 +9,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // safety: recent spend beside the balance is what says how long the balance lasts.
@@ -243,7 +244,7 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request, a cap
 
 func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	if s.operator == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	settings, err := s.operator.CreditSettings(r.Context())
 	if err != nil {

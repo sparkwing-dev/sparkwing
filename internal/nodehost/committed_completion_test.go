@@ -5,19 +5,19 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type cancelBeforeCompletion struct {
 	OwnerStore
-	control store.Actor
+	control runstate.Actor
 }
 
-func (s cancelBeforeCompletion) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
-	if _, err := s.OwnerStore.TransitionRun(ctx, store.RunTransition{RunID: request.Transition.RunID, Actor: s.control, To: store.RunCancelled, Cause: store.RunCancel, Reason: "operator cancelled"}); err != nil {
-		return store.Applied{}, err
+func (s cancelBeforeCompletion) FinishRunAndUnit(ctx context.Context, request runstate.FinishRunRequest) (runstate.Applied, error) {
+	if _, err := s.OwnerStore.TransitionRun(ctx, runstate.RunTransition{RunID: request.Transition.RunID, Actor: s.control, To: runstate.RunCancelled, Cause: runstate.RunCancel, Reason: "operator cancelled"}); err != nil {
+		return runstate.Applied{}, err
 	}
 	return s.OwnerStore.FinishRunAndUnit(ctx, request)
 }
@@ -33,15 +33,15 @@ func TestOwnerReportsCancellationCommittedAfterScheduling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.State != store.RunCancelled || completion.Outcome != string(row.State) || completion.Reason != row.CancelReason {
+	if row.State != runstate.RunCancelled || completion.Outcome != string(row.State) || completion.Reason != row.CancelReason {
 		t.Fatalf("reported %+v, committed %s (%s)", completion, row.State, row.CancelReason)
 	}
 }
 
 func TestOwnerFixtureReturnsCommittedVerdict(t *testing.T) {
 	fixture, _, input := newOwnerFixture(t, true)
-	applied, err := fixture.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(input.RunID), Actor: input.Owner, Cause: store.RunFinish}})
-	if err != nil || applied.Outcome != store.RunSuccess || fixture.snapshot.Run.State != applied.Outcome {
+	applied, err := fixture.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: input.Owner.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(input.RunID), Actor: input.Owner, Cause: runstate.RunFinish}})
+	if err != nil || applied.Outcome != runstate.RunSuccess || fixture.snapshot.Run.State != applied.Outcome {
 		t.Fatalf("completion=%+v state=%s error=%v", applied, fixture.snapshot.Run.State, err)
 	}
 }
@@ -57,8 +57,8 @@ func (c completionController) Finish(context.Context, string, controllerwire.Fin
 
 func TestRemoteCompletionRetainsCommittedVerdict(t *testing.T) {
 	transport := &RemoteHostStore{controller: completionController{result: controllerwire.Applied{Outcome: "cancelled", Reason: "operator cancelled", StateSeq: 8}}}
-	applied, err := transport.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Transition: store.RunCompletion{RunID: "run", Cause: store.RunFinish, Reason: "scheduled success"}})
-	if err != nil || applied.Outcome != store.RunCancelled || applied.Reason != "operator cancelled" || applied.StateSeq != 8 {
+	applied, err := transport.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: "run", Cause: runstate.RunFinish, Reason: "scheduled success"}})
+	if err != nil || applied.Outcome != runstate.RunCancelled || applied.Reason != "operator cancelled" || applied.StateSeq != 8 {
 		t.Fatalf("completion=%+v error=%v", applied, err)
 	}
 }

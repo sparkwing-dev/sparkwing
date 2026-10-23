@@ -13,14 +13,15 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 var reportRequests = []struct{ suffix, body string }{
@@ -102,7 +103,7 @@ func TestEngineStepReadsPublisherAttempts(t *testing.T) {
 	for _, name := range []string{"missing", "private error", "unstarted"} {
 		t.Run(name, func(t *testing.T) {
 			b := publisherBoundary()
-			f := &engineTransactions{node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}}}
+			f := &engineTransactions{node: runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}}}
 			status, code := 500, apierr.Internal
 			switch name {
 			case "missing":
@@ -158,17 +159,17 @@ func TestEngineReportingAuthorities(t *testing.T) {
 		for _, authority := range []string{"job", "owner", "publisher", "cancelling"} {
 			t.Run(operation.suffix+"/"+authority, func(t *testing.T) {
 				b := newCredentialBoundary()
-				f := &engineTransactions{node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Attempt: 11, Generation: 7}}
-				kind, generation, attemptGeneration, attempt := store.ActorHolder, int64(4), int64(4), int64(2)
+				f := &engineTransactions{node: runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Attempt: 11, Generation: 7}}
+				kind, generation, attemptGeneration, attempt := runstate.ActorHolder, int64(4), int64(4), int64(2)
 				switch authority {
 				case "owner":
 					b = ownerBoundary()
 					b.snapshot.Authorities[0].Principal.Capability.Binding.Attempt = 0
 					b.snapshot.Binding.Current.Attempt = 0
-					kind, attemptGeneration, attempt = store.ActorRunHost, 7, 11
+					kind, attemptGeneration, attempt = runstate.ActorRunHost, 7, 11
 				case "publisher":
 					b = publisherBoundary()
-					kind, generation, attemptGeneration, attempt = store.ActorOperator, 0, 7, 11
+					kind, generation, attemptGeneration, attempt = runstate.ActorOperator, 0, 7, 11
 				case "cancelling":
 					b.snapshot.Binding.RunCancelled = true
 				}
@@ -204,7 +205,7 @@ func TestEngineReportingAuthorities(t *testing.T) {
 				if actor.Kind != kind || actor.Generation != runspec.ClaimGeneration(generation) || actor.Authority != b.snapshot.Authorities[0].Principal.Authority {
 					t.Fatalf("actor = %+v", actor)
 				}
-				if authority == "owner" && actor.Owner != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "runner", Generation: 4}}) {
+				if authority == "owner" && actor.Owner != (runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "runner", Generation: 4}}) {
 					t.Fatalf("owner = %+v", actor.Owner)
 				}
 			})
@@ -296,8 +297,8 @@ func TestEngineAnnotationHTTP(t *testing.T) {
 		t.Fatalf("HTTP %d %s, writes %d", w.Code, w.Body.String(), f.writes)
 	}
 	a := f.annotation
-	if a.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || a.Actor.Authority != b.snapshot.Authorities[0].Principal.Authority ||
-		a.Actor.Kind != store.ActorHolder || a.Actor.Holder != "runner" || a.Actor.Generation != 4 || a.Actor.CapabilityPrefix != "claim" ||
+	if a.Ref != (runspec.NodeRef{RunID: "run", NodeID: "job"}) || a.Actor.Authority != b.snapshot.Authorities[0].Principal.Authority ||
+		a.Actor.Kind != runstate.ActorHolder || a.Actor.Holder != "runner" || a.Actor.Generation != 4 || a.Actor.CapabilityPrefix != "claim" ||
 		a.StepID != "" || a.Message != "masked annotation" || a.Level != "warning" || a.File != "build.go" || a.Line == nil || *a.Line != 12 {
 		t.Fatalf("annotation = %+v", a)
 	}
@@ -312,7 +313,7 @@ func TestEngineSummaryHTTP(t *testing.T) {
 				path, body, step = "/api/v1/runs/run/jobs/job/steps/summary", `{"step_id":"compile","markdown":"## masked summary"}`, "compile"
 			}
 			w := engineHTTP(t, b, f, path, body)
-			if w.Code != http.StatusNoContent || f.writes != 1 || f.summary.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) ||
+			if w.Code != http.StatusNoContent || f.writes != 1 || f.summary.Ref != (runspec.NodeRef{RunID: "run", NodeID: "job"}) ||
 				f.summary.Actor.Authority != b.snapshot.Authorities[0].Principal.Authority || f.summary.Actor.Generation != 4 ||
 				f.summary.StepID != step || f.summary.Markdown != "## masked summary" {
 				t.Fatalf("HTTP %d %s, summary %+v", w.Code, w.Body.String(), f.summary)
@@ -471,7 +472,7 @@ func TestEngineTypedStepAttemptProperty(t *testing.T) {
 				b.snapshot.Authorities[0].Principal.Capability.Binding.Attempt = current
 				b.snapshot.Binding.Current.Attempt = current
 			}
-			f := &engineTransactions{node: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Generation: 7, Attempt: runspec.AttemptOrdinal(current)}}
+			f := &engineTransactions{node: runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Generation: 7, Attempt: runspec.AttemptOrdinal(current)}}
 			start := time.Date(2026, 10, 14, 12, 0, 0, int(seed%1000000000), time.UTC)
 			finish := start.Add(time.Nanosecond)
 			input := controllerwire.StepReportRequest{StepID: "compile", State: "passed", SourceAttempt: observed, StartedAt: &start, FinishedAt: &finish, MaskedError: "masked"}

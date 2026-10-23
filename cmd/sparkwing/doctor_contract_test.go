@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type doctorLifecycleFake struct {
@@ -21,11 +22,11 @@ type doctorLifecycleFake struct {
 	version  string
 	calls    int
 	deadline time.Time
-	findings []wingd.LocalDoctorFinding
+	findings []localhostwire.LocalDoctorFinding
 	err      error
 }
 
-func (f *doctorLifecycleFake) Doctor(ctx context.Context, version string) ([]wingd.LocalDoctorFinding, error) {
+func (f *doctorLifecycleFake) Doctor(ctx context.Context, version string) ([]localhostwire.LocalDoctorFinding, error) {
 	f.calls++
 	f.version = version
 	f.deadline, _ = ctx.Deadline()
@@ -41,7 +42,7 @@ func doctorTestDependencies(local *doctorLifecycleFake) doctorDependencies {
 }
 
 func TestDoctorCommandUsesControllerDiagnostics(t *testing.T) {
-	findings := []wingd.LocalDoctorFinding{
+	findings := []localhostwire.LocalDoctorFinding{
 		{Code: "removed_timer_verb", Unit: "nightly", Message: "timer calls crons tick", Hint: "sparkwing schedules install"},
 		{Code: "version_skew", Unit: "controller", Message: "controller uses v1.0.0", Hint: "sparkwing update"},
 		{Code: "incompatible_store", Message: "store schema is newer than this executable", Hint: "sparkwing update"},
@@ -92,7 +93,7 @@ func TestDoctorCommandPreflightDoesNotResolveDependencies(t *testing.T) {
 func TestDoctorCommandRetainsPartialFindingsAndFailure(t *testing.T) {
 	failure := &apierr.Error{Code: apierr.Unavailable, Message: "controller did not answer", Hint: "sparkwing daemon restart"}
 	for _, resolveFailure := range []bool{false, true} {
-		local := &doctorLifecycleFake{err: failure, findings: []wingd.LocalDoctorFinding{{Code: "removed_timer_verb", Unit: "nightly", Message: "timer calls crons tick"}}}
+		local := &doctorLifecycleFake{err: failure, findings: []localhostwire.LocalDoctorFinding{{Code: "removed_timer_verb", Unit: "nightly", Message: "timer calls crons tick"}}}
 		deps := doctorTestDependencies(local)
 		if resolveFailure {
 			deps.local = func(context.Context) (dashboardServices, error) { return dashboardServices{}, failure }
@@ -162,8 +163,8 @@ func TestDoctorCommandResolverCancellationSkipsLifecycle(t *testing.T) {
 }
 
 func TestDoctorCommandRejectsIncompleteFindings(t *testing.T) {
-	for _, finding := range []wingd.LocalDoctorFinding{{Message: "missing code"}, {Code: "missing_message"}} {
-		local := &doctorLifecycleFake{findings: []wingd.LocalDoctorFinding{finding}}
+	for _, finding := range []localhostwire.LocalDoctorFinding{{Message: "missing code"}, {Code: "missing_message"}} {
+		local := &doctorLifecycleFake{findings: []localhostwire.LocalDoctorFinding{finding}}
 		var out bytes.Buffer
 		err := runDoctorCommandArgs(t.Context(), []string{"-o", "json"}, &out, doctorTestDependencies(local))
 		var got doctorReport
@@ -207,7 +208,7 @@ func TestDoctorCommandPreservesPrivateStateWithoutOpeningIt(t *testing.T) {
 }
 
 func TestDoctorJSONUsesLowercaseFindingFields(t *testing.T) {
-	local := &doctorLifecycleFake{findings: []wingd.LocalDoctorFinding{{Code: "version_skew", Unit: "controller", Message: "old executable", Hint: "sparkwing update"}}}
+	local := &doctorLifecycleFake{findings: []localhostwire.LocalDoctorFinding{{Code: "version_skew", Unit: "controller", Message: "old executable", Hint: "sparkwing update"}}}
 	var out bytes.Buffer
 	if err := runDoctorCommandArgs(t.Context(), []string{"-o", "json"}, &out, doctorTestDependencies(local)); err != nil {
 		t.Fatal(err)
@@ -226,7 +227,7 @@ func TestDoctorJSONUsesLowercaseFindingFields(t *testing.T) {
 }
 
 func TestDoctorFormatsRetainActionableFindings(t *testing.T) {
-	local := &doctorLifecycleFake{findings: []wingd.LocalDoctorFinding{{Code: "removed_timer_verb", Unit: "nightly", Message: "timer calls crons tick", Hint: "sparkwing schedules install"}}}
+	local := &doctorLifecycleFake{findings: []localhostwire.LocalDoctorFinding{{Code: "removed_timer_verb", Unit: "nightly", Message: "timer calls crons tick", Hint: "sparkwing schedules install"}}}
 	for _, mode := range []string{"plain", "pretty"} {
 		var out bytes.Buffer
 		if err := runDoctorCommandArgs(t.Context(), []string{"-o", mode}, &out, doctorTestDependencies(local)); err != nil {
@@ -253,7 +254,7 @@ type doctorFailedWriter struct{}
 
 func (doctorFailedWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
-func sameDoctorFindings(got []doctorFinding, want []wingd.LocalDoctorFinding) bool {
+func sameDoctorFindings(got []doctorFinding, want []localhostwire.LocalDoctorFinding) bool {
 	if len(got) != len(want) {
 		return false
 	}

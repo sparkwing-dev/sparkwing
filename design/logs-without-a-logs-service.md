@@ -53,7 +53,7 @@ flowchart LR
 |---|---|
 | Store interface | `storage.LogStore` in `internal/storage/storage.go`; seal is an optional interface checked in `internal/orchestrator/httplogs.go` |
 | Node-side writer | `HTTPLogs` in `internal/orchestrator/httplogs.go`: 256 lines, 64 KiB or 100 ms batches, a per-line sequence number and a running SHA-256, `seal()` on `Close` |
-| Laptop writer | `localLogs` in `internal/orchestrator/backends.go`, writing `runs/<run>/<node>.log` (`internal/paths/paths.go`) |
+| Laptop writer | `localLogs` in `internal/orchestrator/backends.go`, writing `runs/<run>/<node>.log` (`pkg/paths/paths.go`) |
 | Object-store writer | `internal/storage/logbatch` over `internal/storage/s3/logs.go`: one object per flush, 2 s or 256 KiB, capped at 2000 objects and 64 MiB per node |
 | Seal and completeness | `pkg/logs/seal.go` (states streaming, complete, incomplete, cut_off, unconfirmed, unknown); readers in `internal/backend/completeness.go` |
 | Live ring | `internal/controller/livelogs.go` and `livelogs_http.go`: 512 KiB per node, 64 MiB total, 1024 nodes, 10 min idle release |

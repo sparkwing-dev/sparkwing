@@ -8,13 +8,13 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestTerminalRecordSelectorsProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(8341, 72))
-	for _, policy := range []SourcePolicy{SourceNone, SourceMemo, SourceManualRetry, SourceCoalesced} {
+	for _, policy := range []runstate.SourcePolicy{runstate.SourceNone, runstate.SourceMemo, runstate.SourceManualRetry, runstate.SourceCoalesced} {
 		t.Run(string(policy), func(t *testing.T) {
 			for i := range 8 {
 				t.Run(fmt.Sprint(i), func(t *testing.T) {
@@ -29,26 +29,28 @@ func TestTerminalRecordSelectorsProperty(t *testing.T) {
 					if i%3 == 1 {
 						want.Manifest = nil
 					}
-					if policy == SourceNone {
+					if policy == runstate.SourceNone {
 						tenant, _, _ = reconcileFixture(t)
-						tenant.s.resultRecords = nodeResultRecordsFunc(func(context.Context, *storeTx, Team, Actor, NodeRow, NodeResult) error { return nil })
-						holder := Actor{Kind: ActorHolder, Authority: request.Actor.Authority, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
+						tenant.s.resultRecords = nodeResultRecordsFunc(func(context.Context, *storeTx, Team, runstate.Actor, runstate.NodeRow, runstate.NodeResult) error {
+							return nil
+						})
+						holder := runstate.Actor{Kind: runstate.ActorHolder, Authority: request.Actor.Authority, CapabilityPrefix: "claim", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "runner", Generation: 2}}
 						holder.Authority.ID = "claim"
-						change := nodeTransition{Ref: request.Ref, Actor: holder, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: want.Output, ManifestRecord: want.Manifest}}}
+						change := nodeTransition{Ref: request.Ref, Actor: holder, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess, OutputRecord: want.Output, ManifestRecord: want.Manifest}}}
 						if _, err := tenant.TransitionNode(t.Context(), change); err != nil {
 							t.Fatal(err)
 						}
 					} else {
-						tenant.s.materializations = materializationRecordsFunc(func(context.Context, *storeTx, Team, Actor, controllerwire.NodeRef, MaterializeSource) (materializedRecords, error) {
+						tenant.s.materializations = materializationRecordsFunc(func(context.Context, *storeTx, Team, runstate.Actor, runspec.NodeRef, runstate.MaterializeSource) (materializedRecords, error) {
 							return want, nil
 						})
 						got, err := tenant.ReconcileNode(t.Context(), request)
-						if err != nil || got.Kind != Materialize || got.Node.Attempt != 0 {
+						if err != nil || got.Kind != runstate.Materialize || got.Node.Attempt != 0 {
 							t.Fatalf("materialization: %+v, %v", got, err)
 						}
 						assertResultSelectors(t, got.Node, want)
 						got, err = tenant.ReconcileNode(t.Context(), request)
-						if err != nil || got.Kind != KeepTerminal {
+						if err != nil || got.Kind != runstate.KeepTerminal {
 							t.Fatalf("terminal replay: %+v, %v", got, err)
 						}
 						assertResultSelectors(t, got.Node, want)
@@ -74,7 +76,7 @@ func TestTerminalRecordSelectorsProperty(t *testing.T) {
 	}
 }
 
-func assertResultSelectors(t *testing.T, node NodeRow, want materializedRecords) {
+func assertResultSelectors(t *testing.T, node runstate.NodeRow, want materializedRecords) {
 	t.Helper()
 	got := materializedRecords{Output: node.OutputRecord, Manifest: node.ManifestRecord}
 	if !reflect.DeepEqual(got, want) {

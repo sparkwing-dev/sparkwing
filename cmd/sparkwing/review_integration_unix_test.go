@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/sessionledger"
 )
 
 func TestReviewProductionExecutionBindings(t *testing.T) {

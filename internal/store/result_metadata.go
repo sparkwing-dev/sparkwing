@@ -10,17 +10,17 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // StepReport fences step state to the attempt that produced it.
 type StepReport struct {
 	Attempt     runspec.AttemptIdentity
-	Actor       Actor
+	Actor       runstate.Actor
 	StepID      string
 	State       string
 	MaskedError string
@@ -30,8 +30,8 @@ type StepReport struct {
 
 // AnnotationWrite carries already masked text; the store rechecks the shared annotation byte limit without truncation.
 type AnnotationWrite struct {
-	Ref     controllerwire.NodeRef
-	Actor   Actor
+	Ref     runspec.NodeRef
+	Actor   runstate.Actor
 	StepID  string
 	Level   string
 	Message string
@@ -41,22 +41,22 @@ type AnnotationWrite struct {
 
 // SummaryWrite carries masked job or step markdown under the writer's live binding.
 type SummaryWrite struct {
-	Ref      controllerwire.NodeRef
-	Actor    Actor
+	Ref      runspec.NodeRef
+	Actor    runstate.Actor
 	StepID   string
 	Markdown string
 }
 
-func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.NodeRef, actor Actor) (NodeRow, error) {
+func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, actor runstate.Actor) (runstate.NodeRow, error) {
 	p, err := resolveActorTx(ctx, tx, actor)
 	if err != nil {
-		return NodeRow{}, err
+		return runstate.NodeRow{}, err
 	}
 	if !slices.Contains(p.Capability.Grants, capability.NodeReport) {
-		return NodeRow{}, authorityError(apierr.Forbidden, "job reporting grant is required")
+		return runstate.NodeRow{}, authorityError(apierr.Forbidden, "job reporting grant is required")
 	}
 	if err := lockStateRunTx(ctx, tx, team, string(ref.RunID)); err != nil {
-		return NodeRow{}, err
+		return runstate.NodeRow{}, err
 	}
 	row, err := readNodeTx(ctx, tx, team, ref)
 	if err != nil {
@@ -100,7 +100,7 @@ func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error {
 		return err
 	}
 	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
-		row, err := checkResultWriterTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(report.Attempt.RunID), NodeID: runspec.NodeID(report.Attempt.NodeID)}, report.Actor)
+		row, err := checkResultWriterTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(report.Attempt.RunID), NodeID: runspec.NodeID(report.Attempt.NodeID)}, report.Actor)
 		if err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error {
 	})
 }
 
-func writeStepTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, report StepReport) error {
+func writeStepTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, report StepReport) error {
 	var state, message string
 	var started sql.NullInt64
 	var sourceStarted, sourceFinished sql.NullInt64
@@ -245,7 +245,7 @@ func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
 	})
 }
 
-func resultTarget(row NodeRow, team Team, step string) (string, []any) {
+func resultTarget(row runstate.NodeRow, team Team, step string) (string, []any) {
 	args := []any{team, row.Ref.RunID, row.Ref.NodeID}
 	if step == "" {
 		return "nodes WHERE team = ? AND run_id = ? AND node_id = ?", args

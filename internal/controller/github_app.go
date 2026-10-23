@@ -19,12 +19,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 const envGitHubAppInstallation = "GITHUB_APP_INSTALLATION_ID"
@@ -789,7 +789,7 @@ func (s *Server) githubAppCheckUpdate(ctx context.Context, tenant *store.Tenant,
 		return githubCheckUpdate{}, false, errInvalidGitHubCompletion
 	}
 	status := string(effect.State)
-	if effect.State == store.RunFailed && (effect.Reason == "timeout" || effect.Reason == "queue_timeout") {
+	if effect.State == runstate.RunFailed && (effect.Reason == "timeout" || effect.Reason == "queue_timeout") {
 		status = "timed_out"
 	}
 	return githubCheckUpdate{installation: app.Value.InstallationID, repository: provenance.RepositoryID(), sha: provenance.SHA(), pipeline: provenance.Pipeline(), runID: run.ID, runStatus: status, team: tenant.Team()}, true, nil

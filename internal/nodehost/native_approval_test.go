@@ -14,18 +14,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -44,7 +44,7 @@ func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
 	evaluator, err := NewOwnerEvaluator(EvaluationDependencies{
 		Store: f.State, Masker: testMasker(),
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return selected, nil
 		},
 		Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) {
@@ -73,15 +73,15 @@ func TestNativeApprovalPredicateSkipsWithoutJobCapacityOrCompute(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.Host.executionAdmission = ComposeStartGate(f.Tenant, &LocalAdmission{Daemon: daemon}, false)
-	f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+	f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 		return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodeproto.FrameLog) error { return nil })
 	}
 	result, err := f.Host.Run(ctx, f.Input)
 	if err != nil || result.Outcome != "success" {
 		t.Fatalf("approval bypass: %+v, %v", result, err)
 	}
-	row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(job.ID)})
-	if err != nil || row.Status != store.StatusDone || row.Outcome != store.NodeSkipped || row.Attempt != 0 {
+	row, err := f.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(job.ID)})
+	if err != nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeSkipped || row.Attempt != 0 {
 		t.Fatalf("approval bypass created execution: %+v, %v", row, err)
 	}
 	if process == nil || process.closed != 1 || process.cleaned != 1 {
@@ -122,14 +122,14 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 				t.Fatalf("eval binding=%+v error=%v", principal.Capability.Binding, err)
 			}
 			input := f.Input
-			input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: award.Award.CapabilityPrefix, Owner: award.Owner}
+			input.Owner = runstate.Actor{Kind: runstate.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: award.Award.CapabilityPrefix, Owner: award.Owner}
 			var accepted runspec.Spec
 			if err := json.Unmarshal(f.Accepted.Spec, &accepted); err != nil {
 				t.Fatal(err)
 			}
 			selected := engine.Resolved{Identity: accepted.Resolved.Engine}
 			var process *executorProcess
-			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: f.State, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: f.State, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return selected, nil
 			}, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) {
 				if state, err := f.Tenant.GetConcurrencyState(ctx, "job:global:approval"); !errors.Is(err, store.ErrNotFound) && (err != nil || len(state.Holders) != 0) {
@@ -149,7 +149,7 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+			f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 				return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodeproto.FrameLog) error { return nil })
 			}
 			f.Host.executionAdmission.compute = &LocalAdmission{Daemon: admissionAcquireFunc(func(context.Context, wingwire.AdmissionRequest, func(wingwire.Queued)) (Lease, error) {
@@ -163,7 +163,7 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 				t.Fatal(err)
 			}
 			row := capacityRow(t, f, "gate")
-			if mode == "open" && row.Status != store.StatusApprovalPending || mode == "skip" && row.Outcome != store.NodeSkipped || mode == "fail" && row.Outcome != store.NodeFailed || row.Attempt != 0 {
+			if mode == "open" && row.Status != runstate.StatusApprovalPending || mode == "skip" && row.Outcome != runstate.NodeSkipped || mode == "fail" && row.Outcome != runstate.NodeFailed || row.Attempt != 0 {
 				t.Fatalf("mode=%s result=%+v", mode, row)
 			}
 			var status string
@@ -192,7 +192,7 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 	bin := buildNativeSDKFixture(t, ctx, fixture)
 	runner := nodeproto.RunnerIdentity{Name: "host", Type: "local", Labels: []string{}}
 	hello, plan := planNativeSDKFixture(t, ctx, bin, "p", map[string]string{}, nodeproto.RunContext{RunID: "describe", Pipeline: "p"}, runner)
-	selected := engine.Resolved{Identity: engine.Identity{Version: "fixture", ManifestDigest: "fixture", Pin: engine.Pin{SDK: engine.GoSDK, Version: hello.SDK.Version}}}
+	selected := engine.Resolved{Identity: engineid.Identity{Version: "fixture", ManifestDigest: "fixture", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: hello.SDK.Version}}}
 	for _, placement := range []string{"host", "controller"} {
 		t.Run(placement, func(t *testing.T) {
 			request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}
@@ -225,14 +225,14 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 				if err != nil {
 					t.Fatal(err)
 				}
-				input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: award.Award.CapabilityPrefix, Owner: award.Owner}
+				input.Owner = runstate.Actor{Kind: runstate.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: award.Award.CapabilityPrefix, Owner: award.Owner}
 			}
 			authorities, err := NewProcessAuthorities(ProcessAuthorityDependencies{Parent: f.Store.AsOperator(), Bindings: f.Store.AsOperator()})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer authorities.Close()
-			router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
+			router := routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 			if err := RegisterProcessServices(router, authorities.Resolve); err != nil {
 				t.Fatal(err)
 			}
@@ -259,7 +259,7 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 				}
 				return service, err
 			}}
-			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: f.State, Bind: claims.evaluate, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: f.State, Bind: claims.evaluate, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return selected, nil
 			}, Start: func(ctx context.Context, in EvaluationInput) (ExecutorProcess, error) {
 				return StartProtocolSession(ctx, ProtocolSessionConfig{Command: []string{bin}, Environment: testProcessEnv(t, "PATH="+os.Getenv("PATH")), Revoke: in.processRevoke})
@@ -267,7 +267,7 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row store.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
+			f.Host.SkipPolicy = func(ctx context.Context, in EvaluationInput, row runstate.NodeRow, _ StorageBinding) (OwnerLayerResult, error) {
 				return evaluator.skipLayer(ctx, in, row, func(context.Context, string, string, nodeproto.FrameLog) error { return nil })
 			}
 			if placement == "controller" {
@@ -280,7 +280,7 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 				}
 			}
 			row := capacityRow(t, f, "gate")
-			if row.Outcome != store.NodeSkipped || row.Attempt != 0 || reads.Load() != 1 {
+			if row.Outcome != runstate.NodeSkipped || row.Attempt != 0 || reads.Load() != 1 {
 				t.Fatalf("approval=%+v dependency reads=%d", row, reads.Load())
 			}
 		})

@@ -1,0 +1,72 @@
+# pkg/limits
+
+const AnnotationBytes int64 = 128 << 10
+const AttemptLogBytes int64 = 64 << 20
+const BlobGCGrace time.Duration = 24 * time.Hour
+const CacheArchiveBytes int64 = 500 << 20
+func CheckRenewal(every, ttl time.Duration) error
+func Child(now, parent time.Time, want, margin time.Duration) (time.Time, error)
+const ChildAwait time.Duration = 60 * time.Second
+func ChildContext(ctx context.Context, want, margin time.Duration) (context.Context, context.CancelFunc, error)
+const ClaimPoll time.Duration = 500 * time.Millisecond
+const ClaimWait time.Duration = 24 * time.Hour
+const ClaimWindow time.Duration = 10 * time.Minute
+const CleanupTimeout time.Duration = 2 * time.Minute
+const ControllerCompatibilityMonths = 12
+const DataDownloadURLTTL time.Duration = time.Minute
+const DataUploadURLTTL time.Duration = 15 * time.Minute
+const DebugPause time.Duration = 30 * time.Minute
+const DefaultLease time.Duration = 3 * time.Minute
+var ErrNoTime = errors.New("no time remains before parent deadline")
+func Error(text string) string
+const ErrorBytes int64 = 8 << 10
+const EventBytes int64 = 256 << 10
+func Failure(raw []byte) ([]byte, error)
+const FreeLogRetention time.Duration = 30 * 24 * time.Hour
+const FundedLogRetention time.Duration = 90 * 24 * time.Hour
+const GitHubRunnerCredentialTTL time.Duration = time.Hour
+const HeartbeatTimeout time.Duration = 2 * time.Second
+const HostBillingMinimum time.Duration = time.Minute
+const JSONRequestBytes int64 = 1 << 20
+func JobDeadline(now, ownerDeadline, attemptDeadline time.Time) (time.Time, error)
+const JobScratchBytes int64 = 20 << 30
+const LocalBinaryCacheBytes int64 = 2 << 30
+const LocalBinaryCacheEntries int = 20
+const LocalControllerHandshake time.Duration = time.Minute
+const LocalControllerIdleTimeout time.Duration = 5 * time.Minute
+const LogManifestBytes int64 = 4 << 20
+const LogSealGrace time.Duration = time.Minute
+const LogSearchBytes int64 = 256 << 20
+const LogSearchTimeout time.Duration = 10 * time.Second
+const LogSegmentBytes int64 = 1 << 20
+const LogSegmentUploadBytes int64 = 8 << 20
+const LogUploadURLTTL time.Duration = 15 * time.Minute
+const MaxAnnotations int = 1000
+const MaxChildDepth int = 10
+const MaxChildrenPerRoot int = 50
+const MaxDisruptions int = 3
+const MaxEvents int = 50000
+const MaxLogSegmentNumber int = 1000000
+const MaxMetricSamples int = 10000
+const MaxRetries int = 10
+const MaxScheduledReposPerTeam int = 10
+const MaxSchedulesPerRepo int = 20
+const MemoDefaultTTL time.Duration = 7 * 24 * time.Hour
+const MemoMaxTTL time.Duration = 30 * 24 * time.Hour
+const NodeOutputBytes int64 = 16 << 20
+const OperatorEnvMaskMinLength int = 12
+const ProjectConfigBytes int64 = 1 << 20
+const ProtocolEnvelopeBytes int64 = 1 << 20
+const RankingObservations int = 64
+const RankingWindow time.Duration = 5 * time.Second
+func Record(text string) string
+func Renew(ttl time.Duration) time.Duration
+const RetryBackoff time.Duration = 5 * time.Minute
+const RunAnnotationBytes int64 = 4 << 20
+const RunDeadline time.Duration = 6 * time.Hour
+const RunEventBytes int64 = 64 << 20
+const RunnerConcurrency int = 1
+const ScheduleCatchUpMax time.Duration = 24 * time.Hour
+const ScheduleCatchUpMin time.Duration = 2 * time.Minute
+const VersionIndexRefresh time.Duration = 5 * time.Minute
+const WorkBillingMinimum time.Duration = time.Minute

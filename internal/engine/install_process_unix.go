@@ -7,7 +7,7 @@ import (
 	"errors"
 	"os/exec"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
 )
 
 func runSDKInstallProcess(ctx context.Context, command *exec.Cmd) error {

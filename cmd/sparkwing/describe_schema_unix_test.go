@@ -13,8 +13,8 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestPipelineDescribeRefusesUnusableSourceInsteadOfCachedMetadata(t *testing.T) {

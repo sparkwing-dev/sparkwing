@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // safety: unit leases combine authority, funding and durable stop deadlines here;

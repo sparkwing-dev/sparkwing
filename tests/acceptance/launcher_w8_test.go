@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	corev1 "k8s.io/api/core/v1"
 )
 
 type cloudBoundaryFake struct {
@@ -46,7 +46,7 @@ func cloudFixture(kind launcher.CloudUnitKind) (time.Time, launcher.CloudJobConf
 	cfg := launcher.CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}
 	award := launcher.CloudJobAward{LeaseExpiresAt: now.Add(10 * time.Minute), Binding: launcher.CloudJobBinding{UnitID: "unit", Kind: kind, Team: "team", RunID: "run", NodeID: "job", Holder: "holder", Generation: 1, Attempt: 1, OwnerDeadline: now.Add(time.Hour), AttemptDeadline: now.Add(10 * time.Minute), ParentCapabilityExpiry: now.Add(45 * time.Minute)}, Bootstrap: []byte("secret-bootstrap-value"), CPUCores: 1.5, Memory: 2 << 30}
 	if kind != launcher.CloudPlan {
-		award.Engine = &engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("b", 64)}
+		award.Engine = &engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("b", 64)}
 	} else {
 		award.Binding.NodeID, award.Binding.Attempt = "", 0
 	}

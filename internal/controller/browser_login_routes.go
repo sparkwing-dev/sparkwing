@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type loginProofKey struct{}
@@ -18,8 +20,8 @@ type loginProof struct {
 	session *store.Session
 }
 
-func (s *Server) loginEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) loginEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/login", Authentication: capability.AuthBrowserFlow, Verify: s.verifyLoginPage, Handle: s.handleLoginPage},
 		{Method: "POST", Pattern: "/login", Authentication: capability.AuthBrowserFlow, Verify: s.verifyLoginSubmit, Handle: s.handleLoginSubmit},
 	}
@@ -53,7 +55,7 @@ func (s *Server) verifyLoginSubmit(r *http.Request) error {
 		return err
 	}
 	if s.operator == nil || s.authorization.Authenticator == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	if !s.deployment.MultiTeam() {
 		return sessionUnavailable()

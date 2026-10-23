@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func decodeNDJSON[T any](t *testing.T, out string) []T {

@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/source/gitcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitcmd"
 )
 
 type gitClient struct {

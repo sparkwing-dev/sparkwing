@@ -6,11 +6,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 func (s *boundData) Download(ctx context.Context, request blob.GetRequest) (blob.SignedTransfer, error) {
@@ -26,7 +27,7 @@ func (s *boundData) Download(ctx context.Context, request blob.GetRequest) (blob
 		return blob.SignedTransfer{}, err
 	}
 	if s.controller.ReadBlob == nil || s.controller.Objects == nil || s.controller.ChargeDownload == nil {
-		return blob.SignedTransfer{}, missingEndpointPolicy()
+		return blob.SignedTransfer{}, routepolicy.MissingEndpointPolicy()
 	}
 	metadata, err := s.controller.ReadBlob(ctx, authority, request.Digest)
 	if err != nil {
@@ -66,7 +67,7 @@ func (s *boundData) HasMany(ctx context.Context, request blob.HasManyRequest) (b
 		return blob.Presence{}, err
 	}
 	if s.controller.ReadBlob == nil {
-		return blob.Presence{}, missingEndpointPolicy()
+		return blob.Presence{}, routepolicy.MissingEndpointPolicy()
 	}
 	for _, digest := range request.Digests {
 		if !validDataDigest(digest) {

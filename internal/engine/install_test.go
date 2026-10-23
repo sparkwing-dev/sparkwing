@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -51,7 +52,7 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AMBIENT_INSTALL_TEST", "must-not-inherit")
-	for _, sdk := range []SDKKind{GoSDK, TypeScriptSDK} {
+	for _, sdk := range []engineid.SDKKind{engineid.GoSDK, engineid.TypeScriptSDK} {
 		t.Run(string(sdk), func(t *testing.T) {
 			checkout := t.TempDir()
 			pipeline := filepath.Join(checkout, ".sparkwing")
@@ -78,7 +79,7 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			if sdk == GoSDK {
+			if sdk == engineid.GoSDK {
 				if err := command.Close(); err != nil {
 					t.Fatal(err)
 				}
@@ -122,9 +123,9 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 	}
 }
 
-func writeInstallPin(t *testing.T, dir string, sdk SDKKind) {
+func writeInstallPin(t *testing.T, dir string, sdk engineid.SDKKind) {
 	t.Helper()
-	if sdk == GoSDK {
+	if sdk == engineid.GoSDK {
 		writeFixture(t, dir, "go.mod", []byte("module fixture\ngo 1.26\nrequire "+GoModule+" v0.20.0\n"))
 		return
 	}
@@ -146,8 +147,8 @@ func TestInstallSDKPreservesRegisteredSecretsProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkout := t.TempDir()
-	writeInstallPin(t, checkout, GoSDK)
-	pin, err := ReadPin(checkout, GoSDK)
+	writeInstallPin(t, checkout, engineid.GoSDK)
+	pin, err := ReadPin(checkout, engineid.GoSDK)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +164,7 @@ func TestInstallSDKPreservesRegisteredSecretsProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = resolved.InstallSDK(t.Context(), SDKInstallRequest{Directory: checkout, SDK: GoSDK, Environment: slices.Collect(environment.Values()), Masker: masker})
+		_, err = resolved.InstallSDK(t.Context(), SDKInstallRequest{Directory: checkout, SDK: engineid.GoSDK, Environment: slices.Collect(environment.Values()), Masker: masker})
 		if err == nil || strings.Contains(err.Error(), secret) {
 			t.Fatalf("registered install secret survived at seed %d", seed)
 		}

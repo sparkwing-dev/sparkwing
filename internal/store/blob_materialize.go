@@ -8,16 +8,16 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
-func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, ref controllerwire.NodeRef, source MaterializeSource) (materializedRecords, error) {
+func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, ref runspec.NodeRef, source runstate.MaterializeSource) (materializedRecords, error) {
 	result := materializedRecords{}
 	a, err := resolveBlobAuthorityTx(ctx, tx, team, blob.Authority{CapabilityRef: actor.CapabilityPrefix}, capability.DataWrite)
 	if err != nil {
@@ -58,7 +58,7 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 		}
 		if record.Key.Scope.Ref != a.authority.Ref.Scope {
 			facts := record.RefFacts
-			if source.Kind != SourceMemo || !facts.DefaultBranchVerified || !facts.Scope.Verified || facts.AppDeliveryKey == "" || facts.SHA == "" || facts.Scope.Ref != a.authority.Ref.DefaultBranch || !slices.Contains(a.capability.Data.ReadRefs, facts.Scope.CapabilityScope()) {
+			if source.Kind != runstate.SourceMemo || !facts.DefaultBranchVerified || !facts.Scope.Verified || facts.AppDeliveryKey == "" || facts.SHA == "" || facts.Scope.Ref != a.authority.Ref.DefaultBranch || !slices.Contains(a.capability.Data.ReadRefs, facts.Scope.CapabilityScope()) {
 				return result, blob.ErrDigestNotReadable
 			}
 		}
@@ -166,15 +166,15 @@ func (r *blobRecords) verifyMaterializedBlobs(ctx context.Context, tx *storeTx, 
 	return pending
 }
 
-func materializedKey(team Team, a blobActor, row NodeRow, kind blob.Kind) blob.RecordKey {
+func materializedKey(team Team, a blobActor, row runstate.NodeRow, kind blob.Kind) blob.RecordKey {
 	return blob.MaterializedRecordKey(string(team), string(row.Ref.RunID), string(row.Ref.NodeID), row.StateSeq+1, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, kind)
 }
 
-func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobActor, target NodeRow, source MaterializeSource) ([]blob.RecordKey, error) {
-	if source.Kind == SourceCoalesced {
+func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobActor, target runstate.NodeRow, source runstate.MaterializeSource) ([]blob.RecordKey, error) {
+	if source.Kind == runstate.SourceCoalesced {
 		return nil, authorityError(apierr.Unavailable, "coalesced source read-edge authority is not configured")
 	}
-	if source.Kind == SourceMemo {
+	if source.Kind == runstate.SourceMemo {
 		key := source.Record
 		var spec nodeproto.JobSpec
 		if json.Unmarshal(target.Spec, &spec) != nil || spec.Memo == nil || key.Team != string(team) || key.Kind != blob.KindMemo || key.Scope.Repo != a.authority.Repo || key.Scope.Pipeline != a.pipeline || runspec.NodeID(key.Scope.Job) != target.Ref.NodeID || !slices.Contains(a.capability.Data.ReadRefs, key.Scope.Ref.CapabilityScope()) || key.Name != "output" && key.Name != "manifest" {

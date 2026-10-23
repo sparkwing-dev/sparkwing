@@ -19,10 +19,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
-	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/pkg/sessionledger"
 )
 
 const releaseTimeout = 10 * time.Second

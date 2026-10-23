@@ -13,22 +13,23 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 type childSourceEngine struct{ executable string }
 
-func (e childSourceEngine) Resolve(_ context.Context, pin engine.Pin, target releaseasset.Target) (engine.Resolved, error) {
-	return engine.Resolved{Identity: engine.Identity{Pin: pin, Version: pin.Version, ManifestDigest: "verified"}, Executable: e.executable, Target: target}, nil
+func (e childSourceEngine) Resolve(_ context.Context, pin engineid.Pin, target releaseasset.Target) (engine.Resolved, error) {
+	return engine.Resolved{Identity: engineid.Identity{Pin: pin, Version: pin.Version, ManifestDigest: "verified"}, Executable: e.executable, Target: target}, nil
 }
 
 func TestFreshChildRefLookupCannotSelectAnotherRepositoryOrDirectoryProperty(t *testing.T) {
@@ -65,7 +66,7 @@ func TestFreshChildRefLookupCannotSelectAnotherRepositoryOrDirectoryProperty(t *
 	}
 }
 
-func (e childSourceEngine) Ensure(ctx context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+func (e childSourceEngine) Ensure(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (engine.Resolved, error) {
 	return e.Resolve(ctx, identity.Pin, target)
 }
 
@@ -167,7 +168,7 @@ func checkNativeFreshBranchChild(t *testing.T, explicit bool) {
 	installed := false
 	entry, err := source.Acquire(t.Context(), spec, source.Options{Workspace: t.TempDir(), Access: childSourcePublicAccess{}, Engines: childSourceEngine{executable}, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, InstallSDK: func(_ context.Context, selectedEngine engine.Resolved, install engine.SDKInstallRequest) (engine.SDKCommand, error) {
 		directory := filepath.Join(install.Directory, install.PipelineDir)
-		if selectedEngine.Identity.Pin.SDK != engine.GoSDK || selectedEngine.Identity.Pin.Version != "v1.2.3" || sourcetest.Git(t, install.Directory, "rev-parse", "HEAD") != selected {
+		if selectedEngine.Identity.Pin.SDK != engineid.GoSDK || selectedEngine.Identity.Pin.Version != "v1.2.3" || sourcetest.Git(t, install.Directory, "rev-parse", "HEAD") != selected {
 			t.Fatal("installer selected another branch or SDK")
 		}
 		installed = true

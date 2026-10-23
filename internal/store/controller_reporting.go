@@ -3,13 +3,14 @@ package store
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // PrepareLogWrite checks the exact current writer and returns the run's sealed retention class.
-func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, actor Actor) (string, error) {
+func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, actor runstate.Actor) (string, error) {
 	if subject.Team != string(t.team) {
 		return "", authorityError(apierr.Forbidden, "log belongs to another team")
 	}
@@ -39,7 +40,7 @@ func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, a
 }
 
 // WriteActivity records bounded masked detail under the current result writer's fence.
-func (t *Tenant) WriteActivity(ctx context.Context, ref controllerwire.NodeRef, actor Actor, detail string) error {
+func (t *Tenant) WriteActivity(ctx context.Context, ref runspec.NodeRef, actor runstate.Actor, detail string) error {
 	if err := boundedResultText(detail); err != nil {
 		return err
 	}

@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 type replayObject struct {

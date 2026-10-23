@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/paths"
 )
 
 func noticeHome(t *testing.T) (paths.Paths, string) {

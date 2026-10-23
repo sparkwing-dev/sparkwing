@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func cardFixture(t *testing.T) (*Store, *Tenant, time.Time) {
@@ -278,7 +277,7 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 	owner := authorityMember(t, s, "operator", RoleReader)
 	console := s.AsConsole(func(id string) bool { return id == "operator" })
 	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
-	if _, err := console.ConsoleRefund(ctx, a, controllerwire.OperatorRefund{PaymentID: "payment", RefundID: "operator-refund", AmountCents: 400, Reason: "partial"}, "once"); err != nil {
+	if _, err := console.ConsoleRefund(ctx, a, OperatorRefund{PaymentID: "payment", RefundID: "operator-refund", AmountCents: 400, Reason: "partial"}, "once"); err != nil {
 		t.Fatal(err)
 	}
 	event := providerPaymentEvent(now, capability.PaymentRefund)

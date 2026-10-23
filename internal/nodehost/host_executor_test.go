@@ -10,16 +10,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func executionHostFixture(t *testing.T, mode string, trace *[]string, processes *[]*scriptedSDK, configure ...func(*ExecutorDependencies)) (NodeInput, *executionHostFixtureState, *ClaimedNodeHost) {
@@ -57,7 +58,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	}
 	planHash, _ := runspec.CanonicalHash(plan)
 	jobHash, _ := runspec.CanonicalHash(job)
-	identity := engine.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
+	identity := engineid.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}
 	resolved := engine.Resolved{Identity: identity}
 	execution := runspec.JobExecutionSettings{}
 	execution.Retry.Set, execution.Retry.Value = true, 2
@@ -77,15 +78,15 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	raw, _ := json.Marshal(spec)
 	body, _ := json.Marshal(plan)
 	jobBody, _ := json.Marshal(job)
-	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 0, Spec: jobBody, SpecHash: string(jobHash), Execution: execution}
-	s := newExecutionHostStore(store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: body}, Nodes: []store.NodeRow{row}})
+	row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 0, Spec: jobBody, SpecHash: string(jobHash), Execution: execution}
+	s := newExecutionHostStore(store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: body}, Nodes: []runstate.NodeRow{row}})
 	if mode == "artifact_retry" {
 		producer, _ := json.Marshal(plan.Jobs[1])
 		producerHash, _ := runspec.CanonicalHash(plan.Jobs[1])
-		s.snapshot.Nodes = append(s.snapshot.Nodes, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "producer"}, Status: store.StatusDone, Outcome: "success", Spec: producer, SpecHash: string(producerHash)})
+		s.snapshot.Nodes = append(s.snapshot.Nodes, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "producer"}, Status: runstate.StatusDone, Outcome: "success", Spec: producer, SpecHash: string(producerHash)})
 	}
 	if mode == "result_refused" {
-		s.reject = store.CauseReport
+		s.reject = runstate.CauseReport
 	}
 	input, err := NewNodeInput(AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: string(planHash), Plan: plan}, row, resolved, nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}})
 	if err != nil {
@@ -107,7 +108,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 			*processes = append(*processes, process)
 			return process, nil
 		},
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
 
@@ -124,7 +125,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	}
 	setTestExecutor(&dependencies, func(_ context.Context, layer testPolicyName, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		*trace = append(*trace, layer.Name+":in")
-		return func(context.Context, NodeInput, *store.NodeResult) error {
+		return func(context.Context, NodeInput, *runstate.NodeResult) error {
 			*trace = append(*trace, layer.Name+":out")
 			return nil
 		}, nil
@@ -181,7 +182,7 @@ func TestExecutorEnvelope(t *testing.T) {
 			}
 			if mode == "retry" {
 				want := []string{"artifacts:in", "caches:in", "before", "body:1", "body:2", "body:3", "after", "caches:out", "artifacts:out"}
-				if !reflect.DeepEqual(trace, want) || len(s.reports) != 4 || s.reports[0].Cause != store.CauseStart || s.reports[1].Cause != store.CauseRetry || s.reports[2].Cause != store.CauseRetry {
+				if !reflect.DeepEqual(trace, want) || len(s.reports) != 4 || s.reports[0].Cause != runstate.CauseStart || s.reports[1].Cause != runstate.CauseRetry || s.reports[2].Cause != runstate.CauseRetry {
 					t.Fatalf("trace=%v, transitions=%+v", trace, s.reports)
 				}
 			}
@@ -191,11 +192,11 @@ func TestExecutorEnvelope(t *testing.T) {
 				}
 			}
 			last := s.reports[len(s.reports)-1]
-			want := store.NodeFailed
+			want := runstate.NodeFailed
 			if ok || mode == "result_refused" {
-				want = store.NodeSuccess
+				want = runstate.NodeSuccess
 			}
-			if last.Cause != store.CauseReport || last.To != want || strings.Contains(last.Extra.Result.MaskedError, "private") {
+			if last.Cause != runstate.CauseReport || last.To != want || strings.Contains(last.Extra.Result.MaskedError, "private") {
 				t.Fatalf("terminal request=%+v", last)
 			}
 		})

@@ -1,0 +1,8 @@
+# pkg/execdiag
+
+func FromContext(ctx context.Context) (Policy, bool)
+type Policy struct {
+	Expired         func() bool
+	EscalationLimit time.Duration
+	OutputLimit     int
+}

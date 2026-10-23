@@ -12,8 +12,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 const fixtureMemoHash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -350,8 +350,8 @@ func finishBlobRecordJob(t *testing.T, records *blobRecords, intent blob.UploadI
 	}
 	id := intent.Identity.Attempt.Value
 	key := blobOutputRequest(intent).Key
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(id.RunID), NodeID: runspec.NodeID(id.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(id.Generation)}}
-	_, err := records.tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(id.RunID), NodeID: runspec.NodeID(id.NodeID)}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(id.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &key}}})
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(id.RunID), NodeID: runspec.NodeID(id.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(id.Generation)}}
+	_, err := records.tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(id.RunID), NodeID: runspec.NodeID(id.NodeID)}, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(id.Attempt), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess, OutputRecord: &key}}})
 	if err != nil {
 		t.Fatal(err)
 	}

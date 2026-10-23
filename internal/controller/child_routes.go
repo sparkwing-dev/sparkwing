@@ -7,11 +7,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func (s *Server) childEndpoints(e *EngineController) []Endpoint {
-	return []Endpoint{
+func (s *Server) childEndpoints(e *EngineController) []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/children", Authentication: capability.AuthCapability, Decode: e.childIntakeTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleIntake(e)},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/children/{child}", Authentication: capability.AuthCapability, Decode: e.childTarget, ResolveTarget: e.resolveRunSelector, Handle: e.handleChild},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/output", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobOutput},
@@ -29,13 +30,13 @@ func (s *Server) handleJobOutput(w http.ResponseWriter, r *http.Request, a capab
 
 func (s *Server) handleOutput(w http.ResponseWriter, r *http.Request, a capability.Authorized, child bool) error {
 	if s.operator == nil || s.dataController == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	objects, ok := s.dataController.Objects.(interface {
 		ReadOutput(context.Context, blob.Blob) ([]byte, error)
 	})
 	if !ok {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {

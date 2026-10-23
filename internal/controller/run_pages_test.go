@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -108,12 +108,12 @@ func TestPersistedRunPagesFilterBeforeLimitAndPreserveCurrentNotices(t *testing.
 			t.Fatalf("empty %+v: %+v %v", query, page, err)
 		}
 	}
-	spec, err := json.Marshal(runspec.Spec{Request: run.Request, Resolved: runspec.Resolved{Engine: engine.Identity{Version: "v1.2.3"}}})
+	spec, err := json.Marshal(runspec.Spec{Request: run.Request, Resolved: runspec.Resolved{Engine: engineid.Identity{Version: "v1.2.3"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	engineSQL(t, server.Store, `UPDATE runs SET spec_json=?,spec_hash='spec',sealed_at=1,plan_json=?,plan_hash='plan' WHERE team='a' AND id='run'`, spec, []byte(`{"jobs":[]}`))
-	policy := &engineVersionFake{notices: []engine.Notice{{Kind: engine.NoticeSupportEnding, Version: "v1.2.3", Reason: "signed warning"}}}
+	policy := &engineVersionFake{notices: []engineid.Notice{{Kind: engineid.NoticeSupportEnding, Version: "v1.2.3", Reason: "signed warning"}}}
 	api.WithEngineController(NewEngineController(server.Store, EngineController{VersionPolicy: engineVersionPolicy(policy)}))
 	page, err := reader.ListRuns(t.Context(), controllerwire.RunQuery{Limit: 1, Pipeline: "ci"})
 	if err != nil || len(page.Runs) != 1 || !reflect.DeepEqual(page.Runs[0].Notices, policy.notices) {

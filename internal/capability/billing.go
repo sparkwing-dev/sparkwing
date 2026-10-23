@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/limits"
 )
 
 // BillingStart prevents a launch reservation from charging before the pod exists.

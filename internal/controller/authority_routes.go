@@ -5,24 +5,27 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // AuthorityRevoker rechecks actor and target authority and advances revocation
 // generations in the same transaction. Tenant and Operator keep their own scope.
 type AuthorityRevoker interface {
-	RevokeAuthority(context.Context, store.Actor, capability.AuthorityRef) error
+	RevokeAuthority(context.Context, runstate.Actor, capability.AuthorityRef) error
 }
 
 type membershipRequest struct {
 	Role store.Role `json:"role"`
 }
 
-func (s *Server) authorityEndpoints() []Endpoint {
+func (s *Server) authorityEndpoints() []controllerwire.Endpoint {
 	e := s.engineController
-	return []Endpoint{
+	return []controllerwire.Endpoint{
 		{
 			Method: "PATCH", Pattern: "/api/v1/team/members/{account}", Authentication: capability.AuthCapability,
 			Decode: authorityTarget, Handle: e.handleUpdateMembership,
@@ -57,8 +60,8 @@ func authorityTarget(r *http.Request) (capability.RequestEvidence, error) {
 	return capability.RequestEvidence{Target: capability.Target{TokenPrefix: r.PathValue("token"), AccountID: r.PathValue("account")}}, nil
 }
 
-func authorityActor(a capability.Authorized) store.Actor {
-	return store.Actor{ConsoleProof: capability.ProofForConsole(a.Principal), Authority: a.Principal.Authority, Kind: store.ActorOperator, CapabilityPrefix: principalCapabilityPrefix(a.Principal)}
+func authorityActor(a capability.Authorized) runstate.Actor {
+	return runstate.Actor{ConsoleProof: capability.ProofForConsole(a.Principal), Authority: a.Principal.Authority, Kind: runstate.ActorOperator, CapabilityPrefix: principalCapabilityPrefix(a.Principal)}
 }
 
 func (s *EngineController) handleMemberDirectory(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -82,7 +85,7 @@ func (s *EngineController) handleRevokeAuthority(w http.ResponseWriter, r *http.
 	var revoker AuthorityRevoker
 	var err error
 	if a.Target.TokenPrefix == "" {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	if r.Pattern == "DELETE /api/v1/tokens/{token}" {
 		revoker, err = s.runTransactions(r.Context(), a.Target.Team)
@@ -95,7 +98,7 @@ func (s *EngineController) handleRevokeAuthority(w http.ResponseWriter, r *http.
 		return authorityMutationError(err)
 	}
 	if revoker == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	target := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: a.Target.TokenPrefix}
 	if err := revoker.RevokeAuthority(r.Context(), authorityActor(a), target); err != nil {
@@ -108,7 +111,7 @@ func (s *EngineController) handleRevokeAuthority(w http.ResponseWriter, r *http.
 func (s *EngineController) handleUpdateMembership(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	change := store.MembershipUpdate{AccountID: a.Target.AccountID}
 	if change.AccountID == "" {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	if r.Method == http.MethodPatch {
 		var body membershipRequest

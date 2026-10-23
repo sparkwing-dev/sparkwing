@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func paymentSignature(body []byte, secret string, at time.Time) string {

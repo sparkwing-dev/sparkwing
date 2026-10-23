@@ -8,14 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestLocalEngineUsesVerifiedCacheWithoutVersionPolicyNetwork(t *testing.T) {
 	r, transport, key, _, _ := fixtureResolver(t)
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
-	pin := Pin{SDK: GoSDK, Version: "v0.10.2"}
+	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v0.10.2"}
 	bundle := signedBundle(t, key, pin.Version, target, fixtureExecutable(t, pin.Version, target))
 	release, err := VerifyRelease(pin.Version, target, bundle)
 	if err != nil {

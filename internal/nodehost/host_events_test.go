@@ -10,16 +10,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestHostLifecycleEvents(t *testing.T) {
@@ -35,7 +36,7 @@ func TestHostLifecycleEvents(t *testing.T) {
 				fixture = executionStoreFixture(t, deps)
 			})
 			input = storedExecutionInput(t, fixture, host)
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}}
+			row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}}
 			if mode == "result_refused" {
 				if _, err := teststore.SQL(t, fixture.Store).ExecContext(ctx, `CREATE TRIGGER refuse_result BEFORE UPDATE OF outcome ON nodes WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'result transaction refused'); END`); err != nil {
 					t.Fatal(err)
@@ -71,16 +72,16 @@ func TestHostLifecycleEvents(t *testing.T) {
 				}
 			}
 			if mode == "result_refused" {
-				if persisted.Status != store.StatusRunning || persisted.Outcome != "" || persisted.FinishedAt != nil {
+				if persisted.Status != runstate.StatusRunning || persisted.Outcome != "" || persisted.FinishedAt != nil {
 					t.Fatalf("refused result changed persisted state: %+v", persisted)
 				}
 				return
 			}
-			outcome := store.NodeSuccess
+			outcome := runstate.NodeSuccess
 			if failed {
-				outcome = store.NodeFailed
+				outcome = runstate.NodeFailed
 			}
-			if persisted.Status != store.StatusDone || persisted.Outcome != outcome || persisted.ClaimedBy != "" || persisted.CapabilityPrefix != "" {
+			if persisted.Status != runstate.StatusDone || persisted.Outcome != outcome || persisted.ClaimedBy != "" || persisted.CapabilityPrefix != "" {
 				t.Fatalf("terminal result retained its claim or lost its verdict: %+v", persisted)
 			}
 			before, err := fixture.Tenant.ReadStateEvents(ctx, input.Accepted.RunID, 0, 100)
@@ -88,8 +89,8 @@ func TestHostLifecycleEvents(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				result, err := FollowReconciliation(ctx, fixture.Tenant, store.ReconcileRequest{Ref: row.Ref, Actor: fixture.Actor, Policy: store.SourceResume}, nil)
-				if err != nil || result.Kind != store.KeepTerminal || result.Claim != nil || len(result.Bearer) != 0 {
+				result, err := FollowReconciliation(ctx, fixture.Tenant, store.ReconcileRequest{Ref: row.Ref, Actor: fixture.Actor, Policy: runstate.SourceResume}, nil)
+				if err != nil || result.Kind != runstate.KeepTerminal || result.Claim != nil || len(result.Bearer) != 0 {
 					t.Fatalf("adopted terminal result=%+v, error=%v", result, err)
 				}
 			}
@@ -121,7 +122,7 @@ func TestHostStepPersistence(t *testing.T) {
 			input, _, host := executionHostFixture(t, mode, &trace, &processes, func(deps *ExecutorDependencies) {
 				fixture = executionStoreFixture(t, deps)
 				deps.Log = func(ctx context.Context, in NodeInput, log nodeproto.FrameLog) error {
-					row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(in.Accepted.RunID), NodeID: "job"})
+					row, err := fixture.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(in.Accepted.RunID), NodeID: "job"})
 					if err != nil || row.Generation != in.Generation || row.Attempt != in.Attempt || row.ClaimedBy != in.Authority.Holder || row.CapabilityPrefix != in.Authority.CapabilityPrefix {
 						t.Fatalf("diagnostic differs from committed attempt: %+v, %v", row, err)
 					}
@@ -219,10 +220,10 @@ func TestHostStepPersistence(t *testing.T) {
 					t.Fatal("diagnostic failure leaked a process")
 				}
 			}
-			persisted, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"})
-			outcome := store.NodeSuccess
+			persisted, err := fixture.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"})
+			outcome := runstate.NodeSuccess
 			if mode == "before_refused" || mode == "step_failed" || mode == "step_write_refused" || mode == "diagnostic_refused" {
-				outcome = store.NodeFailed
+				outcome = runstate.NodeFailed
 			}
 			if err != nil || persisted.Outcome != outcome {
 				t.Fatalf("job hid its step result: %+v error=%v", persisted, err)
@@ -270,7 +271,7 @@ func TestClaimedHostForeignAwards(t *testing.T) {
 				input.Attempt++
 			}
 			observed := false
-			observer := &scriptedHostStore{readSnapshot: fixture.Tenant.ReadSnapshot, readNode: fixture.Tenant.ReadNode, transitionNode: fixture.Tenant.TransitionNode, recordStep: fixture.Tenant.RecordStep, renewNodeClaim: func(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+			observer := &scriptedHostStore{readSnapshot: fixture.Tenant.ReadSnapshot, readNode: fixture.Tenant.ReadNode, transitionNode: fixture.Tenant.TransitionNode, recordStep: fixture.Tenant.RecordStep, renewNodeClaim: func(ctx context.Context, ref runspec.NodeRef, actor runstate.Actor) (runstate.LeaseBeat, error) {
 				observed = true
 				return fixture.Tenant.RenewNodeClaim(ctx, ref, actor)
 			}}
@@ -317,13 +318,13 @@ func executionStoreFixture(t *testing.T, deps *ExecutorDependencies) *storeHostF
 	deps.Store = fixture.Tenant
 
 	deps.Validation = nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()}
-	deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+	deps.EnsureEngine = func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 		return engine.Resolved{Identity: fixtureEngine(t, fixture.Accepted)}, nil
 	}
 	return fixture
 }
 
-func fixtureEngine(t *testing.T, accepted AcceptedRun) engine.Identity {
+func fixtureEngine(t *testing.T, accepted AcceptedRun) engineid.Identity {
 	t.Helper()
 	var spec runspec.Spec
 	if err := json.Unmarshal(accepted.Spec, &spec); err != nil {
@@ -336,12 +337,12 @@ func storedExecutionInput(t *testing.T, fixture *storeHostFixture, host *Claimed
 	t.Helper()
 	ctx := t.Context()
 	host.Admission = ComposeStartGate(fixture.Tenant, nil, false)
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "job"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "job"}
 	if _, err := fixture.Tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: fixture.Actor}); err != nil {
 		t.Fatal(err)
 	}
-	awarded, err := fixture.Tenant.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: fixture.Actor, Policy: store.SourceNone})
-	if err != nil || awarded.Kind != store.Execute {
+	awarded, err := fixture.Tenant.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: fixture.Actor, Policy: runstate.SourceNone})
+	if err != nil || awarded.Kind != runstate.Execute {
 		t.Fatalf("claim=%+v error=%v", awarded, err)
 	}
 	selected := engine.Resolved{Identity: fixtureEngine(t, fixture.Accepted)}

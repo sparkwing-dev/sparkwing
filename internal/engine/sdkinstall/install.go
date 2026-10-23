@@ -15,13 +15,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // Run serves __sdk-install with the selected engine's build stamp and filtered environment.
@@ -59,7 +60,7 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	}
 	var command []string
 	var cachedExecutable string
-	if request.SDK == engine.GoSDK {
+	if request.SDK == engineid.GoSDK {
 		command, cachedExecutable, err = installGoSDK(ctx, dir, request, pin, environment, diagnostics, masker)
 	} else {
 		command, err = installTypeScriptSDK(ctx, dir, pin, environment, diagnostics, masker)
@@ -70,7 +71,7 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	return json.NewEncoder(output).Encode(engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable})
 }
 
-func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engine.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
+func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
 	if !filepath.IsAbs(request.ExecutableDirectory) {
 		return nil, "", errors.New("Go installation requires an owned executable directory")
 	}
@@ -156,7 +157,7 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	return []string{binary.Path()}, lease.CachedPath(), nil
 }
 
-func installTypeScriptSDK(ctx context.Context, dir string, pin engine.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) ([]string, error) {
+func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) ([]string, error) {
 	var manifest struct{ Main string }
 	body, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {

@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -55,8 +56,8 @@ func TestResumeDebugPauseCommitsPrincipalAndReplays(t *testing.T) {
 	if err != nil || len(pauses) != 1 || pauses[0].ReleasedAt == nil || pauses[0].ReleasedBy != "member" || pauses[0].ReleaseKind != store.PauseReleaseManual {
 		t.Fatalf("pauses=%+v err=%v", pauses, err)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || node.Status != store.StatusPending || node.StatusDetail != "" {
+	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || node.Status != runstate.StatusPending || node.StatusDetail != "" {
 		t.Fatalf("job=%+v err=%v", node, err)
 	}
 	var count int

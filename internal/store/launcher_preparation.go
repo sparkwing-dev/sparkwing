@@ -7,9 +7,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // LauncherPreparation reports the committed authority bound for an acknowledged bootstrap fence.
@@ -102,7 +103,7 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 	if err = lockStateRunTx(ctx, tx, award.Claim.Team, award.Claim.RunID); err != nil {
 		return time.Time{}, err
 	}
-	beat := LeaseBeat{}
+	beat := runstate.LeaseBeat{}
 	funded, err := renewUnitBillingTx(ctx, tx, award.Claim.Team, unitRef, fence.Generation, &beat)
 	if err != nil {
 		return time.Time{}, err

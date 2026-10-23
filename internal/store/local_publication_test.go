@@ -6,8 +6,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestLocalPublicationReadsTenDistinctManifests(t *testing.T) {
@@ -34,8 +34,8 @@ func TestLocalPublicationReadsTenDistinctManifests(t *testing.T) {
 			t.Fatal(err)
 		}
 		a := intent.Identity.Attempt.Value
-		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}}
-		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID)}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, ManifestRecord: &request.Key}}}
+		actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}}
+		change := nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID)}, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess, ManifestRecord: &request.Key}}}
 		if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 			t.Fatal(err)
 		}

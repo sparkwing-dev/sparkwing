@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -14,7 +15,7 @@ func SeedTrigger(s *store.Store, ctx context.Context, team store.Team, v store.T
 }
 
 // SeedTriggerClaim keeps reporting fixtures from assembling partial owner fences.
-func SeedTriggerClaim(s *store.Store, ctx context.Context, team store.Team, run string, actor store.Actor, until time.Time, started *time.Time) error {
+func SeedTriggerClaim(s *store.Store, ctx context.Context, team store.Team, run string, actor runstate.Actor, until time.Time, started *time.Time) error {
 	var start any
 	if started != nil {
 		start = started.UnixNano()

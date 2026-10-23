@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestApprovalConcurrencyRefusedInEachDialect(t *testing.T) {
@@ -74,7 +74,7 @@ func TestControllerApprovalEvaluationCommitsInEachDialect(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "gate"}
+					ref := runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "gate"}
 					claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: machine.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitEval, RunID: ref.RunID, NodeID: ref.NodeID, SourceGeneration: 0}})
 					if err != nil {
 						t.Fatal(err)
@@ -82,25 +82,25 @@ func TestControllerApprovalEvaluationCommitsInEachDialect(t *testing.T) {
 					if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
 						t.Fatal(err)
 					}
-					actor := store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+					actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
 					var command store.NodeCommand = store.OpenApprovalNode{Ref: ref, Actor: actor}
-					want := store.NodeState("")
+					want := runstate.NodeState("")
 					if policy != "open" {
-						kind := store.PolicyApprovalBypass
-						want = store.NodeSkipped
+						kind := runstate.PolicyApprovalBypass
+						want = runstate.NodeSkipped
 						reason := "skip_if"
 						if policy == "fail" {
-							kind = store.PolicyApprovalFail
-							want = store.NodeFailed
+							kind = runstate.PolicyApprovalFail
+							want = runstate.NodeFailed
 							reason = "predicate failed"
 						}
-						command = store.OwnerPolicyNode{Ref: ref, Actor: actor, Outcome: want, OwnerPolicy: &store.OwnerPolicyResult{Kind: kind, Generation: 0}, Result: &store.NodeResult{Outcome: want, Reason: reason}}
+						command = store.OwnerPolicyNode{Ref: ref, Actor: actor, Outcome: want, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: kind, Generation: 0}, Result: &runstate.NodeResult{Outcome: want, Reason: reason}}
 					}
 					if _, err := tenant.TransitionNode(t.Context(), command); err != nil {
 						t.Fatal(err)
 					}
 					row, err := tenant.ReadNode(t.Context(), ref)
-					if err != nil || row.Attempt != 0 || policy == "open" && row.Status != store.StatusApprovalPending || policy != "open" && (row.Status != store.StatusDone || row.Outcome != want) {
+					if err != nil || row.Attempt != 0 || policy == "open" && row.Status != runstate.StatusApprovalPending || policy != "open" && (row.Status != runstate.StatusDone || row.Outcome != want) {
 						t.Fatalf("approval result: %+v %v", row, err)
 					}
 					var status string

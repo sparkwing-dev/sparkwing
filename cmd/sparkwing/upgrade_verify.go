@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -32,7 +33,7 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 		return err
 	}
 	sdk := selected.Identity.Pin.SDK
-	if sdk != engine.GoSDK && sdk != engine.TypeScriptSDK {
+	if sdk != engineid.GoSDK && sdk != engineid.TypeScriptSDK {
 		return errors.New("upgrade: selected engine has no supported SDK")
 	}
 	if !filepath.IsAbs(selected.Executable) {
@@ -96,10 +97,10 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 	return nil
 }
 
-func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env procenv.Env, sdk engine.SDKKind) error {
+func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env procenv.Env, sdk engineid.SDKKind) error {
 	var command []string
 	switch sdk {
-	case engine.GoSDK:
+	case engineid.GoSDK:
 		// safety: a parent workspace must not substitute another checkout's SDK pin.
 		var err error
 		env, err = env.GoTool("GOWORK=off")
@@ -107,7 +108,7 @@ func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env procen
 			return err
 		}
 		command = []string{"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}
-	case engine.TypeScriptSDK:
+	case engineid.TypeScriptSDK:
 		command = []string{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}
 	default:
 		return fmt.Errorf("upgrade: unsupported SDK %q", sdk)

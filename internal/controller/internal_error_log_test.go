@@ -16,9 +16,10 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func TestServerFailuresLogMaskedCauseOnceProperty(t *testing.T) {
@@ -34,15 +35,15 @@ func TestServerFailuresLogMaskedCauseOnceProperty(t *testing.T) {
 					requestMasker(r.Context()).Register(secret)
 					switch path {
 					case "policy":
-						writePolicyError(w, cause)
+						routepolicy.WritePolicyError(w, cause)
 					case "legacy":
 						writeError(w, http.StatusBadGateway, cause)
 					case "internal":
 						server.writeInternalError(w, r, "read plan", cause)
 					case "encoded":
-						writePolicyError(w, &apierr.Error{Code: apierr.BadRequest, Message: form, Details: map[string]any{"invalid": make(chan int)}})
+						routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.BadRequest, Message: form, Details: map[string]any{"invalid": make(chan int)}})
 					case "typed":
-						writePolicyError(w, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: form, Hint: form, Details: map[string]any{"private": form, "retry_after_ms": 1000}}, cause))
+						routepolicy.WritePolicyError(w, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: form, Hint: form, Details: map[string]any{"private": form, "retry_after_ms": 1000}}, cause))
 					case "browser":
 						tmpl := template.Must(template.New("broken").Funcs(template.FuncMap{"fail": func() (string, error) { return "", cause }}).Parse("{{fail}}"))
 						renderPage(w, http.StatusOK, tmpl, nil)

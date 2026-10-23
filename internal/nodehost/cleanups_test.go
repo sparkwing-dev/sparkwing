@@ -14,8 +14,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 func mustRegisterCleanup(t *testing.T, cleanups *nodehost.ProcessCleanups, argv ...string) string {

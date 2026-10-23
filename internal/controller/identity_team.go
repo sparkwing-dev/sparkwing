@@ -6,10 +6,11 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 const runnerPrincipalPrefix = "agent:"
@@ -32,7 +33,7 @@ func (s *Server) handleRenameTeam(w http.ResponseWriter, r *http.Request, a capa
 		return accountMutationError(err)
 	}
 	if info.Slug != store.Team(a.Target.Team) {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	writeJSON(w, http.StatusOK, teamJSON{Slug: string(info.Slug), DisplayName: info.Label(), Role: string(store.RoleOwner)})
 	return nil
@@ -98,7 +99,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capabili
 		return accountMutationError(err)
 	}
 	if inv.Team != store.Team(a.Target.Team) {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	noteAuditTarget(r.Context(), "invitation_id", inv.ID)
 	noteAuditTarget(r.Context(), "role", string(inv.Role))

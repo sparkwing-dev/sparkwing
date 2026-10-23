@@ -9,9 +9,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func checkStoreReferenceBoundary(t *testing.T) error {
@@ -98,12 +98,12 @@ func seedStoreReferenceBoundary(t *testing.T) (*Store, *Tenant, blob.Authority, 
 		t.Fatal(err)
 	}
 	source := intent.Identity.Attempt.Value
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(source.RunID), NodeID: runspec.NodeID(source.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(source.Generation)}}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(source.RunID), NodeID: runspec.NodeID(source.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(source.Generation)}}
 	{
 		records := &blobRecords{manifests: records.manifests}
 		s.resultRecords, s.materializations = records, records
 	}
-	if _, err := records.tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(source.RunID), NodeID: runspec.NodeID(source.NodeID)}, Actor: actor, Cause: CauseReport, To: NodeSuccess, SourceAttempt: sourceAttempt(source.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key}}}); err != nil {
+	if _, err := records.tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(source.RunID), NodeID: runspec.NodeID(source.NodeID)}, Actor: actor, Cause: runstate.CauseReport, To: runstate.NodeSuccess, SourceAttempt: sourceAttempt(source.Attempt), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess, OutputRecord: &output.Key}}}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'", []byte(`{"id":"job","groups":["generated"]}`))
@@ -124,7 +124,7 @@ func TestStoreReferenceEdges(t *testing.T) {
 
 func storeBoundaryForeignUploader(t *testing.T, s *Store) (*Tenant, blob.UploadIntent) {
 	t.Helper()
-	maintenanceRun(t, s, "foreign", 2, RunRunning)
+	maintenanceRun(t, s, "foreign", 2, runstate.RunRunning)
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET team='b',intake_mode='publish',created_principal='publisher' WHERE id='foreign'")
 	publisher := authorityRoot("foreign-publisher", "b")
 	publisher.Subject.ID = "publisher"

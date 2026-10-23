@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -104,7 +105,7 @@ func localNativeServices(ctx context.Context, home string, owned *store.Store, b
 		}
 	}
 	adopt := services.Config.Owner.AdoptClaim
-	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim store.ReconciledNode) error {
+	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim runstate.ReconciledNode) error {
 		if err := private.AdoptClaim(ctx, claim); err != nil {
 			return err
 		}

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 // GitHubRepositoryID resolves a positive numeric identity without trusting a repository display name.

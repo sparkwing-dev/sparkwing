@@ -5,7 +5,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
@@ -19,7 +20,7 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 			billingModelJob(t, s, "customer")
 			customer, customerActor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: "runner", Labels: []string{"sparkwing-4cpu"}, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "customer"}})
 			admitExecution(t, tenant, customerActor)
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
 			*now = now.Add(10 * time.Second)
@@ -57,14 +58,14 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 			if renewed, err := s.AsOperator().RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true); err != nil || renewed.CancelRequested {
 				t.Fatalf("independent job stopped = %+v, %v", renewed, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 				t.Fatal(err)
 			}
-			source, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-			if err != nil || source.Expansion != ExpansionFailed {
+			source, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+			if err != nil || source.Expansion != runstate.ExpansionFailed {
 				t.Fatalf("funding stop did not settle expansion = %+v, %v", source, err)
 			}
 		})
@@ -89,7 +90,7 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 				billingModelJob(t, s, "customer")
 				customer, actor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: "runner", Labels: []string{"sparkwing-4cpu"}, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "customer"}})
 				admitExecution(t, tenant, actor)
-				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "customer"}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 					t.Fatal(err)
 				}
 				*now = now.Add(10 * time.Second)
@@ -107,8 +108,8 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 				if err != nil || run.CancelRequestedAt == nil || run.CancelReason == "" {
 					t.Fatalf("owner stop did not durably cancel run: state=%s cancelled=%v reason=%q, %v", run.State, run.CancelRequestedAt, run.CancelReason, err)
 				}
-				ready, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-				if err != nil || ready.Status != StatusDone || ready.Outcome != NodeCancelled {
+				ready, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+				if err != nil || ready.Status != runstate.StatusDone || ready.Outcome != runstate.NodeCancelled {
 					t.Fatalf("owner stop left ready work = %+v, %v", ready, err)
 				}
 				beat, err := s.AsOperator().RenewUnit(t.Context(), customer.Award.CapabilityPrefix, true)
@@ -132,7 +133,7 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 					t.Fatal(err)
 				}
 				run, err = tenant.ReadRun(t.Context(), "run")
-				if err != nil || run.State != RunCancelled || run.FinishedAt == nil {
+				if err != nil || run.State != runstate.RunCancelled || run.FinishedAt == nil {
 					t.Fatalf("owner stop did not finish run = %+v, %v", run, err)
 				}
 				var unsettled int

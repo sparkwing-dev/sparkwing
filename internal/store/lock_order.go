@@ -10,8 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/apierr"
 )
 
 type storeLockTier string
@@ -71,7 +72,7 @@ func lockClaimQueueTx(ctx context.Context, tx *storeTx) error {
 // lockAuthorityThenRunTx takes a writer's authority chain, then its run.
 // Renewal holds authority while it waits for the run, so taking the run first
 // deadlocks against it (B15).
-func lockAuthorityThenRunTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor) error {
+func lockAuthorityThenRunTx(ctx context.Context, tx *storeTx, team Team, runID string, actor runstate.Actor) error {
 	if _, err := resolveActorTx(ctx, tx, actor); err != nil {
 		return err
 	}

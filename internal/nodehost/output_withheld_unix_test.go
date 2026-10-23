@@ -10,12 +10,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func TestAnOutputHoldingASecretIsWithheldAndTheJobPasses(t *testing.T) {
@@ -73,11 +71,11 @@ func TestAnOutputHoldingASecretIsWithheldAndTheJobPasses(t *testing.T) {
 			if err := host.Execute(t.Context(), input); err != nil {
 				t.Fatalf("job failed: %v", err)
 			}
-			row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
+			row, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if row.Outcome != store.NodeSuccess || row.OutputRecord != nil {
+			if row.Outcome != runstate.NodeSuccess || row.OutputRecord != nil {
 				t.Fatalf("row outcome %q output %v, want success with no output", row.Outcome, row.OutputRecord)
 			}
 			if len(annotations) != 1 || annotations[0].Level != "warn" || annotations[0].Message != "output withheld: contains a secret" {

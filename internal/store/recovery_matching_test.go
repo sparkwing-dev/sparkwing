@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
@@ -27,8 +27,8 @@ func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
 				if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 					t.Fatalf("reap: %+v, %v", reaped, err)
 				}
-				ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
-				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: owner, To: NodeReady, Cause: CauseRelease}); err != nil {
+				ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
+				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: owner, To: runstate.NodeReady, Cause: runstate.CauseRelease}); err != nil {
 					t.Fatal(err)
 				}
 				waiting, err := s.AsOperator().ListWaitingNodes(t.Context(), now.Add(time.Nanosecond), [2]string{}, 10)

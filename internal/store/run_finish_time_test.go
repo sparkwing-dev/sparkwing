@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -17,36 +17,36 @@ func TestAPendingRunCarriesNoFinishTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	run, err := tenant.ReadRun(t.Context(), plan.RunID)
-	if err != nil || run.State != store.RunPending || run.FinishedAt != nil {
+	if err != nil || run.State != runstate.RunPending || run.FinishedAt != nil {
 		t.Fatalf("pending run: %+v, %v", run, err)
 	}
 }
 
 func TestATerminalRunAlwaysCarriesAFinishTime(t *testing.T) {
-	for _, status := range []store.RunState{store.RunSuccess, store.RunCancelled, store.RunFailed} {
+	for _, status := range []runstate.RunState{runstate.RunSuccess, runstate.RunCancelled, runstate.RunFailed} {
 		t.Run(string(status), func(t *testing.T) {
 			var tenant *store.Tenant
 			var s *store.Store
-			var finish store.FinishRunRequest
-			if status == store.RunFailed {
+			var finish runstate.FinishRunRequest
+			if status == runstate.RunFailed {
 				f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
 				tenant, s = f.tenant, f.s
-				if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: f.ref.RunID, Actor: f.owner, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+				if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: f.ref.RunID, Actor: f.owner, To: runstate.RunRunning, Cause: runstate.RunStart}); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeFailed, Result: &store.NodeResult{Outcome: store.NodeFailed}}); err != nil {
+				if _, err := tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: runstate.NodeFailed, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed}}); err != nil {
 					t.Fatal(err)
 				}
-				finish = store.FinishRunRequest{Unit: f.owner.Owner, Transition: store.RunCompletion{RunID: f.ref.RunID, Actor: f.owner, Cause: store.RunFinish}}
+				finish = runstate.FinishRunRequest{Unit: f.owner.Owner, Transition: runstate.RunCompletion{RunID: f.ref.RunID, Actor: f.owner, Cause: runstate.RunFinish}}
 			} else {
 				s = storetest.Open(t, store.WithPolicies(sealStorePolicies))
 				tenant, finish = runCompletionFixture(t, s)
-				if status == store.RunCancelled {
+				if status == runstate.RunCancelled {
 					run, err := tenant.ReadRun(t.Context(), string(finish.Unit.RunID))
 					if err != nil {
 						t.Fatal(err)
 					}
-					if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: runspec.RunID(run.ID), To: store.RunCancelled, Cause: store.RunCancel, Actor: store.Actor{Kind: store.ActorOperator, Authority: run.Request.AuthorityRef}}); err != nil {
+					if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(run.ID), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: run.Request.AuthorityRef}}); err != nil {
 						t.Fatal(err)
 					}
 				}

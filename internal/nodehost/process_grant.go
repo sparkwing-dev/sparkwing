@@ -3,7 +3,7 @@ package nodehost
 import (
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 // ProcessGrant transfers a delegated bearer and its idempotent revoker to the host.

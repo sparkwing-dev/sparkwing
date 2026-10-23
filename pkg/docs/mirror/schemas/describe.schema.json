@@ -741,6 +741,6 @@
   },
   "$ref": "#/$defs/describe",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Generated from internal/nodeproto by go generate ./internal/doccheck. Plan shapes are strict; graph, secret, presence and placement checks belong to ValidatePlan.",
+  "description": "Generated from pkg/nodeproto by go generate ./internal/doccheck. Plan shapes are strict; graph, secret, presence and placement checks belong to ValidatePlan.",
   "title": "Sparkwing node protocol v2: describe and plan"
 }

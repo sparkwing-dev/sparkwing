@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 )
@@ -28,18 +29,18 @@ func TestPipelineEngineExecHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin := engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}
+	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}
 	command := pipelineEngineSwitcher{
 		current: current, diagnostics: io.Discard,
 		target:     releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-		readPin:    func(string, engine.SDKKind) (engine.Pin, error) { return pin, nil },
-		versionFor: func(engine.Pin) (string, error) { return "v1.2.3", nil },
+		readPin:    func(string, engineid.SDKKind) (engineid.Pin, error) { return pin, nil },
+		versionFor: func(engineid.Pin) (string, error) { return "v1.2.3", nil },
 		execute:    execToolchain,
-		resolve: func(_ context.Context, _ engine.Pin, target releaseasset.Target, _ toolchain.Mode) (engine.Resolved, error) {
-			return engine.Resolved{Identity: engine.Identity{Pin: pin, Version: "v1.2.3", ManifestDigest: "fixture-manifest"}, Target: target, AssetDigest: "fixture-asset", Executable: selected}, nil
+		resolve: func(_ context.Context, _ engineid.Pin, target releaseasset.Target, _ toolchain.Mode) (engine.Resolved, error) {
+			return engine.Resolved{Identity: engineid.Identity{Pin: pin, Version: "v1.2.3", ManifestDigest: "fixture-manifest"}, Target: target, AssetDigest: "fixture-asset", Executable: selected}, nil
 		},
 	}
-	if err := command.run(t.Context(), "/checkout/.sparkwing", engine.GoSDK, "auto", os.Args[separator+2:], os.Environ()); err != nil {
+	if err := command.run(t.Context(), "/checkout/.sparkwing", engineid.GoSDK, "auto", os.Args[separator+2:], os.Environ()); err != nil {
 		t.Fatal(err)
 	}
 	t.Fatal("selected process returned")
@@ -70,13 +71,13 @@ func TestPipelineEngineReplaysAfterRootFlagsInRealProcess(t *testing.T) {
 }
 
 func TestPipelineEngineSameFileAvoidsRecursiveExecution(t *testing.T) {
-	command, selected, _, calls := engineSwitchFixture(t, engine.GoSDK)
+	command, selected, _, calls := engineSwitchFixture(t, engineid.GoSDK)
 	alias := filepath.Join(t.TempDir(), "linked-engine")
 	if err := os.Link(selected.Executable, alias); err != nil {
 		t.Fatal(err)
 	}
 	command.current = alias
-	if err := command.run(t.Context(), "/checkout/.sparkwing", engine.GoSDK, "auto", nil, nil); err != nil || *calls != 0 {
+	if err := command.run(t.Context(), "/checkout/.sparkwing", engineid.GoSDK, "auto", nil, nil); err != nil || *calls != 0 {
 		t.Fatalf("same verified file re-executed: %v calls=%d", err, *calls)
 	}
 }

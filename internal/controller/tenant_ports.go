@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -25,11 +27,11 @@ func (s *Server) requestTenant(ctx context.Context, team store.Team) (TenantHand
 
 func scopedTenant(ctx context.Context, team store.Team, resolve func(context.Context, store.Team) (TenantHandle, error)) (TenantHandle, error) {
 	if team == "" {
-		return nil, missingEndpointPolicy()
+		return nil, routepolicy.MissingEndpointPolicy()
 	}
 	if scope, ok := ctx.Value(requestTenantKey{}).(*requestTenant); ok && scope.handle != nil {
 		if scope.handle.Team() != team {
-			return nil, missingEndpointPolicy()
+			return nil, routepolicy.MissingEndpointPolicy()
 		}
 		return scope.handle, nil
 	}
@@ -37,7 +39,7 @@ func scopedTenant(ctx context.Context, team store.Team, resolve func(context.Con
 		resolve = scope.resolve
 	}
 	if resolve == nil {
-		return nil, missingEndpointPolicy()
+		return nil, routepolicy.MissingEndpointPolicy()
 	}
 	handle, err := resolve(ctx, team)
 	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
@@ -47,7 +49,7 @@ func scopedTenant(ctx context.Context, team store.Team, resolve func(context.Con
 		return nil, engineLookupError(err)
 	}
 	if handle == nil || handle.Team() != team {
-		return nil, missingEndpointPolicy()
+		return nil, routepolicy.MissingEndpointPolicy()
 	}
 	if scope, ok := ctx.Value(requestTenantKey{}).(*requestTenant); ok {
 		scope.handle = handle
@@ -56,11 +58,11 @@ func scopedTenant(ctx context.Context, team store.Team, resolve func(context.Con
 }
 
 func tenantPort[P any](ctx context.Context, s *Server, team store.Team) (P, error) {
-	return ScopedTenantPort[P](ctx, team, s.resolveTenant)
+	return scopedTenantPort[P](ctx, team, s.resolveTenant)
 }
 
-// ScopedTenantPort selects a narrow port from the one request tenant handle.
-func ScopedTenantPort[P any](ctx context.Context, team store.Team, resolve func(context.Context, store.Team) (TenantHandle, error)) (P, error) {
+// scopedTenantPort selects a narrow port from the one request tenant handle.
+func scopedTenantPort[P any](ctx context.Context, team store.Team, resolve func(context.Context, store.Team) (TenantHandle, error)) (P, error) {
 	var zero P
 	handle, err := scopedTenant(ctx, team, resolve)
 	if err != nil {
@@ -68,7 +70,7 @@ func ScopedTenantPort[P any](ctx context.Context, team store.Team, resolve func(
 	}
 	port, ok := handle.(P)
 	if !ok {
-		return zero, missingEndpointPolicy()
+		return zero, routepolicy.MissingEndpointPolicy()
 	}
 	return port, nil
 }
@@ -80,7 +82,7 @@ func (s *Server) WithTenantResolver(resolve func(context.Context, store.Team) (T
 	return s
 }
 
-func (s *Server) tenantEndpoint(endpoint Endpoint) Endpoint {
+func (s *Server) tenantEndpoint(endpoint controllerwire.Endpoint) controllerwire.Endpoint {
 	handle := endpoint.Handle
 	endpoint.Handle = func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 		if a.Target.Team != "" && s.resolveTenant != nil {

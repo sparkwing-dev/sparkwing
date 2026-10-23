@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/nodeproto"
 )
 
 func newRecoveryCapacityFixture(t *testing.T) *storeRecoveryFixture {
@@ -23,17 +24,17 @@ func newRecoveryCapacityFixture(t *testing.T) *storeRecoveryFixture {
 	})
 }
 
-func (f *storeRecoveryFixture) claimOwner(ctx context.Context, runID, name string) (store.Actor, error) {
+func (f *storeRecoveryFixture) claimOwner(ctx context.Context, runID, name string) (runstate.Actor, error) {
 	authority := f.plan.Seal.Request.AuthorityRef
 	issued, err := f.s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(f.tenant.Team()), RegistrationID: "runner:planner:" + name, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
-		return store.Actor{}, err
+		return runstate.Actor{}, err
 	}
 	claim, err := f.s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(runID)}})
 	if err != nil {
-		return store.Actor{}, err
+		return runstate.Actor{}, err
 	}
-	return store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}, nil
+	return runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}, nil
 }
 
 func (f *storeRecoveryFixture) capacityCompetitor(ctx context.Context) (string, error) {
@@ -55,9 +56,9 @@ func TestClaimedCapacityWaiterFollowsNodeRenewal(t *testing.T) {
 	f := newRecoveryCapacityFixture(t)
 	ctx := t.Context()
 	blocker, award := admissionPolicyBlocker(t, f, func(doc *nodeproto.PlanDoc) { doc.Concurrency = nil })
-	admissionWant(t, f, blocker, award, store.AcquireGranted)
-	queued, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
-	if err != nil || queued.Kind != store.AcquireQueued {
+	admissionWant(t, f, blocker, award, runstate.AcquireGranted)
+	queued, err := f.tenant.MayStart(ctx, runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
+	if err != nil || queued.Kind != runstate.AcquireQueued {
 		t.Fatalf("queue=%+v %v", queued, err)
 	}
 	var arrival int64
