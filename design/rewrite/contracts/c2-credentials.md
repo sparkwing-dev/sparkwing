@@ -1102,7 +1102,7 @@ All capability names below are in `internal/capability`.
 | `ValidateDelegation` | Refuse widening of team, grants, binding, repo/data scope or expiry. |
 | `Owner` | Select the lookup that establishes resource tenancy. |
 | `BindingRule` | Select the relation between principal and requested resource. |
-| `Liveness`, `LivenessPolicy` | Define live authority and narrow replay/tail exceptions. |
+| `Liveness` | Select live authority and narrow replay/tail exceptions. |
 | `CredentialRule` | Restrict which presentation or unit can use an access alternative. |
 | `AccessRule` | Combine credential rule, required grants, binding and liveness. |
 | `Authentication` | Distinguish capabilities from public, webhook, OIDC, URL and browser proofs. |
@@ -1131,11 +1131,11 @@ All capability names below are in `internal/capability`.
 | `BillingSettlement` | Return billable seconds and unstarted-refund status for the ledger owner. |
 | `SettleBilling` | Calculate settlement from immutable provenance and persisted intervals. |
 | `PaymentMode`, `PaymentConfig` | Select test/live credentials for the same provider verifier and settlement code. |
-| `PaymentEventKind`, `PaymentEventPolicy`, `PaymentEventPolicies` | Enumerate automatic committed-checkout outcomes and their provider event types. |
+| `PaymentEventKind` | Name authenticated provider outcomes. The verifier owns the private provider event mapping. |
 | `PaymentEvent`, `VerifiedPaymentEvent`, `VerifiedPaymentEvent.Event` | Carry authenticated payment facts to C1 without a caller-selected team. |
 | `PaymentPresentation`, `PaymentAuthenticator`, `NewPaymentAuthenticator` | Verify the exact webhook body, signature, timestamp, event type and configured mode. |
 | `DataUse`, `DataScope` | Distinguish executable claims, remote reads, local publication and expansion reads. |
-| `DataOperation`, `DataPolicy` | Pin the grant and edge checks for each data operation. |
+| `DataOperation` | Select a data operation whose grant and edge checks remain private to the authorizer. |
 | `DataTarget` | Select a digest/upload and its uploader attempt without asserting authority. |
 | `DataAccessChecker.CheckDataAccess` | Call C1's receipt, read-set and edge authorization owner. |
 | `AuthorizeData` | Combine route authority, sealed scope and C1's checks before signing or committing. |
@@ -1176,12 +1176,13 @@ All capability names below are in `internal/capability`.
 | `controller.CredentialWriter`, `Server.WithCredentialWriter` | Supply tenant credential mutations with committing authority rechecks and actor attribution. Missing adapters refuse writes. |
 | `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. The default uses Tenant.ReadRunView. No C1 signature changes. |
 
-The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,
-`Routes`, `BootstrapGrants`, `BootstrapUnits`, `UnitBillingMappings`,
-`BillingRules`, `PaymentEventPolicies`, `DataPolicies` and `apierr.Codes`. Constants in
-their files define the closed vocabulary. Implementers consume these tables
-and generate references from them; they do not maintain copies in handlers,
-clients, SDKs or documentation generators.
+The capability tables stay private. `Grants`, `AwardPolicies`, `Routes`,
+`BootstrapGrants`, `BootstrapUnits` and `UnitBillingMappings` return copies.
+Liveness, billing, payment and data policies are read through their verifier,
+settlement and authorizer APIs. `apierr.Codes` supplies the error definitions.
+Constants in these files define the closed vocabulary. Consumers use these
+owners rather than keeping copies in handlers, clients, SDKs or documentation
+generators.
 
 ## Issuance invariants
 
@@ -1472,7 +1473,7 @@ The caller-selected paid-grant HTTP route and its request type are deleted.
 The sole automatic settlement callback is `POST /webhooks/stripe`, classified
 as `AuthPaymentWebhook`. The verifier authenticates the exact body and the
 `Stripe-Signature` header, checks the signature timestamp and configured mode,
-and normalizes only `PaymentEventPolicies`. A paid
+and normalizes only events in the verifier's private policy table. A paid
 `checkout.session.completed` or `checkout.session.async_payment_succeeded`
 may settle credit. An unpaid completed session stays pending. Async payment
 failure and expiry close unpaid checkouts without granting credit. Unsupported
