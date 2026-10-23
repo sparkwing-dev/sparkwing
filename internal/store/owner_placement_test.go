@@ -174,7 +174,7 @@ func TestLiveOwnerKeepsCapturedPlacementWhileRootDoesNotPoll(t *testing.T) {
 	now := s.now()
 	s.clock = func() time.Time { return now }
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration'`)
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu","os=linux","arch=amd64"]}}`))
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["team-4cpu","os=linux","arch=amd64"]}}`))
 	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 	slots := 1
 	demand.FreeSlots = &slots

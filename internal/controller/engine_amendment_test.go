@@ -42,7 +42,7 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	authorized := capability.Authorized{Principal: root, Binding: root.Capability.Binding, Target: capability.Target{Team: "a"}}
-	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu"]}}`))
+	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{"requires":{"set":true,"value":["team-4cpu"]}}`))
 	engineAcceptedFixturePlan(t, server, "a", "run")
 	server.claimProfiles = engineEnrollmentFunc(func(_ context.Context, principal capability.Principal) (match.Profile, error) {
 		if principal.Authority.ID != "runner" {
@@ -60,7 +60,7 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 		}
 		return nil
 	})
-	body := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"name=forged", "class=cloud", "sparkwing-4cpu"}}
+	body := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"name=forged", "class=cloud", "team-4cpu"}}
 	if _, err := server.Claim(t.Context(), authorized, body); err == nil {
 		t.Fatal("revoked runner received an award")
 	}

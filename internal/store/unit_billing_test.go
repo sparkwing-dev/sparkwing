@@ -24,6 +24,8 @@ func meteredUnitFixture(t *testing.T, cloud bool) (*Store, UnitDemand, *time.Tim
 	if cloud {
 		root.Subject.Kind, root.Team = capability.SubjectService, ""
 		root.Grants = []capability.Grant{capability.ClaimsLaunch}
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu"]}}`))
+		indexFixtureUnit(t, s, "a", *demand.Target)
 	}
 	authorityPersist(t, s, root)
 	demand.CapabilityPrefix = root.Prefix
@@ -89,7 +91,7 @@ func TestMeteredUnitClaimAndReservationCommitTogether(t *testing.T) {
 
 func TestMeteredUnitConcurrentClaimsCannotSpendTheSameCredit(t *testing.T) {
 	s, demand, _ := meteredUnitFixture(t, false)
-	rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=600`)
+	rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=120`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,'other',status,ready_at,spec_json,execution_json FROM nodes WHERE node_id='job'`)
 	var group sync.WaitGroup
 	results := make(chan error, 2)
@@ -115,7 +117,7 @@ func TestMeteredUnitConcurrentClaimsCannotSpendTheSameCredit(t *testing.T) {
 		t.Fatalf("awards=%d; want one funded award", success)
 	}
 	rewriteSchemaCount(t, s.db, "billing_awards", 1)
-	unitBillingTotal(t, s, 600, false)
+	unitBillingTotal(t, s, 120, false)
 }
 
 func TestMeteredUnitQueuePassesOverUnaffordableWork(t *testing.T) {
@@ -178,7 +180,11 @@ func TestMeteredUnitNodeLifecycleUsesImmutableAward(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, cloud)
 			awarded := *now
 			_, actor := meteredUnitClaim(t, s, demand)
-			unitBillingTotal(t, s, 600, false)
+			wantCharge := int64(120)
+			if cloud {
+				wantCharge = 600
+			}
+			unitBillingTotal(t, s, wantCharge, false)
 			*now = now.Add(5 * time.Second)
 			tenant := &Tenant{s: s, team: "a"}
 			admitExecution(t, tenant, actor)
@@ -206,7 +212,7 @@ func TestMeteredUnitNodeLifecycleUsesImmutableAward(t *testing.T) {
 					t.Fatalf("finish: %+v, %v", applied, err)
 				}
 			}
-			unitBillingTotal(t, s, 600, true)
+			unitBillingTotal(t, s, wantCharge, true)
 			rewriteSchemaCount(t, s.db, "billable_intervals", 1)
 		})
 	}

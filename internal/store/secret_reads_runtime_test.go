@@ -14,10 +14,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
+	modernsqlite "modernc.org/sqlite"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-	modernsqlite "modernc.org/sqlite"
 )
 
 func secretReadStoreFixture(t *testing.T) (*Tenant, capability.Authorized) {
@@ -172,7 +174,7 @@ func TestSecretReadMemberScopesAndMaskedRefusal(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
 	a.Target.SecretName = "KEY"
 	for _, row := range []Secret{{Name: "KEY", Value: "team"}, {Name: "KEY", Pipeline: "build", Value: "pipeline"}, {Name: "MASKED", Value: "hidden", Masked: true}} {
-		if err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, row)); err != nil {
+		if _, err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, row)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -350,5 +352,33 @@ func TestSecretReadClockFailureCommitsNothing(t *testing.T) {
 	var releases int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='secret.released'`).Scan(&releases); err != nil || releases != 0 {
 		t.Fatalf("committed releases = %d, error = %v", releases, err)
+	}
+}
+
+func TestShortStoredSecretReleasedOnlyToAuthorizedClaim(t *testing.T) {
+	tenant, a := secretReadStoreFixture(t)
+	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM secrets WHERE team=? AND name='KEY'`, tenant.team)
+	sealed := sealedSecretFixture(t, tenant, Secret{Name: "KEY", Value: "abc", Pipeline: "p", Masked: true})
+	if err := seedSecret(t, tenant, sealed.Row(), tenant.s.now()); err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.ReadSecret(t.Context(), a)
+	if err != nil || row == nil || !row.Masked {
+		t.Fatalf("short secret release: %+v %v", row, err)
+	}
+	value := openSecretFixture(t, tenant, row)
+	if value != "abc" {
+		t.Fatal("short secret changed")
+	}
+	masker := secrets.NewMasker()
+	if err := masker.Register(value); err != nil {
+		t.Fatal(err)
+	}
+	if masker.Mask(value) != value || len(masker.Values()) != 0 {
+		t.Fatal("short secret registered")
+	}
+	a.Target.SecretName = "UNDECLARED"
+	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
+		t.Fatal("undeclared short secret released")
 	}
 }

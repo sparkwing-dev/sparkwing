@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -27,21 +26,16 @@ type Masker struct {
 
 func NewMasker() *Masker { return &Masker{} }
 
-// ErrInvalidValue is safe to present when discovery cannot classify author output.
-var ErrInvalidValue = errors.New("secret value must contain at least 4 characters; use a plain config variable instead")
+// ShortValueWarning explains the masking limit without revealing a secret.
+const ShortValueWarning = "Secret values shorter than 4 characters cannot be masked in logs."
 
-// Validate enforces the minimum secret length.
-func Validate(value string) error {
-	if utf8.RuneCountInString(value) < 4 {
-		return ErrInvalidValue
-	}
-	return nil
-}
+// Maskable reports whether a value is long enough to mask without hiding ordinary log text.
+func Maskable(value string) bool { return utf8.RuneCountInString(value) >= 4 }
 
-// Register protects one secret and its encoded spellings.
+// Register protects one secret and its encoded spellings. Short values are skipped.
 func (m *Masker) Register(value string) error {
-	if err := Validate(value); err != nil {
-		return err
+	if !Maskable(value) {
+		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

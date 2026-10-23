@@ -68,7 +68,7 @@ func testGoSDKRefusesCollidingMasks(t *testing.T) {
 			}
 			_, err := host.RunStep(t.Context(), plan, job, step)
 			if kind == "short" {
-				if err == nil || !strings.Contains(err.Error(), "plain config variable") || strings.Contains(err.Error(), secret) {
+				if err != nil {
 					t.Fatalf("short mask = %v", err)
 				}
 			} else {

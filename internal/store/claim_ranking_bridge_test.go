@@ -115,7 +115,7 @@ func (f *RankingFixture) Request(t *testing.T, mutate func(*runspec.Request)) {
 // Poll records a claimant offering one free slot at the current clock.
 func (f *RankingFixture) Poll(t *testing.T, prefix string, kinds ...capability.UnitKind) {
 	t.Helper()
-	if err := f.Store.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Labels: []string{"sparkwing-4cpu"}}); err != nil {
+	if err := f.Store.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Labels: []string{"team-4cpu"}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -124,7 +124,7 @@ func (f *RankingFixture) Poll(t *testing.T, prefix string, kinds ...capability.U
 func (f *RankingFixture) Claim(t *testing.T, prefix string, kind capability.UnitKind) (UnitClaim, error) {
 	t.Helper()
 	f.Poll(t, prefix, kind)
-	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}, Labels: []string{"sparkwing-4cpu"}})
+	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}, Labels: []string{"team-4cpu"}})
 }
 
 // Rank changes the team's claim ranking as the given member.
@@ -163,7 +163,7 @@ func (f *RankingFixture) RequireOnJobs(t *testing.T, terms ...string) {
 func (f *RankingFixture) ClaimKinds(t *testing.T, prefix string, kinds ...capability.UnitKind) (UnitClaim, error) {
 	t.Helper()
 	f.Poll(t, prefix, kinds...)
-	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Labels: []string{"sparkwing-4cpu"}})
+	return f.Store.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: prefix, Kinds: kinds, Labels: []string{"team-4cpu"}})
 }
 
 // LocalQueue registers a local controller queue claimant of the team.
@@ -179,7 +179,7 @@ func (f *RankingFixture) LocalQueue(t *testing.T) string {
 // PollWithSlots records the last advertised free-slot count.
 func (f *RankingFixture) PollWithSlots(t *testing.T, prefix string, slots int) {
 	t.Helper()
-	if err := f.Store.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Labels: []string{"sparkwing-4cpu"}, FreeSlots: &slots}); err != nil {
+	if err := f.Store.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: prefix, Labels: []string{"team-4cpu"}, FreeSlots: &slots}); err != nil {
 		t.Fatal(err)
 	}
 }

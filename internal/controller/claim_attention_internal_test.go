@@ -18,7 +18,7 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	st := e.Store
 	now := time.Now().UTC()
-	engineSQL(t, st, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','apply','pending',?,?,?)`, now.Add(-time.Minute).UnixNano(), []byte(`{"id":"apply"}`), []byte(`{"requires":{"value":["tool:terraform","sparkwing-4cpu"]}}`))
+	engineSQL(t, st, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','apply','pending',?,?,?)`, now.Add(-time.Minute).UnixNano(), []byte(`{"id":"apply"}`), []byte(`{"requires":{"value":["tool:terraform","team-4cpu"]}}`))
 	e.claimProfiles = engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, error) {
 		return match.Profile{}, nil
 	})
@@ -38,14 +38,14 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 			t.Fatalf("attention = %q, want %q", got, want)
 		}
 	}
-	expect("node apply needs tool:terraform, sparkwing-4cpu; no agent in team a has them")
+	expect("node apply needs tool:terraform, team-4cpu; no agent in team a has them")
 	engineHTTPRoot(t, e, "a", "pi", []capability.Grant{capability.NodesClaim})
-	if err := st.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "pi", Labels: []string{"tool:terraform", "sparkwing-4cpu"}}); err != nil {
+	if err := st.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "pi", Labels: []string{"tool:terraform", "team-4cpu"}}); err != nil {
 		t.Fatal(err)
 	}
 	seen := now.Add(-time.Hour)
 	engineSQL(t, st, `UPDATE capabilities SET last_used_at=? WHERE prefix='pi'`, seen.UnixNano())
-	offline := "node apply needs tool:terraform, sparkwing-4cpu; eligible agent pi is offline (last seen " + seen.Format(time.RFC3339) + ")"
+	offline := "node apply needs tool:terraform, team-4cpu; eligible agent pi is offline (last seen " + seen.Format(time.RFC3339) + ")"
 	expect(offline)
 	engineSQL(t, st, `UPDATE capabilities SET last_used_at=? WHERE prefix='pi'`, now.UnixNano())
 	expect("")

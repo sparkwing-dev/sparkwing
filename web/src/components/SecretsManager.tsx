@@ -51,7 +51,7 @@ const copy: Record<
   },
   local: {
     secretsHint:
-      "Masked in run logs and not shown on this page. `sparkwing secrets get` on this machine, and any program that can reach this dashboard's address, can still read a secret's value.",
+      "Not shown on this page. `sparkwing secrets get` on this machine, and any program that can reach this dashboard's address, can still read a secret's value.",
     variablesHint:
       "Plain configuration. This page shows a variable's value, and runs see it unmasked in logs.",
     variableKind: "Variable (plain config, not masked)",
@@ -207,11 +207,13 @@ function SecretRow({
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (value === "") return;
     setSaving(true);
     try {
-      await writeSecret(updateBody(row, value));
-      toast(`Updated ${row.name}`, "success");
+      const result = await writeSecret(updateBody(row, value));
+      toast(
+        `Updated ${row.name}${result.warning ? `. ${result.warning}` : ""}`,
+        "success",
+      );
       close();
       await onSaved();
     } catch (err) {
@@ -270,7 +272,7 @@ function SecretRow({
             <button
               type="submit"
               className={buttonClass}
-              disabled={saving || value === ""}
+              disabled={saving}
             >
               {saving ? "Saving…" : "Replace value"}
             </button>
@@ -414,8 +416,11 @@ function CreateForm({
     if (problem) return;
     setSaving(true);
     try {
-      await writeSecret(draftBody(draft));
-      toast(`Saved ${masked ? "secret" : "variable"} ${name}`, "success");
+      const result = await writeSecret(draftBody(draft));
+      toast(
+        `Saved ${masked ? "secret" : "variable"} ${name}${result.warning ? `. ${result.warning}` : ""}`,
+        "success",
+      );
       setName("");
       setValue("");
       setTouched(false);
@@ -439,7 +444,7 @@ function CreateForm({
               checked={masked}
               onChange={() => setMasked(true)}
             />
-            Secret (write-only, masked in logs)
+            Secret (write-only)
           </label>
           <label className="flex items-center gap-1.5">
             <input

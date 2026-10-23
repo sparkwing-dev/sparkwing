@@ -75,8 +75,8 @@ func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testi
 	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
 		t.Fatalf("stat %s = %v, want no key before any secret is written", keyPath, err)
 	}
-	if code, _ := postSecret(t, srv, st, "TOKEN", "first-value"); code != http.StatusNoContent {
-		t.Fatalf("POST secret = %d, want 204", code)
+	if code, _ := postSecret(t, srv, st, "TOKEN", "first-value"); code != http.StatusOK {
+		t.Fatalf("POST secret = %d, want 200", code)
 	}
 	info, err := os.Stat(keyPath)
 	if err != nil || info.Mode().Perm() != 0o600 {
@@ -91,8 +91,8 @@ func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testi
 	if err := configureSecrets(context.Background(), restarted, st, deployment.Config{}, keyPath); err != nil {
 		t.Fatalf("restart with the generated key: %v", err)
 	}
-	if code, _ := postSecret(t, restarted, st, "OTHER", "second-value"); code != http.StatusNoContent {
-		t.Fatalf("POST after restart = %d, want 204", code)
+	if code, _ := postSecret(t, restarted, st, "OTHER", "second-value"); code != http.StatusOK {
+		t.Fatalf("POST after restart = %d, want 200", code)
 	}
 }
 
@@ -102,7 +102,7 @@ func TestConfigureSecrets_SingleTeamSQLiteRefusesASecondKeyForSealedRows(t *test
 	if err := configureSecrets(context.Background(), srv, st, deployment.Config{}, keyPath); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := postSecret(t, srv, st, "TOKEN", "private-value"); code != http.StatusNoContent {
+	if code, _ := postSecret(t, srv, st, "TOKEN", "private-value"); code != http.StatusOK {
 		t.Fatalf("POST secret = %d", code)
 	}
 	if err := os.Remove(keyPath); err != nil {

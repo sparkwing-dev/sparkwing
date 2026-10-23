@@ -2,7 +2,6 @@ package secrets
 
 import (
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -108,15 +107,20 @@ func TestNewCipherWithPrevious_RejectsAShortPreviousKey(t *testing.T) {
 	}
 }
 
-func TestMaskerRejectsShortValues(t *testing.T) {
+func TestMaskerSkipsShortValuesAndEncodings(t *testing.T) {
 	m := NewMasker()
-	for _, value := range []string{"", "abc", "ééé"} {
-		if err := m.Register(value); err == nil || !strings.Contains(err.Error(), "plain config variable") {
+	for _, value := range []string{"abc", "ééé", ""} {
+		if err := m.Register(value); err != nil {
 			t.Fatalf("Register(%q) = %v", value, err)
+		}
+		for _, text := range append(encodedForms(value), value) {
+			if got := m.Mask(text); got != text {
+				t.Fatalf("short secret spelling %q masked to %q", text, got)
+			}
 		}
 	}
 	if len(m.Values()) != 0 {
-		t.Fatalf("refused values registered: %q", m.Values())
+		t.Fatalf("short values registered: %q", m.Values())
 	}
 	if err := m.Register("éééé"); err != nil {
 		t.Fatal(err)

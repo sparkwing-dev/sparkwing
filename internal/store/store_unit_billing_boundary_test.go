@@ -56,10 +56,12 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 			var award, began, price, reserved int64
 			err = s.db.QueryRowContext(t.Context(), `SELECT a.awarded_at,i.started_at,c.rate_micro_per_second,c.amount_micro FROM billing_awards a JOIN billable_intervals i ON i.team=a.team AND i.reservation_id=a.reservation_id JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix WHERE a.team=? AND a.reservation_id=? AND c.kind='reservation'`, claim.Team, provenance.ReservationID).Scan(&award, &began, &price, &reserved)
 			wantStart := awardedAt
+			wantPrice := int64(2)
 			if cloud {
 				wantStart = startedAt
+				wantPrice = 10
 			}
-			if err != nil || award != awardedAt.UnixNano() || began != wantStart.UnixNano() || price != 10 || reserved != 600 {
+			if err != nil || award != awardedAt.UnixNano() || began != wantStart.UnixNano() || price != wantPrice || reserved != 60*wantPrice {
 				t.Fatalf("reopened billing: award=%d start=%d price=%d reserved=%d: %v", award, began, price, reserved, err)
 			}
 			*now = now.Add(5 * time.Second)
@@ -69,7 +71,7 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 				if err != nil || applied.Replayed != (replay == 1) {
 					t.Fatalf("real calculator settlement: %+v: %v", applied, err)
 				}
-				unitBillingTotal(t, s, 600, true)
+				unitBillingTotal(t, s, 60*wantPrice, true)
 			}
 		})
 	}

@@ -43,9 +43,12 @@ func TestMeteredFailureReportSettlesAndReleasesClaimProperty(t *testing.T) {
 		if err := s.db.QueryRow("SELECT failure_reason,error FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'").Scan(&savedReason, &savedMessage); err != nil || savedReason != reason || savedMessage != message {
 			t.Fatalf("failure reason=%q message=%q: %v", savedReason, savedMessage, err)
 		}
-		want := int64(600)
-		if cloud && !started {
-			want = 0
+		want := int64(120)
+		if cloud {
+			want = 600
+			if !started {
+				want = 0
+			}
 		}
 		unitBillingTotal(t, s, want, true)
 		if started {

@@ -182,11 +182,11 @@ func TestMaskRegistryJoinsRegistrationWithAcceptance(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	accepted := make(chan error, 1)
 	go func() {
-		accepted <- registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}, func() error { close(entered); <-release; return nil })
+		accepted <- registry.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "secret-job"}}}, func() error { close(entered); <-release; return nil })
 	}()
 	<-entered
 	registered := make(chan error, 1)
-	go func() { registered <- registry.registerValue("job") }()
+	go func() { registered <- registry.registerValue("secret-job") }()
 	select {
 	case err := <-registered:
 		close(release)

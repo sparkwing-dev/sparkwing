@@ -24,13 +24,13 @@ func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {
 		}
 		return w.Body.String()
 	}
-	call("POST", "/api/v1/secrets?team=foreign", `{"name":"KEY","value":"private-value","pipeline":"deploy","masked":false}`, 204)
+	call("POST", "/api/v1/secrets?team=foreign", `{"name":"KEY","value":"private-value","pipeline":"deploy","masked":false}`, 200)
 	body := call("GET", "/api/v1/secrets/KEY?pipeline=deploy&team=foreign", "", 200)
 	var row struct{ Value, Principal, Pipeline string }
 	if err := json.Unmarshal([]byte(body), &row); err != nil || row.Value != "private-value" || row.Principal != "member" || row.Pipeline != "deploy" {
 		t.Fatalf("secret response: %s %v", body, err)
 	}
-	call("POST", "/api/v1/secrets", `{"name":"MASKED","value":"private-masked"}`, 204)
+	call("POST", "/api/v1/secrets", `{"name":"MASKED","value":"private-masked"}`, 200)
 	if body := call("GET", "/api/v1/secrets/MASKED", "", 403); strings.Contains(body, "private-masked") {
 		t.Fatal("masked value escaped member read")
 	}

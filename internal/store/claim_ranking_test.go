@@ -321,7 +321,7 @@ func TestCreditNoticeCountsAnActionsRunner(t *testing.T) {
 
 func TestRankingAnUnpricedCloudClassDoesNotBlockAnotherClaimant(t *testing.T) {
 	f := rankingFixture(t, true)
-	f.RequireOnJobs(t, "sparkwing-4cpu")
+	f.RequireOnJobs(t, "sparkwing-4cpu,team-4cpu")
 	table := store.CreditRateTable{{Cores: 1, MicroPerSecond: 1}}
 	if _, err := f.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)

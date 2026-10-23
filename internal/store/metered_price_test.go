@@ -24,7 +24,11 @@ func TestMeteredUnpricedClaimFailsWorkWithoutBilling(t *testing.T) {
 			}
 			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			var unpriced *UnpricedCPUClassError
-			if !errors.As(err, &unpriced) || unpriced.Cores != 4 || unpriced.MaxCores != 1 {
+			wantClass := int64(2)
+			if cloud {
+				wantClass = 4
+			}
+			if !errors.As(err, &unpriced) || unpriced.Cores != wantClass || unpriced.MaxCores != 1 {
 				t.Fatalf("cloud=%t queued=%t: unpriced claim=%v", cloud, queued, err)
 			}
 			row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
@@ -84,8 +88,8 @@ func TestUnpricedFailureKeepsThePollersMatchingEvidence(t *testing.T) {
 	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu","tool:terraform"]}}`))
-	demand.Labels = []string{"sparkwing-4cpu", "tool:terraform"}
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["team-4cpu","tool:terraform"]}}`))
+	demand.Labels = []string{"team-4cpu", "tool:terraform"}
 	_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	row, readErr := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 	if !errors.Is(err, ErrUnpricedCPUClass) || readErr != nil || row.Outcome != runstate.NodeFailed {

@@ -125,7 +125,7 @@ func TestGeneratedDeclarationsRegisterRawDefaultsAndListItemsBeforeRelease(t *te
 	session := protocolSession{cfg: ProtocolSessionConfig{output: &logs, Masks: NewMaskRegistry(masker)}}
 	raw := " first-private , second-private "
 	spec := runspec.Spec{Request: runspec.SealedRequest{Request: runspec.Request{RequestedArgs: map[string]string{"later": raw}}}, Resolved: runspec.Resolved{Args: map[string]string{"later": "first-private,second-private"}}}
-	def := "default-first, default-second"
+	def := "abc, default-first, default-second"
 	result := nodeproto.EvalResult{DeclarationsKnown: true, Arguments: []nodeproto.ArgumentDescription{{Name: "later", Type: "[]string", Secret: true, Default: &def}}}
 	session.gateDeclarations()
 	if err := logs.write(t.Context(), nodeproto.FrameLog{Message: raw + def + " first-private second-private"}); err != nil {
@@ -139,6 +139,9 @@ func TestGeneratedDeclarationsRegisterRawDefaultsAndListItemsBeforeRelease(t *te
 	}
 	if strings.Contains(output.String(), "private") || strings.Contains(output.String(), "default") {
 		t.Fatalf("unmasked output %q", output.String())
+	}
+	if masker.Mask("abc") != "abc" || strings.Contains(output.String(), secrets.ShortValueWarning) {
+		t.Fatalf("short generator default masked or warned: %s", &output)
 	}
 	projection, err := generatorRegistration(spec, result.Arguments)
 	if err != nil {

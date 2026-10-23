@@ -84,12 +84,12 @@ func TestExpansionRefusalRollsBackAllJobsAndBarrier(t *testing.T) {
 			case "null_jobs":
 				request.Body = []byte(`{"jobs":null}`)
 			case "secret_identifier":
-				request.Body = []byte(`{"jobs":[{"id":"job-42","steps":[{"id":"step"}],"groups":["group"]}]}`)
+				request.Body = []byte(`{"jobs":[{"id":"job-secret-42","steps":[{"id":"step"}],"groups":["group"]}]}`)
 				var spec runspec.Spec
 				spec.Declarations.Version = 1
 				spec.Request.Request.Pipeline = "p"
 				spec.Resolved.SecretArgs = []string{"token"}
-				spec.Resolved.Args = map[string]string{"token": "42"}
+				spec.Resolved.Args = map[string]string{"token": "secret-42"}
 				raw, err := json.Marshal(spec)
 				if err != nil {
 					t.Fatal(err)

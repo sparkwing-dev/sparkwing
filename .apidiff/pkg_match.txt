@@ -1,5 +1,6 @@
 # pkg/match
 
+func AuthenticatedLabels(profile Profile) []string
 const ClassAgent = "agent"
 const ClassCloud = "cloud"
 const ClassCoordinator = "coordinator"
@@ -30,6 +31,7 @@ var KnownTools = []string{
 	"helm", "kubectl", "node", "npm", "shellcheck", "terraform",
 }
 func ParseAccept(patterns []string) (RepoFilter, error)
+func PlacementPossible(profile Profile, selector []string) bool
 type Profile struct {
 	ReservedPools []string
 

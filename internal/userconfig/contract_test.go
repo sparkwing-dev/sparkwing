@@ -41,6 +41,18 @@ func TestRejectMalformedMachine(t *testing.T) {
 	}
 }
 
+func TestRunnerLabelsReserveCloudPrefix(t *testing.T) {
+	for _, label := range []string{"sparkwing-16cpu", " sparkwing-future "} {
+		_, err := Decode("machine.yaml", []byte("runner: {labels: ["+label+"]}"))
+		if err == nil || !strings.Contains(err.Error(), "runner.labels") || !strings.Contains(err.Error(), "belong to Sparkwing Cloud") {
+			t.Fatalf("reserved label %q: %v", label, err)
+		}
+	}
+	if _, err := Decode("machine.yaml", []byte("runner: {labels: [team-16cpu, gpu]}")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestErrorsDoNotEchoTokens(t *testing.T) {
 	for _, raw := range []string{"profiles: {p: {controller: {url: [secret-token], token: secret-token}}}", "profiles: {p: {controller: {url: secret-token, token: secret-token}}}", "profiles: {p: {controller: {token: {secret-token: x}}}}"} {
 		_, err := Decode("machine.yaml", []byte(raw))

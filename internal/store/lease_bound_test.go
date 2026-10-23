@@ -119,7 +119,7 @@ func TestCancelledUnstartedMeteredOwnerCannotRenewRefundedAward(t *testing.T) {
 
 func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, false)
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"sparkwing-4cpu"}}}
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"team-4cpu"}}}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
@@ -159,9 +159,13 @@ func TestMeteredSelfClaimBoundsItsOwnerAndPersistsFundingStop(t *testing.T) {
 
 func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, false)
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"sparkwing-4cpu"}}}
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"team-4cpu"}}}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
+	rates := CreditRateTable{{Cores: 2, MicroPerSecond: 10}}
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &rates}); err != nil {
+		t.Fatal(err)
+	}
 	tenant := &Tenant{s: s, team: "a"}
 	self, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, Policy: runstate.SourceNone})
 	if err != nil || self.Kind != runstate.Execute {

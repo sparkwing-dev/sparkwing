@@ -114,7 +114,7 @@ sparks: [{name: core, source: github.com/acme/core, version: v1.0.0}]
 	machineRaw := []byte(`profiles: {prod: {controller: {url: https://controller.example, token: boundary-secret-token}}}
 repos: {repos: [{path: /work/repo}], fallback_paths: [/work], auto_register: true, include_worktrees: false}
 admission: {mode: custom, budget: "50%,8gb", custom: {class_weight: {batch: 0}, aging_every: 0}}
-runner: {controller: https://controller.example, credentials_dir: /private/runner, repos: [github.com/acme/repo], labels: [sparkwing-4cpu, os=linux], accept_working_tree: true, max_concurrent: 2, spawn_policy: return-to-queue, poll: 1s, lease: 1m, heartbeat: 10s}
+runner: {controller: https://controller.example, credentials_dir: /private/runner, repos: [github.com/acme/repo], labels: [team-4cpu, os=linux], accept_working_tree: true, max_concurrent: 2, spawn_policy: return-to-queue, poll: 1s, lease: 1m, heartbeat: 10s}
 cache: {max_bytes: 1GiB, max_entries: 0}
 machine: {box_id: machine-one}
 debug: {pause_timeout: 2m}
@@ -124,7 +124,7 @@ run: {submit_env_allow: [BUILD_REGION], cache_from: prod}
 	if err != nil {
 		return err
 	}
-	if machine.Profiles["prod"].Controller.Token == nil || *machine.Profiles["prod"].Controller.Token != "boundary-secret-token" || machine.Repos.Repos[0].Path != "/work/repo" || *machine.Runner.MaxConcurrent != 2 || !reflect.DeepEqual(machine.Runner.Labels, []string{"sparkwing-4cpu", "os=linux"}) || *machine.Run.CacheFrom != "prod" || *machine.Machine.BoxID != "machine-one" {
+	if machine.Profiles["prod"].Controller.Token == nil || *machine.Profiles["prod"].Controller.Token != "boundary-secret-token" || machine.Repos.Repos[0].Path != "/work/repo" || *machine.Runner.MaxConcurrent != 2 || !reflect.DeepEqual(machine.Runner.Labels, []string{"team-4cpu", "os=linux"}) || *machine.Run.CacheFrom != "prod" || *machine.Machine.BoxID != "machine-one" {
 		return errors.New("machine final-schema values changed")
 	}
 	for _, test := range []struct {

@@ -292,10 +292,7 @@ func (h *host) registerGenerated(arguments []nodeproto.ArgumentDescription) erro
 	defer h.mu.Unlock()
 	_, err := runspec.RegisterArguments(arguments, h.args, nil, h.replayMasks)
 	h.masker.Merge(h.replayMasks)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func (h *host) stepSnapshot(p *sparkwing.Plan, job string) []string {
