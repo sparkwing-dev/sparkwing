@@ -21,6 +21,7 @@ import (
 )
 
 func checkStorageFilesystemCollection(t *testing.T) {
+	recordLeaf(t)
 	objects, _ := storageFilesystem(t)
 	transfers := blob.TransferClient{Transport: storageFilesystemHTTP(objects)}
 	if err := checkBlobCollection(t, t.Context(), t.TempDir(), objects, transfers); err != nil {
@@ -60,6 +61,7 @@ func storageFilesystem(t *testing.T) (*blob.Filesystem, string) {
 }
 
 func checkStorageFilesystemCAS(t *testing.T) {
+	recordLeaf(t)
 	storageProperty(t, func(seed [64]byte, length uint8) bool {
 		f, dir := storageFilesystem(t)
 		body := seed[:int(length)%65]
@@ -168,6 +170,7 @@ func checkStorageFilesystemCAS(t *testing.T) {
 }
 
 func checkStorageFilesystemSignatures(t *testing.T) {
+	recordLeaf(t)
 	f, _ := storageFilesystem(t)
 	storageProperty(t, func(seed [16]byte, size uint16) bool {
 		object := capability.ObjectToSign{

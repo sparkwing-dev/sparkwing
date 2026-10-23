@@ -14,6 +14,7 @@ import (
 )
 
 func testGoSDKFakeHostEvalRunLogs(t *testing.T) {
+	recordLeaf(t)
 	plan := sparkwing.NewPlan()
 	source := sparkwing.Job(plan, "source", func(context.Context) error { return nil })
 	generated := source.Generate(func(ctx context.Context, expanded *sparkwing.Plan) error {
@@ -68,6 +69,7 @@ func testGoSDKClosureIdentifiers(t *testing.T) {
 	defer cleanup()
 	for _, job := range doc.Jobs {
 		t.Run(job.ID, func(t *testing.T) {
+			recordLeaf(t)
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()
 			hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: job.ID, Routes: nodeproto.ProcessRoutes{

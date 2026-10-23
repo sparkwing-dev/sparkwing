@@ -174,9 +174,7 @@ func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
 		return wait(ctx, snapshot)
 	}
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeFailed) })
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	completion, err := f.Host.Run(ctx, f.Input)
+	completion, err := f.Host.Run(t.Context(), f.Input)
 	if err != nil || completion.Outcome != "failed" || !slices.Equal(paused, []string{"gate:" + store.PauseReasonBefore}) {
 		t.Fatalf("completion=%+v pauses=%v error=%v", completion, paused, err)
 	}

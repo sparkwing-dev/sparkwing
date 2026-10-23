@@ -34,6 +34,7 @@ func sourceUploadFixture(t *testing.T, opts ...store.Option) (*serverFixture, cl
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Signed-transfer issuance uses wall time, so verification must use it too.
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://controller", SigningKey: []byte(strings.Repeat("k", 32))})
 	if err != nil {
 		t.Fatal(err)

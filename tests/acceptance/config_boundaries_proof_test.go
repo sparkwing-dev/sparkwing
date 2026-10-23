@@ -1,4 +1,4 @@
-package acceptance
+package acceptance_test
 
 import (
 	"bytes"
@@ -11,24 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
-
-// ConfigBoundaryScenarios identifies executable parser proofs. Placement drivers
-// still own file acquisition, intake and resolved-setting consumption.
-func ConfigBoundaryScenarios() []string {
-	return []string{"surface-config-decoder-boundaries", "surface-config-final-schema"}
-}
-
-// CheckConfigBoundary exercises the shared decoders against independent fixtures.
-func CheckConfigBoundary(scenarioID string) error {
-	switch scenarioID {
-	case "surface-config-decoder-boundaries":
-		return configDecoderBoundaries()
-	case "surface-config-final-schema":
-		return configFinalSchema()
-	default:
-		return fmt.Errorf("no config boundary proof for %q", scenarioID)
-	}
-}
 
 func configDecoderBoundaries() error {
 	for _, test := range []struct {
@@ -132,7 +114,7 @@ sparks: [{name: core, source: github.com/acme/core, version: v1.0.0}]
 	machineRaw := []byte(`profiles: {prod: {controller: {url: https://controller.example, token: boundary-secret-token}}}
 repos: {repos: [{path: /work/repo}], fallback_paths: [/work], auto_register: true, include_worktrees: false}
 admission: {mode: custom, budget: "50%,8gb", custom: {class_weight: {batch: 0}, aging_every: 0}}
-runner: {controller: https://controller.example, credentials_dir: /private/runner, repos: [github.com/acme/repo], accept_working_tree: true, max_concurrent: 2, spawn_policy: return-to-queue, poll: 1s, lease: 1m, heartbeat: 10s}
+runner: {controller: https://controller.example, credentials_dir: /private/runner, repos: [github.com/acme/repo], labels: [sparkwing-4cpu, os=linux], accept_working_tree: true, max_concurrent: 2, spawn_policy: return-to-queue, poll: 1s, lease: 1m, heartbeat: 10s}
 cache: {max_bytes: 1GiB, max_entries: 0}
 machine: {box_id: machine-one}
 debug: {pause_timeout: 2m}
@@ -142,7 +124,7 @@ run: {submit_env_allow: [BUILD_REGION], cache_from: prod}
 	if err != nil {
 		return err
 	}
-	if machine.Profiles["prod"].Controller.Token == nil || *machine.Profiles["prod"].Controller.Token != "boundary-secret-token" || machine.Repos.Repos[0].Path != "/work/repo" || *machine.Runner.MaxConcurrent != 2 || *machine.Run.CacheFrom != "prod" || *machine.Machine.BoxID != "machine-one" {
+	if machine.Profiles["prod"].Controller.Token == nil || *machine.Profiles["prod"].Controller.Token != "boundary-secret-token" || machine.Repos.Repos[0].Path != "/work/repo" || *machine.Runner.MaxConcurrent != 2 || !reflect.DeepEqual(machine.Runner.Labels, []string{"sparkwing-4cpu", "os=linux"}) || *machine.Run.CacheFrom != "prod" || *machine.Machine.BoxID != "machine-one" {
 		return errors.New("machine final-schema values changed")
 	}
 	for _, test := range []struct {
@@ -157,6 +139,7 @@ run: {submit_env_allow: [BUILD_REGION], cache_from: prod}
 		{"runner: {gitcache: ignored}", "runner.gitcache", true},
 		{"runner: {allow_repos: []}", "runner.allow_repos", true},
 		{"runner: {local_reserve: '1,2gb'}", "runner.local_reserve", true},
+		{"runner: {keep_free: '1,2gb'}", "runner.keep_free", true},
 		{"runner: {profile: prod}", "runner.profile", true},
 		{"run: {dispatch_wait: 1m}", "run.dispatch_wait", true},
 		{"profiles: {prod: {controller: {url: https://example.com}, backend: local}}", "profiles.prod.backend", true},

@@ -25,11 +25,9 @@ var (
 func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(fixtureDir)
-	if code == 0 {
-		if err := testleak.Check(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			code = 1
-		}
+	if err := testleak.Check(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		code = 1
 	}
 	os.Exit(code)
 }

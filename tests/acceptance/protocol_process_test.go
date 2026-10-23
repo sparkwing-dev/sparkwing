@@ -22,6 +22,7 @@ func testGoSDKHelloAndHandles(t *testing.T) {
 	defer cleanup()
 	for _, mode := range []string{"planning", "execution", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
+			recordLeaf(t)
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()
 			if mode != "planning" {
@@ -68,6 +69,7 @@ func testGoSDKHelloAndHandles(t *testing.T) {
 		})
 	}
 	t.Run("required-run-snapshot-fields", func(t *testing.T) {
+		recordLeaf(t)
 		process := startProtocolProbe(t, bin)
 		sendProtocolProbe(t, process, probeHello())
 		protocolProbeReply(t, process, "hello")

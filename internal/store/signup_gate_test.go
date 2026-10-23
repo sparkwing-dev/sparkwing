@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func signUpAt(t *testing.T, st *store.Store, p store.SignInProfile, c store.SignUpConditions, now time.Time) store.SignInResult {
@@ -405,11 +407,25 @@ func TestConcurrentSignUpsAdmitExactlyTheLimit(t *testing.T) {
 func invite(t *testing.T, st *store.Store, owner store.SignInResult, email string) store.Invitation {
 	t.Helper()
 	inv, err := tenant(t, st, owner.Account.ActiveTeam).InviteForTest(t,
-		context.Background(), owner.Account.ID, email, store.RoleEditor, time.Now())
+		context.Background(), owner.Account.ID, email, store.RoleEditor, teststore.Now(st))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return inv
+}
+
+func TestInvitationFixtureDoesNotConsumeSessionLifetime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		st := storetest.OpenSQLite(t)
+		owner := signIn(t, st, "owner", "owner@example.test")
+		member := signIn(t, st, "member", "member@example.test")
+		authority := storetest.AccountAuthority(t, st, member.Account.ID)
+		time.Sleep(2 * time.Hour)
+		invitation := invite(t, st, owner, member.Account.Email)
+		if _, err := st.AsOperator().AcceptAccountInvitation(t.Context(), authority, invitation.ID); err != nil {
+			t.Fatalf("fixture setup consumed session lifetime: %v", err)
+		}
+	})
 }
 
 // A waitlisted account that joins by invitation takes a team's scopes, so it

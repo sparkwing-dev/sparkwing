@@ -1,4 +1,4 @@
-package acceptance
+package acceptance_test
 
 import (
 	"errors"
@@ -12,31 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
-
-// EnvironmentBoundaryScenarios names scenarios with executable in-process environment/limits proofs.
-// These proofs do not replace the placement drivers or their host, SDK and store assertions.
-func EnvironmentBoundaryScenarios() []string {
-	return []string{"environment-captured-local-base", "environment-remote-allowlist", "environment-startup-versus-body", "environment-text-and-deadline-boundaries", "environment-deadline-parent-boundaries"}
-}
-
-// CheckEnvironmentBoundary exercises the W6 boundary of a scenario against independent expectations.
-// Native process launches, SDK replans, snapshot persistence and store writes require separate drivers.
-func CheckEnvironmentBoundary(scenarioID string) error {
-	switch scenarioID {
-	case "environment-captured-local-base":
-		return capturedEnvironment()
-	case "environment-remote-allowlist":
-		return remoteEnvironment()
-	case "environment-startup-versus-body":
-		return environmentPhases()
-	case "environment-text-and-deadline-boundaries":
-		return boundedEnvironmentText()
-	case "environment-deadline-parent-boundaries":
-		return environmentDeadlines()
-	default:
-		return fmt.Errorf("no environment boundary proof for %q", scenarioID)
-	}
-}
 
 func capturedEnvironment() error {
 	base := procenv.Base{Local: true, Captured: []string{"SPARKWING_CUSTOM=captured", "EMPTY=", "SPARKWING_RUN_ID=spoofed", "SPARKWING_RUNNER_NAME=spoofed", "AWS_ACCESS_KEY_ID=secret"}, Ambient: []string{"SPARKWING_CUSTOM=daemon", "EMPTY=changed"}}

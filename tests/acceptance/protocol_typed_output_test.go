@@ -32,6 +32,7 @@ func testGoSDKInterfaceOutputs(t *testing.T) {
 		{name: "object", value: map[string]any{"answer": float64(42)}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			recordLeaf(t)
 			plan := sparkwing.NewPlan()
 			job := sparkwing.Job(plan, "producer", interfaceOutputJob{value: test.value})
 			ref := sparkwing.RefTo[any](job)

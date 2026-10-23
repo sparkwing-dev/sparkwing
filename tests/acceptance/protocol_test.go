@@ -23,91 +23,56 @@ import (
 )
 
 func TestProtocol(t *testing.T) {
-	for _, scenario := range acceptance.Scenarios() {
-		if scenario.Group != "protocol" {
-			continue
+	runCell(t, "additive-fields", "go-sdk", testGoSDKAdditiveFieldsAndChildHandles)
+	runCell(t, "envelope-transcripts", "go-sdk", testGoSDKEnvelopeTranscripts)
+	runCell(t, "memo-input", "go-sdk", testGoSDKMemoInputBoundaries)
+	runCell(t, "version", "go-sdk", testGoSDKVersionAndHardCut)
+	runCell(t, "hello", "go-sdk", testGoSDKHelloAndHandles)
+	runCell(t, "mask-acknowledgement", "go-sdk", testGoSDKMaskAcknowledgement)
+	runCell(t, "sdk-linkage", "go-sdk", func(t *testing.T) {
+		recordLeaf(t)
+		linked, err := acceptance.GoSDKLinkage(t.Context())
+		if err != nil {
+			t.Fatalf("%v; linked=%v", err, linked)
 		}
-		t.Run(scenario.ID, func(t *testing.T) {
-			typeScriptBoundary(t, scenario.ID)
-			for _, target := range acceptance.Targets() {
-				if !acceptance.Applies(scenario, target) {
-					continue
-				}
-				t.Run(target.ID, func(t *testing.T) {
-					if scenario.ID == "protocol-additive-fields-and-child-handles" && target.ID == "local-go-"+runtime.GOOS {
-						testGoSDKAdditiveFieldsAndChildHandles(t)
-						return
-					}
-					if scenario.ID == "protocol-envelope-transcripts" && target.ID == "local-go-"+runtime.GOOS {
-						testGoSDKEnvelopeTranscripts(t)
-						return
-					}
-					if scenario.ID == "protocol-memo-input-boundaries" && target.ID == "local-go-"+runtime.GOOS {
-						t.Run("sdk-input-contract", testGoSDKMemoInputBoundaries)
-						skipCell(t, scenario.ID, target.ID, "persisted memo reuse and write suppression require W1/W3 storage integration")
-					}
-					if scenario.ID == "protocol-version-and-hard-cut" && target.ID == "local-go-"+runtime.GOOS {
-						testGoSDKVersionAndHardCut(t)
-						return
-					}
-					if scenario.ID == "protocol-hello-and-handles" && target.ID == "local-go-"+runtime.GOOS {
-						testGoSDKHelloAndHandles(t)
-						return
-					}
-					if scenario.ID == "protocol-mask-acknowledgement" && target.ID == "local-go-"+runtime.GOOS {
-						t.Run("sdk-service-contract", testGoSDKMaskAcknowledgement)
-						skipCell(t, scenario.ID, target.ID, "real HTTP registration and host sink installation require W2/W3 placement drivers")
-					}
-					if scenario.ID == "protocol-go-sdk-fake-host-and-linkage" && target.ID == "local-go-"+runtime.GOOS {
-						t.Run("sdk-linkage", func(t *testing.T) {
-							linked, err := acceptance.GoSDKLinkage(t.Context())
-							if err != nil {
-								t.Fatalf("%v; linked=%v", err, linked)
-							}
-						})
-						t.Run("sdk-frame-boundaries", testGoSDKFrameLimit)
-						t.Run("sdk-reply-frame-boundaries", testGoSDKReplyFrameLimit)
-						t.Run("public-fake-host", testGoSDKFakeHost)
-						t.Run("empty-oidc-token", testGoSDKRefusesEmptyOIDCToken)
-						t.Run("colliding-masks", testGoSDKRefusesCollidingMasks)
-						t.Run("later-mask-collisions", testGoSDKMaskRegistryGuardsLaterDeclarations)
-						t.Run("approval-condition", testGoSDKApprovalCondition)
-						t.Run("queued-eval-cancellation", testGoSDKQueuedEvalCancellation)
-						t.Run("fake-host-close", testGoSDKFakeHostCloseJoinsWork)
-						t.Run("closed-fake-host-services", testGoSDKClosedFakeHostServices)
-						t.Run("mask-close-race", testGoSDKMaskCannotCommitAfterClose)
-						t.Run("dependency-cache-keys", testGoSDKDependencyCacheKeys)
-						t.Run("fileset-path-names", testGoSDKFilesetPathNames)
-						t.Run("fileset-ignore-read-failure", testGoSDKFilesetIgnoreReadFailure)
-						t.Run("declaration-services", testGoSDKDeclarationServices)
-						t.Run("attribute-masking", testGoSDKFakeHostAttributeMasks)
-						t.Run("plan-error-masking", testGoSDKPlanErrorMasks)
-						t.Run("fake-host-run-snapshot", testGoSDKFakeHostRunSnapshot)
-						t.Run("resolved-entrypoint-and-invoked-name", testGoSDKEntrypointAlias)
-						t.Run("closure-identifiers", testGoSDKClosureIdentifiers)
-						t.Run("eval-run-logs", testGoSDKFakeHostEvalRunLogs)
-						t.Run("job-arguments", testGoSDKJobArguments)
-						t.Run("recovery-chains", testGoSDKRecoveryChains)
-						t.Run("replay-environment", testGoSDKReplayEnvironment)
-						t.Run("output-failures", testGoSDKOutputFailures)
-						t.Run("reply-result-reuse", testGoSDKReplyResultReuse)
-						t.Run("required-describe-fields", testGoSDKRequiredDescribeFields)
-						t.Run("interface-outputs", testGoSDKInterfaceOutputs)
-						t.Run("real-process-plan-and-output", testGoSDKProcessPlanOutput)
-						t.Run("real-process-body-failure", testGoSDKProcessFailure)
-						t.Run("real-process-output-encoding-failure", testGoSDKProcessOutputEncodingFailure)
-						t.Run("real-process-application-retry", testGoSDKRetryStepOutputs)
-						t.Run("real-process-host-routes", testGoSDKProcessRoutes)
-						return
-					}
-					skipCell(t, scenario.ID, target.ID, "contract skeleton: %s on %s requires its placement driver", scenario.ID, target.ID)
-				})
-			}
-		})
-	}
+	})
+	runCell(t, "sdk-frame-boundaries", "go-sdk", testGoSDKFrameLimit)
+	runCell(t, "sdk-reply-frame-boundaries", "go-sdk", testGoSDKReplyFrameLimit)
+	runCell(t, "public-fake-host", "go-sdk", testGoSDKFakeHost)
+	runCell(t, "empty-oidc-token", "go-sdk", testGoSDKRefusesEmptyOIDCToken)
+	runCell(t, "colliding-masks", "go-sdk", testGoSDKRefusesCollidingMasks)
+	runCell(t, "later-mask-collisions", "go-sdk", testGoSDKMaskRegistryGuardsLaterDeclarations)
+	runCell(t, "approval-condition", "go-sdk", testGoSDKApprovalCondition)
+	runCell(t, "queued-eval-cancellation", "go-sdk", testGoSDKQueuedEvalCancellation)
+	runCell(t, "fake-host-close", "go-sdk", testGoSDKFakeHostCloseJoinsWork)
+	runCell(t, "closed-fake-host-services", "go-sdk", testGoSDKClosedFakeHostServices)
+	runCell(t, "mask-close-race", "go-sdk", testGoSDKMaskCannotCommitAfterClose)
+	runCell(t, "dependency-cache-keys", "go-sdk", testGoSDKDependencyCacheKeys)
+	runCell(t, "fileset-path-names", "go-sdk", testGoSDKFilesetPathNames)
+	runCell(t, "fileset-ignore-read-failure", "go-sdk", testGoSDKFilesetIgnoreReadFailure)
+	runCell(t, "declaration-services", "go-sdk", testGoSDKDeclarationServices)
+	runCell(t, "attribute-masking", "go-sdk", testGoSDKFakeHostAttributeMasks)
+	runCell(t, "plan-error-masking", "go-sdk", testGoSDKPlanErrorMasks)
+	runCell(t, "fake-host-run-snapshot", "go-sdk", testGoSDKFakeHostRunSnapshot)
+	runCell(t, "resolved-entrypoint-and-invoked-name", "go-sdk", testGoSDKEntrypointAlias)
+	runCell(t, "closure-identifiers", "go-sdk", testGoSDKClosureIdentifiers)
+	runCell(t, "eval-run-logs", "go-sdk", testGoSDKFakeHostEvalRunLogs)
+	runCell(t, "job-arguments", "go-sdk", testGoSDKJobArguments)
+	runCell(t, "recovery-chains", "go-sdk", testGoSDKRecoveryChains)
+	runCell(t, "replay-environment", "go-sdk", testGoSDKReplayEnvironment)
+	runCell(t, "output-failures", "go-sdk", testGoSDKOutputFailures)
+	runCell(t, "reply-result-reuse", "go-sdk", testGoSDKReplyResultReuse)
+	runCell(t, "required-describe-fields", "go-sdk", testGoSDKRequiredDescribeFields)
+	runCell(t, "interface-outputs", "go-sdk", testGoSDKInterfaceOutputs)
+	runCell(t, "real-process-plan-and-output", "go-sdk", testGoSDKProcessPlanOutput)
+	runCell(t, "real-process-body-failure", "go-sdk", testGoSDKProcessFailure)
+	runCell(t, "real-process-output-encoding-failure", "go-sdk", testGoSDKProcessOutputEncodingFailure)
+	runCell(t, "real-process-application-retry", "go-sdk", testGoSDKRetryStepOutputs)
+	runCell(t, "real-process-host-routes", "go-sdk", testGoSDKProcessRoutes)
 }
 
 func testGoSDKProcessFailure(t *testing.T) {
+	recordLeaf(t)
 	actual, err := acceptance.RunGoSDKProcessFixture(t.Context(), "", "failure")
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +95,7 @@ func testGoSDKProcessFailure(t *testing.T) {
 }
 
 func testGoSDKProcessPlanOutput(t *testing.T) {
+	recordLeaf(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	actual, err := acceptance.RunGoSDKProcessFixture(ctx, "", "producer")
@@ -140,10 +106,11 @@ func testGoSDKProcessPlanOutput(t *testing.T) {
 }
 
 func testGoSDKProcessRoutes(t *testing.T) {
+	recordLeaf(t)
 	var outputReads, secretReads, plainReads atomic.Int32
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
-		t.Skipf("sandbox disallows loopback listener for host routes: %v", err)
+		t.Fatalf("sandbox disallows loopback listener for host routes: %v", err)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -231,6 +198,7 @@ func compareGoSDKResults(t *testing.T, ctx context.Context, actual acceptance.Go
 }
 
 func testGoSDKFakeHost(t *testing.T) {
+	recordLeaf(t)
 	host := sparkwingtest.New(sparkwingtest.Options{
 		Secrets: map[string]sparkwingtest.Secret{"TOKEN": {Value: "fake-host-secret", Masked: true}},
 	})

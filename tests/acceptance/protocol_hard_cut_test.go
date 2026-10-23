@@ -21,6 +21,7 @@ func testGoSDKVersionAndHardCut(t *testing.T) {
 	}
 	defer cleanup()
 	t.Run("wire", func(t *testing.T) {
+		recordLeaf(t)
 		mismatch := startProtocolProbe(t, bin)
 		hello := probeHello()
 		hello.Protocol = 1
@@ -75,6 +76,7 @@ func testProtocolAdmissionClass(t *testing.T) {
 		t.Run(string(placement), func(t *testing.T) {
 			for _, class := range []string{"critical", "interactive", "normal", "batch", "", "urgent", "Batch", " batch "} {
 				t.Run("class="+class, func(t *testing.T) {
+					recordLeaf(t)
 					raw, err := json.Marshal(map[string]any{"jobs": []any{}, "admission_class": class})
 					if err != nil {
 						t.Fatal(err)
@@ -144,6 +146,7 @@ func main() {
 		"(*sw.Approval).BeforeRun", "(*sw.Approval).AfterRun", "sw.RuntimePlumbing", "(*sw.JobNode).BeforeRunHooks",
 	} {
 		t.Run(symbol, func(t *testing.T) {
+			recordLeaf(t)
 			output, err := compile(imports + "func main() { _ = " + symbol + " }\n")
 			name := symbol[strings.LastIndex(symbol, ".")+1:]
 			if err == nil || !strings.Contains(output, name) || !strings.Contains(output, "undefined") {

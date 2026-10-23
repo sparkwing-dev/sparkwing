@@ -1,0 +1,15 @@
+[
+  {"op":"accept","want":"ok","balance":999400},
+  {"op":"accept","want":"ok","unchanged":true,"balance":999400},
+  {"op":"invalid_plan","want":"plan_invalid","unchanged":true,"balance":999400},
+  {"op":"grant","reference":"welcome","amount":50000,"want":"created","balance":1049400},
+  {"op":"grant","reference":"welcome","amount":50000,"want":"replayed","balance":1049400,"unchanged":true},
+  {"op":"grant","reference":"welcome","amount":49999,"want":"grant_conflict","balance":1049400,"unchanged":true},
+  {"op":"grant","reference":"invalid","amount":0,"want":"invalid_input","balance":1049400,"unchanged":true},
+  {"op":"grant","reference":"bonus","amount":7000,"want":"created","balance":1056400},
+  {"op":"admit","want":"ok","balance":1056400},
+  {"op":"start","want":"ok","balance":1056400},
+  {"op":"renew","want":"ok","balance":1055800},
+  {"op":"cancel","want":"ok","balance":1055800},
+  {"op":"settle","want":"ok","balance":1056400}
+]

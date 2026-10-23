@@ -67,3 +67,14 @@ func TestReExecInheritsTheSandboxAndLeavesItInPlace(t *testing.T) {
 		t.Errorf("the sandbox home lost a file after a helper exited: %v", err)
 	}
 }
+
+func TestGoTelemetryCannotRecreateTheSandboxHome(t *testing.T) {
+	cmd := exec.Command("go", "env", "GOTELEMETRYDIR")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go telemetry directory: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != os.DevNull {
+		t.Fatalf("Go telemetry directory = %q, want %q", got, os.DevNull)
+	}
+}
