@@ -107,7 +107,7 @@ func noteAuditWrite(ctx context.Context) {
 	}
 }
 
-// safety: mutation handlers record revocation targets only after the store commits; the writer sanitizes every field.
+// safety: targets come from successful store operations; the writer sanitizes every field.
 func noteAuditTarget(ctx context.Context, key, value string) {
 	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok && value != "" {
 		rec.targets = append(rec.targets, key, value)

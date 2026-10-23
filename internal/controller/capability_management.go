@@ -120,6 +120,7 @@ func (s *Server) handleReadCapability(w http.ResponseWriter, r *http.Request, a 
 	if row.Prefix != a.Target.TokenPrefix || !validCapabilityMetadata(a, row) {
 		return errors.New("invalid credential metadata")
 	}
+	noteAuditTarget(r.Context(), "token_prefix", row.Prefix)
 	row.Grants = append([]capability.Grant{}, row.Grants...)
 	writeJSON(w, http.StatusOK, row)
 	return nil
