@@ -11,10 +11,23 @@ import (
 )
 
 func TestUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T) {
+	for _, requirement := range []string{"class=cloud", "sparkwing-16cpu"} {
+		t.Run(requirement, func(t *testing.T) {
+			testUnfundedPushIsHistoryAndNeverStartsAfterFunding(t, requirement)
+		})
+	}
+}
+
+func testUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T, requirement string) {
+	t.Helper()
 	s, tenant, in := appAdmissionFixture(t, true, "unfunded")
 	defer s.Close()
+	rates := CreditRateTable{{Cores: 2, MicroPerSecond: 2}, {Cores: 16, MicroPerSecond: 16}}
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &rates}); err != nil {
+		t.Fatal(err)
+	}
 	in.Request.Dispatch = runspec.DispatchController
-	in.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"class=cloud"}}}
+	in.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{requirement}}}
 	result, err := tenant.AdmitGitHubAppRun(t.Context(), in)
 	if err != nil {
 		t.Fatal(err)
@@ -110,6 +123,15 @@ func TestPushCreditAdmissionUsesSealedPlacementWithoutLaunchers(t *testing.T) {
 		{name: "exclusive Cloud billing policy", ranking: `["cloud"]`, failed: true},
 		{name: "empty ranking permits free", ranking: `[]`},
 		{name: "Cloud required", requires: []string{"class=cloud"}, failed: true},
+		{name: "Cloud size required", requires: []string{"sparkwing-16cpu"}, failed: true},
+		{name: "funded Cloud size", requires: []string{"sparkwing-16cpu"}, funded: true},
+		{name: "Cloud size and ordinary label", requires: []string{"sparkwing-16cpu", "gpu"}, failed: true},
+		{name: "Cloud size alternatives", requires: []string{"sparkwing-16cpu,sparkwing-32cpu"}, failed: true},
+		{name: "Cloud size or free label", requires: []string{"sparkwing-16cpu,gpu"}},
+		{name: "Cloud size or free class", requires: []string{"sparkwing-16cpu,class=agent"}},
+		{name: "Cloud size excludes free alternative", requires: []string{"sparkwing-16cpu,class=agent", "class=cloud"}, failed: true},
+		{name: "conflicting Cloud sizes", requires: []string{"sparkwing-16cpu", "sparkwing-32cpu"}},
+		{name: "runner label requires Cloud size", runnerLabel: "sparkwing-16cpu", failed: true},
 		{name: "runner label requires Cloud", runnerLabel: "class=cloud", failed: true},
 		{name: "runner label permits free", runnerLabel: "gpu"},
 		{name: "free labels before registration", requires: []string{"linux", "arch=arm64"}},
@@ -121,6 +143,10 @@ func TestPushCreditAdmissionUsesSealedPlacementWithoutLaunchers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, tenant, in := appAdmissionFixture(t, true, "placement")
 			defer s.Close()
+			rates := CreditRateTable{{Cores: 2, MicroPerSecond: 2}, {Cores: 16, MicroPerSecond: 16}, {Cores: 32, MicroPerSecond: 32}}
+			if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &rates}); err != nil {
+				t.Fatal(err)
+			}
 			in.Request.Dispatch = runspec.DispatchController
 			in.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: tc.requires}}
 			if tc.runnerLabel != "" {

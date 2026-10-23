@@ -27,7 +27,7 @@ func TestClaimRoutesSeekBoundedHeadsInALargeQueue(t *testing.T) {
 	demand.Target = nil
 	demand.Kinds = []capability.UnitKind{capability.UnitNode}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		requirements, err := persistClaimRequirementsTx(t.Context(), tx, "a", []string{"sparkwing-4cpu"})
+		requirements, err := persistClaimRequirementsTx(t.Context(), tx, "a", []string{"team-4cpu"})
 		if err != nil {
 			return err
 		}
@@ -118,7 +118,7 @@ func TestCloudNamedRecheckSeeksTheTenantUnitKey(t *testing.T) {
 
 func TestClaimPredicateJoinsOnlyTheTeamsClaimants(t *testing.T) {
 	s, demand := launcherFairnessFixture(t)
-	facts := []claimFacts{{Prefix: demand.CapabilityPrefix, Current: 1, Cloud: 1, Trust: "any", Kinds: []string{"node"}, Labels: []string{"sparkwing-4cpu"}}}
+	facts := []claimFacts{{Prefix: demand.CapabilityPrefix, Current: 1, Cloud: 1, Trust: "any", Kinds: []string{"node"}, Labels: []string{"team-4cpu"}}}
 	teams := make([]claimTeamFacts, 200)
 	for i := range teams {
 		teams[i] = claimTeamFacts{Team: fmt.Sprintf("team-%03d", i), Balance: 1e12, Available: 128}

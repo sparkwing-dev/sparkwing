@@ -347,6 +347,13 @@ func TestRunnerEnrollmentRejectsBadRepoPattern(t *testing.T) {
 	}
 }
 
+func TestRunnerEnrollmentRejectsCloudLabels(t *testing.T) {
+	err := validateRunnerEnrollment(userconfig.RunnerConfig{Labels: []string{"sparkwing-16cpu"}})
+	if err == nil || !strings.Contains(err.Error(), "belong to Sparkwing Cloud") {
+		t.Fatalf("Cloud label enrollment: %v", err)
+	}
+}
+
 func TestRunnerEnrollmentFailurePreservesPreviousForcedConfigAndCredential(t *testing.T) {
 	f := newRunnersFixture(t)
 	captureStdout(t, func() {

@@ -31,6 +31,8 @@ func TestUnclaimedLauncherWorkNamesTheCreditHold(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand := executingRunFixture(t, runspec.DispatchController)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu"]}}`))
+			indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
 			indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitPlan, RunID: "run"})
 			meteredRunnerOnly(t, s)
@@ -87,7 +89,7 @@ func unmeteredRunnerCase(t *testing.T, kind capability.UnitKind, runner string) 
 	switch runner {
 	case "metered":
 		meteredRunnerOnly(t, s)
-		if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "paid-runner", Labels: []string{"sparkwing-4cpu"}, Kinds: []capability.UnitKind{kind}}); err != nil {
+		if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "paid-runner", Labels: []string{"team-4cpu"}, Kinds: []capability.UnitKind{kind}}); err != nil {
 			t.Fatal(err)
 		}
 	case "revoked":

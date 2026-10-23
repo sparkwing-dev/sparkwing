@@ -54,7 +54,7 @@ func TestWaitingNodesRetainTheRunsRunnerSelection(t *testing.T) {
 			if selected.Kind == runspec.RunnerName {
 				want = "name=" + want
 			}
-			if err != nil || len(waiting) != 1 || !slices.Equal(waiting[0].Selector, []string{"sparkwing-4cpu", want}) || waiting[0].Repo.URL != "https://github.com/acme/repo" {
+			if err != nil || len(waiting) != 1 || !slices.Equal(waiting[0].Selector, []string{"team-4cpu", want}) || waiting[0].Repo.URL != "https://github.com/acme/repo" {
 				t.Fatalf("run selection: %+v, %v", waiting, err)
 			}
 		})

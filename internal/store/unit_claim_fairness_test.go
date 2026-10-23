@@ -17,6 +17,8 @@ import (
 func launcherFairnessFixture(t *testing.T) (*Store, UnitDemand) {
 	t.Helper()
 	s, _ := unitClaimFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu"]}}`))
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 	fundUnitClaim(t, s)
 	if _, err := (&Tenant{s: s, team: "b"}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 100000000, Reference: "claim-fixture-b", CreatedBy: "fixture"}); err != nil {
 		t.Fatal(err)

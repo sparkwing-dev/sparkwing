@@ -30,6 +30,13 @@ than a label the runner chose. Platform observations supply OS and architecture.
 Free labels, including discovered `tool:NAME` labels, steer placement without
 granting authority.
 
+The `sparkwing-` label prefix belongs to Sparkwing Cloud. Self-hosted, personal
+and pool runners cannot configure it, and claims strip such self-reported
+labels. Use another prefix for your own runner sizes. Requiring a Cloud size
+label such as `sparkwing-16cpu` selects a fresh, isolated Cloud pod. Intake checks
+its funding as Cloud-only placement. A comma alternative such as
+`sparkwing-16cpu,gpu` still permits a self-hosted runner advertising `gpu`.
+
 ## Reserved pools
 
 A team administrator reserves a runner for a pool and allows repositories into
@@ -75,6 +82,7 @@ sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
 `Prefers` ranks eligible candidates and never relaxes a requirement, repository
 restriction, reservation or placement policy. A preference cannot authorize work
 on a runner that fails a hard filter.
+An award matching a Cloud size preference records `placement_reason=preference`.
 
 `Inline` keeps a job with its run host. Use it for a local preflight or other work
 that must run with the owner. A `local` or `location=coordinator` requirement is
