@@ -74,16 +74,20 @@ func TestAppJWT_AnotherKeyIsRejected(t *testing.T) {
 	}
 }
 
-func TestVerifyWebhook(t *testing.T) {
-	_, c := fixture(t)
+func TestWebhookMAC(t *testing.T) {
+	c := githubapp.New(githubapp.Config{WebhookSecret: "current"})
 	body := []byte(`{"action":"opened"}`)
-	if !c.VerifyWebhook(githubapptest.Sign(body), body) {
+	mac := c.WebhookMAC()
+	_, _ = mac.Write(body)
+	if !mac.Verify(githubapptest.SignWith("current", body)) {
 		t.Fatal("a delivery signed with the webhook secret did not verify")
 	}
-	if c.VerifyWebhook(githubapptest.SignWith("other", body), body) {
+	if mac.Verify(githubapptest.SignWith("other", body)) {
 		t.Fatal("a delivery signed with another secret verified")
 	}
-	if c.VerifyWebhook(githubapptest.Sign(body), []byte(`{"action":"closed"}`)) {
+	mac = c.WebhookMAC()
+	_, _ = mac.Write([]byte(`{"action":"closed"}`))
+	if mac.Verify(githubapptest.SignWith("current", body)) {
 		t.Fatal("a signature verified a body it did not cover")
 	}
 }
@@ -145,9 +149,9 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 		t.Fatalf("update: %v", err)
 	}
 	gh.FailCheckRuns(1)
-	var apiErr *githubapp.APIError
+	var apiErr interface{ Temporary() bool }
 	if err := c.UpdateCheckRun(ctx, checks.Token, "acme", "widgets", id, run); !errors.As(err, &apiErr) || !apiErr.Temporary() {
-		t.Fatalf("update GitHub answered 502 = %v, want a temporary APIError", err)
+		t.Fatalf("update GitHub answered 502 = %v, want a temporary error", err)
 	}
 	calls := gh.CheckRunCalls()
 	if len(calls) != 2 || calls[1].Method != "update" || calls[1].ID != id || calls[1].Conclusion != "success" {
@@ -196,21 +200,20 @@ func TestFileAtCommit_ReadsAtMostOneByteBeyondTheConfigurationLimit(t *testing.T
 	}
 }
 
-func TestVerifyWebhook_AcceptsThePreviousSecretDuringRotation(t *testing.T) {
-	gh, _ := fixture(t)
+func TestWebhookMAC_AcceptsThePreviousSecretDuringRotation(t *testing.T) {
 	body := []byte(`{"action":"opened"}`)
 	for _, previous := range []string{"", "rotated-out-secret"} {
-		cfg := gh.Config()
-		cfg.PreviousWebhookSecret = previous
-		c := githubapp.New(cfg)
-		if !c.VerifyWebhook(githubapptest.Sign(body), body) {
+		c := githubapp.New(githubapp.Config{WebhookSecret: "current", PreviousWebhookSecret: previous})
+		mac := c.WebhookMAC()
+		_, _ = mac.Write(body)
+		if !mac.Verify(githubapptest.SignWith("current", body)) {
 			t.Fatal("the current secret did not verify")
 		}
-		if got := c.VerifyWebhook(githubapptest.SignWith("rotated-out-secret", body), body); got != (previous != "") {
+		if got := mac.Verify(githubapptest.SignWith("rotated-out-secret", body)); got != (previous != "") {
 			t.Fatalf("previous secret %q verified = %v", previous, got)
 		}
 		for _, other := range []string{"", "other"} {
-			if c.VerifyWebhook(githubapptest.SignWith(other, body), body) {
+			if mac.Verify(githubapptest.SignWith(other, body)) {
 				t.Fatalf("a delivery signed with %q verified", other)
 			}
 		}

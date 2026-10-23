@@ -72,20 +72,19 @@ var (
 	ErrTooManyRepositories = errors.New("githubapp: the installation covers more repositories than can be listed")
 )
 
-// APIError is an answer from GitHub that is none of the errors above.
-type APIError struct {
-	Op     string
-	Status int
+type apiError struct {
+	op     string
+	status int
 }
 
-func (e *APIError) Error() string {
-	return fmt.Sprintf("githubapp: %s answered %d", e.Op, e.Status)
+func (e *apiError) Error() string {
+	return fmt.Sprintf("githubapp: %s answered %d", e.op, e.status)
 }
 
 // Temporary reports whether the same request may succeed later: GitHub
 // answered 429 or a 5xx.
-func (e *APIError) Temporary() bool {
-	return e.Status == http.StatusTooManyRequests || e.Status >= 500
+func (e *apiError) Temporary() bool {
+	return e.status == http.StatusTooManyRequests || e.status >= 500
 }
 
 // Config names the App and where GitHub answers.
@@ -205,14 +204,6 @@ func (c *Client) AuthorizeURL(state, verifier, redirectURI string) string {
 		"allow_signup":          {"false"},
 	}
 	return c.cfg.WebURL + "/login/oauth/authorize?" + q.Encode()
-}
-
-// VerifyWebhook reports whether signature (the X-Hub-Signature-256 header)
-// is the App's HMAC of body.
-func (c *Client) VerifyWebhook(signature string, body []byte) bool {
-	mac := c.WebhookMAC()
-	_, _ = mac.Write(body)
-	return mac.Verify(signature)
 }
 
 // WebhookMAC hashes a streamed delivery body under every accepted webhook secret.
@@ -450,7 +441,7 @@ func (c *Client) mintToken(ctx context.Context, installation int64, request map[
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return Token{}, fmt.Errorf("%w: installation token for %d answered %d", ErrRejected, installation, status)
 	case status != http.StatusCreated && status != http.StatusOK:
-		return Token{}, &APIError{Op: "installation token", Status: status}
+		return Token{}, &apiError{op: "installation token", status: status}
 	case tok.Token == "":
 		return Token{}, errors.New("githubapp: github returned no installation token")
 	}
@@ -745,7 +736,7 @@ func (c *Client) FindCheckRun(ctx context.Context, token, owner, repo, sha, name
 	case status == http.StatusForbidden:
 		return 0, fmt.Errorf("%w: find check run answered 403", ErrPermissionMissing)
 	case status < 200 || status >= 300:
-		return 0, &APIError{Op: "find check run", Status: status}
+		return 0, &apiError{op: "find check run", status: status}
 	}
 	for _, run := range found.CheckRuns {
 		if run.ExternalID == externalID && run.ID > 0 {
@@ -783,7 +774,7 @@ func (c *Client) repoWrite(ctx context.Context, method, token, owner, repo, path
 	case status == http.StatusForbidden:
 		return nil, fmt.Errorf("%w: %s answered 403", ErrPermissionMissing, op)
 	case status < 200 || status >= 300:
-		return nil, &APIError{Op: op, Status: status}
+		return nil, &apiError{op: op, status: status}
 	}
 	return raw, nil
 }

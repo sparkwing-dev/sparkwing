@@ -13,11 +13,9 @@ internal/controller/client	2
 # ConcurrencyError.Error: implements error; callers use the error interface.
 internal/egress	1
 internal/engine	5
-# APIError: external tests need githubapptest, which imports githubapp.
-# APIError.Error: implements error; callers use the error interface.
+# apiError.Error: implements error; callers use the error interface.
 # Client.InstallationToken: external tests need githubapptest, which imports githubapp.
-# Client.VerifyWebhook: external tests need githubapptest, which imports githubapp.
-internal/githubapp	4
+internal/githubapp	2
 # Client.Verify: external tests need googletest, which imports googleauth.
 internal/googleauth	1
 # Error.Error: implements error; callers use the error interface.
