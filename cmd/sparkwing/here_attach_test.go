@@ -210,7 +210,6 @@ func TestHereAttachmentKeepsDisplayAndExecutionAuthoritySeparate(t *testing.T) {
 	claimed, hosted, closed, attached := false, false, false, false
 	var out bytes.Buffer
 	deps := defaultHereDependencies("json")
-	deps.capacity = nil
 	deps.credentials = func() (hereCredentials, error) { return credentials, nil }
 	deps.attach = func(ctx context.Context, public client.EngineOptions, run string, host func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error) {
 		attached = true

@@ -372,17 +372,13 @@ func runsPerHourRefusal(
 	return nil
 }
 
-func (o *Operator) globalRunsPerHourRefusal(ctx context.Context, q rowQuerier, limit, since int64) error {
+func (o *Operator) globalRunsPerHourRefusal(ctx context.Context, q *storeTx, limit, since int64) error {
 	var runs int64
-	if err := q.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM runs WHERE created_at >= ?`, since).Scan(&runs); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE created_at>=?`, since).Scan(&runs); err != nil {
 		return err
 	}
 	if runs >= limit {
-		return &ComputeLimitError{
-			Limit: ComputeLimitGlobalRunsPerHour, Cap: limit,
-			Observed: runs, Scope: "controller",
-		}
+		return &ComputeLimitError{Limit: ComputeLimitGlobalRunsPerHour, Cap: limit, Observed: runs, Scope: "controller"}
 	}
 	return nil
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestBusinessEventsRecordLifecycleSQLite(t *testing.T) {
@@ -156,7 +155,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		claim, err := st.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}, Available: match.Resources{Cores: 8}})
+		claim, err := st.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}})
 		if err != nil {
 			t.Fatal(err)
 		}

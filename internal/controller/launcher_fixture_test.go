@@ -7,7 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // LauncherFixtureClaim provisions a launcher and exchanges its current unit award.
@@ -41,7 +40,7 @@ func LauncherFixtureClaim(t *testing.T, st *store.Store, runID, nodeID string) s
 	if nodeID == store.PlanNodeID {
 		unit.Kind, unit.NodeID = capability.UnitPlan, ""
 	}
-	claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &unit, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &unit})
 	if err != nil {
 		t.Fatal(err)
 	}

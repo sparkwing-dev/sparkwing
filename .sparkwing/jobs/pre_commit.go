@@ -50,7 +50,7 @@ func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.No
 	// perf: measured on a 16-core Linux host at 0.6 cores sustained over the
 	// whole run; one core is the smallest pin that never throttles the two
 	// steps that fan out (gofmt and the tracked-binary sweep).
-	plan.Resources(sparkwing.Cores(1))
+
 	plan.Priority(hookTierPriority)
 	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil

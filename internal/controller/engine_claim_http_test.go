@@ -105,7 +105,7 @@ func engineClaimHTTPFixture(t *testing.T, grants []capability.Grant, opts ...sto
 
 func TestEngineClaimHTTPDeliversPrivateAwardOnce(t *testing.T) {
 	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
-	body := `{"runner_version":"v1.2.3","kinds":["trigger","node"],"labels":["name=forged","class=cloud"],"available_cores":1}`
+	body := `{"runner_version":"v1.2.3","kinds":["trigger","node"],"labels":["name=forged","class=cloud"]}`
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim?team=foreign", body, 200)
 	var response controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
@@ -134,10 +134,10 @@ func TestEngineClaimHTTPLocalFirstUsesPersistedPoll(t *testing.T) {
 	now := teststore.Now(e.Store).UnixNano()
 	engineSQL(t, e.Store, `UPDATE nodes SET ready_at=?,execution_json=?`, now, []byte(`{"requires":{"set":true,"value":["ready"]}}`))
 	h := e.Server.WithEngineController(e.EngineController).WithLocalFirstPlacement([]string{"gpu"}, time.Minute, time.Minute).Handler()
-	poll := `{"runner_version":"v1","kinds":["node"],"labels":["gpu"],"available_cores":1}`
+	poll := `{"runner_version":"v1","kinds":["node"],"labels":["gpu"]}`
 	engineClaimHTTP(t, h, preferred, "POST", "/api/v1/runners/claim", poll, http.StatusOK)
 	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
-	w := engineClaimHTTP(t, h, fallback, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, http.StatusOK)
+	w := engineClaimHTTP(t, h, fallback, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, http.StatusOK)
 	var held controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &held); err != nil || held.Claim != nil {
 		t.Fatalf("local-first hold: %+v, %v", held, err)
@@ -174,7 +174,7 @@ func TestEngineClaimHTTPRefusalsDoNotAward(t *testing.T) {
 		revokeEngineMachine(t, e.Store, "root")
 		return nil
 	})
-	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 401)
+	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, 401)
 	var holder string
 	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT COALESCE(claimed_by,'') FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&holder); err != nil || holder != "" {
 		t.Fatalf("refused request mutated holder %q: %v", holder, err)
@@ -219,7 +219,7 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	h := e.Server.WithEngineController(e.EngineController).Handler()
-	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["plan"],"available_cores":1}`, 200)
+	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["plan"]}`, 200)
 	var response controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
@@ -273,7 +273,7 @@ func FuzzEngineClaimHTTPKindsNeverWidenGrants(f *testing.F) {
 		for i, value := range values {
 			kinds[i] = []string{"node", "trigger", "plan", "eval", "unknown"}[int(value)%5]
 		}
-		body, err := json.Marshal(map[string]any{"runner_version": "v1", "kinds": kinds, "available_cores": 1})
+		body, err := json.Marshal(map[string]any{"runner_version": "v1", "kinds": kinds})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -302,7 +302,7 @@ func TestEngineClaimHTTPAuthenticatesBeforeNamedLookupErrors(t *testing.T) {
 	e.claimProfiles = engineProfileFake{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	h := e.Server.WithEngineController(e.EngineController).Handler()
-	body := `{"runner_version":"v1","kinds":["trigger"],"available_cores":1}`
+	body := `{"runner_version":"v1","kinds":["trigger"]}`
 	engineClaimHTTP(t, h, "", "POST", "/api/v1/runs/missing/claim", body, 401)
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/missing/claim", body, 404)
 	if !strings.Contains(w.Body.String(), fmt.Sprintf(`"code":%q`, apierr.NotFound)) {
@@ -314,7 +314,7 @@ func TestEngineClaimHTTPAuthenticatesBeforeNamedLookupErrors(t *testing.T) {
 
 func TestEngineClaimHTTPDeadCredentialProperty(t *testing.T) {
 	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	body := `{"runner_version":"v1","kinds":["node"],"available_cores":1}`
+	body := `{"runner_version":"v1","kinds":["node"]}`
 	if err := quick.Check(func(secret [32]byte, legacy bool) bool {
 		prefix := "swk_"
 		if legacy {
@@ -338,7 +338,7 @@ func TestEngineClaimHTTPDeadCredentialProperty(t *testing.T) {
 func TestEngineClaimHTTPCommitsRunnerObservations(t *testing.T) {
 	now := time.Now().UTC()
 	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim}, teststore.WithClock(func() time.Time { return now }))
-	body := `{"runner_version":"v1","kinds":["node"],"available_cores":1,"labels":["tool:git","name=impostor","class=cloud","pool=forged"]}`
+	body := `{"runner_version":"v1","kinds":["node"],"labels":["tool:git","name=impostor","class=cloud","pool=forged"]}`
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", body, 200)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {

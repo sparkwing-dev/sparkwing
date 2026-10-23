@@ -23,7 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type localHostRoundTripper struct{ handler http.Handler }
@@ -83,7 +82,7 @@ func localHostAwardFixture(t *testing.T, opts ...store.Option) (*serverFixture, 
 	engineRuntimeClaim(t, engine, capability.UnitNode)
 	engineSQL(t, engine.Store, `DELETE FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`)
 	engine.claimProfiles = engineProfileFake{}
-	award, err := engine.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	award, err := engine.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +420,7 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 			engine, _ := engineRuntimeStore(t)
 			engineRuntimeClaim(t, engine, capability.UnitNode)
 			engine.claimProfiles = engineProfileFake{}
-			award, err := engine.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+			award, err := engine.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -432,7 +431,9 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 			wantStatus, wantCause := 500, "invalid character"
 			switch stage {
 			case "store":
-				engineSQL(t, engine.Store, `UPDATE nodes SET execution_json=?`, []byte(`!`))
+				if _, err := teststore.SQL(t, engine.Store).ExecContext(t.Context(), `UPDATE nodes SET execution_json=?`, []byte(`!`)); err != nil {
+					t.Fatal(err)
+				}
 			case "handler_cancel":
 				server.authorization.Bindings = cancelSnapshotBinding{server.authorization.Bindings, cancel}
 				wantCause = "context canceled"

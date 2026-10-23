@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -23,7 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestLocalServicesRejectInvalidAdmissionBeforeConstruction(t *testing.T) {
@@ -209,7 +207,7 @@ func TestProductionLocalSchedulesShareCapturedControllerHome(t *testing.T) {
 	}
 }
 
-func TestProductionLocalQueueAdvertisesUsableCapacity(t *testing.T) {
+func TestProductionLocalQueueBindsRunnerPolicy(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
 	var runner runners.StoreRunnerConfig
@@ -232,15 +230,8 @@ func TestProductionLocalQueueAdvertisesUsableCapacity(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	if runner.RequestCapacity == nil {
-		t.Fatal("local queue cannot supply available CPU to matching")
-	}
-	capacity, available, err := runner.RequestCapacity(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verdict := match.Fits(capacity, available, match.Resources{Cores: .25}); !verdict.OK() {
-		t.Fatalf("local queue refuses a fractional CPU job on this machine: %v", verdict)
+	if runner.Bearer == nil || runner.Bind == nil || runner.Loop.MaxConcurrent <= 0 {
+		t.Fatal("local queue has no authenticated runner binding")
 	}
 }
 
@@ -284,7 +275,7 @@ func TestProductionLocalQueueChecksVersionWithoutNetwork(t *testing.T) {
 	if err := queue.CheckVersion(t.Context(), "v1.2.3"); err != nil {
 		t.Fatalf("local queue version check: %v", err)
 	}
-	response, err := queue.Controller.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}, AvailableCores: float64(runtime.NumCPU())})
+	response, err := queue.Controller.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}})
 	if err != nil || response.Claim != nil {
 		t.Fatalf("empty local queue: %+v: %v", response, err)
 	}
@@ -321,36 +312,4 @@ func FuzzLocalServicesKeepOneCapturedHome(f *testing.F) {
 			t.Fatal("bound runtime accepted a different start home")
 		}
 	})
-}
-
-func TestStandaloneLocalQueueWaitsForTheForegroundClaim(t *testing.T) {
-	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
-	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
-	claimed := make(chan struct{})
-	var runner runners.StoreRunnerConfig
-	owner, err := (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
-		services, err := bindStandaloneController(ctx, binding, claimed)
-		runner = services.Runner
-		return services, err
-	}}).Open(t.Context(), t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := owner.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	if runner.Loop.Kinds != nil {
-		t.Fatalf("standalone queue narrowed its kinds to %v; child runs need its trigger claims", runner.Loop.Kinds)
-	}
-	held, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
-	if _, err := runner.Bearer(held); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("standalone queue claimed before the foreground CLI: %v", err)
-	}
-	close(claimed)
-	if raw, err := runner.Bearer(t.Context()); err != nil || raw == "" {
-		t.Fatalf("standalone queue stayed held after the foreground claim: %v", err)
-	}
 }

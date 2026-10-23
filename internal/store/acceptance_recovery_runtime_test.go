@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type storeRecoveryFixture struct {
@@ -78,7 +77,7 @@ func newStoreRecoveryFixtureForAt(t *testing.T, started bool, target *storetest.
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim, err := f.s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: f.ref.RunID, NodeID: f.ref.NodeID}, Available: match.Resources{Cores: 8}})
+	claim, err := f.s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: f.ref.RunID, NodeID: f.ref.NodeID}})
 	if err != nil {
 		t.Fatal(err)
 	}

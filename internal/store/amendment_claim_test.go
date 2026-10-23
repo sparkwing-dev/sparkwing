@@ -2,12 +2,10 @@ package store
 
 import (
 	"errors"
-	"math"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestClaimSelectionRejectsEveryInvalidKindBeforeAward(t *testing.T) {
@@ -45,28 +43,6 @@ func TestClaimSelectionRejectsEveryInvalidKindBeforeAward(t *testing.T) {
 	}
 }
 
-func TestClaimRechecksRegisteredCapacityAtAward(t *testing.T) {
-	s, demand := unitClaimFixture(t)
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 2}}}
-	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
-		t.Fatal("caller observation widened enrolled capacity")
-	}
-	rewriteSchemaCount(t, s.db, "billing_awards", 0)
-}
-
-func TestClaimRejectsInvalidObservationsEvenWithAnEmptyQueue(t *testing.T) {
-	for _, resources := range []match.Resources{{Cores: -1}, {Cores: math.Inf(1)}, {Cores: math.NaN()}, {MemoryBytes: -1}} {
-		s, demand := unitClaimFixture(t)
-		demand.Target, demand.Kinds, demand.Available = nil, []capability.UnitKind{capability.UnitNode}, resources
-		rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=NULL`)
-		_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
-		var failure *apierr.Error
-		if !errors.As(err, &failure) || failure.Code != apierr.BadRequest {
-			t.Fatalf("invalid empty-queue observations: %v", err)
-		}
-	}
-}
-
 func TestMixedClaimSelectionUsesOneRankedQueue(t *testing.T) {
 	for _, first := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
 		t.Run(string(first), func(t *testing.T) {
@@ -77,10 +53,10 @@ func TestMixedClaimSelectionUsesOneRankedQueue(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,'other',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET status='done',finished_at=? WHERE id='other'`, s.now().UnixNano())
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET run_id='other'`)
-			rewriteSchemaExec(t, s.db, `UPDATE runs SET created_at=2 WHERE id='run'`)
-			rewriteSchemaExec(t, s.db, `UPDATE runs SET created_at=3 WHERE id='other'`)
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET available_at=2 WHERE id='run'`)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=3 WHERE run_id='other'`)
 			if first == capability.UnitNode {
-				rewriteSchemaExec(t, s.db, `UPDATE runs SET created_at=4 WHERE id='run'`)
+				rewriteSchemaExec(t, s.db, `UPDATE triggers SET available_at=4 WHERE id='run'`)
 			}
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil || claim.Kind != first {

@@ -56,10 +56,10 @@ func checkUnpricedClaimTx(ctx context.Context, tx *storeTx, row NodeRow, change 
 	if err != nil {
 		return err
 	}
-	if verdict := match.Evaluate(profile, requirements); !verdict.OK() && verdict.Reason != match.ReasonShape {
+	if verdict := match.Evaluate(profile, requirements); !verdict.OK() {
 		return holderRefusal()
 	}
-	if _, err := unitBillingPriceTx(ctx, tx, matchingResources(row.Execution.Resources.Value)); !errors.Is(err, ErrUnpricedCPUClass) {
+	if _, err := unitBillingPriceTx(ctx, tx, row.Execution.Requires.Value, profile); !errors.Is(err, ErrUnpricedCPUClass) {
 		return holderRefusal()
 	}
 	return nil

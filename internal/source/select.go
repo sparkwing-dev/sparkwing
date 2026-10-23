@@ -21,7 +21,22 @@ import (
 
 // Select resolves the execution commit, reads its configuration for the pipeline's code pin and resolves the code commit.
 func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, code runspec.Source, override string, options Options) (runspec.Git, runspec.Source, *projectconfig.Config, error) {
-	lookup := func(ref string) (string, error) { return ResolveRef(ctx, spec, ref, options) }
+	lookup := func(ref string) (string, error) {
+		if options.ResolveRef != nil {
+			return resolveReference(ref, false, func(refs []string) (map[string]string, error) {
+				commits := make(map[string]string)
+				for _, candidate := range refs {
+					sha, err := options.ResolveRef(ctx, candidate)
+					if err != nil {
+						return nil, err
+					}
+					commits[candidate] = sha
+				}
+				return commits, nil
+			})
+		}
+		return ResolveRef(ctx, spec, ref, options)
+	}
 	git, _, err := ResolveRevisions(ctx, git, runspec.Source{}, "", lookup)
 	if err != nil {
 		return git, code, nil, err

@@ -71,8 +71,6 @@ export interface RetryOptions { backoffMs?: number; }
 export interface SkipOptions { budgetMs?: number; }
 /** contract: Memo TTL is ceiling-checked at seal, never clamped. */
 export interface MemoOptions { ttlMs?: number; }
-/** contract: Resource units match the plan wire without a GB conversion convention. */
-export interface Resources { cores?: number; memoryBytes?: number; }
 /** contract: Scope is declarative; the host computes the actual coordination key. */
 export type Scope = "run" | "box" | "global";
 /** contract: Capacity behavior never implies result reuse. */
@@ -134,7 +132,6 @@ export interface JobGroup {
   artifacts(...globs: readonly string[]): this;
   consumes(producer: Job<unknown>, options?: { into?: string }): this;
   concurrency(group: ConcurrencyGroup, cost?: number): this;
-  resources(resources: Resources): this;
   needsTools(...names: readonly string[]): this;
   requires(...labels: readonly string[]): this;
   prefers(...labels: readonly string[]): this;
@@ -255,7 +252,6 @@ export declare class Job<T = unknown> {
   consumes(producer: Dependency, options?: { into?: string }): this;
   onFailure<U = unknown>(id: string, body: Body<U>): Job<U>;
   concurrency(group: ConcurrencyGroup, cost?: number): this;
-  resources(resources: Resources): this;
   needsTools(...names: readonly string[]): this;
   requires(...labels: readonly string[]): this;
   prefers(...labels: readonly string[]): this;
@@ -274,7 +270,6 @@ export declare class Plan {
   approval(id: string, options?: ApprovalOptions): Approval;
   groupJobs(id: string, ...jobs: readonly Job<unknown>[]): JobGroup;
   concurrency(group: ConcurrencyGroup, cost?: number): this;
-  resources(resources: Resources): this;
   priority(value: number): this;
   claimWait(ms: number): this;
   admissionClass(value: string): this;

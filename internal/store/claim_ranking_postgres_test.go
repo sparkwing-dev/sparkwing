@@ -10,20 +10,27 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
+func TestSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testing.T) {
+	testSimultaneousRankedClaims(t, func(t *testing.T) *store.Store { return storetest.Open(t) })
+}
+
 func TestPostgresSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testing.T) {
+	testSimultaneousRankedClaims(t, func(t *testing.T) *store.Store { return storetest.NewPostgres(t).Open(t) })
+}
+
+func testSimultaneousRankedClaims(t *testing.T, open func(*testing.T) *store.Store) {
 	for round := range 3 {
 		t.Run(fmt.Sprint(round), func(t *testing.T) {
-			st := storetest.NewPostgres(t).Open(t)
+			st := open(t)
 			st.DB().SetMaxOpenConns(24)
 			f := st.TestOnlyRankingFixture(t, true)
 			second := f.SelfHosted(t, "second")
 			f.At(time.Second)
 			contenders := []string{f.Self, second, f.Launcher, f.Actions}
 			for _, prefix := range contenders {
-				f.Poll(t, prefix, capability.UnitPlan, capability.UnitNode)
+				f.PollWithSlots(t, prefix, 2)
 			}
 			start := make(chan struct{})
 			awards := make(chan store.UnitClaim, 4*len(contenders))
@@ -33,7 +40,7 @@ func TestPostgresSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testin
 				kind := []capability.UnitKind{capability.UnitPlan, capability.UnitNode}[i/len(contenders)%2]
 				group.Go(func() {
 					<-start
-					claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+					claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{kind}})
 					var illegal *store.ErrIllegalTransition
 					switch {
 					case err == nil:
@@ -58,27 +65,5 @@ func TestPostgresSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testin
 				t.Fatalf("awards inside the window went to %v; want the Actions tier for every unit", won)
 			}
 		})
-	}
-}
-
-func TestPostgresAnAskInFlightHoldsTheLaterAward(t *testing.T) {
-	st := storetest.NewPostgres(t).Open(t)
-	f := st.TestOnlyRankingFixture(t, true)
-	commit := f.OpenAsk(t, f.Self, 3, f.ReadyAt.Add(4900*time.Millisecond))
-	f.At(5100 * time.Millisecond)
-	f.Poll(t, f.Launcher, capability.UnitNode)
-	claimed := make(chan error, 1)
-	go func() {
-		_, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
-		claimed <- err
-	}()
-	select {
-	case err := <-claimed:
-		t.Fatalf("the launcher decided while a better ask was in flight: %v", err)
-	case <-time.After(300 * time.Millisecond):
-	}
-	commit()
-	if err := <-claimed; !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("the launcher took the job a better claimant asked for: %v", err)
 	}
 }

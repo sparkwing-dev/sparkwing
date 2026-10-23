@@ -43,7 +43,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 		peer := capability.Subject{Kind: capability.SubjectLocal, ID: "uid:" + strconv.Itoa(iteration) + ":" + hex.EncodeToString(value)}
 		body := controllerwire.CreateRunRequest{IdempotencyKey: peer.ID, Request: runspec.Request{
 			Version: 1, Team: string(store.DefaultTeam), Pipeline: "local", Mode: runspec.IntakeExecute,
-			Dispatch: runspec.DispatchHost, Origin: runspec.OriginLocal,
+			Dispatch: runspec.DispatchHost, Origin: runspec.OriginLocal, LocalForeground: true,
 			Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"},
 			Source:  runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"},
 			Actor:   runspec.Actor{Kind: "account", ID: "forged"},

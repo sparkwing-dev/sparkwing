@@ -494,8 +494,10 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 	}
 	releasedEvaluation := false
 	if change.To == NodeApprovalPending || change.Extra.OwnerPolicy != nil && (change.Extra.OwnerPolicy.Kind == PolicyApprovalBypass || change.Extra.OwnerPolicy.Kind == PolicyApprovalFail) {
-        releasedEvaluation,err=evaluationReleasedTx(ctx,tx,team,change.Ref,"job_approval_ready",row.Generation)
-        if err!=nil{return Applied{},err}
+		releasedEvaluation, err = evaluationReleasedTx(ctx, tx, team, change.Ref, "job_approval_ready", row.Generation)
+		if err != nil {
+			return Applied{}, err
+		}
 	}
 	if (change.To == NodeReady || change.To == NodeApprovalPending) && !releasedEvaluation {
 		admitted, err := admitReleaseTx(ctx, tx, team, string(change.Ref.RunID), change.Actor)
@@ -611,7 +613,15 @@ func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) erro
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json,expansion,seq) VALUES (?,?,?,'pending',?,?,?,?,(SELECT COALESCE(MAX(seq),-1)+1 FROM nodes WHERE team=? AND run_id=?))`, team, row.Ref.RunID, row.Ref.NodeID, []byte(row.Spec), row.SpecHash, execution, row.Expansion, team, row.Ref.RunID)
+	requirements, err := persistClaimRequirementsTx(ctx, tx, team, row.Execution.Requires.Value)
+	if err != nil {
+		return err
+	}
+	claimContext, err := persistClaimContextTx(ctx, tx, team, string(row.Ref.RunID), capability.UnitNode, requirements, execution)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json,expansion,claim_requirements,claim_context,seq) VALUES (?,?,?,'pending',?,?,?,?,?,?,(SELECT COALESCE(MAX(seq),-1)+1 FROM nodes WHERE team=? AND run_id=?))`, team, row.Ref.RunID, row.Ref.NodeID, []byte(row.Spec), row.SpecHash, execution, row.Expansion, requirements, claimContext, team, row.Ref.RunID)
 	return err
 }
 

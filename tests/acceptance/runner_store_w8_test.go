@@ -63,9 +63,8 @@ func (c *storedRunnerW8) Finish(ctx context.Context, run string, body controller
 
 type runnerStorePolicyW8 struct{}
 
-func (runnerStorePolicyW8) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	capacity := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
-	return match.Profile{Capacity: capacity}, capacity, nil
+func (runnerStorePolicyW8) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{}, nil
 }
 
 func (runnerStorePolicyW8) CheckRunner(_ context.Context, version string) error {
@@ -141,12 +140,12 @@ func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) 
 VALUES (?,'run',1,'fixture','running',?,'request',?,'gh:1','https://github.com/team/repo','host','execute',?,'fixture',?,'r30',30,?,'spec',?,?,'plan')`, []any{store.DefaultTeam, request, now.UnixNano(), []byte(`[]`), now.UnixNano(), spec, now.UnixNano(), plan}},
 		{`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES (?,'run','trigger',?,?,?,?,?)`, []any{store.DefaultTeam, now.UnixNano(), now.UnixNano(), now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`)}},
 	} {
-		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), statement.query, statement.args...); err != nil {
+		if _, err := teststore.Exec(t.Context(), s, statement.query, statement.args...); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if kind == capability.UnitNode {
-		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES (?,'run','job','pending',?,?,?)`, store.DefaultTeam, now.UnixNano(), []byte(`{"id":"job"}`), []byte(`{}`)); err != nil {
+		if _, err := teststore.Exec(t.Context(), s, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES (?,'run','job','pending',?,?,?)`, store.DefaultTeam, now.UnixNano(), []byte(`{"id":"job"}`), []byte(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -204,7 +203,7 @@ func TestRunnerStoreRevocationPreventsPreparationW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
+	response, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}})
 	if err != nil || response.Claim == nil {
 		t.Fatal(err)
 	}

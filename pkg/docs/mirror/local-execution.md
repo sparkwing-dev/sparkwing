@@ -75,7 +75,11 @@ resolution. Scheduled execution still needs the scheduler's sealed-intake bindin
 
 The local controller owns one home, its SQLite store, admission, queue and
 browser dashboard. It starts on demand. The CLI hosts a foreground run and
-sends state operations through the controller API. SDK processes declare and
+sends state operations through the controller API. Its first trigger claim is
+reserved for that foreground command, so the background queue cannot take it
+between submission and hosting. Local intake resolves an omitted dispatch to
+host execution before checking that reservation. Detached submissions enter the background queue.
+SDK processes declare and
 execute work through protocol v2. They do not open the controller's database.
 
 Startup reconciles orphaned work and starts the private API before consumers.
@@ -403,7 +407,7 @@ admission:
 
 Admission charges against that host's capacity. On Linux, an available writable
 cgroup can enforce the machine budget. macOS scheduling controls are advisory.
-The contribution preference controls advertised runner headroom, rather than an
+Runner labels control job placement, rather than an
 OS resource sandbox. Operator ceilings refuse excessive author values instead
 of silently clamping them. See [machine settings](machine-config.md).
 
@@ -492,27 +496,25 @@ started by a push, pull request, release or schedule never reach it.
 Cloud routing requires an attached terminal session. The default local route
 continues to support `--sw-detached`.
 
-Registered machines advertise measured CPU and memory headroom. Their
-`contribution` setting caps that offer, and `keep_free` reserves capacity for
-other work. Enrollment enables `local_admission`, which shares the machine's
-admission controller with local runs. If that controller is absent, a released
-runner fetches the verified matching CLI and starts it before claiming work.
+Registered machines advertise labels and a configured concurrent-job count.
+Required labels select eligible machines. CPU and memory observations are not
+claim requirements. Enrollment can enable `local_admission` to share the
+machine's local admission controller with local runs; claim authority and
+placement still belong to the controller.
+
 Each claimed job holds its machine lease through source preparation, execution
-and cleanup. A full machine offers zero headroom, so later preferences can win.
-Busy local work does not prevent jobs from becoming ready for overflow.
-Jobs without resource settings use the same one-core admission charge locally
-and when matching a runner. The store commits plan capacity with permission to
-release work. Each executing host requests its complete job group set under its
-actual award before compute. Scheduling holds no compute while logical admission
-waits. The requester takes a provisional burst award, then logical admission,
-then tries compute without waiting. If compute is unavailable, it returns the
-award and job reservations. The original readiness ranking window survives,
-so other ranked claimants can take the job. Ctrl-C cancels the wait.
-Concurrency slots count once even when a registered runner shares this machine
-with the requesting CLI.
-Machine admission keeps Cloud run identities separate from local records.
-Cloud overflow captures the working tree. Use `pipeline trigger` for explicit
-committed revisions instead of `--sw-ref` or `--sw-pipeline-ref`.
+and cleanup. Busy local work does not prevent jobs from becoming ready for overflow.
+The store commits plan capacity with permission to release work. Each executing
+host requests its complete job group set under its actual award before compute.
+Scheduling holds no compute while logical admission waits. The requester takes a
+provisional burst award, then logical admission, then tries compute without waiting.
+If compute is unavailable, it returns the award and job reservations. The original
+readiness ranking window survives, so other ranked claimants can take the job.
+Ctrl-C cancels the wait. Concurrency slots count once even when a registered runner
+shares this machine with the requesting CLI. Machine admission keeps Cloud run
+identities separate from local records. Cloud overflow captures the working tree.
+Use `pipeline trigger` for explicit committed revisions instead of `--sw-ref` or
+`--sw-pipeline-ref`.
 
 An unreachable controller before intake, including connection setup and source upload,
 produces a message and a local run.

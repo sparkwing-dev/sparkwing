@@ -7,7 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
@@ -22,6 +21,7 @@ func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
 				authorityPersist(t, s, root)
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=? WHERE id='run'`, now.Add(time.Hour).UnixNano())
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET plan_json=?,plan_hash='plan',spec_json=?,spec_hash='spec',sealed_at=1 WHERE id='run'`, []byte(`{"jobs":[{"id":"job"}]}`), []byte(`{}`))
+				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE run_id='run'`, now.Add(-time.Nanosecond).UnixNano())
 				reaped, err := s.AsOperator().ReapUnits(t.Context(), SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}, 10)
 				if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
@@ -35,7 +35,7 @@ func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
 				if err != nil || len(waiting) != 1 || runspec.RunID(waiting[0].RunID) != ref.RunID || runspec.NodeID(waiting[0].NodeID) != ref.NodeID {
 					t.Fatalf("recovered work awaiting a runner: %+v, %v", waiting, err)
 				}
-				demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+				demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}}
 				if queued {
 					demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
 				}

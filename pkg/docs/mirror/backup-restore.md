@@ -12,8 +12,8 @@ a matching backup in a separate database.
 
 <!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: store schema version 19 is older than this binary (expects 20); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> (or drop the database) and start again
+sparkwing: store schema version 21 is older than this binary (expects 22); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> (or drop the database) and start again
 
-sparkwing: store schema version 21 is newer than this binary (expects 20); start a binary matching the store, or restore a backup matching this binary into a separate database
+sparkwing: store schema version 23 is newer than this binary (expects 22); start a binary matching the store, or restore a backup matching this binary into a separate database
 ```
 <!-- END GENERATED SCHEMA ERRORS -->

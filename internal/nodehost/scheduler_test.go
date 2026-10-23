@@ -178,7 +178,7 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "base", Requires: []string{"linux"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"), Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Resources: &nodeproto.ResourceSpec{Cores: new(float64(4)), MemoryBytes: new(int64(1 << 30))}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"), Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -195,7 +195,7 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 			if err := json.Unmarshal(row.Spec, &job); err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Equal(job.Needs, []string{"base"}) || !slices.Equal(job.NeedsIfPresent, []string{"extra"}) || !slices.Equal(row.Execution.Requires.Value, []string{"gpu", "linux", "big"}) || !slices.Equal(row.Execution.Prefers.Value, []string{"fast"}) || row.Execution.Resources.Value.Cores.Value != 4 || row.Execution.Resources.Value.MemoryBytes.Value != 1<<30 {
+			if !slices.Equal(job.Needs, []string{"base"}) || !slices.Equal(job.NeedsIfPresent, []string{"extra"}) || !slices.Equal(row.Execution.Requires.Value, []string{"gpu", "linux", "big"}) || !slices.Equal(row.Execution.Prefers.Value, []string{"fast"}) {
 				t.Fatalf("job=%+v execution=%+v", job, row.Execution)
 			}
 		}

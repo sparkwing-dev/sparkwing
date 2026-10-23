@@ -17,6 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
+
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
 type admissionEnv struct {
@@ -188,7 +190,7 @@ func TestAdmissionPolicyOnAPIServer(t *testing.T) {
 			t.Fatal(err)
 		}
 		retemplated := current.DeepCopy()
-		retemplated.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = labelHash("other-team")
+		retemplated.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = admission.TeamNodeHash("other-team")
 		_, err = launcher.BatchV1().Jobs("cloud").Update(ctx, retemplated, metav1.UpdateOptions{})
 		refused(t, err, "template annotations")
 		resumed := current.DeepCopy()

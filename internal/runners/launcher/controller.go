@@ -3,7 +3,6 @@ package launcher
 import (
 	"context"
 	"errors"
-	"math"
 	"slices"
 	"time"
 
@@ -12,11 +11,10 @@ import (
 	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // LauncherController is the shared wire client's claim and reconciliation boundary.
-// Its transport must select EngineOptions.Launcher and retain the service credential.
+// Its transport selects EngineOptions.Launcher and retains the launcher's credential.
 type LauncherController interface {
 	Claim(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 	SyncLauncher(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
@@ -30,8 +28,8 @@ type ControllerControl struct {
 
 // NewControllerControl captures only observations; the controller supplies each award's identity.
 func NewControllerControl(client LauncherController, demand controllerwire.ClaimRequest) (*ControllerControl, error) {
-	if client == nil || demand.RunnerVersion == "" || len(demand.Kinds) == 0 || demand.AvailableCores < 0 || math.IsNaN(demand.AvailableCores) || math.IsInf(demand.AvailableCores, 0) || demand.AvailableMemoryBytes < 0 {
-		return nil, errors.New("launcher controller requires a client, runner version, unit kinds and finite nonnegative capacity")
+	if client == nil || demand.RunnerVersion == "" || len(demand.Kinds) == 0 {
+		return nil, errors.New("launcher controller requires a client, runner version, unit kinds")
 	}
 	seen := make(map[capability.UnitKind]bool)
 	for _, kind := range demand.Kinds {
@@ -45,12 +43,14 @@ func NewControllerControl(client LauncherController, demand controllerwire.Claim
 }
 
 // Claim delivers a bootstrap once; uncertain transport delivery recovers through lease expiry.
-func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
+func (c *ControllerControl) Claim(ctx context.Context, namespace string, excludedTeamLabels []string) (*CloudJobAward, error) {
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
 	demand := c.demand
 	demand.Kinds, demand.Labels = slices.Clone(demand.Kinds), slices.Clone(demand.Labels)
+	demand.JobNamespace = namespace
+	demand.ExcludedTeamLabels = slices.Clone(excludedTeamLabels)
 	response, err := c.client.Claim(ctx, demand)
 	if err != nil || response.Claim == nil {
 		return nil, err
@@ -63,7 +63,7 @@ func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
 	if !slices.Contains(c.demand.Kinds, unit.Unit) || unit.Capability == "" {
 		return nil, errors.New("controller returned an unexpected launcher award")
 	}
-	resources := c.resources(unit)
+	resources := unit.CloudResources
 	if resources == nil {
 		return nil, errors.New("Cloud award is missing its committed allocation")
 	}
@@ -80,21 +80,6 @@ func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
 		return nil, err
 	}
 	return &captured, nil
-}
-
-func (c *ControllerControl) resources(unit controllerwire.ClaimedUnit) *match.Resources {
-	if unit.CloudResources == nil || unit.Runner.Type != "runner" {
-		return unit.CloudResources
-	}
-	resources := *unit.CloudResources
-	// Self-hosted work without a pin uses the operator's configured pod budget.
-	if resources.Cores == 0 {
-		resources.Cores = c.demand.AvailableCores
-	}
-	if resources.MemoryBytes == 0 {
-		resources.MemoryBytes = c.demand.AvailableMemoryBytes
-	}
-	return &resources
 }
 
 func cloudSource(unit controllerwire.ClaimedUnit) (source.Spec, error) {
@@ -201,7 +186,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if !ok || states[i].Binding.UnitID != "" || !sameBinding(binding, observations[i].Binding) {
 			return nil, errAwardMismatch
 		}
-		states[i].Binding, states[i].Resources, states[i].LeaseExpiresAt = observations[i].Binding, c.resources(unit), unit.LeaseExpiresAt
+		states[i].Binding, states[i].Resources, states[i].LeaseExpiresAt = observations[i].Binding, unit.CloudResources, unit.LeaseExpiresAt
 	}
 	for _, fence := range response.Deferred {
 		i, ok := byAward[fence]

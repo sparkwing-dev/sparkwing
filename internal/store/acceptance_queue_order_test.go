@@ -29,7 +29,7 @@ func TestStoreQueueOrder(t *testing.T) {
 func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	t.Helper()
 	ctx := t.Context()
-	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}}}))
+	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{}}}))
 	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		input.Request.Git.Ref, input.Request.Git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
 		input.Request.Git.Repository.Key = "gh:42"
@@ -74,7 +74,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	if _, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: authority, Request: foreign}); err != nil {
 		t.Fatal(err)
 	}
-	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}, Available: match.Resources{Cores: 8}}
+	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}}
 	checkStoreQueueCounts(t, s, map[string]int{store.QueueStateReady: 3})
 	claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil || claim.RunID != pending.RunID || claim.Kind != capability.UnitTrigger {
@@ -87,7 +87,6 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	order := []string{"job", "z-preferred"}
 	if preferred {
 		demand.Labels = []string{"gpu"}
-		order[0], order[1] = order[1], order[0]
 	}
 	for _, id := range order {
 		claim, err := s.AsOperator().ClaimUnit(ctx, demand)

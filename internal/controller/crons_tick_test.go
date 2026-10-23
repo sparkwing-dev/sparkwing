@@ -16,34 +16,28 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
 func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	t.Helper()
 	seedTickAppConsent(t, st, store.DefaultTeam)
-	svc := &crons.Service{Operator: st.AsOperator(), Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "schedule-owner"}
-	report, err := svc.ArmPushed(context.Background(), crons.ArmPush{
-		GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		RepoURL: "https://github.com/acme/widgets.git",
-		Branch:  "main",
-		SHA:     "0123456789abcdef0123456789abcdef01234567",
-		Entries: []crons.Declared{{
-			Pipeline: "nightly",
-			Name:     store.CronScheduleDefaultName,
-			Trigger: pipelines.ScheduleTrigger{
-				Name: store.CronScheduleDefaultName, Cron: "* * * * *",
-				Where: pipelines.ScheduleWhereController,
-			},
-		}},
+	return armAppRowForTick(t, teststore.ForTeam(t, st, store.DefaultTeam), "schedule-owner")
+}
+
+func armAppRowForTick(t *testing.T, tenant *store.Tenant, armedBy string) store.CronSchedule {
+	t.Helper()
+	next := time.Now().Truncate(time.Minute).Add(time.Minute)
+	row, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{
+		ID:       crons.AppScheduleID(tenant.Team(), 7, 701, "nightly", store.CronScheduleDefaultName),
+		RepoPath: "https://github.com/acme/widgets.git", Pipeline: "nightly", Name: store.CronScheduleDefaultName,
+		Cron: "* * * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour,
+		Where: store.CronWhereController, GitBranch: "main", LockedRef: "0123456789abcdef0123456789abcdef01234567",
+		GitHubInstallationID: 7, GitHubRepositoryID: 701, ArmedBy: armedBy, NextDueAt: &next,
 	})
 	if err != nil {
-		t.Fatalf("ArmPushed: %v", err)
+		t.Fatal(err)
 	}
-	if len(report.Schedules) != 1 {
-		t.Fatalf("armed %d schedules, want one", len(report.Schedules))
-	}
-	return report.Schedules[0]
+	return row
 }
 
 func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
@@ -235,24 +229,7 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 		t.Fatalf("ForTeam default: %v", err)
 	}
 	seedTickAppConsent(t, st, "team-b")
-	report, err := (&crons.Service{Operator: st.AsOperator(), Schedules: tenantB, ArmedBy: "team-b-owner"}).ArmPushed(ctx, crons.ArmPush{
-		GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		RepoURL: "https://github.com/acme/widgets.git",
-		Branch:  "main",
-		SHA:     "0123456789abcdef0123456789abcdef01234567",
-		Entries: []crons.Declared{{
-			Pipeline: "nightly",
-			Name:     store.CronScheduleDefaultName,
-			Trigger: pipelines.ScheduleTrigger{
-				Name: store.CronScheduleDefaultName, Cron: "* * * * *",
-				Where: pipelines.ScheduleWhereController,
-			},
-		}},
-	})
-	if err != nil {
-		t.Fatalf("ArmPushed: %v", err)
-	}
-	id := report.Schedules[0].ID
+	id := armAppRowForTick(t, tenantB, "team-b-owner").ID
 
 	srv := New(st, nil)
 	srv.cronNow = func() time.Time { return time.Now().Add(2 * time.Minute) }

@@ -124,12 +124,12 @@ func TestLauncherControllerW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 4, AvailableMemoryBytes: 8 << 30}
+	demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}}
 	remove := false
 	transportErr := error(nil)
 	wire := launcherControllerW8{
 		claim: func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-			if !slices.Equal(request.Kinds, demand.Kinds) || request.RunnerVersion != demand.RunnerVersion || request.AvailableCores != demand.AvailableCores || request.AvailableMemoryBytes != demand.AvailableMemoryBytes {
+			if !slices.Equal(request.Kinds, demand.Kinds) || request.RunnerVersion != demand.RunnerVersion {
 				t.Fatalf("launcher split or changed its claim: %+v", request)
 			}
 			return controllerwire.ClaimResponse{}, nil
@@ -165,7 +165,7 @@ func TestLauncherControllerW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := control.Claim(t.Context()); err != nil || got != nil {
+	if got, err := control.Claim(t.Context(), "cloud", nil); err != nil || got != nil {
 		t.Fatalf("empty claim=%v err=%v", got, err)
 	}
 	restarted := launcher.Launcher{Control: control, Kube: kube, Boundary: boundary, Config: config}

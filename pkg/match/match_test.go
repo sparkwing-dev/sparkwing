@@ -95,22 +95,6 @@ func TestAnAgentTakesUnselectedWork(t *testing.T) {
 
 // Eligibility is static: a busy agent is still eligible, so a WhenRunner or
 // hold decision built on it never turns on a momentary lack of room.
-func TestEvaluateIgnoresAvailability(t *testing.T) {
-	p := match.Profile{Capacity: match.Resources{Cores: 4, MemoryBytes: 8 << 30}}
-	request := match.Resources{Cores: 2}
-	if v := match.Evaluate(p, match.Demand{Request: request}); !v.OK() {
-		t.Fatalf("Evaluate refused a node that fits the capacity: %v", v)
-	}
-	if v := match.Fits(p.Capacity, match.Resources{}, request); v.Reason != match.ReasonAvailability {
-		t.Fatalf("Fits with nothing free = %v, want availability", v)
-	}
-	if v := match.Evaluate(p, match.Demand{Request: match.Resources{Cores: 6}}); v.Reason != match.ReasonShape {
-		t.Fatalf("Evaluate of a node larger than the capacity = %v, want shape", v)
-	}
-	if v := match.Fits(match.Resources{}, match.Resources{}, request); !v.OK() {
-		t.Fatalf("Fits with no capacity reported = %v, want it to admit", v)
-	}
-}
 
 func TestAcceptBindsTriggersToNamedRepositories(t *testing.T) {
 	allow, err := sourceurl.ParseRepoAllowlist([]string{"github.com/acme/a"})

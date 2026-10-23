@@ -60,13 +60,19 @@ controller's own queue) and `cloud` (the launcher; a self-hosted controller
 has none and refuses `cloud` in a ranking). A self-hosted
 `sparkwing-controller` does not run pipelines itself: until a runner is
 registered and online, unselected work waits with a `no_eligible_runner`
-notice. Each unit waits up to 5 seconds from readiness for the
-best-ranked claimant that is online. The best-ranked claimant present takes it
-at once. A claimant that asks while a better one is online is recorded. When
-the window closes, the best-ranked recorded asker has 2 more seconds to come
-back. After that, the first eligible asker wins. The launcher takes part only
-while the team has credits or a saved card. A job that requires a `pool=`,
-`name=` or `class=` term skips the ranking and goes to the runners it names.
+notice. During the first 5 seconds after readiness, a job with no named runner
+is held for the best-ranked tier with a live claimant on the same team that
+matches its labels and offered a free slot in its latest poll. That claimant
+can take it at once. Each award consumes one advertised slot until the runner
+polls again. A busy or offline better tier causes no wait. After the 5-second
+window, any eligible claimant may take it. There is no additional
+grace period. The launcher takes part only while the team has credits or a
+saved card. A job that requires a `pool=`, `name=` or `class=` term skips the
+ranking and goes to the runners it names. Explicit `Prefers` placement holds
+still apply when a preferred claimant is allowed by the team's ranking and has
+a free slot. An owner offers its occupied slot for its own run's jobs, keeping
+the captured host labels and platform even when its last queue poll has no free
+slots. Preference scores do not reorder the queue.
 
 Runs started by a push, pull request, release or schedule, and their retries
 and child runs, skip `here` and `personal`: a personal machine takes only its

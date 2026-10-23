@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -58,7 +57,7 @@ func prepareNativeStoreW8(t *testing.T, s *store.Store, kind capability.UnitKind
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), `UPDATE runs SET spec_json=? WHERE id='run'`, body); err != nil {
+	if _, err := teststore.Exec(t.Context(), s, `UPDATE runs SET spec_json=? WHERE id='run'`, body); err != nil {
 		t.Fatal(err)
 	}
 	if kind == capability.UnitNode {
@@ -80,7 +79,7 @@ func nativeStoreAwardW8(t *testing.T, kind capability.UnitKind) (*store.Store, c
 		if unit.Unit == requested {
 			break
 		}
-		response, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{requested}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
+		response, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{requested}})
 		if err != nil || response.Claim == nil {
 			t.Fatalf("claim %s: %v %+v", requested, err, response.Claim)
 		}
@@ -236,10 +235,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			Controller: client.EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return root.Raw, nil }}, NewController: cloudStoreClientW8(t, server),
 			Loop: runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1}, Hosting: remote,
 			Repositories: repositories,
-			Versions:     runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner}, RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
-				resources := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
-				return resources, resources, nil
-			},
+			Versions:     runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -252,10 +248,6 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 			Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1},
 			Bind:   bind,
-			RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
-				resources := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
-				return resources, resources, nil
-			},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -275,10 +267,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 				Runner: runners.StoreRunnerConfig{
 					Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 					Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1},
-					Bind:   bind, RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
-						resources := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
-						return resources, resources, nil
-					},
+					Bind:   bind,
 				},
 			}, nil
 		}}
@@ -393,9 +382,7 @@ func FuzzNativeStoreAwardW8(f *testing.F) {
 		case 6:
 			unit.Accepted.Spec.Hash += runspec.Hash(value)
 		case 7:
-			unit.Execution.Resources.Set = true
-			unit.Execution.Resources.Value.Cores.Set = true
-			unit.Execution.Resources.Value.Cores.Value = 3
+			unit.Execution.Requires.Value = []string{"changed-label"}
 		case 8:
 			unit.Capability += value
 		case 9:

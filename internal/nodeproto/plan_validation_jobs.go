@@ -153,14 +153,6 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 	if err := v.validateConcurrency(job.Concurrency, path+".concurrency", "job"); err != nil {
 		return err
 	}
-	if job.Resources != nil {
-		if err := v.feature(CapabilityResources, path+".resources"); err != nil {
-			return err
-		}
-		if err := validateResources(job.Resources, path+".resources"); err != nil {
-			return err
-		}
-	}
 	if job.Inline {
 		if err := v.feature(CapabilityInline, path+".inline"); err != nil {
 			return err

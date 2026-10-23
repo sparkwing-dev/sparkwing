@@ -306,7 +306,7 @@ cycle and unknown-field refusals before typed decoding.
 as `runspec.Setting[T]`. `ResolveIntake` validates captured request origins and
 resolves them against trusted controller inputs. `Values` embeds those native
 options. Startup, argument and guard inputs keep their separate source metadata.
-Explicit false, zero and empty collections stay present. Nested resources, pause controls and checkout fields
+Explicit false, zero and empty collections stay present. Nested pause controls and checkout fields
 retain separate origins. `OriginLayers` maps every C4 source to C1, including the
 three operator sources. File, key and line survive the conversion. A captured
 winner keeps its original origin when another host consumes the sealed request.
@@ -334,7 +334,7 @@ layers without merging them. `ValidateCheckoutDeclarations` checks the version,
 field/source membership in `Table`, and every nested origin. Layer identity comes
 from the enclosing Pipeline/Defaults field. An origin cannot claim flag, env,
 run, machine or operator precedence. Fields unsupported by that source are refused.
-Code-only resources, priority, claim wait, admission class and job defaults still
+Code-only priority, claim wait, admission class and job defaults still
 come from `PlanDoc`; their availability in the restricted type grants no YAML
 source permission.
 
@@ -344,7 +344,7 @@ participate in the seal hash. Resumption and retry preserve those declaration
 layers unchanged. `ResolvePlan` returns
 `runspec.ExecutionSettings`, whose `Jobs` map contains exactly the declared job
 IDs. C1 persists it in `Resolved.Settings` at seal point two. Timeout, no-progress
-timeout, approval wait, retry/backoff, memo TTL, resources and placement winners
+timeout, approval wait, retry/backoff, memo TTL and placement winners
 retain their origins. Executors consume those winners.
 
 `ResolveExpansion` takes the accepted spec, including `Spec.Declarations` and
@@ -919,7 +919,8 @@ a Pod outside the exact namespace, reservation and observed instance UID.
 
 `cluster.productionLauncher` loads the standard Kubernetes context and composes
 `launcher.NewLauncher` with `launcher.NewProductionBoundary`. Claim demand uses
-the linker version, plan/eval/node kinds and the operator's resource ceilings.
+the linker version, plan/eval/node kinds and advertised labels. Physical pod
+ceilings are enforced when the selected catalog allocation is delivered.
 Launcher authority remains confined to the controller transport.
 
 `KubernetesBoundary.StopProbes` is an optional reservation-scoped recovery callback.
@@ -1118,19 +1119,15 @@ and consumer staging. Public here and personal-runner probes now publish a file
 from the uploaded edited source and read it in a dependent job. Native listener
 refusal leaves those probes unverified.
 
-Cloud resource requests keep their sealed presence and origins. The physical
-allocation comes from the billing class committed at award, independently of
-those settings, and remains fixed across bootstrap exchange and price changes.
+Cloud size labels select the physical allocation and its exact billed class.
+That allocation remains fixed across bootstrap exchange and price changes.
 No default route, per-user cap, configuration key or execution limit changes.
 
 ## Burst machine admission continuation
 
-Registered runner capacity observes the existing machine sampler, including
-container limits, or the local admission queue when `local_admission` is enabled.
-`contribution` caps advertised headroom and `keep_free` subtracts the reserved
-share. The physical capacity and free resources remain distinct, including an
-explicit zero offer. Observation errors fail before a claim instead of reporting
-unknown capacity. Claim messages include OS and architecture.
+Registered runners advertise labels, OS and architecture. The controller
+matches sealed label requirements and current authority; claims carry no CPU
+or memory fit, free-capacity observation or contribution budget.
 
 When enrollment-enabled local admission has no daemon, the runner resolves its
 own release's signed Sparkwing CLI through the existing engine resolver, then

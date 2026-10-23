@@ -146,12 +146,8 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 	}
 	enrollment.profileName, enrollment.force = prof.Name, inv.Bool("force")
 	enrollment.service.skipped = inv.Bool("no-service") || enrollment.launcher
-	contribution := "50%,50%"
-	if inv.Has("contribution") {
-		contribution = inv.Value("contribution")
-	}
 	controller, localAdmission := strings.TrimRight(prof.ControllerURL(), "/"), true
-	enrollment.config = userconfig.RunnerConfig{Controller: &controller, MaxConcurrent: maxConcurrent, HolderPrefix: &name, Labels: inv.Flags["label"], Repos: inv.Flags["repos"], Contribution: &contribution, LocalAdmission: &localAdmission}
+	enrollment.config = userconfig.RunnerConfig{Controller: &controller, MaxConcurrent: maxConcurrent, HolderPrefix: &name, Labels: inv.Flags["label"], Repos: inv.Flags["repos"], LocalAdmission: &localAdmission}
 	return enrollment, prof, nil
 }
 

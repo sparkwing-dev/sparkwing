@@ -887,7 +887,7 @@ cannot renew its claim stops. Replace the machine's private credential and
 restart its supervised runner.
 
 The final machine configuration uses `runner`, `credentials_dir`, `repos` and
-`keep_free`. Native enrollment and service refresh must use that schema before
+labels. Native enrollment and service refresh must use that schema before
 they can establish recovery behavior. Client fixtures do not establish config
 hot reload, hourly parking or automatic resumption.
 

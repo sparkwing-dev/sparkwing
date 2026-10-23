@@ -3,8 +3,6 @@ package store_test
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -27,44 +25,17 @@ func githubRateTable() store.CreditRateTable {
 	}
 }
 
-func TestRateTableRoundsACPURequestUpToItsClass(t *testing.T) {
+func TestRateTablePricesTheRequiredSizeExactly(t *testing.T) {
 	table := githubRateTable()
-	for _, tc := range []struct {
-		cores float64
-		want  int64
-	}{
-		{cores: 0, want: 2},
-		{cores: 0.25, want: 2},
-		{cores: 1, want: 2},
-		{cores: 2, want: 2},
-		{cores: 2.1, want: 4},
-		{cores: 4, want: 4},
-		{cores: 5, want: 8},
-		{cores: 8, want: 8},
-		{cores: 33, want: 64},
-		{cores: 64, want: 64},
-	} {
-		class, err := table.ClassForResource(match.Resources{Cores: tc.cores})
-		if err != nil {
-			t.Fatalf("ClassForResource(%g): %v", tc.cores, err)
-		}
-		if class.Cores != tc.want {
-			t.Errorf("ClassForResource(%g) = %d cores, want %d", tc.cores, class.Cores, tc.want)
+	for _, size := range match.CloudSizes() {
+		class, err := table.ClassForLabels([]string{size.Label}, match.Profile{})
+		if err != nil || class.Cores != size.CreditClass {
+			t.Fatalf("%s: %+v %v", size.Label, class, err)
 		}
 	}
-}
-
-func TestRateTableRefusesARequestAboveItsLargestClass(t *testing.T) {
-	_, err := githubRateTable().ClassForResource(match.Resources{Cores: 96})
-	if !errors.Is(err, store.ErrUnpricedCPUClass) {
-		t.Fatalf("ClassForResource(96) = %v, want ErrUnpricedCPUClass", err)
-	}
-	var unpriced *store.UnpricedCPUClassError
-	if !errors.As(err, &unpriced) {
-		t.Fatalf("error %v does not name the request", err)
-	}
-	if unpriced.Cores != 96 || unpriced.MaxCores != 64 {
-		t.Fatalf("refusal = %+v, want 96 cores against a 64-core ceiling", unpriced)
+	table = store.CreditRateTable{{Cores: 4, MicroPerSecond: 1}}
+	if _, err := table.ClassForLabels([]string{"sparkwing-2cpu"}, match.Profile{}); !errors.Is(err, store.ErrUnpricedCPUClass) {
+		t.Fatalf("unpriced size substituted another class: %v", err)
 	}
 }
 
@@ -236,40 +207,6 @@ func TestATableWithoutAFourCoreClassLeavesTheScalarAlone(t *testing.T) {
 	}
 	if !settings.RateTableSet {
 		t.Fatalf("RateTableSet = %v, %v; want true", settings.RateTableSet, err)
-	}
-}
-
-func TestClassForResource_NeverGivesAMemoryPinLessThanItAsked(t *testing.T) {
-	table := store.CreditRateTable{
-		{Cores: 2, MicroPerSecond: 10_000},
-		{Cores: 4, MicroPerSecond: 20_000},
-		{Cores: 8, MicroPerSecond: 36_667},
-	}
-	for _, tc := range []struct {
-		gib  float64
-		want int64
-	}{
-		{gib: 5, want: 2},
-		{gib: 6, want: 4},
-		{gib: 15, want: 8},
-	} {
-		pin := int64(tc.gib * (1 << 30))
-		class, err := table.ClassForResource(match.Resources{Cores: 1, MemoryBytes: pin})
-		if err != nil {
-			t.Fatalf("%g GiB: %v", tc.gib, err)
-		}
-		if class.Cores != tc.want || store.CPUClassMemoryBytes(class.Cores) < pin {
-			t.Fatalf("%g GiB took the %d-core class, whose Job gets %d bytes; want the %d-core class",
-				tc.gib, class.Cores, store.CPUClassMemoryBytes(class.Cores), tc.want)
-		}
-	}
-
-	_, err := table.ClassForResource(match.Resources{Cores: 1, MemoryBytes: 30 << 30})
-	var unpriced *store.UnpricedCPUClassError
-	if !errors.As(err, &unpriced) || unpriced.Cores != 9 ||
-		!strings.Contains(err.Error(), fmt.Sprint(store.CPUClassMemoryBytes(8))) {
-		t.Fatalf("30 GiB against an 8-core ladder = %v, want a refusal naming a 9-core class "+
-			"and the 8-core class's usable memory", err)
 	}
 }
 

@@ -27,6 +27,7 @@ func unitClaimFixtureStore(t *testing.T, s *Store) (*Store, UnitDemand) {
 		if _, err := s.exec(t.Context(), query, args...); err != nil {
 			t.Fatal(err)
 		}
+		projectFixtureClaimRepositories(t, s.db, s.dialect, query)
 	}
 	now := time.Unix(1700000000, 0).UTC()
 	if s.dialect == DialectPostgres {
@@ -43,16 +44,59 @@ func unitClaimFixtureStore(t *testing.T, s *Store) (*Store, UnitDemand) {
 	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}, assertedProvenance(t, "ci", "", ""))
 	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','https://github.com/acme/repo','host','execute',?,'account',1,'r30',30)`, request, []byte(`[]`))
 	exec(`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a','run','trigger',1,1,?,?,?)`, now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
-	execution := runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Value: runspec.Resources{Cores: runspec.Setting[float64]{Optional: runspec.Optional[float64]{Value: 4, Set: true}}}, Set: true}}}
+	execution := runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sparkwing-4cpu"}}}}
 	body, err := json.Marshal(execution)
 	if err != nil {
 		t.Fatal(err)
 	}
 	exec(`INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), body)
-	return s, UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitTrigger, RunID: "run"})
+	return s, UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Labels: []string{"sparkwing-4cpu"}}
 }
 
-func TestClaimUnitNamedAndQueuedUseCapacityAndIdentity(t *testing.T) {
+func indexFixtureUnit(t *testing.T, s *Store, team Team, unit UnitRef) {
+	t.Helper()
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		var raw, execution []byte
+		var terms []string
+		if unit.Kind == capability.UnitNode {
+			if err := tx.QueryRowContext(t.Context(), `SELECT execution_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&execution); err != nil {
+				return err
+			}
+			var settings runspec.JobExecutionSettings
+			if err := json.Unmarshal(execution, &settings); err != nil {
+				return err
+			}
+			terms = settings.Requires.Value
+		} else {
+			if err := tx.QueryRowContext(t.Context(), `SELECT needs_labels,unit_kind FROM triggers WHERE team=? AND id=?`, team, unit.RunID).Scan(&raw, &unit.Kind); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(raw, &terms); err != nil {
+				return err
+			}
+		}
+		requirements, err := persistClaimRequirementsTx(t.Context(), tx, team, terms)
+		if err != nil {
+			return err
+		}
+		claimContext, err := persistClaimContextTx(t.Context(), tx, team, string(unit.RunID), unit.Kind, requirements, execution)
+		if err != nil {
+			return err
+		}
+		if unit.Kind == capability.UnitNode {
+			_, err = tx.ExecContext(t.Context(), `UPDATE nodes SET claim_requirements=?,claim_context=? WHERE team=? AND run_id=? AND node_id=?`, requirements, claimContext, team, unit.RunID, unit.NodeID)
+		} else {
+			_, err = tx.ExecContext(t.Context(), `UPDATE triggers SET claim_requirements=?,claim_context=? WHERE team=? AND id=?`, requirements, claimContext, team, unit.RunID)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClaimUnitNamedAndQueuedUseLabelsAndIdentity(t *testing.T) {
 	for _, named := range []bool{true, false} {
 		t.Run(map[bool]string{true: "named", false: "queue"}[named], func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
@@ -60,16 +104,11 @@ func TestClaimUnitNamedAndQueuedUseCapacityAndIdentity(t *testing.T) {
 				demand.Target = nil
 				demand.Kinds = []capability.UnitKind{capability.UnitNode}
 			}
-			demand.Capacity.Cores, demand.Available.Cores = 2, 2
+			demand.Labels = []string{"sparkwing-2cpu"}
 			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
-				t.Fatal("two-core runner claimed four-core job")
+				t.Fatal("runner claimed work without its required size label")
 			}
-			demand.Capacity.Cores, demand.Available.Cores = 8, 0
-			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
-				t.Fatal("busy runner claimed job")
-			}
-			demand.Available.Cores = 8
-			demand.Labels = []string{"name=forged", "class=cloud"}
+			demand.Labels = []string{"sparkwing-4cpu", "name=forged", "class=cloud"}
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
@@ -103,12 +142,15 @@ func TestClaimUnitRejectsForeignAndMissingRequirements(t *testing.T) {
 				demand.CapabilityPrefix = root.Prefix
 			case "pool":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["pool=prod"]}}`))
+				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 				demand.Labels = []string{"pool=prod"}
 			case "name":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["name=other"]}}`))
-				demand.Labels = []string{"name=other"}
+				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
+				demand.Labels = []string{"name=other", "sparkwing-4cpu"}
 			case "labels":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["gpu"]}}`))
+				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 			case "expired":
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=1`)
 			case "grant":
@@ -122,6 +164,10 @@ func TestClaimUnitRejectsForeignAndMissingRequirements(t *testing.T) {
 				var refused *ErrIllegalTransition
 				if !errors.As(err, &refused) || refused.Reason != ReasonHolderRights {
 					t.Fatalf("claim refusal = %v", err)
+				}
+			} else if test == "foreign" {
+				if !errors.Is(err, ErrNotFound) {
+					t.Fatalf("foreign claim = %v", err)
 				}
 			} else {
 				var refused *apierr.Error
@@ -144,11 +190,11 @@ type claimProfileFake struct {
 	before    func()
 }
 
-func (f claimProfileFake) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
+func (f claimProfileFake) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
 	if f.before != nil {
 		f.before()
 	}
-	return f.profile, f.available, nil
+	return f.profile, nil
 }
 
 func TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement(t *testing.T) {
@@ -207,6 +253,7 @@ func TestClaimUnitGrantedProfileKeys(t *testing.T) {
 					t.Fatal(err)
 				}
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, execution)
+				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 				impostor := authorityRoot("impostor", "a")
 				impostor.Subject.ID = "other"
 				impostor.Grants = []capability.Grant{capability.NodesClaim}
@@ -325,6 +372,12 @@ func TestClaimUnitTriggerRequirementsAndQueuePreference(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?`, body)
+	labels, err := json.Marshal(sealed.Request.Options.Requires.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE triggers SET needs_labels=?`, labels)
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitTrigger, RunID: "run"})
 	if _, err = s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 		t.Fatal("trigger ignored requirements")
 	}
@@ -335,6 +388,7 @@ func TestClaimUnitTriggerRequirementsAndQueuePreference(t *testing.T) {
 	demand.Target = nil
 	demand.Kinds = []capability.UnitKind{capability.UnitNode}
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','preferred','pending',1,?,?)`, []byte(`{"id":"preferred"}`), []byte(`{"prefers":{"set":true,"value":["gpu"]}}`))
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "preferred"})
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil || claim.NodeID != "preferred" {
 		t.Fatalf("preferred=%+v err=%v", claim, err)
@@ -345,6 +399,9 @@ func TestClaimUnitMismatchPreservesQueueAndDoesNotHideEligibleWork(t *testing.T)
 	s, demand := unitClaimFixture(t)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["pool=prod"]}}`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','later','pending',2,?,?)`, []byte(`{"id":"later"}`), []byte(`{}`))
+	for _, node := range []runspec.NodeID{"job", "later"} {
+		indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: node})
+	}
 	demand.Target = nil
 	demand.Kinds = []capability.UnitKind{capability.UnitNode}
 	demand.Labels = []string{"pool=prod"}
@@ -499,7 +556,7 @@ func TestClaimUnitInheritsRunnerSelection(t *testing.T) {
 						selected = "gpu"
 					}
 					setClaimRunnerSelection(t, s, runspec.RunnerSelection{Kind: runnerKind, Value: selected})
-					demand.Labels = []string{"name=other"}
+					demand.Labels = []string{"name=other", "sparkwing-4cpu"}
 					if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 						t.Fatal("runner selection was ignored")
 					}
@@ -565,5 +622,49 @@ func fundUnitClaim(t *testing.T, s *Store) {
 	t.Helper()
 	if _, err := (&Tenant{s: s, team: "a"}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 100000000, Reference: "claim-fixture", CreatedBy: "fixture"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNamedClaimReadinessDoesNotRevealForeignWork(t *testing.T) {
+	for _, scenario := range []string{"pending", "cancelled", "untrusted", "ungranted", "missing"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, demand := unitClaimFixture(t)
+			foreign := authorityRoot("foreign-runner", "b")
+			if scenario == "untrusted" {
+				foreign.Trust = capability.TrustVerifiedDefault
+			}
+			if scenario == "ungranted" {
+				foreign.Grants = []capability.Grant{capability.TriggersClaim}
+			}
+			authorityPersist(t, s, foreign)
+			demand.CapabilityPrefix = foreign.Prefix
+			if scenario == "cancelled" {
+				rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=1`)
+			}
+			if scenario == "missing" {
+				demand.Target.RunID = "absent"
+			}
+			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("foreign or missing refusal: %v", err)
+			}
+		})
+	}
+}
+
+func TestClaimReadinessDiagnosticCannotRefreshEvaluationOwner(t *testing.T) {
+	s, _ := unitClaimFixture(t)
+	now := s.now()
+	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Hour).UnixNano())
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=7,status='done',outcome='success',finished_at=1,expansion='expected'`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+	err := s.inTx(t.Context(), func(tx *storeTx) error {
+		return checkClaimableUnitTx(t.Context(), tx, "a", UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 7})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generation int64
+	if err := s.db.QueryRow(`SELECT owner_generation FROM eval_units`).Scan(&generation); err != nil || generation != 3 {
+		t.Fatalf("readiness diagnostic mutated owner generation: %d %v", generation, err)
 	}
 }

@@ -93,7 +93,6 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 			plan := capacityPlan("queue", 0, "a", "b")
 			for i := range plan.Jobs {
 				plan.Jobs[i].Concurrency[0].Scope = new(test.scope)
-				plan.Jobs[i].Resources = &nodeproto.ResourceSpec{Cores: new(0.25), MemoryBytes: new(int64(1024))}
 			}
 			fixture := newStoreHostFixture(t, plan)
 			config, _, _, _ := nativeHostFixture(t)
@@ -184,12 +183,7 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 			}
 			computeRequests := 0
 			for _, request := range daemon.requests() {
-				if request.Resources.Cores > 0 || request.Resources.MemoryBytes > 0 {
-					computeRequests++
-					if request.Resources.Cores != 0.25 || request.Resources.MemoryBytes != 1024 {
-						t.Errorf("machine admission changed resource hints: %+v", request)
-					}
-				}
+				computeRequests++
 				if len(request.Semaphores) != 0 {
 					t.Errorf("machine admission received controller concurrency: %+v", request)
 				}
@@ -225,7 +219,6 @@ func TestNativeClaimedJobsContendWithOptionalCompute(t *testing.T) {
 			plan := capacityPlan("queue", 0, "a", "b")
 			for i := range plan.Jobs {
 				plan.Jobs[i].Concurrency[0].Scope = new("run")
-				plan.Jobs[i].Resources = &nodeproto.ResourceSpec{Cores: new(0.25), MemoryBytes: new(int64(1024))}
 			}
 			fixture := newStoreHostFixtureForRequest(t, openStore(t), plan, runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://example.com/acme/repo.git", PipelineDir: ".sparkwing"}}})
 			config, _, _, _ := nativeHostFixture(t)

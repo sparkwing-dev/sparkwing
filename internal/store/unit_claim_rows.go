@@ -3,15 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"slices"
-	"strings"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func lockClaimOwnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
@@ -53,6 +49,13 @@ func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capab
 
 func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
 	now := tx.now(ctx).UnixNano()
+	var expired int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM triggers WHERE team=? AND id=? AND expires_at<=?`, team, unit.RunID, now).Scan(&expired); err != nil {
+		return err
+	}
+	if expired > 0 {
+		return holderRefusal()
+	}
 	run, err := readRunTx(ctx, tx, team, string(unit.RunID))
 	if err != nil {
 		return err
@@ -82,22 +85,16 @@ func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 	var expiry sql.NullInt64
 	if unit.Kind == capability.UnitEval {
 		var ownerName string
-		var ownerGeneration int64
-		err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,expires_at,owner_lease_name,owner_generation FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&status, &holder, &prefix, &expiry, &ownerName, &ownerGeneration)
+		err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,expires_at,owner_lease_name FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&status, &holder, &prefix, &expiry, &ownerName)
 		if err != nil {
 			return err
 		}
-		var actualGeneration, until int64
-		if err = tx.QueryRowContext(ctx, `SELECT generation,until FROM leases WHERE name=?`, ownerName).Scan(&actualGeneration, &until); err != nil {
+		var until int64
+		if err = tx.QueryRowContext(ctx, `SELECT until FROM leases WHERE name=?`, ownerName).Scan(&until); err != nil {
 			return err
 		}
 		if ownerName != "controller.owner" || until <= now || status != "pending" || holder != "" || prefix != "" {
 			return holderRefusal()
-		}
-		if actualGeneration != ownerGeneration {
-			if _, err = tx.ExecContext(ctx, `UPDATE eval_units SET owner_generation=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, actualGeneration, team, unit.RunID, unit.NodeID, unit.SourceGeneration); err != nil {
-				return err
-			}
 		}
 		if err := evaluationSourceTx(ctx, tx, team, unit); err != nil {
 			return err
@@ -126,7 +123,7 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 	var result sql.Result
 	var err error
 	if claim.Kind == capability.UnitEval {
-		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration, claim.Award.Generation-1)
+		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET owner_generation=(SELECT generation FROM leases WHERE name=eval_units.owner_lease_name),status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.NodeID, claim.SourceGeneration, claim.Award.Generation-1)
 	} else {
 		result, err = tx.ExecContext(ctx, `UPDATE triggers SET status='claimed',claimed_by=?,capability_prefix=?,generation=?,claimed_at=?,lease_expires_at=? WHERE team=? AND id=? AND unit_kind=? AND status='pending' AND generation=? AND claimed_by IS NULL AND capability_prefix=''`, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.Generation, tx.now(ctx).UnixNano(), claim.Award.LeaseExpiresAt.UnixNano(), claim.Team, claim.RunID, claim.Kind, claim.Award.Generation-1)
 	}
@@ -141,113 +138,4 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 		return holderRefusal()
 	}
 	return nil
-}
-
-type queuedClaim struct {
-	team    Team
-	unit    UnitRef
-	created int64
-	score   int
-}
-
-func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
-	var candidates []queuedClaim
-	for _, kind := range kinds {
-		query, args := tx.operator.queuedClaimQuery(c, kind, tx.now(ctx).UnixNano())
-		rows, err := tx.QueryContext(ctx, query, args...)
-		if err != nil {
-			return UnitRef{}, err
-		}
-		for rows.Next() {
-			v := queuedClaim{unit: UnitRef{Kind: kind}}
-			if err = rows.Scan(&v.team, &v.unit.RunID, &v.unit.NodeID, &v.unit.SourceGeneration, &v.created); err != nil {
-				_ = rows.Close()
-				return UnitRef{}, err
-			}
-			candidates = append(candidates, v)
-		}
-		if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-			return UnitRef{}, err
-		}
-	}
-	slices.SortFunc(candidates, func(a, b queuedClaim) int {
-		return strings.Compare(string(a.team)+"\x00"+string(a.unit.RunID)+"\x00"+string(a.unit.Kind)+"\x00"+string(a.unit.NodeID), string(b.team)+"\x00"+string(b.unit.RunID)+"\x00"+string(b.unit.Kind)+"\x00"+string(b.unit.NodeID))
-	})
-	var eligible []queuedClaim
-	for _, candidate := range candidates {
-		standing, err := unitEligibilityTx(ctx, tx, candidate.team, candidate.unit, demand, eligibilityChecks{lock: true, fit: true, billing: true, claim: true})
-		if err != nil {
-			return UnitRef{}, err
-		}
-		if !standing.ok() {
-			continue
-		}
-		placement, err := unitPlacementTx(ctx, tx, candidate.team, candidate.unit, demand.CapabilityPrefix, standing.profile, standing.demand)
-		if err != nil {
-			return UnitRef{}, err
-		}
-		if placement.hold {
-			continue
-		}
-		candidate.score = standing.score
-		eligible = append(eligible, candidate)
-	}
-	if len(eligible) == 0 {
-		return UnitRef{}, notFound("eligible work", "")
-	}
-	slices.SortStableFunc(eligible, func(a, b queuedClaim) int {
-		if a.score > b.score {
-			return -1
-		}
-		if a.score < b.score {
-			return 1
-		}
-		if a.created < b.created {
-			return -1
-		}
-		if a.created > b.created {
-			return 1
-		}
-		if a.unit.RunID < b.unit.RunID {
-			return -1
-		}
-		if a.unit.RunID > b.unit.RunID {
-			return 1
-		}
-		if a.unit.NodeID < b.unit.NodeID {
-			return -1
-		}
-		if a.unit.NodeID > b.unit.NodeID {
-			return 1
-		}
-		return 0
-	})
-	return eligible[0].unit, nil
-}
-
-func (o *Operator) queuedClaimQuery(c capability.Capability, kind capability.UnitKind, now int64) (string, []any) {
-	var query string
-	args := []any{}
-	switch kind {
-	case capability.UnitNode:
-		query = `SELECT r.team,r.id,n.node_id,0,r.created_at FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=? AND n.claimed_by IS NULL AND n.cancel_requested_at IS NULL AND (r.claim_wait_ns<=0 OR n.queue_started_at>?-r.claim_wait_ns)`
-		args = append(args, now, now)
-	case capability.UnitEval:
-		query = `SELECT r.team,r.id,e.source_node_id,e.source_generation,r.created_at FROM runs r JOIN eval_units e ON e.team=r.team AND e.run_id=r.id JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name WHERE e.status='pending' AND e.claimed_by IS NULL AND (e.expires_at IS NULL OR e.expires_at>?) AND l.name='controller.owner' AND l.until>? AND n.generation=e.source_generation AND ((n.outcome IN ('success','memoized') AND n.expansion='expected') OR (n.status='pending' AND n.ready_at IS NULL AND n.claimed_by IS NULL))`
-		args = append(args, now, now)
-	default:
-		query = `SELECT r.team,r.id,'',0,r.created_at FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id WHERE t.unit_kind=? AND t.status='pending' AND t.claimed_by IS NULL AND t.cancel_requested_at IS NULL AND t.available_at<=? AND (t.started_at IS NOT NULL OR r.claim_wait_ns<=0 OR r.created_at>?-r.claim_wait_ns)`
-		args = append(args, string(kind), now, now)
-	}
-	query += ` AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=?)`
-	args = append(args, now)
-	if !capability.CloudLauncher(c) {
-		query += ` AND r.team=?`
-		args = append(args, c.Team)
-	}
-	if c.Binding.RunID != "" {
-		query += ` AND r.id=?`
-		args = append(args, c.Binding.RunID)
-	}
-	return query, args
 }

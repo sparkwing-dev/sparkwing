@@ -53,8 +53,6 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 	ctx := localAdmissionContext(t)
 	for _, id := range []string{"ok", "bad"} {
 		row := localAdmissionRow(id)
-		row.Execution.Resources.Value.Cores.Value = 2
-		row.Execution.Resources.Value.MemoryBytes.Value = 1 << 30
 		err := admission.node(ctx, accepted, row, func(context.Context) error {
 			if live, _, _ := d.counts(); live != 1 {
 				t.Error("job ran without its compute lease")
@@ -72,7 +70,7 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 		t.Fatalf("leases=%d/%d/%d", live, granted, released)
 	}
 	for _, req := range d.requests() {
-		if !strings.HasPrefix(string(req.RunID), testRunID+"/node-host/") || req.OwnerRunID != "" || req.OwnerLeaseToken != "" || req.SubLease || req.SemaphoresOnly || len(req.Semaphores) != 0 || req.Priority != 5 || req.Class != "batch" || req.Pipeline != "p" || req.Resources != (wingwire.HostResources{Cores: 2, MemoryBytes: 1 << 30}) {
+		if !strings.HasPrefix(string(req.RunID), testRunID+"/node-host/") || req.OwnerRunID != "" || req.OwnerLeaseToken != "" || req.SubLease || req.SemaphoresOnly || len(req.Semaphores) != 0 || req.Priority != 5 || req.Class != "batch" || req.Pipeline != "p" || req.Resources != (wingwire.HostResources{}) {
 			t.Fatalf("request=%+v", req)
 		}
 	}
@@ -103,7 +101,6 @@ func TestComputeAdmissionDoesNotReadConcurrency(t *testing.T) {
 	d := newFakeDaemon()
 	admission := LocalAdmission{Daemon: d}
 	options := localAdmissionOptions()
-	options.Resources.Value.Cores.Value = 4
 	accepted := localAdmissionSeal(t, options)
 	row := localAdmissionRow("g")
 	row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"}}

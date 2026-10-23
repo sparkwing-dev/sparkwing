@@ -200,7 +200,7 @@ func TestSecretReadMemberScopesAndMaskedRefusal(t *testing.T) {
 
 func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	tenant, owner := secretReadStoreFixture(t)
-	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 	b := owner.Binding
 	actor := Actor{Kind: ActorRunHost, Authority: owner.Principal.Authority, CapabilityPrefix: owner.Principal.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(b.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}}
 	ref := controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: "job"}

@@ -76,7 +76,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 		}
 		var previousTeam Team
 		if row.Reclaim {
-			previous, err := tx.operator.githubInstallationTeamTx(ctx, tx, row.InstallationID)
+			previous, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, row.InstallationID)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
@@ -84,6 +84,9 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				previousTeam = previous
 				prior := &Tenant{s: t.s, team: previous}
 				if err := prior.unbindGitHubAppInstallationTx(ctx, tx, row.InstallationID); err != nil {
+					return err
+				}
+				if err := invalidateGitHubInstallationPublicationsTx(ctx, tx, previous, row.InstallationID); err != nil {
 					return err
 				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=?`, previous, row.InstallationID); err != nil {

@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func checkStoreTransitions(t *testing.T) (err error) {
@@ -38,7 +37,7 @@ func checkStoreTransitions(t *testing.T) (err error) {
 			return err
 		}
 	}
-	demand := store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Available: match.Resources{Cores: 8}}
+	demand := store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}}
 	if _, err := s.AsOperator().ClaimUnit(ctx, demand); err == nil {
 		return errors.New("withdrawn job remained claimable")
 	}

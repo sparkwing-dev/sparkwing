@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func checkStoreLauncherSync(t *testing.T) (err error) {
@@ -61,7 +60,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 		return err
 	}
 	a := capability.Authorized{Principal: capability.Principal{Authority: ref}}
-	demand := store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(runID), NodeID: "alpha"}, Available: match.Resources{Cores: 8}}
+	demand := store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(runID), NodeID: "alpha"}}
 	first, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		return fmt.Errorf("initial launcher claim: %w", err)

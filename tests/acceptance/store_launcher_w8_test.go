@@ -35,7 +35,7 @@ func TestStoreLauncherW8(t *testing.T) {
 	var paths []string
 	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{
 		Kube: kube, Boundary: boundary, Jobs: cfg,
-		Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30},
+		Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}},
 		Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 		HTTP: &http.Client{Transport: surfaceTransport(func(request *http.Request) (*http.Response, error) {
 			if request.Header.Get("Authorization") != "Bearer "+root.Raw {
@@ -157,7 +157,7 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 		if sync {
 			_, err = wire.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{})
 		} else {
-			_, err = wire.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
+			_, err = wire.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}})
 		}
 		if mode%6 == 5 {
 			if !errors.Is(err, providerFailure) || called {

@@ -36,7 +36,7 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*engineFixture, *st
 	profiles := store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		fixture.Server = NewDeployment(st, deploymenttest.Metered(t), nil)
 		policies := fixture.Server.StorePolicies()
-		policies.ClaimProfiles = engineEnrollmentFunc(func(ctx context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
+		policies.ClaimProfiles = engineEnrollmentFunc(func(ctx context.Context, p capability.Principal) (match.Profile, error) {
 			return fixture.claimProfiles.ResolveClaimProfile(ctx, p)
 		})
 		return policies, nil
@@ -68,8 +68,18 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*engineFixture, *st
 
 func engineSQL(t *testing.T, s *store.Store, query string, args ...any) {
 	t.Helper()
-	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), query, args...); err != nil {
+	if _, err := teststore.Exec(t.Context(), s, query, args...); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEngineSeededQueueIgnoresBlankSelectors(t *testing.T) {
+	e, _ := engineRuntimeStore(t)
+	engineHTTPRoot(t, e, "a", "runner", []capability.Grant{capability.NodesClaim})
+	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{"requires":{"set":true,"value":[" ",""]}}`))
+	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Kinds: []capability.UnitKind{capability.UnitNode}})
+	if err != nil || claim.RunID != "run" || claim.NodeID != "job" {
+		t.Fatalf("queued claim with blank selectors: %+v %v", claim, err)
 	}
 }
 
@@ -140,7 +150,7 @@ func engineRuntimeClaim(t *testing.T, server *engineFixture, kind capability.Uni
 		target.NodeID = "job"
 		engineSQL(t, s, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	}
-	claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: target, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: target})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,8 +202,8 @@ func TestEngineJobLifecycleRenewsAndReplaysUnderStoreFences(t *testing.T) {
 
 type engineProfileFake struct{}
 
-func (engineProfileFake) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	return match.Profile{Capacity: match.Resources{Cores: 1}}, match.Resources{Cores: 1}, nil
+func (engineProfileFake) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{}, nil
 }
 
 func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {

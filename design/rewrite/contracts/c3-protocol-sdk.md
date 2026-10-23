@@ -36,6 +36,10 @@ when joined with missing or corrupt cache data. A memo record remains producer-o
 until successful settlement makes it reusable in the same transaction. Failure,
 cancellation or a rolled-back report cannot publish a reusable result.
 
+Reconciliation carries no CPU or memory request, availability or reservation.
+The store evaluates sealed labels and current authority through the shared
+claim module; a host observation cannot grant an execution award.
+
 ## Declared requester secrets in composed execution
 
 Artifact publication, consumed-file staging, relative cache directories, cache

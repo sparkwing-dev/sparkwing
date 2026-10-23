@@ -7,7 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func assertAwardBox(t *testing.T, s *Store, ref capability.AuthorityRef, run, host string) {
@@ -82,7 +81,7 @@ func TestAwardBoxIdentityForAccountHere(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAwardBox(t, tenant.s, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: admitted.HereCapabilityPrefix}, admitted.RunID, "laptop")
-	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: admitted.HereCapabilityPrefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: admitted.HereCapabilityPrefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}})
 	if err != nil {
 		t.Fatal(err)
 	}

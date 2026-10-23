@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestClaimedHostReadsOnlyDeclaredProducerManifestSelectors(t *testing.T) {
@@ -29,7 +28,7 @@ func TestClaimedHostReadsOnlyDeclaredProducerManifestSelectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,generation,attempt,finished_at,spec_json,execution_json,manifest_record) VALUES ('a','run','producer','done','success',3,2,1,?,?,?)`, []byte(`{"id":"producer","env":{"PRIVATE":{"value":"private-source-value"}}}`), []byte(`{}`), raw)
-	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "reader-machine", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "reader"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "reader-machine", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "reader"}})
 	if err != nil {
 		t.Fatal(err)
 	}

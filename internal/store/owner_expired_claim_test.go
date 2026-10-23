@@ -16,7 +16,7 @@ func TestOwnerRenewalUsesItsSelfClaimsAuthorityBound(t *testing.T) {
 	for _, binding := range []bool{false, true} {
 		t.Run(fmt.Sprint("binding=", binding), func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, false)
-			s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+			s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"sparkwing-4cpu"}}}
 			demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 			owner, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: "a"}
@@ -57,7 +57,7 @@ func TestOwnerRenewalUsesItsSelfClaimsAuthorityBound(t *testing.T) {
 
 func TestOwnerCannotForgetExpiredSelfClaim(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, false)
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Capacity: match.Resources{Cores: 8}}, available: match.Resources{Cores: 8}}
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"sparkwing-4cpu"}}}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
 	owner, actor := meteredUnitClaim(t, s, demand)
 	first, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true)

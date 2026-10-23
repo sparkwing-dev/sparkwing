@@ -6,7 +6,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestPrivateHostSnapshotCarriesCanonicalPlacementAcrossTransport(t *testing.T) {
@@ -18,7 +17,7 @@ func TestPrivateHostSnapshotCarriesCanonicalPlacementAcrossTransport(t *testing.
 	}
 	server.placement.defaultPrefers, server.placement.hold, server.placement.liveness = []string{"name=preferred"}, time.Hour, time.Minute
 	engineHTTPRoot(t, newEngineFixture(server.store, EngineController{}), "a", "preferred", []capability.Grant{capability.NodesClaim})
-	if err := server.store.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "preferred", Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}); err != nil {
+	if err := server.store.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "preferred"}); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err = host.ReadSnapshot(t.Context(), "run")

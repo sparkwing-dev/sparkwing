@@ -160,8 +160,8 @@ func TestApprovalConcurrencyRefusedAtAcceptance(t *testing.T) {
 
 func TestPlanCapabilityLaunchParity(t *testing.T) {
 	rows := CapabilityTable()
-	if len(rows) != 36 {
-		t.Fatalf("capability rows = %d, want 36", len(rows))
+	if len(rows) != 35 {
+		t.Fatalf("capability rows = %d, want 35", len(rows))
 	}
 	seen := map[PlanCapability]bool{}
 	for _, row := range rows {
@@ -176,8 +176,8 @@ func TestPlanCapabilityLaunchParity(t *testing.T) {
 }
 
 func TestValidatePlanPreservesExplicitZero(t *testing.T) {
-	plan := checkPlan(t, `{"jobs":[{"id":"a","timeout_ms":0,"retry":{"attempts":0,"backoff_ms":0},"memo":{"ttl_ms":0},"closures":{"memo_key":"key"},"steps":[{"id":"s"}]}],"priority":0,"claim_wait_ms":0,"resources":{"cores":0,"memory_bytes":0},"source":{"full_history":false,"depth":0}}`, planContext(), "")
-	if plan.Priority == nil || *plan.Priority != 0 || plan.ClaimWaitMS == nil || *plan.ClaimWaitMS != 0 || plan.Resources == nil || plan.Resources.Cores == nil || plan.Resources.MemoryBytes == nil || plan.Source == nil || plan.Source.FullHistory == nil || *plan.Source.FullHistory || plan.Source.Depth == nil {
+	plan := checkPlan(t, `{"jobs":[{"id":"a","timeout_ms":0,"retry":{"attempts":0,"backoff_ms":0},"memo":{"ttl_ms":0},"closures":{"memo_key":"key"},"steps":[{"id":"s"}]}],"priority":0,"claim_wait_ms":0,"source":{"full_history":false,"depth":0}}`, planContext(), "")
+	if plan.Priority == nil || *plan.Priority != 0 || plan.ClaimWaitMS == nil || *plan.ClaimWaitMS != 0 || plan.Source == nil || plan.Source.FullHistory == nil || *plan.Source.FullHistory || plan.Source.Depth == nil {
 		t.Fatalf("explicit settings lost presence: %+v", plan)
 	}
 	job := plan.Jobs[0]
@@ -319,6 +319,16 @@ func TestValidatePlanChildTargets(t *testing.T) {
 		if _, err := ValidatePlan(json.RawMessage(raw), planContext()); err == nil {
 			t.Fatalf("accepted children %s", children)
 		}
+	}
+}
+
+func TestValidatePlanNormalizesRunnerLabels(t *testing.T) {
+	plan := checkPlan(t, `{"jobs":[{"id":"build","requires":["", " gpu ", "gpu", "os=linux, os=macos", " "],"prefers":["", " fast ", "fast"],"steps":[{"id":"body"}]}]}`, planContext(), "")
+	if got := strings.Join(plan.Jobs[0].Requires, ";"); got != "gpu;os=linux, os=macos" {
+		t.Fatalf("normalized requirements = %q", got)
+	}
+	if got := strings.Join(plan.Jobs[0].Prefers, ";"); got != "fast" {
+		t.Fatalf("normalized preferences = %q", got)
 	}
 }
 

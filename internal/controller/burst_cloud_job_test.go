@@ -76,7 +76,7 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 			t.Fatal(err)
 		}
 		observed := &burstLauncherWire{Controller: wire}
-		runtime, err = launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: launcher.CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: options.URL, CPUCeiling: 64, MemoryCeiling: 64 << 30}, Demand: controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 64}, HTTP: options.HTTP, Bearer: options.Bearer, NewController: func(client.EngineOptions) (launcher.LauncherController, error) { return observed, nil }})
+		runtime, err = launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: launcher.CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: options.URL, CPUCeiling: 64, MemoryCeiling: 64 << 30}, Demand: controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"worker"}}, HTTP: options.HTTP, Bearer: options.Bearer, NewController: func(client.EngineOptions) (launcher.LauncherController, error) { return observed, nil }})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -177,10 +177,7 @@ func appReference(t *testing.T, s *Store, ref, sha, pin string) (*Tenant, string
 		t.Fatal(err)
 	}
 	digest := "reference-" + strings.ReplaceAll(ref, "/", "-") + pin
-	s.SetTestClock(t, func() time.Time { return now })
-	if _, err := s.AsOperator().BindGitHubAppDeliveryEvent(t.Context(), digest, "push", "delivery"); err != nil {
-		t.Fatal(err)
-	}
+	s.testOnlyExec(t, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event,installation_id,connection_generation) SELECT ?,?,?,?,installation_id,connection_generation FROM github_app_installations WHERE installation_id=7`, digest, "delivery", now.UnixNano(), "push")
 	app := runspec.AppFacts{Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: ref, SHA: sha, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main", VerifiedAt: now}
 	in := GitHubAppAdmission{Installation: installation, Subscription: &sub, Event: "push", Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost,

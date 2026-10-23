@@ -79,7 +79,7 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 		}
 		if demand == nil {
 			var current UnitDemand
-			if current, observed, err = ownerExecutionDemandTx(ctx, tx, p, nil); err != nil {
+			if current, observed, err = ownerExecutionDemandTx(ctx, tx, p); err != nil {
 				return RunSnapshot{}, err
 			}
 			demand = &current

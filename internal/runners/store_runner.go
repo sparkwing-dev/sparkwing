@@ -10,16 +10,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // StoreRunnerConfig binds an embedded claimant and native hosts to the controller's store.
 type StoreRunnerConfig struct {
-	Bearer          func(context.Context) (string, error)
-	Loop            LoopConfig
-	Bind            func(context.Context, StoreBinding) (nodehost.NativeServices, error)
-	RequestCapacity func(context.Context) (capacity, available match.Resources, err error)
-	OnError         func(error)
+	Bearer  func(context.Context) (string, error)
+	Loop    LoopConfig
+	Bind    func(context.Context, StoreBinding) (nodehost.NativeServices, error)
+	OnError func(error)
 }
 
 // NewStoreRunner constructs the shared queue without a transport or another store opener.
@@ -39,8 +37,8 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 	client := StoreController{Engine: engine, Bearer: cfg.Bearer, Router: router}
 	loop := &Loop{
 		Config: cfg.Loop, Controller: client,
-		Host:            StoreHosting{Controller: engine, Bind: cfg.Bind},
-		RequestCapacity: cfg.RequestCapacity, OnError: cfg.OnError,
+		Host:    StoreHosting{Controller: engine, Bind: cfg.Bind},
+		OnError: cfg.OnError,
 	}
 	loop.CheckVersion = func(ctx context.Context, version string) error {
 		return client.checkVersion(ctx, version, loop.Config.Kinds)

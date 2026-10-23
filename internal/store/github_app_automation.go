@@ -70,7 +70,10 @@ func (t *Tenant) putGitHubAppAutomationTx(ctx context.Context, tx *storeTx, a Gi
 	if err != nil {
 		return err
 	}
-	return credentialRowChanged(result, nil)
+	if err := credentialRowChanged(result, nil); err != nil {
+		return err
+	}
+	return bumpGitHubPublicationTx(ctx, tx, t.team, a.RepositoryID)
 }
 
 // GitHubAppAutomation reads live consent for one repository and installation.
@@ -110,12 +113,24 @@ func (t *Tenant) GitHubAppAutomations(ctx context.Context) (_ []GitHubAppAutomat
 
 // WithdrawGitHubAppAutomation removes consent only through its bound installation.
 func (t *Tenant) WithdrawGitHubAppAutomation(ctx context.Context, installation, repository int64) error {
-	_, err := t.s.exec(ctx, `DELETE FROM github_app_automation WHERE team = ? AND installation_id = ? AND repository_id = ?`, string(t.team), installation, repository)
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return t.withdrawGitHubAppAutomationTx(ctx, tx, installation, repository)
+	})
+}
+
+func (t *Tenant) withdrawGitHubAppAutomationTx(ctx context.Context, tx *storeTx, installation, repository int64) error {
+	_, err := githubDeliveryResultTx(ctx, tx, fmt.Sprintf("lifecycle:withdraw-automation:%s:%d:%d", t.team, installation, repository), func() (struct{}, error) {
+		if err := bumpGitHubPublicationTx(ctx, tx, t.team, repository); err != nil {
+			return struct{}{}, err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=? AND repository_id=?`, t.team, installation, repository)
+		return struct{}{}, err
+	})
 	return err
 }
 
 // RenameGitHubAppAutomation follows a repository's numeric identity after a rename.
 func (t *Tenant) RenameGitHubAppAutomation(ctx context.Context, installation, repository int64, name string) error {
-	_, err := t.s.exec(ctx, `UPDATE github_app_automation SET repository = ? WHERE team = ? AND installation_id = ? AND repository_id = ?`, name, string(t.team), installation, repository)
+	_, err := t.s.githubDeliveryExec(ctx, fmt.Sprintf("rename-automation:%s:%d:%d", t.team, installation, repository), `UPDATE github_app_automation SET repository = ? WHERE team = ? AND installation_id = ? AND repository_id = ?`, name, string(t.team), installation, repository)
 	return err
 }

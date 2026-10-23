@@ -1,9 +1,11 @@
 package source_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -114,4 +116,54 @@ func FuzzCommittedConfigurationStaysInsideAcquiredCheckout(f *testing.F) {
 			t.Fatal("outside configuration symlink was silently ignored")
 		}
 	})
+}
+
+func TestSelectUsesHostAuthorityForExecutionAndConfiguredSourceRevisions(t *testing.T) {
+	const execution = "0123456789abcdef0123456789abcdef01234567"
+	const pinned = "abcdef0123456789abcdef0123456789abcdef01"
+	for _, pin := range []string{"", "origin/code", pinned} {
+		t.Run(pin, func(t *testing.T) {
+			var lookedUp []string
+			options := source.Options{
+				ResolveRef: func(_ context.Context, ref string) (string, error) {
+					lookedUp = append(lookedUp, ref)
+					switch ref {
+					case "refs/heads/main":
+						return execution, nil
+					case "refs/heads/code":
+						return pinned, nil
+					case "refs/tags/main":
+						return "", nil
+					default:
+						t.Fatalf("unexpected revision lookup %q", ref)
+						return "", nil
+					}
+				},
+				ReadFile: func(_ context.Context, sha, name string) ([]byte, bool, error) {
+					if sha != execution || name != ".sparkwing/sparkwing.yaml" {
+						t.Fatalf("read %s:%s, want execution configuration", sha, name)
+					}
+					config := "pipelines:\n  - name: build\n    entrypoint: Build\n"
+					if pin != "" {
+						config += "    source: " + pin + "\n"
+					}
+					return []byte(config), true, nil
+				},
+			}
+			git, code, _, err := source.Select(t.Context(), source.Spec{RepoKey: "gh:701", RemoteURL: "https://github.invalid/acme/repo.git"}, "build", runspec.Git{Ref: "main"}, runspec.Source{}, "", options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantSHA, wantLookups := execution, []string{"refs/heads/main", "refs/tags/main"}
+			if pin != "" {
+				wantSHA = pinned
+			}
+			if pin == "origin/code" {
+				wantLookups = append(wantLookups, "refs/heads/code")
+			}
+			if git.SHA != execution || code.Ref != wantSHA || code.RequestedRef != pin || !slices.Equal(lookedUp, wantLookups) {
+				t.Fatalf("selection git=%s source=%+v lookups=%v, want source=%s lookups=%v", git.SHA, code, lookedUp, wantSHA, wantLookups)
+			}
+		})
+	}
 }

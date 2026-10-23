@@ -26,9 +26,9 @@ import (
 
 var runAnywhereKinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}
 
-func runAnywherePoll(t *testing.T, f cloudDispatch, raw string) *controllerwire.ClaimedUnit {
+func runAnywherePoll(t *testing.T, f cloudDispatch, raw string, freeSlots int) *controllerwire.ClaimedUnit {
 	t.Helper()
-	response, err := f.open(raw, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: runAnywhereKinds, OS: "linux", Arch: "amd64", AvailableCores: 2, AvailableMemoryBytes: 4 << 30})
+	response, err := f.open(raw, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: runAnywhereKinds, OS: "linux", Arch: "amd64", FreeSlots: &freeSlots})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func runAnywhereComplete(t *testing.T, f cloudDispatch, unit *controllerwire.Cla
 func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing.T) {
 	f := cloudDispatchTrigger(t)
 	builder := cloudDispatchMachine(t, f, "builder")
-	if runAnywherePoll(t, f, builder) != nil {
+	if runAnywherePoll(t, f, builder, 1) != nil {
 		t.Fatal("runner found work before the run existed")
 	}
 	created, err := f.member.CreateRun(t.Context(), f.request)
@@ -98,7 +98,7 @@ func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing
 	if launched, err := cloud.runtime.LaunchOne(t.Context()); err != nil || launched {
 		t.Fatalf("launcher took the plan while a better-ranked runner was live: %v %v", launched, err)
 	}
-	plan := runAnywherePoll(t, f, builder)
+	plan := runAnywherePoll(t, f, builder, 2)
 	if plan == nil || plan.Unit != capability.UnitPlan || plan.Delivery != capability.DeliveryDirect || plan.RunID != created.RunID {
 		t.Fatalf("runner plan award: %+v", plan)
 	}
@@ -106,7 +106,7 @@ func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing
 	if launched, err := cloud.runtime.LaunchOne(t.Context()); err != nil || launched {
 		t.Fatalf("launcher took the job while a better-ranked runner was live: %v %v", launched, err)
 	}
-	job := runAnywherePoll(t, f, builder)
+	job := runAnywherePoll(t, f, builder, 1)
 	if job == nil || job.Unit != capability.UnitNode || job.JobID != "verify" {
 		t.Fatalf("runner job award: %+v", job)
 	}
@@ -159,7 +159,7 @@ func TestTeamAdminRanksCloudFirstFromTheCLI(t *testing.T) {
 		t.Fatalf("ranking after the CLI change: %+v %v", current, err)
 	}
 	builder := cloudDispatchMachine(t, f, "builder")
-	runAnywherePoll(t, f, builder)
+	runAnywherePoll(t, f, builder, 1)
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {
 		t.Fatal(err)
@@ -190,42 +190,6 @@ func runAnywhereAdmin(t *testing.T, f cloudDispatch) string {
 		t.Fatal(err)
 	}
 	return issued.Raw
-}
-
-func TestRunAnywhereJobWaitsForTheRunnerHeadroomItsPlanDidNotNeed(t *testing.T) {
-	f := cloudDispatchTrigger(t)
-	builder := cloudDispatchMachine(t, f, "builder")
-	created, err := f.member.CreateRun(t.Context(), f.request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.state.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "run-anywhere-test", time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	poll := func(cores float64) *controllerwire.ClaimedUnit {
-		response, err := f.open(builder, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: runAnywhereKinds, OS: "linux", Arch: "amd64", AvailableCores: cores, AvailableMemoryBytes: 4 << 30})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return response.Claim
-	}
-	plan := poll(0.25)
-	if plan == nil || plan.Unit != capability.UnitPlan {
-		t.Fatalf("a busy runner did not take the plan: %+v", plan)
-	}
-	runAnywherePlan(t, f, created, plan.Capability)
-	for range 3 {
-		if job := poll(0.25); job != nil {
-			t.Fatalf("a job needing one core went to a runner offering a quarter: %+v", job)
-		}
-	}
-	var asks int
-	if err := teststore.SQL(t, f.state).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM unit_asks`).Scan(&asks); err != nil || asks != 0 {
-		t.Fatalf("a claimant that does not fit recorded %d asks: %v", asks, err)
-	}
-	if job := poll(2); job == nil || job.Unit != capability.UnitNode || job.JobID != "verify" {
-		t.Fatalf("the job did not go to the runner once it had headroom: %+v", job)
-	}
 }
 
 func cloudDispatchRequest(t *testing.T, f cloudDispatch, id string) runspec.SealedRequest {

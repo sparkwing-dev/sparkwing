@@ -26,11 +26,8 @@ type runnerPoll struct {
 	ObservedAt time.Time `json:"observed_at"`
 }
 
-// RecordRunnerPoll stores a live machine's advertised capacity and labels with the store clock.
+// RecordRunnerPoll stores a live claimant's advertised labels and platform with the store clock.
 func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
-	if !validMatchingResources(observation.Capacity) || !validMatchingResources(observation.Available) {
-		return authorityError(apierr.BadRequest, "invalid claim resources")
-	}
 	observation.Labels = match.SelfAsserted(observation.Labels)
 	raw, err := json.Marshal(observation.Labels)
 	if err != nil {
@@ -145,8 +142,8 @@ func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) 
 			if err := json.Unmarshal(body, a.poll); err != nil {
 				return nil, err
 			}
-			if !validMatchingResources(a.poll.Capacity) || !validMatchingResources(a.poll.Available) || a.poll.ObservedAt.IsZero() || a.poll.ObservedAt.After(now) {
-				return nil, authorityError(apierr.IntegrityFailure, "invalid runner capacity observation")
+			if a.poll.ObservedAt.IsZero() || a.poll.ObservedAt.After(now) {
+				return nil, authorityError(apierr.IntegrityFailure, "invalid runner label observation")
 			}
 		}
 		observations = append(observations, a)
@@ -165,7 +162,7 @@ func registeredAgentTx(ctx context.Context, tx *storeTx, team Team, observed Reg
 	}
 	profile := match.Profile{}
 	if tx.store.claimProfiles != nil {
-		profile, _, err = tx.store.claimProfiles.ResolveClaimProfile(ctx, principal)
+		profile, err = tx.store.claimProfiles.ResolveClaimProfile(ctx, principal)
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +187,6 @@ type WaitingNode struct {
 	Team          Team
 	Selector      []string
 	Repo          match.Repository
-	Request       match.Resources
 	Attention     string
 	AllowedPools  []string
 }
@@ -228,10 +224,7 @@ func (o *Operator) ListWaitingNodes(ctx context.Context, readyBefore time.Time, 
 		if err := json.Unmarshal(execution, &settings); err != nil {
 			return nil, fmt.Errorf("decode waiting job %s/%s: %w", n.RunID, n.NodeID, err)
 		}
-		n.Selector, n.Request = settings.Requires.Value, matchingResources(settings.Resources.Value)
-		if !validMatchingResources(n.Request) {
-			return nil, fmt.Errorf("invalid resources for waiting job %s/%s", n.RunID, n.NodeID)
-		}
+		n.Selector = settings.Requires.Value
 		if err := json.Unmarshal(pools, &n.AllowedPools); err != nil {
 			return nil, fmt.Errorf("decode waiting run pools: %w", err)
 		}
@@ -281,4 +274,30 @@ func (o *Operator) SetNodeAttention(ctx context.Context, updates []NodeAttention
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func consumeClaimSlotTx(ctx context.Context, tx *storeTx, prefix, team string) error {
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT claim_observation_json FROM capabilities WHERE prefix=? AND COALESCE(team,'')=?`, prefix, team).Scan(&raw); err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	var poll runnerPoll
+	if err := json.Unmarshal(raw, &poll); err != nil {
+		return err
+	}
+	slots := 1
+	if poll.FreeSlots != nil {
+		slots = *poll.FreeSlots
+	}
+	slots = max(0, slots-1)
+	poll.FreeSlots = &slots
+	raw, err := json.Marshal(poll)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=? WHERE prefix=? AND COALESCE(team,'')=?`, raw, prefix, team)
+	return err
 }

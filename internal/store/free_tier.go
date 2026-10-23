@@ -2,14 +2,14 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
 )
 
-// safety: the free tier counts teams, not bytes: a team without credits takes a slot on its first store, released only
-// when the team is deleted, so free bytes never pass slots times the allowance. Each store holds a slotted team to its
-// share where it writes (the controller's is run events). Runs are never refused here; a metered claim refuses them.
+// safety: the free tier counts teams, not bytes. Each store holds a slotted team to its share where it writes
+// (the controller's is run events). Runs are never refused here; a metered claim refuses them.
 
 // DefaultFreeTeamSlots is how many teams without credits may hold a free-tier
 // slot when the operator has set no other number.
@@ -41,6 +41,72 @@ func FreeEventShare(allowance int64) int64 { return allowance / 16 }
 const StorageLimitFreeEvents = "free_event_share"
 
 const metaKeyFreeTeamSlots = "free_team_slots"
+
+const freeSlotIdlePeriod = 30 * 24 * time.Hour
+
+func markFreeSlotActiveTx(ctx context.Context, tx *storeTx, team Team) error {
+	_, err := tx.ExecContext(ctx, `UPDATE free_slots SET empty_since=0 WHERE team=? AND empty_since<>0`, team)
+	return err
+}
+
+func (op *Operator) releaseIdleFreeSlotsTx(ctx context.Context, tx *storeTx) (int64, error) {
+	if err := lockFreeTierTx(ctx, tx); err != nil {
+		return 0, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT team,empty_since FROM free_slots ORDER BY team`+tx.forUpdate())
+	if err != nil {
+		return 0, err
+	}
+	type slot struct {
+		team       Team
+		emptySince int64
+	}
+	var slots []slot
+	for rows.Next() {
+		var row slot
+		if err := rows.Scan(&row.team, &row.emptySince); err != nil {
+			return 0, errors.Join(err, rows.Close())
+		}
+		slots = append(slots, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, err
+	}
+	now := tx.now(ctx).UnixNano()
+	cutoff := tx.now(ctx).Add(-freeSlotIdlePeriod).UnixNano()
+	var released int64
+	for _, slot := range slots {
+		var occupied int64
+		err := tx.QueryRowContext(ctx, `SELECT CASE WHEN
+			EXISTS(SELECT 1 FROM runs WHERE team=?) OR
+			EXISTS(SELECT 1 FROM blobs WHERE team=? AND size<>0) OR
+			EXISTS(SELECT 1 FROM log_streams WHERE team=? AND stored_bytes<>0) OR
+			EXISTS(SELECT 1 FROM uploads WHERE team=? AND size<>0 AND staging_deleted_at IS NULL) OR
+			EXISTS(SELECT 1 FROM source_uploads WHERE team=? AND size<>0)
+			THEN 1 ELSE 0 END`, slot.team, slot.team, slot.team, slot.team, slot.team).Scan(&occupied)
+		if err != nil {
+			return 0, err
+		}
+		switch {
+		case occupied != 0 && slot.emptySince != 0:
+			_, err = tx.ExecContext(ctx, `UPDATE free_slots SET empty_since=0 WHERE team=?`, slot.team)
+		case occupied == 0 && slot.emptySince == 0:
+			_, err = tx.ExecContext(ctx, `UPDATE free_slots SET empty_since=? WHERE team=?`, now, slot.team)
+		case occupied == 0 && slot.emptySince <= cutoff:
+			var result sql.Result
+			result, err = tx.ExecContext(ctx, `DELETE FROM free_slots WHERE team=?`, slot.team)
+			if err == nil {
+				var n int64
+				n, err = result.RowsAffected()
+				released += n
+			}
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
+	return released, nil
+}
 
 // ErrFreeStoragePaused refuses a team with neither credits nor a free-tier
 // slot, because every slot is taken.
@@ -234,6 +300,7 @@ ON CONFLICT (team) DO NOTHING`, string(team), tx.now(ctx).UnixNano()); err != ni
 		}
 		return nil
 	})
+
 }
 
 // SetFreeTeamSlots sets how many teams without credits may hold a slot.

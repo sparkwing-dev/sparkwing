@@ -13,7 +13,6 @@ import (
 	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // RunnerAdmissionPolicy checks server-owned software policy before a new award.
@@ -71,7 +70,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
-	profile, _, err := s.authority.ReadClaimProfile(ctx, principal.Authority)
+	profile, err := s.authority.ReadClaimProfile(ctx, principal.Authority)
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
@@ -82,19 +81,21 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	}
 	if principal.Capability.Purpose == capability.PurposeHere || principal.Capability.Subject.Kind == capability.SubjectMachine && principal.Capability.Binding.Kind == capability.BindingNone {
 		profile.OS, profile.Arch = body.OS, body.Arch
-		profile.Capacity = match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}
-		if body.Capacity != nil {
-			profile.Capacity = *body.Capacity
-		}
 	}
 	c := principal.Capability
+	if (len(body.ExcludedTeamLabels) > 0 || body.JobNamespace != "") && !capability.Launcher(c) {
+		return controllerwire.ClaimResponse{}, invalidEngineBody("only a launcher can report its job namespace or exclude faulted teams")
+	}
+	if len(body.ExcludedTeamLabels) > 0 && body.JobNamespace == "" {
+		return controllerwire.ClaimResponse{}, invalidEngineBody("faulted team labels require the job namespace")
+	}
 	machine := c.Subject.Kind == capability.SubjectMachine && (c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush)
 	if c.Purpose == capability.PurposeHere || machine || c.Subject.Kind == capability.SubjectLocal || c.Subject.Kind == capability.SubjectService && slices.Contains(c.Grants, capability.ClaimsLaunch) {
-		if err := s.authority.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}}); err != nil {
+		if err := s.authority.RecordRunnerPoll(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
-	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), Target: target, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}})
+	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch})
 	if target == nil && errors.Is(err, store.ErrNotFound) {
 		observeEmptyClaim(principal.Capability)
 		return controllerwire.ClaimResponse{}, nil
@@ -161,13 +162,11 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	}
 	switch claim.Kind {
 	case capability.UnitPlan, capability.UnitEval:
-		resources := run.Request.Request.Options.Resources
+		selectors := run.Request.Request.Options.Requires
 		if run.Spec != nil {
-			resources = run.Spec.Resolved.Settings.Options.Resources
+			selectors = run.Spec.Resolved.Settings.Options.Requires
 		}
-		unit.Execution = &runspec.JobExecutionSettings{Resources: resources}
-	case capability.UnitTrigger:
-		unit.Execution = nil
+		unit.Execution = &runspec.JobExecutionSettings{Requires: selectors}
 	}
 	unit.CloudResources, err = s.authority.CloudAwardResources(ctx, principal.Authority)
 	if err != nil {

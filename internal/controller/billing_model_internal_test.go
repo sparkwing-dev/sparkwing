@@ -32,9 +32,8 @@ import (
 
 type billingCloudProfile struct{}
 
-func (billingCloudProfile) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	capacity := match.Resources{Cores: 64}
-	return match.Profile{Capacity: capacity}, capacity, nil
+func (billingCloudProfile) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{Labels: []string{"sparkwing-4cpu"}}, nil
 }
 
 func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
@@ -42,7 +41,7 @@ func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
 	engineSQL(t, e.Store, `UPDATE triggers SET expires_at=?`, time.Now().Add(24*time.Hour).UnixNano())
 	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp',card_added_at=? WHERE name='a'`, time.Now().UnixNano())
 	engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('a','funded-a','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
-	execution := runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{Cores: runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: 4}}}}}}
+	execution := runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sparkwing-4cpu"}}}}
 	rawExecution, err := json.Marshal(execution)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +59,7 @@ func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
 		if id == "three" {
 			status = http.StatusConflict
 		}
-		w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", fmt.Sprintf(`{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":%q,"available_cores":64}`, id), status)
+		w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", fmt.Sprintf(`{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":%q}`, id), status)
 		if id == "three" {
 			continue
 		}
@@ -83,7 +82,7 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 			engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('a','funded-a','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
 			engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('b','funded-b','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
 			for _, id := range []string{"one", "two", "three"} {
-				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
+				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu"]}}`))
 			}
 			engineAcceptedFixturePlan(t, e, "a", "run", "one", "two", "three")
 			engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,spec_json,spec_hash,sealed_at,plan_json,plan_hash) SELECT 'b','later',number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at+1,log_retention_class,log_retention_days,spec_json,spec_hash,sealed_at,plan_json,plan_hash FROM runs WHERE id='run'`)
@@ -100,12 +99,12 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 			h := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithEngineController(e.EngineController).Handler()
 			if blocked == "capacity" {
 				for _, id := range []string{"one", "two"} {
-					engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", fmt.Sprintf(`{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":%q,"available_cores":64}`, id), http.StatusOK)
+					engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", fmt.Sprintf(`{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":%q}`, id), http.StatusOK)
 				}
 			} else {
-				engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE team='a'`, []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":16}}}}`))
+				engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE team='a'`, []byte(`{"requires":{"set":true,"value":["sparkwing-16cpu"]}}`))
 			}
-			w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":64}`, http.StatusOK)
+			w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"]}`, http.StatusOK)
 			var response controllerwire.ClaimResponse
 			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 				t.Fatal(err)
@@ -129,7 +128,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	engineSQL(t, e.Store, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
 	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp' WHERE name='a'`)
 	for _, id := range []string{"one", "two"} {
-		engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":16}}}}`))
+		engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"requires":{"set":true,"value":["sparkwing-16cpu"]}}`))
 	}
 	engineAcceptedFixturePlan(t, e, "a", "run", "one", "two")
 	rates := store.CreditRateTable{{Cores: 16, MicroPerSecond: 1}}
@@ -140,7 +139,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	h, webhook := billingModelPaymentHandler(t, e)
-	request := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"one","available_cores":64}`
+	request := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"one"}`
 	w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", request, http.StatusBadRequest)
 	if !strings.Contains(w.Body.String(), "New") {
 		t.Fatalf("oversized job omitted standing: %s", w.Body)
@@ -168,7 +167,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	if err != nil || standing.Tier != "Held" {
 		t.Fatalf("chargeback standing=%+v: %v", standing, err)
 	}
-	w = engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":64}`, http.StatusOK)
+	w = engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"]}`, http.StatusOK)
 	var waiting controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &waiting); err != nil || waiting.Claim != nil {
 		t.Fatalf("chargeback admitted work: %s: %v", w.Body, err)

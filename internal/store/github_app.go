@@ -101,6 +101,10 @@ func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in G
 	if in.InstallationID <= 0 || in.AccountID <= 0 || in.AccountLogin == "" || (in.AccountType != "User" && in.AccountType != "Organization") {
 		return GitHubAppInstallation{}, fmt.Errorf("%w: a binding needs the installation and its account", ErrInvalidInput)
 	}
+	generation, err := newIdentityID()
+	if err != nil {
+		return GitHubAppInstallation{}, err
+	}
 	at := now.UTC().UnixNano()
 	suspended := 0
 	if in.Suspended {
@@ -109,8 +113,8 @@ func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in G
 	// safety: the conflict guard compares teams, so a second team's connect
 	// updates nothing and cannot take the installation over.
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO github_app_installations (`+githubAppInstallationCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO github_app_installations (`+githubAppInstallationCols+`, connection_generation)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (installation_id) DO UPDATE SET
 		    account_id = excluded.account_id, account_login = excluded.account_login,
 		    account_type = excluded.account_type, suspended = excluded.suspended,
@@ -118,7 +122,7 @@ func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in G
 		    updated_at = excluded.updated_at
 		WHERE github_app_installations.team = excluded.team`,
 		in.InstallationID, string(t.team), in.AccountID, in.AccountLogin, in.AccountType, suspended,
-		in.ConnectedBy, in.GitHubUserID, at, at)
+		in.ConnectedBy, in.GitHubUserID, at, at, generation)
 	if err != nil {
 		return GitHubAppInstallation{}, err
 	}
@@ -181,25 +185,21 @@ func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation i
 // GitHub's uninstall notice and the operator's move both name only the
 // installation.
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error) {
-	var team Team
-	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := acquireLockSet(ctx, tx, func() lockSet {
-			return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation)
-		}); err != nil {
-			return err
-		}
-		owner, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		team = owner
-		t := &Tenant{s: o.s, team: team}
-		return t.unbindGitHubAppInstallationTx(ctx, tx, installation)
+	return inTxResult(ctx, o.s, func(tx *storeTx) (Team, error) {
+		return githubDeliveryResultTx(ctx, tx, fmt.Sprintf("lifecycle:unbind:%d", installation), func() (Team, error) {
+			if err := acquireLockSet(ctx, tx, func() lockSet { return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation) }); err != nil {
+				return "", err
+			}
+			team, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", ErrNotFound
+			}
+			if err != nil {
+				return "", err
+			}
+			return team, (&Tenant{s: o.s, team: team}).unbindGitHubAppInstallationTx(ctx, tx, installation)
+		})
 	})
-	return team, err
 }
 
 // SetGitHubAppInstallationSuspended records GitHub's suspension of
@@ -209,13 +209,13 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 	if suspended {
 		flag = 1
 	}
-	return o.s.inTx(ctx, func(tx *storeTx) error {
+	return o.s.githubDeliveryEffect(ctx, fmt.Sprintf("suspend:%d", installation), func(tx *storeTx) error {
 		if err := acquireLockSet(ctx, tx, func() lockSet {
 			return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation)
 		}); err != nil {
 			return err
 		}
-		team, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
+		team, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -224,6 +224,9 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
 			WHERE team = ? AND installation_id = ?`, flag, tx.now(ctx).UTC().UnixNano(), team, installation); err != nil {
+			return err
+		}
+		if err := invalidateGitHubInstallationPublicationsTx(ctx, tx, team, installation); err != nil {
 			return err
 		}
 		if suspended {
@@ -423,64 +426,8 @@ func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installat
 	if !ok {
 		return ErrInvalidInput
 	}
-	_, err := t.s.exec(ctx, `UPDATE github_app_triggers SET repository = ?, installation_id = ? WHERE team = ? AND repository_id = ?`,
+	_, err := t.s.githubDeliveryExec(ctx, fmt.Sprintf("rename-triggers:%s:%d:%d", t.team, installation, repositoryID), `UPDATE github_app_triggers SET repository = ?, installation_id = ? WHERE team = ? AND repository_id = ?`,
 		repo.Slug(), installation, string(t.team), repositoryID)
-	return err
-}
-
-// GitHubAppDeliveryRetention is how long a delivery's digest is remembered.
-// The App webhook refuses an event older than this, so a forgotten digest
-// does not readmit a replayed delivery.
-const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
-
-// BindGitHubAppDeliveryEvent ties digest to the first event it arrived as and
-// reports whether event is that one. The binding is kept apart from the
-// processed record, so binding a delivery does not make it seen.
-func (o *Operator) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string) (out bool, err error) {
-	err = o.s.inTxOnce(ctx, func(tx *storeTx) error {
-		if err = forgetExpiredGitHubAppDeliveriesTx(ctx, tx); err != nil {
-			return err
-		}
-		key := "event:" + digest
-		if _, err = tx.ExecContext(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at, event) VALUES (?, ?, ?, ?)
-			ON CONFLICT (digest) DO NOTHING`, key, delivery, tx.now(ctx).Unix(), event); err != nil {
-			return err
-		}
-		var bound string
-		if err = tx.QueryRowContext(ctx, `SELECT event FROM github_app_deliveries WHERE digest = ?`, key).Scan(&bound); err != nil {
-			return err
-		}
-		out = bound == event
-		return nil
-	})
-	return out, err
-}
-
-// GitHubAppDeliverySeen reports whether a delivery with digest was processed
-// before, for any team.
-func (o *Operator) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool, error) {
-	var n int
-	err := o.s.queryRow(ctx, `SELECT COUNT(*) FROM github_app_deliveries WHERE digest = ?`, digest).Scan(&n)
-	return n > 0, err
-}
-
-// RecordGitHubAppDelivery remembers that a delivery with digest was
-// processed. It and [Store.BindGitHubAppDeliveryEvent] forget digests and
-// event bindings older than [GitHubAppDeliveryRetention].
-func (o *Operator) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string) error {
-	return o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := forgetExpiredGitHubAppDeliveriesTx(ctx, tx); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
-		ON CONFLICT (digest) DO NOTHING`, digest, delivery, tx.now(ctx).Unix())
-		return err
-	})
-}
-
-func forgetExpiredGitHubAppDeliveriesTx(ctx context.Context, tx *storeTx) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
-		tx.now(ctx).Add(-GitHubAppDeliveryRetention).Unix())
 	return err
 }
 
@@ -603,6 +550,9 @@ func (t *Tenant) GitHubCommitRuns(ctx context.Context, repo GitHubRepo, sha stri
 }
 
 func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx, installation int64) error {
+	if err := invalidateGitHubInstallationPublicationsTx(ctx, tx, t.team, installation); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM github_app_installations WHERE team = ? AND installation_id = ?`,
 		string(t.team), installation)
 	if err != nil {
@@ -623,8 +573,9 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 	return nil
 }
 
-func (o *Operator) githubInstallationTeamTx(ctx context.Context, tx *storeTx, installation int64) (Team, error) {
+func (o *Operator) githubInstallationConnectionTx(ctx context.Context, tx *storeTx, installation int64) (Team, string, error) {
 	var team Team
-	err := tx.QueryRowContext(ctx, `SELECT team FROM github_app_installations WHERE installation_id=?`, installation).Scan(&team)
-	return team, err
+	var generation string
+	err := tx.QueryRowContext(ctx, `SELECT team,connection_generation FROM github_app_installations WHERE installation_id=?`, installation).Scan(&team, &generation)
+	return team, generation, err
 }

@@ -1,4 +1,4 @@
-package sparkwingruntime
+package nodeproto
 
 import "strings"
 

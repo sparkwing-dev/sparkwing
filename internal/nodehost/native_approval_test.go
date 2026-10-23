@@ -26,7 +26,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -114,7 +113,7 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 			if _, err := f.Store.AsOperator().ReconcileControllerRuns(ctx, controllerLease, "", 100); err != nil {
 				t.Fatal(err)
 			}
-			award, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(f.Input.RunID), NodeID: "gate", SourceGeneration: 0}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+			award, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(f.Input.RunID), NodeID: "gate", SourceGeneration: 0}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -218,7 +217,7 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 				if _, err := f.Store.AsOperator().ReconcileControllerRuns(ctx, lease, "", 100); err != nil {
 					t.Fatal(err)
 				}
-				award, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+				award, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}})
 				if err != nil {
 					t.Fatal(err)
 				}

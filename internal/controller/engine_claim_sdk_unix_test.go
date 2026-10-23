@@ -56,7 +56,7 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 		t.Fatal("repository example must declare an empty arguments array")
 	}
 	_, handler, bearer := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	response := controller.EngineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
+	response := controller.EngineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, 200)
 	var award controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
 		t.Fatalf("claim: %s: %v", response.Body.String(), err)
@@ -159,7 +159,7 @@ func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.R
 	if err := json.Unmarshal(response.Body.Bytes(), &admitted); err != nil {
 		t.Fatal(err)
 	}
-	claimBody := fmt.Sprintf(`{"runner_version":"development","kinds":["trigger"],"run_id":%q,"available_cores":%d}`, admitted.RunID, runtime.NumCPU())
+	claimBody := fmt.Sprintf(`{"runner_version":"development","kinds":["trigger"],"run_id":%q}`, admitted.RunID)
 	response = controller.EngineClaimHTTP(t, handler, "", "POST", "/api/v1/runners/claim", claimBody, http.StatusOK)
 	var award controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {

@@ -617,23 +617,49 @@ collect possible copied bytes and release every quota dimension.
 ## Run-anywhere claim ranking
 
 `SelectDispatch` seals controller dispatch for an executing run with no runner
-selection, `pool=` requirement or burst preferences, on every controller. A
+selection or `pool=` requirement, on every controller. A
 unit is ranked when its run is run anywhere and the unit's own requirements pin
 no `pool=`, `name=` or `class=` term. Tiers come from the authenticated chain:
 here (the personal machine sealed as `OriginMachine` from a verified proof),
 personal, github-actions, self-hosted (including local queues) or cloud. An
 empty ranking means first come, and an unset ranking means the default order.
 
-`unitEligibilityTx` is the single judgment of a claimant for a unit: kinds,
-authority and placement (including the ranking), matching, advertised
-capacity and billing for every metered claimant. Queue scans, named claims,
-ranking holds and notices all use it. `unitPlacementTx` applies only the
-ranking to a ranked unit. Inside `limits.RankingWindow` from readiness, a claim
-waits while a better-ranked eligible claimant is live, and it writes its ask to
-`unit_asks` under the unit's claim lock in the same transaction, which commits
-when the scan awards another unit or nothing. For `limits.RankingAward` after
-the window, a claim waits only for a better-ranked ask recorded inside the
-window. An award deletes the unit's asks.
+`claimSQL` selects and rechecks every claimant through one SQL predicate: readiness,
+grants, binding, repository scope, trust, selectors, reservation, exclusions,
+placement and funding. Teams take turns by their last committed award ordinal;
+arrival and stable unit identity break ties. Failed awards advance no ordinal.
+There is no launcher scan frontier, demand hash or probing savepoint. Repository
+routing identities are normalized by the source URL owner when intake writes the run.
+
+`claim_contexts` groups work by immutable claim policy. Its hash covers the
+request and provenance, resolved options and guards, job execution settings,
+repository access, allowed pools and creator. It omits seal timestamps and
+unrelated jobs. Intake, plan acceptance and expansion insertion write context
+references with their source rows. The context table stores only identity,
+requirement set and unit kind; run policy remains on the run.
+
+Label lookups select matching requirement sets. Each context then seeks one
+ready head per unit kind through an index on team, requirement set, context,
+arrival and identity. A batched proof uses the same eligibility and ranking
+predicate to identify contexts held for a better shared claimant. Those routes
+seek past the ranking window through the arrival index. Bound, personal and
+Actions claimants cannot supply this shared proof because their eligibility can
+depend on a particular run. Every selected head still passes the full predicate
+and atomic award recheck. Context and requirement references prevent pruning
+policy used by live work. Retention removes unused contexts before requirement
+sets; tenant purge uses the same dependency order.
+
+Inside the 5-second `limits.RankingWindow`, placement holds reserve unnamed work
+for the best-ranked tier with a live claimant on the same team, matching labels
+and a free slot in its latest poll. A busy or offline better tier causes no wait.
+After the window, any eligible claimant may take it. SQL applies holds before
+`LIMIT 1`, so a held prefix cannot hide eligible work. Explicit placement, burst
+and `Prefers` holds remain. There are no ask rows, ask retention or post-window
+grace period. Preference scoring is removed; fair share and arrival order select
+between eligible jobs. Polls report free slots; an omitted count offers one slot,
+and an explicit zero means busy.
+`explainUnitEligibilityTx` supplies diagnostics for notices; it never selects
+or awards work.
 
 A personal machine takes only its owner's manual runs. `automatedLineageTx`
 follows a retry or child run back to its original request and refuses any whose

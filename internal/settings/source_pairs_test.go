@@ -15,11 +15,6 @@ type sourceProbe func(Inputs) (any, Origin, error)
 func probe[T any](fn func(Inputs) (T, Origin, error)) sourceProbe {
 	return func(in Inputs) (any, Origin, error) {
 		v, o, e := fn(in)
-		if resources, ok := any(v).(runspec.Resources); ok {
-			resources.Cores.Origin = runspec.SettingOrigin{}
-			resources.MemoryBytes.Origin = runspec.SettingOrigin{}
-			return resources, o, e
-		}
 		return v, o, e
 	}
 }

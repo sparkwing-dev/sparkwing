@@ -53,7 +53,7 @@ func TestLauncherRefusesAdmittedNodeChangeW8Components(t *testing.T) {
 	}
 }
 
-func (c *cloudControlW8) Claim(context.Context) (*launcher.CloudJobAward, error) {
+func (c *cloudControlW8) Claim(context.Context, string, []string) (*launcher.CloudJobAward, error) {
 	return c.award, nil
 }
 

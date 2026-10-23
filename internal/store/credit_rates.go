@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -18,13 +17,6 @@ const (
 	// MaxCreditRateTableEntries bounds the table an operator may store, which keeps the settings row small enough to read on every claim.
 	MaxCreditRateTableEntries = 32
 
-	// safety: an N-core class is a machine of N vCPU and 4N GiB, matching the hosted runners customers
-	// compare against. The Job gets what remains after the hypervisor (Karpenter counts 7.5 percent) and
-	// 2 GiB for the kubelet reservation at 110 pods (1465 MiB), the 100 MiB eviction threshold, the
-	// node's daemonsets and a margin.
-	cpuClassMachineBytesPerCore = 4 << 30
-	cpuClassSystemBytes         = 2 << 30
-
 	// DefaultWarmCPUClassCores is the class a warm runner pool serves when no operator set one.
 	DefaultWarmCPUClassCores = 2
 )
@@ -35,11 +27,8 @@ type CPUClass struct {
 	MemoryBytes int64 `json:"memory_bytes"`
 }
 
-// CPUClassMemoryBytes returns the memory a Job of a class with this many cores may use, which is both what selects the class for a memory pin and what the Job is given, whole mebibytes.
-func CPUClassMemoryBytes(cores int64) int64 {
-	usable := cores*cpuClassMachineBytesPerCore*37/40 - cpuClassSystemBytes
-	return max(usable&^(1<<20-1), 0)
-}
+// CPUClassMemoryBytes returns the catalog allocation for a billed class in whole mebibytes.
+func CPUClassMemoryBytes(cores int64) int64 { return match.CloudSizeMemoryBytes(cores) }
 
 // safety: each class is priced at 90% of the GitHub Actions Linux runner of its size, so the
 // ladder is a price list rather than a multiplication. A price change is made here, never to
@@ -62,70 +51,41 @@ type CreditRate struct {
 // CreditRateTable prices every cpu class a cluster offers, ordered from the smallest class to the largest.
 type CreditRateTable []CreditRate
 
-// ErrUnpricedCPUClass reports a cpu request larger than the biggest class the rate table prices.
-var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
+// ErrUnpricedCPUClass reports a size label whose class is not priced.
+var ErrUnpricedCPUClass = errors.New("credits: runner size class is not priced")
 
-// UnpricedCPUClassError refuses a claim for a node asking for more cores than the rate table prices, and names the request and the largest class, so the operator knows which class to add.
+// UnpricedCPUClassError refuses a claim whose exact Cloud size class has no
+// price. MaxCores names the largest priced class for the operator's diagnosis.
 type UnpricedCPUClassError struct {
 	RunID    string
 	NodeID   string
 	Cores    int64
 	MaxCores int64
-	// MemoryBytes is what the node asked for when memory, not cpu, is what no class covers.
-	MemoryBytes int64
 }
 
 func (e *UnpricedCPUClassError) Error() string {
-	if e.MemoryBytes > 0 {
-		return fmt.Sprintf(
-			"credits: this node asks for %d bytes of memory, which needs a %d-core class, "+
-				"and the largest priced class is %d, whose Job gets %d bytes; "+
-				"lower the memory pin or add a class to the credit rate table",
-			e.MemoryBytes, e.Cores, e.MaxCores, CPUClassMemoryBytes(e.MaxCores))
-	}
-	return fmt.Sprintf(
-		"credits: this node asks for %d cpu cores and the largest priced class is %d; "+
-			"add a class for it to the credit rate table", e.Cores, e.MaxCores)
+	return fmt.Sprintf("credits: sparkwing-%dcpu has no price; add its exact class to the credit rate table (largest priced class: %d)", e.Cores, e.MaxCores)
 }
 
 // Unwrap reports [ErrUnpricedCPUClass], so a caller matches the condition with errors.Is without knowing this type.
 func (e *UnpricedCPUClassError) Unwrap() error { return ErrUnpricedCPUClass }
 
-// ClassForResource returns the class that covers both halves of a node's request: the smallest class whose cores cover the cpu rounded up to a whole core and whose [CPUClassMemoryBytes] covers the memory asked for.
-func (t CreditRateTable) ClassForResource(res match.Resources) (CreditRate, error) {
-	if len(t) == 0 {
-		return CreditRate{}, fmt.Errorf("%w: the rate table prices no cpu class", ErrInvalidCreditSetting)
-	}
-	want := int64(1)
-	if res.Cores > 1 {
-		want = int64(math.Ceil(res.Cores))
+// ClassForLabels prices the selected Cloud size's exact class.
+func (t CreditRateTable) ClassForLabels(selector []string, profile match.Profile) (CreditRate, error) {
+	size, err := match.CloudSizeForProfile(selector, profile)
+	if err != nil {
+		return CreditRate{}, fmt.Errorf("%w: %v", ErrUnpricedCPUClass, err)
 	}
 	for _, entry := range t {
-		if entry.Cores >= want && CPUClassMemoryBytes(entry.Cores) >= res.MemoryBytes {
+		if entry.Cores == size.CreditClass {
 			return entry, nil
 		}
 	}
-	largest := t[len(t)-1]
-	if CPUClassMemoryBytes(largest.Cores) < res.MemoryBytes {
-		return CreditRate{}, &UnpricedCPUClassError{
-			Cores: max(want, memoryClassCores(res.MemoryBytes)), MaxCores: largest.Cores,
-			MemoryBytes: res.MemoryBytes,
-		}
+	largest := int64(0)
+	for _, entry := range t {
+		largest = max(largest, entry.Cores)
 	}
-	return CreditRate{}, &UnpricedCPUClassError{Cores: want, MaxCores: largest.Cores}
-}
-
-// safety: a memory request above every class is reported as the core count
-// that much memory would come with, so the operator adds a class that fits
-// rather than one that still refuses the node.
-func memoryClassCores(bytes int64) int64 {
-	cores := int64((float64(bytes) + cpuClassSystemBytes) / (cpuClassMachineBytesPerCore * 0.925))
-	// safety: a pin is pipeline input, so a huge one stops the walk before
-	// CPUClassMemoryBytes overflows rather than after.
-	for cores < 1<<20 && CPUClassMemoryBytes(cores) < bytes {
-		cores++
-	}
-	return cores
+	return CreditRate{}, &UnpricedCPUClassError{Cores: size.CreditClass, MaxCores: largest}
 }
 
 // RateFor returns the micro-credits a second costs at the recorded class, rounding up to the next class the table still prices and falling back to the largest one.

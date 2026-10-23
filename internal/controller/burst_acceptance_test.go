@@ -24,35 +24,30 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestBurstAcceptanceLocalOwnerPersonalWorkerAndCancellation(t *testing.T) {
 	burstAcceptanceFlow(t, false, "personal")
 }
 
-func TestBurstAcceptanceSaturatedLocalOwnerPersonalWorker(t *testing.T) {
+func TestBurstAcceptanceLabelIneligibleLocalOwnerPersonalWorker(t *testing.T) {
 	burstAcceptanceFlow(t, true, "personal")
 }
 
-func TestBurstAcceptanceSaturatedLocalOwnerCloudWorker(t *testing.T) {
+func TestBurstAcceptanceLabelIneligibleLocalOwnerCloudWorker(t *testing.T) {
 	burstAcceptanceFlow(t, true, "cloud")
 }
 
-func TestBurstAcceptanceSaturatedLocalOwnerCloudRetryWorker(t *testing.T) {
+func TestBurstAcceptanceLabelIneligibleLocalOwnerCloudRetryWorker(t *testing.T) {
 	burstAcceptanceFlow(t, true, "cloud-retry")
-}
-
-func TestBurstAcceptanceSelfClaimUsesPrivateReservationWithZeroFreeCapacity(t *testing.T) {
-	burstAcceptanceFlow(t, false, "here-reserved")
 }
 
 func TestBurstAcceptanceLocalOwnerExecutesBeforeOverflow(t *testing.T) {
 	burstAcceptanceFlow(t, false, "here")
 }
 
-func burstAcceptanceFlow(t *testing.T, saturated bool, placement string) {
-	burstAcceptanceExecution(t, saturated, placement, nil)
+func burstAcceptanceFlow(t *testing.T, localIneligible bool, placement string) {
+	burstAcceptanceExecution(t, localIneligible, placement, nil)
 }
 
 // BurstExecutionProof binds real SDK execution to the composed burst intake and claim fixture.
@@ -74,7 +69,7 @@ func BurstExecutionAcceptance(t *testing.T, placement string, proof BurstExecuti
 	burstAcceptanceExecution(t, placement != "here", placement, &proof)
 }
 
-func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, proof *BurstExecutionProof) {
+func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement string, proof *BurstExecutionProof) {
 	t.Helper()
 	cloudWorker := strings.HasPrefix(placement, "cloud")
 	clock := &testClock{}
@@ -108,7 +103,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	worker := newClient(personal, false)
 	cloudBearer := engineHTTPRoot(t, e, "", "burst-launcher", []capability.Grant{capability.ClaimsLaunch})
 	cloud := newClient(cloudBearer, true)
-	poll := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 64}
+	poll := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"worker"}}
 	if observed, err := worker.Claim(t.Context(), poll); err != nil || observed.Claim != nil {
 		t.Fatalf("personal machine observation: %+v %v", observed, err)
 	}
@@ -142,11 +137,11 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		t.Fatalf("Cloud-owned intake with local host: %+v %v", created, err)
 	}
 	here := newClient(created.HereBearer, false)
-	available := float64(64)
-	if saturated {
-		available = 0
+	ownerPoll := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitTrigger}, RunID: created.RunID}
+	if !localIneligible {
+		ownerPoll.Labels = []string{"worker"}
 	}
-	claimed, err := here.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitTrigger}, RunID: created.RunID, Capacity: &match.Resources{Cores: 64}, AvailableCores: available})
+	claimed, err := here.Claim(t.Context(), ownerPoll)
 	if err != nil || claimed.Claim == nil {
 		t.Fatalf("local owner claim: %+v %v", claimed, err)
 	}
@@ -154,7 +149,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		t.Fatal("the requester's here award is not marked as the owner's machine")
 	}
 	owner := newClient(claimed.Claim.Capability, false)
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Requires: []string{"worker"}, Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
 	if proof != nil {
 		plan = proof.Plan
 	}
@@ -179,7 +174,7 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		t.Fatalf("owner releases job: %v", err)
 	}
 	laterClaimants := []controllerwire.Controller{cloud}
-	if !saturated {
+	if !localIneligible {
 		laterClaimants = append(laterClaimants, worker)
 	}
 	for _, later := range laterClaimants {
@@ -188,18 +183,9 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		}
 	}
 	var awarded controllerwire.ClaimResponse
-	if placement == "here" || placement == "here-reserved" {
+	if placement == "here" {
 		request := controllerwire.ReconcileRequest{Policy: "none"}
-		if placement == "here-reserved" {
-			if _, err := owner.Renew(t.Context(), claimed.Claim.UnitID, controllerwire.RenewalRequest{Available: &match.Resources{}}); err != nil {
-				t.Fatal(err)
-			}
-			miss, err := owner.ReconcileJob(t.Context(), created.RunID, "job", request)
-			if err != nil || miss.Kind != string(store.Dispatch) || miss.Claim != nil {
-				t.Fatalf("zero capacity claimed without reservation: %+v %v", miss, err)
-			}
-			request.Reserved = &match.Resources{Cores: 1}
-		}
+
 		result, err := owner.ReconcileJob(t.Context(), created.RunID, "job", request)
 		if err != nil || result.Claim == nil || result.Claim.Runner.Name != claimed.Claim.Runner.Name {
 			t.Fatalf("local owner did not execute before overflow: %+v %v", result, err)

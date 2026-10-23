@@ -90,15 +90,14 @@ func (c *Claimant) Close() (err error) {
 	return c.tenant.RevokeAuthority(context.Background(), store.Actor{Kind: store.ActorOperator, Authority: ref}, ref)
 }
 
-// ResolveClaimProfile binds local queue capacity to the captured OS account.
-func (c *Claimant) ResolveClaimProfile(ctx context.Context, principal capability.Principal) (match.Profile, match.Resources, error) {
+// ResolveClaimProfile binds local placement facts to the captured OS account.
+func (c *Claimant) ResolveClaimProfile(ctx context.Context, principal capability.Principal) (match.Profile, error) {
 	if err := context.Cause(ctx); err != nil {
-		return match.Profile{}, match.Resources{}, err
+		return match.Profile{}, err
 	}
 	p := principal.Capability
 	if c.subject == "" || p.Subject != (capability.Subject{Kind: capability.SubjectLocal, ID: c.subject}) || p.Team != string(store.DefaultTeam) || p.Audience != capability.Controller || principal.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: p.Prefix}) || p.Prefix == "" {
-		return match.Profile{}, match.Resources{}, errors.New("local claim profile requires the controller account's authenticated capability")
+		return match.Profile{}, errors.New("local claim profile requires the controller account's authenticated capability")
 	}
-	capacity := match.Resources{Cores: float64(runtime.NumCPU())}
-	return match.Profile{Name: c.subject, OS: runtime.GOOS, Arch: runtime.GOARCH, Capacity: capacity}, capacity, nil
+	return match.Profile{Name: c.subject, OS: runtime.GOOS, Arch: runtime.GOARCH}, nil
 }

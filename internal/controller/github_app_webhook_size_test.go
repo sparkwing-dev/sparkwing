@@ -33,7 +33,7 @@ func TestGitHubAppWebhookBoundsBodiesWithoutBufferingUnsignedOnes(t *testing.T) 
 		return []byte(head + strings.Repeat("z", size-len(head)-len(tail)) + tail)
 	}
 	large := padded(20 << 20)
-	if code := post(large, githubapptest.Sign(large)); code != http.StatusOK {
+	if code := post(large, githubapptest.Sign(large)); code != http.StatusAccepted {
 		t.Fatalf("signed 20 MiB delivery = %d", code)
 	}
 	over := padded(25<<20 + 1)

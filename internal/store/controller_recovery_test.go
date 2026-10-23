@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc, prepare ...func(*Tenant, *PlanAcceptance)) (*Tenant, PlanAcceptance, *time.Time) {
@@ -43,7 +42,7 @@ func controllerJobAward(t *testing.T, tenant *Tenant, runID string) Actor {
 	root := authorityRoot("runner", "a")
 	root.Grants = []capability.Grant{capability.NodesClaim}
 	authorityPersist(t, tenant.s, root)
-	demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(runID), NodeID: "job"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+	demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(runID), NodeID: "job"}}
 	fundUnitClaim(t, tenant.s)
 	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
@@ -232,7 +231,7 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 			root.Subject.Kind = capability.SubjectService
 			root.Grants = []capability.Grant{capability.ClaimsLaunch}
 			authorityPersist(t, tenant.s, root)
-			demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(retry.RunID)}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+			demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(retry.RunID)}}
 			fundUnitClaim(t, tenant.s)
 			claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
@@ -329,7 +328,7 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 	root.Grants = []capability.Grant{capability.ClaimsLaunch}
 	authorityPersist(t, tenant.s, root)
 	fundUnitClaim(t, tenant.s)
-	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(request.RunID), NodeID: "job", SourceGeneration: 1}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(request.RunID), NodeID: "job", SourceGeneration: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +417,7 @@ func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 		authorityPersist(t, tenant.s, root)
 		generation := int64(random.IntN(1000) + 1)
 		rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET generation=? WHERE team=? AND id=?`, generation, tenant.team, retry.RunID)
-		demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(retry.RunID)}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+		demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(retry.RunID)}}
 		fundUnitClaim(t, tenant.s)
 		prior, stale := meteredUnitClaim(t, tenant.s, demand)
 		if err := tenant.s.ReleaseUnit(t.Context(), prior, prior.Award.CapabilityPrefix); err != nil {

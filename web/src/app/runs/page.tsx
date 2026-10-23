@@ -2518,6 +2518,13 @@ const FullRunRow = memo(function FullRunRow({
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 items-start min-w-0 overflow-hidden">
       {meta}
       <div className="min-w-0 text-[11px] font-mono">
+        {r.error?.startsWith("run did not start: out of credits:") && (
+          <RetryButton
+            runId={r.id}
+            onDone={() => window.dispatchEvent(new CustomEvent("sparkwing:runs-changed"))}
+            runNow
+          />
+        )}
         {r.error ? (
           <Tooltip
             content={
@@ -2622,6 +2629,13 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
                 {branchShort}
               </span>
             </>
+          )}
+          {r.error?.startsWith("run did not start: out of credits:") && (
+            <RetryButton
+              runId={r.id}
+              onDone={() => window.dispatchEvent(new CustomEvent("sparkwing:runs-changed"))}
+              runNow
+            />
           )}
           {(r.retry_of || r.retried_as) && (
             <AttemptsDropdown currentRunID={r.id} dense />
@@ -3186,7 +3200,7 @@ function RunDetailPane({
           <span className="ml-auto flex items-center gap-2">
             <AttemptsDropdown currentRunID={run.id} />
             {runIsActive && <CancelButton runId={run.id} onDone={onRefresh} />}
-            <RetryButton runId={run.id} onDone={onRefresh} />
+            <RetryButton runId={run.id} onDone={onRefresh} runNow={run.error?.startsWith("run did not start: out of credits:")} />
             <button
               onClick={() => setShowTrigger(!showTrigger)}
               className="bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded text-xs font-medium hover:bg-green-500/30 transition-colors"
@@ -6747,7 +6761,11 @@ function CancelButton({
   );
 }
 
-function RetryButton({ runId, onDone }: { runId: string; onDone: () => void }) {
+function RetryButton({ runId, onDone, runNow = false }: {
+  runId: string;
+  onDone: () => void;
+  runNow?: boolean;
+}) {
   const [loading, setLoading] = useState(false);
 
   const submit = async (full: boolean) => {
@@ -6767,6 +6785,21 @@ function RetryButton({ runId, onDone }: { runId: string; onDone: () => void }) {
     onDone();
     setLoading(false);
   };
+
+  if (runNow) {
+    return (
+      <button
+        disabled={loading}
+        onClick={(event) => {
+          event.stopPropagation();
+          void submit(true);
+        }}
+        className="px-2 py-1 rounded text-xs font-medium border border-indigo-500/30 text-indigo-400"
+      >
+        {loading ? "Starting..." : "Run now"}
+      </button>
+    );
+  }
 
   return (
     <ActionMenu

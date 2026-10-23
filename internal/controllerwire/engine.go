@@ -77,16 +77,16 @@ type PlanAccepted struct {
 
 // ClaimRequest proposes selectors, labels and free capacity for a server-authorized award.
 type ClaimRequest struct {
-	Capacity             *match.Resources      `json:"capacity,omitempty"`
-	OS                   string                `json:"os,omitempty"`
-	Arch                 string                `json:"arch,omitempty"`
-	RunnerVersion        string                `json:"runner_version"`
-	Kinds                []capability.UnitKind `json:"kinds"`
-	Labels               []string              `json:"labels"`
-	AvailableCores       float64               `json:"available_cores"`
-	AvailableMemoryBytes int64                 `json:"available_memory_bytes"`
-	RunID                string                `json:"run_id,omitempty"`
-	JobID                string                `json:"job_id,omitempty"`
+	FreeSlots          *int                  `json:"free_slots,omitempty"`
+	OS                 string                `json:"os,omitempty"`
+	Arch               string                `json:"arch,omitempty"`
+	RunnerVersion      string                `json:"runner_version"`
+	Kinds              []capability.UnitKind `json:"kinds"`
+	Labels             []string              `json:"labels"`
+	JobNamespace       string                `json:"job_namespace,omitempty"`
+	ExcludedTeamLabels []string              `json:"excluded_team_labels,omitempty"`
+	RunID              string                `json:"run_id,omitempty"`
+	JobID              string                `json:"job_id,omitempty"`
 }
 
 // ClaimedUnit carries the one-time private execution award over authenticated transport.
@@ -167,7 +167,6 @@ type ExchangeResponse struct {
 // RenewalRequest reports activity, never a replacement holder or generation.
 type RenewalRequest struct {
 	LocalSecrets map[string]string `json:"local_secrets,omitempty"`
-	Available    *match.Resources  `json:"available,omitempty"`
 	Executing    bool              `json:"executing"`
 }
 
@@ -250,10 +249,9 @@ type MaterializedResultSource struct {
 }
 
 type ReconcileRequest struct {
-	Reserved        *match.Resources `json:"reserved,omitempty"`
-	Policy          string           `json:"policy"`
-	Source          *ReuseSource     `json:"source,omitempty"`
-	MaterializeOnly bool             `json:"materialize_only,omitempty"`
+	Policy          string       `json:"policy"`
+	Source          *ReuseSource `json:"source,omitempty"`
+	MaterializeOnly bool         `json:"materialize_only,omitempty"`
 }
 
 type ReconcileResponse struct {

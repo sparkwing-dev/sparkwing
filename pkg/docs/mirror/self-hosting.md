@@ -333,7 +333,7 @@ for both. JSON enrollment output includes `personal` alongside the runner name.
 The CLI checks local prerequisites before minting a runner credential. It writes
 that credential to a private file under `runner.credentials_dir`, then updates
 the `runner` section of the complete machine file. Labels, repository patterns
-and capacity observations grant no authority beyond the controller's enrollment.
+and platform observations grant no authority beyond the controller's enrollment.
 
 `--label` and `--repos` accept repeated values. `--no-service` writes the
 configuration for a machine supervised separately. `--force` permits replacing

@@ -18,25 +18,17 @@ func meteredPlacement(claimant, root capability.Capability) bool {
 	return capability.CloudLauncher(claimant) || !launcherClaimant(claimant) && root.RootMetered
 }
 
-func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
+func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capability, selected *CreditRate) error {
 	if c.Purpose == capability.PurposeHere {
 		return nil
 	}
 	var price CreditRate
 	var reservedSeconds int64
 	if c.Billing.Metered {
-		run, err := readRunTx(ctx, tx, Team(c.Team), c.Binding.RunID)
-		if err != nil {
-			return err
+		if selected == nil {
+			return authorityError(apierr.IntegrityFailure, "metered award is missing its selected size price")
 		}
-		resources, err := unitResourcesTx(ctx, tx, Team(c.Team), run, UnitRef{Kind: c.Unit, RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
-		if err != nil {
-			return err
-		}
-		price, err = unitBillingPriceTx(ctx, tx, matchingResources(resources))
-		if err != nil {
-			return err
-		}
+		price = *selected
 		l, err := lockLedgerTx(ctx, tx, Team(c.Team))
 		if err != nil {
 			return err
@@ -45,7 +37,7 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 			if err := checkOverflowTx(ctx, tx, Team(c.Team), c.Binding.RunID); err != nil {
 				return err
 			}
-			if err := checkCloudCapacityTx(ctx, l, price.Cores); err != nil {
+			if err := checkCloudCapacityTx(ctx, l.view(), price.Cores); err != nil {
 				return err
 			}
 		}
@@ -54,15 +46,15 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	return recordBillingAwardTx(ctx, tx, c, price, reservedSeconds)
 }
 
-func unitResourcesTx(ctx context.Context, tx *storeTx, team Team, run RunRow, unit UnitRef) (runspec.Resources, error) {
+func unitSelectorsTx(ctx context.Context, tx *storeTx, team Team, run RunRow, unit UnitRef) ([]string, error) {
 	if unit.Kind == capability.UnitNode {
 		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
-		return row.Execution.Resources.Value, err
+		return row.Execution.Requires.Value, err
 	}
 	if run.Spec != nil {
-		return run.Spec.Resolved.Settings.Options.Resources.Value, nil
+		return run.Spec.Resolved.Settings.Options.Requires.Value, nil
 	}
-	return run.Request.Request.Options.Resources.Value, nil
+	return run.Request.Request.Options.Requires.Value, nil
 }
 
 func billingUnitKind(kind capability.UnitKind) capability.BillingUnit {
@@ -74,55 +66,41 @@ func billingUnitKind(kind capability.UnitKind) capability.BillingUnit {
 	return ""
 }
 
-func unitBillingPriceTx(ctx context.Context, tx *storeTx, resources match.Resources) (CreditRate, error) {
+func unitBillingPriceTx(ctx context.Context, tx *storeTx, selectors []string, profile match.Profile) (CreditRate, error) {
 	table, err := creditRateTableTx(ctx, tx)
 	if err != nil {
 		return CreditRate{}, err
 	}
-	return table.ClassForResource(resources)
+	return table.ClassForLabels(selectors, profile)
 }
 
-func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate, cloud bool) (bool, error) {
-	var err error
+func checkUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate, cloud bool) error {
+	view := ledgerView{tx: tx, team: team}
 	if cloud {
-		err = checkOverflowTx(ctx, tx, team, string(unit.RunID))
-		var overflow *apierr.Error
-		if errors.As(err, &overflow) && overflow.Code == apierr.LockHeld {
-			return false, nil
+		if err := checkOverflowTx(ctx, tx, team, string(unit.RunID)); err != nil {
+			return err
 		}
-		if err != nil {
-			return false, err
-		}
-		l, err := lockLedgerTx(ctx, tx, team)
-		if err != nil {
-			return false, err
-		}
-		err = checkCloudCapacityTx(ctx, l, price.Cores)
-		var refused *apierr.Error
-		if errors.As(err, &refused) && (refused.Code == apierr.BadRequest || refused.Code == apierr.LockHeld) || errors.Is(err, ErrInsufficientCredits) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
+		if err := checkCloudCapacityTx(ctx, view, price.Cores); err != nil {
+			return err
 		}
 	}
-	err = unitCreditRefusalTx(ctx, tx, team, unit, price)
-	if errors.Is(err, ErrInsufficientCredits) {
-		return false, nil
-	}
-	return err == nil, err
+	return unitCreditRefusalViewTx(ctx, view, unit, price)
 }
 
 func unitCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate) error {
-	amount, err := billingProduct(SliceSeconds, price.MicroPerSecond)
-	if err != nil {
-		return err
-	}
 	l, err := lockLedgerTx(ctx, tx, team)
 	if err != nil {
 		return err
 	}
-	return refuseUnfundedTx(ctx, l, amount, string(unit.RunID), string(unit.NodeID))
+	return unitCreditRefusalViewTx(ctx, l.view(), unit, price)
+}
+
+func unitCreditRefusalViewTx(ctx context.Context, view ledgerView, unit UnitRef, price CreditRate) error {
+	amount, err := billingProduct(SliceSeconds, price.MicroPerSecond)
+	if err != nil {
+		return err
+	}
+	return refuseUnfundedTx(ctx, view, amount, string(unit.RunID), string(unit.NodeID))
 }
 
 func unitBillingAwardTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64) (*billingAward, error) {

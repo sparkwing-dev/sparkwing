@@ -103,6 +103,8 @@ var routes = []RoutePolicy{
 	route("GET", "/api/v1/team/billing", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("GET", "/api/v1/team/build-trust", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("GET", "/api/v1/team/git-credentials", OwnerTeam, RetrySafe, member(RunsRead)),
+	route("GET", "/api/v1/team/github-app/deliveries/failed", OwnerTeam, RetrySafe, member(TeamAdmin)),
+	route("POST", "/api/v1/team/github-app/deliveries/{delivery}/process-again", OwnerTeam, RetryNever, member(TeamAdmin)),
 	route("GET", "/api/v1/team/github-app", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("GET", "/api/v1/team/github-app/installations/{installation}/repositories", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("GET", "/api/v1/team/github-app/triggers", OwnerTeam, RetrySafe, member(RunsRead)),

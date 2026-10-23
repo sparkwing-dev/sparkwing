@@ -32,7 +32,8 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	return l.sync(ctx)
 }
 
-func (l *Launcher) sync(ctx context.Context) error {
+func (l *Launcher) sync(ctx context.Context) (result error) {
+	defer func() { result = l.syncReservations(ctx, result) }()
 	var errs []error
 	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
 	if err != nil {
@@ -103,7 +104,7 @@ func (l *Launcher) sync(ctx context.Context) error {
 			}
 		}
 	}
-	return errors.Join(append(errs, l.syncReservations(ctx), l.syncCapacity(ctx))...)
+	return errors.Join(append(errs, l.syncCapacity(ctx))...)
 }
 
 func (l *Launcher) renewJobDeadline(ctx context.Context, job *batchv1.Job, binding CloudJobBinding, expires time.Time) error {
@@ -143,42 +144,63 @@ func (l *Launcher) renewJobDeadline(ctx context.Context, job *batchv1.Job, bindi
 	return nil
 }
 
-func (l *Launcher) syncReservations(ctx context.Context) error {
+func (l *Launcher) syncReservations(ctx context.Context, prior error) error {
 	nodes, err := l.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return err
+		return errors.Join(prior, err)
 	}
-	var errs []error
-	budget := maxQuarantinesPerSync
-	// safety: nodes still faulted from earlier passes spend the budget too, so
-	// a fault spreading across the fleet stops claims instead of tainting it.
-	quarantine := func(node *corev1.Node, cause string) error {
-		if budget == 0 {
-			return fmt.Errorf("Cloud node %s: %s; more than %d nodes faulted in one pass, so claims stop until an operator checks the controller and these nodes", node.Name, cause, maxQuarantinesPerSync)
-		}
-		budget--
-		return quarantineNode(ctx, l.Kube, node, cause)
-	}
+	errs := []error{prior}
+	ledger := newTeamFaultLedger(nodes.Items)
+	ledger.record(prior)
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
-		if namespace := node.Annotations[reservationNamespaceAnnotation]; namespace != l.Config.Namespace {
-			if namespace != "" {
-				l.logger().Warn("node holds a Cloud reservation from another job namespace; drain it with that namespace's launcher or clear it by hand", "node", node.Name, "namespace", namespace)
-			}
+		namespace := node.Annotations[reservationNamespaceAnnotation]
+		if namespace != "" && namespace != l.Config.Namespace && !ownsNodeReservation(node, l.Config.Namespace) {
+			l.logger().Warn("node holds a Cloud reservation from another job namespace; drain it with that namespace's launcher or clear it by hand", "node", node.Name, "namespace", namespace)
+		}
+		if node.Labels[TeamNodeLabel] == "" || !reservationEvidence(node) {
 			continue
 		}
 		held, binding, ok := nodeReservation(node)
 		if !ok {
-			errs = append(errs, quarantine(node, "reservation is malformed or does not match its award"))
+			ledger.record(&nodeFault{node: node.Name, cause: "reservation is malformed or does not match its award"})
+		}
+		if !ownsNodeReservation(node, l.Config.Namespace) {
+			continue
+		}
+		if !ok {
+			err := ledger.quarantine(ctx, l.Kube, node, "reservation is malformed or does not match its award")
+			ledger.record(err)
+			errs = append(errs, err)
 			continue
 		}
 		refused, err := l.releaseOrphan(ctx, held, binding)
 		if refused {
-			err = quarantine(node, "controller refused the reservation's award")
+			err = ledger.quarantine(ctx, l.Kube, node, "controller refused the reservation's award")
 		}
+		ledger.record(err)
 		errs = append(errs, err)
 	}
+	l.mu.Lock()
+	l.blockedTeamLabels = ledger.blockedLabels()
+	l.mu.Unlock()
 	return errors.Join(errs...)
+}
+
+func reservationEvidence(node *corev1.Node) bool {
+	if node.Annotations[reservationAnnotation] != "" || node.Annotations[bindingAnnotation] != "" || quarantined(*node) {
+		return true
+	}
+	return slices.ContainsFunc(node.Spec.Taints, func(taint corev1.Taint) bool { return taint.Key == reservationTaint })
+}
+
+func ownsNodeReservation(node *corev1.Node, namespace string) bool {
+	var held CloudNodeReservation
+	var binding CloudJobBinding
+	_ = json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held)
+	_ = json.Unmarshal([]byte(node.Annotations[bindingAnnotation]), &binding)
+	return held.Team != "" && node.Labels[TeamNodeLabel] == TeamNodeValue(namespace, held.Team) ||
+		binding.Team != "" && node.Labels[TeamNodeLabel] == TeamNodeValue(namespace, binding.Team)
 }
 
 func nodeReservation(node *corev1.Node) (CloudNodeReservation, CloudJobBinding, bool) {
@@ -192,9 +214,7 @@ func nodeReservation(node *corev1.Node) (CloudNodeReservation, CloudJobBinding, 
 		held.Award == lease && lease.Kind != "" && lease.ID != "" && lease.Holder != "" && lease.Generation > 0 && held.JobName == jobName(binding) && held.ReservationID != ""
 }
 
-// maxQuarantinesPerSync bounds how many faulted nodes one pass quarantines or
-// keeps quarantined. A controller fault that refuses every orphaned award at
-// once passes it, and sync then stops claims and asks an operator.
+// maxQuarantinesPerSync is the contained-fault budget before a team stops claiming.
 const maxQuarantinesPerSync = 3
 
 // safety: each orphaned reservation gets its own controller call, so a refused

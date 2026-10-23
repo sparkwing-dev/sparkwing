@@ -762,15 +762,19 @@ components:
       properties:
         arch:
           type: string
-        available_cores:
-          type: number
-        available_memory_bytes:
-          type: integer
-        capacity:
+        excluded_team_labels:
           anyOf:
-            - $ref: '#/components/schemas/pkg.match.Resources'
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        free_slots:
+          anyOf:
+            - type: integer
             - type: "null"
         job_id:
+          type: string
+        job_namespace:
           type: string
         kinds:
           anyOf:
@@ -794,8 +798,6 @@ components:
         - runner_version
         - kinds
         - labels
-        - available_cores
-        - available_memory_bytes
       type: object
       x-sparkwing-go-type: controllerwire.ClaimRequest
     internal.controllerwire.ClaimResponse:
@@ -2999,10 +3001,6 @@ components:
           type: boolean
         policy:
           type: string
-        reserved:
-          anyOf:
-            - $ref: '#/components/schemas/pkg.match.Resources'
-            - type: "null"
         source:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.ReuseSource'
@@ -3034,10 +3032,6 @@ components:
     internal.controllerwire.RenewalRequest:
       additionalProperties: true
       properties:
-        available:
-          anyOf:
-            - $ref: '#/components/schemas/pkg.match.Resources'
-            - type: "null"
         executing:
           type: boolean
         local_secrets:
@@ -4688,10 +4682,6 @@ components:
                 type: string
               type: array
             - type: "null"
-        resources:
-          anyOf:
-            - $ref: '#/components/schemas/internal.nodeproto.ResourceSpec'
-            - type: "null"
         result_step:
           type: string
         retry:
@@ -4786,19 +4776,6 @@ components:
         - job
       type: object
       x-sparkwing-go-type: nodeproto.PipelineReference
-    internal.nodeproto.ResourceSpec:
-      additionalProperties: true
-      properties:
-        cores:
-          anyOf:
-            - type: number
-            - type: "null"
-        memory_bytes:
-          anyOf:
-            - type: integer
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: nodeproto.ResourceSpec
     internal.nodeproto.RetrySpec:
       additionalProperties: true
       properties:
@@ -5014,12 +4991,9 @@ components:
           $ref: '#/components/schemas/internal.runspec.Setting.time.Duration.'
         priority:
           $ref: '#/components/schemas/internal.runspec.Setting.int.'
-        resources:
-          $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.'
         retry:
           $ref: '#/components/schemas/internal.runspec.Setting.int.'
       required:
-        - resources
         - priority
         - owner_execution_timeout
         - claim_wait
@@ -5292,8 +5266,6 @@ components:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
         requires:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
-        resources:
-          $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.'
         retry:
           $ref: '#/components/schemas/internal.runspec.Setting.int.'
         retry_backoff:
@@ -5308,7 +5280,6 @@ components:
         - retry
         - retry_backoff
         - memo_ttl
-        - resources
         - requires
         - prefers
       type: object
@@ -5503,8 +5474,6 @@ components:
           $ref: '#/components/schemas/internal.runspec.Setting.string.'
         requires:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
-        resources:
-          $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.'
         runner:
           $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.RunnerSelection.'
         start_at:
@@ -5517,7 +5486,6 @@ components:
           $ref: '#/components/schemas/internal.runspec.Setting.int.'
       required:
         - runner
-        - resources
         - priority
         - admission_class
         - claim_wait
@@ -5668,6 +5636,8 @@ components:
           $ref: '#/components/schemas/internal.runspec.Git'
         lineage:
           $ref: '#/components/schemas/internal.runspec.Lineage'
+        local_foreground:
+          type: boolean
         local_secret_names:
           anyOf:
             - items:
@@ -5780,18 +5750,6 @@ components:
         - env
       type: object
       x-sparkwing-go-type: runspec.Resolved
-    internal.runspec.Resources:
-      additionalProperties: true
-      properties:
-        cores:
-          $ref: '#/components/schemas/internal.runspec.Setting.float64.'
-        memory_bytes:
-          $ref: '#/components/schemas/internal.runspec.Setting.int64.'
-      required:
-        - cores
-        - memory_bytes
-      type: object
-      x-sparkwing-go-type: runspec.Resources
     internal.runspec.RunnerSelection:
       additionalProperties: true
       properties:
@@ -5965,21 +5923,6 @@ components:
         - origin
       type: object
       x-sparkwing-go-type: runspec.Setting[bool]
-    internal.runspec.Setting.float64.:
-      additionalProperties: true
-      properties:
-        origin:
-          $ref: '#/components/schemas/internal.runspec.SettingOrigin'
-        set:
-          type: boolean
-        value:
-          type: number
-      required:
-        - set
-        - value
-        - origin
-      type: object
-      x-sparkwing-go-type: runspec.Setting[float64]
     internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.CheckoutPolicy.:
       additionalProperties: true
       properties:
@@ -6025,21 +5968,6 @@ components:
         - origin
       type: object
       x-sparkwing-go-type: runspec.Setting[github.com/sparkwing-dev/sparkwing/internal/runspec.PauseSelection]
-    internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.:
-      additionalProperties: true
-      properties:
-        origin:
-          $ref: '#/components/schemas/internal.runspec.SettingOrigin'
-        set:
-          type: boolean
-        value:
-          $ref: '#/components/schemas/internal.runspec.Resources'
-      required:
-        - set
-        - value
-        - origin
-      type: object
-      x-sparkwing-go-type: runspec.Setting[github.com/sparkwing-dev/sparkwing/internal/runspec.Resources]
     internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.RunnerSelection.:
       additionalProperties: true
       properties:
@@ -6070,21 +5998,6 @@ components:
         - origin
       type: object
       x-sparkwing-go-type: runspec.Setting[int]
-    internal.runspec.Setting.int64.:
-      additionalProperties: true
-      properties:
-        origin:
-          $ref: '#/components/schemas/internal.runspec.SettingOrigin'
-        set:
-          type: boolean
-        value:
-          type: integer
-      required:
-        - set
-        - value
-        - origin
-      type: object
-      x-sparkwing-go-type: runspec.Setting[int64]
     internal.runspec.Setting.map.string.github.com.sparkwing-dev.sparkwing.internal.runspec.Setting.string..:
       additionalProperties: true
       properties:
@@ -15246,6 +15159,62 @@ paths:
       x-sparkwing-policy:
         method: PUT
         path: /api/v1/team/github-app/automation
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: safe
+      x-sparkwing-wire: undocumented
+  /api/v1/team/github-app/deliveries/{delivery}/process-again:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: delivery
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/team/github-app/deliveries/{delivery}/process-again
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/team/github-app/deliveries/{delivery}/process-again
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: never
+      x-sparkwing-wire: undocumented
+  /api/v1/team/github-app/deliveries/failed:
+    get:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: GET /api/v1/team/github-app/deliveries/failed
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/team/github-app/deliveries/failed
         audience: controller
         owner: team
         authentication: capability

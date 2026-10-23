@@ -67,6 +67,9 @@ func (t *Tenant) PutAuthorizedGitHubAutomation(ctx context.Context, a capability
 // DeleteAuthorizedGitHubAutomation revokes this tenant's repository consent.
 func (t *Tenant) DeleteAuthorizedGitHubAutomation(ctx context.Context, a capability.Authorized, repository int64) error {
 	return t.teamMutationTx(ctx, a, "DeleteAuthorizedGitHubAutomation", string(t.team), func(tx *storeTx, _ capability.Principal) error {
+		if err := bumpGitHubPublicationTx(ctx, tx, t.team, repository); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND repository_id=?`, t.team, repository)
 		return err
 	})

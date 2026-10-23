@@ -84,10 +84,6 @@ func TestPreCommitAdmitsAheadOfTheBroadGate(t *testing.T) {
 		t.Fatalf("pre-commit priority %d, gate priority %d: a ten-second tier queued behind a ten-minute one is not a ten-second tier",
 			precommit.Priority, gate.Priority)
 	}
-	hints := precommit.Resources
-	if hints == nil || hints.Cores <= 0 || hints.Cores > 1 {
-		t.Fatalf("pre-commit reserved cores = %#v, want a pin of at most one so it fits beside a running gate", hints)
-	}
 }
 
 func TestGateStillRunsEveryStepTheHookTiersAlsoRun(t *testing.T) {

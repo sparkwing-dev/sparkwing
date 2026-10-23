@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestAdmissionDeterministicSimulation(t *testing.T) {
@@ -241,7 +240,7 @@ func (s *admissionSimulation) start(i int) {
 		if run.host == "simulation" {
 			machine = s.machines[1]
 		}
-		claim, err := s.f.s.AsOperator().ClaimUnit(s.t.Context(), store.UnitDemand{CapabilityPrefix: machine, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run.id), NodeID: "job"}, Available: match.Resources{Cores: 8}})
+		claim, err := s.f.s.AsOperator().ClaimUnit(s.t.Context(), store.UnitDemand{CapabilityPrefix: machine, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run.id), NodeID: "job"}})
 		if err != nil {
 			s.t.Fatalf("claim run=%d: %v", i, err)
 		}

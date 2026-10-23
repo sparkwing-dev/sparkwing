@@ -84,7 +84,7 @@ membership. Repository restrictions and granted reservations filter claims
 before preferences rank work. A controller connection alone does not override
 those restrictions. A self-asserted `pool=production` label is not a reservation.
 
-The contribution preference controls advertised headroom. It does not constrain
+Runner labels control job placement. They do not constrain
 what accepted code can consume at the OS level. Machine admission and any
 available cgroup enforcement are separate controls. See
 [machine budgets](local-execution.md#capping-sparkwings-share-of-the-machine).

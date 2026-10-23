@@ -18,10 +18,9 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	st := e.Store
 	now := time.Now().UTC()
-	engineSQL(t, st, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','apply','pending',?,?,?)`, now.Add(-time.Minute).UnixNano(), []byte(`{"id":"apply"}`), []byte(`{"requires":{"value":["tool:terraform"]},"resources":{"value":{"cores":{"set":true,"value":4}}}}`))
-	capacity := 8.0
-	e.claimProfiles = engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-		return match.Profile{Capacity: match.Resources{Cores: capacity}}, match.Resources{Cores: capacity}, nil
+	engineSQL(t, st, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','apply','pending',?,?,?)`, now.Add(-time.Minute).UnixNano(), []byte(`{"id":"apply"}`), []byte(`{"requires":{"value":["tool:terraform","sparkwing-4cpu"]}}`))
+	e.claimProfiles = engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, error) {
+		return match.Profile{}, nil
 	})
 	engineHTTPRoot(t, e, "a", "box", []capability.Grant{capability.NodesClaim})
 	if err := st.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "box", Labels: []string{"tool:git"}}); err != nil {
@@ -39,19 +38,16 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 			t.Fatalf("attention = %q, want %q", got, want)
 		}
 	}
-	expect("node apply needs tool:terraform; no agent in team a has it")
+	expect("node apply needs tool:terraform, sparkwing-4cpu; no agent in team a has them")
 	engineHTTPRoot(t, e, "a", "pi", []capability.Grant{capability.NodesClaim})
-	if err := st.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "pi", Labels: []string{"tool:terraform"}}); err != nil {
+	if err := st.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "pi", Labels: []string{"tool:terraform", "sparkwing-4cpu"}}); err != nil {
 		t.Fatal(err)
 	}
 	seen := now.Add(-time.Hour)
 	engineSQL(t, st, `UPDATE capabilities SET last_used_at=? WHERE prefix='pi'`, seen.UnixNano())
-	offline := "node apply needs tool:terraform; eligible agent pi is offline (last seen " + seen.Format(time.RFC3339) + ")"
+	offline := "node apply needs tool:terraform, sparkwing-4cpu; eligible agent pi is offline (last seen " + seen.Format(time.RFC3339) + ")"
 	expect(offline)
-	capacity = 2
 	engineSQL(t, st, `UPDATE capabilities SET last_used_at=? WHERE prefix='pi'`, now.UnixNano())
-	expect("node apply needs tool:terraform; every agent in team a that matches refuses it: pi (shape)")
-	capacity = 8
 	expect("")
 	engineSQL(t, st, `UPDATE capabilities SET last_used_at=? WHERE prefix='pi'`, seen.UnixNano())
 	expect(offline)

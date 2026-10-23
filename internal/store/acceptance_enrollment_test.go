@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -66,11 +67,11 @@ func checkStoreEnrolledClaims(t *testing.T) (err error) {
 	if err := reopen(); err != nil {
 		return err
 	}
-	profile, _, err := s.AsOperator().ReadClaimProfile(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+	profile, err := s.AsOperator().ReadClaimProfile(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
 	if err != nil || profile.Name != "enrolled" || profile.Class != match.ClassAgent || len(profile.ReservedPools) != 1 || profile.Accept == nil {
 		return errors.Join(errors.New("reopening lost enrolled identity"), err)
 	}
-	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}, Labels: []string{"name=forged", "pool=forged", "class=cloud"}}
+	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"name=forged", "pool=forged", "class=cloud"}}
 	var admitted []byte
 	if err := s.DB().QueryRowContext(ctx, `SELECT request_json FROM runs`).Scan(&admitted); err != nil {
 		return err
@@ -90,7 +91,8 @@ func checkStoreEnrolledClaims(t *testing.T) (err error) {
 		}
 		claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 		if repository == "foreign" {
-			if !errors.Is(err, store.ErrNotFound) || len(claim.Bearer) != 0 {
+			var denied *apierr.Error
+			if !(errors.As(err, &denied) && denied.Code == apierr.Forbidden) || len(claim.Bearer) != 0 {
 				return errors.Join(errors.New("enrollment permitted another repository"), err)
 			}
 			continue

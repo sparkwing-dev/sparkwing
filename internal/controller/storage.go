@@ -117,8 +117,8 @@ func (s *Server) maintainRetainedData(ctx context.Context) {
 		s.logger.Error("storage retention failed", "err", err)
 		return
 	}
-	if retained.Runs > 0 || retained.Metrics > 0 || retained.Records > 0 || retained.Invitations > 0 || retained.Sessions > 0 || retained.AuditEvents > 0 {
-		s.logger.Info("expired retained data", "runs", retained.Runs, "metrics", retained.Metrics, "records", retained.Records, "invitations", retained.Invitations, "sessions", retained.Sessions, "audit_events", retained.AuditEvents)
+	if retained.Runs > 0 || retained.Metrics > 0 || retained.Records > 0 || retained.Invitations > 0 || retained.Sessions > 0 || retained.AuditEvents > 0 || retained.FreeSlotsReleased > 0 {
+		s.logger.Info("expired retained data", "runs", retained.Runs, "metrics", retained.Metrics, "records", retained.Records, "invitations", retained.Invitations, "sessions", retained.Sessions, "audit_events", retained.AuditEvents, "free_slots_released", retained.FreeSlotsReleased)
 	}
 	if _, err := operator.SealAbandonedLogStreams(ctx, lease, 5000); err != nil {
 		s.logger.Error("seal abandoned log streams failed", "err", err)

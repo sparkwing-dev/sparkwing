@@ -285,6 +285,11 @@ func blobIsCache(kind blob.Kind) bool         { return kind == blob.KindMemo || 
 func blobLocalRepo(repo runspec.RepoKey) bool { return strings.HasPrefix(string(repo), "local:") }
 
 func commitBlobBytesTx(ctx context.Context, tx *storeTx, team Team, object blob.Blob, reserved int64) (int64, error) {
+	if object.Size > 0 {
+		if err := markFreeSlotActiveTx(ctx, tx, team); err != nil {
+			return 0, err
+		}
+	}
 	now := tx.now(ctx)
 	inserted, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, object.Digest, object.Size, now.UnixNano())
 	if err != nil {

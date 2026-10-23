@@ -36,35 +36,12 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 		return (&Gate{}).Plan(context.Background(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 
-	hints := plan.Resources
-	wantCores := gateCoreReservation(runtime.NumCPU())
-	if hints == nil || hints.Cores != wantCores {
-		t.Fatalf("reserved cores = %#v, want %v", hints, wantCores)
-	}
 	nodes := plan.Jobs
 	if len(nodes) != 1 {
 		t.Fatalf("gate plan nodes = %d, want one", len(nodes))
 	}
 	if got := time.Duration(nodes[0].TimeoutMS) * time.Millisecond; got != gateRunTimeout {
 		t.Fatalf("gate node timeout = %s, want declared workload deadline %s", got, gateRunTimeout)
-	}
-	for _, tc := range []struct {
-		cpus  int
-		cores float64
-	}{{1, 1}, {2, 1}, {3, 1}, {4, 2.5}, {8, 2.5}, {16, 4.5}, {32, 8.5}} {
-		if got := gateCoreReservation(tc.cpus); got != tc.cores {
-			t.Errorf("gateCoreReservation(%d) = %v, want %v", tc.cpus, got, tc.cores)
-		}
-	}
-	// safety: two gates must fit under the daemon's DefaultHeadroomFraction,
-	// which a reservation near half the box prevented.
-	for _, cpus := range []int{8, 16, 32} {
-		if got, machine := gateCoreReservation(cpus), float64(cpus); 2*got > 0.8*machine {
-			t.Errorf("reservation %v on %d cores leaves no room for a second gate", got, cpus)
-		}
-	}
-	if got, machine := gateCoreReservation(4), float64(4); got > 0.8*machine {
-		t.Errorf("reservation %v on four cores consumes the machine's admission headroom", got)
 	}
 	for _, tc := range []struct{ cpus, parallelism int }{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {8, 3}, {14, 6}, {16, 7}} {
 		if got := goStepParallelism(hostShape{cpus: tc.cpus}); got != tc.parallelism {

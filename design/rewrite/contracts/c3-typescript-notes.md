@@ -140,7 +140,7 @@ Data properties on exported interfaces carry the values named in the export inve
 | `Job.memo`, `cache` | Declare result reuse or reusable file directories. |
 | `Job.artifacts`, `consumes` | Publish files or stage an authorized producer's files. |
 | `Job.onFailure` | Declare a recovery job with structured failure context. |
-| `Job.concurrency`, `resources` | Declare admission cost and resource demand. |
+| `Job.concurrency` | Declare admission cost. |
 | `Job.requires`, `prefers`, `inline` | Declare hard demands, preferences or owner execution. |
 | `Job.optional`, `continueOnError` | Control failure propagation at job scope. |
 | `Job.env` | Declare body env or explicitly marked startup env. |
@@ -150,13 +150,13 @@ Data properties on exported interfaces carry the values named in the export inve
 | `Approval.optional`, `continueOnError`, `onFailure` | Preserve approval failure and recovery policy without execution hooks. |
 | `Generated.job`, `approval`, `groupJobs` | Declare generated jobs, approvals and display groups. |
 | `Plan.job`, `approval`, `groupJobs` | Add static jobs, approvals and display groups. |
-| `Plan.concurrency`, `resources` | Declare run-level admission and resources. |
+| `Plan.concurrency` | Declare run-level admission. |
 | `Plan.priority`, `claimWait`, `admissionClass`, `checkout` | Declare code defaults resolved at accept. |
 | `JobGroup.needs`, `needsIfPresent`, `needsGenerated` | Apply dependency and expansion ordering to every member. |
 | `JobGroup.retry`, `timeout`, `noProgressTimeout` | Apply retry and execution limits to every member. |
 | `JobGroup.skipIf`, `beforeRun`, `verify`, `afterRun` | Apply eval and execution hooks to every member. |
 | `JobGroup.memo`, `cache`, `artifacts`, `consumes` | Apply reuse, directory caches and artifact flow to every member. |
-| `JobGroup.concurrency`, `resources` | Apply admission cost and resource demands to every member. |
+| `JobGroup.concurrency` | Apply admission cost to every member. |
 | `JobGroup.requires`, `prefers`, `inline` | Apply placement declarations to every member. |
 | `JobGroup.optional`, `continueOnError`, `env` | Apply failure policy and startup/body env to every member. |
 | `Plan`, `ConcurrencyGroup` constructors | Create author-owned declarations without host state. |
@@ -198,7 +198,7 @@ Data properties on exported interfaces carry the values named in the export inve
 | `Pipeline`, `Base`, `Workable`, `Work`, `NewWork`, `Job`, `JobNode`, `Produces` | `PipelineDef.plan`, `Plan.job`, typed `Body<T>`, `Job<T>`, `Step<T>.result`. JS functions need no embedded base type or marker interface. |
 | Typed `Inputs`, `WithArgs`, `NoInputs`, extra argument bag | `ArgSpec`, `PipelineDef.args/extra`, `Job.withArgs`, resolved string `Args`, and native parsing/destructuring. An empty spec list replaces `NoInputs`. Arrays use the documented CSV rules. |
 | `JobFanOut`, group constructors and membership | Native loops/maps calling `plan.job`, then `groupJobs`; groups expose readonly members. No speculative matrix controls. |
-| Dependency, retry, hooks, approval, failure, resources, source, placement, risk, env and plan knobs | Corresponding `Job`, `Step`, `Approval`, `JobGroup`, `StepGroup`, `Plan` members and their options. Resource memory uses bytes; Go `MemoryGB(n)` maps to `memoryBytes: n * 2 ** 30`. |
+| Dependency, retry, hooks, approval, failure, source, placement, risk, env and plan knobs | Corresponding `Job`, `Step`, `Approval`, `JobGroup`, `StepGroup`, `Plan` members and their options. Runner size uses required labels; no resource request API remains. |
 | Option functions, enum constants, `FailureStage.String` | Options-object fields and literal unions. Failure stage strings retain action/verify. |
 | `Outcome.Terminal`, `Outcome.OK` | Native literal comparisons or set membership. All six valid outcomes are terminal; success, memoized and skipped satisfy dependencies. Unknown strings are not valid outcomes. |
 | `RunnerInfo.HasLabel`, `Runner`, `IsDryRun` | `ctx.runner.labels.includes(label)`, `ctx.runner`, `ctx.dryRun`. |

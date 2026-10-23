@@ -110,6 +110,7 @@ func prepareLocalRunRequest(ctx context.Context, input localRunPreparation, flag
 	return controllerwire.CreateRunRequest{IdempotencyKey: flags.idempotencyKey, LocalSecrets: maps.Clone(input.localSecrets), Request: runspec.Request{
 		Version: 1, RequestID: flags.requestID, Pipeline: input.identity.Name, Mode: runspec.IntakeExecute, Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost,
 		LocalSecretNames: slices.Sorted(maps.Keys(input.localSecrets)),
+		LocalForeground:  !flags.detached,
 		RequestedArgs:    requested, SecretArgs: runspec.Optional[[]string]{Set: true, Value: secretArgs},
 		Git: input.git, Source: input.source, Env: input.environment, EnvironmentSource: runspec.EnvironmentCaptured, Options: options,
 	}}, nil

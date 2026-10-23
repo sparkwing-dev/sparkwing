@@ -100,14 +100,6 @@ func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, b
 			return controllerwire.RenewalResponse{}, err
 		}
 	}
-	if body.Available != nil {
-		if s.authority == nil {
-			return controllerwire.RenewalResponse{}, missingEndpointPolicy()
-		}
-		if err := s.authority.RecordHereAvailability(ctx, p.Authority, *body.Available); err != nil {
-			return controllerwire.RenewalResponse{}, err
-		}
-	}
 	beat, err := units.RenewUnit(ctx, p.Authority.ID, body.Executing)
 	if err != nil {
 		return controllerwire.RenewalResponse{}, engineLookupError(err)

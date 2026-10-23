@@ -17,7 +17,7 @@ import (
 type storeLockTier string
 
 const (
-	lockGlobal       storeLockTier = "global advisories"
+	lockLedger       storeLockTier = "credit ledgers"
 	lockLease        storeLockTier = "singleton leases"
 	lockSettings     storeLockTier = "settings and signup gates"
 	lockTeam         storeLockTier = "teams"
@@ -40,14 +40,32 @@ const (
 )
 
 var storeLockOrder = [...]storeLockTier{
-	lockGlobal, lockLease, lockSettings, lockTeam, lockAccount, lockMembership,
+	lockLease, lockSettings, lockTeam, lockAccount, lockMembership,
 	lockAuthority, lockInstallation, lockCredential, lockSchedule, lockTrigger,
 	lockEval, lockRun, lockNode, lockConcurrency, lockUpload, lockDigest,
-	lockQuota, lockBilling, lockRecord,
+	lockQuota, lockLedger, lockBilling, lockRecord,
 }
 
 func compareLockTiers(a, b storeLockTier) int {
 	return cmp.Compare(slices.Index(storeLockOrder[:], a), slices.Index(storeLockOrder[:], b))
+}
+
+// Claims take the controller lease, queue arbitration, authority and unit rows,
+// then the ledger. Arbitration serializes awards without unit ranking locks.
+func lockClaimQueueTx(ctx context.Context, tx *storeTx) error {
+	if tx.claimQueueLocked {
+		return nil
+	}
+	if tx.ledgerLocked {
+		tx.err = errors.New("claim lock order: queue arbitration must precede the ledger")
+		return tx.err
+	}
+	var ordinal int64
+	if err := tx.QueryRowContext(ctx, `SELECT ordinal FROM claim_awards WHERE singleton=1`+tx.forUpdate()).Scan(&ordinal); err != nil {
+		return err
+	}
+	tx.claimQueueLocked = true
+	return nil
 }
 
 // lockAuthorityThenRunTx takes a writer's authority chain, then its run.
@@ -186,10 +204,14 @@ func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock
 	var query string
 	args := []any{k.keys[0]}
 	switch k.tier {
-	case lockGlobal:
+	case lockLedger:
 		_, err := lockLedgerTx(ctx, tx, Team(k.keys[0]))
 		return err
 	case lockTeam:
+		if tx.ledgerLocked {
+			tx.err = errors.New("claim lock order: teams must precede the ledger")
+			return tx.err
+		}
 		query = "SELECT name FROM teams WHERE name=?"
 	case lockAccount:
 		query = "SELECT id FROM accounts WHERE id=?"
@@ -210,7 +232,9 @@ func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock
 	mode := tx.forShare()
 	if row.write {
 		mode = tx.forUpdate()
-		if k.tier == lockAuthority {
+		// Team names and authority identities never change. Ledger writes may
+		// acquire their foreign-key key-share locks after the ledger advisory.
+		if k.tier == lockAuthority || k.tier == lockTeam {
 			mode = tx.forNoKeyUpdate()
 		}
 	}
@@ -238,7 +262,7 @@ func (op *Operator) discoverInstallationLocks(ctx context.Context, tx *storeTx, 
 	if set.err != nil {
 		return set
 	}
-	team, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
+	team, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
 	if err == nil {
 		set.add(lockTeam, true, string(team))
 	} else if !errors.Is(err, sql.ErrNoRows) {

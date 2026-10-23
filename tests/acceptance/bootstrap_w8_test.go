@@ -68,11 +68,8 @@ func TestCloudBootstrapW8Components(t *testing.T) {
 				Binding:        capability.Binding{Kind: capability.BindingNode, RunID: string(binding.RunID), NodeID: string(binding.NodeID), Holder: binding.Holder, Generation: int64(binding.Generation), Attempt: int64(binding.Attempt)},
 				Request:        runspec.SealedRequest{RunID: string(binding.RunID), Request: runspec.Request{Team: binding.Team}},
 				LeaseExpiresAt: now.Add(time.Minute), OwnerDeadline: &binding.OwnerDeadline, AttemptDeadline: &binding.AttemptDeadline, ParentCapabilityExpiry: &binding.ParentCapabilityExpiry,
-				Engine: award.Engine,
-				Execution: &runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{
-					Cores:       runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: award.CPUCores}},
-					MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: award.Memory}},
-				}}}},
+				Engine:    award.Engine,
+				Execution: &runspec.JobExecutionSettings{},
 			}
 			unit.Request.Request.Git = runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey(award.Source.RepoKey)}, SHA: award.Source.SHA}
 			unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: award.Source.RemoteURL, PipelineDir: award.Source.PipelineDir}

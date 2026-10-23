@@ -79,7 +79,8 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 	api := httptest.NewUnstartedServer(nil)
 	t.Cleanup(api.Close)
 	endpoint := "http://" + api.Listener.Addr().String()
-	state, server, member := burstIntakeDeploymentController(t, endpoint, deploymenttest.Cloud(t, endpoint))
+	now := time.Now().UTC()
+	state, server, member := burstIntakeDeploymentController(t, endpoint, deploymenttest.Cloud(t, endpoint), teststore.WithClock(func() time.Time { return now }))
 	api.Config.Handler = server.Handler()
 	api.Start()
 	if err := os.WriteFile(os.Getenv("SPARKWING_CONFIG"), []byte("profiles:\n  cloud: { controller: { url: "+endpoint+", token: "+member+" } }\n"), 0o600); err != nil {
@@ -192,12 +193,12 @@ func TestCloudTriggerWithRunnerSelectorStaysOnTheRunner(t *testing.T) {
 	if cloudDispatchRequest(t, f, created.RunID).Request.Dispatch != runspec.DispatchHost {
 		t.Fatalf("runner-selected Cloud trigger sealed dispatch=%s", cloudDispatchRequest(t, f, created.RunID).Request.Dispatch)
 	}
-	poll := controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 64, AvailableMemoryBytes: 64 << 30}
+	poll := controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}}
 	if empty, err := f.open(f.launcher, true).Claim(t.Context(), poll); err != nil || empty.Claim != nil {
 		t.Fatalf("launcher took a runner-selected run: %+v %v", empty.Claim, err)
 	}
 	raw := cloudDispatchMachine(t, f, "builder")
-	owner, err := f.open(raw, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitTrigger}, OS: "linux", Arch: "amd64", AvailableCores: 2, AvailableMemoryBytes: 4 << 30})
+	owner, err := f.open(raw, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitTrigger}, OS: "linux", Arch: "amd64"})
 	if err != nil || owner.Claim == nil || owner.Claim.Unit != capability.UnitTrigger || owner.Claim.RunID != created.RunID {
 		t.Fatalf("selected runner did not take the trigger: %+v %v", owner.Claim, err)
 	}
@@ -240,7 +241,7 @@ func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	poll := controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 64, AvailableMemoryBytes: 64 << 30}
+	poll := controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}}
 	if empty, err := f.open(f.launcher, true).Claim(t.Context(), poll); err != nil || empty.Claim != nil {
 		t.Fatalf("launcher claimed unfunded work: %+v %v", empty.Claim, err)
 	}
@@ -282,7 +283,7 @@ func cloudDispatchMachine(t *testing.T, f cloudDispatch, name string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.open(issued.Raw, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitNode}, OS: "linux", Arch: "amd64", AvailableCores: 2, AvailableMemoryBytes: 4 << 30}); err != nil {
+	if _, err := f.open(issued.Raw, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitNode}, OS: "linux", Arch: "amd64"}); err != nil {
 		t.Fatal(err)
 	}
 	return issued.Raw
@@ -309,7 +310,7 @@ type cloudDispatchClaimProbe struct {
 	claims int
 }
 
-func (c *cloudDispatchClaimProbe) Claim(context.Context) (*launcher.CloudJobAward, error) {
+func (c *cloudDispatchClaimProbe) Claim(context.Context, string, []string) (*launcher.CloudJobAward, error) {
 	c.claims++
 	return nil, nil
 }
@@ -363,7 +364,7 @@ func newCloudDispatchLauncher(t *testing.T, f cloudDispatch) *cloudDispatchLaunc
 	}
 	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{
 		Kube: l.kube, Boundary: cloudDispatchBoundary{}, Jobs: jobs,
-		Demand: controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 64, AvailableMemoryBytes: 64 << 30},
+		Demand: controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}},
 		Bearer: func(context.Context) (string, error) { return f.launcher, nil },
 	})
 	if err != nil {

@@ -511,9 +511,18 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 func burstPublicHoldMachine(t *testing.T, ctx context.Context, endpoint string) {
 	t.Helper()
 	home := os.Getenv("SPARKWING_HOME")
-	capacity, _, err := observeBurstCapacity(ctx, home)
+	state, err := wingdclient.Query(ctx, wingdclient.Options{Home: home, Version: installedVersion()})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var cores float64
+	for _, resource := range state.Resources {
+		if resource.Key == "cores" {
+			cores = resource.Capacity
+		}
+	}
+	if cores <= 0 {
+		t.Fatal("local admission did not report CPU capacity")
 	}
 	daemon, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: installedVersion()})
 	if err != nil {
@@ -521,7 +530,7 @@ func burstPublicHoldMachine(t *testing.T, ctx context.Context, endpoint string) 
 	}
 	held, err := daemon.Acquire(ctx, wingwire.AdmissionRequest{
 		RunID: wingwire.HolderRef(wingwire.RemoteRunID(endpoint, "competing-machine-work")), Pipeline: "machine-holder",
-		Resources: wingwire.HostResources{Cores: capacity.Cores}, CostSource: wingwire.CostSourcePin,
+		Resources: wingwire.HostResources{Cores: cores}, CostSource: wingwire.CostSourcePin,
 	}, nil)
 	if err != nil {
 		_ = daemon.Close()
@@ -539,9 +548,18 @@ func burstPublicHoldMachine(t *testing.T, ctx context.Context, endpoint string) 
 			t.Error(err)
 		}
 	})
-	_, available, err := observeBurstCapacity(ctx, home)
-	if err != nil || available.Cores != 0 {
-		t.Fatalf("competing work did not occupy local capacity: %+v %v", available, err)
+	state, err = wingdclient.Query(ctx, wingdclient.Options{Home: home, Version: installedVersion()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	available := -1.0
+	for _, resource := range state.Resources {
+		if resource.Key == "cores" {
+			available = resource.Available
+		}
+	}
+	if available != 0 {
+		t.Fatalf("competing work did not occupy local capacity: %+v", state.Resources)
 	}
 }
 

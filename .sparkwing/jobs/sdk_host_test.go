@@ -11,14 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
-type resourceDocument struct {
-	Cores       float64
-	MemoryBytes int64 `json:"memory_bytes"`
-}
-
 type pipelineDocument struct {
 	Jobs           []jobDocument
-	Resources      *resourceDocument
 	Priority       int
 	AdmissionClass sparkwing.AdmissionClass `json:"admission_class"`
 }
@@ -27,7 +21,6 @@ type jobDocument struct {
 	ID              string
 	Needs           []string `json:"deps"`
 	Steps           []stepDocument
-	Resources       *resourceDocument
 	TimeoutMS       int64 `json:"timeout_ms"`
 	Requires        []string
 	Inline          bool

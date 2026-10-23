@@ -63,9 +63,24 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 
 func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, request runspec.Request, read func(context.Context, string, string) ([]byte, bool, error)) (runspec.Git, runspec.Source, error) {
 	spec := source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL, LocalCheckout: request.Source.Location.LocalCheckout}
-	options := source.Options{Access: &intakeRevisionAccess{server: s, team: team}, Base: procenv.Base{Ambient: os.Environ(), Masker: requestMasker(ctx)}, ReadFile: read}
+	access := &intakeRevisionAccess{server: s, team: team}
+	options := source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: requestMasker(ctx)}, ReadFile: read}
 	if spec.LocalCheckout != "" || s.dashboard != nil && s.dashboard.Local {
 		options.Base.Local, options.Base.Captured, options.GitAccess = true, os.Environ(), source.GitAccessOwner
+	}
+	if read != nil && s.githubApp != nil && strings.HasPrefix(spec.RepoKey, "gh:") {
+		options.ResolveRef = func(ctx context.Context, ref string) (string, error) {
+			installation, repository, err := access.githubAppRepository(ctx, spec)
+			if err != nil {
+				return "", err
+			}
+			repo, _ := store.ParseGitHubRepo(repository.FullName)
+			sha, err := s.githubApp.client.ResolveCommit(ctx, installation.InstallationID, repo.Owner, repo.Name, ref)
+			if errors.Is(err, githubapp.ErrRefNotFound) {
+				return "", nil
+			}
+			return sha, err
+		}
 	}
 	git, code, _, err := source.Select(ctx, spec, request.Pipeline, request.Git, request.Source, "", options)
 	return git, code, err
@@ -81,26 +96,14 @@ func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Sp
 	if s.operator == nil {
 		return source.Credential{}, missingEndpointPolicy()
 	}
-	tenant, err := s.tenantForTeam(ctx, a.team)
-	if err != nil {
-		return source.Credential{}, err
-	}
 	host, err := sourceurl.Host(spec.RemoteURL)
 	if err != nil {
 		return source.Credential{}, err
 	}
 	if host == "github.com" && s.githubApp != nil {
-		display, err := sourceurl.Identity(spec.RemoteURL)
+		installation, repository, err := a.githubAppRepository(ctx, spec)
 		if err != nil {
 			return source.Credential{}, err
-		}
-		_, slug, _ := strings.Cut(display, "/")
-		installation, repository, err := s.resolveGitHubAppRepository(ctx, tenant, slug)
-		if err != nil {
-			return source.Credential{}, err
-		}
-		if runspec.RepoKey(fmt.Sprintf("gh:%d", repository.ID)) != runspec.RepoKey(spec.RepoKey) {
-			return source.Credential{}, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "child source repository identity changed")
 		}
 		token, err := s.githubApp.client.InstallationTokenByIDs(ctx, installation.InstallationID, []int64{repository.ID}, map[string]string{"contents": "read"})
 		if err != nil {
@@ -112,6 +115,23 @@ func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Sp
 		return source.Credential{Kind: "github_app", Host: host, Secret: token.Token}, nil
 	}
 	return s.intakeStoredCredential(ctx, a.team, spec.RepoKey, host, "")
+}
+
+func (a *intakeRevisionAccess) githubAppRepository(ctx context.Context, spec source.Spec) (store.GitHubAppInstallation, githubapp.Repository, error) {
+	tenant, err := a.server.tenantForTeam(ctx, a.team)
+	if err != nil {
+		return store.GitHubAppInstallation{}, githubapp.Repository{}, err
+	}
+	display, err := sourceurl.Identity(spec.RemoteURL)
+	if err != nil {
+		return store.GitHubAppInstallation{}, githubapp.Repository{}, err
+	}
+	_, slug, _ := strings.Cut(display, "/")
+	installation, repository, err := a.server.resolveGitHubAppRepository(ctx, tenant, strings.TrimSuffix(slug, ".git"))
+	if err == nil && runspec.RepoKey(fmt.Sprintf("gh:%d", repository.ID)) != runspec.RepoKey(spec.RepoKey) {
+		err = apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "source repository identity changed")
+	}
+	return installation, repository, err
 }
 
 func (s *Server) intakeStoredCredential(ctx context.Context, team store.Team, repository, host, kind string) (source.Credential, error) {

@@ -229,7 +229,7 @@ func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capabil
 		if installation <= 0 {
 			return "", ErrInvalidInput
 		}
-		team, err := tx.operator.githubInstallationTeamTx(ctx, tx, installation)
+		team, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
 		}

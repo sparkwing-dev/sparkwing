@@ -83,7 +83,7 @@ func sightAgents(registered []store.RegisteredAgent, now time.Time) []agentSight
 
 func claimAttention(n store.WaitingNode, agents []agentSighting, cloud bool) string {
 	repo := n.Repo
-	demand := match.Demand{Selector: n.Selector, Repo: &repo, Request: n.Request, AllowedPools: n.AllowedPools}
+	demand := match.Demand{Selector: n.Selector, Repo: &repo, AllowedPools: n.AllowedPools}
 	var offline []agentSighting
 	var refused []string
 	profiles := make([]match.Profile, 0, len(agents)+1)
@@ -95,7 +95,7 @@ func claimAttention(n store.WaitingNode, agents []agentSighting, cloud bool) str
 			return ""
 		case verdict.OK():
 			offline = append(offline, a)
-		case verdict.Reason == match.ReasonRepo || verdict.Reason == match.ReasonShape:
+		case verdict.Reason == match.ReasonRepo:
 			refused = append(refused, a.Name+" ("+string(verdict.Reason)+")")
 		}
 	}

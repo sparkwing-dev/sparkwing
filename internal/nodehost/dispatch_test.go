@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -37,7 +36,7 @@ func releaseRemote(t *testing.T, f *storeHostFixture, node string) {
 
 func claimRemote(t *testing.T, f *storeHostFixture, node string) (store.UnitClaim, NodeInput) {
 	t.Helper()
-	claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(node)}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(node)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +99,7 @@ func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
 			t.Fatalf("held reconciliation = %+v, error %v", result, err)
 		}
 	}
-	if _, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}}); err == nil {
+	if _, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}}); err == nil {
 		t.Fatal("held node awarded twice")
 	}
 	if err := f.report(t.Context(), input, store.NodeFailed); err != nil {
@@ -154,7 +153,6 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 					plan := remotePlan()
 					for i := range plan.Jobs {
 						plan.Jobs[i].Concurrency = []nodeproto.ConcurrencySpec{{Group: "db", Scope: new(scope)}}
-						plan.Jobs[i].Resources = &nodeproto.ResourceSpec{Cores: new(8.0), MemoryBytes: new(int64(8 << 30))}
 					}
 					f := newStoreHostFixture(t, plan)
 					claims := map[string]NodeInput{}

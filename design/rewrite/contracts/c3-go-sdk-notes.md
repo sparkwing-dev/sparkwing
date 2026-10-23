@@ -396,13 +396,6 @@ Each row names one exported type or function. Retain means its declared signatur
 | `sparkwing.RefOption` | `sparkwing/ref.go` | RefOption tunes a cross-pipeline ref constructor (RefToLastRun). |
 | `sparkwing.MaxAge` | `sparkwing/ref.go` | MaxAge bounds cross-pipeline ref resolution to runs whose finished_at is within d. |
 | `sparkwing.RefToLastRun` | `sparkwing/ref.go` | References a job output in the pipeline's newest successful run. |
-| `sparkwing.ResourceHints` | `sparkwing/resources.go` | ResourceHints is the resolved resource pin declared via Plan.Resources or JobNode.Resources. |
-| `sparkwing.ResourceHint` | `sparkwing/resources.go` | ResourceHint is one option for Plan.Resources or JobNode.Resources. |
-| `sparkwing.Cores` | `sparkwing/resources.go` | Declares an explicit CPU requirement in cores. |
-| `sparkwing.MemoryGB` | `sparkwing/resources.go` | Declares an explicit memory requirement in GiB. |
-| `sparkwing.Plan.Resources` | `sparkwing/resources.go` | Declares run CPU and memory requirements for host admission. |
-| `sparkwing.JobNode.Resources` | `sparkwing/resources.go` | Declares job CPU and memory requirements for host admission. |
-| `sparkwing.JobGroup.Resources` | `sparkwing/resources.go` | Applies resource requirements to every member. |
 | `sparkwing.RunnerInfo` | `sparkwing/runner.go` | RunnerInfo describes the runner that's about to execute (or is executing) the current job. |
 | `sparkwing.RunnerInfo.HasLabel` | `sparkwing/runner.go` | HasLabel reports whether the runner advertises the given label term. |
 | `sparkwing.Runner` | `sparkwing/runner.go` | Reads the granted runner identity delivered by hello. |
@@ -598,8 +591,6 @@ Each row names one exported type or function. Retain means its declared signatur
 | `sparkwing.Plan.PriorityValue` | `sparkwing/priority.go` | Remove the old API during SDK decoupling. |
 | `sparkwing.JobNode.PipelineRefs` | `sparkwing/ref.go` | Remove the old API during SDK decoupling. |
 | `sparkwing.RefTarget` | `sparkwing/ref.go` | Remove the old API during SDK decoupling. |
-| `sparkwing.Plan.ResourceHints` | `sparkwing/resources.go` | Remove the old API during SDK decoupling. |
-| `sparkwing.JobNode.ResourceHints` | `sparkwing/resources.go` | Remove the old API during SDK decoupling. |
 | `sparkwing.RuntimeConfig` | `sparkwing/runtime_config.go` | Remove the old API during SDK decoupling. |
 | `sparkwing.CurrentRuntime` | `sparkwing/runtime_config.go` | Remove the old API during SDK decoupling. |
 | `sparkwing.SetWorkDir` | `sparkwing/runtime_config.go` | Remove the old API during SDK decoupling. |
@@ -670,3 +661,11 @@ Each row names one exported type or function. Retain means its declared signatur
 `NoMemo` is the explicit reuse bypass. Every other engine event, environment-key, or old outcome constant remains implementation-only or is removed with the old runtime.
 
 `CheckoutOld` and `Plan.CheckoutOld` retain only the old runtime and fixtures. Both are deleted during implementation.
+
+Runner label declarations pass through both SDKs unchanged. Host plan acceptance
+and settings resolution share one normalizer that trims outer whitespace, removes
+empty labels and keeps the first occurrence in declaration order. Selector
+alternatives retain their OR semantics. The SDKs neither normalize nor reject
+empty runner labels.
+
+Runner sizing uses the existing `Requires` declarations. The SDK exposes no CPU or memory request API. Size labels use the normal selector term semantics and Cloud maps its fixed catalog labels to physical allocations and exact credit classes.

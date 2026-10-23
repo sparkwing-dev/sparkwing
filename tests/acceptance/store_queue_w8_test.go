@@ -68,7 +68,7 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		body := controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: kinds, AvailableCores: 2, AvailableMemoryBytes: 1 << 30}
+		body := controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: kinds}
 		if named {
 			body.RunID = "run"
 		}

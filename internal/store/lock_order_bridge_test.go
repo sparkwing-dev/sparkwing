@@ -47,4 +47,5 @@ func (s *Store) testOnlyExec(t *testing.T, query string, args ...any) {
 	if _, err := s.exec(t.Context(), query, args...); err != nil {
 		t.Fatal(err)
 	}
+	projectFixtureClaimRepositories(t, s.db, s.dialect, query)
 }

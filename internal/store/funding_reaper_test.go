@@ -17,7 +17,7 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 				t.Fatal(err)
 			}
 			billingModelJob(t, s, "customer")
-			customer, customerActor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: "runner", Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "customer"}})
+			customer, customerActor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: "runner", Labels: []string{"sparkwing-4cpu"}, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "customer"}})
 			admitExecution(t, tenant, customerActor)
 			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
@@ -87,7 +87,7 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 					t.Fatal(err)
 				}
 				billingModelJob(t, s, "customer")
-				customer, actor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: "runner", Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "customer"}})
+				customer, actor := meteredUnitClaim(t, s, UnitDemand{CapabilityPrefix: "runner", Labels: []string{"sparkwing-4cpu"}, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "customer"}})
 				admitExecution(t, tenant, actor)
 				if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "customer"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 					t.Fatal(err)

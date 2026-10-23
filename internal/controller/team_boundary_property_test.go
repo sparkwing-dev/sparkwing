@@ -53,7 +53,7 @@ func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
 			if node {
 				kind = capability.UnitNode
 			}
-			body := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{kind}, AvailableCores: 1}
+			body := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{kind}}
 			if named {
 				body.RunID = f.runA
 				if node {

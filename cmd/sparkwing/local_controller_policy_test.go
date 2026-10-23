@@ -249,7 +249,7 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	if err != nil {
 		t.Fatal(err)
 	}
-	award, err := engine.Claim(ctx, controllerwire.ClaimRequest{RunID: admitted.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: "v1.2.3", AvailableCores: 1})
+	award, err := engine.Claim(ctx, controllerwire.ClaimRequest{RunID: admitted.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: "v1.2.3"})
 	if err != nil || award.Claim == nil {
 		t.Fatalf("owner claim: %+v: %v", award, err)
 	}

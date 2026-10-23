@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -65,13 +64,8 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		return localRunRuntime{}, err
 	}
 	var standalone wingd.LocalLifecycle
-	claimed := make(chan struct{})
-	var release sync.Once
 	return localRunRuntime{
 		controller: controller,
-		ownerClaimed: func() {
-			release.Do(func() { close(claimed) })
-		},
 		openCache: func(ctx context.Context, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
 			environment, err := snapshots.Load(ctx, request.Env)
 			if err != nil {
@@ -87,7 +81,7 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		},
 		ensureController: func(ctx context.Context) error {
 			if options.standalone {
-				services, err := resolveStandaloneServicesAt(ctx, home, claimed)
+				services, err := resolveLocalServicesAt(ctx, home)
 				if err != nil {
 					return err
 				}

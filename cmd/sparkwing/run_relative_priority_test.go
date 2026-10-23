@@ -56,7 +56,7 @@ func TestRunRelativePrioritySealsControllerQueueRank(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &receipt); err != nil {
 				t.Fatal(err)
 			}
-			award, err := controller.Claim(t.Context(), controllerwire.ClaimRequest{RunID: receipt.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: installedVersion(), AvailableCores: 1})
+			award, err := controller.Claim(t.Context(), controllerwire.ClaimRequest{RunID: receipt.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: installedVersion()})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -19,6 +19,13 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
 		result = ReconciledNode{}
 
+		if err := lockClaimControllerTx(ctx, tx); err != nil {
+			return err
+		}
+		if err := lockClaimQueueTx(ctx, tx); err != nil {
+			return err
+		}
+
 		if _, err := controllerOwnerTx(ctx, tx, t.team, string(request.Ref.RunID)); err != nil {
 			return err
 		}
@@ -90,7 +97,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 			if err != nil {
 				return err
 			}
-			eligible, err := ownerExecutionEligibleTx(ctx, tx, owner, request.Ref, request.Reserved)
+			eligible, err := ownerExecutionEligibleTx(ctx, tx, owner, request.Ref)
 			if err != nil {
 				return err
 			}
@@ -99,7 +106,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 				result.Node, err = readNodeTx(ctx, tx, t.team, request.Ref)
 				return err
 			}
-			claim, err := selfClaimNodeTx(ctx, tx, t.team, request.Actor, request.Ref, request.Reserved)
+			claim, err := selfClaimNodeTx(ctx, tx, t.team, request.Actor, request.Ref)
 			if err != nil {
 				return err
 			}

@@ -14,6 +14,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
 func requestedPod(t *testing.T) (*Launcher, *corev1.Pod) {
@@ -43,8 +45,8 @@ func awardMutations() map[string]func(*corev1.Pod) {
 		"container_cpu": func(p *corev1.Pod) {
 			p.Spec.InitContainers[1].Resources.Limits = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}
 		},
-		"team_label":     func(p *corev1.Pod) { p.Labels[TeamLabel] = labelHash("other-team") },
-		"team_selector":  func(p *corev1.Pod) { p.Spec.NodeSelector[TeamNodeLabel] = labelHash("other-team") },
+		"team_label":     func(p *corev1.Pod) { p.Labels[TeamLabel] = admission.TeamNodeHash("other-team") },
+		"team_selector":  func(p *corev1.Pod) { p.Spec.NodeSelector[TeamNodeLabel] = admission.TeamNodeHash("other-team") },
 		"node":           func(p *corev1.Pod) { p.Spec.NodeName = "other-node" },
 		"container_name": func(p *corev1.Pod) { p.Spec.InitContainers[1].Name = "renamed" },
 	}

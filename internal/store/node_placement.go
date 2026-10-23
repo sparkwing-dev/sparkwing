@@ -50,11 +50,6 @@ func (p ClaimPlacement) preferencesFor(nodePrefers []string) []PlacementPreferen
 	return []PlacementPreference{{Prefers: nodePrefers, Hold: hold}, {}}
 }
 
-type placementDecision struct {
-	reason string
-	hold   bool
-}
-
 func claimLiveness(ctx context.Context, request runspec.Request) time.Duration {
 	policy, _ := ClaimPlacementFromContext(ctx)
 	if policy.Liveness <= 0 && (request.Burst != nil || runAnywhere(request)) {

@@ -32,9 +32,8 @@ func (hostIntakePolicy) ResolveIntake(ctx context.Context, resolver capability.A
 
 type hostEnrollment struct{}
 
-func (hostEnrollment) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	capacity := match.Resources{Cores: 64, MemoryBytes: 64 << 30}
-	return match.Profile{Capacity: capacity}, capacity, nil
+func (hostEnrollment) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{}, nil
 }
 
 type hostState struct {
@@ -197,7 +196,7 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	if admitted.HereCapabilityPrefix != "" {
 		root = admitted.HereCapabilityPrefix
 	}
-	claim, err := database.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}, Capacity: match.Resources{Cores: 64, MemoryBytes: 64 << 30}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	claim, err := database.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}})
 	if err != nil {
 		t.Fatal(err)
 	}

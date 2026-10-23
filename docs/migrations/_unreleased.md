@@ -1,5 +1,68 @@
 # Migrating to the next release
 
+## GitHub deliveries enter a durable inbox
+
+GitHub webhooks now answer 202 with `status: queued` after storing the signed
+delivery. Processing results, including duplicate run details and temporary
+admission refusals, are no longer returned to GitHub. Failed deliveries never retry automatically. Team admins can inspect them in
+the team’s GitHub settings and choose Process again. Credit exhaustion creates
+a run that did not start. Use Run now after funding the team. Clients
+that post signed deliveries must treat 202 as acceptance for later processing.
+Disconnecting an installation revokes work still preparing source for admission
+or schedule publication. Those refused effects leave no receipt to replay.
+
+The schema baseline moves to version 22 for the inbox, targeted effect results,
+team queue attribution and idle free-slot tracking. Recreate stores from an
+earlier baseline before starting this build.
+Existing stores are refused rather than opened under the new schema.
+
+## Runner sizes are labels
+
+Replace CPU and memory requests in pipeline declarations with runner labels.
+Cloud size labels are `sparkwing-2cpu`, `sparkwing-4cpu`, `sparkwing-8cpu`,
+`sparkwing-16cpu`, `sparkwing-32cpu` and `sparkwing-64cpu`. Without a size label,
+Cloud uses `sparkwing-2cpu`. Billing follows the selected size's credit class.
+Self-hosted runners advertise the labels their jobs need. Every selector term
+must match, and alternatives within a term still use OR.
+
+Go `Resources` and TypeScript `resources` declarations are
+removed. Update SDK dependencies and author code together. Remove CPU and memory
+availability fields from claim requests. Runner capacity no longer participates
+in claim matching.
+
+Go and TypeScript SDKs pass runner label declarations to the host. The host
+trims outer whitespace, removes empty labels and deduplicates in declaration
+order for both languages. Alternatives within a term keep their OR semantics.
+TypeScript declarations containing empty labels now reach host normalization
+instead of throwing during plan construction.
+
+Foreground local submissions reserve their initial trigger for the submitting
+OS account. This replaces the standalone process gate and also protects runs
+submitted to a controller that is already running. Detached work still queues.
+
+All claimants now share eligibility and fair-share ordering. An eligible team's
+last successful award determines its next turn, followed by job arrival and
+identity. Queue preference scores are removed. Explicit preference holds and
+placement ranking remain. Concurrent claims share queue arbitration before
+billing. Registration and temporary occupancy do not decide whether a push
+needs credits. A placement policy permitting unmetered execution can wait for
+its runner. Cloud-only work still needs funds at intake. Private owner placement snapshots
+use the same eligibility and funding checks as awards. Reading a snapshot
+leaves readiness, reservations and fair-share accounting unchanged.
+Requirements are indexed when work is accepted, so unrelated label backlogs do
+not delay matching jobs. Existing stores must be recreated because the baseline
+adds normalized requirement sets and indexed references on queued work.
+Metered claim leases account for billable time that begins during issuance.
+
+The store baseline is 22. Earlier stores are refused and must be recreated under
+the pre-launch baseline policy. Delivery receipts now include each targeted
+admission, publication, withdrawal and lifecycle result. Reprocessing preserves
+committed effects. Installation withdrawals keep their original repository targets
+and result, so processing an old delivery cannot withdraw later schedules or consent.
+Historical deliveries without complete receipts cannot be
+reconstructed safely. Reconcile their outcomes before replaying them after a
+cutover. Failed deliveries still require an admin's Process again action.
+
 ## Declared restore and credential epochs
 
 The external `credential-epoch` fences bearer tokens and dashboard sessions.
@@ -19,7 +82,7 @@ opt in to automatic refill. See [Cloud billing](../billing.md).
 
 No data migration is needed: the staging and production stores had no open
 card charges, no negative balances and no saved cards at the cut. The store
-schema baseline moves to version 20, which drops `card_charges`,
+schema baseline moves to version 21, which drops `card_charges`,
 `card_attempts` and `team_spend_days` and adds the refill settings to `teams` and the immutable
 `credit_checkouts.liability_shift` payment snapshot;
 recreate stores at an earlier version. Saved cards, card pins, fraud warnings
@@ -2314,7 +2377,8 @@ Replace `Store.ClaimLaunch` with `Store.ClaimUnit`. A named plan selects
 `UnitRef{Kind: capability.UnitPlan, RunID: runID}` without a job ID. A named
 job selects `capability.UnitNode` and its job ID. Queue requests supply the
 requested kinds. A deployment service capability carrying `claims.launch`
-provides the launcher identity. Capacity and labels remain observations.
+provides the launcher identity. Labels and platform remain observations.
+Claim requests no longer carry CPU, memory or free-capacity fields.
 
 `Client.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `MinLaunchLifetime`
 and `LaunchDeadlineSlack` are removed. HTTP consumers call `Claim` on the controller returned by
@@ -3157,7 +3221,7 @@ cancellation was requested.
 
 The internal node API replaces `NodeTransition` with named commands. Store
 mutation methods no longer accept caller wall-clock arguments. The store captures
-database time for transaction decisions. Schema baseline 20 includes stored,
+database time for transaction decisions. Schema baseline 21 includes stored,
 generated cancellation deadlines. Older schema baselines require the declared
 restore workflow.
 
@@ -3200,6 +3264,18 @@ its registration is refused rather than resumed with incomplete masking. Runs se
 host masking registrations cannot resume. Start a new run. This is a pre-launch
 format cut with no migration. Previously stored short secrets must be replaced
 with longer secrets or plain config values before execution.
+
+## Ranking uses available claimants
+
+For a ready job with no named runner, the controller holds placement for the
+best-ranked tier with a live claimant on the same team that matches the job's
+labels and has a free slot in its latest poll. Busy or offline better tiers
+cause no wait. The hold ends after 5 seconds, when any eligible claimant may
+claim the job. The former recorded-ask winner and extra 2-second grace period
+are removed. Explicit `Prefers` holds remain; preference scores are removed.
+Runner claim clients can send `free_slots`; omission offers one slot, while
+an explicit zero reports that the claimant is busy. Each award consumes one
+advertised slot until the next poll.
 
 ## Memo inputs run on the host
 

@@ -126,6 +126,17 @@ type ledgerTx struct {
 	team Team
 }
 
+type ledgerView struct {
+	tx   *storeTx
+	team Team
+}
+
+func (l *ledgerTx) view() ledgerView { return ledgerView{tx: l.storeTx, team: l.team} }
+
+func (v ledgerView) balance(ctx context.Context) (int64, error) {
+	return creditBalanceTx(ctx, v.tx, v.team)
+}
+
 // safety: PostgreSQL runs concurrent claims and settlements in their own transactions, so a team's balance check and
 // the write it guards serialize on the team's lock; SQLite allows one writer and is already serial. The lock key is
 // a 32-bit hash of the team, so two teams can share one and serialize; that costs only waiting, never a balance.
@@ -138,6 +149,7 @@ func lockLedgerTx(ctx context.Context, tx *storeTx, team Team) (*ledgerTx, error
 			return nil, err
 		}
 	}
+	tx.ledgerLocked = true
 	return &ledgerTx{storeTx: tx, team: team}, nil
 }
 
@@ -190,7 +202,7 @@ func (l *ledgerTx) debitFunded(ctx context.Context, c CreditCharge) (*CreditChar
 }
 
 func (l *ledgerTx) balance(ctx context.Context) (int64, error) {
-	return creditBalanceTx(ctx, l.storeTx, l.team)
+	return l.view().balance(ctx)
 }
 
 func (l *ledgerTx) relabelCreator(ctx context.Context, from, to string) error {

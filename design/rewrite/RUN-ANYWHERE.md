@@ -1,6 +1,6 @@
 # Run anywhere: ranked claims for unselected runs
 
-Source: Korey's decisions 2 and 13-16 of 2026-10-18 (`contracts/handoffs.md`). It replaces
+Source: Korey's decisions 2, 13-16, 20 and 44 (`contracts/handoffs.md`). It replaces
 the launcher-only rule for unselected runs from the earlier lead ruling "Cloud
 triggers use controller dispatch". Frozen §2.3, §3.2 and §3.5 still hold.
 
@@ -15,21 +15,22 @@ machines (decisions 15 and 16) and the in-process controller host (decision
 13's host claimant) were built, reviewed and deleted; they return as their
 own reviewed work.
 
-**B. One eligibility result per (unit, claimant).** `unitEligibilityTx`
-returns the claimant's matching inputs, tier rank, kind, liveness, capacity
-fit and billing (for every metered claimant) in one value. Queue scans, named
-claims, ranking holds and notices all derive from it. A claimant-specific
-refusal, an unpriced Cloud class included, is an ineligible result, never an
-error that aborts another claimant's check. Notices evaluate the live
-observations the ranking scans (capped per claim), including the local
-queue, and report the first failing step.
+**B. One SQL eligibility predicate per (unit, claimant).** Every queue,
+named and self-claim uses `claimSQL` for readiness, grants, bindings, repository
+access, trust, labels, exclusions, placement and funding. Work is ordered by
+each team's last committed award ordinal, then arrival and stable identity.
+Only a successful award advances the ordinal. Claimant refusals leave other
+eligible work selectable. There are no scan frontiers or demand hashes.
+Private owner projections use the same predicate before job readiness, without
+writing asks or reserving work. Award rechecks readiness and eligibility in its
+transaction. Notices explain refusals without selecting or awarding work.
 
-**C. Asks and awards serialize under one ranking lock per unit.** A held
-claimant's ask is written in its claim transaction, whether that scan awards
-another unit or nothing. Every ask and award takes the unit's ranking lock
-before reading readiness; scans take these locks in one global unit order.
-`RankingAward` (2 s after the window, worst case 7 s) is the lead amendment to
-decision 2.
+**C. Asks and awards serialize under queue arbitration.** Claims take the
+controller lease, queue arbitration, authority and unit rows, then the ledger,
+as defined in `lock_order.go`. Taking queue arbitration after a ledger lock
+poisons the transaction. A waiting claimant's ask commits even when its scan
+awards another unit or nothing. `RankingAward` (2 s after the window, worst
+case 7 s) preserves the window winner.
 
 A self-hosted `sparkwing-controller` runs no pipelines itself: without a
 registered runner, unselected work shows `no_eligible_runner`.
@@ -56,7 +57,7 @@ preference holds do not apply to it.
 ## Sealing and the plan unit (placement D, any executor)
 
 Under §2.3 the store schedules a controller-owned run (stage 7), so every job
-is a ready node that any matching claimant takes through `match.Evaluate`.
+is a ready node selected through the shared SQL claim predicate.
 Only the plan step and generator evaluation change hands. Registered machines,
 personal machines and Actions runners claim `plan` (grant `triggers.claim`)
 and `eval` (grant `nodes.claim`) units on `/api/v1/runners/claim`. The runner
@@ -106,9 +107,9 @@ Each plan, eval and job unit has its own window `W = limits.RankingWindow`
 
 - Inside the window, a claim waits while a better-ranked claimant is live and
   fully eligible for the unit (the shared eligibility below, including its
-  advertised kinds, capacity and billing). The best-ranked claimant present
+  advertised kinds, labels and billing). The best-ranked claimant present
   wins immediately. A waiting claim records an **ask** (`unit_asks`:
-  claimant, rank, time) under the unit's claim lock, in the claim
+  claimant, rank, time) under queue arbitration, in the claim
   transaction itself, whether that transaction awards another unit or none.
 - From `ready+W` to `ready+W+A` (`A = limits.RankingAward`, 2 s, the lead
   amendment to decision 2), the window's winner is the best-ranked asker
@@ -117,29 +118,34 @@ Each plan, eval and job unit has its own window `W = limits.RankingWindow`
   ask inside the window, the first eligible asker wins.
 - After that, the first eligible asker wins. An award clears the unit's asks.
 
-Claimants keep their normal poll cadence. A ranking check evaluates at most
-`limits.RankingObservations` (64) of the most recent live observations.
+Claimants keep their normal poll cadence. SQL selection considers live claimant
+observations. Notices explain up to `limits.RankingObservations` (64) of the
+most recent observations.
 
 ## Eligibility
 
-`unitEligibilityTx` is the one judgment of a claimant for a unit: claim
-kinds and advertised kinds, authority and placement (repository, push and
-personal-machine scope, tier inside the ranking), matching, advertised
-capacity, and billing for every metered claimant. Queue scans, named claims,
-ranking holds and notices all call it. Named claims leave billing to award
-issuance, which reports the exact credit standing. The wingd queue is an
-observed claimant like any runner.
+`claimSQL` owns eligibility for every award and private owner projection.
+It checks claim kinds, authority, placement, repository and push scope,
+personal-machine ownership, tier, labels and funding for metered claimants.
+Every requested selector term must match. Alternatives within a term use OR.
+Runner size is a label. The fixed Cloud size catalog binds labels to physical
+allocations and credit classes. Self-hosted runners advertise their own labels.
+CPU and memory requests and free-resource observations do not select work.
+
+Named claims use the same predicate and preserve the exact funding refusal.
+The wingd queue is an observed claimant like any runner. Local foreground work
+is reserved for its here owner, so the background queue cannot take its trigger.
 
 ## Notices
 
-Notices judge the live observations the ranking scans, plus each Cloud
+Notices explain recent live observations, plus each Cloud
 launcher for credit standing. Any live eligible claimant leaves only the
 generic `unclaimed_work` notice. Otherwise `credit_hold` appears when a
 claimant failed only on billing. A run-anywhere unit then gets
 `no_eligible_runner`, naming the first cause: dropped tiers ("Cloud is off in
 this team's runner ranking"), the pin ("this job targets pool=gpu only"), or
 "no runner of the allowed tiers (...) is online". A live claimant that is only
-short of capacity keeps the generic notice.
+waiting on temporary Cloud standing capacity keeps the generic notice.
 
 ## Personal machines
 
@@ -163,7 +169,7 @@ pin that requires `class=cloud`, so only the launcher matches.
 2. A generator on a job without a typed result evaluates with no result
    (`null`) on every host. Both local and remote evaluation failed with "blob
    not found" before.
-3. A runner's job claims are bounded by its measured headroom. Plans and
-   evaluations carry no core demand, so a runner on a busy machine can take a
-   plan and then not fit its one-core jobs until the machine has headroom
-   again. Ranking records no ask for a claimant that does not fit.
+3. Job placement uses required labels. Plans and evaluations use their run's
+   labels. Cloud standing capacity and funding are checked and reserved at
+   award. Private snapshots check funding through the shared predicate and
+   leave readiness, asks, reservations and fairness accounting unchanged.

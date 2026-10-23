@@ -23,9 +23,8 @@ const quarantineAnnotation = "sparkwing.dev/quarantined"
 // errAwardMismatch marks a controller decision that disagrees with the award an observation carried.
 var errAwardMismatch = errors.New("controller sync returned duplicate or changed Cloud bindings")
 
-// nodeFault is a fault confined to one node, which never stops claims on
-// other nodes. It has no Unwrap, so an API error cannot travel inside it and be
-// discarded along with it.
+// nodeFault identifies a contained node fault for sync to charge to its protected
+// team label. It has no Unwrap, so an API error cannot be discarded along with it.
 type nodeFault struct{ node, cause string }
 
 func (f *nodeFault) Error() string {
@@ -33,12 +32,11 @@ func (f *nodeFault) Error() string {
 }
 
 // safety: a kubelet can rewrite its own Node's annotations, so a fault read
-// from them is charged to that node alone. The node is cordoned and given a
-// taint, which NodeRestriction stops a kubelet from removing. Placement
-// already skips it while it records a reservation that is not the one being
-// placed, so repeated conflicts back off into a node fault and claiming
-// continues; any other failed write stays blocking until the quarantine
-// persists.
+// from them must leave the node cordoned and tainted. NodeRestriction stops a
+// kubelet from removing the taint.
+// Placement skips conflicting reservations, so repeated conflicts become node
+// faults. Claims continue within the team's quarantine budget. Other failed
+// writes block until quarantine persists.
 func quarantineNode(ctx context.Context, kube kubernetes.Interface, node *corev1.Node, cause string) error {
 	fault := &nodeFault{node: node.Name, cause: "quarantined: " + cause}
 	if node.Labels[TeamNodeLabel] == "" {

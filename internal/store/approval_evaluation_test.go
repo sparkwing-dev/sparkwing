@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func approvalEvaluationFixture(t *testing.T, prepare ...func(*Tenant, *PlanAcceptance)) (*Tenant, controllerwire.NodeRef, UnitClaim) {
@@ -26,7 +25,7 @@ func approvalEvaluationFixture(t *testing.T, prepare ...func(*Tenant, *PlanAccep
 	authorityPersist(t, tenant.s, root)
 	fundUnitClaim(t, tenant.s)
 	ref := controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "gate"}
-	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitEval, RunID: ref.RunID, NodeID: ref.NodeID, SourceGeneration: 0}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitEval, RunID: ref.RunID, NodeID: ref.NodeID, SourceGeneration: 0}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +122,7 @@ func TestControllerApprovalPredicateRecoversAnExpiredEvaluation(t *testing.T) {
 	if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 		t.Fatalf("approval evaluator did not recover: %+v %v", reaped, err)
 	}
-	demand := UnitDemand{CapabilityPrefix: "approval-evaluator", Target: &UnitRef{Kind: capability.UnitEval, RunID: ref.RunID, NodeID: ref.NodeID, SourceGeneration: 0}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+	demand := UnitDemand{CapabilityPrefix: "approval-evaluator", Target: &UnitRef{Kind: capability.UnitEval, RunID: ref.RunID, NodeID: ref.NodeID, SourceGeneration: 0}}
 	replacement, err := tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil || replacement.Award.Generation <= claim.Award.Generation {
 		t.Fatalf("replacement evaluator: %+v %v", replacement, err)
@@ -332,5 +331,16 @@ func TestGeneratorEvaluationCannotReadApprovalSecretsOrPipelineReferences(t *tes
 		if !errors.As(err, &refusal) || refusal.Details["reason"] != apierr.ReasonBinding {
 			t.Fatalf("generator reached declaration lookup: target=%+v error=%v", target, err)
 		}
+	}
+}
+
+func TestApprovalEvaluationQueuedClaimUsesPendingSource(t *testing.T) {
+	tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gate", Approval: &nodeproto.ApprovalSpec{}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"skip"}}}}})
+	root := authorityRoot("queued-approval-evaluator", "a")
+	authorityPersist(t, tenant.s, root)
+	fundUnitClaim(t, tenant.s)
+	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{capability.UnitEval}})
+	if err != nil || claim.RunID != request.RunID || claim.NodeID != "gate" || claim.SourceGeneration != 0 {
+		t.Fatalf("queued approval claim=%+v: %v", claim, err)
 	}
 }

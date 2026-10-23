@@ -22,7 +22,7 @@ func FuzzMachineClaimsCannotSelectLocalVersionPolicy(f *testing.F) {
 			return &apierr.Error{Code: apierr.Unavailable, Message: "verified policy unavailable"}
 		})
 		e.LocalRunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { exempted = true; return nil })
-		body, err := json.Marshal(map[string]any{"runner_version": "version-" + version, "kinds": []string{"node"}, "labels": []string{label, "type=local"}, "available_cores": 1})
+		body, err := json.Marshal(map[string]any{"runner_version": "version-" + version, "kinds": []string{"node"}, "labels": []string{label, "type=local"}})
 		if err != nil {
 			t.Fatal(err)
 		}

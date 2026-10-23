@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func bindLocalRunHost(ctx context.Context, home string, options client.EngineOptions, award controllerwire.ClaimedUnit) (_ hereHostSession, err error) {
@@ -72,10 +71,6 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 			}
 		}
 
-		state.Available = func(ctx context.Context) (*match.Resources, error) {
-			_, available, err := observeBurstCapacity(ctx, home)
-			return &available, err
-		}
 	}
 	sourceOptions, err := hostSourceOptions(home, os.Environ(), secrets.NewMasker(), award.Request.Request.Source.Location.LocalCheckout != "")
 	if err != nil {

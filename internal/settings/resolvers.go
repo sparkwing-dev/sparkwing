@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -155,6 +156,10 @@ func Retry(in Inputs) (int, Origin, error) {
 func Requires(in Inputs) ([]string, Origin, error) {
 	value, origin, err := pickRunList(in, "requires", func(v runspec.Options) runspec.Setting[[]string] { return v.Requires })
 	if err == nil {
+		value = nodeproto.NormalizeLabels(value)
+		if value == nil {
+			value = []string{}
+		}
 		err = validNames("requires", value, origin)
 	}
 	return value, origin, err
@@ -164,6 +169,10 @@ func Requires(in Inputs) ([]string, Origin, error) {
 func Prefers(in Inputs) ([]string, Origin, error) {
 	value, origin, err := pickRunList(in, "prefers", func(v runspec.Options) runspec.Setting[[]string] { return v.Prefers })
 	if err == nil {
+		value = nodeproto.NormalizeLabels(value)
+		if value == nil {
+			value = []string{}
+		}
 		err = validNames("prefers", value, origin)
 	}
 	return value, origin, err

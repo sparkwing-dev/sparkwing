@@ -36,7 +36,7 @@ func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*storedEngine
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
+	owner, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}})
 	if err != nil || owner.Claim == nil {
 		t.Fatalf("run owner acquisition: present=%v error=%v", owner.Claim != nil, err)
 	}
@@ -52,15 +52,12 @@ func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*storedEngine
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "cloud-fixture", CreatedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
-	execution := runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{
-		Cores:       runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: 1}},
-		MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: 1 << 29}},
-	}}}}
+	execution := runspec.JobExecutionSettings{}
 	body, err := json.Marshal(execution)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.SQL(t, server.Store).ExecContext(t.Context(), `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, body); err != nil {
+	if _, err := teststore.Exec(t.Context(), server.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, body); err != nil {
 		t.Fatal(err)
 	}
 	return server, root
@@ -73,12 +70,12 @@ func storedCloudAwardW8(t *testing.T) (*storedEngineW8, launcher.CloudJobAward) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := cloud.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}, RunID: "run", JobID: "job", AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
+	response, err := cloud.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}, RunID: "run", JobID: "job"})
 	if err != nil || response.Claim == nil {
 		t.Fatalf("Cloud acquisition: present=%v error=%v", response.Claim != nil, err)
 	}
 	unit := response.Claim
-	if unit.CloudResources == nil || unit.CloudResources.Cores != 2 || unit.CloudResources.MemoryBytes != store.CPUClassMemoryBytes(2) || unit.Delivery != capability.DeliveryBootstrap || unit.ParentCapabilityExpiry == nil || unit.Engine == nil || unit.Execution == nil || unit.Execution.Resources.Value.Cores.Value != 1 || unit.Execution.Resources.Value.MemoryBytes.Value != 1<<29 {
+	if unit.CloudResources == nil || unit.CloudResources.Cores != 2 || unit.CloudResources.MemoryBytes != store.CPUClassMemoryBytes(2) || unit.Delivery != capability.DeliveryBootstrap || unit.ParentCapabilityExpiry == nil || unit.Engine == nil || unit.Execution == nil {
 		t.Fatal("Cloud claim lost bootstrap delivery, parent expiry, engine or execution resources")
 	}
 	binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), Attempt: runspec.AttemptOrdinal(unit.Binding.Attempt), ParentCapabilityExpiry: *unit.ParentCapabilityExpiry}

@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
@@ -357,44 +356,4 @@ func cronRunStatus(ctx context.Context, tenant *store.Tenant, runID string) stri
 		return ""
 	}
 	return run.Status
-}
-
-// safety: every schedule is a stream of runs the team pays for and the
-// controller evaluates each minute, so a push is bounded per repository and a
-// team's repositories are bounded in count. Re-pushing a repository the team
-// already arms replaces its schedules and does not count as another.
-const (
-	maxCronSchedulesPerRepo = limits.MaxSchedulesPerRepo
-	maxCronReposPerTeam     = limits.MaxScheduledReposPerTeam
-)
-
-func (s *Server) cronRepoCapRefusal(ctx context.Context, svc *crons.Service, repoURL string, githubRepoID int64, entries int) (int, error) {
-	if entries > maxCronSchedulesPerRepo {
-		return http.StatusBadRequest, fmt.Errorf(
-			"a repository may declare at most %d schedules; this push declares %d", maxCronSchedulesPerRepo, entries)
-	}
-	rows, err := svc.List(ctx)
-	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("list cron schedules: %w", err)
-	}
-	repos := map[string]bool{}
-	for _, row := range rows {
-		if !row.Declared {
-			continue
-		}
-		key := row.RepoPath
-		if row.GitHubRepositoryID > 0 {
-			key = fmt.Sprintf("github:%d", row.GitHubRepositoryID)
-		}
-		repos[key] = true
-	}
-	key := repoURL
-	if githubRepoID > 0 {
-		key = fmt.Sprintf("github:%d", githubRepoID)
-	}
-	if !repos[key] && len(repos) >= maxCronReposPerTeam {
-		return http.StatusConflict, fmt.Errorf(
-			"this team already schedules %d repositories, the most it may; disarm one first", len(repos))
-	}
-	return 0, nil
 }

@@ -2,7 +2,6 @@ import type { DescribeArg } from "./describe.ts";
 export interface PlanDoc {
   jobs: JobSpec[];
   concurrency?: ConcurrencySpec[];
-  resources?: ResourceSpec;
   priority?: number;
   claim_wait_ms?: number;
   admission_class?: string;
@@ -34,7 +33,6 @@ export interface JobSpec {
   memo?: { ttl_ms?: number; input?: import("../index.d.ts").MemoInput };
   caches?: CacheSpec[];
   concurrency?: ConcurrencySpec[];
-  resources?: ResourceSpec;
   closures?: ClosureSpec;
   skip_if_budget_ms?: number;
   steps?: StepSpec[];
@@ -73,10 +71,6 @@ export interface ConcurrencySpec {
   queue_timeout_ms?: number;
 }
 
-export interface ResourceSpec {
-  cores?: number;
-  memory_bytes?: number;
-}
 export interface SourceSpec {
   full_history?: boolean;
   depth?: number;

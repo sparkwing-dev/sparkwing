@@ -31,8 +31,6 @@ type Plan struct {
 
 	planConcurrency []planConcurrency
 
-	resources *ResourceHints
-
 	priority int
 
 	claimWait time.Duration
@@ -233,8 +231,6 @@ type JobNode struct {
 	concurrency *concurrencyMembership
 
 	dirCaches []DirCache
-
-	resources *ResourceHints
 
 	beforeRun []BeforeRunFn
 	afterRun  []AfterRunFn
@@ -486,7 +482,7 @@ func (n *JobNode) Verify(fn VerifyFn) *JobNode {
 // step, so Requires does not select or reject their runner. For conditional
 // For a soft preference, use Prefers.
 func (n *JobNode) Requires(labels ...string) *JobNode {
-	n.requires = normalizeLabels(labels)
+	n.requires = slices.Clone(labels)
 	return n
 }
 
@@ -508,27 +504,10 @@ func (n *JobNode) StartsChildrenIn(repository string, pipelines ...string) *JobN
 	return n
 }
 
-// Prefers ranks eligible runners without relaxing requirements, reservations or resource bounds.
+// Prefers ranks eligible runners without relaxing requirements, reservations or placement policy.
 func (n *JobNode) Prefers(labels ...string) *JobNode {
-	n.prefers = normalizeLabels(labels)
+	n.prefers = slices.Clone(labels)
 	return n
-}
-
-func normalizeLabels(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(in))
-	for _, l := range in {
-		if l == "" {
-			continue
-		}
-		out = append(out, l)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 // Inline places the node on the dispatcher's host.

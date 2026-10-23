@@ -78,6 +78,11 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 		if err := reserveUploadQuotaDimensionTx(ctx, tx, t.team, d, u.ExpiresAt); err != nil {
 			return u, err
 		}
+		if u.Blob.Size > 0 {
+			if err := markFreeSlotActiveTx(ctx, tx, t.team); err != nil {
+				return u, err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO source_uploads(team,id,authority_kind,authority_id,repo_key,repo_display,execution_sha,pipeline_sha,digest,size,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, t.team, u.ID, authority.Kind, authority.ID, u.Scope.Repository, u.Scope.RepositoryDisplay, u.Scope.ExecutionSHA, u.Scope.PipelineSHA, u.Blob.Digest, u.Blob.Size, u.ExpiresAt.UnixNano())
 		if err != nil {
 			return u, err

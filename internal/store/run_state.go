@@ -41,6 +41,7 @@ const (
 	RunPublish        RunCause = "publish"
 	RunPolicyRefused  RunCause = "policy_refused"
 	RunLaunchRejected RunCause = "launch_rejected"
+	runCreditRefused  RunCause = "credit_refused"
 )
 
 // RunEdge records all legal run-state families; a cancel of live work is initially request-only.
@@ -59,6 +60,7 @@ func RunTransitions() []RunEdge {
 	terminal := []RunState{RunSuccess, RunFailed, RunCancelled}
 	owners := []ActorKind{ActorRunHost, ActorController}
 	return []RunEdge{
+		{[]RunState{RunPending}, []RunState{RunFailed}, []ActorKind{ActorOperator}, runCreditRefused, "App admission; unstarted and unfunded", false},
 		{active, []RunState{RunFailed}, []ActorKind{ActorLauncher}, RunLaunchRejected, "exact live launcher plan award", false},
 		{[]RunState{RunPending}, []RunState{RunRunning}, owners, RunStart, "live owner; accepted plan", false},
 		{active, terminal, owners, RunFinish, "live owner; no live work or expected expansions", false},
@@ -327,6 +329,11 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 		return errors.New("unexpected run owner policy result")
 	}
 	switch change.Cause {
+	case runCreditRefused:
+		if tx.appAdmission == nil || row.StartedAt != nil || row.Spec != nil || row.StateSeq != 0 || change.Actor.Authority != tx.appAdmission.authority() {
+			return holderRefusal()
+		}
+		return nil
 	case RunLaunchRejected:
 		award, err := checkLauncherActorTx(ctx, tx, team, row.ID, change.Actor)
 		if err != nil {

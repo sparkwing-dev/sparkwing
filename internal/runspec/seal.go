@@ -40,6 +40,9 @@ func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 	if request.Dispatch != DispatchHost && request.Dispatch != DispatchController {
 		return SealedRequest{}, errors.New("invalid dispatch")
 	}
+	if request.LocalForeground && (request.Mode != IntakeExecute || request.Origin != OriginLocal || request.Dispatch != DispatchHost) {
+		return SealedRequest{}, errors.New("foreground reservation requires local host execution")
+	}
 	if request.Mode == IntakeExecute && (!IsCommitID(request.Git.SHA) || !IsCommitID(request.Source.Ref)) {
 		return SealedRequest{}, &apierr.Error{Code: apierr.InvalidArgs, Message: "executable intake requires resolved execution and code commits"}
 	}

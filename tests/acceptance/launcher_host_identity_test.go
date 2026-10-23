@@ -46,7 +46,7 @@ func TestLauncherCapacityWaitDoesNotSealExecutionHost(t *testing.T) {
 			return launcher.CloudNetworkEvidence{Namespace: cfg.Namespace, NodeUID: r.NodeUID, PolicyRevision: "verified", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
 		}, Clear: func(context.Context, launcher.CloudNodeReservation) error { return nil },
 	}
-	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: cfg, Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30}, Bearer: func(context.Context) (string, error) { return root.Raw, nil }, NewController: func(options client.EngineOptions) (launcher.LauncherController, error) {
+	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: cfg, Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}}, Bearer: func(context.Context) (string, error) { return root.Raw, nil }, NewController: func(options client.EngineOptions) (launcher.LauncherController, error) {
 		return cloudStoreClientW8(t, server)(options)
 	}})
 	if err != nil {

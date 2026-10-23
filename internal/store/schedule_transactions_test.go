@@ -17,7 +17,7 @@ import (
 type scheduleFixturePolicy struct{ IntakePolicy }
 
 func (p scheduleFixturePolicy) ResolveScheduleSource(_ context.Context, row CronSchedule, request runspec.Request) (runspec.Request, error) {
-	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: row.RepoPath})
+	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: row.RepoPath, GitHubRepositoryID: runspec.Optional[int64]{Set: row.GitHubRepositoryID > 0, Value: row.GitHubRepositoryID}})
 	request.Version = 1
 	request.Git = runspec.Git{Repository: repository, Ref: row.GitBranch, SHA: row.LockedRef}
 	request.Source.Ref = request.Git.SHA
@@ -167,6 +167,83 @@ func TestScheduleReplacementCapsAndOverrideRollback(t *testing.T) {
 	}
 }
 
+func TestAppScheduleReplacementIsAtomicAndMemberReplaceKeepsAppRows(t *testing.T) {
+	tenant, member, body, _ := consentedScheduleFixture(t)
+	_, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), GitHubAppInstallation{
+		InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization",
+		ConnectedBy: "schedule-owner", GitHubUserID: 501,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES (?,?,?,?,?,?,?)`, tenant.team, "gh:701", 701, "acme/widgets", 7, "schedule-owner", time.Now().UnixNano())
+	repo := "https://github.com/acme/widgets.git"
+	makeInput := func(i int) (CronSchedule, runspec.Request) {
+		pipeline := fmt.Sprintf("nightly-%d", i)
+		row := CronSchedule{
+			ID: fmt.Sprintf("app-%d", i), RepoPath: repo, Pipeline: pipeline, Name: CronScheduleDefaultName,
+			Cron: "0 * * * *", TZ: "UTC", Overlap: CronOverlapSkip, Where: CronWhereController, GitBranch: "main",
+			GitHubInstallationID: 7, GitHubRepositoryID: 701,
+		}
+		request := runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701", Display: "acme/widgets"}}}
+		return row, request
+	}
+	row, request := makeInput(0)
+	ids, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), prepareAppPublication(t, tenant, 7, 701), repo, []CronSchedule{row}, []runspec.Request{request})
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("App arm: %v %v", ids, err)
+	}
+	body.RepoURL, body.Schedules = repo, nil
+	if _, withdrawn, err := tenant.ReplaceAuthorizedSchedules(t.Context(), member, body); err != nil || len(withdrawn) != 0 {
+		t.Fatalf("member replacement withdrew App schedule: %v %v", withdrawn, err)
+	}
+	stored, err := tenant.GetCronSchedule(t.Context(), ids[0])
+	if err != nil || !stored.Declared || stored.LockedRef != "" {
+		t.Fatalf("App row after member replacement: %+v %v", stored, err)
+	}
+	_, err = tenant.TestOnlySeedGitHubInstallation(t.Context(), GitHubAppInstallation{
+		InstallationID: 8, AccountID: 70, AccountLogin: "acme", AccountType: "Organization",
+		ConnectedBy: "schedule-owner", GitHubUserID: 501,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_automation SET installation_id=8,enabled_at=? WHERE team=? AND repository_id=701`, time.Now().UnixNano(), tenant.team)
+	other, otherRequest := makeInput(1)
+	other.ID, other.GitHubInstallationID = "app-other-installation", 8
+	otherIDs, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), prepareAppPublication(t, tenant, 8, 701), repo, []CronSchedule{other}, []runspec.Request{otherRequest})
+	if err != nil || len(otherIDs) != 1 {
+		t.Fatalf("other installation arm: %v %v", otherIDs, err)
+	}
+	_, withdrawn, err := tenant.ReplaceGitHubAppSchedules(t.Context(), prepareAppPublication(t, tenant, 8, 701), repo, nil, nil)
+	if err != nil || len(withdrawn) != 1 {
+		t.Fatalf("own installation withdrawal: %v %v", withdrawn, err)
+	}
+	otherStored, err := tenant.GetCronSchedule(t.Context(), ids[0])
+	if err != nil || !otherStored.Declared {
+		t.Fatalf("replacement withdrew other installation: %+v %v", otherStored, err)
+	}
+	var rows []CronSchedule
+	var requests []runspec.Request
+	for i := 1; i <= 21; i++ {
+		r, q := makeInput(i)
+		r.ID, r.GitHubInstallationID = fmt.Sprintf("app-eight-%d", i), 8
+		rows, requests = append(rows, r), append(requests, q)
+	}
+	if _, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), prepareAppPublication(t, tenant, 8, 701), repo, rows, requests); err == nil {
+		t.Fatal("App schedule cap accepted")
+	}
+	after, err := tenant.ListCronSchedules(t.Context())
+	if err != nil || len(after) != 2 {
+		t.Fatalf("partial App replacement: %+v %v", after, err)
+	}
+	for _, current := range after {
+		if current.ID == ids[0] && !current.Declared || current.ID == otherIDs[0] && current.Declared {
+			t.Fatalf("wrong installation after rollback: %+v", after)
+		}
+	}
+}
+
 type scheduleResolutionRace struct {
 	scheduleFixturePolicy
 	before func()
@@ -248,7 +325,7 @@ func TestScheduleLocalSourceRequiresPersistedPeerAuthorityProperty(t *testing.T)
 			t.Fatal(err)
 		}
 		request := runspec.Request{Git: runspec.Git{Repository: repository}, Source: runspec.Source{Location: runspec.SourceLocation{LocalCheckout: root}}}
-		_, _, err = tenant.replaceConsentedSchedules(t.Context(), a, root, []CronSchedule{row}, []runspec.Request{request}, true)
+		_, _, err = tenant.replaceConsentedSchedules(t.Context(), &a, nil, root, []CronSchedule{row}, []runspec.Request{request}, true)
 		rewriteSchemaCount(t, tenant.s.db, "cron_schedules", 0)
 		return err != nil
 	}
@@ -303,13 +380,48 @@ func TestScheduleRunNowPreservesCadenceWhilePaused(t *testing.T) {
 type scheduleFollowPolicy struct {
 	scheduleFixturePolicy
 	revision *string
+	failure  *error
 }
 
 func (p scheduleFollowPolicy) ResolveScheduleSource(ctx context.Context, row CronSchedule, request runspec.Request) (runspec.Request, error) {
+	if p.failure != nil && *p.failure != nil {
+		return request, *p.failure
+	}
 	request, err := p.scheduleFixturePolicy.ResolveScheduleSource(ctx, row, request)
 	request.Git.SHA = *p.revision
 	request.Source.Ref = request.Git.SHA
 	return request, err
+}
+
+func TestAppScheduleReplayKeepsFirstSealWithoutSourceProvider(t *testing.T) {
+	for _, unavailable := range []bool{false, true} {
+		t.Run(fmt.Sprint(unavailable), func(t *testing.T) {
+			tenant, row, due := scheduleIntakeFixture(t, 1)
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET locked_ref=''`)
+			row.LockedRef = ""
+			revision := "0123456789abcdef0123456789abcdef01234567"
+			var failure error
+			tenant.s.intakePolicy = scheduleFollowPolicy{scheduleFixturePolicy: scheduleFixturePolicy{tenant.s.intakePolicy}, revision: &revision, failure: &failure}
+			first, err := tenant.AdmitScheduledRun(t.Context(), row, due)
+			if err != nil {
+				t.Fatal(err)
+			}
+			revision = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			if unavailable {
+				failure = fmt.Errorf("source provider unavailable")
+			}
+			replay, err := tenant.AdmitScheduledRun(t.Context(), row, due)
+			if err != nil || !replay.Replayed || !reflect.DeepEqual(first.Request, replay.Request) {
+				t.Fatalf("committed App schedule depended on source provider: run=%s replayed=%t err=%v", replay.RunID, replay.Replayed, err)
+			}
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_installations SET suspended=1`)
+			if replay, err := tenant.AdmitScheduledRun(t.Context(), row, due); err == nil || replay.RunID != "" {
+				t.Fatalf("revoked App authority replayed: run=%s err=%v", replay.RunID, err)
+			}
+			rewriteSchemaCount(t, tenant.s.db, "runs", 1)
+			rewriteSchemaCount(t, tenant.s.db, "triggers", 1)
+		})
+	}
 }
 
 func TestScheduleReplayKeepsFirstSealAfterFollowedRevisionMoves(t *testing.T) {
@@ -398,4 +510,13 @@ func TestScheduleRepositoryCapCommitsOnlyTenRepositories(t *testing.T) {
 	if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err != nil {
 		t.Fatalf("replacement at cap: %v", err)
 	}
+}
+
+func prepareAppPublication(t *testing.T, tenant *Tenant, installation, repository int64) GitHubAppPublication {
+	t.Helper()
+	p, _, err := tenant.PrepareGitHubAppPublication(t.Context(), installation, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

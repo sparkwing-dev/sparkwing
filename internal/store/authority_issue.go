@@ -92,7 +92,11 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 		}
 	}
 	if request.Award != nil {
-		if err := persistUnitBillingTx(ctx, tx, c); err != nil {
+		var price *CreditRate
+		if prospective != nil {
+			price = prospective.selectedPrice
+		}
+		if err := persistUnitBillingTx(ctx, tx, c, price); err != nil {
 			return capability.Issued{}, err
 		}
 		if err := observeUnitTx(ctx, tx, c.Prefix); err != nil {
@@ -131,6 +135,7 @@ func decodeAwardUnit(kind capability.UnitKind, id string) (UnitRef, error) {
 }
 
 type awardRow struct {
+	selectedPrice                                  *CreditRate
 	team, run, node, holder, prefix, repo, display string
 	generation, attempt, created                   int64
 	expiry, lease, cancel                          sql.NullInt64

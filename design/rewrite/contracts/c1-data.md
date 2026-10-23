@@ -452,10 +452,13 @@ and principal-prefix helpers are removed. Here admission and award use
 `AdmitRun` and `Issue`, with `limits.ClaimWindow` bounding first acquisition.
 
 `RecordRunnerPoll(ctx, UnitDemand)` replaces `RecordAgentLabels`. It checks live
-unbound machine authority and valid resources, strips reserved label keys and
-stores observed capacity, labels and the store timestamp on the capability row.
+machine, Actions, launcher or here authority, strips reserved label keys and
+stores observed labels, platform and the store timestamp on the capability row.
 `capabilities.claim_observation_json` holds the observations. It carries no bearer.
 The observation never supplies granted identity, pools or repository authority.
+A here trigger award copies its host observation onto the owner capability,
+without the trigger request's target or kind filter. The owner can then take
+eligible nodes through the same query as every other claimant.
 
 `ClaimPlacement.Preferences` is an ordered list of `PlacementPreference` values.
 Each step has matcher `Prefers` terms and a `Hold`. An empty term list matches
@@ -468,7 +471,7 @@ The existing controller flags configure this two-step case.
 
 Named, queued and reconciled job claims use the same policy and matcher.
 The store rechecks the earlier runner's ancestry, tenant, job-claim rights,
-repository, selectors, pools and available capacity. Poll JSON records its own
+repository, selectors and pools. Poll JSON records its own
 store-clock `observed_at`. Other credential activity cannot refresh that poll.
 Held claims leave the job, awards and event sequence unchanged. The removed
 `RunnerPresence` and caller-supplied `Live` list have no consumers. Liveness
@@ -482,15 +485,18 @@ node reference, generation and declaration hash. `OwnerCanExecute(principal)`
 checks those bindings before the host selects inline execution. Public snapshots
 and plan/eval snapshots carry no self-execution decision.
 
-The projection and transactional reconciliation use the shared matcher,
-resource checks and configured preference holds. Reconciliation returns Dispatch
-when current matching or capacity declines self-execution. It still performs
+The projection and transactional reconciliation use the shared SQL eligibility
+predicate and configured preference holds. Reconciliation returns Dispatch
+when current eligibility declines self-execution. It still performs
 the normal transactional claim checks before issuing any node award.
 
 Local hosts use their configured profile resolver. Remote trigger owners use
 the persisted poll of a current registered ancestor with the same machine
 subject. The live owner lease supplies self-claim liveness because its occupied
-slot can prevent another root poll. Zero or future observation times are refused.
+slot can prevent another root poll. Owner execution offers are constructed from
+captured labels and platform, with one slot for the owner's own run, independently
+of the poll's remaining queue slots and target or kind filters. Zero or future
+observation times are refused.
 Other runners still need fresh root polls to hold work through preferences.
 
 Plan private snapshots require `data.read`, `plan_owner` and the live plan lease.
@@ -541,7 +547,7 @@ remaining callers. Current child admission remains `Tenant.AdmitRun`.
 `HeartbeatNodeClaimWithCredits` are removed. Named job awards use `ClaimUnit`
 with a `UnitNode` target and live capability authority. The stored enrollment
 selects the holder and placement. Naming a job requires the same readiness,
-repository, grant and capacity checks as the queue. Owners self-claim through
+repository, grant, label and funding checks as the queue. Owners self-claim through
 `ReconcileNode`. Renewal uses `RenewUnit` with the awarded capability prefix.
 
 The legacy node claim and node heartbeat HTTP routes are removed. The current
@@ -550,7 +556,7 @@ holder, lease or sizes-to-class flag survives on those routes.
 
 `TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty` drives real intake,
 acceptance, enrollment, start, report and owner completion with generated job
-identifiers, labels and resources. Refused requests preserve the full snapshot,
+identifiers and labels. Refused requests preserve the full snapshot,
 award count and event count. `TestRenewUnitCannotMutateAStaleJobProperty` checks
 root, revoked, expired, superseded, wrong-holder and forged authority with both
 execution observations. Refusal preserves the job and creates no interval or
@@ -814,13 +820,103 @@ The queue check preserves the blocked job's complete row across unsuccessful
 scans and proves that current push authority excludes another repository.
 The native scenario catalog is unchanged.
 
-## Shared launcher claim queue
+## Shared claim eligibility and delivery effects
 
-`Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, the launcher-only
-scan/cursor and `Client.ClaimLaunch` are removed. Launcher awards use
-`Store.ClaimUnit` and the common ordered matcher. Unit kinds, enrollment,
-current authority and billing remain transaction facts. Bootstrap exchange
-preserves the award fence.
+Every named, queued, personal, burst, self-hosted, pool and Cloud claim uses one
+SQL eligibility predicate. It includes readiness, current grants and bindings,
+repository access, trust, all selector terms, exclusions, placement and funding.
+Host plan acceptance and settings resolution share one label normalizer: trim
+outer whitespace, remove empty labels and keep the first occurrence. SDKs carry
+raw declarations. Selector terms and alternatives are indexed when work is sealed.
+Required-label eligibility and route selection share one reader of that index;
+runner selection keeps its label-term alternatives.
+`claim_contexts` assigns immutable policy contexts to source rows at intake,
+plan acceptance and expansion insertion. A context hash includes the request,
+provenance, resolved options and guards, job execution settings, repository
+scope, allowed pools and creator. Seal identities, source revisions, timestamps and unrelated job declarations
+do not split otherwise equal contexts. The context row stores
+only its identity, requirement set and unit kind; it duplicates no run policy.
+
+Label lookups select matching requirement sets, then context routes. Ready
+source indexes use team, requirement set, context, arrival and identity. A
+transaction-local merge selects one head per unit kind from each route and
+compares those heads in the award order. Nodes and triggers carry explicit
+contexts; only evaluations use the context-free route. Indexed requirement
+alternatives narrow the proof's observers; the SQL predicate checks every term.
+The shared eligibility and ranking predicate proves holds in a batch. A proof supplied by an unbound shared
+claimant skips that context: its earliest ready job is inside the ranking
+window, so every later ready job is held too. Personal, bound and Actions
+claimants cannot supply that proof because they can distinguish runs within a
+context. Selected heads still pass
+the complete predicate and atomic award recheck. Rejected heads advance only
+that transaction's route. Named rechecks seek the complete team and unit key.
+Local foreground intake seals `Request.LocalForeground`. An omitted dispatch
+is resolved from the request before checking foreground authority. The shared predicate
+reserves the original intake's generation-zero trigger for a named claim by the
+submitting OS account. Queued polls retain their original unnamed intent when
+an indexed head recheck names a candidate. Detached intake, retry destinations
+and subsequent lease recovery use normal queue eligibility. No process-local
+queue gate participates in this reservation.
+There is no persisted scan state. Ordering uses each team's last committed award
+ordinal, then arrival and stable identity. Only an awarded claim advances that
+ordinal. Queue arbitration serializes holds and awards. Claims take the controller
+lease, queue arbitration, authority and unit rows, then the ledger. Taking queue
+arbitration or a new team lock after a ledger lock poisons the transaction before
+acquisition. Billing pages, standing decisions, and team and account deletion
+take team rows and authority before ledger locks. Team rows use no-key-update strength because their names never change;
+ledger writes can take foreign-key key-share locks without waiting for deletion. Award rechecks SQL eligibility and reserves the unit and funding atomically.
+For a ready job naming no runner, the existing placement-hold predicate holds
+work for the best-ranked tier with a live claimant on the same team, matching
+labels and a free slot in its latest poll. The hold ends when that claimant takes
+the job or the 5-second `RankingWindow` expires. Busy or offline higher tiers
+cause no wait. Any eligible claimant may take the job after the window; there is
+no post-window grace. Both ranking and `Prefers` holds use one admissible
+claimant/work relation: complete eligibility, ranking permission and a free slot.
+Owner self-execution offers its own slot instead of reusing the last poll.
+Preference scoring and durable asks
+are removed. Polls carry optional `free_slots`: absent means one available slot;
+zero means busy. Each award consumes one advertised slot. Each loop reports
+its configured concurrency minus active awards.
+Context and requirement references prevent retention from removing policy still
+used by work. Run retention removes unused contexts before unreferenced
+requirement sets and their terms. Tenant purge follows the same dependency order. Work without ranking,
+burst placement or preferences omits those relations from its SQL plan. Ranked
+work without preferences keeps ranking and omits preference relations.
+Named work without placement relations hydrates only its current claimant.
+Scoped polls hydrate machines from their source team and keep service observers.
+The predicate joins work to claimant scope by team before evaluating pairs.
+Cancelled, finished or expired named work reports its state refusal before
+funding diagnostics. Named claims resolve the run within the claimant's team
+before kind or trust diagnostics. Only the Cloud launcher may resolve across teams.
+Repository routing identities are lowercased by `sourceurl.RoutingIdentity` at intake.
+Private owner placement projections use that same SQL predicate before readiness.
+They write no awards, reservations or fair-share ordinals. Readiness is
+rechecked when the owner asks to execute.
+Runner matching has no CPU or memory fit. Cloud size labels map to credit classes
+in one catalog. Existing AND-between-terms and OR-within-terms semantics remain.
+
+A per-team fault ledger owns attribution, deduplication, claim blocking and
+quarantine permission. Counted faults and nodes permitted for quarantine are
+separate sets. Every contained release fault is counted before claiming again.
+
+Intake funding is a placement and billing policy decision. Current occupancy and
+launcher registration cannot turn permitted unmetered work into a paid-only
+credit failure.
+
+A canonical delivery and targeted effect identify one transactional receipt.
+Targets include `admit:<pipeline>`, `publish:<repository>`,
+`withdraw:<repository>` and `lifecycle:<kind>`. Each receipt stores the committed
+result. Reprocessing returns it without repeating the effect. Empty effect keys
+are refused. Repository publication generations and consent are captured before
+source fetch, checked and advanced in the publishing transaction. Withdrawals
+and consent changes advance that generation. Installation connection generation
+fences remain in force. Losing that connection during source preparation is a
+revoked admission or publication, with no receipt for the refused effect.
+Failed deliveries never retry automatically.
+
+`Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `Client.ClaimLaunch`,
+launcher sweep frontiers and probe savepoints are removed. Bootstrap exchange
+preserves the award fence, and pool claims still launch a fresh pod per claim.
 
 The unused `Tenant.SetRepoDispatch`, `Store.SeedToken`,
 `ErrSeededTokenRevoked`, `Store.CheckClaimSensitive`,
@@ -829,6 +925,12 @@ The unused `Tenant.SetRepoDispatch`, `Store.SeedToken`,
 The capability issuer, binding transactions, sealed intake and source release
 own their retained responsibilities. Seeded startup bootstrap uses the gated
 `Store.Issue` transaction described above.
+
+Installation withdrawal and listing reconciliation share one targeted receipt.
+It commits the complete original repository set and aggregate result with the
+withdrawals, before a replay can enumerate current repositories. Individual
+repository effects retain their own receipts. A changed listing or processing
+branch cannot expand an already applied installation effect.
 
 ## Launcher award snapshots
 
@@ -1513,8 +1615,7 @@ the one-time bearer after commit and discard it on validation or storage errors.
 Controller claim adapters use the installed enrollment resolver and a
 `RunnerAdmissionPolicy`. `SignedRunnerAdmission` delegates index verification and
 runner eligibility to `internal/engine`. Request bodies supply requested kinds,
-labels and available resources. Persisted authority supplies identity, total
-capacity, repositories and pools. Cancellation and renewal repeat their store
+labels and observed platform. Persisted authority supplies identity, repositories and pools. Cancellation and renewal repeat their store
 fences. Expansion replay returns the persisted `ExecutionJob` in each `Current`.
 
 `Store.CheckBinding` and the transaction's `CheckBinding` reload current authority
@@ -1523,7 +1624,7 @@ the persisted binding or grants. The checker covers run, job, owner, plan,
 pipeline, child-generation, own-unit, declared dependency/recovery, source and
 secret relations. C2 still owns route grants and liveness classes. Named claim
 checks share the matching-input reader without taking write locks. The awarding
-transaction evaluates observed labels and available resources through the matcher.
+transaction evaluates observed labels and observed platform through the matcher.
 Data selectors call the transaction's `DataAccessChecker`, supplied by the blob
 owner. Receipt and read-edge changes in that transaction govern its verdict.
 Concurrency binding resolves the accepted group and exact holder generation
@@ -1862,7 +1963,7 @@ checkouts idempotently. No caller-selected team or credit amount reaches settlem
 
 The unit lifecycle joins W1b's billing helpers in the claim, start, renewal,
 release, plan acceptance, expansion acceptance, finish and reaper transactions.
-Pricing comes from the sealed request or resolved job resources. The existing
+Pricing comes from the selected fixed Cloud size label and its exact credit class. The existing
 minute reservation is refundable. C2's calculator applies the separate final
 minimums, including zero for plan/eval. A here intake capability authorizes a
 future claim and opens no compute reservation at generation zero.
@@ -2013,18 +2114,20 @@ fail projection. Both owners pass this result to the same pure `Decide`.
 
 C1 owns placement input construction. `matchingInputsTx` derives `match.Profile`
 identity and `ReservedPools` from the live capability and its enrollment facts.
-It derives `match.Demand.Selector`, `Prefers` and `Request` from resolved execution
-settings and `AllowedPools` from intake. Every named, queued and self claim calls
-`match.Evaluate` with those inputs. `UnitDemand.Target` selects a named unit;
+It derives `match.Demand.Selector` and `Prefers` from resolved execution
+settings and `AllowedPools` from intake. Every named, queued and self claim
+checks the shared SQL predicate with those inputs. `UnitDemand.Target` selects a named unit;
 absence selects the ordered eligible queue. Reservations require an explicitly
 required granted pool that intake allowed. A self-asserted `pool=` label grants
-nothing. Preferences rank only eligible work. `match.Fits` checks availability.
+nothing. Preference holds apply only between eligible claimants. The shared SQL
+query orders jobs by team award ordinal, arrival and identity. It does not score
+queued jobs by preferences or match CPU and memory observations.
 
 `ClaimProfileResolver` supplies enrolled repository acceptance and location,
 plus the host observations needed by a self-claim. The store replaces its name,
 class and reserved pools with authenticated capability facts. Self-claims
 require this resolver because `ReconcileRequest` carries no machine observations.
-Named and queued claims still carry their observed labels and capacity in
+Named and queued claims carry their observed labels and platform in
 `UnitDemand`.
 
 Repository matching checks every capability ancestor. Canonical repository keys
@@ -2263,7 +2366,7 @@ local publication transport and physical bytes remain integration obligations.
 | `RunSnapshot.Scheduling` | Projects declarations and persisted state into the scheduling graph. |
 | `ScheduleNode`, `ScheduleExpansion`, `ScheduleSnapshot` | Carry the accepted graph, including empty generator groups. |
 | `DecisionKind`, `NodeDecision`, `ScheduleDecision`, `Decide` | Define one pure graph decision consumed by both owners. |
-| `UnitRef`, `UnitDemand` | Select named or queued work with observed capacity and labels. |
+| `UnitRef`, `UnitDemand` | Select named or queued work with observed platform and labels. |
 | `match.Profile`, `match.Demand`, `match.Evaluate` | Match granted reservations against sealed requirements and authorized pools. |
 | `blob.LogSubjectKind`, `blob.LogUnitKind` | Select attempt versus unit logs and the persisted owner-unit kind. |
 | `blob.LogSubject`, `blob.LogUnit`, `blob.LogSource`, `blob.LogSubject.Validate` | Carry and validate one fenced log identity. |
@@ -3392,7 +3495,8 @@ selection, before inserting either the run or its owner. The single per-principa
 guard uses the authenticated subject kind and ID within its tenant, including
 unmetered members. Retry admissions use the committed retrier lineage for the
 subject kind because the source request retains its original actor. An account
-and machine sharing an ID have separate budgets. The global guard covers every team. Both read committed run admissions
+and machine sharing an ID have separate budgets. The global guard covers every team and uses only the configured cap. Pending
+execution backlog never derives a per-team hourly share. Both read committed run admissions
 under the shared store serialization, never summed usage counters. Refusals preserve ErrComputeLimit and expose canonical rate_limited with the
 existing five-second retry delay. Replay spends no second slot. Raw pending-run attribution and token metering are not intake
 inputs. The unused OldestWaitingReadyNodeForPrincipal diagnostic is removed.
@@ -3481,8 +3585,8 @@ collection releases every decline hold on that team.
 
 ## Decision 112 production hosted pages
 
-`Tenant` implements C2's `BillingWriter` directly. Billing writes lock the ledger
-before the team and recheck current member authority at commit. `billing_pages`
+`Tenant` implements C2's `BillingWriter` directly. Billing writes lock the team
+and member authority before the ledger, then recheck authority at commit. `billing_pages`
 is a tenant table with the reservation ID, caller account ID, request key,
 payment mode, immutable page facts and failed-delivery time. Its unique key is
 `(team, account_id, request_key)`. Changing kind or requested amount conflicts.
@@ -3730,36 +3834,26 @@ are refused and need a fresh baseline; no migration or backfill is added.
 committed billing reservation in one snapshot. It returns no allocation for
 customer machines or here ownership. A Cloud award returns the CPU class
 recorded in its reservation charge and `CPUClassMemoryBytes` for that class.
-The current price table and authored resource settings cannot resize that award.
+The current price table and later labels cannot resize that award.
 Bootstrap exchange retains the reservation and its allocation. A consumed
 bootstrap cannot read it again. No new price, tier, limit or schema field is added.
 
-The allocation property starts with an implicit resource request, replaces the
+The allocation property starts with the smallest Cloud size, replaces the
 price table, and exchanges the bootstrap. Generated table changes retain the
 original class and memory. Customer machine awards retain no Cloud allocation.
 
-## Unhinted job matching
+## Label requirements
 
-Node matching resolves an all-zero resource request to the existing one-core
-machine admission charge. `internal/admission.DefaultChargeCores` owns that
-value for both the local queue and the shared matcher input. This projection
-does not change the seal or the Cloud allocation. It applies to direct claims,
-queued claims, owner self-claims and preference liveness through the same
-matching-input reader. Explicit CPU or memory requests retain their values.
-Trigger ownership keeps its existing request so a saturated here machine can
-still host scheduling and overflow.
+All claims use sealed label requirements and observed platform facts. There is
+no implicit CPU request, CPU/memory fit or current free-resource observation.
+Cloud sizes use the catalog in `pkg/match/cloud_sizes.go`; an unspecified size
+selects its existing smallest two-core allocation for billing and delivery.
 
-## Burst reservation before self-claim
+## Burst self-claim eligibility
 
-`ReconcileRequest.Reserved` is optional machine capacity already held for this
-job. The owner supplies its actual local admission grant. Within the same
-transaction as eligibility and self-claim, C1 adds that amount to the
-machine's observed free resources. Invalid, nonfinite, negative and
-above-capacity reservations refuse. The transaction still checks the current
-owner, claim fences, repository, selectors and placement. Private snapshot
-eligibility and ordinary claims see only free resources. The reservation never
-updates the stored observation, so concurrent heartbeats cannot erase it or
-advertise it to another job. Existing callers omit the field.
+Burst self-claims use the canonical label predicate and live owner fence.
+They carry no resource reservation or free-capacity observation. The atomic
+award rechecks repository access, selectors, placement and funding policy.
 
 ## Local dependency-cache scope
 
@@ -3886,15 +3980,16 @@ source location, owner unit, first seal and completion intent. Failed validation
 or effects roll all of them back. A retry of the signed body and pipeline returns
 the existing run without spending another number or admission slot.
 
-`github_app_deliveries.admitted_team` is an empty string until the first successful
-admission of that signed body. The same transaction binds it to the tenant.
-Partial deliveries retain that binding even while another pipeline is shed.
-Moving the installation cannot admit the body into a second tenant. The event
-row expires with the existing replay retention. No schema migration is added.
+A fresh installation connection receives a random generation. Ingress records
+that generation and installation ID with the signed body under the installation
+lock. One transaction fence compares the receipt with the live connection before
+manual processing, every delivery mutation, and admission. Moving away and back,
+or disconnecting and reconnecting within one team, cannot revive an old delivery.
+The receipt expires with the existing replay retention.
 
 Replay keys use the signed body digest plus pipeline and are selected inside the
-tenant. The processed-body marker still prevents replays across installations
-that move teams. `GitHubCommitRuns` replaces `GitHubCommitTriggers` and reads
+tenant. The connection fence prevents replays across replacement installation
+bindings. `GitHubCommitRuns` replaces `GitHubCommitTriggers` and reads
 sealed requests in one query by tenant, numeric repository and exact SHA.
 Re-request selection uses those facts rather than removed trigger environment
 columns. OIDC classification uses the event in the seal, so expiry of the replay
@@ -4123,8 +4218,7 @@ also requires the private transaction proof carrying the failed poller's matchin
 inputs. A public TransitionNode caller cannot manufacture it. Its guard rechecks live claimant ancestry, repository and unit scope, metered placement,
 matching policy and the current price table. Only a still-unpriced job can fail
 with unpriced_cpu_class. Claim issuance rolls back before that guarded edge,
-so no award, attempt or charge survives. Named and queued claims check pricing
-before resource fit. Pricing refusal does not limit unmetered self-hosted work.
+so no award, attempt or charge survives. Named and queued claims check the exact selected size price before award. Pricing refusal does not limit unmetered self-hosted work.
 The guard is exercised by generated foreign, missing, revoked and repriced cases.
 
 IntakeQueueDepth reads the tenant queue from the same admission transaction.
@@ -4174,9 +4268,9 @@ The obsolete OutputRef type, output-prefix helpers and writers for the deleted
 node_outputs/data_objects tables are removed, along with direct-upload key and
 SHA validators with no callers. Current record and upload authority is unchanged.
 
-CreditRateTable.ClassForResource takes match.Resources directly. The unused
+CreditRateTable.ClassForLabels uses the fixed catalog label's exact credit class. The unused
 ExecutorResource alias and nodeChargeTx/profile-fallback reader are removed.
-Billing still prices the resources sealed for the awarded unit. Later profile
+Billing prices the selected Cloud size label for the awarded unit. Later profile
 pins cannot reprice it. Storage inventory's unused lockTeamStorageTx and the
 unused legacy NodeLogSealGrace constant are also removed. The current blob,
 retained-storage and log transactions remain their respective writers.
@@ -4312,6 +4406,8 @@ Successful transaction construction captures database time. Failure to read that
 clock aborts construction before any transaction body runs. Read transactions
 keep that instant and one database snapshot. Mutation authority and lease checks
 read fresh database time after lock waits or policy work through `storeTx.now`.
+Claim funding and final lease bounds read time after issuance, including any
+billable intervals it opened.
 A failed clock read poisons the transaction: later SQL returns that error,
 commit rolls back, and transaction callbacks cannot hide it behind success
 or a different refusal. Mutation transactions expose no stored snapshot
@@ -4335,7 +4431,7 @@ Runs, nodes and triggers store a generated `drain_deadline_at` from their first
 `cancel_requested_at` plus five minutes. The database derives it in the same
 write, including concurrency supersession. Cancellation clamps existing work and
 slot leases. Renewal uses `leaseBound` for the authority, cancellation and funded
-bounds. The schema baseline is version 20.
+bounds. The schema baseline is version 22.
 The shared capacity writer applies the bound to each holder and waiter,
 including controller reconciliation.
 Node capacity follows the later live claim or owner lease; plan capacity follows
@@ -4363,6 +4459,26 @@ its job outcomes and resolves expansions, then derives the run verdict through
 the shared scheduler. Existing required-job failures retain their effect.
 Completion returns the committed outcome and reason, which the host reports
 and the foreground CLI uses for its exit status.
+
+
+## Intake funding and launcher faults
+
+Funding admission uses the sealed placement and team billing policy. It never
+consults runner registration, polls, observed labels or current occupancy. A
+policy that permits unmetered execution leaves an unfunded push pending;
+Cloud-only placement or an exclusive Cloud ranking checks credit standing,
+including prepaid policy and holds, before admitting executable work. A
+refused push remains terminal history and replay retains that result.
+
+Each launcher pass has one fault ledger attributed only by protected team
+labels. Every contained teardown, release or quarantine fault enters that
+ledger once per node. More than three distinct faults block that team's next
+claim. Quarantine permission is tracked separately and permits at most three
+distinct nodes per team per pass; counting a fault grants no write permission.
+Reservation evidence on protected team nodes is classified before namespace
+filtering. Erased identity annotations still consume the protected label's budget
+when a reservation taint or quarantine remains. Only a recorded team matching the
+protected label in the launcher's namespace permits a quarantine or release write.
 
 ## Sealed masking projection (decision 43)
 

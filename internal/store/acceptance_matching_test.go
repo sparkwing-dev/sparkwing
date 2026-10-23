@@ -19,8 +19,8 @@ import (
 
 type matchingEnrollment struct{ profile match.Profile }
 
-func (e *matchingEnrollment) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	return e.profile, e.profile.Capacity, nil
+func (e *matchingEnrollment) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return e.profile, nil
 }
 
 func TestStoreClaimMatching(t *testing.T) {
@@ -40,15 +40,15 @@ func TestStoreClaimMatching(t *testing.T) {
 func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	t.Helper()
 	ctx := t.Context()
-	enrollment := &matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}}
+	enrollment := &matchingEnrollment{profile: match.Profile{}}
 	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: enrollment}))
 	job := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	labels := []string(nil)
 	pools := []string(nil)
 	switch scenario {
 	case "capacity":
-		job.Resources = &nodeproto.ResourceSpec{Cores: new(float64(4))}
-		enrollment.profile.Capacity.Cores = 2
+		job.Requires = append(job.Requires, "sparkwing-4cpu")
+		labels = []string{"sparkwing-2cpu"}
 	case "name":
 		job.Requires, labels = []string{"name=other"}, []string{"name=other"}
 	case "missing_labels":
@@ -67,7 +67,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 		job.Requires, pools = []string{"pool=prod"}, []string{"prod"}
 	}
 	expectedProfile := enrollment.profile
-	enrollment.profile = match.Profile{Capacity: match.Resources{Cores: 8}}
+	enrollment.profile = match.Profile{}
 	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		doc.Jobs = []nodeproto.JobSpec{job}
 	})
@@ -105,7 +105,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{unit.Kind}, Available: match.Resources{Cores: 8}, Labels: labels}
+	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{unit.Kind}, Labels: labels}
 	if named {
 		demand.Target = &unit
 	}
@@ -117,7 +117,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	}
 	switch scenario {
 	case "capacity":
-		enrollment.profile.Capacity.Cores = 8
+		demand.Labels = []string{"sparkwing-4cpu"}
 	case "name":
 		replacement, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":other", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "other"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 		if err != nil {
@@ -159,6 +159,10 @@ func assertMatchingRefusal(t *testing.T, err error, named bool) {
 	t.Helper()
 	var denied *apierr.Error
 	if named {
+		var holder *store.ErrIllegalTransition
+		if errors.As(err, &holder) && holder.Reason == store.ReasonHolderRights {
+			return
+		}
 		if !errors.As(err, &denied) || denied.Code != apierr.Forbidden && denied.Code != apierr.LockHeld {
 			t.Fatalf("named claim failed outside matching: %v", err)
 		}

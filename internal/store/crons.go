@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -437,60 +438,99 @@ func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declare
 
 // WithdrawGitHubCronRepository stops only this team's App schedules for one
 // installation and repository, keeping their cursor, overrides and history.
-func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64) (out int64, err error) {
-	err = t.s.inTxOnce(ctx, func(tx *storeTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
-			WHERE team = ? AND github_installation_id = ? AND github_repository_id = ? AND declared = 1`,
-			tx.now(ctx).UnixNano(), string(t.team), installationID, repositoryID)
-		if err != nil {
-			return err
-		}
-		out, err = res.RowsAffected()
-		return err
-	})
-	return out, err
+func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64) (int64, error) {
+	return t.withdrawGitHubCrons(ctx, fmt.Sprintf("withdraw:%d:%d", installationID, repositoryID), repositoryID,
+		`github_installation_id=? AND github_repository_id=?`, installationID, repositoryID)
 }
 
-// WithdrawGitHubCronInstallation stops every App schedule this installation
-// armed for the team without touching manually pushed rows.
-func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64) (out int64, err error) {
-	err = t.s.inTxOnce(ctx, func(tx *storeTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
-			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-			tx.now(ctx).UnixNano(), string(t.team), installationID)
-		if err != nil {
-			return err
-		}
-		out, err = res.RowsAffected()
-		return err
-	})
-	return out, err
+type githubInstallationWithdrawal struct {
+	Repositories []int64
+	Count        int64
 }
 
-// WithdrawOtherGitHubCronInstallations stops this team's App schedules for a
-// repository that another of its installations armed.
-func (t *Tenant) WithdrawOtherGitHubCronInstallations(ctx context.Context, installationID, repositoryID int64) (out int64, err error) {
-	err = t.s.inTxOnce(ctx, func(tx *storeTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
-			WHERE team = ? AND github_repository_id = ? AND github_repository_id > 0
-			  AND github_installation_id != ? AND declared = 1`,
-			tx.now(ctx).UnixNano(), string(t.team), repositoryID, installationID)
-		if err != nil {
-			return err
-		}
-		out, err = res.RowsAffected()
-		return err
-	})
-	return out, err
+// WithdrawGitHubCronInstallation stops App schedules without touching manual rows.
+func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64) (int64, error) {
+	result, err := t.withdrawGitHubInstallation(ctx, installationID, nil, false)
+	return result.Count, err
 }
 
-// RenameGitHubCronRepository changes the clone URL under a stable App schedule
-// identity, so a rename keeps its history and no second schedule appears.
+// ReconcileGitHubInstallationRepositories withdraws consent and schedules for
+// repositories absent from the listing. A delivery replay keeps its original targets.
+func (t *Tenant) ReconcileGitHubInstallationRepositories(ctx context.Context, installationID int64, covered []int64) error {
+	_, err := t.withdrawGitHubInstallation(ctx, installationID, covered, true)
+	return err
+}
+
+func (t *Tenant) withdrawGitHubInstallation(ctx context.Context, installationID int64, covered []int64, consent bool) (githubInstallationWithdrawal, error) {
+	return inTxResult(ctx, t.s, func(tx *storeTx) (githubInstallationWithdrawal, error) {
+		return githubDeliveryResultTx(ctx, tx, fmt.Sprintf("withdraw-installation:%s:%d", t.team, installationID), func() (githubInstallationWithdrawal, error) {
+			var result githubInstallationWithdrawal
+			rows, err := tx.QueryContext(ctx, `SELECT repository_id FROM github_app_automation WHERE team=? AND installation_id=? UNION SELECT github_repository_id FROM cron_schedules WHERE team=? AND github_installation_id=? ORDER BY 1`, t.team, installationID, t.team, installationID)
+			if err != nil {
+				return result, err
+			}
+			for rows.Next() {
+				var repository int64
+				if err := rows.Scan(&repository); err != nil {
+					return result, errors.Join(err, rows.Close())
+				}
+				if repository > 0 && !slices.Contains(covered, repository) {
+					result.Repositories = append(result.Repositories, repository)
+				}
+			}
+			if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+				return result, err
+			}
+			for _, repository := range result.Repositories {
+				if consent {
+					if err := t.withdrawGitHubAppAutomationTx(ctx, tx, installationID, repository); err != nil {
+						return result, err
+					}
+				}
+				n, err := t.withdrawGitHubCronsTx(ctx, tx, fmt.Sprintf("withdraw:%d:%d", installationID, repository), repository, `github_installation_id=? AND github_repository_id=?`, installationID, repository)
+				if err != nil {
+					return result, err
+				}
+				result.Count += n
+			}
+			return result, nil
+		})
+	})
+}
+
+// WithdrawOtherGitHubCronInstallations stops schedules belonging to former installations.
+func (t *Tenant) WithdrawOtherGitHubCronInstallations(ctx context.Context, installationID, repositoryID int64) (int64, error) {
+	return t.withdrawGitHubCrons(ctx, fmt.Sprintf("withdraw:former:%d:%d", installationID, repositoryID), repositoryID,
+		`github_repository_id=? AND github_repository_id>0 AND github_installation_id!=?`, repositoryID, installationID)
+}
+
+func (t *Tenant) withdrawGitHubCrons(ctx context.Context, effect string, repositoryID int64, predicate string, args ...any) (int64, error) {
+	return inTxResult(ctx, t.s, func(tx *storeTx) (int64, error) {
+		return t.withdrawGitHubCronsTx(ctx, tx, effect, repositoryID, predicate, args...)
+	})
+}
+
+func (t *Tenant) withdrawGitHubCronsTx(ctx context.Context, tx *storeTx, effect string, repositoryID int64, predicate string, args ...any) (int64, error) {
+	return githubDeliveryResultTx(ctx, tx, effect, func() (int64, error) {
+		if err := bumpGitHubPublicationTx(ctx, tx, t.team, repositoryID); err != nil {
+			return 0, err
+		}
+		values := append([]any{tx.now(ctx).UnixNano(), t.team}, args...)
+		result, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared=0,updated_at=? WHERE team=? AND declared=1 AND `+predicate, values...)
+		if err != nil {
+			return 0, err
+		}
+		return result.RowsAffected()
+	})
+}
+
+// RenameGitHubCronRepository preserves schedule identity through a repository move.
 func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, repoURL string) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET repo_path = ?, updated_at = ?
-		WHERE team = ? AND github_installation_id = ? AND github_repository_id = ?`,
-			repoURL, tx.now(ctx).UnixNano(), string(t.team), installationID, repositoryID)
+	return t.s.githubDeliveryEffect(ctx, fmt.Sprintf("rename-cron:%s:%d:%d", t.team, installationID, repositoryID), func(tx *storeTx) error {
+		if err := bumpGitHubPublicationTx(ctx, tx, t.team, repositoryID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET repo_path=?,updated_at=? WHERE team=? AND github_installation_id=? AND github_repository_id=?`, repoURL, tx.now(ctx).UnixNano(), t.team, installationID, repositoryID)
 		if isUniqueViolation(err) {
 			return fmt.Errorf("%w: a schedule already uses %s", ErrCronScheduleTaken, repoURL)
 		}

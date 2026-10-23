@@ -17,6 +17,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
+
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
 // ErrNoDedicatedNode leaves the award unstarted when no exclusive placement is available.
@@ -156,8 +158,7 @@ func (b *KubernetesBoundary) release(ctx context.Context, reservation CloudNodeR
 	if raw == "" {
 		return nil
 	}
-	// safety: the node may now hold another award, so it is left untouched; sync
-	// quarantines it if what it records is not a valid reservation.
+	// safety: the node may now hold another award, so it is left untouched.
 	var held CloudNodeReservation
 	if json.Unmarshal([]byte(raw), &held) != nil || held != reservation || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
 		return &nodeFault{node: reservation.NodeName, cause: "reservation changed before teardown"}
@@ -257,7 +258,7 @@ func nodeReady(node corev1.Node) bool {
 }
 
 // TeamNodeValue is the collision-resistant value infrastructure must place on the team's dedicated nodes.
-func TeamNodeValue(namespace, team string) string { return labelHash(namespace + "/" + team) }
+func TeamNodeValue(namespace, team string) string { return admission.TeamNodeValue(namespace, team) }
 
 func daemonPod(pod corev1.Pod) bool {
 	for _, owner := range pod.OwnerReferences {

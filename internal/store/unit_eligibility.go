@@ -11,18 +11,13 @@ import (
 )
 
 const (
-	stepKinds    = "kinds"
-	stepTrust    = "trust"
-	stepTier     = "tier"
-	stepAccess   = "access"
-	stepMatch    = "match"
-	stepCapacity = "capacity"
-	stepBilling  = "billing"
+	stepKinds   = "kinds"
+	stepTrust   = "trust"
+	stepTier    = "tier"
+	stepAccess  = "access"
+	stepMatch   = "match"
+	stepBilling = "billing"
 )
-
-// safety: a named claim leaves billing to award issuance, which reports the exact credit standing. Only the
-// claimant's own claim turns an unpriced unit into an error; judging another claimant marks it ineligible.
-type eligibilityChecks struct{ lock, fit, billing, claim bool }
 
 type eligibility struct {
 	profile    match.Profile
@@ -31,7 +26,6 @@ type eligibility struct {
 	launcher   bool
 	metered    bool
 	price      CreditRate
-	score      int
 	tier       string
 	failed     string
 	refused    error
@@ -40,8 +34,16 @@ type eligibility struct {
 
 func (e eligibility) ok() bool { return e.failed == "" }
 
-// safety: claims, ranking holds and notices all judge a claimant here, so they cannot disagree about eligibility.
-func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, claimant UnitDemand, checks eligibilityChecks) (eligibility, error) {
+// explainUnitEligibilityTx supplies refusal details for placement notices; awards use claimSQL.
+func explainUnitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, claimant UnitDemand) (eligibility, error) {
+	e, err := explainUnitPlacementTx(ctx, tx, team, unit, claimant)
+	if err != nil || !e.ok() {
+		return e, err
+	}
+	return explainUnitFundingTx(ctx, tx, team, unit, e)
+}
+
+func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, claimant UnitDemand) (eligibility, error) {
 	var e eligibility
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claimant.CapabilityPrefix}, false)
 	if unavailableRunner(err) || refusal(err) {
@@ -62,7 +64,7 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, "claimant trust requires verified default-branch work and launcher mode for reserved pools")
 		return e, err
 	}
-	e.profile, e.demand, err = readMatchingInputsTx(ctx, tx, claimant, unit, checks.lock)
+	e.profile, e.demand, err = readMatchingInputsTx(ctx, tx, claimant, unit, false)
 	switch {
 	case errors.Is(err, errTierOutsideRanking):
 		seal, err := sealedRequestTx(ctx, tx, team, string(unit.RunID))
@@ -79,36 +81,33 @@ func unitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 	case err != nil:
 		return e, err
 	}
-	if e.metered {
-		if e.price, err = unitBillingPriceTx(ctx, tx, e.demand.Request); err != nil {
-			var unpriced *UnpricedCPUClassError
-			if errors.As(err, &unpriced) && !checks.claim {
-				e.failed, e.refused = stepBilling, err
-				return e, nil
-			}
-			if errors.As(err, &unpriced) {
-				unpriced.RunID, unpriced.NodeID = string(unit.RunID), string(unit.NodeID)
-			}
-			return e, err
-		}
-	}
 	verdict := match.Evaluate(e.profile, e.demand)
 	if !verdict.OK() {
 		e.failed, e.refused = stepMatch, authorityError(apierr.Forbidden, "work does not match claimant: "+verdict.String())
 		return e, nil
 	}
-	e.score = verdict.PreferenceScore
-	if checks.fit && !match.Fits(e.profile.Capacity, claimant.Available, e.demand.Request).OK() {
-		e.failed, e.refused = stepCapacity, authorityError(apierr.LockHeld, "claimant capacity is unavailable")
-		return e, nil
-	}
-	if e.metered && checks.billing {
-		funded, err := eligibleUnitBillingTx(ctx, tx, team, unit, e.price, e.launcher)
-		if err != nil {
+	return e, nil
+}
+
+func explainUnitFundingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, e eligibility) (eligibility, error) {
+	if e.metered {
+		var err error
+		if e.price, err = unitBillingPriceTx(ctx, tx, e.demand.Selector, e.profile); err != nil {
+			var unpriced *UnpricedCPUClassError
+			if errors.As(err, &unpriced) {
+				unpriced.RunID, unpriced.NodeID = string(unit.RunID), string(unit.NodeID)
+				e.failed, e.refused = stepBilling, err
+				return e, nil
+			}
 			return e, err
 		}
-		if !funded {
-			e.failed, e.refused = stepBilling, ErrInsufficientCredits
+		if err := checkUnitBillingTx(ctx, tx, team, unit, e.price, capability.CloudLauncher(e.chain[0].principal.Capability)); err != nil {
+			var refused *apierr.Error
+			if errors.Is(err, ErrInsufficientCredits) || errors.As(err, &refused) && (refused.Code == apierr.BadRequest || refused.Code == apierr.LockHeld) {
+				e.failed, e.refused = stepBilling, err
+				return e, nil
+			}
+			return e, err
 		}
 	}
 	return e, nil

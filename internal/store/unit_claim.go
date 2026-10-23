@@ -19,10 +19,14 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 	var out UnitClaim
 	var waiting error
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		out, waiting = UnitClaim{}, nil
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
 		claimant := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
+		if err := lockClaimQueueTx(ctx, tx); err != nil {
+			return err
+		}
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{claimant}); err != nil {
 			return err
 		}
@@ -30,33 +34,42 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		if err != nil {
 			return err
 		}
+		if demand.Target != nil {
+			if _, err := tx.operator.claimTargetTeamTx(ctx, tx, p.Capability, *demand.Target); err != nil {
+				return err
+			}
+		}
 		kinds, err := claimKinds(p.Capability, demand)
 		if err != nil {
 			return err
 		}
-		if !validMatchingResources(demand.Capacity) || !validMatchingResources(demand.Available) {
-			return authorityError(apierr.BadRequest, "invalid claim resources")
+		if demand.FreeSlots != nil && *demand.FreeSlots <= 0 {
+			waiting = notFound("eligible work", "")
+			return nil
 		}
-		unit := demand.Target
-		if unit == nil {
-			queued, err := queuedUnitTx(ctx, tx, p.Capability, demand, kinds)
-			if errors.Is(err, ErrNotFound) {
-				waiting = err
-				return nil
+		unit, err := queuedUnitTx(ctx, tx, demand, kinds)
+		if errors.Is(err, ErrNotFound) {
+			waiting = err
+			if demand.Target != nil {
+				waiting = tx.operator.claimRefusalTx(ctx, tx, demand, *demand.Target)
 			}
-			if err != nil {
-				return err
-			}
-			unit = &queued
+			return nil
 		}
-		out, err = tx.operator.claimUnitTx(ctx, tx, demand, *unit)
+		if err != nil {
+			return err
+		}
+		out, err = tx.operator.claimUnitTx(ctx, tx, demand, unit)
 		if err == errRankingHold {
 			waiting, err = err, nil
+			if demand.Target == nil {
+				waiting = notFound("eligible work", "")
+			}
 		}
+
 		return err
 	})
-	if err == nil && waiting != nil {
-		return UnitClaim{}, waiting
+	if err == nil {
+		err = waiting
 	}
 	if err != nil {
 		var unpriced *UnpricedCPUClassError
@@ -68,7 +81,6 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 	return out, nil
 }
 
-// safety: a held claim commits its transaction, so the ask it recorded survives; nothing else was written by then.
 var errRankingHold = authorityError(apierr.LockHeld, "work is waiting for a preferred runner")
 
 func lockClaimControllerTx(ctx context.Context, tx *storeTx) error {
@@ -132,31 +144,31 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err := validateClaimUnit(unit); err != nil {
 		return UnitClaim{}, err
 	}
+	if err := lockClaimQueueTx(ctx, tx); err != nil {
+		return UnitClaim{}, err
+	}
 	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+	if err != nil {
+		return UnitClaim{}, err
+	}
+	team, err := tx.operator.claimTargetTeamTx(ctx, tx, p.Capability, unit)
 	if err != nil {
 		return UnitClaim{}, err
 	}
 	if _, err = claimKinds(p.Capability, UnitDemand{Target: &unit}); err != nil {
 		return UnitClaim{}, err
 	}
-	var team Team
-	if err = tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id=?`, unit.RunID).Scan(&team); err != nil {
-		return UnitClaim{}, err
-	}
 	named := demand
 	named.Kinds = nil
-	standing, err := unitEligibilityTx(ctx, tx, team, unit, named, eligibilityChecks{lock: true, fit: true, claim: true})
+	named.Target = &unit
+	if _, err := queuedUnitTx(ctx, tx, named, []capability.UnitKind{unit.Kind}); err != nil {
+		return UnitClaim{}, err
+	}
+	profile, requirements, err := readMatchingInputsTx(ctx, tx, named, unit, true)
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	if !standing.ok() {
-		return UnitClaim{}, standing.refused
-	}
-	profile, requirements := standing.profile, standing.demand
 	if err = checkClaimantBindingTx(ctx, tx, p.Capability, unit); err != nil {
-		return UnitClaim{}, err
-	}
-	if err = lockRankedUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
 	if err = lockClaimOwnerTx(ctx, tx, team, unit); err != nil {
@@ -168,14 +180,26 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err = checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
-	placement, err := unitPlacementTx(ctx, tx, team, unit, demand.CapabilityPrefix, profile, requirements)
-	if err != nil {
-		return UnitClaim{}, err
+	policy, _ := ClaimPlacementFromContext(ctx)
+	placement := PlacementNone
+	if unit.Kind == capability.UnitNode {
+		var body []byte
+		if err := tx.QueryRowContext(ctx, `SELECT execution_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&body); err != nil {
+			return UnitClaim{}, err
+		}
+		var execution runspec.JobExecutionSettings
+		if err := json.Unmarshal(body, &execution); err != nil {
+			return UnitClaim{}, err
+		}
+		preferences := policy.preferencesFor(execution.Prefers.Value)
+		if len(preferences) > 0 && len(preferences[0].Prefers) > 0 {
+			placement = PlacementFallback
+			if placementRank(profile, requirements, preferences) == 0 {
+				placement = PlacementPreferred
+			}
+		}
 	}
-	if placement.hold {
-		return UnitClaim{}, errRankingHold
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM unit_asks WHERE team=? AND run_id=? AND unit_kind=? AND node_id=?`, team, unit.RunID, unit.Kind, unit.NodeID); err != nil {
+	if err := consumeClaimSlotTx(ctx, tx, demand.CapabilityPrefix, p.Capability.Team); err != nil {
 		return UnitClaim{}, err
 	}
 	unitID, err := encodeAwardUnit(unit)
@@ -199,11 +223,24 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err != nil {
 		return UnitClaim{}, err
 	}
+	chain, err := authorityChainTx(ctx, tx, p.Authority, false)
+	if err != nil {
+		return UnitClaim{}, err
+	}
+	if meteredPlacement(p.Capability, chain[len(chain)-1].principal.Capability) {
+		selected, err := unitBillingPriceTx(ctx, tx, requirements.Selector, profile)
+		if err != nil {
+			return UnitClaim{}, err
+		}
+		row.selectedPrice = &selected
+	}
 	row.holder, row.generation, row.lease = p.Capability.Subject.ID, row.generation+1, sql.NullInt64{Int64: until.UnixNano(), Valid: true}
 	issued, err := tx.store.issueTx(ctx, tx, capability.IssueRequest{Kind: capability.Award, Award: &spec}, &row)
 	if err != nil {
 		return UnitClaim{}, err
 	}
+	// Issuance can start a billable interval after the initial lease check.
+	now = tx.now(ctx)
 	funded, err := fundedBoundTx(ctx, tx, team, unit, row.generation, now)
 	if err != nil {
 		return UnitClaim{}, err
@@ -216,7 +253,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: unit.RunID, NodeID: unit.NodeID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
 		_, err = transitionNodeTx(ctx, tx, team, nodeTransition{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, To: NodeClaimed, Cause: CauseAward, Actor: actor, Extra: transitionExtra{Claim: &claim.Award}})
 		if err == nil {
-			_, err = tx.ExecContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement.reason, team, unit.RunID, unit.NodeID)
+			_, err = tx.ExecContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement, team, unit.RunID, unit.NodeID)
 		}
 	} else {
 		err = writeOwnerClaimTx(ctx, tx, claim)
@@ -247,6 +284,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if p.Capability.Purpose == capability.PurposeHere && unit.Kind == capability.UnitTrigger {
 		observation := demand
 		observation.CapabilityPrefix = claim.Award.CapabilityPrefix
+		observation.Target, observation.Kinds = nil, nil
 		observation.Labels = match.SelfAsserted(observation.Labels)
 		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now(ctx)})
 		if err != nil {
@@ -255,6 +293,9 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.now(ctx).UnixNano(), team, observation.CapabilityPrefix); err != nil {
 			return UnitClaim{}, err
 		}
+	}
+	if err := recordClaimAwardTx(ctx, tx, team); err != nil {
+		return UnitClaim{}, err
 	}
 	return claim, nil
 }
@@ -293,4 +334,46 @@ func claimPurpose(kind capability.UnitKind) capability.AwardPurpose {
 	default:
 		return capability.PurposeWork
 	}
+}
+
+func (o *Operator) claimRefusalTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitRef) error {
+	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+	if err != nil {
+		return err
+	}
+	team, err := tx.operator.claimTargetTeamTx(ctx, tx, p.Capability, unit)
+	if err != nil {
+		return err
+	}
+	diagnostic, err := explainUnitPlacementTx(ctx, tx, team, unit, demand)
+	if err != nil {
+		return err
+	}
+	if !diagnostic.ok() {
+		return diagnostic.refused
+	}
+	if err := checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
+		return err
+	}
+	diagnostic, err = explainUnitFundingTx(ctx, tx, team, unit, diagnostic)
+	if err != nil {
+		return err
+	}
+	if !diagnostic.ok() {
+		return diagnostic.refused
+	}
+	return errRankingHold
+}
+
+func (o *Operator) claimTargetTeamTx(ctx context.Context, tx *storeTx, claimant capability.Capability, unit UnitRef) (Team, error) {
+	query, args := `SELECT team FROM runs WHERE id=? AND team=?`, []any{unit.RunID, claimant.Team}
+	if capability.CloudLauncher(claimant) {
+		query, args = `SELECT team FROM runs WHERE id=?`, []any{unit.RunID}
+	}
+	var team Team
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&team)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", notFound("run", string(unit.RunID))
+	}
+	return team, err
 }

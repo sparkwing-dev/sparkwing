@@ -6,7 +6,6 @@ import "encoding/json"
 type PlanDoc struct {
 	Jobs           []JobSpec         `json:"jobs"`
 	Concurrency    []ConcurrencySpec `json:"concurrency,omitempty"`
-	Resources      *ResourceSpec     `json:"resources,omitempty"`
 	Priority       *int              `json:"priority,omitempty"`
 	ClaimWaitMS    *int64            `json:"claim_wait_ms,omitempty"`
 	AdmissionClass *string           `json:"admission_class,omitempty"`
@@ -40,7 +39,6 @@ type JobSpec struct {
 	Memo                *MemoSpec         `json:"memo,omitempty"`
 	Caches              []CacheSpec       `json:"caches,omitempty"`
 	Concurrency         []ConcurrencySpec `json:"concurrency,omitempty"`
-	Resources           *ResourceSpec     `json:"resources,omitempty"`
 	Closures            ClosureSpec       `json:"closures,omitzero"`
 	SkipIfBudgetMS      *int64            `json:"skip_if_budget_ms,omitempty"`
 	Steps               []StepSpec        `json:"steps,omitempty"`
@@ -92,12 +90,6 @@ type ConcurrencySpec struct {
 	Cost           *int    `json:"cost,omitempty"`
 	OnLimit        *string `json:"on_limit,omitempty"`
 	QueueTimeoutMS *int64  `json:"queue_timeout_ms,omitempty"`
-}
-
-// ResourceSpec preserves unset values until the setting's seal point.
-type ResourceSpec struct {
-	Cores       *float64 `json:"cores,omitempty"`
-	MemoryBytes *int64   `json:"memory_bytes,omitempty"`
 }
 
 // SourceSpec expresses checkout policy without granting repository authority.

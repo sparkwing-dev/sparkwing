@@ -93,6 +93,16 @@ func evaluationSourceCurrent(row NodeRow) bool {
 	return pendingApprovalPredicate(row) || row.Status == StatusDone && scheduleSucceeded(string(row.Outcome)) && row.Expansion == ExpansionExpected
 }
 
+func evaluationSourceSQL(q *claimSQL, node string) string {
+	spec := q.blob(node + `.spec_json`)
+	approval := node + `.status='pending' AND ` + node + `.ready_at IS NULL AND ` + node + `.claimed_by IS NULL AND ` + q.at(spec, "approval") + ` IS NOT NULL AND EXISTS (SELECT 1 FROM ` + q.array(q.at(spec, "closures", "skip_if"), "approval_skip") + `)`
+	return `((` + node + `.status='done' AND ` + node + `.outcome IN ('success','memoized') AND ` + node + `.expansion='expected') OR (` + approval + `))`
+}
+
+func (q *claimSQL) evaluationArrivalSQL() string {
+	return `COALESCE(n.finished_at,(SELECT er.created_at FROM runs er WHERE er.team=e.team AND er.id=e.run_id))`
+}
+
 func approvalEvaluationReaderTx(ctx context.Context, tx *storeTx, c capability.Capability) (bool, error) {
 	b := c.Binding
 	if c.Unit != capability.UnitEval || b.Expansion == nil || b.Expansion.Kind != capability.UnitEval {

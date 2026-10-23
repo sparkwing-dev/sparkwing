@@ -157,6 +157,10 @@ A `source:` code pin that is a full commit ID keeps the run's class. A branch or
 tag pin that does not resolve to the execution commit demotes the run to
 `asserted`, because whoever can push that ref chooses the code. The demoted run
 still receives its pipeline's scoped secrets; see [secrets](secrets.md).
+Bare names must identify a branch or tag. If both exist at different commits,
+resolution fails. Use `refs/heads/main` or `refs/tags/main` to choose one.
+Commit pins require a full commit ID. Scheduled execution resolves the named
+branch in `refs/heads/`, so a tag with the same name cannot select its code.
 
 Reserved pools are granted only to verified App runs, the children and retries
 that inherit them, and admin-armed default-branch schedule fires, which receive

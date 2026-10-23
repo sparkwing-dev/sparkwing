@@ -182,57 +182,6 @@ func TestGitHubAppTriggerOptionsRoundTripAndDefaultOff(t *testing.T) {
 	}
 }
 
-func TestGitHubAppDeliveryIsRememberedAcrossTeams(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	if seen, err := st.AsOperator().GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || seen {
-		t.Fatalf("unseen delivery = %v, %v", seen, err)
-	}
-	st.SetTestClock(t, func() time.Time { return now })
-	if err := st.AsOperator().RecordGitHubAppDelivery(ctx, "digest-1", "d-1"); err != nil {
-		t.Fatal(err)
-	}
-	st.SetTestClock(t, func() time.Time { return now })
-	if err := st.AsOperator().RecordGitHubAppDelivery(ctx, "digest-1", "d-1"); err != nil {
-		t.Fatalf("recording twice: %v", err)
-	}
-	if seen, err := st.AsOperator().GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || !seen {
-		t.Fatalf("recorded delivery = %v, %v; want seen", seen, err)
-	}
-	later := now.Add(store.GitHubAppDeliveryRetention + time.Hour)
-	st.SetTestClock(t, func() time.Time { return later })
-	if err := st.AsOperator().RecordGitHubAppDelivery(ctx, "digest-2", "d-2"); err != nil {
-		t.Fatal(err)
-	}
-	if seen, _ := st.AsOperator().GitHubAppDeliverySeen(ctx, "digest-1"); seen {
-		t.Fatal("a digest past its retention was kept")
-	}
-}
-
-func TestGitHubAppDeliveryKeepsItsFirstEvent(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	for _, tc := range []struct {
-		event string
-		want  bool
-	}{{"repository", true}, {"repository", true}, {"installation", false}} {
-		st.SetTestClock(t, func() time.Time { return now })
-		if same, err := st.AsOperator().BindGitHubAppDeliveryEvent(ctx, "digest-1", tc.event, "d-1"); err != nil || same != tc.want {
-			t.Fatalf("bind as %s = %v, %v; want %v", tc.event, same, err, tc.want)
-		}
-	}
-	if seen, err := st.AsOperator().GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || seen {
-		t.Fatalf("a bound delivery reads as processed: %v, %v", seen, err)
-	}
-	later := now.Add(store.GitHubAppDeliveryRetention + time.Hour)
-	st.SetTestClock(t, func() time.Time { return later })
-	if same, err := st.AsOperator().BindGitHubAppDeliveryEvent(ctx, "digest-1", "installation", "d-1"); err != nil || !same {
-		t.Fatalf("a binding past its retention was kept without any run starting: %v, %v", same, err)
-	}
-}
-
 func TestGitHubAppRepositoryKeysSurviveRenamesProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(193, 811))
 	for i := range 24 {

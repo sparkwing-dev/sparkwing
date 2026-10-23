@@ -31,6 +31,7 @@ func rewriteSchemaExec(t *testing.T, db rewriteSchemaExecer, query string, args 
 	if _, err := db.Exec(query, args...); err != nil {
 		t.Fatal(err)
 	}
+	projectFixtureClaimRepositories(t, db, DialectSQLite, query)
 }
 
 func rewriteSchemaRefuses(t *testing.T, db rewriteSchemaExecer, query string, args ...any) {

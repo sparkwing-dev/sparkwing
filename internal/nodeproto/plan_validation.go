@@ -3,7 +3,6 @@ package nodeproto
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"sort"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -104,6 +103,11 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 		if err := v.validateConcurrency(job.Concurrency, path+".concurrency", "job"); err != nil {
 			return PlanDoc{}, err
 		}
+	}
+	for i := range plan.Jobs {
+		job := &plan.Jobs[i]
+		job.Requires = NormalizeLabels(job.Requires)
+		job.Prefers = NormalizeLabels(job.Prefers)
 	}
 	for i, job := range plan.Jobs {
 		if err := v.registerJob(job, fmt.Sprintf("jobs[%d]", i)); err != nil {
@@ -232,14 +236,6 @@ func (v *planValidator) validatePlanSettings(plan PlanDoc) error {
 	if err := v.validatePlanConcurrency(plan.Concurrency, "plan.concurrency"); err != nil {
 		return err
 	}
-	if plan.Resources != nil {
-		if err := v.feature(CapabilityResources, "plan.resources"); err != nil {
-			return err
-		}
-		if err := validateResources(plan.Resources, "plan.resources"); err != nil {
-			return err
-		}
-	}
 	for _, item := range []struct {
 		used bool
 		name PlanCapability
@@ -264,16 +260,6 @@ func (v *planValidator) validatePlanSettings(plan PlanDoc) error {
 	}
 	if plan.Source != nil && plan.Source.Depth != nil && *plan.Source.Depth < 0 {
 		return planInvalid("plan.source.depth", "depth is negative")
-	}
-	return nil
-}
-
-func validateResources(resources *ResourceSpec, path string) error {
-	if resources.Cores != nil && (*resources.Cores < 0 || math.IsNaN(*resources.Cores) || math.IsInf(*resources.Cores, 0)) {
-		return planInvalid(path+".cores", "cores must be finite and nonnegative")
-	}
-	if resources.MemoryBytes != nil && *resources.MemoryBytes < 0 {
-		return planInvalid(path+".memory_bytes", "memory is negative")
 	}
 	return nil
 }

@@ -46,9 +46,10 @@ func TestGitHubAppRunSealsConfiguredCodePin(t *testing.T) {
 		t.Fatalf("subscribe = %d", code)
 	}
 	execution, code := pinnedSourceRepository(t, "https://github.com/acme/widgets.git")
+	f.app.SetCommit("acme/widgets", "main", code)
 	f.app.SetFile("acme/widgets", execution, ".sparkwing/sparkwing.yaml", []byte(pinnedSourceConfig))
 	if status, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", execution), ""); status != http.StatusAccepted || out["status"] != "dispatched" {
-		t.Fatalf("push = %d %v", status, out)
+		t.Fatalf("push = %d %v\nserver log:\n%s", status, out, f.logs.String())
 	}
 	got := f.triggers(olga.team)
 	team, err := f.store.ForTeam(t.Context(), store.Team(olga.team))

@@ -46,7 +46,7 @@ func TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork(t *testing.T) {
 func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, verified, claims, launcher bool) {
 	t.Helper()
 	ctx := t.Context()
-	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}}}))
+	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{}}}))
 	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		doc.Jobs = []nodeproto.JobSpec{{ID: "job", Requires: []string{"pool=prod"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 	})
@@ -96,7 +96,7 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 	if err != nil {
 		t.Fatal(err)
 	}
-	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Available: match.Resources{Cores: 8}}
+	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}}
 	if named {
 		demand.Target = &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(plan.RunID), NodeID: "job"}
 	}
@@ -112,7 +112,7 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 
 func TestRunnerTrustIsAnAdminSetCredentialFact(t *testing.T) {
 	ctx := t.Context()
-	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{Capacity: match.Resources{Cores: 8}}}}))
+	s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{}}}))
 	_, plan, err := storePlanSealRequestWith(ctx, s, func(*store.IntakeRequest, *nodeproto.PlanDoc) {})
 	if err != nil {
 		t.Fatal(err)

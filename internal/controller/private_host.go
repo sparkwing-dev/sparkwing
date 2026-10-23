@@ -193,7 +193,7 @@ func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request,
 		if body.SourceAttempt == nil || *body.SourceAttempt < 0 || *body.SourceAttempt == math.MaxInt64 {
 			return invalidEngineBody("start requires a valid captured source attempt")
 		}
-		profile, _, err := s.operator.ReadClaimProfile(r.Context(), a.Principal.Authority)
+		profile, err := s.operator.ReadClaimProfile(r.Context(), a.Principal.Authority)
 		if err != nil {
 			return err
 		}

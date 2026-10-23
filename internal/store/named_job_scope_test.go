@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
@@ -23,11 +22,12 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 	for trial := range 12 {
 		t.Run(fmt.Sprint(trial), func(t *testing.T) {
 			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies))
+			now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+			s.SetTestClock(t, func() time.Time { return now })
 			job := fmt.Sprintf("job-%x", random.Uint64())
 			label := fmt.Sprintf("tool-%x", random.Uint64())
-			cores := float64(1 + random.IntN(4))
 			tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
-				doc.Jobs = []nodeproto.JobSpec{{ID: job, Requires: []string{label}, Resources: &nodeproto.ResourceSpec{Cores: &cores}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
+				doc.Jobs = []nodeproto.JobSpec{{ID: job, Requires: []string{label}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -50,7 +50,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(job)}
-			demand := store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Labels: []string{label}, Available: match.Resources{Cores: 8}}
+			demand := store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Labels: []string{label}}
 			refuse := func(request store.UnitDemand) {
 				t.Helper()
 				before := readMutationSnapshot(t, tenant, s, plan.RunID)
@@ -73,7 +73,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			bad.Labels = []string{"name=worker", "class=cloud"}
 			refuse(bad)
 			bad = demand
-			bad.Available.Cores = cores / 2
+			bad.Labels = []string{"missing-label"}
 			refuse(bad)
 			bad = demand
 			target := *demand.Target

@@ -55,6 +55,7 @@ These grants do not confer operator-console powers.
 | Child-run depth | At most ten levels, counting the root run. A deeper child is refused with `409`, conflict detail `limit: max_child_depth`. GitHub reusable workflows also nest ten levels. |
 | Children per root | At most fifty child runs under one root run at every depth; retries do not count. More is refused with `409`, `limit: max_children_per_root`. GitHub allows fifty unique reusable workflows per run. |
 | Child run budget | A child spends the hourly run (`max_runs_per_hour`), flood and queue-depth budgets of whoever created its root, not the runner holding the parent's claim. |
+| Global hourly runs | When `max_global_runs_per_hour` is set, admission counts every run the controller committed during the past hour. New runs are refused when that count reaches the configured cap. |
 | Cloud scratch | Fixed aggregate 20 GiB, including Docker-in-Docker. |
 | Cloud Docker | `docker build`, `docker run`, Compose and `--memory` work; privileged and host-level features do not. |
 
@@ -95,6 +96,11 @@ Storage usage comes from committed blob rows and tagged log-stream records.
 live blob-upload holds. Historical usage counters and bucket listings do not
 replace those authoritative counts. Exact ticket replay never charges twice.
 Deployment reports sum usage by tenant, period and replica.
+
+Leased retention releases a free-tier slot after thirty consecutive days with
+no runs or stored bytes. New run or storage activity restarts that clock.
+Expired staging uploads still count until garbage collection removes them.
+A team that stores data again competes for an available free slot.
 
 The controller's leased maintenance pass expires records, marks unreachable
 blobs and collects tombstones after the 24-hour grace period. New references

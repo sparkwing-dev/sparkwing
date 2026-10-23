@@ -35,7 +35,14 @@ func (t *Tenant) AdmitGitHubAppRun(ctx context.Context, in GitHubAppAdmission) (
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		tx.appAdmission = &in
 		var err error
-		result, err = admitRun(ctx, tx, t.team, IntakeRequest{Authority: in.authority(), Request: in.Request, VerifiedDeliveryID: app.Value.DeliveryKey}, tx.now(ctx))
+		applied := false
+		result, err = githubDeliveryResultTx(ctx, tx, "admit:"+in.Request.Pipeline, func() (AdmissionResult, error) {
+			applied = true
+			return admitRun(ctx, tx, t.team, IntakeRequest{Authority: in.authority(), Request: in.Request, VerifiedDeliveryID: app.Value.DeliveryKey}, tx.now(ctx))
+		})
+		if err == nil && !applied {
+			result.Replayed = true
+		}
 		return err
 	})
 	if err != nil {
@@ -61,9 +68,12 @@ func (in GitHubAppAdmission) resolve(ctx context.Context, tx *storeTx) (capabili
 	if err != nil {
 		return capability.Principal{}, err
 	}
+	if _, err := githubDeliveryFenceTx(ctx, tx); err != nil {
+		return capability.Principal{}, err
+	}
 	app := in.Request.Git.App.Value
 	var event string
-	err = tx.QueryRowContext(ctx, `SELECT event FROM github_app_deliveries WHERE digest=?`+tx.forShare(), "event:"+app.DeliveryKey).Scan(&event)
+	err = tx.QueryRowContext(ctx, `SELECT event FROM github_app_deliveries WHERE digest=?`+tx.forShare(), app.DeliveryKey).Scan(&event)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && event != in.Event {
 		return refuse()
 	}
@@ -92,14 +102,8 @@ func (in GitHubAppAdmission) resolve(ctx context.Context, tx *storeTx) (capabili
 			return capability.Principal{}, err
 		}
 	}
-	bound, err := tx.ExecContext(ctx, `UPDATE github_app_deliveries SET admitted_team=? WHERE digest=? AND (admitted_team='' OR admitted_team=?)`, in.Installation.Team, "event:"+app.DeliveryKey, in.Installation.Team)
-	if err != nil {
+	if err := githubDeliveryConnectionTx(ctx, tx, app.DeliveryKey); err != nil {
 		return capability.Principal{}, err
-	}
-	if n, err := bound.RowsAffected(); err != nil {
-		return capability.Principal{}, err
-	} else if n != 1 {
-		return refuse()
 	}
 	ref := in.authority()
 	return capability.Principal{Authority: ref, Capability: capability.Capability{Team: string(in.Installation.Team), Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectService, ID: ref.ID}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}}}, nil

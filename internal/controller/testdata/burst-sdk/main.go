@@ -46,7 +46,7 @@ func (pipeline) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.RunConte
 			return err
 		}
 		return os.WriteFile("burst-result.txt", []byte("artifact from burst SDK\n"), 0o640)
-	}).Artifacts("burst-result.txt").Cache(sw.Dir("modules", sw.KeyFromFile("source-marker.txt")))
+	}).Requires("worker").Artifacts("burst-result.txt").Cache(sw.Dir("modules", sw.KeyFromFile("source-marker.txt")))
 	return nil
 }
 

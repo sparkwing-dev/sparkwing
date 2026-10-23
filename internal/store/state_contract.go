@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // RunRow is the immutable request/spec plus the mutable lifecycle read model used by hosts.
@@ -83,11 +82,10 @@ const (
 
 // ReconcileRequest names a possible source; the store checks it rather than trusting the host's cache hit.
 type ReconcileRequest struct {
-	Reserved *match.Resources
-	Ref      controllerwire.NodeRef
-	Actor    Actor
-	Policy   SourcePolicy
-	Source   *MaterializeSource
+	Ref    controllerwire.NodeRef
+	Actor  Actor
+	Policy SourcePolicy
+	Source *MaterializeSource
 	// MaterializeOnly returns Dispatch on a source miss without awarding execution.
 	MaterializeOnly bool
 }

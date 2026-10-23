@@ -10,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestBurstCancelledOwnerRenewalRetainsReportingAuthority(t *testing.T) {
@@ -34,7 +33,7 @@ func TestBurstCancelledOwnerRenewalRetainsReportingAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := here.Claim(t.Context(), controllerwire.ClaimRequest{RunID: created.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: "v1", AvailableCores: 1})
+	response, err := here.Claim(t.Context(), controllerwire.ClaimRequest{RunID: created.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: "v1"})
 	if err != nil || response.Claim == nil {
 		t.Fatalf("here claim: %+v %v", response, err)
 	}
@@ -46,12 +45,11 @@ func TestBurstCancelledOwnerRenewalRetainsReportingAuthority(t *testing.T) {
 	if _, err := c.Cancel(t.Context(), created.RunID, controllerwire.CancelRequest{Reason: "interrupt"}); err != nil {
 		t.Fatal(err)
 	}
-	available := &match.Resources{Cores: 1}
-	for _, request := range []controllerwire.RenewalRequest{{}, {LocalSecrets: values}, {Available: available}, {LocalSecrets: values, Available: available}} {
-		t.Run(fmt.Sprintf("secrets=%v/availability=%v", request.LocalSecrets != nil, request.Available != nil), func(t *testing.T) {
+	for _, request := range []controllerwire.RenewalRequest{{}, {LocalSecrets: values}} {
+		t.Run(fmt.Sprintf("secrets=%v", request.LocalSecrets != nil), func(t *testing.T) {
 			beat, err := owner.Renew(t.Context(), response.Claim.UnitID, request)
 			if err != nil || !beat.CancelRequested {
-				t.Fatalf("cancelled owner lost reporting renewal (secrets=%v available=%v): %+v %v", request.LocalSecrets != nil, request.Available != nil, beat, err)
+				t.Fatalf("cancelled owner lost reporting renewal (secrets=%v): %+v %v", request.LocalSecrets != nil, beat, err)
 			}
 		})
 	}

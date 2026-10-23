@@ -144,7 +144,7 @@ func discoverTeamDeletionLocks(ctx context.Context, tx *storeTx, set lockSet, te
 	if set.err != nil {
 		return set
 	}
-	set.add(lockGlobal, true, string(team))
+	set.add(lockLedger, true, string(team))
 	set.add(lockTeam, true, string(team))
 	ids, err := (&Tenant{s: tx.store, team: team}).memberIDsTx(ctx, tx)
 	if err != nil {
@@ -216,7 +216,7 @@ func (op *Operator) discoverAccountDeletionLocks(ctx context.Context, tx *storeT
 			return set
 		}
 		for _, team := range teams {
-			set.add(lockGlobal, true, team)
+			set.add(lockLedger, true, team)
 			set.add(lockTeam, true, team)
 		}
 	}
@@ -490,12 +490,14 @@ func (o *Operator) requireLease(ctx context.Context, team Team, holder, state st
 	})
 }
 
-// safety: runs goes last so the rows that reference a run are removed by
-// their own statements rather than by a cascade from a very large delete.
+// Run dependents go first to avoid a large cascade; requirement sets follow
+// the work rows that reference them.
 func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
 	tables := append([]string{"capabilities", "sessions", "payment_events"}, tenantTables...)
 	tables = slices.DeleteFunc(tables, func(t string) bool { return t == "credit_grants" || t == "credit_charges" })
-	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool { return t == "runs" || t == "quota_admission" }), "quota_admission", "runs") {
+	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool {
+		return t == "runs" || t == "quota_admission" || t == "claim_requirements" || t == "claim_contexts"
+	}), "quota_admission", "runs", "claim_contexts", "claim_requirements") {
 		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}

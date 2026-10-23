@@ -70,14 +70,12 @@ type RunnerConfig struct {
 	AcceptWorkingTree *bool    `yaml:"accept_working_tree,omitempty" json:"accept_working_tree,omitempty"`
 	MaxConcurrent     *int     `yaml:"max_concurrent,omitempty" json:"max_concurrent,omitempty"`
 	Labels            []string `yaml:"labels,omitempty" json:"labels,omitempty"`
-	Contribution      *string  `yaml:"contribution,omitempty" json:"contribution,omitempty"`
 	SpawnPolicy       *string  `yaml:"spawn_policy,omitempty" json:"spawn_policy,omitempty"`
 	HolderPrefix      *string  `yaml:"holder_prefix,omitempty" json:"holder_prefix,omitempty"`
 	Poll              *string  `yaml:"poll,omitempty" json:"poll,omitempty"`
 	Lease             *string  `yaml:"lease,omitempty" json:"lease,omitempty"`
 	Heartbeat         *string  `yaml:"heartbeat,omitempty" json:"heartbeat,omitempty"`
 	LocalAdmission    *bool    `yaml:"local_admission,omitempty" json:"local_admission,omitempty"`
-	KeepFree          *string  `yaml:"keep_free,omitempty" json:"keep_free,omitempty"`
 }
 
 // CacheConfig bounds only the local binary cache; explicit zero disables a bound.

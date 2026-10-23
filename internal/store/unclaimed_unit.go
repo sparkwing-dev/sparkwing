@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // UnclaimedUnit is a live run's longest-waiting unit that no claimant holds.
@@ -84,7 +85,7 @@ func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 	observed := map[string]bool{}
 	for _, poll := range polls {
 		observed[poll.CapabilityPrefix] = true
-		standing, err := unitEligibilityTx(ctx, tx, team, unit, poll.UnitDemand, eligibilityChecks{fit: true, billing: true})
+		standing, err := explainUnitEligibilityTx(ctx, tx, team, unit, poll.UnitDemand)
 		if err != nil {
 			return nil, err
 		}
@@ -109,7 +110,7 @@ func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 		return nil, err
 	}
 	for _, prefix := range launchers {
-		standing, err := unitEligibilityTx(ctx, tx, team, unit, UnitDemand{CapabilityPrefix: prefix}, eligibilityChecks{billing: true})
+		standing, err := explainUnitEligibilityTx(ctx, tx, team, unit, UnitDemand{CapabilityPrefix: prefix})
 		if err != nil {
 			return nil, err
 		}
@@ -155,9 +156,6 @@ func noEligibleCauseTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	if pinned := slices.DeleteFunc(slices.Clone(terms), func(term string) bool { return !pinnedTerm(term) }); len(pinned) > 0 {
 		return what + " targets " + strings.Join(pinned, " ") + " only", nil
 	}
-	if slices.ContainsFunc(standings, func(e eligibility) bool { return !e.unobserved && e.failed == stepCapacity }) {
-		return "", nil
-	}
 	ranking, err := claimRankingTx(ctx, tx, team)
 	if err != nil {
 		return "", err
@@ -170,11 +168,11 @@ func noEligibleCauseTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 }
 
 func unitCreditHoldTx(ctx context.Context, tx *storeTx, team Team, run RunRow, unit UnitRef) (string, error) {
-	resources, err := unitResourcesTx(ctx, tx, team, run, unit)
+	selectors, err := unitSelectorsTx(ctx, tx, team, run, unit)
 	if err != nil {
 		return "", err
 	}
-	price, err := unitBillingPriceTx(ctx, tx, matchingResources(resources))
+	price, err := unitBillingPriceTx(ctx, tx, selectors, match.Profile{Class: match.ClassCloud, Location: TierCloud, Labels: match.ToolLabels(match.CloudTools), OS: "linux", Arch: "amd64"})
 	var unpriced *UnpricedCPUClassError
 	if errors.As(err, &unpriced) {
 		return "", nil

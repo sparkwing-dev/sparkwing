@@ -110,7 +110,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 	}
 
 	handler := server.WithEngineController(e.EngineController).HTTP().API
-	parent := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
+	parent := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, 200)
 	var award struct {
 		Claim struct {
 			Capability string `json:"capability"`
@@ -239,8 +239,8 @@ func childOutputSQL(t *testing.T, st *store.Store, query string, args ...any) {
 
 type childOutputCapacity struct{}
 
-func (childOutputCapacity) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	return match.Profile{Capacity: match.Resources{Cores: 2}}, match.Resources{Cores: 2}, nil
+func (childOutputCapacity) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{}, nil
 }
 
 func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, httpClient *http.Client, run string) {
@@ -251,7 +251,7 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 	if err := teststore.SeedNodeReady(st, t.Context(), run, "stamp"); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run), NodeID: "stamp"}, Capacity: match.Resources{Cores: 2}, Available: match.Resources{Cores: 2}})
+	claim, err := st.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run), NodeID: "stamp"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 	}))
 
 	handler := server.WithEngineController(e.EngineController).HTTP().API
-	claim := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
+	claim := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, 200)
 	var award struct {
 		Claim struct {
 			Capability string `json:"capability"`

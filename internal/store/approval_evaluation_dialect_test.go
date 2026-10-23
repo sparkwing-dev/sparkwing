@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestApprovalConcurrencyRefusedInEachDialect(t *testing.T) {
@@ -76,7 +75,7 @@ func TestControllerApprovalEvaluationCommitsInEachDialect(t *testing.T) {
 						t.Fatal(err)
 					}
 					ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "gate"}
-					claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: machine.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitEval, RunID: ref.RunID, NodeID: ref.NodeID, SourceGeneration: 0}, Available: match.Resources{Cores: 8}})
+					claim, err := s.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: machine.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitEval, RunID: ref.RunID, NodeID: ref.NodeID, SourceGeneration: 0}})
 					if err != nil {
 						t.Fatal(err)
 					}

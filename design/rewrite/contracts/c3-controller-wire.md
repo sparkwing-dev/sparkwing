@@ -143,6 +143,10 @@ Here intake/retry never transparently retries. Idempotent replay retains the run
 but cannot return its raw HereBearer. A lost first response is a failed handoff,
 with a fresh trigger request as the recovery and the abandoned reservation expiring
 at its original claim_by. Resume uses the retained private bearer, bound to the controller URL and run.
+Local foreground `CreateRunRequest.Request.local_foreground` reserves the original
+run's first trigger claim for a named local claim from its submitting OS account.
+Only local host execution may request it. Detached submissions omit it. History
+publication clears it without changing the local source request.
 Local transport also binds the absolute API socket path. Local clients use a raw
 socket transport under the same C2 route retry policy as HTTP clients, without
 an additional transport retry loop.
@@ -1097,25 +1101,12 @@ It restores no values and grants no secret reads. Registry loss returns
 unavailable until the owner restores values. Retry requires fresh resolution. Cross-process secret delivery
 still needs a Cloud affinity or unpersisted relay contract.
 
-`ClaimRequest` adds optional `capacity`, `os` and `arch` for authenticated
-here capabilities and unbound registered machines. Existing available CPU/memory fields retain current free
-resources. `RenewalRequest.available` refreshes the here owner's availability.
-The CLI reads the local admission daemon's actual capacity and free resources,
-including explicit zero availability. `RemoteHostStore.Available` supplies
-renewal observations. Canonical store placement decides owner self-execution.
-Burst self-claims reserve machine compute before reconciliation.
-`ReconcileRequest.reserved` carries the actual acquired lease resources to that
-transaction. C1 adds them to the authenticated machine's current free-resource
-observation for this job only. The field is optional, bounded by physical
-capacity, and never saved as shared availability. Ordinary heartbeats continue
-to report free resources. Claim authority, selectors, fences and placement
-holds still apply.
-Here binding supplies the real shared native host, private HTTP state,
-source access, data, logs, process services and leases.
-
-Runner `RequestCapacity` callbacks now take context and return physical capacity,
-current availability and an error. The loop makes no controller claim when
-observation fails. Every claim carries the machine's OS and architecture.
+`ClaimRequest` carries labels, OS and architecture. CPU/memory request,
+capacity, availability and reserved-resource fields are removed. Owner and burst
+self-claims use the same label eligibility and claim fences as every other
+claimant. Private snapshot eligibility captures those facts without reserving
+machine compute. Here binding supplies the shared native host, private HTTP
+state, source access, data, logs and process services.
 Physical capacity remains nonzero when contribution or keep-free settings leave
 zero availability. Registration identity, pools and repository grants still
 come from authenticated capabilities. Trusted profile ceilings remain enforced

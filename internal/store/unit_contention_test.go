@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
-func TestUnitClaimRenewReleaseCapacityContentionProperty(t *testing.T) {
+func TestUnitClaimRenewReleaseContentionProperty(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
 			target := storetest.NewSQLite(t)
@@ -27,18 +26,10 @@ func TestUnitClaimRenewReleaseCapacityContentionProperty(t *testing.T) {
 			demand := s.TestOnlyUnitDemand(t)
 			replica := target.Open(t)
 			replica.SetTestClock(t, func() time.Time { return now })
-			random := rand.New(rand.NewPCG(91, 773))
 			for round := range 8 {
 				t.Run(fmt.Sprint(round), func(t *testing.T) {
 					if _, err := s.DB().ExecContext(t.Context(), `UPDATE nodes SET ready_at=1 WHERE run_id='run'`); err != nil {
 						t.Fatal(err)
-					}
-					insufficient := demand
-					insufficient.Available.Cores = random.Float64() * 4
-					_, err := s.AsOperator().ClaimUnit(t.Context(), insufficient)
-					var capacity *apierr.Error
-					if !errors.As(err, &capacity) || capacity.Code != apierr.LockHeld {
-						t.Fatalf("capacity boundary: %v", err)
 					}
 					start := make(chan struct{})
 					claims := make(chan store.UnitClaim, 12)
@@ -49,17 +40,10 @@ func TestUnitClaimRenewReleaseCapacityContentionProperty(t *testing.T) {
 						if i%2 == 1 {
 							claimant = replica
 						}
-						request.Available.Cores = 4 + random.Float64()*4
-						if i%3 == 0 {
-							request.Available.Cores = random.Float64() * 4
-						}
 						wg.Go(func() {
 							<-start
 							claim, err := claimant.AsOperator().ClaimUnit(t.Context(), request)
 							if err == nil {
-								if request.Available.Cores < 4 {
-									t.Error("claim exceeded available capacity")
-								}
 								claims <- claim
 							} else {
 								var refused *apierr.Error
@@ -99,7 +83,7 @@ func TestUnitClaimRenewReleaseCapacityContentionProperty(t *testing.T) {
 					})
 					close(start)
 					wg.Wait()
-					_, err = s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
+					_, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
 					var refused *store.ErrIllegalTransition
 					if !errors.As(err, &refused) || refused.Reason != store.ReasonHolderRights {
 						t.Fatalf("released award renewed: %v", err)

@@ -235,10 +235,12 @@ below).
 
 ## Runner labels (`runner-label`)
 
-The linter rejects blank runner labels on `Requires` and `Prefers`. An empty string is dropped when labels are normalized, so the
-term vanishes; a whitespace label survives and matches no runner, so the term
-can never be satisfied. An `Inline()` job executes on the dispatcher's host,
-where `Requires` and `Prefers` select no runner.
+The linter flags blank runner labels on `Requires` and `Prefers`. The host trims
+outer whitespace, drops empty labels and keeps the first copy of each label
+in declaration order. Both SDKs preserve the declarations for host processing.
+Alternatives within a selector term keep their existing OR semantics. An
+`Inline()` job executes on the dispatcher's host, where `Requires` and `Prefers`
+select no runner.
 
 Avoid blank labels and labels on inline jobs:
 

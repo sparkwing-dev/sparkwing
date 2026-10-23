@@ -49,3 +49,80 @@ func TestClaimUnitLocksOwnerBeforeRun(t *testing.T) {
 		})
 	}
 }
+
+func TestClaimQueueLedgerLockOrder(t *testing.T) {
+	for _, inverse := range []bool{false, true} {
+		t.Run(map[bool]string{false: "queue then ledger", true: "ledger then queue"}[inverse], func(t *testing.T) {
+			s, recorder := newRecordingStore(t)
+			rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+			recorder.reset()
+			err := s.inTx(t.Context(), func(tx *storeTx) error {
+				if !inverse {
+					if err := lockClaimQueueTx(t.Context(), tx); err != nil {
+						return err
+					}
+				}
+				if _, err := lockLedgerTx(t.Context(), tx, "a"); err != nil {
+					return err
+				}
+				// Ignoring a refused acquisition must still roll back the transaction.
+				_ = lockClaimQueueTx(t.Context(), tx)
+				return nil
+			})
+			if inverse {
+				if err == nil || !strings.Contains(err.Error(), "claim lock order") {
+					t.Fatalf("inverse lock order committed: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			locks := 0
+			for _, query := range recorder.snapshot() {
+				if strings.HasPrefix(query, "SELECT ordinal FROM claim_awards") {
+					locks++
+				}
+			}
+			want := 1
+			if inverse {
+				want = 0
+			}
+			if locks != want {
+				t.Fatalf("queue acquisitions = %d, want %d", locks, want)
+			}
+		})
+	}
+}
+
+func TestTeamLedgerLockOrder(t *testing.T) {
+	for _, inverse := range []bool{false, true} {
+		t.Run(map[bool]string{false: "team then ledger", true: "ledger then team"}[inverse], func(t *testing.T) {
+			s, _ := newRecordingStore(t)
+			rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+			err := s.inTx(t.Context(), func(tx *storeTx) error {
+				acquireTeam := func() error {
+					return acquireLockSet(t.Context(), tx, func() lockSet {
+						var set lockSet
+						set.add(lockTeam, true, "a")
+						return set
+					})
+				}
+				if !inverse {
+					if err := acquireTeam(); err != nil {
+						return err
+					}
+				}
+				if _, err := lockLedgerTx(t.Context(), tx, "a"); err != nil {
+					return err
+				}
+				_ = acquireTeam()
+				return nil
+			})
+			if inverse && (err == nil || !strings.Contains(err.Error(), "teams must precede the ledger")) {
+				t.Fatalf("inverse team/ledger order committed: %v", err)
+			}
+			if !inverse && err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

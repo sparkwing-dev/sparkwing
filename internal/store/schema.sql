@@ -10,6 +10,7 @@ CREATE TABLE teams (
     created_by TEXT NOT NULL DEFAULT '',
     members_can_add_machines BIGINT NOT NULL DEFAULT 1 CHECK(members_can_add_machines IN (0,1)),
     claim_ranking TEXT NOT NULL DEFAULT '',
+    claim_award_ordinal BIGINT NOT NULL DEFAULT 0 CHECK(claim_award_ordinal >= 0),
     billing_trust_at BIGINT NOT NULL DEFAULT 0,
     billing_trust_reason TEXT NOT NULL DEFAULT '',
     billing_trust TEXT NOT NULL DEFAULT '' CHECK(billing_trust IN ('','granted','revoked')),
@@ -30,6 +31,11 @@ CREATE TABLE teams (
     CHECK(refill_enabled = 0 OR (refill_amount_cents >= 1000 AND card_payment_method <> ''))
 );
 
+CREATE TABLE claim_awards (
+    singleton BIGINT PRIMARY KEY CHECK(singleton=1),
+    ordinal BIGINT NOT NULL DEFAULT 0 CHECK(ordinal >= 0)
+);
+INSERT INTO claim_awards(singleton,ordinal) VALUES (1,0);
 CREATE TABLE team_first_success (
     team TEXT NOT NULL PRIMARY KEY REFERENCES teams(name),
     run_id TEXT NOT NULL CHECK(run_id <> '')
@@ -57,6 +63,7 @@ CREATE TABLE runs (
     git_sha TEXT NOT NULL DEFAULT '',
     repo_key TEXT NOT NULL,
     repo_display TEXT NOT NULL DEFAULT '',
+    repo_identity TEXT NOT NULL DEFAULT '',
     retry_of TEXT NOT NULL DEFAULT '',
     lineage_json BLOB,
     replay_of_run_id TEXT NOT NULL DEFAULT '',
@@ -101,6 +108,32 @@ CREATE TABLE runs (
     CHECK(plan_accepted_generation >= 0)
 );
 
+CREATE TABLE claim_requirements (
+    team TEXT NOT NULL REFERENCES teams(name),
+    id TEXT NOT NULL CHECK(id <> ''),
+    PRIMARY KEY(team,id)
+);
+
+CREATE TABLE claim_requirement_terms (
+    team TEXT NOT NULL REFERENCES teams(name),
+    requirements TEXT NOT NULL,
+    term BIGINT NOT NULL CHECK(term >= 0),
+    label TEXT NOT NULL,
+    PRIMARY KEY(team,requirements,term,label),
+    FOREIGN KEY(team,requirements) REFERENCES claim_requirements(team,id) ON DELETE CASCADE
+);
+
+CREATE TABLE claim_contexts (
+    team TEXT NOT NULL REFERENCES teams(name),
+    id TEXT NOT NULL CHECK(id <> ''),
+    requirements TEXT NOT NULL DEFAULT '',
+    requirements_ref TEXT GENERATED ALWAYS AS (NULLIF(requirements,'')) STORED,
+    unit_kind TEXT NOT NULL CHECK(unit_kind IN ('node','plan','trigger')),
+    PRIMARY KEY(team,id),
+    FOREIGN KEY(team,requirements_ref) REFERENCES claim_requirements(team,id)
+);
+CREATE INDEX idx_claim_contexts_requirements ON claim_contexts(team,requirements,unit_kind,id);
+
 CREATE TABLE nodes (
     run_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
@@ -114,6 +147,10 @@ CREATE TABLE nodes (
     queue_started_at BIGINT,
     claimed_by TEXT,
     claim_principal TEXT NOT NULL DEFAULT '',
+    claim_context TEXT NOT NULL DEFAULT '',
+    claim_context_ref TEXT GENERATED ALWAYS AS (NULLIF(claim_context,'')) STORED,
+    claim_requirements TEXT NOT NULL DEFAULT '',
+    claim_requirements_ref TEXT GENERATED ALWAYS AS (NULLIF(claim_requirements,'')) STORED,
     capability_prefix TEXT NOT NULL DEFAULT '',
     owner_capability_prefix TEXT NOT NULL DEFAULT '',
     lease_expires_at BIGINT,
@@ -179,7 +216,9 @@ CREATE TABLE nodes (
     CHECK((status = 'done') = (finished_at IS NOT NULL)),
     CHECK((output_record IS NULL AND manifest_record IS NULL) OR status = 'done'),
     CHECK(status <> 'done' OR (claimed_by IS NULL AND lease_expires_at IS NULL AND capability_prefix = '')),
-    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,claim_context_ref) REFERENCES claim_contexts(team,id),
+    FOREIGN KEY(team,claim_requirements_ref) REFERENCES claim_requirements(team,id)
 );
 
 CREATE TABLE sparkwing_schema_version (
@@ -217,6 +256,10 @@ CREATE TABLE triggers (
     claimed_by TEXT,
     capability_prefix TEXT NOT NULL DEFAULT '',
     claim_principal TEXT NOT NULL DEFAULT '',
+    claim_context TEXT NOT NULL DEFAULT '',
+    claim_context_ref TEXT GENERATED ALWAYS AS (NULLIF(claim_context,'')) STORED,
+    claim_requirements TEXT NOT NULL DEFAULT '',
+    claim_requirements_ref TEXT GENERATED ALWAYS AS (NULLIF(claim_requirements,'')) STORED,
     needs_labels BLOB NOT NULL,
     prefers_labels BLOB NOT NULL,
     disruptions BIGINT NOT NULL DEFAULT 0 CHECK(disruptions BETWEEN 0 AND 3),
@@ -231,7 +274,9 @@ CREATE TABLE triggers (
     CHECK((claimed_by IS NULL AND capability_prefix = '' AND lease_expires_at IS NULL AND claimed_at IS NULL) OR (claimed_by IS NOT NULL AND claimed_by <> '' AND capability_prefix <> '' AND lease_expires_at IS NOT NULL AND claimed_at IS NOT NULL AND generation > 0)),
     CHECK((status IN ('done','failed')) = (finished_at IS NOT NULL)),
     CHECK(status <> 'pending' OR started_at IS NULL),
-    FOREIGN KEY(team,id) REFERENCES runs(team,id) ON DELETE CASCADE
+    FOREIGN KEY(team,id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,claim_context_ref) REFERENCES claim_contexts(team,id),
+    FOREIGN KEY(team,claim_requirements_ref) REFERENCES claim_requirements(team,id)
 );
 
 CREATE TABLE node_attempts (
@@ -701,6 +746,7 @@ CREATE TABLE github_runner_bindings (
 );
 
 CREATE TABLE github_app_installations (
+    connection_generation TEXT NOT NULL DEFAULT '',
     installation_id BIGINT NOT NULL PRIMARY KEY CHECK(installation_id > 0),
     team TEXT NOT NULL REFERENCES teams(name),
     account_id BIGINT NOT NULL,
@@ -754,11 +800,42 @@ CREATE TABLE github_app_triggers (
 );
 
 CREATE TABLE github_app_deliveries (
-    admitted_team TEXT NOT NULL DEFAULT '',
+    installation_id BIGINT NOT NULL DEFAULT 0,
+    connection_generation TEXT NOT NULL DEFAULT '',
+    queue_team TEXT NOT NULL DEFAULT '',
     digest TEXT NOT NULL PRIMARY KEY,
-    delivery_id TEXT NOT NULL,
+    delivery_id TEXT NOT NULL UNIQUE,
     received_at BIGINT NOT NULL,
-    event TEXT NOT NULL DEFAULT ''
+    event TEXT NOT NULL DEFAULT '',
+    body BLOB,
+    state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','leased','done','failed')),
+    lease_until BIGINT NOT NULL DEFAULT 0,
+    lease BIGINT NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    CHECK(state != 'done' OR body IS NULL),
+    CHECK(state = 'done' OR body IS NOT NULL)
+);
+
+CREATE INDEX idx_github_app_deliveries_ready ON github_app_deliveries(state,received_at);
+CREATE INDEX idx_github_app_deliveries_team ON github_app_deliveries(queue_team,received_at,digest) WHERE state!='done';
+
+CREATE TABLE github_app_delivery_ids (
+    delivery_id TEXT NOT NULL PRIMARY KEY,
+    digest TEXT NOT NULL REFERENCES github_app_deliveries(digest) ON DELETE CASCADE
+);
+
+CREATE TABLE github_app_delivery_effects (
+    digest TEXT NOT NULL REFERENCES github_app_deliveries(digest) ON DELETE CASCADE,
+    effect TEXT NOT NULL CHECK(effect <> ''),
+    result TEXT NOT NULL DEFAULT 'null',
+    PRIMARY KEY (digest, effect)
+);
+
+CREATE TABLE github_app_publications (
+    team TEXT NOT NULL REFERENCES teams(name),
+    repository_id BIGINT NOT NULL,
+    generation BIGINT NOT NULL DEFAULT 0 CHECK(generation >= 0),
+    PRIMARY KEY(team,repository_id)
 );
 
 CREATE TABLE team_deletions (
@@ -781,7 +858,8 @@ CREATE TABLE invitation_email_log (
 
 CREATE TABLE free_slots (
     team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
-    taken_at BIGINT NOT NULL
+    taken_at BIGINT NOT NULL,
+    empty_since BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE signup_gate (
@@ -1277,18 +1355,6 @@ CREATE TABLE capabilities (
     FOREIGN KEY(team,bind_run) REFERENCES runs(team,id) ON DELETE CASCADE
 );
 
-CREATE TABLE unit_asks (
-    team TEXT NOT NULL REFERENCES teams(name),
-    run_id TEXT NOT NULL,
-    unit_kind TEXT NOT NULL CHECK(unit_kind IN ('plan','eval','node')),
-    node_id TEXT NOT NULL,
-    claimant TEXT NOT NULL,
-    claim_rank BIGINT NOT NULL CHECK(claim_rank >= 0),
-    asked_at BIGINT NOT NULL,
-    PRIMARY KEY (team,run_id,unit_kind,node_id,claimant),
-    FOREIGN KEY (team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
-);
-
 CREATE TABLE blobs (
     team TEXT NOT NULL REFERENCES teams(name),
     digest TEXT NOT NULL,
@@ -1530,6 +1596,20 @@ CREATE INDEX idx_runs_sha_started ON runs(team,git_sha, started_at DESC);
 
 CREATE INDEX idx_runs_branch_started ON runs(team,git_branch, started_at DESC);
 
+CREATE INDEX idx_claim_requirement_labels ON claim_requirement_terms(label,team,requirements,term);
+
+CREATE INDEX idx_nodes_claim_requirements ON nodes(team,claim_requirements,ready_at,run_id,node_id) WHERE status='pending' AND ready_at IS NOT NULL AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
+
+CREATE INDEX idx_triggers_claim_requirements ON triggers(team,claim_requirements,unit_kind,available_at,id) WHERE status='pending' AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
+
+CREATE INDEX idx_nodes_claim_window ON nodes(ready_at,team) WHERE status='pending' AND ready_at IS NOT NULL AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
+
+CREATE INDEX idx_triggers_claim_window ON triggers(available_at,team) WHERE status='pending' AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
+
+CREATE INDEX idx_nodes_eval_window ON nodes(finished_at,team,run_id,node_id) WHERE finished_at IS NOT NULL AND outcome IN ('success','memoized') AND expansion='expected';
+
+CREATE INDEX idx_nodes_team_eval_window ON nodes(team,finished_at,run_id,node_id) WHERE finished_at IS NOT NULL AND outcome IN ('success','memoized') AND expansion='expected';
+
 CREATE INDEX idx_nodes_claimable ON nodes(team,ready_at) WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND status != 'done';
 
 CREATE INDEX idx_nodes_queued ON nodes(team,queue_started_at) WHERE queue_started_at IS NOT NULL AND claimed_by IS NULL AND status = 'pending';
@@ -1747,3 +1827,6 @@ CREATE TABLE admission_work (
     CHECK(node_id='' OR (generation>0 AND holder<>'')),
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
+
+CREATE INDEX idx_nodes_claim_context ON nodes(team,claim_requirements,claim_context,ready_at,run_id,node_id) WHERE status='pending' AND ready_at IS NOT NULL AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
+CREATE INDEX idx_triggers_claim_context ON triggers(team,claim_requirements,claim_context,unit_kind,available_at,id) WHERE status='pending' AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;

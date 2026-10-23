@@ -156,12 +156,6 @@ func ResolveRequest(in Inputs) (runspec.Options, error) {
 			return runspec.Options{}, err
 		}
 	}
-	if sealed.Resources.Set {
-		out.Resources, err = resourceSetting(in)
-		if err != nil {
-			return out, err
-		}
-	}
 	if sealed.Checkout.Set {
 		if err := validateSource(sealed.Checkout.Value.Policy, false); err != nil {
 			return out, invalid("source", fromOrigin(sealed.Checkout.Origin), err.Error())

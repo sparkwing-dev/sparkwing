@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func committedDashboardLogs(t *testing.T, payload []byte) (segmentLogs, blob.LogSubject, *store.Store) {
@@ -31,7 +32,8 @@ func committedDashboardLogs(t *testing.T, payload []byte) (segmentLogs, blob.Log
 
 func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLogs, blob.LogSubject, *store.Store) {
 	t.Helper()
-	engine, tenant := engineRuntimeStore(t)
+	now := time.Now().UTC()
+	engine, tenant := engineRuntimeStore(t, teststore.WithClock(func() time.Time { return now }))
 	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 	actor := engineActor(authorized)
 	engineAdmitExecution(t, engine.Store, authorized.Principal)

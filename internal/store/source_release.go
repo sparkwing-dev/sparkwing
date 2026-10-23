@@ -141,7 +141,7 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 		return capability.SourceExecutor{}, authorityError(apierr.Unavailable, "source executor enrollment is unavailable")
 	}
 	p := chain[0].principal
-	profile, _, err := t.s.claimProfiles.ResolveClaimProfile(ctx, p)
+	profile, err := t.s.claimProfiles.ResolveClaimProfile(ctx, p)
 	if err != nil {
 		return capability.SourceExecutor{}, err
 	}

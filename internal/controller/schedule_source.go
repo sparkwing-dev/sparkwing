@@ -21,7 +21,7 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 	request.Origin = runspec.OriginSchedule
 	request.RequestedArgs = row.Effective().Args
 	if row.Where != store.CronWhereLocal {
-		request.Git.Ref = row.GitBranch
+		request.Git.Ref = "refs/heads/" + strings.TrimPrefix(row.GitBranch, "refs/heads/")
 	}
 	if row.Where == store.CronWhereLocal {
 		if !filepath.IsAbs(row.RepoPath) || request.Source.Location.LocalCheckout != row.RepoPath || request.Env.Digest == "" {

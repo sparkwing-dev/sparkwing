@@ -72,14 +72,14 @@ func spendStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 	return s, err
 }
 
-// safety: admission and every renewal ask this under the team's ledger lock, so two claims racing for the last
-// credits cannot both pass, and a hold refuses whatever the balance reads.
-func refuseUnfundedTx(ctx context.Context, l *ledgerTx, required int64, runID, nodeID string) error {
-	cause, err := teamHoldTx(ctx, l.storeTx, l.team)
+// safety: admission and renewal call this with a locked view before writing;
+// an unlocked claim probe is advisory and the awarded claim rechecks.
+func refuseUnfundedTx(ctx context.Context, view ledgerView, required int64, runID, nodeID string) error {
+	cause, err := teamHoldTx(ctx, view.tx, view.team)
 	if err != nil {
 		return err
 	}
-	balance, err := l.balance(ctx)
+	balance, err := view.balance(ctx)
 	if err != nil {
 		return err
 	}

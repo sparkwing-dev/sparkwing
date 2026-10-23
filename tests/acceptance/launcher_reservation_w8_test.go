@@ -86,7 +86,7 @@ func reservationFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientset, *s
 	}
 	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{
 		Kube: kube, Boundary: boundary, Jobs: cfg,
-		Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30},
+		Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}},
 		Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 		NewController: func(options client.EngineOptions) (launcher.LauncherController, error) {
 			return cloudStoreClientW8(t, server)(options)
@@ -95,7 +95,7 @@ func reservationFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientset, *s
 	if err != nil {
 		t.Fatal(err)
 	}
-	award, err := runtime.Control.Claim(t.Context())
+	award, err := runtime.Control.Claim(t.Context(), "cloud", nil)
 	if err != nil || award == nil {
 		t.Fatalf("claim: %v", err)
 	}

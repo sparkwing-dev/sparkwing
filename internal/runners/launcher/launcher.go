@@ -26,7 +26,7 @@ import (
 // Sync must return exactly one decision for each supplied binding, including dead or cancelled claims.
 type CloudControl interface {
 	Prepare(context.Context, []capability.LeaseRef) (time.Time, error)
-	Claim(context.Context) (*CloudJobAward, error)
+	Claim(context.Context, string, []string) (*CloudJobAward, error)
 	Sync(context.Context, []CloudJobObservation) ([]CloudJobState, error)
 }
 
@@ -65,9 +65,10 @@ type Launcher struct {
 	Poll     time.Duration
 	Logger   *slog.Logger
 
-	mu       sync.Mutex
-	waiting  map[string]*CloudJobAward
-	identity string
+	mu                sync.Mutex
+	waiting           map[string]*CloudJobAward
+	blockedTeamLabels []string
+	identity          string
 }
 
 func (l *Launcher) logger() *slog.Logger {
@@ -167,7 +168,10 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := l.placeWaiting(ctx); err != nil {
 		return false, err
 	}
-	award, err := l.Control.Claim(ctx)
+	l.mu.Lock()
+	blocked := append([]string(nil), l.blockedTeamLabels...)
+	l.mu.Unlock()
+	award, err := l.Control.Claim(ctx, l.Config.Namespace, blocked)
 	if err != nil || award == nil {
 		return false, err
 	}

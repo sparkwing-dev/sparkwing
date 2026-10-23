@@ -73,13 +73,13 @@ func TestRegisteredAgentsRetainEnrollmentWithoutReplacingGrantedIdentity(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Name: "impostor", Class: match.ClassCloud, ReservedPools: []string{"forged"}, Location: "local", Accept: accept, Capacity: match.Resources{Cores: 4}}}
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Name: "impostor", Class: match.ClassCloud, ReservedPools: []string{"forged"}, Location: "local", Accept: accept}}
 	agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
 	if err != nil || len(agents) != 1 {
 		t.Fatalf("enrolled agents: %+v, %v", agents, err)
 	}
 	got := agents[0].Profile
-	if got.Name != root.Subject.ID || got.Class != match.ClassAgent || !slices.Equal(got.ReservedPools, root.ReservedPools) || got.Location != "local" || got.Capacity.Cores != 4 || got.Accept == nil {
+	if got.Name != root.Subject.ID || got.Class != match.ClassAgent || !slices.Equal(got.ReservedPools, root.ReservedPools) || got.Location != "local" || got.Accept == nil {
 		t.Fatalf("enrolled profile: %+v", got)
 	}
 }

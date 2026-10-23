@@ -73,7 +73,7 @@ sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
 
 `Requires` filters eligibility. `NeedsTools` adds `tool:NAME` requirements.
 `Prefers` ranks eligible candidates and never relaxes a requirement, repository
-restriction, reservation or resource bound. A preference cannot authorize work
+restriction, reservation or placement policy. A preference cannot authorize work
 on a runner that fails a hard filter.
 
 `Inline` keeps a job with its run host. Use it for a local preflight or other work
@@ -119,9 +119,10 @@ worker loop. All claim paths apply the same matcher before awarding authority.
 
 ## Waiting jobs
 
-An eligible runner must also have available capacity. A busy machine leaves
-work queued. A request that cannot fit its capacity is ineligible. Preferences
-order eligible work without widening the eligible set. Queue observations retain
+Runners ask for work when they can execute it. A job requires every selector
+term to match the runner's labels. Within a term, comma-separated alternatives
+are ORed. Claims order eligible jobs by the team's last award, then arrival and
+identity. Preference holds can delay a later placement without widening eligibility. Queue observations retain
 holders, ordered waiters, pressure, estimates and missing measurements:
 
 ```bash
@@ -129,6 +130,9 @@ sparkwing queue list --profile prod -o json
 sparkwing queue list --profile prod --group deploy -o json
 sparkwing runs status --run RUN_ID --profile prod
 ```
+
+New metered claims account for billable time that begins during issuance when
+computing the funded lease bound.
 
 Queue wait defaults to 24 hours and also ends at a finite owner deadline.
 Execution and approval wait are separate budgets. A local run has no default

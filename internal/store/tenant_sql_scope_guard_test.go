@@ -16,6 +16,9 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).claimObserversTx":               "claim placement discovers live claimant observations across teams, then checks every pair against authenticated scope",
+	"(*Operator).claimOverflowFactsTx":           "deployment claims gather each live team's overflow policy before the shared eligibility predicate filters pairs",
+	"(*Operator).claimTargetTeamTx":              "only the Cloud launcher resolves a globally named run; other claimants query their authenticated team before kind or trust diagnostics",
 	"(*Operator).cancelRestoredSchedulesTx":      "offline restore cancels every tenant scheduled run through its scoped lifecycle owner before the rotated epoch is recorded",
 	"(*Operator).AcknowledgeRestore":             "offline restore acknowledgement advances every tenant schedule past the recovery window before schedules resume",
 	"(*Operator).installAuditProtection":         "baseline audit collision protection checks globally unique event IDs across teams",
@@ -39,7 +42,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).SealAbandonedLogStreams":   "leased log maintenance discovers abandoned streams across every tenant",
 	"(*Operator).dueRunEffects":             "the completion worker discovers due effects across tenants before dispatching each tenant run",
 	"(*Operator).expiredUnits":              "the leased reaper discovers expired execution units across tenants before expiring each exact unit",
-	"(*Operator).queuedClaimQuery":          "launcher claims scan deployment queues; ordinary claimant queries append their bound tenant predicate",
 	"(*Operator).launcherKeysTx":            "launcher observations name global unit identities whose stored fence and capability ancestry prove ownership before any award is returned",
 	"(*Operator).launcherPrefixesTx":        "launcher reconciliation discovers every tenant award before validating each exact award",
 	"(*Operator).lockMaintenanceCapacityTx": "the leased concurrency pass locks capacity entries across tenants before maintaining each tenant key",
@@ -57,9 +59,9 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).EnsureBootstrapCapability": "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
 	"(*Operator).launcherAwardPrefixTx":     "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
-	"(*Operator).recordAudit":                  "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
-	"(*Operator).githubInstallationTeamTx":     "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
-	"(*Operator).revokeSelectedCapabilitiesTx": "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
+	"(*Operator).recordAudit":                    "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
+	"(*Operator).githubInstallationConnectionTx": "a global installation ID resolves its tenant before tenant-scoped mutation or delivery scheduling",
+	"(*Operator).revokeSelectedCapabilitiesTx":   "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
 
 	"(*Operator).hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
 	"(*Operator).LookupCapability":              "a presentation digest identifies the credential before its tenant is known",
@@ -79,7 +81,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).authenticationAuthorityTx": "a globally unique presentation digest identifies the session before its tenant and current membership are known",
 	"(*Operator).revokeAuthorityTx":         "the authorized revocation path names its exact capability or session by global identity",
 	"(*Operator).lockUnitsTx":               "a unit's globally unique run id yields the team its owner, run and job locks are scoped by",
-	"(*Operator).claimUnitTx":               "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"(*Operator).loadMatchingRunTx":         "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
 	"(*Operator).loadAwardRowTx":            "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
 	"(*Operator).deleteRetentionMetricsTx":  "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
@@ -95,7 +96,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).applyCheckoutPaymentTx":    "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 
 	"(*Operator).DueCardRefunds":            "the payment worker lists every team's queued refunds in one pass",
-	"(*Operator).globalRunsPerHourRefusal":  "the global hourly cap counts runs from every team",
+	"(*Operator).globalRunsPerHourRefusal":  "the committed-admission ceiling counts runs across every team in the deployment",
 	"(*Operator).runOwnerTx":                "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Operator).SampleSealedSecrets":       "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Operator).unlinkAccountIdentityTx":   "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
@@ -119,8 +120,9 @@ var reviewedUnscopedSQL = map[string]string{
 		"because the daily cap protects the inbox, not the team",
 	"(*Operator).GitHubAppInstallationTeam": "a webhook delivery and a repository's installation name no team, " +
 		"so the installation's binding is how either finds the team it belongs to",
-	"(*Operator).FreeSlots":      "the free tier is bounded by how many teams hold a slot, so it counts every team's",
-	"(*Operator).freeSlotOpenTx": "a reservation asks whether any slot is left, so it counts every team's",
+	"(*Operator).FreeSlots":              "the free tier is bounded by how many teams hold a slot, so it counts every team's",
+	"(*Operator).freeSlotOpenTx":         "a reservation asks whether any slot is left, so it counts every team's",
+	"(*Operator).releaseIdleFreeSlotsTx": "leased retention inspects every team's slot and releases only its exact team after thirty empty days without bytes or runs",
 	"(*Operator).disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
 
@@ -164,6 +166,10 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 				continue
 			}
 		}
+		if _, fragment := reviewedClaimSQLFragments[stmt.key]; fragment {
+			seen[stmt.key] = true
+			continue
+		}
 		if exemptFromScope(stmt.key) {
 			seen[stmt.key] = true
 			continue
@@ -177,6 +183,11 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 		t.Errorf("%s: statement in %s touches %s with no team predicate.\n"+
 			"Scope it, or add %q to reviewedUnscopedSQL with the reason it crosses teams.\n\t%s",
 			stmt.pos, stmt.key, strings.Join(tables, ", "), stmt.key, collapse(stmt.text))
+	}
+	for key, why := range reviewedClaimSQLFragments {
+		if !strings.HasPrefix(key, "(*claimSQL).") || why == "" || !seen[key] {
+			t.Errorf("stale or unexplained claim SQL fragment %s", key)
+		}
 	}
 	for key, why := range reviewedUnscopedSQL {
 		if !strings.HasPrefix(key, "(*Operator).") {

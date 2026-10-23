@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func controllerCapacityFixture(t *testing.T, opts ...store.Option) (*serverFixture, *store.Tenant, capability.Principal) {
@@ -118,7 +117,7 @@ func TestPrivateCapacityEvalUsesOnlyItsAwardedSource(t *testing.T) {
 	})
 	claim := func(unit store.UnitRef) store.UnitClaim {
 		t.Helper()
-		claimed, err := server.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &unit, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+		claimed, err := server.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &unit})
 		if err != nil {
 			t.Fatal(err)
 		}

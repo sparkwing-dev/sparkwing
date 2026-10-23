@@ -174,11 +174,15 @@ Kubernetes administrators remain trusted.
 ## Node faults
 
 A kubelet can rewrite its own Node's annotations, so a fault read from them is
-charged to that node alone. Sync quarantines a node whose reservation in this
-job namespace is malformed, disagrees with its binding, names a team other than
-the node's protected team label, or carries an award the controller refuses
-outright: a binding refusal, a bad request or a changed binding. Each orphaned
-reservation goes to the controller in its own call, so a refusal names one
+charged to that node alone. Sync counts malformed reservations and bindings
+against the node's protected team label before filtering by namespace. It may
+quarantine the node only when a reservation or binding team, combined with this
+job namespace, matches that protected label. If both annotations name another
+team or erase their team identity, the fault still counts but Sync leaves the
+node untouched. Within that permission boundary, Sync quarantines malformed or
+disagreeing reservations and awards the controller refuses outright: a binding
+refusal, a bad request or a changed binding. Each orphaned reservation goes to
+the controller in its own call, so a refusal names one
 node. Quarantine cordons a team node, adds the NoSchedule taint
 `sparkwing.dev/quarantined`, which NodeRestriction stops a kubelet from
 removing, and records the cause in the annotation of the same name. One
@@ -187,10 +191,17 @@ taint or the annotation, even after it is uncordoned. No NodeClaim is deleted:
 an operator inspects the node, then deletes it or removes the taint and
 annotation.
 
-One pass quarantines or keeps quarantined at most three faulted nodes. A
-fourth means the controller, not a node, is likely at fault, so sync stops
-claims with an error naming the node and asking an operator to check the
-controller and the quarantined nodes.
+One per-team fault ledger owns attribution, deduplication, quarantine permission
+and claim blocking. A pass permits quarantine for at most three distinct nodes
+per team. Counted faults and permitted quarantines are separate sets: teardown
+or release faults consume the fault budget without authorizing more writes.
+A fourth fault stops that team's claims; other teams keep claiming. A fourth
+quarantine request reports the node for operator inspection. An erased-identity
+fault that cannot authorize quarantine instead adds the protected team label to
+the blocked labels sent with claims, without a node diagnostic. The protected
+node label groups faults even when both reservation and binding annotations are damaged. The launcher
+sends faulted protected labels with each claim, and the controller excludes
+their matching teams.
 
 A quarantine that has not persisted stops claims, so a 503 or any other failed
 write blocks until a later pass writes it. A conflict is retried with backoff;
@@ -339,7 +350,7 @@ the bootstrap or installs an SDK.
 
 `NewControllerControl` binds the launcher's claim and sync operations to the
 shared controller wire interface. Its client must use `EngineOptions.Launcher`.
-It captures observed labels/capacity and requests the configured Cloud unit
+It sends the launcher's labels and requests the configured Cloud unit
 kinds in one call. The server supplies team, holder, generation, resources and
 the one-time bootstrap. The launcher has no caller-selected holder override.
 Transport failures never trigger a second claim in the adapter.
@@ -356,7 +367,8 @@ through `source.ForExecution` using the accepted spec and matching engine.
 Claim publication, source initialization and bootstrap exchange capture private
 award values before calling service bindings. The claim adapter uses the shared
 source projections directly.
-Each award must include resolved CPU and memory in `ClaimedUnit.Execution`.
+Each award carries its committed CPU and memory allocation in
+`ClaimedUnit.CloudResources`.
 For eval, `Binding.Generation` fences the terminal source and
 `Binding.Expansion` identifies the eval's own live lease. Both survive dispatch.
 

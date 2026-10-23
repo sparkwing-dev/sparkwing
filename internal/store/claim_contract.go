@@ -18,17 +18,19 @@ type UnitRef struct {
 	SourceGeneration int64
 }
 
-// UnitDemand carries observed capacity and labels. Identity, reservations and team
+// UnitDemand carries observed platform and labels. Identity, reservations and team
 // come from C2's capability; requirements and allowed pools come from persisted seals.
 type UnitDemand struct {
-	CapabilityPrefix string
-	Kinds            []capability.UnitKind
-	Labels           []string
-	Target           *UnitRef
-	OS               string
-	Arch             string
-	Capacity         match.Resources
-	Available        match.Resources
+	// FreeSlots is remaining poll capacity; nil offers one slot. Awards consume it.
+	FreeSlots          *int
+	CapabilityPrefix   string
+	Kinds              []capability.UnitKind
+	Labels             []string
+	JobNamespace       string
+	ExcludedTeamLabels []string
+	Target             *UnitRef
+	OS                 string
+	Arch               string
 }
 
 // UnitClaim records the store-derived team and award; source generation remains distinct from eval claim generation.
@@ -44,11 +46,11 @@ type UnitClaim struct {
 	Bearer []byte `json:"-"`
 }
 
-// ClaimUnit resolves matching inputs and calls match.Evaluate and match.Fits before
+// ClaimUnit selects one eligible unit and rechecks its requirements before
 // C2 Award in the same transaction. Named and queued trigger, plan, eval and job
 // claims use the same path; only launcher service scope can cross teams.
-// ReconcileNode self-claims use the same matching inputs and reservation checks.
-// Each requested kind requires its own live grant before one ordered scan. Empty,
+// ReconcileNode self-claims recheck the same SQL predicate before their award.
+// Each requested kind requires its own live grant before fair-share and arrival ordering. Empty,
 // duplicate, unknown and unauthorized kinds fail instead of being filtered silently.
 // A named trigger Target also accepts the matching here Award's trigger.host after
 // rechecking its first-claim/reclaim window, reservation and requester authority.

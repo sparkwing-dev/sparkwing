@@ -352,3 +352,17 @@ describe("subscription form rules", () => {
     assert.equal(lib.connectedAccount("?connected="), null);
   });
 });
+
+describe("failed deliveries", () => {
+  it("lists failures without signed payloads and encodes manual processing IDs", async () => {
+    const failure = { id: "delivery/1", event: "push", received_at: "2026-10-21T00:00:00Z", last_error: "GitHub unavailable" };
+    respond = () => json([failure]);
+    assert.deepEqual(await lib.listFailedGitHubDeliveries(), [failure]);
+    assert.equal(calls[0].url, "/api/v1/team/github-app/deliveries/failed");
+    respond = () => new Response(null, { status: 204 });
+    await lib.processGitHubDeliveryAgain(failure.id);
+    assert.equal(calls[1].url, "/api/v1/team/github-app/deliveries/delivery%2F1/process-again");
+    assert.equal(calls[1].method, "POST");
+    assert.equal(calls[1].headers.get("X-CSRF-Token"), "session-csrf");
+  });
+});

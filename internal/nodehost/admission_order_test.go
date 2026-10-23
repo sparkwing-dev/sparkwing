@@ -11,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -22,9 +21,7 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 	plan := capacityPlan("queue", 0, "a", "b")
 	for i := range plan.Jobs {
 		plan.Jobs[i].Concurrency[0].Scope = new("run")
-		plan.Jobs[i].Resources = &nodeproto.ResourceSpec{Cores: new(1.0)}
 	}
-	plan.Resources = &nodeproto.ResourceSpec{Cores: new(1.0)}
 	fixture := newStoreHostFixtureForRequest(t, openStore(t), plan, runspec.Request{
 		Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute,
 		Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
@@ -33,7 +30,7 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 	})
 	releaseRemote(t, fixture, "a")
 	_, awarded := claimRemote(t, fixture, "a")
-	machine := &budgetAdmitter{free: wingwire.HostResources{Cores: 1}}
+	machine := newFakeDaemon()
 	claimAtCompute, allowCompute := make(chan struct{}), make(chan struct{})
 	var first sync.Once
 	admitter := admissionAcquireFunc(func(ctx context.Context, request wingwire.AdmissionRequest, queued func(wingwire.Queued)) (Lease, error) {
@@ -70,11 +67,8 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 		if err != nil || len(state.Holders) != 1 || state.Holders[0].NodeID != input.NodeID {
 			return fmt.Errorf("execution lost logical capacity: %+v %v", state, err)
 		}
-		machine.mu.Lock()
-		free := machine.free.Cores
-		machine.mu.Unlock()
-		if free != 0 {
-			return fmt.Errorf("execution lost compute capacity: free=%v", free)
+		if live, _, _ := machine.counts(); live != 1 {
+			return fmt.Errorf("execution lost machine admission: live=%d", live)
 		}
 		return fixture.report(ctx, input, store.NodeSuccess)
 	})
@@ -105,11 +99,8 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 	case <-ctx.Done():
 		t.Fatal(context.Cause(ctx))
 	}
-	machine.mu.Lock()
-	free := machine.free.Cores
-	machine.mu.Unlock()
-	if free != 1 {
-		t.Errorf("owner held compute while waiting for logical capacity: free=%v", free)
+	if live, _, _ := machine.counts(); live != 0 {
+		t.Errorf("owner held machine admission while waiting for logical capacity: live=%d", live)
 	}
 	close(allowCompute)
 	for range 2 {
@@ -122,9 +113,7 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 			t.Fatal(context.Cause(ctx))
 		}
 	}
-	machine.mu.Lock()
-	defer machine.mu.Unlock()
-	if machine.free.Cores != 1 {
-		t.Fatal("compute leaked", machine.free)
+	if live, _, _ := machine.counts(); live != 0 {
+		t.Fatal("machine admission leaked", live)
 	}
 }

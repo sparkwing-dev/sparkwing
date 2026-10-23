@@ -66,6 +66,31 @@ func TestSchemaShapeIncludesGeneratedDrainDeadlines(t *testing.T) {
 	}
 }
 
+func TestSchemaShapeIncludesGeneratedClaimRequirements(t *testing.T) {
+	s := storetest.OpenSQLite(t)
+	shape := sqliteShape(t, s.DB())
+	for _, table := range []string{"nodes", "triggers"} {
+		want := fmt.Sprintf("generated %s.claim_requirements_ref stored expression=nullif(claim_requirements, '')", table)
+		if !slices.Contains(shape, want) {
+			t.Errorf("schema inspection omitted %q", want)
+		}
+	}
+}
+
+func TestSchemaExpressionNormalizesFunctionSeparators(t *testing.T) {
+	for _, expression := range []string{
+		"NULLIF(claim_requirements,'')",
+		"NULLIF(claim_requirements, ''::text)",
+	} {
+		if got := normalizeDefault(expression); got != "nullif(claim_requirements, '')" {
+			t.Errorf("normalizeDefault(%q) = %q", expression, got)
+		}
+	}
+	if got := normalizeDefault("COALESCE(value,'a,b')"); got != "coalesce(value, 'a,b')" {
+		t.Errorf("literal separator changed: %q", got)
+	}
+}
+
 // A store this build did not create is refused whole, with the remedy in the
 // message, rather than read with a schema it may not have.
 func TestOpenRefusesAStoreFromAnotherBaseline(t *testing.T) {
@@ -215,7 +240,8 @@ func typeClass(declared string) string {
 var (
 	postgresCast    = regexp.MustCompile(`::[a-z ]+`)
 	quotedInteger   = regexp.MustCompile(`'(-?[0-9]+)'`)
-	generatedColumn = regexp.MustCompile(`(?i)(\w+)\s+\w+\s+GENERATED\s+ALWAYS\s+AS\s*\(([^()]+)\)\s+(STORED|VIRTUAL)`)
+	generatedColumn = regexp.MustCompile(`(?is)(\w+)\s+\w+\s+GENERATED\s+ALWAYS\s+AS\s*\((.*?)\)\s+(STORED|VIRTUAL)`)
+	commaSpacing    = regexp.MustCompile(`'(?:[^']|'')*'|,\s*`)
 )
 
 // hack: Postgres stores a default with a cast, parentheses and a quoted negative integer, so those are stripped.
@@ -226,6 +252,12 @@ func normalizeDefault(expr string) string {
 		return "database_timestamp"
 	}
 	expr = postgresCast.ReplaceAllString(expr, "")
+	expr = commaSpacing.ReplaceAllStringFunc(expr, func(token string) string {
+		if strings.HasPrefix(token, ",") {
+			return ", "
+		}
+		return token
+	})
 	for strings.HasPrefix(expr, "(") && strings.HasSuffix(expr, ")") {
 		expr = expr[1 : len(expr)-1]
 	}

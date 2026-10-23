@@ -69,21 +69,7 @@ func ProjectCeilings(values OperatorValues) (runspec.Ceilings, error) {
 	if err != nil {
 		return out, err
 	}
-	cores, err := projectValue(values.MaxCores, values.Origins, "operator.max_cores")
-	if err != nil {
-		return out, err
-	}
-	memory, err := projectValue(values.MaxMemoryBytes, values.Origins, "operator.max_memory_bytes")
-	if err != nil {
-		return out, err
-	}
-	if cores.Set || memory.Set {
-		origin := cores.Origin
-		if !cores.Set {
-			origin = memory.Origin
-		}
-		out.Resources = declaration(runspec.Resources{Cores: cores, MemoryBytes: memory}, origin)
-	}
+
 	out.AllowedAdmissionClasses, err = projectList(values.AllowedAdmissionClasses, values.Origins, "operator.allowed_admission_classes")
 	if err != nil {
 		return out, err

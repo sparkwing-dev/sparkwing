@@ -14,15 +14,9 @@ func TestTemplateVerifyPlanUsesMeasuredResourcesAndBoundsFanout(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
 		return (TemplateVerify{}).Plan(context.Background(), plan, TemplateVerifyArgs{}, sparkwing.RunContext{})
 	})
-	if hints := plan.Resources; hints != nil {
-		t.Fatalf("resource pin = %#v, want measured admission", hints)
-	}
 
 	count := 0
 	for _, node := range plan.Jobs {
-		if hints := node.Resources; hints != nil {
-			t.Fatalf("%s resource pin = %#v, want measured admission", node.ID, hints)
-		}
 		if !strings.HasPrefix(node.ID, "verify-") {
 			continue
 		}

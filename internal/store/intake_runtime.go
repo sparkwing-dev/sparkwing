@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type admittedSnapshot struct {
@@ -248,7 +249,87 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err = writeRunEffectsTx(ctx, tx, team, id, RunPending, now); err != nil {
 		return AdmissionResult{}, err
 	}
+	if request.VerifiedDeliveryID != "" || snapshot.execution.Retry != nil && snapshot.spec == nil && input.Origin == runspec.OriginApp {
+		run, err := readRunTx(ctx, tx, team, id)
+		if err != nil {
+			return AdmissionResult{}, err
+		}
+		creditRefusal, err := intakeCreditRefusalTx(ctx, tx, team, run)
+		if err != nil {
+			return AdmissionResult{}, err
+		}
+		if creditRefusal != "" {
+			if snapshot.execution.Retry != nil {
+				return AdmissionResult{}, authorityError(apierr.Conflict, creditRefusal)
+			}
+			if _, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: runspec.RunID(id), To: RunFailed, Actor: Actor{Kind: ActorOperator, Authority: request.Authority}, Cause: runCreditRefused, Reason: FailureCreditsExhausted, MaskedError: "run did not start: " + creditRefusal}); err != nil {
+				return AdmissionResult{}, err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE triggers SET status='failed',finished_at=? WHERE team=? AND id=?`, now.UnixNano(), team, id); err != nil {
+				return AdmissionResult{}, err
+			}
+			result.OwnerUnit = nil
+		}
+	}
 	return result, nil
+}
+
+// Credit admission judges sealed placement policy, including when every free runner is offline or busy.
+func intakeCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, run RunRow) (string, error) {
+	request := run.Request.Request
+	if request.Mode != runspec.IntakeExecute || request.Dispatch != runspec.DispatchController || request.Burst != nil {
+		return "", nil
+	}
+	options := request.Options
+	if run.Spec != nil {
+		options = run.Spec.Resolved.Settings.Options
+	}
+	if runner := options.Runner; runner.Set && runner.Value.Kind != runspec.RunnerAny && runner.Value.Kind != runspec.RunnerLabel {
+		return "", nil
+	}
+	terms := slices.Clone(options.Requires.Value)
+	if runner := options.Runner; runner.Set && runner.Value.Kind == runspec.RunnerLabel {
+		terms = append(terms, runner.Value.Value)
+	}
+	// Observed labels and platform never make an otherwise free placement paid-only.
+	var selector []string
+	for _, term := range terms {
+		placementOnly := true
+		for _, alternative := range strings.Split(term, ",") {
+			key, _, _ := strings.Cut(strings.TrimSpace(alternative), "=")
+			if key != "class" && key != "pool" && key != "name" && key != "location" && key != "local" {
+				placementOnly = false
+			}
+		}
+		if placementOnly {
+			selector = append(selector, term)
+		}
+	}
+	if !match.Evaluate(match.Profile{Class: match.ClassCloud, Location: TierCloud}, match.Demand{Selector: selector}).OK() {
+		return "", nil
+	}
+	paidOnly := !match.Evaluate(match.Profile{Class: match.ClassAgent, Location: "local"}, match.Demand{Selector: selector}).OK() &&
+		!match.Evaluate(match.Profile{Class: match.ClassCoordinator, Location: "local"}, match.Demand{Selector: selector}).OK()
+	if rankedUnit(request, match.Demand{Selector: options.Requires.Value}) {
+		ranking, err := claimRankingTx(ctx, tx, team)
+		if err != nil {
+			return "", err
+		}
+		if len(ranking) > 0 {
+			if !slices.Contains(ranking, TierCloud) {
+				return "", nil
+			}
+			paidOnly = paidOnly || len(ranking) == 1
+		}
+	}
+	if !paidOnly {
+		return "", nil
+	}
+	unit, err := ownerUnitTx(ctx, tx, team, run.ID)
+	if err != nil {
+		return "", err
+	}
+	return unitCreditHoldTx(ctx, tx, team, run, unit)
 }
 
 func intakeDigest(request IntakeRequest, snapshot admittedSnapshot) (runspec.Hash, error) {
@@ -288,6 +369,13 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 	c := p.Capability
 	if c.Team != string(team) || c.Audience != capability.Controller || request.Request.Team != "" && request.Request.Team != string(team) || request.CapabilityPrefix != "" && request.CapabilityPrefix != c.Prefix {
 		return p, authorityError(apierr.Forbidden, "intake authority does not match the team")
+	}
+	dispatch := request.Request.Dispatch
+	if dispatch == "" {
+		dispatch = SelectDispatch(request.Request)
+	}
+	if request.Request.LocalForeground && (request.Request.Mode != runspec.IntakeExecute || request.Request.Origin != runspec.OriginLocal || dispatch != runspec.DispatchHost || c.Subject.Kind != capability.SubjectLocal) {
+		return p, authorityError(apierr.Forbidden, "foreground reservation requires local host intake")
 	}
 	grant := capability.RunsWrite
 	if request.Request.Lineage.RetryOf != "" {
@@ -509,7 +597,14 @@ func appReplayKey(input runspec.Request) string {
 	if !input.Git.App.Set {
 		return ""
 	}
-	return fmt.Sprintf("%s:%s", input.Git.App.Value.DeliveryKey, input.Pipeline)
+	return gitHubAppReplayKey(input.Git.App.Value.DeliveryKey, input.Pipeline)
+}
+
+func gitHubAppReplayKey(digest, pipeline string) string {
+	if digest == "" || pipeline == "" {
+		return ""
+	}
+	return digest + ":" + pipeline
 }
 
 // validateChildLineageTx checks a child against every ancestor and returns its depth,

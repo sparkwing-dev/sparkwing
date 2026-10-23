@@ -40,10 +40,7 @@ func ProductionRuntime(version string) Runtime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
-			capacity, err := runnerCapacity(home, version, options.Config, engines)
-			if err != nil {
-				return runners.RuntimeConfig{}, err
-			}
+
 			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", options.Config.LocalAdmission != nil && *options.Config.LocalAdmission, options.SubmitAccept, options.actions)}
 			installation, err := productionInstallation(options.ConfigPath, hosting)
 			if err != nil {
@@ -51,7 +48,7 @@ func ProductionRuntime(version string) Runtime {
 			}
 			return runners.RuntimeConfig{
 				Installation: installation, Versions: engines, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-				Hosting: hosting, RequestCapacity: capacity,
+				Hosting: hosting,
 			}, nil
 		}},
 		Bootstrap: BootstrapRuntime{

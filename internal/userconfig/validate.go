@@ -128,16 +128,6 @@ func validateRunner(r RunnerConfig) error {
 			return Invalid("runner.heartbeat", "two renewals must fit strictly before lease expiry")
 		}
 	}
-	for _, field := range []struct {
-		key   string
-		value *string
-	}{{"keep_free", r.KeepFree}, {"contribution", r.Contribution}} {
-		if field.value != nil {
-			if _, err := ParseBudget(*field.value); err != nil {
-				return Invalid("runner."+field.key, "invalid resource budget")
-			}
-		}
-	}
 	return nil
 }
 

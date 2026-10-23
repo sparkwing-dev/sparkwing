@@ -292,8 +292,4 @@ func jobName(b CloudJobBinding) string {
 	return "sw-" + hex.EncodeToString(sum[:24])
 }
 
-func labelHash(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return "sha256-" + hex.EncodeToString(sum[:20])
-}
 func ptr[T any](value T) *T { return &value }

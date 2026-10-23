@@ -37,6 +37,7 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 	request.Team, request.Actor, request.Mode = "", runspec.Actor{}, runspec.IntakePublish
 	request.Source.Location = runspec.SourceLocation{}
 	request.LocalSecretNames = nil
+	request.LocalForeground = false
 	request.Env = runspec.EnvSnapshot{}
 	request.Lineage, request.Burst = runspec.Lineage{}, nil
 	request.Options.Publish.Value, request.Options.CacheFrom.Value = "", ""

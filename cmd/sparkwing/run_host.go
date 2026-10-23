@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	runtimehost "runtime"
 	"strings"
 	"syscall"
 
@@ -42,8 +41,6 @@ type localRunRuntime struct {
 	openCache        func(context.Context, string, *runspec.Request) (blob.RemoteCache, func() error, error)
 	publish          func(context.Context, string, string) error
 	follow           func(context.Context, string, string, io.Writer) error
-	// safety: ownerClaimed releases a standalone queue held for the CLI's own trigger claim.
-	ownerClaimed func()
 }
 
 type localRunDependencies struct {
@@ -267,10 +264,7 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 	if err := ctx.Err(); err != nil {
 		return completion, err
 	}
-	response, err := runtime.controller.Claim(ctx, controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: version, AvailableCores: float64(runtimehost.NumCPU())})
-	if runtime.ownerClaimed != nil {
-		runtime.ownerClaimed()
-	}
+	response, err := runtime.controller.Claim(ctx, controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: version})
 	if err != nil {
 		return completion, err
 	}

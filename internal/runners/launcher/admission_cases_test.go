@@ -19,6 +19,8 @@ import (
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/apiserver/pkg/cel/environment"
+
+	swadmission "github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
 const (
@@ -231,7 +233,7 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 			p.Spec.Tolerations = append(p.Spec.Tolerations, toleration)
 		}), reason: "own team's nodes"},
 		{name: "missing_toleration", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Tolerations = p.Spec.Tolerations[:1] }), reason: "own team's nodes"},
-		{name: "wrong_team_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels[TeamLabel] = labelHash("other-team") }), reason: "own team's nodes"},
+		{name: "wrong_team_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels[TeamLabel] = swadmission.TeamNodeHash("other-team") }), reason: "own team's nodes"},
 		{name: "injected_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels["escape"] = "true" }), reason: "launcher's labels"},
 		{name: "unknown_gate", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.ReadinessGates = []corev1.PodReadinessGate{{ConditionType: "example.com/gate"}}
@@ -342,7 +344,7 @@ func (f *admissionFixture) updates(job *batchv1.Job) []admissionCase {
 		{name: "finalizer_removal", user: testJobController, old: created, object: with(func(p *corev1.Pod) { p.Finalizers = nil })},
 		{name: "orphaned_by_collector", user: testCollector, old: created, object: with(func(p *corev1.Pod) { p.OwnerReferences = nil })},
 		{name: "image_update", user: testJobController, old: created, object: with(func(p *corev1.Pod) { p.Spec.Containers[0].Image = otherImage }), reason: "immutable"},
-		{name: "relabel", user: testJobController, old: created, object: with(func(p *corev1.Pod) { p.Labels[TeamLabel] = labelHash("other-team") }), reason: "immutable"},
+		{name: "relabel", user: testJobController, old: created, object: with(func(p *corev1.Pod) { p.Labels[TeamLabel] = swadmission.TeamNodeHash("other-team") }), reason: "immutable"},
 		{name: "reowned", user: testIntruder, old: created, object: with(func(p *corev1.Pod) { p.OwnerReferences[0].UID = "other-job" }), reason: "Pod ownership"},
 		{name: "ephemeral", user: testIntruder, subresource: "ephemeralcontainers", old: created, object: with(func(p *corev1.Pod) {
 			p.Spec.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug", Image: f.l.Config.RunnerImage}}}
@@ -353,7 +355,9 @@ func (f *admissionFixture) updates(job *batchv1.Job) []admissionCase {
 		{name: "collector_marks_job", user: testCollector, old: job, object: jobWith(func(j *batchv1.Job) { j.Finalizers = append(j.Finalizers, "foregroundDeletion") })},
 		{name: "launcher_annotates_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Annotations[rejectedAnnotation] = rejectedPod })},
 		{name: "other_annotates_job", user: testIntruder, old: job, object: jobWith(func(j *batchv1.Job) { j.Annotations[rejectedAnnotation] = rejectedUnadmittable }), reason: "only the launcher changes a Job"},
-		{name: "retemplated_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = labelHash("other-team") }), reason: "template annotations"},
+		{name: "retemplated_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) {
+			j.Spec.Template.Spec.NodeSelector[TeamNodeLabel] = swadmission.TeamNodeHash("other-team")
+		}), reason: "template annotations"},
 		{name: "other_resumes_job", user: testIntruder, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Suspend = ptr(false) }), reason: "only the launcher changes a Job"},
 		{name: "widened_job", user: testLauncher, old: job, object: jobWith(func(j *batchv1.Job) { j.Spec.Parallelism = ptr(int32(3)) }), reason: "exactly one Pod"},
 	}

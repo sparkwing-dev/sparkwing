@@ -91,7 +91,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := runspec.Request{Version: 1, Team: "local", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/acme/repo"}, Ref: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}, RequestedArgs: map[string]string{}}
+	request := runspec.Request{LocalForeground: true, Version: 1, Team: "local", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/acme/repo"}, Ref: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}, RequestedArgs: map[string]string{}}
 	state := store.LocalPublication{RunSnapshot: store.RunSnapshot{Run: store.RunRow{ID: "local-run", Team: "local", Pipeline: "ci", State: store.RunSuccess, Request: runspec.SealedRequest{Request: request}, Spec: &runspec.Spec{Declarations: runspec.CheckoutDeclarations{Version: 1}, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"LOCAL_TOKEN"}, Guards: runspec.Guards{Passed: true}}}, Plan: raw, FinishedAt: &now}, Nodes: []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "local-run", NodeID: "job"}, Spec: rawJob(t, plan.Jobs[0]), Status: store.StatusDone, Outcome: store.NodeSuccess, Attempt: 1, Generation: 1, StartedAt: &now, FinishedAt: &now}}}}
 	values := map[string]string{}
 	for _, name := range shellNames {
@@ -160,6 +160,12 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 		if bytes.Contains(persisted, []byte(name)) {
 			t.Fatalf("private shell name reached Cloud history: %s", name)
 		}
+	}
+	if snapshot.Run.Request.Request.LocalForeground {
+		t.Fatal("publication inherited the foreground reservation")
+	}
+	if !state.Run.Request.Request.LocalForeground {
+		t.Fatal("publication changed the local foreground intent")
 	}
 	if len(snapshot.Run.Request.Request.Env.Names) != 0 || len(snapshot.Run.Spec.Resolved.Env.Names) != 0 || snapshot.Run.Request.Request.Env.Digest == localEnv.Digest || snapshot.Run.Spec.Resolved.Env.Digest == localEnv.Digest {
 		t.Fatal("Cloud history retained the private local environment identity")

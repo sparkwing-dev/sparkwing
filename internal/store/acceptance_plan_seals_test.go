@@ -138,7 +138,7 @@ func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity strin
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
-	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: parent.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}, Available: match.Resources{Cores: 8}})
+	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: parent.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}})
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
@@ -190,9 +190,8 @@ const acceptanceTeam store.Team = "planner"
 
 type acceptanceClaimProfile struct{}
 
-func (acceptanceClaimProfile) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
-	capacity := match.Resources{Cores: 8}
-	return match.Profile{Capacity: capacity}, capacity, nil
+func (acceptanceClaimProfile) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, error) {
+	return match.Profile{}, nil
 }
 
 func acceptanceAttempt[T ~int | ~int64](attempt T) *runspec.AttemptOrdinal {

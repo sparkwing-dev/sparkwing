@@ -17,10 +17,10 @@ import (
 
 func (t *Tenant) billingMutationTx(ctx context.Context, a capability.Authorized, write func(*storeTx, capability.Principal) error) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		if _, err := lockLedgerTx(ctx, tx, t.team); err != nil {
-			return err
-		}
 		return t.teamMutationInTx(ctx, tx, a, "billingMutationTx", string(t.team), func(tx *storeTx, p capability.Principal) error {
+			if _, err := lockLedgerTx(ctx, tx, t.team); err != nil {
+				return err
+			}
 			var deleting int
 			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug=? AND state=?`, t.team, TeamDeletionPending).Scan(&deleting); err != nil {
 				return err

@@ -43,8 +43,8 @@ func sharedSettingsPlan(t *testing.T, plan nodeproto.PlanDoc) (*Tenant, PlanAcce
 }
 
 func TestAcceptanceUsesSharedSettingsAndSeals(t *testing.T) {
-	cores, timeout := 1.5, int64(1234)
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Resources: &nodeproto.ResourceSpec{Cores: &cores}, TimeoutMS: &timeout, Requires: []string{"linux"}}}}
+	timeout := int64(1234)
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", TimeoutMS: &timeout, Requires: []string{"linux"}}}}
 	tenant, request := sharedSettingsPlan(t, plan)
 	accepted, err := tenant.AcceptPlan(t.Context(), request)
 	if err != nil {
@@ -57,7 +57,7 @@ func TestAcceptanceUsesSharedSettingsAndSeals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if node.Execution.Resources.Value.Cores.Value != cores || node.Execution.Timeout.Value != 1234*time.Millisecond || !slices.Equal(node.Execution.Requires.Value, []string{"linux"}) || node.Attempt != 0 {
+	if node.Execution.Timeout.Value != 1234*time.Millisecond || !slices.Equal(node.Execution.Requires.Value, []string{"linux"}) || node.Attempt != 0 {
 		t.Fatalf("resolved execution: %+v, attempt %d", node.Execution, node.Attempt)
 	}
 	replayed, err := tenant.AcceptPlan(t.Context(), request)
@@ -67,18 +67,17 @@ func TestAcceptanceUsesSharedSettingsAndSeals(t *testing.T) {
 }
 
 func TestAcceptanceRerunsSharedSettingsBeforePersistence(t *testing.T) {
-	cores := 1.5
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Resources: &nodeproto.ResourceSpec{Cores: &cores}}}}
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}}
 	tenant, request := sharedSettingsPlan(t, plan)
-	zero := float64(0)
-	plan.Jobs[0].Resources.Cores = &zero
+	invalidTimeout := int64(-1)
+	plan.Jobs[0].TimeoutMS = &invalidTimeout
 	body, err := json.Marshal(testBodyPlan(plan))
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.Seal.Plan = body
 	if _, err := tenant.AcceptPlan(t.Context(), request); err == nil {
-		t.Fatal("explicit zero accepted using the planner's previous winners")
+		t.Fatal("negative timeout accepted using the planner's previous winners")
 	}
 	run, err := tenant.ReadRun(t.Context(), request.RunID)
 	if err != nil || run.Spec != nil {

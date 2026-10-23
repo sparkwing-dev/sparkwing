@@ -41,7 +41,6 @@ func (Gate) Examples() []sparkwing.Example {
 }
 
 func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Resources(sparkwing.Cores(gateCoreReservation(runtime.NumCPU())))
 	sparkwing.Job(plan, rc.Pipeline, p).Timeout(gateRunTimeout).Cache(lintCache())
 	return nil
 }
@@ -49,20 +48,6 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInput
 // perf: the one logical-CPU count whose schedule starts the full Go suite and
 // the touched-package race suite together.
 const overlappedGoSuiteCPUs = 4
-
-// perf: admission charges sustained CPU. The four-core schedule overlaps the
-// two long Go suites and needs 2.5 cores; larger hosts use the p95 measured on
-// a 16-core Linux host over 20 uncontended runs (3.9 cores, maximum 4.4). A pin
-// also survives a plan edit resetting the profile's plan hash.
-func gateCoreReservation(cpuCount int) float64 {
-	if cpuCount < 4 {
-		return 1
-	}
-	if cpuCount == overlappedGoSuiteCPUs {
-		return 2.5
-	}
-	return float64(cpuCount)/4 + 0.5
-}
 
 // safety: tenancy travels with the CPU count so a step's parallelism has no
 // input the caller cannot see, and a test says which host it describes.

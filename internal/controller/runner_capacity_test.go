@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -16,15 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-func TestRegisteredRunnerZeroHeadroomRefusesAward(t *testing.T) {
-	t.Run("explicit", func(t *testing.T) {
-		registeredRunnerZeroHeadroom(t, `{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`, 4)
-	})
-	t.Run("implicit", func(t *testing.T) { registeredRunnerZeroHeadroom(t, `{}`, 1) })
-}
-
-func registeredRunnerZeroHeadroom(t *testing.T, execution string, available float64) {
-	t.Helper()
+func TestRegisteredRunnerRequiresEveryRequestedLabel(t *testing.T) {
 	original, session := credentialSessionServer(t)
 	connection, err := original.store.Connection(t.Context())
 	if err != nil {
@@ -67,16 +58,16 @@ func registeredRunnerZeroHeadroom(t *testing.T, execution string, available floa
 	}
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_display=? WHERE id='run'`, requestBody, sealed.Request.Git.Repository.Display)
 	engineAcceptedFixturePlan(t, e, "a", "run")
-	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(execution))
-	request := `{"runner_version":"v1.2.3","kinds":["node"],"capacity":{"cores":8,"memory_bytes":8192},"available_cores":0,"available_memory_bytes":0,"os":"linux","arch":"arm64"}`
+	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu","tool:terraform"]}}`))
+	request := `{"runner_version":"v1.2.3","kinds":["node"],"labels":["sparkwing-4cpu"],"os":"linux","arch":"arm64"}`
 	response := engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", request, 200)
 	var claim controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &claim); err != nil || claim.Claim != nil {
-		t.Fatalf("saturated registered machine received work: %s error=%v", response.Body, err)
+		t.Fatalf("machine missing a required label received work: %s error=%v", response.Body, err)
 	}
-	request = fmt.Sprintf(`{"runner_version":"v1.2.3","kinds":["node"],"capacity":{"cores":8,"memory_bytes":8192},"available_cores":%g,"available_memory_bytes":4096,"os":"linux","arch":"arm64"}`, available)
+	request = `{"runner_version":"v1.2.3","kinds":["node"],"labels":["sparkwing-4cpu","tool:terraform"],"os":"linux","arch":"arm64"}`
 	response = engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", request, 200)
 	if err := json.Unmarshal(response.Body.Bytes(), &claim); err != nil || claim.Claim == nil || claim.Claim.JobID != "job" || claim.Claim.Runner.Name != "capacity-machine" {
-		t.Fatalf("available registered machine lost its award: %s error=%v", response.Body, err)
+		t.Fatalf("matching registered machine lost its award: %s error=%v", response.Body, err)
 	}
 }

@@ -62,7 +62,7 @@ func main() { sw.Register("check", func() sw.Pipeline[sw.NoInputs] { return pipe
 		t.Fatal(err)
 	}
 	checkRequestID(t, first, "trace-42")
-	claimed, err := controller.Claim(t.Context(), controllerwire.ClaimRequest{RunID: first.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: installedVersion(), AvailableCores: 1})
+	claimed, err := controller.Claim(t.Context(), controllerwire.ClaimRequest{RunID: first.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: installedVersion()})
 	if err != nil || claimed.Claim == nil {
 		t.Fatalf("owner claim: %v", err)
 	}

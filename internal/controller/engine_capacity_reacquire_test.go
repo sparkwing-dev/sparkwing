@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -31,7 +30,7 @@ func TestControllerPlanContinuityLapseWaitsWithoutStoppingReleasedWork(t *testin
 				},
 			}
 			acceptCapacityDocument(t, server, tenant, owner, plan)
-			claim, err := server.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "first"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+			claim, err := server.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "first"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -107,7 +106,7 @@ func addControllerCapacityRun(t *testing.T, server *serverFixture, tenant *store
 	}
 	engineSQL(t, server.store, `UPDATE runs SET request_json=?,dispatch='controller' WHERE team='a' AND id='other'`, raw)
 	engineSQL(t, server.store, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a','other','plan',1,1,?,?,?)`, time.Now().Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
-	claim, err := server.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "other"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	claim, err := server.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "other"}})
 	if err != nil {
 		t.Fatal(err)
 	}

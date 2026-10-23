@@ -28,7 +28,7 @@ func meteredUnitFixture(t *testing.T, cloud bool) (*Store, UnitDemand, *time.Tim
 	authorityPersist(t, s, root)
 	demand.CapabilityPrefix = root.Prefix
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
-	table := CreditRateTable{{Cores: 1, MicroPerSecond: 2}, {Cores: 4, MicroPerSecond: 10}}
+	table := CreditRateTable{{Cores: 2, MicroPerSecond: 2}, {Cores: 4, MicroPerSecond: 10}}
 	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestMeteredUnitNodeLifecycleUsesImmutableAward(t *testing.T) {
 			if err := s.db.QueryRow(`SELECT started_at FROM billable_intervals`).Scan(&began); err != nil || began != wantStart {
 				t.Fatalf("compute start=%d, %v; want %d", began, err, wantStart)
 			}
-			table := CreditRateTable{{Cores: 1, MicroPerSecond: 200}, {Cores: 4, MicroPerSecond: 1000}}
+			table := CreditRateTable{{Cores: 2, MicroPerSecond: 200}, {Cores: 4, MicroPerSecond: 1000}}
 			if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 				t.Fatal(err)
 			}
@@ -356,7 +356,7 @@ func TestMeteredUnitReaperSettlesAtLeaseLapse(t *testing.T) {
 
 func TestMeteredUnitApplicationRetryKeepsOneReservation(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, true)
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}},"retry":{"set":true,"value":1}}`))
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu"]},"retry":{"set":true,"value":1}}`))
 	_, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: "a"}
 	admitExecution(t, tenant, actor)

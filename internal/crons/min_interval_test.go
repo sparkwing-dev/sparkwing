@@ -5,22 +5,23 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestRefuseBelowMinInterval(t *testing.T) {
-	if err := crons.RefuseBelowMinInterval("*/5 * * * *", 0); err != nil {
+	if err := crons.RefuseBelowMinInterval("*/5 * * * *", "UTC", 0); err != nil {
 		t.Fatalf("an unset guard refused %v", err)
 	}
-	if err := crons.RefuseBelowMinInterval("", 900); err != nil {
+	if err := crons.RefuseBelowMinInterval("", "UTC", 900); err != nil {
 		t.Fatalf("an empty expression refused %v", err)
 	}
-	if err := crons.RefuseBelowMinInterval("0 * * * *", 900); err != nil {
+	if err := crons.RefuseBelowMinInterval("0 * * * *", "UTC", 900); err != nil {
 		t.Fatalf("an hourly schedule refused %v", err)
 	}
-	err := crons.RefuseBelowMinInterval("*/5 * * * *", 900)
+	err := crons.RefuseBelowMinInterval("*/5 * * * *", "UTC", 900)
 	var refused *store.ComputeLimitError
 	if !errors.As(err, &refused) || refused.Limit != store.ComputeLimitCronSeconds {
 		t.Fatalf("a five-minute schedule under a fifteen-minute guard = %v", err)
@@ -36,14 +37,14 @@ func TestTickRefusesAScheduleBelowTheMinInterval(t *testing.T) {
 	svc := pushedService(t)
 	svc.Side = store.CronWhereController
 	ctx := context.Background()
-	if _, err := svc.ArmPushed(ctx, crons.ArmPush{
+	next := time.Now().Add(time.Minute)
+	if _, _, err := svc.Schedules.ArmCronSchedule(ctx, store.CronSchedule{
+		ID: "crn_sweep", RepoPath: pushedRepoURL, Pipeline: "sweep", Name: "default",
+		Cron: "*/5 * * * *", TZ: "UTC", Overlap: store.CronOverlapSkip,
+		Where: store.CronWhereController, GitBranch: "main", NextDueAt: &next,
 		GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		RepoURL: pushedRepoURL,
-		Branch:  "main",
-		SHA:     "0123456789abcdef0123456789abcdef01234567",
-		Entries: []crons.Declared{declaredEntry("sweep", "default", "*/5 * * * *")},
 	}); err != nil {
-		t.Fatalf("ArmPushed: %v", err)
+		t.Fatal(err)
 	}
 	if _, err := svc.Operator.SetComputeLimits(ctx, map[string]int64{store.ComputeLimitCronSeconds: 900}); err != nil {
 		t.Fatalf("set the guard: %v", err)

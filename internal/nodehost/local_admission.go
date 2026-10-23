@@ -22,12 +22,11 @@ type Admitter interface {
 // Lease holds machine capacity until Release and joins ownership watching.
 type Lease interface {
 	Token() string
-	Resources() wingwire.HostResources
 	Release() error
 	Watch(func(wingwire.Evicted), func(wingwire.Cancel)) error
 }
 
-// LocalAdmission holds CPU and memory under sealed settings.
+// LocalAdmission holds machine capacity under sealed settings.
 type LocalAdmission struct {
 	Daemon     Admitter
 	Controller string
@@ -54,8 +53,7 @@ func (a *LocalAdmission) machine(ctx context.Context, accepted AcceptedRun, row 
 	request := wingwire.AdmissionRequest{
 		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), string(row.Ref.NodeID)),
 		DisplayRunID: accepted.RunID + "/" + string(row.Ref.NodeID), Pipeline: spec.Request.Request.Pipeline,
-		Resources: localResources(row.Execution.Resources.Value),
-		Priority:  options.Priority.Value, Class: options.AdmissionClass.Value, NonBlocking: nonblocking,
+		Priority: options.Priority.Value, Class: options.AdmissionClass.Value, NonBlocking: nonblocking,
 	}
 	return a.hold(ctx, row.Ref, request, func(ctx context.Context, _ Lease) error { return body(ctx) })
 }
@@ -66,10 +64,6 @@ func admissionSpec(accepted AcceptedRun) (runspec.Spec, error) {
 		return spec, errors.New("local admission requires the accepted run seal")
 	}
 	return spec, nil
-}
-
-func localResources(resources runspec.Resources) wingwire.HostResources {
-	return wingwire.HostResources{Cores: resources.Cores.Value, MemoryBytes: resources.MemoryBytes.Value}
 }
 
 func (a *LocalAdmission) holderRunID(run string) string {
