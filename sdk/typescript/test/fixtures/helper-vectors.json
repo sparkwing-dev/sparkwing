@@ -12,35 +12,5 @@
       "job": "grandchild",
       "groups": ["child/generate/0", "display", "source/generate/0"]
     }
-  ],
-  "memo": [
-    {
-      "kind": "file",
-      "content": "same",
-      "key": "memo:3bc4fa07becb41c1f7fcdbda8308533030b0a735dc1cd5abf7953a135e48d7e0",
-      "treeKey": "memo:408092b508e0a5f161a43b5bebc82cbbc87c7b3291fff8e8771003b18bd8f788"
-    },
-    {
-      "kind": "link",
-      "content": "same",
-      "key": "memo:5c0bd5bc8bd99421bd1ad7a6b36fc8f85115def0771d5b0791edadd0b1f2a2e6"
-    },
-    {
-      "kind": "file",
-      "content": "秘密",
-      "key": "memo:96cea74fa4ae1281213055070cd5f99f9f4716e3d78c621518f53be89ddabc3d",
-      "treeKey": "memo:55e3ce98576bf91d39ab1400f07e5733576421196d7d5e51fb06ba8bb379cd2f"
-    },
-    {
-      "kind": "link",
-      "content": "秘密",
-      "key": "memo:af0847098cf3023446b7b59f8f341063dce1c6c0cda2a865dcd10cecf8af090b"
-    },
-    {
-      "kind": "file",
-      "content": "",
-      "key": "memo:236de1ac769ed3f40c9572ebdabd26ad40936f1a61f1dd6c16db34603bc4570c",
-      "treeKey": "memo:4a0257dc9e79c0f9c77b44f3732d24c66cdff8a399365a4a3d2c15f83f327734"
-    }
   ]
 }

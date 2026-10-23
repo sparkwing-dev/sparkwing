@@ -147,7 +147,7 @@ func nativeEvals(t *testing.T, h *host, job nodeproto.JobSpec, output json.RawMe
 		{"before", job.Closures.BeforeRun[0], "", "null"},
 		{"verify", job.Closures.Verify, "", "null"},
 		{"after", job.Closures.AfterRun[0], `{"outcome":"success"}`, "null"},
-		{"memo", job.Closures.MemoKey, "", `"native"`},
+		{"memo", job.Closures.MemoKey, "", `{"version":"native","enabled":true}`},
 	} {
 		var result nodeproto.EvalResult
 		h.call(nodeproto.Request{ID: tc.id, Op: nodeproto.OpEval, Closure: tc.closure, Input: json.RawMessage(tc.input)}, &result)

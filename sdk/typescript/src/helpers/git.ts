@@ -3,8 +3,7 @@ import * as fs from "node:fs/promises";
 import * as paths from "node:path";
 import type { Context, GitInfo, git as GitAPI } from "../../index.d.ts";
 import { assertExecution } from "../scope.ts";
-import { isMissing, path, regularFiles } from "./files.ts";
-import { inputMatcher } from "./memo.ts";
+import { isMissing, path, regularFiles, inputMatcher } from "./files.ts";
 
 async function command(ctx: Context, directory: string, ...args: string[]): Promise<string> {
   assertExecution();

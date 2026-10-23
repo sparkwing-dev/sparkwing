@@ -1,5 +1,5 @@
 import { writeSync } from "node:fs";
-import { definePipeline, main, constant, ConcurrencyGroup } from "@sparkwing/sdk";
+import { definePipeline, main, ConcurrencyGroup } from "@sparkwing/sdk";
 
 definePipeline({
   name: "native",
@@ -13,7 +13,7 @@ definePipeline({
       .beforeRun(() => {})
       .verify(() => {})
       .afterRun(() => {})
-      .memo(constant("native"));
+      .memo(() => ({ version: "native", enabled: true }));
     job.step("probe", async ctx => {
       writeSync(1, '{"reply":"forged","ok":true}\n');
       ctx.log.debug("native-debug");

@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -20,10 +21,7 @@ func (h *nodeExecutor) memo(ctx context.Context, session *executorSession, input
 	if err != nil || key == "" {
 		return "", nil, err
 	}
-	hash, err := runspec.CanonicalHash(key)
-	if err != nil {
-		return "", nil, err
-	}
+	hash := runspec.Hash(key)
 	if spec.Resolved.Settings.Options.NoMemo.Value {
 		return hash, nil, nil
 	}
@@ -41,14 +39,31 @@ func (h *nodeExecutor) memoKey(ctx context.Context, session *executorSession, in
 	if job.Memo == nil && job.Closures.MemoKey == "" {
 		return "", nil
 	}
-	if job.Memo == nil || job.Closures.MemoKey == "" {
-		return "", executorError(apierr.PlanInvalid, "memo policy and key closure must be declared together")
+	if job.Memo == nil || (job.Memo.Input == nil && job.Closures.MemoKey == "") || (job.Memo.Input != nil && job.Closures.MemoKey != "") {
+		return "", executorError(apierr.PlanInvalid, "memo requires exactly one input recipe or value callback")
 	}
 	bounded, cancel, err := h.deps.ChildContext(ctx, 30*time.Second, 0)
 	if err != nil {
 		return "", err
 	}
 	defer cancel()
+	if job.Memo.Input != nil {
+		var environment procenv.Env
+		if memoNeedsEnvironment(*job.Memo.Input) {
+			if h.deps.memoEnvironment == nil {
+				return "", errors.New("memo requires the effective job environment")
+			}
+			environment, err = h.deps.memoEnvironment(bounded, input)
+			if err != nil {
+				return "", err
+			}
+		}
+		value, err := memoInputValue(bounded, *job.Memo.Input, memoWorkspace(input), environment)
+		if err != nil {
+			return "", errors.Join(executorError(apierr.Internal, "memo input evaluation failed"), err)
+		}
+		return memoValueKey(value)
+	}
 	value, err := h.eval(bounded, session, input, job.Closures.MemoKey, "memo_key", nil, nil)
 	if err = errors.Join(err, context.Cause(bounded)); err != nil {
 		return "", err
@@ -56,11 +71,10 @@ func (h *nodeExecutor) memoKey(ctx context.Context, session *executorSession, in
 	if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 		return "", nil
 	}
-	var key string
-	if err := json.Unmarshal(value, &key); err != nil || key == "" {
-		return "", executorError(apierr.ProtocolError, "memo key must be a nonempty string or null")
+	if !json.Valid(value) || bytes.Equal(bytes.TrimSpace(value), []byte(`""`)) {
+		return "", executorError(apierr.ProtocolError, "memo callback must return a JSON value or null")
 	}
-	return key, nil
+	return memoValueKey(json.RawMessage(value))
 }
 
 func (h *nodeExecutor) restoreMemo(ctx context.Context, input NodeInput, pipeline string, hash runspec.Hash) (*store.NodeResult, error) {

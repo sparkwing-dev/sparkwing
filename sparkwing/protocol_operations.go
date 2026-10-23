@@ -320,13 +320,13 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 		if err != nil {
 			return nil, err
 		}
-		if v == NoMemo {
+		if sentinel, ok := v.(memoBypass); ok && sentinel == NoMemo {
 			return nil, nil
 		}
 		if v == "" {
 			return nil, fmt.Errorf("memo key must not be empty")
 		}
-		return string(v), nil
+		return v, nil
 	}
 	if n.work != nil {
 		for _, step := range n.work.steps {

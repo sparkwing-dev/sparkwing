@@ -206,6 +206,7 @@ func materializeWork(id string, job Workable) (*Work, *WorkStep) {
 // Inner-DAG modifiers belong to [WorkStep].
 type JobNode struct {
 	memoKey                                                             MemoKeyFn
+	memoInput                                                           *MemoInput
 	memoOptions                                                         memoOptions
 	declaredEnv                                                         map[string]nodeproto.EnvValue
 	generators                                                          []*Generator

@@ -1,3 +1,4 @@
+import { jsonValue } from "./protocol.ts";
 import { argument } from "./describe.ts";
 import { posix } from "node:path";
 import type * as API from "../index.d.ts";
@@ -438,13 +439,14 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
     this.callbacks.push({ id: this.closureID("verify"), kind: "verify", fn, job: this });
     return this;
   }
-  memo(fn: API.MemoKeyFn, options: API.MemoOptions = {}): this {
+  memo(fn: API.MemoInput | API.MemoKeyFn, options: API.MemoOptions = {}): this {
     this.assertMutable();
     const memo: NonNullable<JobSpec["memo"]> = {};
     if (options.ttlMs !== undefined) memo.ttl_ms = integer("memo TTL", options.ttlMs);
     this.spec.memo = memo;
     this.callbacks = this.callbacks.filter((c) => c.kind !== "memo_key");
-    this.callbacks.push({ id: this.closureID("memo_key"), kind: "memo_key", fn, job: this });
+    if (typeof fn === "function") this.callbacks.push({ id: this.closureID("memo_key"), kind: "memo_key", fn, job: this });
+    else memo.input = jsonValue(fn, true) as API.MemoInput;
     return this;
   }
   cache(...caches: readonly API.CacheSpec[]): this {
@@ -581,7 +583,7 @@ class JobGroup implements API.JobGroup {
   afterRun(fn: API.AfterRunFn): this {
     return this.apply((job) => job.afterRun(fn));
   }
-  memo(fn: API.MemoKeyFn, options?: API.MemoOptions): this {
+  memo(fn: API.MemoInput | API.MemoKeyFn, options?: API.MemoOptions): this {
     return this.apply((job) => job.memo(fn, options));
   }
   cache(...caches: readonly API.CacheSpec[]): this {

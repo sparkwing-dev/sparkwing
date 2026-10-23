@@ -62,8 +62,8 @@ generated declarations before execution.
 
 `Context` provides lazy secrets and plain variables, typed outputs, references,
 annotations, summaries, acknowledged masking, OIDC, child runs and cleanup.
-Command, Git, Docker, service, filesystem and memo helpers use the same context
-and cancellation signal. Plan callbacks declare work; helpers that perform I/O
+Command, Git, Docker, service and filesystem helpers use the same context
+and cancellation signal. Memo helpers declare input recipes for host evaluation. Plan callbacks declare work; helpers that perform I/O
 refuse calls during planning. Generated jobs reconstruct from recorded source
 output. The host validates the reconstructed declarations against accepted state.
 
@@ -98,9 +98,11 @@ Generated declarations use the frame budget. The Sparkwing host masks output and
 protocol payloads after receiving them from the SDK. Pipeline code run without a
 Sparkwing host has unmasked logs and errors.
 
-Tracked memo inputs encode each path, entry type and file bytes or symlink
-target. They never read a symlink's target bytes. Tree inputs hash regular files,
-skip symlink entries and reject roots that traverse symlinks.
+Memo helpers declare recipes in the plan. The executing host evaluates them
+against its checkout and effective job environment, under the job admission
+permit. Tracked inputs encode paths, entry types and file bytes or symlink target
+text. Tree inputs include regular files and skip symlinks. Custom callbacks return
+JSON values for host hashing. `memoKey` collects parts and performs no hashing.
 
 On Windows, the host supplies decimal handles through
 `--sw-protocol-handles <request>,<frame>`. A packaged native bridge converts them

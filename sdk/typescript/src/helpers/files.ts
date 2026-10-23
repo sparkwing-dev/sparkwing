@@ -105,3 +105,23 @@ export async function regularFiles(root: string, signal?: AbortSignal, skip: Rea
   await visit("");
   return files.sort();
 }
+
+export function inputMatcher(pattern: string): (file: string) => boolean {
+  const directory = pattern.endsWith("/");
+  const normalized = directory ? pattern.slice(0, -1) : pattern;
+  const expression = globRegex(normalized, true);
+  if (directory && !normalized.includes("/"))
+    return (file) =>
+      file
+        .split("/")
+        .slice(0, -1)
+        .some((part) => expression.test(part));
+  if (directory)
+    return (file) =>
+      file
+        .split("/")
+        .slice(0, -1)
+        .some((_, i, parts) => expression.test(parts.slice(0, i + 1).join("/")));
+  if (!pattern.includes("/")) return (file) => expression.test(paths.posix.basename(file));
+  return (file) => expression.test(file);
+}

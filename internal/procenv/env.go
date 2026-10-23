@@ -21,13 +21,19 @@ func (e Env) Values() iter.Seq[string] { return slices.Values(e.values) }
 
 // Lookup returns a variable's value using the platform's name comparison.
 func (e Env) Lookup(name string) string {
+	value, _ := e.LookupEnv(name)
+	return value
+}
+
+// LookupEnv returns a value and its presence using the platform's name comparison.
+func (e Env) LookupEnv(name string) (string, bool) {
 	for i := len(e.values) - 1; i >= 0; i-- {
 		key, value, _ := strings.Cut(e.values[i], "=")
 		if envKey(key) == envKey(name) {
-			return value
+			return value, true
 		}
 	}
-	return ""
+	return "", false
 }
 
 // GoTool applies Go-tool execution settings through the same credential and mask policy.

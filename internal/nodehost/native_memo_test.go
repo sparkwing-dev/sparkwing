@@ -22,13 +22,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func TestNativeExecutorMemoHitUsesClaimAndReleasesAdmission(t *testing.T) {
+func TestNativeExecutorMemoRecipeHitUsesClaimAndReleasesAdmission(t *testing.T) {
 	ctx := t.Context()
 	objects, directory := nativeStoreObjects(t)
 	database := openStore(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{ResultBlobs: storage.BlobManifests{Objects: objects}}, nil
 	}))
-	job := nodeproto.JobSpec{ID: "output", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Memo: &nodeproto.MemoSpec{}, Closures: nodeproto.ClosureSpec{MemoKey: "memo"}}
+	job := nodeproto.JobSpec{ID: "output", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Memo: &nodeproto.MemoSpec{Input: &nodeproto.MemoInput{Kind: "parts", Parts: []any{"same-key"}}}}
 	job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "memo-job", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}}
 	job.Artifacts = []string{"artifact.txt"}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
@@ -95,7 +95,7 @@ func TestNativeExecutorMemoHitUsesClaimAndReleasesAdmission(t *testing.T) {
 				started = append(started, input)
 				return &executorProcess{plan: plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`"memo-output"`)}, onRun: func(context.Context) { bodies++ }, answer: func(_ context.Context, request nodeproto.Request) (any, error) {
 					if request.Op == nodeproto.OpEval {
-						return nodeproto.EvalResult{Value: json.RawMessage(`"same-key"`)}, nil
+						t.Fatal("built-in recipe invoked author callback")
 					}
 					return nil, nil
 				}}, nil

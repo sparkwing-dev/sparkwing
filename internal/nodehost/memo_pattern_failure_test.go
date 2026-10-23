@@ -1,12 +1,13 @@
-package inputs
+package nodehost
 
 import (
 	"errors"
 	"os/exec"
-	"path/filepath"
-	"runtime"
+	"path"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -19,9 +20,9 @@ func TestMalformedPatternsFailWithoutTrackedFiles(t *testing.T) {
 	}
 	withWorkDir(t, repository, func() {
 		for _, pattern := range []string{"[", "[a-]"} {
-			for _, resolve := range []sparkwing.MemoKeyFn{Files(pattern), RepoFiles(Ignore(pattern)), Files("*", pattern), RepoFiles(Ignore("*", pattern))} {
-				key, err := resolve(t.Context())
-				if key != "" || !errors.Is(err, filepath.ErrBadPattern) || !strings.Contains(err.Error(), "pattern") {
+			for _, resolve := range []sparkwing.MemoInput{inputs.Files(pattern), inputs.RepoFiles(inputs.Ignore(pattern)), inputs.Files("*", pattern), inputs.RepoFiles(inputs.Ignore("*", pattern))} {
+				key, err := resolveTestMemo(t, resolve)
+				if key != "" || !errors.Is(err, path.ErrBadPattern) || !strings.Contains(err.Error(), "pattern") {
 					t.Errorf("pattern %q = (%q, %v)", pattern, key, err)
 				}
 			}
@@ -32,9 +33,9 @@ func TestMalformedPatternsFailWithoutTrackedFiles(t *testing.T) {
 func TestMalformedLaterPatternFailsBeforeMatching(t *testing.T) {
 	repository := createTestRepository(t, map[string]string{"sample.txt": "sample"})
 	withWorkDir(t, repository, func() {
-		for _, resolve := range []sparkwing.MemoKeyFn{Files("*", "["), RepoFiles(Ignore("*", "["))} {
-			key, err := resolve(t.Context())
-			if key != "" || !errors.Is(err, filepath.ErrBadPattern) {
+		for _, resolve := range []sparkwing.MemoInput{inputs.Files("*", "["), inputs.RepoFiles(inputs.Ignore("*", "["))} {
+			key, err := resolveTestMemo(t, resolve)
+			if key != "" || !errors.Is(err, path.ErrBadPattern) {
 				t.Errorf("later malformed pattern = (%q, %v)", key, err)
 			}
 		}
@@ -64,22 +65,9 @@ func TestPatternMatchingKeepsExistingSyntax(t *testing.T) {
 	}
 }
 
-func TestTrailingBackslashFollowsPlatformMatching(t *testing.T) {
-	const pattern = "sample\\"
-	matcher, err := compilePattern(pattern)
-	if runtime.GOOS != "windows" {
-		if !errors.Is(err, filepath.ErrBadPattern) || matcher != nil {
-			t.Fatalf("trailing escape: matcher present=%t, error=%v", matcher != nil, err)
-		}
-		return
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{pattern, "sample", "nested\\sample"} {
-		matched, err := matcher(path)
-		if err != nil || matched {
-			t.Errorf("trailing separator matched basename of %q: (%t, %v)", path, matched, err)
-		}
+func TestTrailingBackslashIsInvalidOnEveryHost(t *testing.T) {
+	matcher, err := compilePattern("sample\\")
+	if !errors.Is(err, path.ErrBadPattern) || matcher != nil {
+		t.Fatalf("trailing escape: matcher present=%t error=%v", matcher != nil, err)
 	}
 }

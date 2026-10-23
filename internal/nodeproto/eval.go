@@ -27,8 +27,7 @@ func (r EvalResult) ValidateValue(kind string) error {
 			return bad()
 		}
 	case "memo_key":
-		var key string
-		if !null && (json.Unmarshal(raw, &key) != nil || key == "") {
+		if bytes.Equal(raw, []byte(`""`)) {
 			return bad()
 		}
 	case "before_run", "after_run", "verify":
