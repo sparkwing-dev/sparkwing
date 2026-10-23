@@ -10,10 +10,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 )
 
-func TestGitHubRunnerOnboardingResolvesCoveredIdentity(t *testing.T) {
+func TestGitHubRunnerOnboardingResolvesCoveredIdentityBeyondTenPages(t *testing.T) {
 	f := newAppFixture(t)
 	owner := f.ghUser(501, "olga")
 	f.connect(owner, 501, 7, acmeAdmin)
+	var repos []githubapptest.Repo
+	for i := 0; i < 1000; i++ {
+		repos = append(repos, githubapptest.Repo{ID: int64(1000 + i), FullName: fmt.Sprintf("acme/repo%d", i)})
+	}
+	f.app.SetRepos(7, append(repos, githubapptest.Repo{ID: 701, FullName: "acme/widgets"})...)
 	var out struct {
 		Bindings []struct {
 			Repository string `json:"repository"`
@@ -31,7 +36,7 @@ func TestGitHubRunnerOnboardingResolvesCoveredIdentity(t *testing.T) {
 }
 
 func TestGitHubRunnerOnboardingRefusesUnverifiedIdentity(t *testing.T) {
-	for _, scenario := range []string{"unbound", "uncovered", "forged ids", "transferred", "missing owner", "truncated", "unavailable"} {
+	for _, scenario := range []string{"unbound", "uncovered", "forged ids", "transferred", "missing owner", "unavailable"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newAppFixture(t)
 			owner := f.ghUser(501, "olga")
@@ -49,12 +54,6 @@ func TestGitHubRunnerOnboardingRefusesUnverifiedIdentity(t *testing.T) {
 				f.app.SetRepos(7, githubapptest.Repo{ID: 701, FullName: "acme/widgets", Owner: githubapp.Account{ID: 999, Login: "acme"}})
 			case "missing owner":
 				f.app.SetRepos(7, githubapptest.Repo{ID: 701, FullName: "acme/widgets", Owner: githubapp.Account{Login: "acme"}})
-			case "truncated":
-				repos := []githubapptest.Repo{{ID: 701, FullName: "acme/widgets"}}
-				for i := 0; i < 1000; i++ {
-					repos = append(repos, githubapptest.Repo{ID: int64(1000 + i), FullName: fmt.Sprintf("acme/repo%d", i)})
-				}
-				f.app.SetRepos(7, repos...)
 			case "unavailable":
 				f.app.FailInstallationRepositories(1)
 			}
