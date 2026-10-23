@@ -64,7 +64,7 @@ Initial jobs must use argument declarations discovered by zero-input describe,
 even when invocation inputs change job IDs. New declarations belong in generated
 jobs, whose secrets the host registers before execution.
 
-Secret flag values are masked in logs and diagnostics. Input masking does not
+Secret flag values of 4 or more characters are masked in logs and diagnostics (see the secret values rule). Input masking does not
 remove those values from stored invocation arguments, so use declared secrets
 for credentials.
 
@@ -404,14 +404,10 @@ Masking is provided by the Go host. Neither SDK masks output or sends automatic
 mask registrations. Pipeline code run without a Sparkwing host is unmasked.
 The host registers accepted secret arguments, defaults and normalized list items
 before execution. Stored secrets and OIDC tokens are registered before release.
-Stored secrets, supplied secret arguments and nonempty secret defaults of the
-selected pipeline need at least four characters. Secrets containing `***` are accepted.
-This includes each nonempty list item. An empty supplied argument or default
-is no value.
-Use a plain config variable for values that fail this rule. Defaults belonging
-to unselected pipelines do not refuse a run. Valid values and list items still
-register, while short items are skipped. Derived proxy credential parts
-that fail the rule are skipped.
+See [secret values](secrets.md#values-that-can-be-secrets) for the masking
+length rule. Empty supplied arguments and defaults carry no value.
+Secrets containing `***` are accepted.
+Defaults from unselected pipelines register when long enough.
 Stdout and stderr are masked before line splitting. Describe and generator output
 waits for declarations. Failed discovery withholds that output, including CLI
 help diagnostics and test-host planning output. Generator failures persist a
@@ -423,7 +419,7 @@ type, with all unclassified text withheld after incomplete discovery.
 The stream matcher publishes complete safe lines within the current write.
 It holds only suffixes that could complete a registered spelling. Safe partial
 lines flush after 25 ms of idle output. Prefixes that could complete a secret
-stay private until more input or EOF. A stored secret read is masked even when
+stay private until more input or EOF. A stored secret read of 4 or more characters is masked even when
 its value occurs in an accepted job identifier, including subsequent steps.
 Size and idle flushes preserve complete UTF-8 boundaries. Output delivery
 failures stop the session even when a timer triggers the flush.

@@ -145,9 +145,6 @@ func declarationError(message string) error {
 
 // Error withholds unclassified author errors and sanitizes classified payloads.
 func (g *DeclarationGate) Error(err error) error {
-	if errors.Is(err, secrets.ErrInvalidValue) {
-		return secrets.ErrInvalidValue
-	}
 	if !g.Complete() {
 		code := apierr.SDKError
 		var canonical *apierr.Error

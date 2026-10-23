@@ -452,10 +452,9 @@ func TestSDKPlanningArgumentFailuresRespectRegistration(t *testing.T) {
 			value := "supplied-private-secret"
 			input.Args = map[string]string{"token": value}
 			want := "no flag --*** is declared"
+			input.Args[value] = "unknown"
 			if short {
 				input.Args["short"] = "bad"
-			} else {
-				input.Args[value] = "unknown"
 			}
 			var logs []nodeproto.FrameLog
 			planner.Log = func(_ context.Context, frame nodeproto.FrameLog) error { logs = append(logs, frame); return nil }
@@ -480,7 +479,7 @@ func TestSDKPlanningArgumentFailuresRespectRegistration(t *testing.T) {
 			if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs {
 				t.Fatalf("preparation error = %v", err)
 			}
-			if !short && failure.Message != want {
+			if failure.Message != want {
 				t.Fatalf("known argument error = %q, want %q", failure.Message, want)
 			}
 			encoded, _ := json.Marshal(logs)

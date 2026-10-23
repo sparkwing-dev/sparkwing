@@ -1,12 +1,10 @@
 package runspec
 
 import (
-	"fmt"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // BuildSecretRegistration derives the accepted run's complete argument mask set.
@@ -17,25 +15,19 @@ func BuildSecretRegistration(request Request, resolved Resolved) (SecretRegistra
 	projection.Version = 1
 	var values []string
 	seen := make(map[string]bool)
-	add := func(raw string, list bool) error {
+	add := func(raw string, list bool) {
 		for _, value := range secretCandidates(raw, list) {
-			if err := secrets.Validate(value); err != nil {
-				return err
-			}
 			if !seen[value] {
 				values = append(values, value)
 				seen[value] = true
 			}
 		}
-		return nil
 	}
 	for _, value := range projection.Defaults {
 		if value.Raw == "" {
 			continue
 		}
-		if err := add(value.Raw, value.List); err != nil {
-			return SecretRegistration{}, fmt.Errorf("secret argument default: %w", err)
-		}
+		add(value.Raw, value.List)
 	}
 	names := append([]string(nil), resolved.SecretArgs...)
 	names = append(names, request.SecretArgs.Value...)
@@ -44,15 +36,11 @@ func BuildSecretRegistration(request Request, resolved Resolved) (SecretRegistra
 	for _, name := range names {
 		list := slices.Contains(projection.ListArgs, name)
 		if raw, present := request.RequestedArgs[name]; present {
-			if err := add(raw, list); err != nil {
-				return SecretRegistration{}, fmt.Errorf("secret argument %q: %w", name, err)
-			}
+			add(raw, list)
 		}
 		raw, present := resolved.Args[name]
 		if present {
-			if err := add(raw, list); err != nil {
-				return SecretRegistration{}, fmt.Errorf("secret argument %q: %w", name, err)
-			}
+			add(raw, list)
 		}
 	}
 	projection.Values = values

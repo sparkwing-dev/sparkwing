@@ -78,11 +78,15 @@ func TestExpansionRegistrationPersistsOutsideGeneratedPlanAndBindsReplay(t *test
 	}
 }
 
-func TestExpansionRegistrationRefusesShortItem(t *testing.T) {
+func TestExpansionRegistrationAcceptsShortItem(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
 	request.Registration.Defaults = []runspec.SecretValue{{Raw: "ab,long-private", List: true}}
-	if _, err := tenant.AcceptExpansion(t.Context(), request); err == nil || !strings.Contains(err.Error(), "plain config variable") {
-		t.Fatalf("expected short-item refusal, got %v", err)
+	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	projection, err := runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{SecretRegistration: request.Registration})
+	if err != nil || !slices.Contains(projection.Values, "ab") {
+		t.Fatalf("lost short item: %+v %v", projection, err)
 	}
 }
 

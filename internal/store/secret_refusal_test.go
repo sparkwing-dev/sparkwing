@@ -1,33 +1,35 @@
 package store
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-type refusalCipher struct{ called bool }
-
-func (c *refusalCipher) SealBound(secrets.Purpose, string, string, string, bool, bool, string) (string, error) {
-	c.called = true
-	return "", nil
-}
-
-func TestStoredSecretRefusesUnmaskableValueBeforeEncryption(t *testing.T) {
-	for _, value := range []string{"abc", ""} {
-		cipher := &refusalCipher{}
-		_, err := SealSecret(cipher, "team", Secret{Name: "TOKEN", Value: value, Masked: true})
-		if err == nil || !strings.Contains(err.Error(), "plain config variable") || cipher.called {
-			t.Fatalf("%q: refusal %v, encryption called %t", value, err, cipher.called)
+func TestStoredShortSecretsStayEncryptedAndClassified(t *testing.T) {
+	cipher, err := secrets.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"abc", "ééé", ""} {
+		sealed, err := SealSecret(cipher, "team", Secret{Name: "TOKEN", Value: value, Masked: true, Pipeline: "deploy"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		row := sealed.Row()
+		plain, err := cipher.OpenBound(secrets.PurposeSecret, "team", row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
+		if err != nil || plain != value || row.Value == value || !row.Masked {
+			t.Fatalf("short secret lost protection: %+v %v", row, err)
+		}
+		if _, err := cipher.OpenBound(secrets.PurposeSecret, "other", row.Name, row.Pipeline, row.Shared, row.Masked, row.Value); err == nil {
+			t.Fatal("foreign team opened secret")
 		}
 	}
 }
 
-func TestLocalSecretRefusesUnmaskableValue(t *testing.T) {
-	err := validateLocalSecrets([]string{"TOKEN"}, map[string]string{"TOKEN": "abc"})
-	if err == nil || !strings.Contains(err.Error(), "plain config variable") {
-		t.Fatalf("expected plain-config refusal, got %v", err)
+func TestLocalShortSecretAccepted(t *testing.T) {
+	if err := validateLocalSecrets([]string{"TOKEN"}, map[string]string{"TOKEN": "abc"}); err != nil {
+		t.Fatal(err)
 	}
 }
 
