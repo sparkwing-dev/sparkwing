@@ -60,7 +60,7 @@ internal/releaseasset	1
 internal/releaseauth	1
 internal/repos	20
 internal/runflags	11
-internal/runners	3
+internal/runners	2
 internal/runners/launcher	4
 internal/runners/service	4
 internal/runners/service/unitfile	1
@@ -80,5 +80,5 @@ internal/tokenpark	3
 internal/toolchain	2
 internal/userconfig	3
 internal/web	5
-internal/wingd	24
+internal/wingd	21
 internal/wingd/client	15
