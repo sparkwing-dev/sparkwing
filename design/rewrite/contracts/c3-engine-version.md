@@ -322,7 +322,7 @@ release resolver and need an explicit development workflow during implementation
 | [`VersionForPin`](../../../internal/engine/pin.go) | maps release pins to their exact engine and Go SDK replacements to the installed engine. |
 | [`engineid.Identity`](../../../internal/engineid/identity.go) | binds the selected engine to SDK inputs in the accepted run seal. |
 | [`Resolved`](../../../internal/engine/engine.go) | includes the selected executable for this machine's platform. |
-| [`ReleaseBundle`](../../../internal/engine/engine.go) | is untrusted until VerifyRelease checks the shared release trust roots. |
+| [`ReleaseBundle`](../../../internal/engine/engine.go) | is untrusted until VerifyRelease checks it against the keys its caller supplies; the resolver supplies the production roots. |
 | [`VerifiedRelease`](../../../internal/engine/engine.go) | cannot be constructed outside this package before verification. |
 | [`VerifyRelease`](../../../internal/engine/release.go) | checks explicit trusted keys through releaseasset.VerifyForVersion. |
 | [`Config`](../../../internal/engine/engine.go) | supplies machine-owned storage and transport, never repository-selected trust roots or URLs. |

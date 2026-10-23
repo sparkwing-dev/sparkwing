@@ -33,8 +33,8 @@ maintenance. It opens `<home>/state.db`, selects `DefaultTeam`, and gives the
 shared service binder that store, tenant and `EngineController`. The binder
 returns the shared policy handlers, state projection and `StoreRunnerConfig`.
 `Config.Open` constructs the shared queue over its owned store before returning.
-`runners.NewStoreRunner` constructs that queue from the shared controller and
-`runners.StoreRunnerConfig`. `Config.Open` rejects another controller store.
+`localcontroller.NewStoreRunner` constructs that queue from the shared controller and
+`localcontroller.StoreRunnerConfig`. `Config.Open` rejects another controller store.
 The runner supplies `StoreHosting` over the owned handle. The controller needs its signed runner
 admission policy and the store needs its enrollment resolver. The bearer provider
 supplies a provisioned claimant credential.

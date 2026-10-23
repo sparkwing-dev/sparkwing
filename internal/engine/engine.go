@@ -30,7 +30,7 @@ type Resolved struct {
 	trustedKeys []ed25519.PublicKey
 }
 
-// ReleaseBundle is untrusted until VerifyRelease checks the shared release trust roots.
+// ReleaseBundle is untrusted until VerifyRelease checks it against the keys its caller supplies; the resolver supplies the production roots.
 type ReleaseBundle struct {
 	Manifest          []byte
 	ManifestSignature []byte
