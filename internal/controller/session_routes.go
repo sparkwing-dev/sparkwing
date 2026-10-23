@@ -167,7 +167,7 @@ func noteSessionRevocation(ctx context.Context, revoked *store.SessionRevocation
 	if revoked == nil {
 		return
 	}
-	noteAuditTarget(ctx, "session_digest", revoked.Digest)
-	noteAuditTarget(ctx, "revoked_account_id", revoked.AccountID)
-	noteAuditTarget(ctx, "revoked_team", string(revoked.Team))
+	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
+		rec.revokedSessions = append(rec.revokedSessions, *revoked)
+	}
 }

@@ -134,14 +134,22 @@ func TestAuditFormatsEveryFieldBeforeClipping(t *testing.T) {
 	}
 }
 
-func TestRequestIDUsesBoundedSafeCorrelationValues(t *testing.T) {
+func TestRequestIDIgnoresClientValues(t *testing.T) {
 	for _, id := range []string{"trace-1_A.b", strings.Repeat("a", 64), "", "bad id", "bad\nline", strings.Repeat("a", 65)} {
-		req := httptest.NewRequest("POST", "/", nil)
-		req.Header.Set(RequestIDHeader, id)
-		got := requestID(req)
-		wantKept := id == "trace-1_A.b" || id == strings.Repeat("a", 64)
-		if !validRequestID(got) || (got == id) != wantKept {
-			t.Errorf("request ID %q became %q", id, got)
+		h, logs := auditHarness(t, "/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+		for range 2 {
+			req := httptest.NewRequest("POST", "/", nil)
+			req.Header.Set(RequestIDHeader, id)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			got := w.Header().Get(RequestIDHeader)
+			if len(got) != 24 || got == id {
+				t.Errorf("request ID %q became %q", id, got)
+			}
+		}
+		records := auditLines(t, logs, "audit")
+		if records[0]["request_id"] == records[1]["request_id"] {
+			t.Fatal("requests reused an ID")
 		}
 	}
 }

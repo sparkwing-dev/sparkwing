@@ -154,8 +154,11 @@ func TestAccountUnlinkKeepsSelectedSessionAndRequiresRecentSignIn(t *testing.T) 
 	}
 	*now = now.Add(-time.Nanosecond)
 	ended, err := s.AsOperator().UnlinkAccountIdentity(t.Context(), a, ProviderGoogle)
-	if err != nil || ended != 1 {
-		t.Fatalf("unlink ended=%d: %v", ended, err)
+	if err != nil || len(ended.EndedSessions) != 1 {
+		t.Fatalf("unlink ended=%+v: %v", ended, err)
+	}
+	if ended.KeptSessionDigest != sessionDigest(raw) || ended.EndedSessions[0] != (SessionRevocation{Digest: sessionDigest(other), AccountID: id, Team: Team(a.Principal.Capability.Team)}) {
+		t.Fatalf("unlink identities=%+v", ended)
 	}
 	if _, err := s.AsOperator().LookupSession(t.Context(), raw); err != nil {
 		t.Fatal(err)

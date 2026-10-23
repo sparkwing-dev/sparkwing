@@ -630,7 +630,7 @@ func withRequestLog(
 	next http.Handler, logger *slog.Logger, routeLabel, clientIP func(*http.Request) string,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := requestID(r)
+		id := requestID()
 		w.Header().Set(RequestIDHeader, id)
 		ctx, masker := withRequestMasker(r.Context())
 		ctx, rec := withAuditRecord(ctx, id, routeLabel(r))

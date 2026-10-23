@@ -14,17 +14,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// RequestIDHeader carries a request's correlation id. A caller's value is
-// kept when it is a short safe correlation value and replaced otherwise. Every response
-// echoes the one the request was logged under.
+// RequestIDHeader carries a controller-generated correlation id. Every response
+// echoes the one the request was logged under. Client values are ignored.
 const RequestIDHeader = "X-Request-Id"
 
-const (
-	maxRequestIDLen = 64
-	maxAuditValue   = 128
-)
+const maxAuditValue = 128
 
 // safety: only these path wildcards, and the identity targets below, reach the
 // audit record. Other wildcards can carry values a log must not hold.
@@ -79,6 +76,7 @@ type auditRecord struct {
 	path                    string
 	principalID, kind, team string
 	targets                 []any
+	revokedSessions         []store.SessionRevocation
 	// safety: a GET that changes who can act, such as a sign-in callback, is audited like a write.
 	write     bool
 	emptyPoll bool
@@ -146,25 +144,10 @@ func clientClass(ua string) string {
 	}
 }
 
-func requestID(r *http.Request) string {
-	if id := r.Header.Get(RequestIDHeader); validRequestID(id) {
-		return id
-	}
+func requestID() string {
 	var b [12]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
-}
-
-func validRequestID(id string) bool {
-	if id == "" || len(id) > maxRequestIDLen || pathCredential.MatchString(id) {
-		return false
-	}
-	for _, c := range id {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
-			return false
-		}
-	}
-	return true
 }
 
 func readOnlyMethod(method string) bool {
@@ -199,7 +182,14 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 	attrs = append(attrs, auditPathAttrs(rec.route, r.URL.EscapedPath())...)
 	attrs = append(attrs, rec.targets...)
 	attrs = append(attrs, pathAttrs...)
-	logger.InfoContext(ctx, "audit", safeAuditAttrs(attrs)...)
+	if len(rec.revokedSessions) == 0 {
+		logger.InfoContext(ctx, "audit", safeAuditAttrs(attrs)...)
+		return
+	}
+	for _, revoked := range rec.revokedSessions {
+		entry := append(attrs[:len(attrs):len(attrs)], "session_digest", revoked.Digest, "revoked_account_id", revoked.AccountID, "revoked_team", string(revoked.Team))
+		logger.InfoContext(ctx, "audit", safeAuditAttrs(entry)...)
+	}
 }
 
 // safety: formatting happens before clipping so a long field cannot expose a truncated credential.

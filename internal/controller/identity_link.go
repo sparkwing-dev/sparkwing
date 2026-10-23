@@ -80,11 +80,15 @@ func (s *Server) handleIdentityUnlink(w http.ResponseWriter, r *http.Request, a 
 	if err != nil {
 		return err
 	}
-	ended, err := writer.UnlinkAccountIdentity(r.Context(), a, name)
+	unlinked, err := writer.UnlinkAccountIdentity(r.Context(), a, name)
 	if err != nil {
 		return accountMutationError(err)
 	}
-	s.logger.Info("identity.unlinked", "account", a.Principal.Capability.Subject.ID, "provider", name, "sessions_ended", ended)
+	noteAuditTarget(r.Context(), "provider", name)
+	noteAuditTarget(r.Context(), "kept_session_digest", unlinked.KeptSessionDigest)
+	for _, ended := range unlinked.EndedSessions {
+		noteSessionRevocation(r.Context(), &ended)
+	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

@@ -496,8 +496,8 @@ func TestUnlinkedSignInNoLongerReachesTheAccount(t *testing.T) {
 		t.Fatalf("UnlinkIdentity: %v", err)
 	}
 	ids := identitiesOf(t, st, owner.Account.ID)
-	if ended != 1 || len(ids) != 1 || ids[0].Provider != store.ProviderGoogle {
-		t.Fatalf("unlink ended %d sessions or retained the wrong sign-in", ended)
+	if len(ended.EndedSessions) != 1 || len(ids) != 1 || ids[0].Provider != store.ProviderGoogle {
+		t.Fatalf("unlink ended %+v sessions or retained the wrong sign-in", ended)
 	}
 	if _, err := st.AsOperator().LookupSession(t.Context(), keep); err != nil {
 		t.Fatalf("the session that unlinked = %v, want it kept", err)

@@ -180,12 +180,12 @@ claim. See [limits](limits.md#execution-and-records).
 Audit records identify the route, operation, team, subject and public credential
 prefix. Revocation targets appear after the store commits. Logout and browser
 session replacement record `session_digest`, `revoked_account_id` and
-`revoked_team` for the session that ended. Every audit field replaces complete
-Sparkwing credential shapes with a short SHA-256 fingerprint before truncation.
-Public 16-character credential prefixes remain readable. `X-Request-ID` accepts
-1-64 ASCII letters, digits, dots, underscores or hyphens, excluding Sparkwing
-credential shapes. Other values receive a generated request ID, echoed in the
-response. Source and secret releases record their authorized subject. Raw bearers,
+`revoked_team` for the session that ended. Identity unlink records
+`kept_session_digest` and one audit line per ended session with its digest,
+account and team. Every audit field replaces complete Sparkwing credential
+shapes with a short SHA-256 fingerprint before truncation. Public 16-character
+credential prefixes remain readable. The controller generates every request ID,
+ignores client-supplied `X-Request-ID` values and echoes its ID in the response. Source and secret releases record their authorized subject. Raw bearers,
 request bodies, captured environment values and secret-bearing hashes do not
 belong in logs or receipts. Public run details are redacted display projections.
 Restricted claims and sealed execution inputs must never be rendered as details.

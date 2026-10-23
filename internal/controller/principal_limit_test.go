@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/quick"
 	"time"
@@ -94,5 +97,45 @@ func TestRequestBudgetFleetStaysAlive(t *testing.T) {
 				t.Fatalf("%s=%d %s", runner, w.Code, w.Body)
 			}
 		}
+	}
+}
+
+func TestRequestBudgetNeverLogsRunnerHeader(t *testing.T) {
+	for _, prefix := range capability.CredentialPrefixes() {
+		for _, class := range []string{budgetClassBeat, budgetClassRunnerNames} {
+			s := New(nil, nil).WithRequestBudget(RequestBudget{HeartbeatsPerMinute: 1, RunnersPerToken: 1})
+			var logs bytes.Buffer
+			s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}}}
+			credential := prefix + strings.Repeat("x", 43)
+			for i := range 2 {
+				r := httptest.NewRequest("POST", "/", nil)
+				identity := credential
+				if class == budgetClassRunnerNames && i == 0 {
+					identity = "first"
+				}
+				r.Header.Set(store.RunnerIdentityHeader, identity)
+				s.admitRunnerRequest(httptest.NewRecorder(), r, a, budgetClassBeat)
+			}
+			if !strings.Contains(logs.String(), "request shed") || strings.Contains(logs.String(), credential) {
+				t.Fatalf("unsafe %s warning: %s", class, &logs)
+			}
+		}
+	}
+}
+
+func TestRequestBudgetBoundsRunnerHeader(t *testing.T) {
+	s := New(nil, nil).WithRequestBudget(RequestBudget{})
+	a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}}}
+	prefix := strings.Repeat("x", 4096)
+	keys := make(map[string]bool)
+	for _, identity := range []string{prefix + "one", prefix + "two"} {
+		r := httptest.NewRequest("POST", "/", nil)
+		r.Header.Set(store.RunnerIdentityHeader, identity)
+		key, ok := s.runnerBudgetKey(httptest.NewRecorder(), r, a)
+		if !ok || len(key) > 256 || keys[key] {
+			t.Fatalf("unbounded or colliding runner budget key: length=%d", len(key))
+		}
+		keys[key] = true
 	}
 }

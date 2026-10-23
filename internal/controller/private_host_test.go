@@ -447,7 +447,7 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 			w := httptest.NewRecorder()
 			server.Handler().ServeHTTP(w, r)
 			records := auditLines(t, &logs, "http request failed")
-			if w.Code != wantStatus || len(records) != 1 || records[0]["request_id"] != "snapshot-request" || !strings.Contains(records[0]["err"].(string), wantCause) || records[0]["route"] != "/api/v1/runs/{run}/local-host/snapshot" {
+			if w.Code != wantStatus || len(records) != 1 || records[0]["request_id"] != w.Header().Get(RequestIDHeader) || !strings.Contains(records[0]["err"].(string), wantCause) || records[0]["route"] != "/api/v1/runs/{run}/local-host/snapshot" {
 				t.Fatalf("snapshot HTTP %d: %s logs=%s", w.Code, w.Body, logs.String())
 			}
 			if strings.Contains(w.Body.String(), wantCause) {

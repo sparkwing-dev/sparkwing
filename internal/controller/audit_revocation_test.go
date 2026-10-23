@@ -141,7 +141,7 @@ func TestAuditRejectsCredentialRequestIDsAndUncommittedRunnerTargets(t *testing.
 				t.Fatalf("invented revocation: %v", records)
 			}
 			id := w.Header().Get(RequestIDHeader)
-			if id == credential || !validRequestID(id) || records[0]["request_id"] != id {
+			if id == credential || len(id) != 24 || records[0]["request_id"] != id {
 				t.Fatalf("unsafe request ID: %q", id)
 			}
 		})
@@ -257,5 +257,56 @@ func TestRejectedRevocationsDoNotLogCommittedTargets(t *testing.T) {
 		if len(records) != 1 || records[0]["token_prefix"] != nil || records[0]["member_id"] != nil || records[0]["role"] != nil {
 			t.Fatalf("uncommitted revocation target logged: %v", records)
 		}
+	}
+}
+
+func TestIdentityUnlinkAuditIdentifiesKeptAndEndedSessions(t *testing.T) {
+	for _, count := range []int{0, 3} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			s, keep, csrf := reviewAccount(t, "owner")
+			engineSQL(t, s.store, `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at,linked) VALUES ('github','linked','member','',0,1,1),('google','original','member','',0,1,0)`)
+			ended := make(map[string]bool)
+			for range count {
+				raw, _, _, err := s.operator.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ended[fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))] = true
+			}
+			var logs bytes.Buffer
+			s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			s.deployment = deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: "https://controller.test"}, license.FeatureMultiTeam)
+			reviewSessionRequest(t, s, keep, csrf, "DELETE", "/api/v1/me/identities/github", "", http.StatusNoContent)
+			records := auditLines(t, &logs, "audit")
+			if len(records) != max(1, count) {
+				t.Fatalf("missing session identities: %v", records)
+			}
+			for _, rec := range records {
+				if rec["kept_session_digest"] != fmt.Sprintf("%x", sha256.Sum256([]byte(keep))) {
+					t.Fatalf("missing kept session: %v", rec)
+				}
+				if count == 0 {
+					if rec["session_digest"] != nil {
+						t.Fatalf("invented revocation: %v", rec)
+					}
+					continue
+				}
+				digest, _ := rec["session_digest"].(string)
+				if !ended[digest] || rec["revoked_account_id"] != "member" || rec["revoked_team"] != "a" {
+					t.Fatalf("unrecoverable unlink: %v", rec)
+				}
+				delete(ended, digest)
+			}
+			if _, err := s.operator.LookupSession(t.Context(), keep); err != nil {
+				t.Fatalf("kept session ended: %v", err)
+			}
+			logs.Reset()
+			reviewSessionRequest(t, s, keep, csrf, "DELETE", "/api/v1/me/identities/google", "", http.StatusConflict)
+			for _, rec := range auditLines(t, &logs, "audit") {
+				if rec["session_digest"] != nil || rec["kept_session_digest"] != nil {
+					t.Fatalf("failed unlink logged committed targets: %v", rec)
+				}
+			}
+		})
 	}
 }

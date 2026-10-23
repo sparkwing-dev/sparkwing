@@ -20,8 +20,10 @@ audit log stream outside the database and reapply revocations, member removals
 and demotions since the backup using its token prefixes, account IDs, machine
 IDs and teams. Session logout and replacement records include `session_digest`,
 `revoked_account_id` and `revoked_team` for the session that ended, so another
-session for the same account can stay valid. Payment recovery and targeted revocation recovery are manual;
-follow the operator runbook kept outside this repository.
+session for the same account can stay valid. Identity unlink adds
+`kept_session_digest` and records each ended session on its own audit line.
+Payment recovery and targeted revocation recovery are manual. Follow the
+operator runbook kept outside this repository.
 
 ## Schema compatibility
 

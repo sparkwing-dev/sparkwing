@@ -1,8 +1,8 @@
 package controller
 
 import (
+	"crypto/sha256"
 	"fmt"
-
 	"net/http"
 	"sync"
 	"time"
@@ -100,6 +100,10 @@ func (s *Server) runnerBudgetKey(w http.ResponseWriter, r *http.Request, a capab
 	supplied := false
 	if identity == "" {
 		identity = r.Header.Get(store.RunnerIdentityHeader)
+		// Bound retained header bytes without merging distinct long runner names.
+		if len(identity) > maxAuditValue {
+			identity = fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
+		}
 		supplied = identity != ""
 	}
 	if identity == "" {
@@ -108,7 +112,7 @@ func (s *Server) runnerBudgetKey(w http.ResponseWriter, r *http.Request, a capab
 	if supplied && !s.requestBudget.admitName(principal, identity, time.Now()) {
 		limit := s.requestBudget.values().RunnersPerToken
 		observePrincipalThrottled(budgetClassRunnerNames)
-		s.logger.Warn("request shed", "principal", principal, "route_class", budgetClassRunnerNames, "cap", limit)
+		s.logger.Warn("request shed", "principal", formatAuditValue(principal), "route_class", budgetClassRunnerNames, "cap", limit)
 		writeRetryAfter(w, runnerNameIdle, fmt.Sprintf("this caller already holds %d runner names, the most it may; reuse one", limit))
 		return "", false
 	}
@@ -175,7 +179,7 @@ func (s *Server) admitRunnerRequest(w http.ResponseWriter, r *http.Request, a ca
 			_, wait = limiter.AllowWithRetry(key, now)
 		}
 		observePrincipalThrottled(class)
-		s.logger.Warn("request shed", "runner", key, "route_class", class, "retry_after", wait)
+		s.logger.Warn("request shed", "principal", formatAuditValue(credentialBudgetKey(a.Principal)), "route_class", class, "retry_after", wait)
 		writeRetryAfter(w, wait, "too many "+class+" requests from this runner")
 	}
 	return key, allowed
