@@ -38,7 +38,7 @@ const runnerNameIdle = 10 * time.Minute
 
 // WithRequestBudget installs b as the per-runner budget on the claim and
 // heartbeat routes. A refused request is answered 429 with a Retry-After
-// naming the real refill delay, and logged at warn with the runner and the
+// naming the real refill delay, and logged at warn with the principal and the
 // route class.
 func (s *Server) WithRequestBudget(b RequestBudget) *Server {
 	s.requestBudget = newPrincipalBudget(b)
@@ -112,7 +112,7 @@ func (s *Server) runnerBudgetKey(w http.ResponseWriter, r *http.Request, a capab
 	if supplied && !s.requestBudget.admitName(principal, identity, time.Now()) {
 		limit := s.requestBudget.values().RunnersPerToken
 		observePrincipalThrottled(budgetClassRunnerNames)
-		s.logger.Warn("request shed", "principal", formatAuditValue(principal), "route_class", budgetClassRunnerNames, "cap", limit)
+		s.logger.Warn("request shed", "principal", principal, "route_class", budgetClassRunnerNames, "cap", limit)
 		writeRetryAfter(w, runnerNameIdle, fmt.Sprintf("this caller already holds %d runner names, the most it may; reuse one", limit))
 		return "", false
 	}
@@ -179,7 +179,7 @@ func (s *Server) admitRunnerRequest(w http.ResponseWriter, r *http.Request, a ca
 			_, wait = limiter.AllowWithRetry(key, now)
 		}
 		observePrincipalThrottled(class)
-		s.logger.Warn("request shed", "principal", formatAuditValue(credentialBudgetKey(a.Principal)), "route_class", class, "retry_after", wait)
+		s.logger.Warn("request shed", "principal", credentialBudgetKey(a.Principal), "route_class", class, "retry_after", wait)
 		writeRetryAfter(w, wait, "too many "+class+" requests from this runner")
 	}
 	return key, allowed

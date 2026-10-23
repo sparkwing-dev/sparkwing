@@ -114,7 +114,7 @@ func TestClientClassNeverCarriesTheRawUserAgent(t *testing.T) {
 	}
 }
 
-func TestAuditFormatsEveryFieldBeforeClipping(t *testing.T) {
+func TestAuditFormatsCredentialsInEveryField(t *testing.T) {
 	for _, prefix := range capability.CredentialPrefixes() {
 		credential := prefix + strings.Repeat("x", 43)
 		value := strings.Repeat("a", 110) + credential

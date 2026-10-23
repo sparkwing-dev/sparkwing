@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 )
@@ -27,7 +29,7 @@ func loadOIDCIssuer(cfg deployment.Config, ttl time.Duration, log io.Writer) (*o
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(log, "sparkwing-controller: OIDC issuer %s signing with key %s, publishing %s, token lifetime %s\n",
-		iss.URL(), iss.KeyIDs()[0], strings.Join(iss.KeyIDs(), ", "), iss.TTL())
+	slog.New(controller.CredentialSafeLogHandler(slog.NewTextHandler(log, nil))).Info("OIDC issuer",
+		"issuer", iss.URL(), "signing_key", iss.KeyIDs()[0], "published_keys", iss.KeyIDs(), "token_lifetime", iss.TTL())
 	return iss, nil
 }

@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
 	"net/http"
@@ -117,9 +116,9 @@ func noteAuditTarget(ctx context.Context, key, value string) {
 func requestLogAttrs(r *http.Request) []any {
 	rec, ok := r.Context().Value(auditCtxKey{}).(*auditRecord)
 	if !ok {
-		return safeAuditAttrs([]any{"method", r.Method, "route", otherLabel})
+		return []any{"method", r.Method, "route", otherLabel}
 	}
-	return safeAuditAttrs([]any{"request_id", rec.id, "method", r.Method, "route", rec.route})
+	return []any{"request_id", rec.id, "method", r.Method, "route", rec.route}
 }
 
 var sparkwingAgent = regexp.MustCompile(`^(sparkwing-[a-z]{1,24})(?:/(v?[0-9][0-9A-Za-z.+-]{0,31}))?(?:[ ;(]|$)`)
@@ -168,7 +167,7 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 	}
 	if readOnlyMethod(r.Method) && !denied && !rec.write && !auditedRead(rec.route) {
 		attrs := []any{"request_id", rec.id, "method", r.Method, "route", rec.route, "status", status, "dur_ms", elapsed.Milliseconds()}
-		logger.InfoContext(ctx, "http", safeAuditAttrs(append(attrs, pathAttrs...))...)
+		logger.InfoContext(ctx, "http", append(attrs, pathAttrs...)...)
 		return
 	}
 	attrs := []any{
@@ -183,37 +182,14 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 	attrs = append(attrs, rec.targets...)
 	attrs = append(attrs, pathAttrs...)
 	if len(rec.revokedSessions) == 0 {
-		logger.InfoContext(ctx, "audit", safeAuditAttrs(attrs)...)
+		logger.InfoContext(ctx, "audit", attrs...)
 		return
 	}
 	for _, revoked := range rec.revokedSessions {
 		entry := append(attrs[:len(attrs):len(attrs)], "session_digest", revoked.Digest, "revoked_account_id", revoked.AccountID, "revoked_team", string(revoked.Team))
-		logger.InfoContext(ctx, "audit", safeAuditAttrs(entry)...)
+		logger.InfoContext(ctx, "audit", entry...)
 	}
 }
-
-// safety: formatting happens before clipping so a long field cannot expose a truncated credential.
-func safeAuditAttrs(attrs []any) []any {
-	for i, attr := range attrs {
-		if value, ok := attr.(string); ok {
-			attrs[i] = formatAuditValue(value)
-		}
-	}
-	return attrs
-}
-
-func formatAuditValue(value string) string {
-	return clip(pathCredential.ReplaceAllStringFunc(value, func(credential string) string {
-		// A stored capability prefix is a public identifier, not a bearer.
-		if len(credential) == 16 {
-			return credential
-		}
-		digest := sha256.Sum256([]byte(credential))
-		return "[credential:" + hex.EncodeToString(digest[:8]) + "]"
-	}))
-}
-
-var pathCredential = regexp.MustCompile(`(?:` + strings.Join(capability.CredentialPrefixes(), "|") + `)[A-Za-z0-9_-]+`)
 
 func sanitizedMissingPath(path string, mask func(string) string) string {
 	parts := strings.Split(mask(path), "/")

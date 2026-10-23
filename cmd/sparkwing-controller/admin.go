@@ -131,7 +131,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	}
 	defer func() {
 		if cerr := st.Close(); cerr != nil {
-			fmt.Fprintln(stderr, "sparkwing-controller: close state:", cerr)
+			slog.New(controller.CredentialSafeLogHandler(slog.NewJSONHandler(stderr, nil))).Error("close state", "err", cerr)
 		}
 	}()
 	t, err := st.ForTeam(ctx, store.Team(*team))
@@ -167,7 +167,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	slog.New(slog.NewJSONHandler(stderr, nil)).Info("audit",
+	slog.New(controller.CredentialSafeLogHandler(slog.NewJSONHandler(stderr, nil))).Info("audit",
 		"command", breakGlassActor+" "+verb, "principal_kind", "break-glass", "principal_id", breakGlassActor,
 		"target_team", string(t.Team()), "holds_changed", changed, "frozen", freeze.Frozen)
 	holds := append([]string{}, freeze.Disputes...)
@@ -186,7 +186,7 @@ func adminGrant(ctx context.Context, t *store.Tenant, cents int64, key, reason s
 	if err != nil {
 		return err
 	}
-	slog.New(slog.NewJSONHandler(stderr, nil)).Info("audit",
+	slog.New(controller.CredentialSafeLogHandler(slog.NewJSONHandler(stderr, nil))).Info("audit",
 		"command", breakGlassActor+" grant", "principal_kind", "break-glass", "principal_id", breakGlassActor,
 		"target_team", string(t.Team()), "grant_id", result.Grant.ID, "amount_micro", result.Grant.AmountMicro, "created", result.Created)
 	return json.NewEncoder(stdout).Encode(adminGrantJSON{Team: string(t.Team()), GrantID: result.Grant.ID, AmountMicro: result.Grant.AmountMicro, Reference: result.Grant.Reference, Created: result.Created, BalanceMicro: balance})

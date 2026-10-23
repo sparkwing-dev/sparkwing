@@ -887,7 +887,8 @@ kept outside the database. Its revocation lines identify token prefixes,
 accounts, machines or GitHub repository IDs and the team. Session logout and
 replacement identify the ended session by `session_digest`, `revoked_account_id`
 and `revoked_team`, including when the browser signs in as another account.
-No bearer or session secret is logged. Follow the operator runbook kept outside this repository.
+Controller logs fingerprint credential shapes in messages, attributes and errors.
+Public token prefixes remain readable. Follow the operator runbook kept outside this repository.
 
 For a stolen database, leaked keys or another security incident,
 `sparkwing-controller restore prepare --sign-out-everyone` rotates the external

@@ -436,6 +436,7 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	listener := func(h http.Handler) *http.Server {
 		return &http.Server{
 			Handler:           h,
+			ErrorLog:          slog.NewLogLogger(s.logger.Handler(), slog.LevelError),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       30 * time.Second,
 			WriteTimeout:      30 * time.Second,
@@ -629,6 +630,7 @@ func (s *Server) sampleCreditLedger(ctx context.Context) {
 func withRequestLog(
 	next http.Handler, logger *slog.Logger, routeLabel, clientIP func(*http.Request) string,
 ) http.Handler {
+	logger = slog.New(CredentialSafeLogHandler(logger.Handler()))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := requestID()
 		w.Header().Set(RequestIDHeader, id)

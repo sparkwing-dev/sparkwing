@@ -44,6 +44,9 @@ type Config struct {
 	// Log is how the service writes its own log to stderr. The zero value
 	// keeps a handler the caller already installed.
 	Log logutil.Options
+
+	// WrapLogHandler filters every sink before any startup or telemetry log is emitted.
+	WrapLogHandler func(slog.Handler) slog.Handler
 }
 
 type Telemetry struct {
@@ -69,12 +72,18 @@ func meter(name string) metric.Meter {
 
 func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 	t := &Telemetry{}
+	wrap := cfg.WrapLogHandler
+	if wrap == nil {
+		wrap = func(h slog.Handler) slog.Handler { return h }
+	}
 	if cfg.Log != (logutil.Options{}) {
 		h, err := cfg.Log.Handler(os.Stderr)
 		if err != nil {
 			return nil, err
 		}
-		slog.SetDefault(slog.New(h))
+		slog.SetDefault(slog.New(wrap(h)))
+	} else if cfg.WrapLogHandler != nil {
+		slog.SetDefault(slog.New(wrap(configuredHandler())))
 	}
 
 	serviceName := cfg.ServiceName
@@ -146,13 +155,13 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 				&traceContextHandler{inner: configuredHandler()},
 				otelHandler,
 			}}
-			slog.SetDefault(slog.New(combined))
+			slog.SetDefault(slog.New(wrap(combined)))
 			log.Printf("otel: logs enabled (OTLP + slog bridge)")
 		}
 	} else {
-		slog.SetDefault(slog.New(&traceContextHandler{
+		slog.SetDefault(slog.New(wrap(&traceContextHandler{
 			inner: configuredHandler(),
-		}))
+		})))
 	}
 
 	if cfg.Log != (logutil.Options{}) {

@@ -28,7 +28,7 @@ func NewDeployment(st *store.Store, cfg deployment.Config, logger *slog.Logger) 
 	srv := &Server{
 		deployment:         cfg,
 		engineController:   NewEngineController(st, EngineController{}),
-		logger:             logger,
+		logger:             slog.New(CredentialSafeLogHandler(logger.Handler())),
 		loginLimit:         newLoginLimiter(),
 		deliverySpools:     make(chan struct{}, githubDeliverySpools),
 		queueTimeout:       15 * time.Minute,

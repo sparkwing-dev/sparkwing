@@ -189,6 +189,10 @@ and API/local schedule consent, and requires a fresh `bootstrap-admin-token`
 seed and reissued credentials. See [Backup and restore](backup-restore.md#restore).
 Payment recovery is manual; follow the operator runbook kept outside this repository.
 
+Controller log messages and attribute values, including nested groups and errors,
+replace Sparkwing credential shapes with `[credential:<digest>]` fingerprints
+before writing to stderr or telemetry. Public token prefixes remain readable.
+
 ### Client addresses behind proxies
 
 Set `--trusted-proxy-cidrs=10.0.0.0/8,2001:db8:ffff::/48` to the networks of
