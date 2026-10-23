@@ -30,6 +30,11 @@ than a label the runner chose. Platform observations supply OS and architecture.
 Free labels, including discovered `tool:NAME` labels, steer placement without
 granting authority.
 
+The `sparkwing-` label prefix belongs to Sparkwing Cloud. Self-hosted, personal
+and pool runners cannot configure it, and claims strip such self-reported
+labels. Use another prefix for your own runner sizes. Requiring a Cloud size
+label such as `sparkwing-16cpu` selects a fresh, isolated Cloud pod.
+
 ## Reserved pools
 
 A team administrator reserves a runner for a pool and allows repositories into

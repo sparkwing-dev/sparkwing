@@ -26,10 +26,10 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 				preferred := fmt.Sprintf("gpu-%x", random.Uint64())
 				if problem == "granted_name" {
 					preferred = "name=preferred"
-					request.Labels = []string{preferred, "sparkwing-4cpu"}
+					request.Labels = []string{preferred, "team-4cpu"}
 				}
 				policy := ClaimPlacement{Preferences: []PlacementPreference{{Hold: 3 * time.Minute}, {}}, Liveness: time.Minute}
-				execution := runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sparkwing-4cpu"}}}}
+				execution := runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"team-4cpu"}}}}
 				if i%2 == 0 {
 					policy.Preferences[0].Prefers = []string{preferred}
 				} else {
@@ -40,7 +40,7 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 					request.Labels = []string{"tool:git"}
 				}
 				if problem == "preferred_claimant" {
-					request.Labels = []string{preferred, "sparkwing-4cpu"}
+					request.Labels = []string{preferred, "team-4cpu"}
 				}
 				body, err := json.Marshal(execution)
 				if err != nil {
@@ -63,7 +63,7 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 					root.ExpiresAt = &expires
 				}
 				authorityPersist(t, s, root)
-				observation := UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{preferred, "sparkwing-4cpu", "name=forged", "pool=forged"}}
+				observation := UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{preferred, "team-4cpu", "name=forged", "pool=forged"}}
 				if err := s.AsOperator().RecordRunnerPoll(t.Context(), observation); err != nil {
 					t.Fatal(err)
 				}
@@ -167,7 +167,7 @@ func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *tes
 				authorityPersist(t, s, root)
 				live := random.IntN(2) == 0
 				if live {
-					observation := UnitDemand{CapabilityPrefix: name, Labels: []string{"sparkwing-4cpu", "name=runner", "class=cloud"}}
+					observation := UnitDemand{CapabilityPrefix: name, Labels: []string{"team-4cpu", "name=runner", "class=cloud"}}
 					if err := s.AsOperator().RecordRunnerPoll(t.Context(), observation); err != nil {
 						t.Fatal(err)
 					}
@@ -176,7 +176,7 @@ func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *tes
 					wantHeld = true
 				}
 			}
-			request.Labels = []string{"sparkwing-4cpu", "name=" + order[0], "class=cloud"}
+			request.Labels = []string{"team-4cpu", "name=" + order[0], "class=cloud"}
 			if i%2 == 0 {
 				request.Target, request.Kinds = nil, []capability.UnitKind{capability.UnitNode}
 			}

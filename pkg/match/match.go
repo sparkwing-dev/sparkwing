@@ -133,14 +133,16 @@ func TermSatisfied(p Profile, term string) bool {
 }
 
 // SelfAsserted drops the labels an agent may not assert for itself: the fixed
-// keys name, class, team and pool, and the placement vocabulary. os= and arch= stay,
-// because they only steer scheduling.
+// keys name, class, team and pool, the placement vocabulary, and the Cloud-only
+// sparkwing- prefix. os= and arch= stay, because they only steer scheduling.
 func SelfAsserted(labels []string) []string {
 	out := make([]string, 0, len(labels))
 	for _, label := range labels {
 		label = strings.TrimSpace(label)
 		key, _, _ := strings.Cut(label, "=")
 		switch {
+		case strings.HasPrefix(label, "sparkwing-"):
+			continue
 		case label == "", label == "local", key == "location", key == "name", key == "class", key == "team", key == "pool":
 			continue
 		}

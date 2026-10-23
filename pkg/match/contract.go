@@ -13,7 +13,15 @@ import (
 // explicitly required by the demand and present in AllowedPools. Matching a
 // different alternative in a selector never substitutes for that pool requirement.
 func Evaluate(profile Profile, demand Demand) Verdict {
+	labels := profile.Labels
 	profile.Labels = SelfAsserted(profile.Labels)
+	if profile.Class == ClassCloud {
+		for _, size := range CloudSizes() {
+			if slices.Contains(labels, size.Label) {
+				profile.Labels = append(profile.Labels, size.Label)
+			}
+		}
+	}
 	for _, pool := range profile.ReservedPools {
 		profile.Labels = append(profile.Labels, "pool="+pool)
 	}

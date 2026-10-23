@@ -40,7 +40,7 @@ func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,allowed_pools=? WHERE id='run'`, body, []byte(`["deploy"]`))
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=CAST(json_set(execution_json, '$.requires', json(?)) AS BLOB) WHERE run_id='run'`, `{"set":true,"value":["pool=deploy","sparkwing-4cpu"]}`)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=CAST(json_set(execution_json, '$.requires', json(?)) AS BLOB) WHERE run_id='run'`, `{"set":true,"value":["pool=deploy","team-4cpu"]}`)
 	return s, demand
 }
 
@@ -63,7 +63,7 @@ func TestPoolLauncherUsesBootstrapAndNeverMeters(t *testing.T) {
 		t.Fatalf("pool preparation: %v %v", prepared, err)
 	}
 	allocation, err := s.AsOperator().CloudAwardResources(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
-	if err != nil || allocation == nil || allocation.Cores != 4 {
+	if err != nil || allocation == nil || allocation.Cores != 2 {
 		t.Fatalf("pool allocation: %+v %v", allocation, err)
 	}
 	issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})

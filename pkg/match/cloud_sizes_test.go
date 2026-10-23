@@ -27,7 +27,7 @@ func TestCloudSizesUseLabelsAndPreserveSelectorTerms(t *testing.T) {
 		if got.Resources.Cores != float64(got.CreditClass) || got.Resources.MemoryBytes != CloudSizeMemoryBytes(got.CreditClass) {
 			t.Fatalf("allocation differs from catalog: %+v", got)
 		}
-		p := Profile{Labels: []string{got.Label, "gpu"}}
+		p := Profile{Class: ClassCloud, Labels: []string{got.Label, "gpu"}}
 		if !Evaluate(p, Demand{Selector: tc.selector}).OK() {
 			t.Fatalf("selected size does not satisfy labels: %+v", got)
 		}
@@ -35,9 +35,17 @@ func TestCloudSizesUseLabelsAndPreserveSelectorTerms(t *testing.T) {
 }
 
 func TestLabelSizeDoesNotAdmitAnotherSize(t *testing.T) {
-	p := Profile{Labels: []string{"sparkwing-8cpu"}}
+	p := Profile{Class: ClassCloud, Labels: []string{"sparkwing-8cpu"}}
 	if Evaluate(p, Demand{Selector: []string{"sparkwing-4cpu"}}).OK() {
 		t.Fatal("larger runner substituted for a required label")
+	}
+}
+
+func TestCloudProfileUsesOnlyCatalogSizeLabels(t *testing.T) {
+	p := Profile{Class: ClassCloud, Labels: []string{"sparkwing-16cpu", "sparkwing-future"}}
+	if !Evaluate(p, Demand{Selector: []string{"sparkwing-16cpu"}}).OK() ||
+		Evaluate(p, Demand{Selector: []string{"sparkwing-future"}}).OK() {
+		t.Fatal("Cloud size labels differ from the catalog")
 	}
 }
 

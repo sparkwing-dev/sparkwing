@@ -9,7 +9,9 @@ Cloud size labels select a fixed allocation and its exact credit class: `sparkwi
 `sparkwing-4cpu`, `sparkwing-8cpu`, `sparkwing-16cpu`, `sparkwing-32cpu` and
 `sparkwing-64cpu`. Each label bills its corresponding core class; an unpriced
 class cannot be awarded. Without a size label, Cloud uses `sparkwing-2cpu`.
-Self-hosted runner labels do not create a Cloud charge.
+The `sparkwing-` prefix is reserved for Cloud. Requiring a Cloud size label
+selects a fresh, isolated Cloud pod. Self-hosted, personal and pool runners use
+other labels for their own sizes and cannot advertise Cloud labels.
 
 ## Standing
 
