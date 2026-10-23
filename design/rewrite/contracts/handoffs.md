@@ -1050,3 +1050,17 @@ separate operations; no database transaction stays open across a provider call.
 ## 2026-10-23 Korey decision 55: the sparkwing- label prefix belongs to Sparkwing Cloud
 
 - Self-hosted, personal and pool runners cannot advertise labels beginning with `sparkwing-`; such self-reported labels are stripped like pool=, name= and class= terms. A job requesting a Cloud size label (e.g. `sparkwing-4cpu`) therefore always runs on a fresh, isolated Cloud pod. Teams name their own runner sizes with any other label. A team opt-in for self-hosted runners to serve Cloud sizes can be added later if customers ask.
+
+## 2026-10-23 Korey decision 56: narrow the harsh defaults (simplicity/HARSH-DEFAULTS-SWEEP.md)
+
+1. A half-configured or invalid GitHub App no longer stops the controller: App features report unhealthy and refuse to operate; everything else runs. Webhook signature verification stays strict.
+2. The shared all-tenant daily storage request stop becomes an opt-in emergency brake; ordinary enforcement uses the existing per-team budgets.
+3. A transient repository-listing failure while handling a repository-removed delivery withdraws only the repositories GitHub names as removed; ambiguous cases go to the failed-delivery list (decision 41).
+4. A log persistence failure never changes a job's real result or blocks completion: the result stands, logs are marked incomplete and an alert is raised. Masking and required-output integrity stay strict.
+5. Node faults exclude the suspect nodes and report them to the operator instead of blocking a team's claims after four; a team-wide stop is an explicit operator action.
+6. GitHub installation repository listing paginates fully (or verifies the specific repository by ID); no 1,000-repository cutoff.
+7. The child-run ceiling (decision 28) becomes a per-team setting defaulting to 50; recursion protection and funding/rate limits stay. Docs correct the GitHub comparison (GitHub limits 50 unique reusable workflows, not invocations).
+
+## 2026-10-23 Korey decision 57: short secrets are accepted but not masked
+
+- Amends decisions 43 and 49. A secret value shorter than 4 characters is accepted, stored and access-controlled like any secret, but is not registered for masking. When it is saved from the CLI or the console, the user sees a one-time warning that values shorter than 4 characters cannot be masked in logs; the docs state the rule. No persistent UI callouts and no warnings elsewhere. Matches CircleCI, which accepts such values without masking them.
