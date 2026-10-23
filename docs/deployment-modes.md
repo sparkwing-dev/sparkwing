@@ -70,8 +70,9 @@ grace period. The launcher takes part only while the team has credits or a
 saved card. A job that requires a `pool=`, `name=` or `class=` term skips the
 ranking and goes to the runners it names. Explicit `Prefers` placement holds
 still apply when a preferred claimant is allowed by the team's ranking and has
-a free slot. Owner self-execution offers its own slot, independently of its
-last poll. Preference scores do not reorder the queue.
+a free slot. An owner offers its occupied slot for its own run's jobs, keeping
+the captured host labels and platform even when its last queue poll has no free
+slots. Preference scores do not reorder the queue.
 
 Runs started by a push, pull request, release or schedule, and their retries
 and child runs, skip `here` and `personal`: a personal machine takes only its

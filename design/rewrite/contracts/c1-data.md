@@ -485,15 +485,18 @@ node reference, generation and declaration hash. `OwnerCanExecute(principal)`
 checks those bindings before the host selects inline execution. Public snapshots
 and plan/eval snapshots carry no self-execution decision.
 
-The projection and transactional reconciliation use the shared matcher,
-resource checks and configured preference holds. Reconciliation returns Dispatch
-when current matching or capacity declines self-execution. It still performs
+The projection and transactional reconciliation use the shared SQL eligibility
+predicate and configured preference holds. Reconciliation returns Dispatch
+when current eligibility declines self-execution. It still performs
 the normal transactional claim checks before issuing any node award.
 
 Local hosts use their configured profile resolver. Remote trigger owners use
 the persisted poll of a current registered ancestor with the same machine
 subject. The live owner lease supplies self-claim liveness because its occupied
-slot can prevent another root poll. Zero or future observation times are refused.
+slot can prevent another root poll. Owner execution offers are constructed from
+captured labels and platform, with one slot for the owner's own run, independently
+of the poll's remaining queue slots and target or kind filters. Zero or future
+observation times are refused.
 Other runners still need fresh root polls to hold work through preferences.
 
 Plan private snapshots require `data.read`, `plan_owner` and the live plan lease.

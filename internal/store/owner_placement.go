@@ -67,8 +67,8 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 		if poll.ObservedAt.IsZero() || poll.ObservedAt.After(tx.now(ctx)) {
 			continue
 		}
-		poll.CapabilityPrefix = owner.Capability.Prefix
-		return poll.UnitDemand, nil
+		// The owner occupies its queue slot already; only the host profile carries into self-execution.
+		return UnitDemand{CapabilityPrefix: owner.Capability.Prefix, Labels: poll.Labels, OS: poll.OS, Arch: poll.Arch}, nil
 	}
 	return UnitDemand{}, authorityError(apierr.Unavailable, "self-claim host observation is unavailable")
 }

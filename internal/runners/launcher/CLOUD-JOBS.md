@@ -174,11 +174,15 @@ Kubernetes administrators remain trusted.
 ## Node faults
 
 A kubelet can rewrite its own Node's annotations, so a fault read from them is
-charged to that node alone. Sync quarantines a node whose reservation in this
-job namespace is malformed, disagrees with its binding, names a team other than
-the node's protected team label, or carries an award the controller refuses
-outright: a binding refusal, a bad request or a changed binding. Each orphaned
-reservation goes to the controller in its own call, so a refusal names one
+charged to that node alone. Sync counts malformed reservations and bindings
+against the node's protected team label before filtering by namespace. It may
+quarantine the node only when a reservation or binding team, combined with this
+job namespace, matches that protected label. If both annotations name another
+team or erase their team identity, the fault still counts but Sync leaves the
+node untouched. Within that permission boundary, Sync quarantines malformed or
+disagreeing reservations and awards the controller refuses outright: a binding
+refusal, a bad request or a changed binding. Each orphaned reservation goes to
+the controller in its own call, so a refusal names one
 node. Quarantine cordons a team node, adds the NoSchedule taint
 `sparkwing.dev/quarantined`, which NodeRestriction stops a kubelet from
 removing, and records the cause in the annotation of the same name. One
@@ -191,9 +195,11 @@ One per-team fault ledger owns attribution, deduplication, quarantine permission
 and claim blocking. A pass permits quarantine for at most three distinct nodes
 per team. Counted faults and permitted quarantines are separate sets: teardown
 or release faults consume the fault budget without authorizing more writes.
-A fourth fault stops that team's claims and names the node for operator
-inspection; other teams keep claiming. The protected node label groups faults
-even when both reservation and binding annotations are damaged. The launcher
+A fourth fault stops that team's claims; other teams keep claiming. A fourth
+quarantine request reports the node for operator inspection. An erased-identity
+fault that cannot authorize quarantine instead adds the protected team label to
+the blocked labels sent with claims, without a node diagnostic. The protected
+node label groups faults even when both reservation and binding annotations are damaged. The launcher
 sends faulted protected labels with each claim, and the controller excludes
 their matching teams.
 

@@ -170,13 +170,36 @@ func TestOwnerSnapshotUsesOnlyAuthenticatedAncestorPollForRemoteSelfClaim(t *tes
 }
 
 func TestLiveOwnerKeepsCapturedPlacementWhileRootDoesNotPoll(t *testing.T) {
-	tenant, actor := ownerPlacementFixture(t)
-	s := tenant.s
+	s, demand := unitClaimFixture(t)
 	now := s.now()
 	s.clock = func() time.Time { return now }
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_hash='declaration'`)
-	if err := s.AsOperator().RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: "runner"}); err != nil {
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu","os=linux","arch=amd64"]}}`))
+	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
+	slots := 1
+	demand.FreeSlots = &slots
+	demand.OS, demand.Arch = "linux", "amd64"
+	demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitTrigger}
+	if err := s.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
 		t.Fatal(err)
+	}
+	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant := &Tenant{s: s, team: "a"}
+	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+	var body []byte
+	if err := s.queryRow(t.Context(), `SELECT claim_observation_json FROM capabilities WHERE team='a' AND prefix='runner'`).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	var poll runnerPoll
+	if err := json.Unmarshal(body, &poll); err != nil {
+		t.Fatal(err)
+	}
+	if poll.FreeSlots == nil || *poll.FreeSlots != 0 {
+		t.Fatalf("trigger did not consume the queue slot: %+v", poll.FreeSlots)
 	}
 	ctx := WithClaimPlacement(t.Context(), ClaimPlacement{Liveness: time.Second})
 	for range 4 {
@@ -192,6 +215,10 @@ func TestLiveOwnerKeepsCapturedPlacementWhileRootDoesNotPoll(t *testing.T) {
 	snapshot, err := tenant.ReadOwnerSnapshot(ctx, actor.Authority, "run")
 	if err != nil || !OwnerCanExecute(owner)(snapshot.Nodes[0]) {
 		t.Fatalf("live owner lost its captured placement: %v", err)
+	}
+	result, err := tenant.ReconcileNode(ctx, ReconcileRequest{Ref: snapshot.Nodes[0].Ref, Actor: actor, Policy: SourceNone})
+	if err != nil || result.Kind != Execute {
+		t.Fatalf("owner did not execute its job after consuming the queue slot: %s %v", result.Kind, err)
 	}
 	now = now.Add(time.Hour)
 	if _, err := tenant.ReadOwnerSnapshot(ctx, actor.Authority, "run"); err == nil {

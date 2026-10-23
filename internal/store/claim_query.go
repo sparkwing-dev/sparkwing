@@ -797,7 +797,7 @@ func (q *claimSQL) claimRankSQL(alias, facts string) string {
 }
 
 func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
-	// Owner self-execution offers its own slot through claimFactsTx, independent of its last poll.
+	// Owner execution demands offer a slot separately from queue polls.
 	admissible := `admissible AS NOT MATERIALIZED (SELECT * FROM pairs e WHERE ` + q.number(q.at("e.facts", "free_slots")) + `>0 AND (e.ranked=0 OR e.claim_rank>=0 OR e.claim_ranking='[]'))`
 	if q.placementFree {
 		return `,pairs AS MATERIALIZED (SELECT e.*,0 AS ranked,0 AS claim_rank FROM eligible e),` + admissible + `,available AS MATERIALIZED (SELECT * FROM admissible)`, nil
