@@ -3311,10 +3311,10 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 |---|---|
 | `RunRow` | RunRow is the immutable request/spec plus the mutable lifecycle read model used by hosts. |
 | `RunSnapshot` | Reads persisted state and accepted expansion declarations for the shared scheduling projection. |
-| `SourcePolicy` | SourcePolicy keeps resume, retry, memo and coalescing authority distinct at reconciliation. |
+| `runstate.SourcePolicy` | SourcePolicy keeps resume, retry, memo and coalescing authority distinct at reconciliation. |
 | `ReconcileKind` | ReconcileKind tells a host whether it may execute; only Execute carries a newly fenced claim. |
 | `ReconcileRequest` | ReconcileRequest names a possible source; the store checks it rather than trusting the host's cache hit. |
-| `ReconciledNode` | ReconciledNode is decided with any self-claim in the same transaction. |
+| `runstate.ReconciledNode` | ReconciledNode is decided with any self-claim in the same transaction. |
 | `LeaseBeat` | LeaseBeat delivers cancellation and watched jobs without changing the owner heartbeat cadence. |
 | `StateEvent` | StateEvent uses a single per-run sequence and a unique node state sequence for lifecycle writes. |
 | `Tenant.ReadRun` | ReadRun returns only the Tenant's run, including both seals and the stable team number. |

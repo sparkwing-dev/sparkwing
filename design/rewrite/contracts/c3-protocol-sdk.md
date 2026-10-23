@@ -393,8 +393,8 @@ are part of this contract.
 | `store.ScheduleDecision` | Returns ordered graph actions and an optional final run verdict. |
 | `store.Decide` | Exposes the single pure `decide()` to run hosts. |
 | `store.RunSnapshot.Scheduling` | Projects accepted declarations and persisted state, including empty generator groups, into `ScheduleSnapshot`. |
-| `store.ReconcileRequest`, `store.SourcePolicy` | Carry typed resume, retry, memo or coalescing source authority. |
-| `store.ReconciledNode` | Returns the persisted node and any committed claim or authorized source. |
+| `store.ReconcileRequest`, `runstate.SourcePolicy` | Carry typed resume, retry, memo or coalescing source authority. |
+| `runstate.ReconciledNode` | Returns the persisted node and any committed claim or authorized source. |
 | `store.Tenant.ReconcileNode` | Chooses, self-claims or materializes in one transaction. |
 | `store.ExpansionSubmission` | Carries source generation, server-derived actor and exactly one success body or structured failure. |
 | `store.AcceptedExpansion` | Returns persisted nodes, body hash, barrier state and replay status. |

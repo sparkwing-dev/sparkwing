@@ -352,7 +352,8 @@ one envelope and use `apierr.DecodeInner`.
 | `RenewalRequest`, `RenewalResponse` | Shared keeper activity, expiry, cancellation and watched jobs. |
 | `JobResult`, `JobTransitionRequest`, `Applied` | One transition/report boundary, authorized output records and replay result. |
 | `StepReportRequest`, `StepRecorded` | Attempt-specific step state and acknowledged persistence on the C2 start/finish/skip routes. |
-| `LauncherObservation`, `LauncherCapacityObservation`, `LauncherActivation`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and retirement decisions. Kubernetes cleanup identities remain in the launcher. |
+| `capability.LauncherObservation`, `capability.LauncherActivation` | Award-fenced observations and activations shared with persistence. |
+| `LauncherCapacityObservation`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and retirement decisions. Kubernetes cleanup identities remain in the launcher. |
 | `ExpansionSubmission`, `ExpansionAccepted`, `ExpandedJob` | Exactly one success body with private `registration`, or a structured failure, and the persisted topology/settings. |
 | `ReuseSource`, `ReconcileRequest`, `ReconcileResponse` | C1 reconciliation over a proposed source, with persisted source outcome and committed claim. |
 | `FinishRequest`, `CancelRequest`, `RetryRequest` | Owner finish, cooperative cancellation and retry lineage. |
