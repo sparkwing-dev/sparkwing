@@ -33,7 +33,7 @@ type PrettyRenderer struct {
 	pendingRunStart   *sparkwing.LogRecord
 }
 
-func NewPrettyRenderer() *PrettyRenderer {
+func newPrettyRenderer() *PrettyRenderer {
 	return &PrettyRenderer{
 		w:         os.Stdout,
 		errW:      os.Stderr,
@@ -108,7 +108,7 @@ func (p *PrettyRenderer) color(s, code string) string {
 // safety: pipeline output reaches the terminal here, so escape sequences are filtered before printing.
 func (p *PrettyRenderer) sanitize(s string) string {
 	if p.useColor {
-		return SanitizeANSI(s)
+		return sanitizeANSI(s)
 	}
 	return StripANSI(s)
 }
@@ -732,7 +732,7 @@ func (p *PrettyRenderer) writeRunBlockSummaries(w io.Writer, nodes []any) {
 			header += p.color(" › ", ansiDim) + p.color(p.sanitizeInline(e.stepID), ansiBold)
 		}
 		fmt.Fprintln(w, "  "+header)
-		RenderMarkdownSummary(w, "    ", p.sanitize(e.md))
+		renderMarkdownSummary(w, "    ", p.sanitize(e.md))
 	}
 }
 
@@ -1148,8 +1148,8 @@ func asMillis(v any) (int64, bool) {
 	return 0, false
 }
 
-func RenderMarkdownSummary(out io.Writer, prefix, md string) {
-	body := strings.TrimRight(SanitizeANSI(md), "\n")
+func renderMarkdownSummary(out io.Writer, prefix, md string) {
+	body := strings.TrimRight(sanitizeANSI(md), "\n")
 	lines := strings.Split(body, "\n")
 
 	var table []string

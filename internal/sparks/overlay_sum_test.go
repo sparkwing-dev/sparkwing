@@ -157,12 +157,12 @@ func (b *buildFailure) Error() string { return b.err.Error() + ": " + b.output }
 func TestMaterializeSumKeepsSupersededChecksums(t *testing.T) {
 	dir := supersedingConsumer(t)
 
-	if _, err := WriteOverlay(context.Background(), dir,
+	if _, err := writeOverlay(context.Background(), dir,
 		map[string]string{"example.com/product": "v0.2.0"}); err != nil {
 		t.Fatalf("WriteOverlay: %v", err)
 	}
 
-	sum, err := os.ReadFile(filepath.Join(dir, OverlaySumfileName))
+	sum, err := os.ReadFile(filepath.Join(dir, overlaySumfileName))
 	if err != nil {
 		t.Fatalf("read sum: %v", err)
 	}
@@ -186,19 +186,19 @@ func TestWriteOverlayRepairsSumAfterFailedMaterialization(t *testing.T) {
 
 	proxy := os.Getenv("GOPROXY")
 	t.Setenv("GOPROXY", "off")
-	if _, err := WriteOverlay(context.Background(), dir, resolved); err == nil {
+	if _, err := writeOverlay(context.Background(), dir, resolved); err == nil {
 		t.Fatal("expected the first WriteOverlay to fail with the proxy off")
 	}
 	t.Setenv("GOPROXY", proxy)
 
-	changed, err := WriteOverlay(context.Background(), dir, resolved)
+	changed, err := writeOverlay(context.Background(), dir, resolved)
 	if err != nil {
 		t.Fatalf("second WriteOverlay: %v", err)
 	}
 	if changed {
 		t.Fatal("the second call rewrote the overlay, so it never reached the repair path")
 	}
-	sum, err := os.ReadFile(filepath.Join(dir, OverlaySumfileName))
+	sum, err := os.ReadFile(filepath.Join(dir, overlaySumfileName))
 	if err != nil {
 		t.Fatalf("read sum: %v", err)
 	}
@@ -265,10 +265,10 @@ func TestWriteOverlayDoesNotRedownloadAReplacedModuleSet(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "use.go"), "package consumer\n\nimport _ \"example.com/local\"\n")
 
 	resolved := map[string]string{"example.com/local": "v1.0.0"}
-	if _, err := WriteOverlay(context.Background(), dir, resolved); err != nil {
+	if _, err := writeOverlay(context.Background(), dir, resolved); err != nil {
 		t.Fatalf("first WriteOverlay: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, OverlaySumfileName)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, overlaySumfileName)); err != nil {
 		t.Fatalf("a successful materialization left no sum: %v", err)
 	}
 	first := countLines(t, counter)
@@ -276,7 +276,7 @@ func TestWriteOverlayDoesNotRedownloadAReplacedModuleSet(t *testing.T) {
 		t.Fatal("no go invocation, so materializeSum never ran")
 	}
 
-	if _, err := WriteOverlay(context.Background(), dir, resolved); err != nil {
+	if _, err := writeOverlay(context.Background(), dir, resolved); err != nil {
 		t.Fatalf("second WriteOverlay: %v", err)
 	}
 	if got := countLines(t, counter); got != first {
@@ -307,7 +307,7 @@ func TestWriteOverlayLeavesTheSumToTheWorkspace(t *testing.T) {
 	notices := captureStderr(t, func() {
 		resolved := map[string]string{"example.com/product": "v0.2.0"}
 		for range 2 {
-			if _, err := WriteOverlay(context.Background(), dir, resolved); err != nil {
+			if _, err := writeOverlay(context.Background(), dir, resolved); err != nil {
 				t.Fatalf("WriteOverlay: %v", err)
 			}
 		}
@@ -318,7 +318,7 @@ func TestWriteOverlayLeavesTheSumToTheWorkspace(t *testing.T) {
 	if got := countLines(t, counter); got != 0 {
 		t.Errorf("a workspace resolve ran %d go invocation(s); modules resolve from go.work there", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, OverlaySumfileName)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(dir, overlaySumfileName)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("expected no sum under a workspace, stat err = %v", err)
 	}
 }

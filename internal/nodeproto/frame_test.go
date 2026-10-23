@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"io"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func readAll(t *testing.T, r *Reader) ([]string, error) {
@@ -28,10 +29,10 @@ func TestReaderLineBound(t *testing.T) {
 	r := NewReader(strings.NewReader(in))
 	r.max = 64
 	lines, err := readAll(t, r)
-	if want := []string{"a", strings.Repeat("y", 63)}; strings.Join(lines, "|") != strings.Join(want, "|") || !errors.Is(err, ErrLineTooLong) {
+	if want := []string{"a", strings.Repeat("y", 63)}; strings.Join(lines, "|") != strings.Join(want, "|") || !errors.Is(err, errLineTooLong) {
 		t.Fatalf("lines %q, err %v", lines, err)
 	}
-	if _, err := r.ReadLine(); !errors.Is(err, ErrLineTooLong) {
+	if _, err := r.ReadLine(); !errors.Is(err, errLineTooLong) {
 		t.Fatalf("read after a long line: %v", err)
 	}
 }
@@ -48,7 +49,7 @@ func (endless) Read(p []byte) (int, error) {
 func TestReaderFailsLongLineWithoutNewline(t *testing.T) {
 	r := NewReader(endless{})
 	r.max = 10000
-	if _, err := r.Next(); !errors.Is(err, ErrLineTooLong) {
+	if _, err := r.Next(); !errors.Is(err, errLineTooLong) {
 		t.Fatalf("err = %v, want ErrLineTooLong", err)
 	}
 	if len(r.buf) > r.max+4096 {
@@ -78,7 +79,7 @@ func TestWriterRefusesOversizeAndKeepsLinesWhole(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewWriter(&buf)
 	w.max = 32
-	if err := w.Send(FrameLog{TS: "t", Message: strings.Repeat("m", 64)}); !errors.Is(err, ErrLineTooLong) || buf.Len() != 0 {
+	if err := w.Send(FrameLog{TS: "t", Message: strings.Repeat("m", 64)}); !errors.Is(err, errLineTooLong) || buf.Len() != 0 {
 		t.Fatalf("oversize: err %v, wrote %d bytes", err, buf.Len())
 	}
 	w.max = MaxLineBytes
@@ -171,7 +172,7 @@ func FuzzReader(f *testing.F) {
 		}
 		for _, p := range parts {
 			if len(p)+1 > r.max {
-				wantErr = ErrLineTooLong
+				wantErr = errLineTooLong
 				break
 			}
 			want = append(want, strings.TrimSuffix(p, "\r"))

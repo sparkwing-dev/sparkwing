@@ -13,51 +13,51 @@ const (
 	PlacementGitHubActions  Placement = "github_actions"
 )
 
-// PlanCapability names each declarative feature checked by the shared validator.
-type PlanCapability string
+// planCapability names each declarative feature checked by the shared validator.
+type planCapability string
 
 // CapabilityJobs through CapabilitySource name the declarative features checked during validation.
 const (
-	CapabilityJobs                  PlanCapability = "jobs"
-	CapabilitySteps                 PlanCapability = "steps"
-	CapabilityDependencies          PlanCapability = "dependencies"
-	CapabilityOptionalDependencies  PlanCapability = "optional_dependencies"
-	CapabilityGroups                PlanCapability = "groups"
-	CapabilityGenerators            PlanCapability = "generators"
-	CapabilityGeneratedDependencies PlanCapability = "generated_dependencies"
-	CapabilityRecovery              PlanCapability = "recovery"
-	CapabilityRetry                 PlanCapability = "retry"
-	CapabilityTimeout               PlanCapability = "timeout"
-	CapabilityNoProgressTimeout     PlanCapability = "no_progress_timeout"
-	CapabilityMemo                  PlanCapability = "memo"
-	CapabilityCaches                PlanCapability = "caches"
-	CapabilityArtifacts             PlanCapability = "artifacts"
-	CapabilityConsumes              PlanCapability = "consumes"
-	CapabilityReferences            PlanCapability = "references"
-	CapabilityRequires              PlanCapability = "requires"
-	CapabilityPrefers               PlanCapability = "prefers"
-	CapabilityInline                PlanCapability = "inline"
-	CapabilityJobConcurrency        PlanCapability = "job_concurrency"
-	CapabilityPlanConcurrency       PlanCapability = "plan_concurrency"
-	CapabilityBoxConcurrency        PlanCapability = "box_concurrency"
-	CapabilityApproval              PlanCapability = "approval"
-	CapabilityApprovalCondition     PlanCapability = "approval_condition"
-	CapabilityClosures              PlanCapability = "closures"
-	CapabilitySkipBudget            PlanCapability = "skip_budget"
-	CapabilityFailurePolicy         PlanCapability = "failure_policy"
-	CapabilityRisk                  PlanCapability = "risk"
-	CapabilityDryRun                PlanCapability = "dry_run"
-	CapabilityStartupEnv            PlanCapability = "startup_env"
-	CapabilityBodyEnv               PlanCapability = "body_env"
-	CapabilityPriority              PlanCapability = "priority"
-	CapabilityClaimWait             PlanCapability = "claim_wait"
-	CapabilityAdmissionClass        PlanCapability = "admission_class"
-	CapabilitySource                PlanCapability = "source"
+	capabilityJobs                  planCapability = "jobs"
+	capabilitySteps                 planCapability = "steps"
+	capabilityDependencies          planCapability = "dependencies"
+	capabilityOptionalDependencies  planCapability = "optional_dependencies"
+	capabilityGroups                planCapability = "groups"
+	capabilityGenerators            planCapability = "generators"
+	capabilityGeneratedDependencies planCapability = "generated_dependencies"
+	capabilityRecovery              planCapability = "recovery"
+	capabilityRetry                 planCapability = "retry"
+	capabilityTimeout               planCapability = "timeout"
+	capabilityNoProgressTimeout     planCapability = "no_progress_timeout"
+	capabilityMemo                  planCapability = "memo"
+	capabilityCaches                planCapability = "caches"
+	capabilityArtifacts             planCapability = "artifacts"
+	capabilityConsumes              planCapability = "consumes"
+	capabilityReferences            planCapability = "references"
+	capabilityRequires              planCapability = "requires"
+	capabilityPrefers               planCapability = "prefers"
+	capabilityInline                planCapability = "inline"
+	capabilityJobConcurrency        planCapability = "job_concurrency"
+	capabilityPlanConcurrency       planCapability = "plan_concurrency"
+	capabilityBoxConcurrency        planCapability = "box_concurrency"
+	capabilityApproval              planCapability = "approval"
+	capabilityApprovalCondition     planCapability = "approval_condition"
+	capabilityClosures              planCapability = "closures"
+	capabilitySkipBudget            planCapability = "skip_budget"
+	capabilityFailurePolicy         planCapability = "failure_policy"
+	capabilityRisk                  planCapability = "risk"
+	capabilityDryRun                planCapability = "dry_run"
+	capabilityStartupEnv            planCapability = "startup_env"
+	capabilityBodyEnv               planCapability = "body_env"
+	capabilityPriority              planCapability = "priority"
+	capabilityClaimWait             planCapability = "claim_wait"
+	capabilityAdmissionClass        planCapability = "admission_class"
+	capabilitySource                planCapability = "source"
 )
 
-// PlacementCapability records support for one feature across execution topologies.
-type PlacementCapability struct {
-	Feature        PlanCapability
+// placementCapability records support for one feature across execution topologies.
+type placementCapability struct {
+	Feature        planCapability
 	Local          bool
 	LocalTriggered bool
 	RunnerHosted   bool
@@ -66,43 +66,43 @@ type PlacementCapability struct {
 	GitHubActions  bool
 }
 
-// CapabilityTable returns the supported features for every execution topology.
-func CapabilityTable() []PlacementCapability {
-	return []PlacementCapability{
-		{CapabilityJobs, true, true, true, true, true, true},
-		{CapabilitySteps, true, true, true, true, true, true},
-		{CapabilityDependencies, true, true, true, true, true, true},
-		{CapabilityOptionalDependencies, true, true, true, true, true, true},
-		{CapabilityGroups, true, true, true, true, true, true},
-		{CapabilityGenerators, true, true, true, true, true, true},
-		{CapabilityGeneratedDependencies, true, true, true, true, true, true},
-		{CapabilityRecovery, true, true, true, true, true, true},
-		{CapabilityRetry, true, true, true, true, true, true},
-		{CapabilityTimeout, true, true, true, true, true, true},
-		{CapabilityNoProgressTimeout, true, true, true, true, true, true},
-		{CapabilityMemo, true, true, true, true, true, true},
-		{CapabilityCaches, true, true, true, true, true, true},
-		{CapabilityArtifacts, true, true, true, true, true, true},
-		{CapabilityConsumes, true, true, true, true, true, true},
-		{CapabilityReferences, true, true, true, true, true, true},
-		{CapabilityRequires, true, true, true, true, true, true},
-		{CapabilityPrefers, true, true, true, true, true, true},
-		{CapabilityInline, true, true, true, true, true, true},
-		{CapabilityJobConcurrency, true, true, true, true, true, true},
-		{CapabilityPlanConcurrency, true, true, true, true, true, true},
-		{CapabilityBoxConcurrency, true, true, true, true, true, true},
-		{CapabilityApproval, true, true, true, true, true, true},
-		{CapabilityApprovalCondition, true, true, true, true, true, true},
-		{CapabilityClosures, true, true, true, true, true, true},
-		{CapabilitySkipBudget, true, true, true, true, true, true},
-		{CapabilityFailurePolicy, true, true, true, true, true, true},
-		{CapabilityRisk, true, true, true, true, true, true},
-		{CapabilityDryRun, true, true, true, true, true, true},
-		{CapabilityStartupEnv, true, true, true, true, true, true},
-		{CapabilityBodyEnv, true, true, true, true, true, true},
-		{CapabilityPriority, true, true, true, true, true, true},
-		{CapabilityClaimWait, true, true, true, true, true, true},
-		{CapabilityAdmissionClass, true, true, true, true, true, true},
-		{CapabilitySource, true, true, true, true, true, true},
+// capabilityTable returns the supported features for every execution topology.
+func capabilityTable() []placementCapability {
+	return []placementCapability{
+		{capabilityJobs, true, true, true, true, true, true},
+		{capabilitySteps, true, true, true, true, true, true},
+		{capabilityDependencies, true, true, true, true, true, true},
+		{capabilityOptionalDependencies, true, true, true, true, true, true},
+		{capabilityGroups, true, true, true, true, true, true},
+		{capabilityGenerators, true, true, true, true, true, true},
+		{capabilityGeneratedDependencies, true, true, true, true, true, true},
+		{capabilityRecovery, true, true, true, true, true, true},
+		{capabilityRetry, true, true, true, true, true, true},
+		{capabilityTimeout, true, true, true, true, true, true},
+		{capabilityNoProgressTimeout, true, true, true, true, true, true},
+		{capabilityMemo, true, true, true, true, true, true},
+		{capabilityCaches, true, true, true, true, true, true},
+		{capabilityArtifacts, true, true, true, true, true, true},
+		{capabilityConsumes, true, true, true, true, true, true},
+		{capabilityReferences, true, true, true, true, true, true},
+		{capabilityRequires, true, true, true, true, true, true},
+		{capabilityPrefers, true, true, true, true, true, true},
+		{capabilityInline, true, true, true, true, true, true},
+		{capabilityJobConcurrency, true, true, true, true, true, true},
+		{capabilityPlanConcurrency, true, true, true, true, true, true},
+		{capabilityBoxConcurrency, true, true, true, true, true, true},
+		{capabilityApproval, true, true, true, true, true, true},
+		{capabilityApprovalCondition, true, true, true, true, true, true},
+		{capabilityClosures, true, true, true, true, true, true},
+		{capabilitySkipBudget, true, true, true, true, true, true},
+		{capabilityFailurePolicy, true, true, true, true, true, true},
+		{capabilityRisk, true, true, true, true, true, true},
+		{capabilityDryRun, true, true, true, true, true, true},
+		{capabilityStartupEnv, true, true, true, true, true, true},
+		{capabilityBodyEnv, true, true, true, true, true, true},
+		{capabilityPriority, true, true, true, true, true, true},
+		{capabilityClaimWait, true, true, true, true, true, true},
+		{capabilityAdmissionClass, true, true, true, true, true, true},
+		{capabilitySource, true, true, true, true, true, true},
 	}
 }

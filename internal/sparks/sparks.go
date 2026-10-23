@@ -17,5 +17,5 @@ func ResolveAndWrite(ctx context.Context, sparkwingDir string, m *Manifest) (boo
 	if err != nil {
 		return false, err
 	}
-	return WriteOverlay(ctx, sparkwingDir, resolved)
+	return writeOverlay(ctx, sparkwingDir, resolved)
 }

@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	DefaultMaxCacheBytes   int64 = limits.LocalBinaryCacheBytes
-	DefaultMaxCacheEntries       = limits.LocalBinaryCacheEntries
+	defaultMaxCacheBytes   int64 = limits.LocalBinaryCacheBytes
+	defaultMaxCacheEntries       = limits.LocalBinaryCacheEntries
 )
 
 var (
@@ -62,7 +62,7 @@ func ScanCache() ([]CacheEntry, error) {
 			if dirInfo, infoErr := de.Info(); infoErr == nil {
 				entry.LastUsed = dirInfo.ModTime()
 			}
-			entry.Owners = Owners(de.Name())
+			entry.Owners = owners(de.Name())
 		}
 		entries = append(entries, entry)
 	}
@@ -130,7 +130,7 @@ type cacheConfigFile struct {
 // config.yaml, defaulting each one the file leaves unset. A value that does
 // not parse is an error naming the file and key.
 func ConfiguredLimits() (Limits, error) {
-	limits := Limits{MaxBytes: DefaultMaxCacheBytes, MaxEntries: DefaultMaxCacheEntries}
+	limits := Limits{MaxBytes: defaultMaxCacheBytes, MaxEntries: defaultMaxCacheEntries}
 	var raw cacheConfigFile
 	path, _, err := userconfig.ReadDefault(userconfig.Cache, &raw)
 	if err != nil {

@@ -18,7 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, EvaluationDependencies, *executorProcess) {
+func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, evaluationDependencies, *executorProcess) {
 	t.Helper()
 	input, st, exec, _ := executorFixture(t)
 	job := input.Accepted.Plan.Jobs[0]
@@ -40,7 +40,7 @@ func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, Evaluatio
 	st.row.ClaimedBy, st.row.CapabilityPrefix = "", ""
 	p := &executorProcess{plan: input.Accepted.Plan}
 	in := EvaluationInput{Engine: input.Engine, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: string(hash), Entry: input.Entry, GrantedRunner: input.GrantedRunner, RouteBinding: input.RouteBinding}
-	deps := EvaluationDependencies{
+	deps := evaluationDependencies{
 		Store: st, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return p, nil }, EnsureEngine: exec.EnsureEngine, ChildContext: exec.ChildContext, Masker: testMasker("private"), ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
 			if ref != st.row.Ref || runspec.ClaimGeneration(generation) != st.row.Generation {
 				t.Fatal("read output without source fence")
@@ -73,11 +73,11 @@ func TestOwnerEvaluationCombinesAllGenerators(t *testing.T) {
 				raw, _ := json.Marshal(jobs)
 				return nodeproto.EvalResult{Value: raw}, nil
 			}
-			h, err := NewOwnerEvaluator(deps)
+			h, err := newOwnerEvaluator(deps)
 			if err != nil {
 				t.Fatal(err)
 			}
-			body, _, failure, err := h.Expand(t.Context(), in)
+			body, _, failure, err := h.evaluateExpansion(t.Context(), in)
 			if err != nil || failure != nil {
 				t.Fatalf("failure = %+v, error = %v", failure, err)
 			}
@@ -110,8 +110,8 @@ func TestOwnerEvaluationEmptyExpansionIsExplicit(t *testing.T) {
 		}
 		return nil, nil
 	}
-	h, _ := NewOwnerEvaluator(deps)
-	body, _, failure, err := h.Expand(t.Context(), in)
+	h, _ := newOwnerEvaluator(deps)
+	body, _, failure, err := h.evaluateExpansion(t.Context(), in)
 	if err != nil || failure != nil || string(body) != `{"jobs":[]}` {
 		t.Fatalf("body = %s, failure = %+v, error = %v", body, failure, err)
 	}
@@ -135,11 +135,11 @@ func TestOwnerEvaluationRefusesFreshIdentifierAfterIssuance(t *testing.T) {
 		raw, _ := json.Marshal(jobs)
 		return nodeproto.EvalResult{Value: raw}, nil
 	}
-	host, err := NewOwnerEvaluator(deps)
+	host, err := newOwnerEvaluator(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _, failure, err := host.Expand(t.Context(), in)
+	body, _, failure, err := host.evaluateExpansion(t.Context(), in)
 	if err != nil || failure == nil || failure.Code != apierr.SecretInIdentifier || len(body) != 0 {
 		t.Fatalf("fresh expansion = %s, failure = %+v, error = %v", body, failure, err)
 	}
@@ -175,8 +175,8 @@ func TestOwnerEvaluationFailuresNeverReturnPartialTopology(t *testing.T) {
 			case "cleanup":
 				p.cleanupErr = cause
 			}
-			h, _ := NewOwnerEvaluator(deps)
-			body, _, failure, err := h.Expand(t.Context(), in)
+			h, _ := newOwnerEvaluator(deps)
+			body, _, failure, err := h.evaluateExpansion(t.Context(), in)
 			if err != nil || len(body) != 0 || failure == nil || strings.Contains(failure.MaskedError, "private") {
 				t.Fatalf("body = %s, failure = %+v, error = %v", body, failure, err)
 			}
@@ -201,8 +201,8 @@ func TestOwnerEvaluationAuthorityLossDoesNotResolveBarrier(t *testing.T) {
 			}
 			return nil, nil
 		}
-		h, _ := NewOwnerEvaluator(deps)
-		body, _, failure, err := h.Expand(ctx, in)
+		h, _ := newOwnerEvaluator(deps)
+		body, _, failure, err := h.evaluateExpansion(ctx, in)
 		if !errors.Is(err, cause) || failure != nil || len(body) != 0 {
 			t.Fatalf("body = %s, failure = %+v, error = %v", body, failure, err)
 		}
@@ -228,8 +228,8 @@ func TestOwnerEvaluationRequiresCurrentSuccessfulSource(t *testing.T) {
 			case "cancelled":
 				ctx, cancel := context.WithCancel(t.Context())
 				cancel()
-				h, _ := NewOwnerEvaluator(deps)
-				_, _, _, err := h.Expand(ctx, in)
+				h, _ := newOwnerEvaluator(deps)
+				_, _, _, err := h.evaluateExpansion(ctx, in)
 				if !errors.Is(err, context.Canceled) {
 					t.Fatal(err)
 				}
@@ -239,8 +239,8 @@ func TestOwnerEvaluationRequiresCurrentSuccessfulSource(t *testing.T) {
 			case "hash":
 				in.SpecHash = "wrong"
 			}
-			h, _ := NewOwnerEvaluator(deps)
-			body, _, failure, err := h.Expand(t.Context(), in)
+			h, _ := newOwnerEvaluator(deps)
+			body, _, failure, err := h.evaluateExpansion(t.Context(), in)
 			if err == nil || len(body) != 0 || failure != nil {
 				t.Fatalf("body = %s, failure = %+v, error = %v", body, failure, err)
 			}
@@ -259,8 +259,8 @@ func TestOwnerEvaluationCannotAttributeJobsToAnotherGenerator(t *testing.T) {
 		}
 		return nil, nil
 	}
-	h, _ := NewOwnerEvaluator(deps)
-	body, _, failure, err := h.Expand(t.Context(), in)
+	h, _ := newOwnerEvaluator(deps)
+	body, _, failure, err := h.evaluateExpansion(t.Context(), in)
 	if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.PlanInvalid {
 		t.Fatalf("body = %s, failure = %+v, error = %v", body, failure, err)
 	}
@@ -278,8 +278,8 @@ func TestOwnerEvaluationRejectsUnknownFieldsInCombinedBody(t *testing.T) {
 		}
 		return nodeproto.EvalResult{Value: raw}, nil
 	}
-	h, _ := NewOwnerEvaluator(deps)
-	body, _, failure, err := h.Expand(t.Context(), in)
+	h, _ := newOwnerEvaluator(deps)
+	body, _, failure, err := h.evaluateExpansion(t.Context(), in)
 	if err != nil || len(body) != 0 || failure == nil || failure.Code != apierr.PlanInvalid || failure.MaskedError != generatorFailureMessage {
 		t.Fatalf("body = %s, failure = %+v, error = %v", body, failure, err)
 	}
@@ -356,8 +356,8 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 		}
 		return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
 	}
-	h, _ := NewOwnerEvaluator(deps)
-	body, _, failure, err := h.Expand(t.Context(), in)
+	h, _ := newOwnerEvaluator(deps)
+	body, _, failure, err := h.evaluateExpansion(t.Context(), in)
 	if err != nil || failure != nil || string(body) != `{"jobs":[]}` || replayed != 1 || len(st.changes) != 0 {
 		t.Fatalf("body = %s, failure = %+v, error = %v, replays = %d", body, failure, err, replayed)
 	}
@@ -372,8 +372,8 @@ func TestOwnerEvaluationUnclaimedMemoSourceKeepsGenerationZero(t *testing.T) {
 		}
 		return nil, nil
 	}
-	h, _ := NewOwnerEvaluator(deps)
-	body, _, failure, err := h.Expand(t.Context(), in)
+	h, _ := newOwnerEvaluator(deps)
+	body, _, failure, err := h.evaluateExpansion(t.Context(), in)
 	if err != nil || failure != nil || string(body) != `{"jobs":[]}` {
 		t.Fatalf("body = %s, failure = %+v, error = %v", body, failure, err)
 	}

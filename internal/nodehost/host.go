@@ -109,18 +109,18 @@ type NodeHost interface {
 	Execute(context.Context, NodeInput) error
 }
 
-// Reconciler follows an existing holder until terminal or requeued, then calls
+// reconciler follows an existing holder until terminal or requeued, then calls
 // the store's atomic ReconcileNode again. A wait result is never a final result.
-type Reconciler interface {
+type reconciler interface {
 	ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error)
 }
 
-// ExpansionStore is the owner/eval host's persistence boundary. The Tenant
+// expansionStore is the owner/eval host's persistence boundary. The Tenant
 // implementation is the sole writer of expansion state and generated jobs.
-type ExpansionStore interface {
+type expansionStore interface {
 	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
 }
 
-var _ ExpansionStore = (*store.Tenant)(nil)
+var _ expansionStore = (*store.Tenant)(nil)
 
-var _ Reconciler = (*store.Tenant)(nil)
+var _ reconciler = (*store.Tenant)(nil)

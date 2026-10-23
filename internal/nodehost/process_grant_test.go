@@ -198,7 +198,7 @@ func FuzzOwnerBindingRevocation(f *testing.F) {
 			}
 			return p, err
 		}
-		host, err := NewOwnerEvaluator(deps)
+		host, err := newOwnerEvaluator(deps)
 		if err != nil {
 			t.Fatal(err)
 		}

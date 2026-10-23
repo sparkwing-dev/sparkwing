@@ -257,7 +257,7 @@ func TestRejectionCannotReleaseBeforeNodeRetirement(t *testing.T) {
 		t.Fatalf("retirement failure released node: retirements=%d releases=%d", boundary.retirements, boundary.releases)
 	}
 	boundary.err = nil
-	if err := l.Sync(t.Context()); !errors.Is(err, ErrContainersRunning) {
+	if err := l.Sync(t.Context()); !errors.Is(err, errContainersRunning) {
 		t.Fatalf("persisted rejection released a node with a running Pod: %v", err)
 	}
 	if boundary.retirements != 2 || boundary.releases != 0 || !jobRemoved(t, l.Kube, p.OwnerReferences[0].Name) {

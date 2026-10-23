@@ -40,7 +40,7 @@ func TestPlatformProbeEndsAJobWhoseOwnerIsGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Verdict != VerdictReaped {
+	if len(out) != 1 || out[0].Verdict != verdictReaped {
 		t.Fatalf("outcomes = %+v", out)
 	}
 	waited := make(chan error, 1)

@@ -32,7 +32,7 @@ func (planningSecretMatcher) ContainsSecret(value string) bool { return false }
 func TestPlanInitialAlwaysRunsCurrentSDKPlanning(t *testing.T) {
 	calls := 0
 	for range 2 {
-		result, err := PlanInitial(t.Context(), PlanningInput{Validation: nodeproto.ValidationContext{Secrets: planningSecretMatcher{}, Placement: nodeproto.PlacementLocal}}, func(context.Context) (json.RawMessage, error) { calls++; return json.RawMessage(`{"jobs":[]}`), nil })
+		result, err := planInitial(t.Context(), PlanningInput{Validation: nodeproto.ValidationContext{Secrets: planningSecretMatcher{}, Placement: nodeproto.PlacementLocal}}, func(context.Context) (json.RawMessage, error) { calls++; return json.RawMessage(`{"jobs":[]}`), nil })
 		if err != nil || len(result.Plan.Jobs) != 0 || result.PlanHash == "" {
 			t.Fatalf("planning = %+v, %v", result, err)
 		}
@@ -59,7 +59,7 @@ func TestPlanInitialRetainsAuthorityLossAroundSDKPlanning(t *testing.T) {
 					return plan(ctx)
 				}
 			}
-			result, err := PlanInitial(ctx, fixture.input, functions)
+			result, err := planInitial(ctx, fixture.input, functions)
 			if !errors.Is(err, lease.ErrLeaseLost) || len(result.CanonicalPlan) != 0 {
 				t.Fatalf("%s lost authority: result=%+v error=%v", stage, result, err)
 			}

@@ -10,7 +10,7 @@ import (
 func TestDefaultPath_StillHonorsAnExplicitOverride(t *testing.T) {
 	want := filepath.Join(t.TempDir(), "explicit.yaml")
 	t.Setenv("SPARKWING_CONFIG", want)
-	got, err := DefaultPath()
+	got, err := defaultPath()
 	if err != nil {
 		t.Fatalf("DefaultPath: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestDefaultPath_StillHonorsAnExplicitOverride(t *testing.T) {
 	}
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
-	got, err = DefaultPath()
+	got, err = defaultPath()
 	if err != nil {
 		t.Fatalf("DefaultPath: %v", err)
 	}
@@ -49,10 +49,10 @@ func TestAutoRegister_SkipsAScratchCheckoutUnderTempDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := AutoRegister(scratch); err != nil {
+	if err := autoRegister(scratch); err != nil {
 		t.Fatalf("AutoRegister: %v", err)
 	}
-	cfg, err := Load(registry)
+	cfg, err := load(registry)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestAutoRegister_StillRecordsACheckoutOutsideTempDir(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", registry)
 
 	outside := filepath.Join(string(filepath.Separator), "Users", "dev", "code", "app")
-	err := AutoRegister(outside)
+	err := autoRegister(outside)
 	if err == nil {
 		t.Fatal("AutoRegister accepted a path with no .git, so it never reached repoKind")
 	}
@@ -106,7 +106,7 @@ func TestAutoRegister_OffInConfigStopsBeforeThePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	outside := filepath.Join(string(filepath.Separator), "Users", "dev", "code", "app")
-	if err := AutoRegister(outside); err != nil {
+	if err := autoRegister(outside); err != nil {
 		t.Fatalf("AutoRegister with repos.auto_register false = %v, want it to stop before inspecting the path", err)
 	}
 }

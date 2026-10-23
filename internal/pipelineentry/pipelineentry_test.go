@@ -70,7 +70,7 @@ func TestTypeScriptStartsTheInstalledSDKEntry(t *testing.T) {
 		t.Fatalf("a missing entry file: %v", err)
 	}
 	writeFile(t, filepath.Join(dir, "pipeline.ts"), "")
-	if _, err := TypeScript(dir); !errors.Is(err, ErrNotInstalled) {
+	if _, err := TypeScript(dir); !errors.Is(err, errNotInstalled) {
 		t.Fatalf("an uninstalled SDK: %v, want ErrNotInstalled", err)
 	}
 
@@ -84,7 +84,7 @@ func TestTypeScriptStartsTheInstalledSDKEntry(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
-	if args := got.Exec(procenv.Env{}).Args; args[len(args)-1] != ProtocolArg || len(args) != len(want)+1 {
+	if args := got.Exec(procenv.Env{}).Args; args[len(args)-1] != protocolArg || len(args) != len(want)+1 {
 		t.Fatalf("exec args = %q", args)
 	}
 
@@ -119,7 +119,7 @@ func TestInstallHooksGetOnlyTheInstallEnvironment(t *testing.T) {
 		`{"name":"hooked","version":"1.0.0","scripts":{"postinstall":"env > hook-env"}}`)
 	writeFile(t, filepath.Join(dir, "package-lock.json"),
 		`{"name":"hooked","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"hooked","version":"1.0.0","hasInstallScript":true}}}`)
-	if err := InstallTypeScript(t.Context(), dir, []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "npm_config_registry=" + os.Getenv("npm_config_registry")}, io.Discard); err != nil {
+	if err := installTypeScript(t.Context(), dir, []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "npm_config_registry=" + os.Getenv("npm_config_registry")}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(out)

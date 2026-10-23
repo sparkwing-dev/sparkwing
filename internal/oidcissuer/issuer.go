@@ -31,13 +31,13 @@ import (
 const (
 	// DefaultTTL is how long a token lives when the operator names no lifetime.
 	DefaultTTL = 10 * time.Minute
-	// MaxTTL caps the lifetime, because a leaked token is a live credential
+	// maxTTL caps the lifetime, because a leaked token is a live credential
 	// until it expires and nothing can revoke it.
-	MaxTTL = time.Hour
-	// MinTTL leaves a token time to reach the provider's exchange.
-	MinTTL = time.Minute
-	// MaxAudienceLen bounds the audience a caller may request.
-	MaxAudienceLen = 256
+	maxTTL = time.Hour
+	// minTTL leaves a token time to reach the provider's exchange.
+	minTTL = time.Minute
+	// maxAudienceLen bounds the audience a caller may request.
+	maxAudienceLen = 256
 	// DiscoveryPath and JWKSPath are served under the issuer URL.
 	DiscoveryPath = "/.well-known/openid-configuration"
 	JWKSPath      = "/.well-known/jwks.json"
@@ -46,8 +46,8 @@ const (
 	cacheMaxAge = "public, max-age=3600"
 )
 
-// ErrInvalidClaim marks a claim value the subject cannot carry unambiguously.
-var ErrInvalidClaim = errors.New("oidcissuer: claim value cannot appear in a subject")
+// errInvalidClaim marks a claim value the subject cannot carry unambiguously.
+var errInvalidClaim = errors.New("oidcissuer: claim value cannot appear in a subject")
 
 type signingKey struct {
 	kid string
@@ -70,14 +70,14 @@ type Issuer struct {
 // may be empty; when set it is published and never used to sign. ttl zero
 // means DefaultTTL.
 func New(issuerURL string, activePEM, publishedPEM []byte, ttl time.Duration) (*Issuer, error) {
-	if err := ValidateIssuerURL(issuerURL); err != nil {
+	if err := validateIssuerURL(issuerURL); err != nil {
 		return nil, err
 	}
 	if ttl == 0 {
 		ttl = DefaultTTL
 	}
-	if ttl < MinTTL || ttl > MaxTTL {
-		return nil, fmt.Errorf("oidcissuer: token lifetime %s is outside %s to %s", ttl, MinTTL, MaxTTL)
+	if ttl < minTTL || ttl > maxTTL {
+		return nil, fmt.Errorf("oidcissuer: token lifetime %s is outside %s to %s", ttl, minTTL, maxTTL)
 	}
 	active, err := parsePrivateKey(activePEM)
 	if err != nil {
@@ -97,11 +97,11 @@ func New(issuerURL string, activePEM, publishedPEM []byte, ttl time.Duration) (*
 	return iss, nil
 }
 
-// ValidateIssuerURL accepts an https origin with no path, query, fragment
+// validateIssuerURL accepts an https origin with no path, query, fragment
 // or credentials. Providers fetch <issuer>/.well-known/openid-configuration
 // and compare iss to it byte for byte, so anything past the origin breaks
 // discovery. A loopback http origin is accepted for local testing.
-func ValidateIssuerURL(raw string) error {
+func validateIssuerURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("oidcissuer: issuer %q is not an absolute URL", raw)
@@ -174,10 +174,10 @@ func (c Claims) Subject() (string, error) {
 	var b strings.Builder
 	for i, s := range segs {
 		if s.value == "" && s.name != "ref" && s.name != "repository_id" {
-			return "", fmt.Errorf("%w: %s is empty", ErrInvalidClaim, s.name)
+			return "", fmt.Errorf("%w: %s is empty", errInvalidClaim, s.name)
 		}
 		if strings.ContainsFunc(s.value, forbiddenInSubject) {
-			return "", fmt.Errorf("%w: %s %q holds ':', '*', '?', whitespace or a byte outside printable ASCII", ErrInvalidClaim, s.name, s.value)
+			return "", fmt.Errorf("%w: %s %q holds ':', '*', '?', whitespace or a byte outside printable ASCII", errInvalidClaim, s.name, s.value)
 		}
 		if i > 0 {
 			b.WriteByte(':')
@@ -199,8 +199,8 @@ func ValidateAudience(aud string) error {
 	if aud == "" {
 		return errors.New("audience is required")
 	}
-	if len(aud) > MaxAudienceLen {
-		return fmt.Errorf("audience is longer than %d characters", MaxAudienceLen)
+	if len(aud) > maxAudienceLen {
+		return fmt.Errorf("audience is longer than %d characters", maxAudienceLen)
 	}
 	for i := 0; i < len(aud); i++ {
 		if aud[i] <= ' ' || aud[i] >= 0x7f {
@@ -276,15 +276,15 @@ func (i *Issuer) sign(payload map[string]any) (string, error) {
 	return signing + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// ClaimsSupported lists every claim a token may carry, for the discovery
+// claimsSupported lists every claim a token may carry, for the discovery
 // document.
-var ClaimsSupported = []string{
+var claimsSupported = []string{
 	"iss", "aud", "sub", "iat", "nbf", "exp", "jti",
 	"team", "pipeline", "trigger", "runner_kind", "ref", "sha", "repository", "run_id",
 }
 
-// Discovery is the OpenID provider metadata document.
-type Discovery struct {
+// discovery is the OpenID provider metadata document.
+type discovery struct {
 	Issuer                           string   `json:"issuer"`
 	JWKSURI                          string   `json:"jwks_uri"`
 	ResponseTypesSupported           []string `json:"response_types_supported"`
@@ -294,21 +294,21 @@ type Discovery struct {
 	ScopesSupported                  []string `json:"scopes_supported"`
 }
 
-// Discovery returns the metadata document for this issuer.
-func (i *Issuer) Discovery() Discovery {
-	return Discovery{
+// discovery returns the metadata document for this issuer.
+func (i *Issuer) discovery() discovery {
+	return discovery{
 		Issuer:                           i.issuer,
 		JWKSURI:                          i.issuer + JWKSPath,
 		ResponseTypesSupported:           []string{"id_token"},
 		SubjectTypesSupported:            []string{"public"},
 		IDTokenSigningAlgValuesSupported: []string{"RS256"},
-		ClaimsSupported:                  ClaimsSupported,
+		ClaimsSupported:                  claimsSupported,
 		ScopesSupported:                  []string{"openid"},
 	}
 }
 
-// JWK is one published RSA public key.
-type JWK struct {
+// jwk is one published RSA public key.
+type jwk struct {
 	Kty string `json:"kty"`
 	Kid string `json:"kid"`
 	Use string `json:"use"`
@@ -318,28 +318,28 @@ type JWK struct {
 }
 
 // JWKS is the published key set.
-type JWKS struct {
-	Keys []JWK `json:"keys"`
+type keySet struct {
+	Keys []jwk `json:"keys"`
 }
 
-// JWKS returns the active public key, then the published one.
-func (i *Issuer) JWKS() JWKS {
-	out := JWKS{Keys: make([]JWK, 0, len(i.keys))}
+// jwks returns the active public key, then the published one.
+func (i *Issuer) jwks() keySet {
+	out := keySet{Keys: make([]jwk, 0, len(i.keys))}
 	for _, k := range i.keys {
 		n, e := jwkNumbers(k.pub)
-		out.Keys = append(out.Keys, JWK{Kty: "RSA", Kid: k.kid, Use: "sig", Alg: "RS256", N: n, E: e})
+		out.Keys = append(out.Keys, jwk{Kty: "RSA", Kid: k.kid, Use: "sig", Alg: "RS256", N: n, E: e})
 	}
 	return out
 }
 
 // ServeDiscovery answers GET /.well-known/openid-configuration.
 func (i *Issuer) ServeDiscovery(w http.ResponseWriter, _ *http.Request) {
-	servePublic(w, i.Discovery())
+	servePublic(w, i.discovery())
 }
 
 // ServeJWKS answers GET /.well-known/jwks.json.
 func (i *Issuer) ServeJWKS(w http.ResponseWriter, _ *http.Request) {
-	servePublic(w, i.JWKS())
+	servePublic(w, i.jwks())
 }
 
 func servePublic(w http.ResponseWriter, v any) {

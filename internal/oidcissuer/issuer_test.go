@@ -1,4 +1,4 @@
-package oidcissuer_test
+package oidcissuer
 
 import (
 	"crypto/ecdsa"
@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/jwks"
-	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 )
 
 func rsaPEM(t *testing.T, bits int, pkcs8 bool) []byte {
@@ -35,8 +34,8 @@ func rsaPEM(t *testing.T, bits int, pkcs8 bool) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 }
 
-func runClaims() oidcissuer.Claims {
-	return oidcissuer.Claims{
+func runClaims() Claims {
+	return Claims{
 		Audience: "sts.amazonaws.com", Team: "acme", Pipeline: "deploy", Trigger: "push",
 		RunnerKind: "runner", Ref: "refs/heads/main", SHA: "abc123", Repository: "github.com/acme/api",
 		RepositoryID: 123456789, RunID: "run-1",
@@ -51,7 +50,7 @@ func TestThumbprintMatchesRFC7638Example(t *testing.T) {
 		t.Fatal(err)
 	}
 	pub := &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: 65537}
-	if got, want := oidcissuer.Thumbprint(pub), "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"; got != want {
+	if got, want := Thumbprint(pub), "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"; got != want {
 		t.Fatalf("thumbprint = %s, want %s", got, want)
 	}
 }
@@ -100,7 +99,7 @@ func TestSubjectRefusesValuesThatForgeSegments(t *testing.T) {
 		case "team":
 			c.Team = bad.value
 		}
-		if _, err := c.Subject(); !errors.Is(err, oidcissuer.ErrInvalidClaim) {
+		if _, err := c.Subject(); !errors.Is(err, errInvalidClaim) {
 			t.Errorf("%s %q: err = %v, want ErrInvalidClaim", bad.field, bad.value, err)
 		}
 	}
@@ -108,12 +107,12 @@ func TestSubjectRefusesValuesThatForgeSegments(t *testing.T) {
 
 func TestAudienceValidation(t *testing.T) {
 	for _, ok := range []string{"sts.amazonaws.com", "api://AzureADTokenExchange", "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/q", strings.Repeat("a", 256)} {
-		if err := oidcissuer.ValidateAudience(ok); err != nil {
+		if err := ValidateAudience(ok); err != nil {
 			t.Errorf("ValidateAudience(%q) = %v, want nil", ok, err)
 		}
 	}
 	for _, bad := range []string{"", strings.Repeat("a", 257), "has space", "tab\t", "caf\xc3\xa9"} {
-		if err := oidcissuer.ValidateAudience(bad); err == nil {
+		if err := ValidateAudience(bad); err == nil {
 			t.Errorf("ValidateAudience(%q) = nil, want an error", bad)
 		}
 	}
@@ -121,12 +120,12 @@ func TestAudienceValidation(t *testing.T) {
 
 func TestIssuerURLMustBeABareHTTPSOrigin(t *testing.T) {
 	for _, ok := range []string{"https://api.sparkwing.dev", "http://127.0.0.1:8080", "http://localhost:9"} {
-		if err := oidcissuer.ValidateIssuerURL(ok); err != nil {
+		if err := validateIssuerURL(ok); err != nil {
 			t.Errorf("ValidateIssuerURL(%q) = %v, want nil", ok, err)
 		}
 	}
 	for _, bad := range []string{"", "api.sparkwing.dev", "http://api.sparkwing.dev", "https://api.sparkwing.dev/", "https://api.sparkwing.dev/oidc", "https://api.sparkwing.dev?x=1", "https://u:p@api.sparkwing.dev"} {
-		if err := oidcissuer.ValidateIssuerURL(bad); err == nil {
+		if err := validateIssuerURL(bad); err == nil {
 			t.Errorf("ValidateIssuerURL(%q) = nil, want an error", bad)
 		}
 	}
@@ -134,10 +133,10 @@ func TestIssuerURLMustBeABareHTTPSOrigin(t *testing.T) {
 
 func TestNewRefusesWeakOrForeignKeysAndLifetimes(t *testing.T) {
 	good := rsaPEM(t, 2048, true)
-	if _, err := oidcissuer.New("https://api.sparkwing.dev", rsaPEM(t, 2048, false), nil, 0); err != nil {
+	if _, err := New("https://api.sparkwing.dev", rsaPEM(t, 2048, false), nil, 0); err != nil {
 		t.Errorf("PKCS #1 key: %v", err)
 	}
-	if _, err := oidcissuer.New("https://api.sparkwing.dev", rsaPEM(t, 1024, true), nil, 0); err == nil {
+	if _, err := New("https://api.sparkwing.dev", rsaPEM(t, 1024, true), nil, 0); err == nil {
 		t.Error("a 1024-bit key was accepted")
 	}
 	ec, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -148,18 +147,18 @@ func TestNewRefusesWeakOrForeignKeysAndLifetimes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := oidcissuer.New("https://api.sparkwing.dev", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil, 0); err == nil {
+	if _, err := New("https://api.sparkwing.dev", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil, 0); err == nil {
 		t.Error("an EC key was accepted for RS256")
 	}
-	if _, err := oidcissuer.New("https://api.sparkwing.dev", []byte("not pem"), nil, 0); err == nil {
+	if _, err := New("https://api.sparkwing.dev", []byte("not pem"), nil, 0); err == nil {
 		t.Error("a non-PEM key was accepted")
 	}
 	for _, ttl := range []time.Duration{30 * time.Second, 2 * time.Hour} {
-		if _, err := oidcissuer.New("https://api.sparkwing.dev", good, nil, ttl); err == nil {
+		if _, err := New("https://api.sparkwing.dev", good, nil, ttl); err == nil {
 			t.Errorf("lifetime %s was accepted", ttl)
 		}
 	}
-	if iss, err := oidcissuer.New("https://api.sparkwing.dev", good, nil, 0); err != nil || iss.TTL() != oidcissuer.DefaultTTL {
+	if iss, err := New("https://api.sparkwing.dev", good, nil, 0); err != nil || iss.TTL() != DefaultTTL {
 		t.Errorf("zero lifetime: iss = %v, err = %v; want the default", iss, err)
 	}
 }
@@ -177,12 +176,12 @@ func TestPreviousKeyIsPublishedNotUsed(t *testing.T) {
 		t.Fatal(err)
 	}
 	prevPub := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})
-	iss, err := oidcissuer.New("https://api.sparkwing.dev", active, prevPub, 0)
+	iss, err := New("https://api.sparkwing.dev", active, prevPub, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ids := iss.KeyIDs()
-	if len(ids) != 2 || ids[1] != oidcissuer.Thumbprint(&prevKey.PublicKey) {
+	if len(ids) != 2 || ids[1] != Thumbprint(&prevKey.PublicKey) {
 		t.Fatalf("key ids = %v, want the active key then the previous", ids)
 	}
 	tok, _, err := iss.Mint(runClaims(), time.Now(), time.Time{})
@@ -196,7 +195,7 @@ func TestPreviousKeyIsPublishedNotUsed(t *testing.T) {
 	if head.Kid != ids[0] {
 		t.Fatalf("token kid = %s, want the active key %s", head.Kid, ids[0])
 	}
-	same, err := oidcissuer.New("https://api.sparkwing.dev", active, active, 0)
+	same, err := New("https://api.sparkwing.dev", active, active, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +205,7 @@ func TestPreviousKeyIsPublishedNotUsed(t *testing.T) {
 }
 
 func TestMintCapsExpiryAtNotAfter(t *testing.T) {
-	iss, err := oidcissuer.New("https://api.sparkwing.dev", rsaPEM(t, 2048, true), nil, 10*time.Minute)
+	iss, err := New("https://api.sparkwing.dev", rsaPEM(t, 2048, true), nil, 10*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,11 +227,11 @@ func TestMintCapsExpiryAtNotAfter(t *testing.T) {
 }
 
 func TestDiscoveryCarriesTheFieldsAWSRequires(t *testing.T) {
-	iss, err := oidcissuer.New("https://api.sparkwing.dev", rsaPEM(t, 2048, true), nil, 0)
+	iss, err := New("https://api.sparkwing.dev", rsaPEM(t, 2048, true), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(iss.Discovery())
+	raw, err := json.Marshal(iss.discovery())
 	if err != nil {
 		t.Fatal(err)
 	}

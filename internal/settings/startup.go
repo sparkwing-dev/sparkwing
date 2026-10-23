@@ -132,8 +132,8 @@ func RunnerPreferences(in Inputs) (userconfig.RunnerConfig, Origin, error) {
 	return value, origin, compoundError(userconfig.ValidateConfig(userconfig.Config{Runner: &value}), "machine.runner", origin, origins)
 }
 
-// RepoLocation consumes ordered checkout facts, never ambient working directories.
-func RepoLocation(in Inputs) (string, Origin, error) {
+// repoLocation consumes ordered checkout facts, never ambient working directories.
+func repoLocation(in Inputs) (string, Origin, error) {
 	fallback := in.Context.ParentCheckout
 	if fallback == "" && len(in.Context.RegisteredCheckouts) > 0 {
 		fallback = in.Context.RegisteredCheckouts[0]
@@ -145,9 +145,9 @@ func RepoLocation(in Inputs) (string, Origin, error) {
 	if err != nil {
 		return value, origin, err
 	}
-	if in.Context.Submitter && in.Context.ParentCheckout != "" && !in.options(Flag).RepoLocation.Set && !in.options(Run).RepoLocation.Set {
+	if in.Context.Submitter && in.Context.ParentCheckout != "" && !in.options(Flag).RepoLocation.Set && !in.options(sourceRun).RepoLocation.Set {
 		value = in.Context.ParentCheckout
-		origin = Origin{Source: Run, Key: "repo_location"}
+		origin = Origin{Source: sourceRun, Key: "repo_location"}
 	}
 	if strings.TrimSpace(value) == "" || strings.ContainsRune(value, 0) {
 		return "", origin, invalid("repo_location", origin, "checkout path is absent or invalid")
@@ -156,8 +156,8 @@ func RepoLocation(in Inputs) (string, Origin, error) {
 }
 
 func pauseSetting(in Inputs) (runspec.Setting[runspec.PauseSelection], error) {
-	if !in.Context.Submitter && !in.options(Run).Pause.Set {
-		return runspec.Setting[runspec.PauseSelection]{}, invalid("debug.pause", Origin{Source: Run, Key: "debug.pause"}, "sealed setting is absent")
+	if !in.Context.Submitter && !in.options(sourceRun).Pause.Set {
+		return runspec.Setting[runspec.PauseSelection]{}, invalid("debug.pause", Origin{Source: sourceRun, Key: "debug.pause"}, "sealed setting is absent")
 	}
 	origin := runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "debug.pause"}
 	out := runspec.PauseSelection{Before: declaration([]string{}, runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "debug.pause.before"}), After: declaration([]string{}, runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "debug.pause.after"}), OnFailure: declaration(false, runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "debug.pause.on_failure"})}

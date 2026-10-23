@@ -1,4 +1,4 @@
-package opsview_test
+package opsview
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -14,13 +13,13 @@ func TestLocalQueue_DistinguishesServingAbsentAndUnreachable(t *testing.T) {
 	blocked := errors.New("dial unix /tmp/sparkwing-502-abc/d.sock: connect: operation not permitted")
 	for _, format := range []string{"json", "plain", "pretty"} {
 		var unreachable, absent, idle bytes.Buffer
-		if err := opsview.RenderUnreachableDaemon(&unreachable, format, blocked); err != nil {
+		if err := renderUnreachableDaemon(&unreachable, format, blocked); err != nil {
 			t.Fatalf("%s unreachable: %v", format, err)
 		}
-		if err := opsview.RenderNoDaemon(&absent, format); err != nil {
+		if err := RenderNoDaemon(&absent, format); err != nil {
 			t.Fatalf("%s absent: %v", format, err)
 		}
-		if err := opsview.RenderLocalQueue(&idle, wingwire.QueueState{}, opsview.Serving(), format); err != nil {
+		if err := renderLocalQueue(&idle, wingwire.QueueState{}, serving(), format); err != nil {
 			t.Fatalf("%s idle: %v", format, err)
 		}
 		if unreachable.String() == absent.String() {
@@ -38,7 +37,7 @@ func TestLocalQueue_DistinguishesServingAbsentAndUnreachable(t *testing.T) {
 	}
 
 	var pretty bytes.Buffer
-	if err := opsview.RenderUnreachableDaemon(&pretty, "pretty", blocked); err != nil {
+	if err := renderUnreachableDaemon(&pretty, "pretty", blocked); err != nil {
 		t.Fatalf("pretty: %v", err)
 	}
 	if !strings.Contains(pretty.String(), "operation not permitted") {

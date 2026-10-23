@@ -49,8 +49,8 @@ type ProtocolSessionConfig struct {
 	grace           time.Duration
 }
 
-// Start launches an attempt with its validated grant and shared environment.
-func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+// startNode launches an attempt with its validated grant and shared environment.
+func (cfg ProtocolSessionConfig) startNode(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 	if input.processRevoke != nil {
 		cfg.Revoke = input.processRevoke
 	}
@@ -127,7 +127,7 @@ func sdkWorkingDirectory(entry *source.Entry) string {
 }
 
 func (cfg ProtocolSessionConfig) start(ctx context.Context) (ExecutorProcess, error) {
-	session, err := StartProtocolSession(ctx, cfg)
+	session, err := startProtocolSession(ctx, cfg)
 	if session == nil {
 		return nil, err
 	}
@@ -147,9 +147,9 @@ type protocolCall struct {
 	reply    chan nodeproto.Reply
 }
 
-// ProtocolSession owns one SDK process tree until Close or the keeper execution
+// protocolSession owns one SDK process tree until Close or the keeper execution
 // bound. Requests cancel independently within the remaining execution lifetime.
-type ProtocolSession struct {
+type protocolSession struct {
 	cfg                       ProtocolSessionConfig
 	cmd                       *exec.Cmd
 	process                   sessionProcess
@@ -176,9 +176,9 @@ type ProtocolSession struct {
 
 var errProtocolSessionClosed = errors.New("SDK protocol session closed")
 
-// StartProtocolSession starts the acquired command with private protocol pipes.
+// startProtocolSession starts the acquired command with private protocol pipes.
 // Callers must Close every returned session, including after a rejected hello.
-func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (session *ProtocolSession, err error) {
+func startProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (session *protocolSession, err error) {
 	defer func() {
 		if session == nil {
 			err = cfg.failedStartup(err)
@@ -237,7 +237,7 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 		return nil, fmt.Errorf("start SDK process: %w", err)
 	}
 	logCtx, stopLogs := context.WithCancel(context.WithoutCancel(ctx))
-	s := &ProtocolSession{cfg: cfg, cmd: cmd, process: process, requests: parent[0], reads: parent[1:], pending: make(map[string]protocolCall), done: make(chan struct{}), joined: make(chan struct{}), framesDone: make(chan struct{}), logCtx: logCtx, stopLogs: stopLogs, executionCtx: lease.ExecutionContext(ctx)}
+	s := &protocolSession{cfg: cfg, cmd: cmd, process: process, requests: parent[0], reads: parent[1:], pending: make(map[string]protocolCall), done: make(chan struct{}), joined: make(chan struct{}), framesDone: make(chan struct{}), logCtx: logCtx, stopLogs: stopLogs, executionCtx: lease.ExecutionContext(ctx)}
 	cfg.output.mu.Lock()
 	cfg.output.fail = s.failProtocol
 	cfg.output.mu.Unlock()
@@ -268,7 +268,7 @@ func closeProtocolFiles(files []*os.File) {
 
 // Request assigns a fresh private correlation ID; returned replies use the
 // caller's ID. Cancellation preserves the original request's right to a reply.
-func (s *ProtocolSession) Request(ctx context.Context, request nodeproto.Request) (nodeproto.Reply, error) {
+func (s *protocolSession) Request(ctx context.Context, request nodeproto.Request) (nodeproto.Reply, error) {
 	if err := context.Cause(ctx); err != nil {
 		return nodeproto.Reply{}, err
 	}
@@ -339,7 +339,7 @@ func (s *ProtocolSession) Request(ctx context.Context, request nodeproto.Request
 	}
 }
 
-func (s *ProtocolSession) acceptProtocolRequest(request nodeproto.Request) error {
+func (s *protocolSession) acceptProtocolRequest(request nodeproto.Request) error {
 	if s.failure != nil {
 		return s.failure
 	}
@@ -371,7 +371,7 @@ func (s *ProtocolSession) acceptProtocolRequest(request nodeproto.Request) error
 	return nil
 }
 
-func (s *ProtocolSession) writeProtocolRequest(request nodeproto.Request) error {
+func (s *protocolSession) writeProtocolRequest(request nodeproto.Request) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	data, err := json.Marshal(request)
@@ -387,7 +387,7 @@ func (s *ProtocolSession) writeProtocolRequest(request nodeproto.Request) error 
 	return nil
 }
 
-func (s *ProtocolSession) cancelProtocolRequest(call protocolCall, cause error) error {
+func (s *protocolSession) cancelProtocolRequest(call protocolCall, cause error) error {
 	select {
 	case <-call.reply:
 		return cause
@@ -420,7 +420,7 @@ func (s *ProtocolSession) cancelProtocolRequest(call protocolCall, cause error) 
 	return errors.Join(cause, err)
 }
 
-func (s *ProtocolSession) readProtocolFrames(file *os.File) {
+func (s *protocolSession) readProtocolFrames(file *os.File) {
 	defer s.streams.Done()
 	defer close(s.framesDone)
 	defer file.Close()
@@ -449,7 +449,7 @@ func (s *ProtocolSession) readProtocolFrames(file *os.File) {
 	}
 }
 
-func (s *ProtocolSession) deliverProtocolReply(reply nodeproto.Reply) error {
+func (s *protocolSession) deliverProtocolReply(reply nodeproto.Reply) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.failure != nil && !errors.Is(s.failure, errProtocolSessionClosed) {
@@ -478,7 +478,7 @@ func (s *ProtocolSession) deliverProtocolReply(reply nodeproto.Reply) error {
 	return nil
 }
 
-func (s *ProtocolSession) attributeProtocolLog(log nodeproto.FrameLog) nodeproto.FrameLog {
+func (s *protocolSession) attributeProtocolLog(log nodeproto.FrameLog) nodeproto.FrameLog {
 	if log.Step == "" {
 		return log
 	}
@@ -499,7 +499,7 @@ func protocolScanner(file *os.File) *bufio.Scanner {
 	return scanner
 }
 
-func (s *ProtocolSession) readProtocolText(file *os.File, level string) {
+func (s *protocolSession) readProtocolText(file *os.File, level string) {
 	defer s.streams.Done()
 	defer file.Close()
 	buffer := make([]byte, 32<<10)
@@ -527,7 +527,7 @@ func (s *ProtocolSession) readProtocolText(file *os.File, level string) {
 	}
 }
 
-func (s *ProtocolSession) emitProtocolLog(log nodeproto.FrameLog) {
+func (s *protocolSession) emitProtocolLog(log nodeproto.FrameLog) {
 	if s.cfg.Activity.Progress != nil {
 		s.cfg.Activity.Progress()
 	}
@@ -542,7 +542,7 @@ func (s *ProtocolSession) emitProtocolLog(log nodeproto.FrameLog) {
 	}
 }
 
-func (s *ProtocolSession) failProtocol(err error) {
+func (s *protocolSession) failProtocol(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.failure == nil {
@@ -553,9 +553,9 @@ func (s *ProtocolSession) failProtocol(err error) {
 	}
 }
 
-func (s *ProtocolSession) protocolFailure() error { s.mu.Lock(); defer s.mu.Unlock(); return s.failure }
+func (s *protocolSession) protocolFailure() error { s.mu.Lock(); defer s.mu.Unlock(); return s.failure }
 
-func (s *ProtocolSession) watchProtocolProcess() {
+func (s *protocolSession) watchProtocolProcess() {
 	defer close(s.joined)
 	select {
 	case <-s.done:
@@ -581,7 +581,7 @@ func (s *ProtocolSession) watchProtocolProcess() {
 	}
 }
 
-func (s *ProtocolSession) awaitProtocol(done <-chan struct{}) bool {
+func (s *protocolSession) awaitProtocol(done <-chan struct{}) bool {
 	timer := time.NewTimer(s.cfg.grace)
 	defer timer.Stop()
 	select {
@@ -594,7 +594,7 @@ func (s *ProtocolSession) awaitProtocol(done <-chan struct{}) bool {
 
 // Close revokes authority, closes the request pipe, and joins stream readers and
 // the process tree. Concurrent callers receive the same final error.
-func (s *ProtocolSession) Close() error {
+func (s *protocolSession) Close() error {
 	s.closeOnce.Do(func() {
 		var revokeErr error
 		if s.cfg.Revoke != nil {
@@ -625,7 +625,7 @@ func (s *ProtocolSession) Close() error {
 }
 
 // Cleanup runs host-registered cleanups after Close has revoked and joined.
-func (s *ProtocolSession) Cleanup(ctx context.Context) error {
+func (s *protocolSession) Cleanup(ctx context.Context) error {
 	if s.cfg.RunCleanups != nil {
 		env := s.cfg.cleanupEnv
 		if !s.cfg.cleanupEnvSet {
@@ -647,4 +647,4 @@ func protocolSessionError(code apierr.Code, message string) error {
 	return &apierr.Error{Code: code, Message: message}
 }
 
-var _ ExecutorProcess = (*ProtocolSession)(nil)
+var _ ExecutorProcess = (*protocolSession)(nil)

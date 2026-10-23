@@ -25,17 +25,17 @@ func (s *S3) LogClassReady(ctx context.Context, class string) error {
 	if err != nil && !s3Error(err, "NoSuchLifecycleConfiguration") {
 		return fmt.Errorf("read log lifecycle: %w", err)
 	}
-	prefix := s.PhysicalKey(LogClassPrefix(class))
-	if err == nil && LogLifecycleExpires(out.Rules, prefix, days) {
+	prefix := s.PhysicalKey(logClassPrefix(class))
+	if err == nil && logLifecycleExpires(out.Rules, prefix, days) {
 		return nil
 	}
 	return fmt.Errorf("bucket %s has no enabled lifecycle rule expiring prefix %q after %d days", s.bucket, prefix, days)
 }
 
-// LogLifecycleExpires checks an already-fetched lifecycle configuration. A pure
+// logLifecycleExpires checks an already-fetched lifecycle configuration. A pure
 // prefix rule must cover the whole class. Tag and size filters leave some log
 // objects without expiry and cannot establish readiness.
-func LogLifecycleExpires(rules []types.LifecycleRule, prefix string, days int) bool {
+func logLifecycleExpires(rules []types.LifecycleRule, prefix string, days int) bool {
 	if prefix == "" || days < 1 {
 		return false
 	}

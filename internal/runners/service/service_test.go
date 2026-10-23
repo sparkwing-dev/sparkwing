@@ -90,7 +90,7 @@ func TestInstallLinuxWritesUnitAndStartsIt(t *testing.T) {
 	}
 	unit := string(body)
 	for _, want := range []string{
-		Marker,
+		marker,
 		"ExecStart=" + unitfile.Command([]string{h.Binary, "start", "--config", h.ConfigPath}),
 		"Restart=on-failure",
 		"WantedBy=default.target",
@@ -126,7 +126,7 @@ func TestInstallDarwinWritesPlistAndLoadsIt(t *testing.T) {
 	if !state.Installed || !state.Running {
 		t.Fatalf("state = %+v", state)
 	}
-	body, err := os.ReadFile(PlistPath(h))
+	body, err := os.ReadFile(plistPath(h))
 	if err != nil {
 		t.Fatalf("read plist: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestInstallDarwinWritesPlistAndLoadsIt(t *testing.T) {
 		t.Fatalf("plist is not well-formed XML: %v", err)
 	}
 	plist := string(body)
-	for _, want := range []string{Marker, "<string>" + Label + "</string>", "<string>start</string>", h.ConfigPath} {
+	for _, want := range []string{marker, "<string>" + label + "</string>", "<string>start</string>", h.ConfigPath} {
 		if !strings.Contains(plist, want) {
 			t.Errorf("plist missing %q:\n%s", want, plist)
 		}
@@ -146,7 +146,7 @@ func TestInstallDarwinWritesPlistAndLoadsIt(t *testing.T) {
 	want := []string{
 		"launchctl print gui/501/com.sparkwing.runner",
 		"launchctl bootout gui/501/com.sparkwing.runner",
-		"launchctl bootstrap gui/501 " + PlistPath(h),
+		"launchctl bootstrap gui/501 " + plistPath(h),
 	}
 	if strings.Join(exec.calls, "|") != strings.Join(want, "|") {
 		t.Errorf("calls = %v, want %v", exec.calls, want)
@@ -191,7 +191,7 @@ func TestUninstallStopsAndRemoves(t *testing.T) {
 			"systemctl --user disable --now sparkwing-runner.service",
 			"systemctl --user daemon-reload",
 		}},
-		{"darwin", darwinHost, PlistPath, []string{
+		{"darwin", darwinHost, plistPath, []string{
 			"launchctl print gui/501/com.sparkwing.runner",
 			"launchctl bootout gui/501/com.sparkwing.runner",
 		}},
@@ -299,7 +299,7 @@ func TestUninstallLeavesAServiceRunningAnotherConfig(t *testing.T) {
 		path func(Host) string
 	}{
 		{"linux", linuxHost, UnitPath},
-		{"darwin", darwinHost, PlistPath},
+		{"darwin", darwinHost, plistPath},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			install := &fakeExec{}

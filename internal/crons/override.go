@@ -8,11 +8,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// Override is the edit one host lays over a repository's declared cadence. A
+// override is the edit one host lays over a repository's declared cadence. A
 // nil field leaves the declaration in place; a set one replaces it. Args
 // replaces the declared arguments whole, so an empty non-nil map runs the
 // schedule with none.
-type Override struct {
+type override struct {
 	Cron    *string
 	TZ      *string
 	Overlap *string
@@ -21,11 +21,11 @@ type Override struct {
 }
 
 // Empty reports whether the override sets nothing.
-func (o Override) Empty() bool {
+func (o override) Empty() bool {
 	return o.Cron == nil && o.TZ == nil && o.Overlap == nil && o.CatchUp == nil && o.Args == nil
 }
 
-// SetOverride lays fields over one schedule's declaration, keeping whatever
+// setOverride lays fields over one schedule's declaration, keeping whatever
 // this host had already overridden and had not named again. The declaration
 // the result is measured against is refreshed to what the repository says now,
 // so setting an override clears any staleness the previous one carried.
@@ -33,7 +33,7 @@ func (o Override) Empty() bool {
 // The effective cadence is validated the way the config validates a declared
 // one, so an override that would stop the schedule evaluating is refused here
 // rather than at the next tick.
-func (s *Service) SetOverride(ctx context.Context, id string, fields Override) (Row, error) {
+func (s *Service) setOverride(ctx context.Context, id string, fields override) (Row, error) {
 	sched, err := s.Schedules.GetCronSchedule(ctx, id)
 	if err != nil {
 		return Row{}, err
@@ -81,9 +81,9 @@ func (s *Service) SetOverride(ctx context.Context, id string, fields Override) (
 	return s.reload(ctx, sched.ID)
 }
 
-// ClearOverride drops this host's edit, returning the schedule to what the
+// clearOverride drops this host's edit, returning the schedule to what the
 // repository declares.
-func (s *Service) ClearOverride(ctx context.Context, id string) (Row, error) {
+func (s *Service) clearOverride(ctx context.Context, id string) (Row, error) {
 	sched, err := s.Schedules.GetCronSchedule(ctx, id)
 	if err != nil {
 		return Row{}, err

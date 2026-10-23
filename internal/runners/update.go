@@ -13,8 +13,8 @@ type RunnerInstallation interface {
 	Apply(context.Context, engine.VerifiedRelease) error
 }
 
-// ApplySoftwareUpdate drains before replacement and stops immediately on an installation failure.
-func ApplySoftwareUpdate(ctx context.Context, update engine.SoftwareUpdate, installation RunnerInstallation) error {
+// applySoftwareUpdate drains before replacement and stops immediately on an installation failure.
+func applySoftwareUpdate(ctx context.Context, update engine.SoftwareUpdate, installation RunnerInstallation) error {
 	if update.Version == update.CurrentVersion && !update.Required {
 		return nil
 	}

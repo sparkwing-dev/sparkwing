@@ -1,4 +1,4 @@
-package paths_test
+package paths
 
 import (
 	"testing"

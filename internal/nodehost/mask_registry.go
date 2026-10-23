@@ -30,8 +30,8 @@ func (r *MaskRegistry) ContainsSecret(identifier string) bool {
 	return r.masker.ContainsSecret(identifier)
 }
 
-// Register refuses collisions before changing any sink; success is synchronous.
-func (r *MaskRegistry) Register(value string) error {
+// registerValue refuses collisions before changing any sink; success is synchronous.
+func (r *MaskRegistry) registerValue(value string) error {
 	candidate := secrets.NewMasker()
 	if err := candidate.Register(value); err != nil {
 		return err
@@ -65,9 +65,9 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 	return nil
 }
 
-// Accept checks initial or generated identifiers, commits under the registration
+// acceptPlan checks initial or generated identifiers, commits under the registration
 // lock, then retains their names. A refused commit changes no registry state.
-func (r *MaskRegistry) Accept(plan nodeproto.PlanDoc, commit func() error) error {
+func (r *MaskRegistry) acceptPlan(plan nodeproto.PlanDoc, commit func() error) error {
 	return r.accept(plan, commit, r.masker)
 }
 

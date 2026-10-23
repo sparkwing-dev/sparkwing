@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	Marker      = "Installed by sparkwing"
-	ServiceName = "sparkwing-runner.service"
-	Label       = "com.sparkwing.runner"
-	PlistName   = Label + ".plist"
+	marker      = "Installed by sparkwing"
+	serviceName = "sparkwing-runner.service"
+	label       = "com.sparkwing.runner"
+	PlistName   = label + ".plist"
 )
 
 // ErrUnsupported is returned, wrapped, for a GOOS that has no runner service.
@@ -61,7 +61,7 @@ func Install(ctx context.Context, h Host) (State, error) {
 	if err := requireHost(h); err != nil {
 		return State{}, err
 	}
-	_, exists, managed, err := unitfile.Read(path, Marker)
+	_, exists, managed, err := unitfile.Read(path, marker)
 	if err != nil {
 		return State{}, err
 	}
@@ -80,7 +80,7 @@ func Install(ctx context.Context, h Host) (State, error) {
 	if h.GOOS == "linux" {
 		err = runCommand(ctx, h, "systemctl", "--user", "daemon-reload")
 		if err == nil {
-			err = runCommand(ctx, h, "systemctl", "--user", "enable", "--now", ServiceName)
+			err = runCommand(ctx, h, "systemctl", "--user", "enable", "--now", serviceName)
 		}
 	} else {
 		if loaded {
@@ -117,9 +117,9 @@ func Uninstall(ctx context.Context, h Host) (State, error) {
 	}
 	var stopErr error
 	if h.GOOS == "linux" {
-		out, err := h.run(ctx, "systemctl", "--user", "disable", "--now", ServiceName)
+		out, err := h.run(ctx, "systemctl", "--user", "disable", "--now", serviceName)
 		if err != nil && !notLoaded(out) {
-			stopErr = fmt.Errorf("runner service: disable %s: %w: %s", ServiceName, err, strings.TrimSpace(out))
+			stopErr = fmt.Errorf("runner service: disable %s: %w: %s", serviceName, err, strings.TrimSpace(out))
 		}
 	} else if loaded {
 		stopErr = runCommand(ctx, h, "launchctl", "bootout", h.serviceTarget())
@@ -169,17 +169,17 @@ func DefaultExec(ctx context.Context, name string, args ...string) (string, erro
 
 // UnitPath reports the systemd user unit path for a host.
 func UnitPath(h Host) string {
-	return filepath.Join(h.ConfigHome, "systemd", "user", ServiceName)
+	return filepath.Join(h.ConfigHome, "systemd", "user", serviceName)
 }
 
-// PlistPath reports the LaunchAgent path for a host.
-func PlistPath(h Host) string {
+// plistPath reports the LaunchAgent path for a host.
+func plistPath(h Host) string {
 	return filepath.Join(h.Home, "Library", "LaunchAgents", PlistName)
 }
 
 func (h Host) registration(ctx context.Context, path string) (bool, error) {
 	if h.GOOS == "linux" {
-		return true, unitfile.CheckSystemdSource(ctx, h.Exec, ServiceName, path)
+		return true, unitfile.CheckSystemdSource(ctx, h.Exec, serviceName, path)
 	}
 	return agentRegistration(ctx, h)
 }
@@ -195,7 +195,7 @@ func (h Host) writeRegistration(path string) error {
 	return unitfile.Write(path, body)
 }
 
-func (h Host) serviceTarget() string { return fmt.Sprintf("gui/%d/%s", h.UID, Label) }
+func (h Host) serviceTarget() string { return fmt.Sprintf("gui/%d/%s", h.UID, label) }
 
 func (h Host) domainTarget() string { return fmt.Sprintf("gui/%d", h.UID) }
 
@@ -231,7 +231,7 @@ func foreignState(path string) State {
 }
 
 func foreignError(path string) error {
-	return fmt.Errorf("runner service: %s was not written by sparkwing (it lacks %q); move it aside before installing", path, Marker)
+	return fmt.Errorf("runner service: %s was not written by sparkwing (it lacks %q); move it aside before installing", path, marker)
 }
 
 // safety: launchd's StandardOutPath creates the log file but not its directory.
@@ -278,7 +278,7 @@ func configArgument(words []string) string {
 
 func serviceUnit(h Host) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s\n", Marker)
+	fmt.Fprintf(&b, "# %s\n", marker)
 	b.WriteString("[Unit]\n")
 	b.WriteString("Description=sparkwing-runner (pulls jobs from a shared sparkwing controller)\n")
 	b.WriteString("After=network-online.target\n")
@@ -296,9 +296,9 @@ func serviceUnit(h Host) string {
 func agentPlist(h Host) string {
 	var b strings.Builder
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-	fmt.Fprintf(&b, "<!-- %s -->\n", Marker)
+	fmt.Fprintf(&b, "<!-- %s -->\n", marker)
 	b.WriteString("<plist version=\"1.0\">\n<dict>\n")
-	fmt.Fprintf(&b, "  <key>Label</key>\n  <string>%s</string>\n\n", unitfile.XMLText(Label))
+	fmt.Fprintf(&b, "  <key>Label</key>\n  <string>%s</string>\n\n", unitfile.XMLText(label))
 	b.WriteString("  <key>ProgramArguments</key>\n  <array>\n")
 	for _, arg := range []string{h.Binary, "start", "--config", h.ConfigPath} {
 		fmt.Fprintf(&b, "    <string>%s</string>\n", unitfile.XMLText(arg))

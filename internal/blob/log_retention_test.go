@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -13,18 +13,16 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 func TestLogClassDays(t *testing.T) {
 	for _, days := range []int{1, 30, 90, 120, int(^uint(0) >> 1)} {
-		if got, ok := blob.LogClassDays("r" + strconv.Itoa(days)); !ok || got != days {
+		if got, ok := LogClassDays("r" + strconv.Itoa(days)); !ok || got != days {
 			t.Fatalf("class %d = %d, %v", days, got, ok)
 		}
 	}
 	for _, class := range []string{"", "r", "r0", "r01", "r+1", "r-1", "r1/", "r 1", "r1.0", "R30", "r99999999999999999999999"} {
-		if _, ok := blob.LogClassDays(class); ok {
+		if _, ok := LogClassDays(class); ok {
 			t.Errorf("accepted class %q", class)
 		}
 	}
@@ -33,7 +31,7 @@ func TestLogClassDays(t *testing.T) {
 func TestFilesystemLogRetention(t *testing.T) {
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
-	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32)), Now: func() time.Time { return now }})
+	backend, err := NewFilesystem(FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32)), Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +126,7 @@ func TestFilesystemLogRetention(t *testing.T) {
 
 func TestFilesystemLogRetentionPreservesUnrecognizedFiles(t *testing.T) {
 	dir := t.TempDir()
-	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32))})
+	backend, err := NewFilesystem(FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}

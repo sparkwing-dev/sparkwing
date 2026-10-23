@@ -14,7 +14,7 @@ func operatorPick[T any](in OperatorInputs, key string, field func(OperatorValue
 	for _, layer := range []struct {
 		value  OperatorValues
 		source Source
-	}{{in.Flags, Flag}, {in.Team, TeamDB}, {in.Global, GlobalDB}, {in.Profile, LimitsProfile}} {
+	}{{in.Flags, Flag}, {in.Team, teamDB}, {in.Global, GlobalDB}, {in.Profile, limitsProfile}} {
 		if v := field(layer.value); v != nil {
 			copy := *v
 			origin := layer.value.Origins[key]

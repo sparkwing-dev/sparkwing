@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
-type Services struct {
+type services struct {
 	Dashboard string `json:"dashboard,omitempty"`
 
 	MultiTeam bool `json:"multi_team,omitempty"`
 }
 
-var ErrNoController = errors.New("discovery: no controller URL configured")
+var errNoController = errors.New("discovery: no controller URL configured")
 
 type cacheKey struct {
 	URL   string
@@ -24,7 +24,7 @@ type cacheKey struct {
 }
 
 type cacheEntry struct {
-	services Services
+	services services
 	err      error
 	at       time.Time
 }
@@ -39,9 +39,9 @@ const successTTL = 10 * time.Minute
 
 const failureTTL = 30 * time.Second
 
-func ServicesFor(ctx context.Context, controllerURL, token string) (Services, error) {
+func servicesFor(ctx context.Context, controllerURL, token string) (services, error) {
 	if controllerURL == "" {
-		return Services{}, ErrNoController
+		return services{}, errNoController
 	}
 	key := cacheKey{URL: controllerURL, Token: token}
 
@@ -66,17 +66,17 @@ func ServicesFor(ctx context.Context, controllerURL, token string) (Services, er
 	return svc, err
 }
 
-func ResetCache() {
+func resetCache() {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 	servicesCache = map[cacheKey]cacheEntry{}
 }
 
-func fetchServices(ctx context.Context, controllerURL, token string) (Services, error) {
+func fetchServices(ctx context.Context, controllerURL, token string) (services, error) {
 	url := controllerURL + "/api/v1/services"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return Services{}, fmt.Errorf("build services request: %w", err)
+		return services{}, fmt.Errorf("build services request: %w", err)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -84,19 +84,19 @@ func fetchServices(ctx context.Context, controllerURL, token string) (Services, 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return Services{}, fmt.Errorf("controller services: %w", err)
+		return services{}, fmt.Errorf("controller services: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch resp.StatusCode {
 	case http.StatusOK:
-		var out Services
+		var out services
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			return Services{}, fmt.Errorf("decode services response: %w", err)
+			return services{}, fmt.Errorf("decode services response: %w", err)
 		}
 		return out, nil
 	case http.StatusNotFound:
-		return Services{}, nil
+		return services{}, nil
 	default:
-		return Services{}, fmt.Errorf("controller services: HTTP %d", resp.StatusCode)
+		return services{}, fmt.Errorf("controller services: HTTP %d", resp.StatusCode)
 	}
 }

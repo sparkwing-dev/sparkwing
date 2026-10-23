@@ -32,17 +32,8 @@ func (p AwardPolicy) clone() AwardPolicy {
 	return p
 }
 
-// LivenessPolicies returns a copy of the liveness policies table.
-func LivenessPolicies() []LivenessPolicy { return copied(livenessPolicies, nil) }
-
-// PaymentEventPolicies returns a copy of the payment event policies table.
-func PaymentEventPolicies() []PaymentEventPolicy { return copied(paymentEventPolicies, nil) }
-
 // CredentialPrefixes returns a copy of the credential prefixes table.
 func CredentialPrefixes() []string { return copied(credentialPrefixes, nil) }
-
-// DataPolicies returns a copy of the data policies table.
-func DataPolicies() []DataPolicy { return copied(dataPolicies, nil) }
 
 // UnitBillingMappings returns a copy of the unit billing mappings table.
 func UnitBillingMappings() []UnitBilling { return copied(unitBillingMappings, nil) }

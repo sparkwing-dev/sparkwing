@@ -4,8 +4,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// PublicNode returns the credential-safe shape shared by node read surfaces.
-func PublicNode(node *store.Node) *store.Node {
+// publicNode returns the credential-safe shape shared by node read surfaces.
+func publicNode(node *store.Node) *store.Node {
 	if node == nil {
 		return nil
 	}
@@ -44,7 +44,7 @@ func PublicNodes(nodes []*store.Node) []*store.Node {
 	}
 	out := make([]*store.Node, len(nodes))
 	for i, node := range nodes {
-		out[i] = PublicNode(node)
+		out[i] = publicNode(node)
 	}
 	return out
 }

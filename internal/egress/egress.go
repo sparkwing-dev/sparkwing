@@ -27,8 +27,8 @@ const (
 	ClassLogStream Class = "log_stream"
 )
 
-// AnonymousPrincipal labels bytes served without a bearer.
-const AnonymousPrincipal = "anonymous"
+// anonymousPrincipal labels bytes served without a bearer.
+const anonymousPrincipal = "anonymous"
 
 // TeamPrincipal names a caller to a meter by its team and its token's name,
 // because a token's name is free text that two teams may both choose.
@@ -39,18 +39,18 @@ func TeamPrincipal(team, name string) string {
 	return team + "/" + name
 }
 
-// OverflowPrincipal labels bytes served to a principal the meter had no
+// overflowPrincipal labels bytes served to a principal the meter had no
 // room to track separately. They share one budget rather than an
 // unbudgeted one, so reaching the cardinality cap tightens the meter
 // instead of opening it. The fold lasts until the month rolls, which is
 // when a meter drops the principals that spent nothing.
-const OverflowPrincipal = "(overflow)"
+const overflowPrincipal = "(overflow)"
 
-// MaxPendingUsages bounds the closing-month totals a meter parks for a
+// maxPendingUsages bounds the closing-month totals a meter parks for a
 // drain it is still waiting on. It sits above one month roll at the
 // principal cap, so a drain that runs monthly never reaches it and one
 // that has stopped entirely is capped rather than unbounded.
-const MaxPendingUsages = 2 * MaxPrincipals
+const maxPendingUsages = 2 * MaxPrincipals
 
 // MaxPrincipals bounds how many principals one meter tracks. A
 // controller mints tokens under an operator's hand, so the cap sits far
@@ -73,8 +73,8 @@ const (
 	SlotLogStream Slot = "live log stream"
 )
 
-// ErrConcurrencyLimit matches every *ConcurrencyError under errors.Is.
-var ErrConcurrencyLimit = errors.New("egress concurrency limit reached")
+// errConcurrencyLimit matches every *ConcurrencyError under errors.Is.
+var errConcurrencyLimit = errors.New("egress concurrency limit reached")
 
 // ConcurrencyError refuses a response because the principal already
 // holds its cap of that slot open.
@@ -91,7 +91,7 @@ type ConcurrencyError struct {
 func (e *ConcurrencyError) Error() string {
 	flag := e.Flag
 	if flag == "" {
-		flag = FlagMaxLogStreams
+		flag = flagMaxLogStreams
 	}
 	return fmt.Sprintf(
 		"egress concurrency limit reached: %s already holds %d concurrent %ss, which is the cap, so this one is refused. "+
@@ -99,7 +99,7 @@ func (e *ConcurrencyError) Error() string {
 		e.Principal, e.Limit, e.Slot, flag)
 }
 
-func (e *ConcurrencyError) Unwrap() error { return ErrConcurrencyLimit }
+func (e *ConcurrencyError) Unwrap() error { return errConcurrencyLimit }
 
 // SlotRetryAfter is the wait a refused response is told to observe. A
 // stream ends when its node does and a download ends when its bytes run
@@ -129,8 +129,8 @@ type Config struct {
 	Persisted bool
 }
 
-// Budgeted reports whether any budget in this configuration applies.
-func (c Config) Budgeted() bool {
+// budgeted reports whether any budget in this configuration applies.
+func (c Config) budgeted() bool {
 	return c.GlobalDailyAlarmBytes > 0 || c.MaxStreamsPerPrincipal > 0 || c.MaxDownloadsPerPrincipal > 0
 }
 
@@ -190,8 +190,8 @@ type State struct {
 	Top            []PrincipalState `json:"top,omitempty"`
 }
 
-// TopConsumers is how many principals [Meter.State] reports.
-const TopConsumers = 10
+// topConsumers is how many principals [Meter.State] reports.
+const topConsumers = 10
 
 type principalCounters struct {
 	month      string
@@ -279,23 +279,20 @@ func (m *Meter) WithLogger(l *slog.Logger) *Meter {
 	return m
 }
 
-// WithPersistence marks this meter as one whose owner drains it with
+// withPersistence marks this meter as one whose owner drains it with
 // [Meter.Flush] and persists what comes out. Only such a meter parks a
 // month's closing totals for the next drain; a meter nobody drains would
 // otherwise accumulate one entry per principal per month roll forever.
-func (m *Meter) WithPersistence() *Meter {
+func (m *Meter) withPersistence() *Meter {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.persists = true
 	return m
 }
 
-// Config returns the budgets this meter was built on.
-func (m *Meter) Config() Config { return m.cfg }
-
-// Record adds n bytes served to principal through class, whatever the
+// record adds n bytes served to principal through class, whatever the
 // budgets say.
-func (m *Meter) Record(principal string, class Class, n int64) {
+func (m *Meter) record(principal string, class Class, n int64) {
 	if m == nil || n <= 0 {
 		return
 	}
@@ -328,12 +325,12 @@ func (m *Meter) Record(principal string, class Class, n int64) {
 	}
 }
 
-// Serve returns a ResponseWriter that counts what the handler sends to
+// serveResponse returns a ResponseWriter that counts what the handler sends to
 // principal. Bytes count only on a 2xx response to a request whose method
 // carries a body, because net/http discards what a handler writes to a
 // HEAD and an error body is not a download. It preserves the flush, hijack,
 // and deadline control a streaming handler reaches for.
-func (m *Meter) Serve(w http.ResponseWriter, r *http.Request, principal string, class Class) http.ResponseWriter {
+func (m *Meter) serveResponse(w http.ResponseWriter, r *http.Request, principal string, class Class) http.ResponseWriter {
 	if m == nil {
 		return w
 	}
@@ -416,11 +413,11 @@ func (m *Meter) Open(principal string, slot Slot) (func(), error) {
 	}, nil
 }
 
-// Flush gives persist the usages whose byte totals moved and acknowledges
+// flush gives persist the usages whose byte totals moved and acknowledges
 // only the exact snapshot that persist commits. A failed persistence keeps
 // every usage eligible for the next flush, while bytes recorded during a
 // successful persistence remain eligible as a newer total.
-func (m *Meter) Flush(persist func([]Usage) error) error {
+func (m *Meter) flush(persist func([]Usage) error) error {
 	if m == nil {
 		return nil
 	}
@@ -529,10 +526,10 @@ type DayUsage struct {
 	MonthBytes int64  `json:",omitempty"`
 }
 
-// FlushDay gives persist today's process total when it moved since the
+// flushDay gives persist today's process total when it moved since the
 // last successful FlushDay, and acknowledges it only when persist
 // succeeds and nothing was charged meanwhile.
-func (m *Meter) FlushDay(persist func(DayUsage) error) error {
+func (m *Meter) flushDay(persist func(DayUsage) error) error {
 	if m == nil {
 		return nil
 	}
@@ -628,15 +625,15 @@ func (m *Meter) State() State {
 		}
 		return compareStrings(a.Principal, b.Principal)
 	})
-	if len(out.Top) > TopConsumers {
-		out.Top = out.Top[:TopConsumers]
+	if len(out.Top) > topConsumers {
+		out.Top = out.Top[:topConsumers]
 	}
 	out.Pending = len(m.pending)
 	return out
 }
 
-// Alarm reports whether the process is past its daily egress threshold.
-func (m *Meter) Alarm() bool {
+// alarmed reports whether the process is past its daily egress threshold.
+func (m *Meter) alarmed() bool {
 	if m == nil {
 		return false
 	}
@@ -662,10 +659,10 @@ func sign(n int64) int64 {
 // meter can account for.
 func (m *Meter) key(principal string) string {
 	if principal == "" {
-		return AnonymousPrincipal
+		return anonymousPrincipal
 	}
 	if _, tracked := m.principals[principal]; !tracked && len(m.principals) >= MaxPrincipals {
-		return OverflowPrincipal
+		return overflowPrincipal
 	}
 	return principal
 }
@@ -676,10 +673,10 @@ func (m *Meter) key(principal string) string {
 func (m *Meter) counters(principal string, now time.Time) (string, *principalCounters) {
 	m.rollGlobal(now)
 	key := m.key(principal)
-	if key == OverflowPrincipal && !m.overflowed {
+	if key == overflowPrincipal && !m.overflowed {
 		m.overflowed = true
 		m.logger.Warn("egress principal cap reached",
-			"principals", len(m.principals), "shared_budget", OverflowPrincipal)
+			"principals", len(m.principals), "shared_budget", overflowPrincipal)
 	}
 	st := m.principals[key]
 	if st == nil {
@@ -733,13 +730,13 @@ func (m *Meter) park(u Usage) {
 	if !m.persists {
 		return
 	}
-	if len(m.pending) >= MaxPendingUsages {
+	if len(m.pending) >= maxPendingUsages {
 		m.pending = m.pending[1:]
 		m.pendingDropped++
 		if !m.pendingWarned {
 			m.pendingWarned = true
 			m.logger.Warn("egress usage backlog full",
-				"pending", len(m.pending), "limit", MaxPendingUsages)
+				"pending", len(m.pending), "limit", maxPendingUsages)
 		}
 	}
 	m.nextPendingID++
@@ -793,7 +790,7 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(p)
 	if w.charges() {
 		w.sent += int64(n)
-		w.meter.Record(w.principal, w.class, int64(n))
+		w.meter.record(w.principal, w.class, int64(n))
 	}
 	return n, err
 }

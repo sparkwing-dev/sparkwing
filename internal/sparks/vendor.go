@@ -16,7 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
-const VendoredDirName = "sparks"
+const vendoredDirName = "sparks"
 
 type VendorResult struct {
 	ModulePath string
@@ -43,7 +43,7 @@ func Vendor(ctx context.Context, sparkwingDir, modulePath string) (*VendorResult
 	}
 
 	base := path.Base(modulePath)
-	dest := filepath.Join(sparkwingDir, VendoredDirName, base)
+	dest := filepath.Join(sparkwingDir, vendoredDirName, base)
 	if _, err := os.Stat(dest); err == nil {
 		return nil, fmt.Errorf("sparks: %s already exists; refusing to overwrite (delete it first to re-vendor)", dest)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -70,7 +70,7 @@ func Vendor(ctx context.Context, sparkwingDir, modulePath string) (*VendorResult
 		return nil, err
 	}
 
-	relReplace := "./" + path.Join(VendoredDirName, base)
+	relReplace := "./" + path.Join(vendoredDirName, base)
 	if err := addReplaceDirective(goModPath, rawGoMod, modulePath, relReplace); err != nil {
 		return nil, err
 	}

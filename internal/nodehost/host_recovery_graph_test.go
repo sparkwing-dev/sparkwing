@@ -63,7 +63,7 @@ func TestRecoveryDependencies(t *testing.T) {
 				parent.Declaration.Optional = true
 				recovery.Status, recovery.Outcome, kind = "done", "failed", ""
 			}
-			graph, err := (&RemoteOwnerStore{Controller: wire}).Schedule(t.Context(), "run")
+			graph, err := (&RemoteOwnerStore{Controller: wire}).schedule(t.Context(), "run")
 			if err != nil {
 				t.Fatal(err)
 			}

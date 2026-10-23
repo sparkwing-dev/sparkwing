@@ -1,4 +1,4 @@
-package egress_test
+package egress
 
 import (
 	"context"
@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
 type teamDay struct {
@@ -31,7 +29,7 @@ func (d *teamDay) charge(_ context.Context, n int64, record bool) error {
 func serveCharged(d *teamDay, handler http.HandlerFunc) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	refuse := func(w http.ResponseWriter, err error) { http.Error(w, err.Error(), http.StatusTooManyRequests) }
-	egress.ChargeTeam(rec, httptest.NewRequest(http.MethodGet, "/a", nil), d.charge, refuse, handler)
+	chargeTeam(rec, httptest.NewRequest(http.MethodGet, "/a", nil), d.charge, refuse, handler)
 	return rec
 }
 
@@ -53,14 +51,14 @@ func TestChargeTeamChargesTheBytesDelivered(t *testing.T) {
 // a long stream shows on the team's day before it ends.
 func TestChargeTeamCountsALengthlessStreamAsItStreams(t *testing.T) {
 	d := &teamDay{cap: 1 << 40}
-	chunk := make([]byte, egress.ChargeChunk)
+	chunk := make([]byte, chargeChunk)
 	serveCharged(d, func(w http.ResponseWriter, _ *http.Request) {
 		for range 2 {
 			_, _ = w.Write(chunk)
 		}
 		_, _ = w.Write([]byte("tail"))
 	})
-	want := []int64{egress.ChargeChunk, egress.ChargeChunk, 4}
+	want := []int64{chargeChunk, chargeChunk, 4}
 	if len(d.charges) != len(want) || d.charges[0] != want[0] || d.charges[1] != want[1] || d.charges[2] != want[2] {
 		t.Fatalf("charges = %v, want %v", d.charges, want)
 	}

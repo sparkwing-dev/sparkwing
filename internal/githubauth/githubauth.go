@@ -21,10 +21,10 @@ import (
 // GitHub's published endpoints. Config carries them as fields so a test can
 // point a client at a local server.
 const (
-	GitHubAuthURL   = "https://github.com/login/oauth/authorize"
-	GitHubTokenURL  = "https://github.com/login/oauth/access_token"
-	GitHubUserURL   = "https://api.github.com/user"
-	GitHubEmailsURL = "https://api.github.com/user/emails"
+	gitHubAuthURL   = "https://github.com/login/oauth/authorize"
+	gitHubTokenURL  = "https://github.com/login/oauth/access_token"
+	gitHubUserURL   = "https://api.github.com/user"
+	gitHubEmailsURL = "https://api.github.com/user/emails"
 )
 
 const (
@@ -55,7 +55,7 @@ type Config struct {
 func GitHub(clientID, clientSecret string) Config {
 	return Config{
 		ClientID: clientID, ClientSecret: clientSecret,
-		AuthURL: GitHubAuthURL, TokenURL: GitHubTokenURL, UserURL: GitHubUserURL, EmailsURL: GitHubEmailsURL,
+		AuthURL: gitHubAuthURL, TokenURL: gitHubTokenURL, UserURL: gitHubUserURL, EmailsURL: gitHubEmailsURL,
 	}
 }
 

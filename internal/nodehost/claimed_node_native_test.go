@@ -93,7 +93,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			defer deadline()
 			ctx, cancel := context.WithCancelCause(testCtx)
 			defer cancel(nil)
-			var session *ProtocolSession
+			var session *protocolSession
 			var entered atomic.Bool
 			revoked, cleaned := false, false
 			cfg := ProtocolSessionConfig{
@@ -118,7 +118,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 				parent.snapshot.Authorities[0].Principal.Capability.Binding = delegation.Binding
 				parent.snapshot.Binding.Current = delegation.Binding
 				services.RunID, services.Job = input.Accepted.RunID, input.Accepted.Plan.Jobs[0]
-				issued, revoke, err := authorities.Delegate(ctx, parentLookup, delegation, services)
+				issued, revoke, err := authorities.delegate(ctx, parentLookup, delegation, services)
 				if err != nil {
 					return ProcessGrant{}, err
 				}
@@ -140,9 +140,9 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 				return resolved, nil
 			}
 			deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
-				process, err := cfg.Start(ctx, input, activity)
+				process, err := cfg.startNode(ctx, input, activity)
 				if process != nil {
-					session = process.(*ProtocolSession)
+					session = process.(*protocolSession)
 				}
 				return process, err
 			}

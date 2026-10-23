@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -14,8 +14,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 func TestS3CommitVerifiesStoredBytes(t *testing.T) {
@@ -28,22 +26,22 @@ func TestS3CommitVerifiesStoredBytes(t *testing.T) {
 		copies              int
 	}{
 		{name: "new", staged: "hello", copies: 1},
-		{name: "corrupt staging", staged: "jello", want: blob.ErrIntegrity},
-		{name: "short staging", staged: "hell", want: blob.ErrIntegrity},
-		{name: "long staging", staged: "hello!", want: blob.ErrIntegrity},
-		{name: "truncated body", staged: "hell", fixedLength: true, want: blob.ErrIntegrity},
-		{name: "extra body", staged: "hello!", fixedLength: true, want: blob.ErrIntegrity},
+		{name: "corrupt staging", staged: "jello", want: ErrIntegrity},
+		{name: "short staging", staged: "hell", want: ErrIntegrity},
+		{name: "long staging", staged: "hello!", want: ErrIntegrity},
+		{name: "truncated body", staged: "hell", fixedLength: true, want: ErrIntegrity},
+		{name: "extra body", staged: "hello!", fixedLength: true, want: ErrIntegrity},
 		{name: "deduplicated", staged: "hello", final: "hello", copies: 1},
-		{name: "corrupt final", staged: "hello", final: "jello", want: blob.ErrIntegrity, copies: 1},
-		{name: "missing staging with existing final", final: "hello", want: blob.ErrNotFound},
-		{name: "missing staging with corrupt final", final: "jello", want: blob.ErrNotFound},
-		{name: "absent", want: blob.ErrNotFound},
+		{name: "corrupt final", staged: "hello", final: "jello", want: ErrIntegrity, copies: 1},
+		{name: "missing staging with existing final", final: "hello", want: ErrNotFound},
+		{name: "missing staging with corrupt final", final: "jello", want: ErrNotFound},
+		{name: "absent", want: ErrNotFound},
 		{name: "staging close", staged: "hello", closeKey: "pending", want: closeErr},
 		{name: "final close", staged: "hello", closeKey: "cas", want: closeErr, copies: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			object := blob.Blob{Team: "team", Digest: digest("hello"), Size: 5}
-			final, err := blob.ObjectKey(object.Team, object.Digest)
+			object := Blob{Team: "team", Digest: digest("hello"), Size: 5}
+			final, err := ObjectKey(object.Team, object.Digest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -106,7 +104,7 @@ func TestS3CommitVerifiesStoredBytes(t *testing.T) {
 					return response, nil
 				}),
 			})
-			backend, err := blob.NewS3(client, "bucket", "")
+			backend, err := NewS3(client, "bucket", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,9 +134,9 @@ func TestS3CommitRequiresItsOwnStagedBytes(t *testing.T) {
 		for j := range body {
 			body[j] = byte(random.Uint32())
 		}
-		object := blob.Blob{Team: "team", Digest: digest(string(body)), Size: int64(len(body))}
+		object := Blob{Team: "team", Digest: digest(string(body)), Size: int64(len(body))}
 		pending := "teams/team/pending/unuploaded"
-		final, err := blob.ObjectKey(object.Team, object.Digest)
+		final, err := ObjectKey(object.Team, object.Digest)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,11 +161,11 @@ func TestS3CommitRequiresItsOwnStagedBytes(t *testing.T) {
 				return response, nil
 			}),
 		})
-		backend, err := blob.NewS3(client, "bucket", "")
+		backend, err := NewS3(client, "bucket", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := backend.CommitObject(t.Context(), pending, object); !errors.Is(err, blob.ErrNotFound) {
+		if err := backend.CommitObject(t.Context(), pending, object); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("case %d accepted final bytes without this ticket's staged upload: %v", i, err)
 		}
 	}

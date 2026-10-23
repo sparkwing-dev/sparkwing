@@ -16,13 +16,13 @@ type declarationProcess interface {
 	releaseDeclarations(context.Context, runspec.Spec, nodeproto.EvalResult) error
 }
 
-func (s *ProtocolSession) gateDeclarations() {
+func (s *protocolSession) gateDeclarations() {
 	if s.cfg.output != nil {
 		s.cfg.output.gate()
 	}
 }
 
-func (s *ProtocolSession) releaseDeclarations(ctx context.Context, spec runspec.Spec, result nodeproto.EvalResult) error {
+func (s *protocolSession) releaseDeclarations(ctx context.Context, spec runspec.Spec, result nodeproto.EvalResult) error {
 	if s.cfg.output == nil || s.cfg.Masks == nil {
 		return executorError(apierr.Internal, "generator output requires host masking")
 	}
@@ -34,7 +34,7 @@ func (s *ProtocolSession) releaseDeclarations(ctx context.Context, spec runspec.
 		return err
 	}
 	for _, value := range projection.Values {
-		if err := s.cfg.Masks.Register(value); err != nil {
+		if err := s.cfg.Masks.registerValue(value); err != nil {
 			return err
 		}
 	}

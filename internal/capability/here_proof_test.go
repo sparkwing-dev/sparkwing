@@ -26,7 +26,7 @@ func TestHereProofBindsTheRequestWithoutCarryingTheCredential(t *testing.T) {
 	}
 	for name, ok := range map[string]bool{
 		"another request":    VerifyHereProof(proof, stored, "key-2", now),
-		"expired":            VerifyHereProof(proof, stored, "key-1", now.Add(HereProofLifetime)),
+		"expired":            VerifyHereProof(proof, stored, "key-1", now.Add(hereProofLifetime)),
 		"another credential": VerifyHereProof(proof, strings.Repeat("0", 64), "key-1", now),
 		"forged expiry":      VerifyHereProof(strings.Replace(proof, ".", ".9", 1), stored, "key-1", now),
 	} {

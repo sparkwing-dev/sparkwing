@@ -95,7 +95,7 @@ func FuzzLoopPendingPolicyInterruption(f *testing.F) {
 			}()
 			<-refreshing
 			if mode%5 == 0 {
-				loop.Drain()
+				loop.startDrain()
 			} else if mode%5 < 3 {
 				cancel(cause)
 			}

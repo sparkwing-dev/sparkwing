@@ -27,7 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-type Config struct {
+type config struct {
 	Seed int64
 
 	Duration time.Duration
@@ -52,8 +52,8 @@ type Config struct {
 	OracleTimeout time.Duration
 }
 
-func CIConfig(seed int64) Config {
-	return Config{
+func ciConfig(seed int64) config {
+	return config{
 		Seed:              seed,
 		Duration:          25 * time.Second,
 		MaxActors:         10,
@@ -68,8 +68,8 @@ func CIConfig(seed int64) Config {
 	}
 }
 
-func SoakConfig(seed int64, d time.Duration) Config {
-	return Config{
+func soakConfig(seed int64, d time.Duration) config {
+	return config{
 		Seed:              seed,
 		Duration:          d,
 		MaxActors:         24,
@@ -84,12 +84,12 @@ func SoakConfig(seed int64, d time.Duration) Config {
 	}
 }
 
-type Harness struct {
-	cfg      Config
+type harness struct {
+	cfg      config
 	t        testing.TB
 	home     string
 	rng      *rand.Rand
-	jr       *Journal
+	jr       *journal
 	dummyBin string
 	sparkBin string
 
@@ -137,7 +137,7 @@ type actor struct {
 	exitedAt      time.Time
 }
 
-func Run(t testing.TB, cfg Config) {
+func run(t testing.TB, cfg config) {
 	if err := procgroup.Supported(); err != nil {
 		t.Fatalf("chaos process ownership: %v", err)
 	}
@@ -157,14 +157,14 @@ func Run(t testing.TB, cfg Config) {
 	})
 
 	jpath := filepath.Join(home, "journal.jsonl")
-	jr, err := NewJournal(jpath)
+	jr, err := newJournal(jpath)
 	if err != nil {
 		t.Fatalf("journal: %v", err)
 	}
 
 	// #nosec G404 -- a seeded generator so a chaos run replays deterministically
 	rng := rand.New(rand.NewSource(cfg.Seed))
-	h := &Harness{
+	h := &harness{
 		cfg:     cfg,
 		t:       t,
 		home:    home,
@@ -179,7 +179,7 @@ func Run(t testing.TB, cfg Config) {
 	stopGuard := h.startProcessGuard()
 	defer stopGuard()
 	t.Logf("chaos seed=%d journal=%s home=%s", cfg.Seed, jpath, home)
-	jr.Append(Event{Kind: "seed", Detail: strconv.FormatInt(cfg.Seed, 10)})
+	jr.append(event{Kind: "seed", Detail: strconv.FormatInt(cfg.Seed, 10)})
 
 	h.buildBinaries()
 	h.loop()
@@ -195,14 +195,14 @@ func Run(t testing.TB, cfg Config) {
 	}
 }
 
-func (h *Harness) buildBinaries() {
+func (h *harness) buildBinaries() {
 	h.dummyBin = h.build("github.com/sparkwing-dev/sparkwing/internal/chaos/crashdummy", true)
 	if h.cfg.EnableCLI {
 		h.sparkBin = h.build("github.com/sparkwing-dev/sparkwing/cmd/sparkwing", false)
 	}
 }
 
-func (h *Harness) build(pkg string, required bool) string {
+func (h *harness) build(pkg string, required bool) string {
 	bin := filepath.Join(h.home, filepath.Base(pkg))
 	cmd := procenv.HostCommand("go", "build", "-o", bin, pkg)
 	cmd.Stderr = os.Stderr
@@ -216,7 +216,7 @@ func (h *Harness) build(pkg string, required bool) string {
 	return bin
 }
 
-func (h *Harness) loop() {
+func (h *harness) loop() {
 	deadline := time.Now().Add(h.cfg.Duration)
 	lastOS := time.Now()
 	for time.Now().Before(deadline) {
@@ -240,7 +240,7 @@ func (h *Harness) loop() {
 	}
 }
 
-func (h *Harness) step() {
+func (h *harness) step() {
 	fb := h.cfg.FaultBudget
 	choices := []struct {
 		w  float64
@@ -270,11 +270,11 @@ func (h *Harness) step() {
 	}
 }
 
-func (h *Harness) spawnActor() { h.spawn(false) }
+func (h *harness) spawnActor() { h.spawn(false) }
 
-func (h *Harness) spawnWedged() { h.spawn(true) }
+func (h *harness) spawnWedged() { h.spawn(true) }
 
-func (h *Harness) spawn(wedged bool) {
+func (h *harness) spawn(wedged bool) {
 	h.mu.Lock()
 	if h.liveCountLocked() >= h.cfg.MaxActors {
 		h.mu.Unlock()
@@ -334,7 +334,7 @@ func (h *Harness) spawn(wedged bool) {
 	h.mu.Lock()
 	h.actors[runID] = a
 	h.mu.Unlock()
-	h.jr.Append(Event{Kind: "spawn", Run: runID, Detail: strings.Join(args[3:], " ")})
+	h.jr.append(event{Kind: "spawn", Run: runID, Detail: strings.Join(args[3:], " ")})
 	go h.watchActor(a, stdout)
 }
 
@@ -354,7 +354,7 @@ func startActorCommand(cmd *exec.Cmd) (io.ReadCloser, *procgroup.Group, error) {
 	return stdout, group, nil
 }
 
-func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
+func (h *harness) watchActor(a *actor, stdout io.ReadCloser) {
 	scanned := a.scanned
 	go func() {
 		defer close(scanned)
@@ -366,12 +366,12 @@ func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
 				h.mu.Lock()
 				a.granted = true
 				h.mu.Unlock()
-				h.jr.Append(Event{Kind: "grant", Run: a.runID})
+				h.jr.append(event{Kind: "grant", Run: a.runID})
 			case strings.HasPrefix(line, "REJECT"):
 				h.mu.Lock()
 				a.rejected = true
 				h.mu.Unlock()
-				h.jr.Append(Event{Kind: "reject", Run: a.runID, Detail: strings.TrimPrefix(line, "REJECT ")})
+				h.jr.append(event{Kind: "reject", Run: a.runID, Detail: strings.TrimPrefix(line, "REJECT ")})
 			}
 		}
 	}()
@@ -383,7 +383,7 @@ func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
 
 var errActorDrain = errors.New("output stream did not drain within the cleanup bound")
 
-func (h *Harness) finishActor(a *actor, force bool) error {
+func (h *harness) finishActor(a *actor, force bool) error {
 	a.finishMu.Lock()
 	defer a.finishMu.Unlock()
 	h.mu.Lock()
@@ -421,23 +421,23 @@ func (h *Harness) finishActor(a *actor, force bool) error {
 	a.exited = true
 	a.exitedAt = time.Now()
 	h.mu.Unlock()
-	h.jr.Append(Event{Kind: "exit", Run: a.runID})
+	h.jr.append(event{Kind: "exit", Run: a.runID})
 	return nil
 }
 
-func (h *Harness) killHolder() {
+func (h *harness) killHolder() {
 	if a := h.pick(func(a *actor) bool { return a.granted && !a.wedged }); a != nil {
 		h.killActor(a, "kill_holder")
 	}
 }
 
-func (h *Harness) killWaiter() {
+func (h *harness) killWaiter() {
 	if a := h.pick(func(a *actor) bool { return !a.granted && !a.rejected }); a != nil {
 		h.killActor(a, "kill_waiter")
 	}
 }
 
-func (h *Harness) killActor(a *actor, kind string) {
+func (h *harness) killActor(a *actor, kind string) {
 	h.mu.Lock()
 	if a.killed || a.exited || a.cmd == nil || a.cmd.Process == nil {
 		h.mu.Unlock()
@@ -448,10 +448,10 @@ func (h *Harness) killActor(a *actor, kind string) {
 	group := a.group
 	h.mu.Unlock()
 	_ = group.Kill()
-	h.jr.Append(Event{Kind: kind, Run: a.runID})
+	h.jr.append(event{Kind: kind, Run: a.runID})
 }
 
-func (h *Harness) killDaemon() {
+func (h *harness) killDaemon() {
 	pid := h.currentDaemonPid()
 	if pid <= 0 {
 		return
@@ -466,10 +466,10 @@ func (h *Harness) killDaemon() {
 	if process, err := os.FindProcess(pid); err == nil {
 		_ = process.Kill()
 	}
-	h.jr.Append(Event{Kind: "kill_daemon", Detail: strconv.Itoa(pid)})
+	h.jr.append(event{Kind: "kill_daemon", Detail: strconv.Itoa(pid)})
 }
 
-func (h *Harness) takeover() {
+func (h *harness) takeover() {
 	h.mu.Lock()
 	if h.liveCountLocked() >= h.cfg.MaxActors {
 		h.mu.Unlock()
@@ -498,11 +498,11 @@ func (h *Harness) takeover() {
 	h.mu.Lock()
 	h.actors[runID] = a
 	h.mu.Unlock()
-	h.jr.Append(Event{Kind: "takeover", Run: runID, Detail: ver})
+	h.jr.append(event{Kind: "takeover", Run: runID, Detail: ver})
 	go h.watchActor(a, stdout)
 }
 
-func (h *Harness) churn() {
+func (h *harness) churn() {
 	sock := h.sockPath()
 	n := 3 + h.rng.Intn(6)
 	var wg sync.WaitGroup
@@ -517,10 +517,10 @@ func (h *Harness) churn() {
 		}()
 	}
 	wg.Wait()
-	h.jr.Append(Event{Kind: "churn", Detail: strconv.Itoa(n)})
+	h.jr.append(event{Kind: "churn", Detail: strconv.Itoa(n)})
 }
 
-func (h *Harness) malformed() {
+func (h *harness) malformed() {
 	sock := h.sockPath()
 	c, err := dialUnix(sock, 200*time.Millisecond)
 	if err != nil {
@@ -534,10 +534,10 @@ func (h *Harness) malformed() {
 	}
 	_, _ = c.Write(junk[h.rng.Intn(len(junk))])
 	_ = c.Close()
-	h.jr.Append(Event{Kind: "malformed"})
+	h.jr.append(event{Kind: "malformed"})
 }
 
-func (h *Harness) hammerCLI() {
+func (h *harness) hammerCLI() {
 	if h.sparkBin == "" {
 		return
 	}
@@ -550,14 +550,14 @@ func (h *Harness) hammerCLI() {
 	cmd := procenv.ControlCommand(
 		append(os.Environ(), "SPARKWING_HOME="+h.home), h.sparkBin, verb...)
 
-	event := Event{Kind: "cli", Detail: strings.Join(verb, " ")}
+	event := event{Kind: "cli", Detail: strings.Join(verb, " ")}
 	if err := cmd.Run(); err != nil {
 		event.Fields = map[string]any{"error": err.Error()}
 	}
-	h.jr.Append(event)
+	h.jr.append(event)
 }
 
-func (h *Harness) checkLedger() {
+func (h *harness) checkLedger() {
 	qs, err := h.readState()
 	if err != nil {
 		return
@@ -576,7 +576,7 @@ func (h *Harness) checkLedger() {
 	}
 }
 
-func (h *Harness) checkOS() {
+func (h *harness) checkOS() {
 	qs, err := h.readState()
 	if err != nil {
 		return
@@ -587,12 +587,12 @@ func (h *Harness) checkOS() {
 	}
 }
 
-func (h *Harness) daemonGraceStable(qs wingwire.QueueState) bool {
+func (h *harness) daemonGraceStable(qs wingwire.QueueState) bool {
 	grace := time.Duration(h.cfg.DaemonGraceMS) * time.Millisecond
 	return daemonGraceStable(qs, grace, h.cfg.Settle)
 }
 
-func (h *Harness) startProcessGuard() func() {
+func (h *harness) startProcessGuard() func() {
 	interval := h.guardInterval
 	if interval <= 0 {
 		interval = 100 * time.Millisecond
@@ -632,11 +632,11 @@ type zombie struct {
 }
 
 type processGuard struct {
-	h     *Harness
+	h     *harness
 	since map[zombie]time.Time
 }
 
-func newProcessGuard(h *Harness) *processGuard {
+func newProcessGuard(h *harness) *processGuard {
 	return &processGuard{h: h, since: map[zombie]time.Time{}}
 }
 
@@ -715,7 +715,7 @@ func (z zombie) String() string {
 	return fmt.Sprintf("descendant pid %d in owned group %d", z.pid, z.group)
 }
 
-func (h *Harness) reportProcessGrowth(violations []string) {
+func (h *harness) reportProcessGrowth(violations []string) {
 	h.guardFailure.Do(func() {
 		if h.processFailure != nil {
 			h.processFailure(violations)
@@ -725,21 +725,21 @@ func (h *Harness) reportProcessGrowth(violations []string) {
 	})
 }
 
-func (h *Harness) processLimit() int {
+func (h *harness) processLimit() int {
 	if h.cfg.MaxOwnedProcesses > 0 {
 		return h.cfg.MaxOwnedProcesses
 	}
 	return h.cfg.MaxActors*4 + 32
 }
 
-func (h *Harness) zombieDrain() time.Duration {
+func (h *harness) zombieDrain() time.Duration {
 	if h.cfg.MaxZombieDrain > 0 {
 		return h.cfg.MaxZombieDrain
 	}
 	return max(2*h.processWait(), 2*time.Second)
 }
 
-func (h *Harness) ownedProcessGroups() map[int]ownedGroup {
+func (h *harness) ownedProcessGroups() map[int]ownedGroup {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	groups := make(map[int]ownedGroup, len(h.actors)+len(h.daemons))
@@ -756,7 +756,7 @@ func (h *Harness) ownedProcessGroups() map[int]ownedGroup {
 	return groups
 }
 
-func (h *Harness) leakStable() bool {
+func (h *harness) leakStable() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.daemonKilledAt.IsZero() {
@@ -766,7 +766,7 @@ func (h *Harness) leakStable() bool {
 	return time.Since(h.daemonKilledAt) > grace+h.cfg.Settle
 }
 
-func (h *Harness) processSets() (live, known map[string]bool) {
+func (h *harness) processSets() (live, known map[string]bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	live = map[string]bool{}
@@ -781,7 +781,7 @@ func (h *Harness) processSets() (live, known map[string]bool) {
 	return live, known
 }
 
-func (h *Harness) pick(match func(*actor) bool) *actor {
+func (h *harness) pick(match func(*actor) bool) *actor {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var candidates []*actor
@@ -799,7 +799,7 @@ func (h *Harness) pick(match func(*actor) bool) *actor {
 	return candidates[h.rng.Intn(len(candidates))]
 }
 
-func (h *Harness) liveCountLocked() int {
+func (h *harness) liveCountLocked() int {
 	n := 0
 	for _, a := range h.actors {
 		if !a.exited {
@@ -809,8 +809,8 @@ func (h *Harness) liveCountLocked() int {
 	return n
 }
 
-func (h *Harness) quiesce() {
-	h.jr.Log("quiesce", "", "stopping injection")
+func (h *harness) quiesce() {
+	h.jr.log("quiesce", "", "stopping injection")
 	h.mu.Lock()
 	var pending []*actor
 	for _, a := range h.actors {
@@ -836,7 +836,7 @@ func (h *Harness) quiesce() {
 	}
 }
 
-func (h *Harness) cleanup() {
+func (h *harness) cleanup() {
 	h.mu.Lock()
 	if h.ctl != nil {
 		_ = h.ctl.Close()
@@ -873,7 +873,7 @@ var errResidentsUnsupported = errors.New("reading a process environment is unsup
 // safety: a daemon the CLI auto-starts detaches into its own session, so
 // owned-group and session accounting never see it. The home it was started
 // against is the one handle that still names it.
-func (h *Harness) assertHomeQuiet() {
+func (h *harness) assertHomeQuiet() {
 	if violations := h.homeResidentViolations(); len(violations) > 0 {
 		h.fail("home-residents", violations, wingwire.QueueState{})
 	}
@@ -882,7 +882,7 @@ func (h *Harness) assertHomeQuiet() {
 // safety: a failed inspection is a violation too, because a scan that reached
 // no verdict is not a clean teardown. The settle window runs first so a process
 // on its way out is not charged as a leak.
-func (h *Harness) homeResidentViolations() []string {
+func (h *harness) homeResidentViolations() []string {
 	read := h.residentReader
 	if read == nil {
 		read = homeResidents
@@ -892,7 +892,7 @@ func (h *Harness) homeResidentViolations() []string {
 	for {
 		found, err := read(h.home)
 		if errors.Is(err, errResidentsUnsupported) {
-			h.jr.Append(Event{Kind: "home-residents", Detail: "no verdict on " + runtime.GOOS})
+			h.jr.append(event{Kind: "home-residents", Detail: "no verdict on " + runtime.GOOS})
 			h.t.Logf("chaos: no way to read a process environment on %s, so teardown reached no verdict on %s",
 				runtime.GOOS, h.home)
 			return nil
@@ -913,7 +913,7 @@ func (h *Harness) homeResidentViolations() []string {
 	return violations
 }
 
-func (h *Harness) cleanupActor(a *actor) error {
+func (h *harness) cleanupActor(a *actor) error {
 	err := h.finishActor(a, true)
 	switch {
 	case err == nil:
@@ -925,21 +925,21 @@ func (h *Harness) cleanupActor(a *actor) error {
 	}
 }
 
-func (h *Harness) cleanupDaemon(daemon *daemonProcess) error {
+func (h *harness) cleanupDaemon(daemon *daemonProcess) error {
 	if err := h.finishDaemon(daemon, true); err != nil {
 		return fmt.Errorf("daemon process group %d did not exit within cleanup bound: %w", daemon.group.ID(), err)
 	}
 	return nil
 }
 
-func (h *Harness) processWait() time.Duration {
+func (h *harness) processWait() time.Duration {
 	if h.cfg.Settle > 0 {
 		return h.cfg.Settle
 	}
 	return time.Second
 }
 
-func (h *Harness) allExited(as []*actor) bool {
+func (h *harness) allExited(as []*actor) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, a := range as {
@@ -950,7 +950,7 @@ func (h *Harness) allExited(as []*actor) bool {
 	return true
 }
 
-func (h *Harness) converge() {
+func (h *harness) converge() {
 	deadline := time.Now().Add(h.cfg.Settle + 5*time.Second)
 	var last []string
 	for time.Now().Before(deadline) {
@@ -969,7 +969,7 @@ func (h *Harness) converge() {
 		h.fail("convergence", last, wingwire.QueueState{})
 		return
 	}
-	h.jr.Log("converged", "", "zero leases, zero waiters")
+	h.jr.log("converged", "", "zero leases, zero waiters")
 
 	h.mu.Lock()
 	if h.ctl != nil {
@@ -985,14 +985,14 @@ func (h *Harness) converge() {
 		_, err := client.Query(ctx, h.readOpts())
 		cancel()
 		if errors.Is(err, client.ErrNoDaemon) {
-			h.jr.Log("daemon_idle", "", "daemon exited after quiescence")
+			h.jr.log("daemon_idle", "", "daemon exited after quiescence")
 			return
 		}
 	}
-	h.t.Errorf("daemon did not idle-exit after convergence (seed=%d journal=%s)", h.cfg.Seed, h.jr.Path())
+	h.t.Errorf("daemon did not idle-exit after convergence (seed=%d journal=%s)", h.cfg.Seed, h.jr.filename())
 }
 
-func (h *Harness) readState() (wingwire.QueueState, error) {
+func (h *harness) readState() (wingwire.QueueState, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), h.oracleTimeout())
 	defer cancel()
 	if h.stateReader != nil {
@@ -1022,14 +1022,14 @@ func (h *Harness) readState() (wingwire.QueueState, error) {
 	return cl.QueueState(ctx)
 }
 
-func (h *Harness) oracleTimeout() time.Duration {
+func (h *harness) oracleTimeout() time.Duration {
 	if h.cfg.OracleTimeout > 0 {
 		return h.cfg.OracleTimeout
 	}
 	return 750 * time.Millisecond
 }
 
-func (h *Harness) readOpts() client.Options {
+func (h *harness) readOpts() client.Options {
 	return client.Options{
 		Home:        h.home,
 		Version:     "",
@@ -1039,7 +1039,7 @@ func (h *Harness) readOpts() client.Options {
 	}
 }
 
-func (h *Harness) daemonSpawn() func(home, version string) error {
+func (h *harness) daemonSpawn() func(home, version string) error {
 	return func(home, version string) error {
 		v := version
 		if v == "" {
@@ -1056,7 +1056,7 @@ func (h *Harness) daemonSpawn() func(home, version string) error {
 	}
 }
 
-func (h *Harness) startDaemonCommand(cmd *exec.Cmd) error {
+func (h *harness) startDaemonCommand(cmd *exec.Cmd) error {
 	group, err := procgroup.Start(cmd)
 	if err != nil {
 		return err
@@ -1077,7 +1077,7 @@ func (h *Harness) startDaemonCommand(cmd *exec.Cmd) error {
 	return nil
 }
 
-func (h *Harness) finishDaemon(process *daemonProcess, force bool) error {
+func (h *harness) finishDaemon(process *daemonProcess, force bool) error {
 	process.finalizeMu.Lock()
 	defer process.finalizeMu.Unlock()
 	if process.complete {
@@ -1106,7 +1106,7 @@ func (h *Harness) finishDaemon(process *daemonProcess, force bool) error {
 	return nil
 }
 
-func (h *Harness) sockPath() string {
+func (h *harness) sockPath() string {
 	sock, err := wingd.SocketPath(h.home)
 	if err != nil {
 		return filepath.Join(h.home, "wingd", "d.sock")
@@ -1114,7 +1114,7 @@ func (h *Harness) sockPath() string {
 	return sock
 }
 
-func (h *Harness) currentDaemonPid() int {
+func (h *harness) currentDaemonPid() int {
 	data, err := os.ReadFile(filepath.Join(h.home, "wingd", "daemons.log"))
 	if err != nil {
 		return -1
@@ -1130,7 +1130,7 @@ func (h *Harness) currentDaemonPid() int {
 	return pid
 }
 
-func (h *Harness) scanDaemonPanic() {
+func (h *harness) scanDaemonPanic() {
 	data, err := os.ReadFile(filepath.Join(h.home, "wingd", "d.log"))
 	if err != nil {
 		return
@@ -1150,13 +1150,13 @@ func firstPanicLine(s string) string {
 	return "panic in daemon log"
 }
 
-func (h *Harness) fail(oracle string, violations []string, qs wingwire.QueueState) {
-	h.jr.Append(Event{Kind: "VIOLATION", Detail: oracle, Fields: map[string]any{
+func (h *harness) fail(oracle string, violations []string, qs wingwire.QueueState) {
+	h.jr.append(event{Kind: "VIOLATION", Detail: oracle, Fields: map[string]any{
 		"violations": violations,
 		"queue":      qs,
 	}})
 	h.t.Errorf("CHAOS VIOLATION [%s] seed=%d journal=%s\n  - %s",
-		oracle, h.cfg.Seed, h.jr.Path(), strings.Join(violations, "\n  - "))
+		oracle, h.cfg.Seed, h.jr.filename(), strings.Join(violations, "\n  - "))
 }
 
 func dialUnix(sock string, timeout time.Duration) (net.Conn, error) {

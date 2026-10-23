@@ -18,9 +18,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// PinnedBinaryName is the file a locked schedule runs, under
+// pinnedBinaryName is the file a locked schedule runs, under
 // <Service.PinRoot>/<schedule id>/.
-const PinnedBinaryName = "pipeline"
+const pinnedBinaryName = "pipeline"
 
 // Proof is what compiling a repository's pipelines produced: the binary that
 // answers for the pipeline.
@@ -110,11 +110,11 @@ func (s *Service) armDeclared(ctx context.Context, root string, declared []Decla
 	var report ArmReport
 	var locals []Declared
 	for _, d := range selected {
-		if d.Local() {
+		if d.local() {
 			locals = append(locals, d)
 			continue
 		}
-		report.Controller = append(report.Controller, d.DisplayName())
+		report.Controller = append(report.Controller, d.displayName())
 	}
 
 	proofs, err := s.proveAll(ctx, root, locals, opts.Prove)
@@ -134,12 +134,12 @@ func (s *Service) armDeclared(ctx context.Context, root string, declared []Decla
 		if proof, pinned := proofs[d.Pipeline]; pinned && !opts.Follow {
 			lock, err = s.pin(d.ID(), head, proof)
 			if err != nil {
-				return report, fmt.Errorf("%s: %w", d.DisplayName(), err)
+				return report, fmt.Errorf("%s: %w", d.displayName(), err)
 			}
 		}
 		row, rerr := scheduleRow(d, lock, s.ArmedBy, now)
 		if rerr != nil {
-			return report, fmt.Errorf("%s: %w", d.DisplayName(), rerr)
+			return report, fmt.Errorf("%s: %w", d.displayName(), rerr)
 		}
 		if beforeArm != nil {
 			if err := beforeArm(d); err != nil {
@@ -160,7 +160,7 @@ func (s *Service) armDeclared(ctx context.Context, root string, declared []Decla
 		// pin root for ever.
 		if lock.Binary == "" && hadPin {
 			if perr := s.removePin(d.ID()); perr != nil {
-				return report, fmt.Errorf("%s: drop the pinned binary: %w", d.DisplayName(), perr)
+				return report, fmt.Errorf("%s: drop the pinned binary: %w", d.displayName(), perr)
 			}
 		}
 		if created {
@@ -202,7 +202,7 @@ func selectDeclared(declared []Declared, only []string, root string) ([]Declared
 		}
 		var matched []Declared
 		for _, d := range declared {
-			if d.Pipeline == want || d.Selector() == want {
+			if d.Pipeline == want || d.selector() == want {
 				matched = append(matched, d)
 			}
 		}
@@ -221,7 +221,7 @@ func declaredNames(declared []Declared) string {
 	}
 	names := make([]string, 0, len(declared))
 	for _, d := range declared {
-		names = append(names, d.Selector())
+		names = append(names, d.selector())
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
@@ -277,7 +277,7 @@ func (s *Service) withdrawUndeclared(
 ) error {
 	keep := make(map[string]bool, len(declared))
 	for _, d := range declared {
-		if d.Local() {
+		if d.local() {
 			keep[d.ID()] = true
 		}
 	}
@@ -311,7 +311,7 @@ func (s *Service) pin(id, head string, proof Proof) (store.CronLock, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return store.CronLock{}, fmt.Errorf("make %s: %w", dir, err)
 	}
-	dest := filepath.Join(dir, PinnedBinaryName)
+	dest := filepath.Join(dir, pinnedBinaryName)
 	if err := copyExecutable(proof.Binary, dest); err != nil {
 		return store.CronLock{}, err
 	}
@@ -345,7 +345,7 @@ func copyExecutable(src, dest string) error {
 		return fmt.Errorf("read the compiled pipeline at %s: %w", src, err)
 	}
 	defer func() { _ = in.Close() }()
-	tmp, err := os.CreateTemp(filepath.Dir(dest), PinnedBinaryName+"-*")
+	tmp, err := os.CreateTemp(filepath.Dir(dest), pinnedBinaryName+"-*")
 	if err != nil {
 		return fmt.Errorf("stage %s: %w", dest, err)
 	}
@@ -437,9 +437,9 @@ func (s *Service) Disarm(ctx context.Context, id string) error {
 	return s.removePin(id)
 }
 
-// DisarmRepo deletes every schedule of one repository checkout, their
+// disarmRepo deletes every schedule of one repository checkout, their
 // histories and their pinned binaries, returning how many rows went.
-func (s *Service) DisarmRepo(ctx context.Context, repoRoot string) (int, error) {
+func (s *Service) disarmRepo(ctx context.Context, repoRoot string) (int, error) {
 	root, err := filepath.Abs(repoRoot)
 	if err != nil {
 		return 0, fmt.Errorf("resolve %s: %w", repoRoot, err)
@@ -509,11 +509,11 @@ func (s *Service) Unlock(ctx context.Context, id string) (store.CronSchedule, er
 	return s.Schedules.GetCronSchedule(ctx, sched.ID)
 }
 
-// RefreshReport says what one pass over the armed repositories changed.
+// refreshReport says what one pass over the armed repositories changed.
 // Updated counts the rows whose declaration actually moved, not the rows
 // looked at. Errors carries one sentence per repository that could not be
 // read; a repository that fails never blocks the others.
-type RefreshReport struct {
+type refreshReport struct {
 	Repos     int      `json:"repos"`
 	Updated   int      `json:"updated"`
 	Withdrawn int      `json:"withdrawn"`
@@ -546,7 +546,7 @@ func sameArgs(a, b map[string]string) bool {
 	return true
 }
 
-// Refresh re-reads every armed repository's sparkwing.yaml and republishes
+// refresh re-reads every armed repository's sparkwing.yaml and republishes
 // what it finds, without proof: a changed cadence, zone, overlap policy,
 // catch-up window or argument set is stored, and a row the repository stopped
 // declaring is marked undeclared. A checkout that cannot be read at all is
@@ -565,10 +565,10 @@ func sameArgs(a, b map[string]string) bool {
 // bring it back. A row the repository had stopped declaring is different: it is
 // still in the store, so a repository that declares it again republishes it and
 // it fires once more, as long as it follows the checkout.
-func (s *Service) Refresh(ctx context.Context) (RefreshReport, error) {
+func (s *Service) refresh(ctx context.Context) (refreshReport, error) {
 	stored, err := s.Schedules.ListCronSchedules(ctx)
 	if err != nil {
-		return RefreshReport{}, err
+		return refreshReport{}, err
 	}
 	byRepo := map[string][]store.CronSchedule{}
 	var roots []string
@@ -581,9 +581,9 @@ func (s *Service) Refresh(ctx context.Context) (RefreshReport, error) {
 	sort.Strings(roots)
 
 	now := s.now()
-	var report RefreshReport
+	var report refreshReport
 	for _, root := range roots {
-		if PushedRepo(root) {
+		if pushedRepo(root) {
 			// safety: a pushed repository's declaration is what the push
 			// carried, and this process holds no checkout of it to read.
 			report.Locked += len(byRepo[root])
@@ -597,12 +597,12 @@ func (s *Service) Refresh(ctx context.Context) (RefreshReport, error) {
 		}
 		byID := make(map[string]Declared, len(declared))
 		for _, d := range declared {
-			if d.Local() {
+			if d.local() {
 				byID[d.ID()] = d
 			}
 		}
 		for _, sched := range byRepo[root] {
-			if sched.LockedBinary != "" || Pushed(sched) {
+			if sched.LockedBinary != "" || pushed(sched) {
 				report.Locked++
 				continue
 			}
@@ -614,12 +614,12 @@ func (s *Service) Refresh(ctx context.Context) (RefreshReport, error) {
 
 func (s *Service) refreshOne(
 	ctx context.Context, sched store.CronSchedule, byID map[string]Declared,
-	now time.Time, report *RefreshReport,
+	now time.Time, report *refreshReport,
 ) {
 	// safety: a row the caller already filtered, repeated here because a
 	// republished row for the other side would move a declaration nothing on
 	// this machine owns.
-	if Pushed(sched) || !s.evaluates(sched) {
+	if pushed(sched) || !s.evaluates(sched) {
 		report.Locked++
 		return
 	}

@@ -334,7 +334,7 @@ func TestCompilePipeline_FailureCapturesStdoutAndStderr(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected CompilePipeline to fail")
 	}
-	var ce *CompileError
+	var ce *compileError
 	if !errors.As(err, &ce) {
 		t.Fatalf("expected *CompileError, got %T: %v", err, err)
 	}

@@ -2,18 +2,19 @@ package sparkwingruntime
 
 import (
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// MissingSecretsError names every required secret of a pipeline's Secrets()
+// missingSecretsError names every required secret of a pipeline's Secrets()
 // declaration that its secret source does not hold.
-type MissingSecretsError struct {
+type missingSecretsError struct {
 	Pipeline string
 	Names    []string
 }
 
-func (e *MissingSecretsError) Error() string {
+func (e *missingSecretsError) Error() string {
 	noun := "secrets"
 	if len(e.Names) == 1 {
 		noun = "secret"
@@ -22,4 +23,4 @@ func (e *MissingSecretsError) Error() string {
 }
 
 // Unwrap lets a caller match the miss as [sparkwing.ErrSecretMissing].
-func (e *MissingSecretsError) Unwrap() error { return sparkwing.ErrSecretMissing }
+func (e *missingSecretsError) Unwrap() error { return sparkwing.ErrSecretMissing }

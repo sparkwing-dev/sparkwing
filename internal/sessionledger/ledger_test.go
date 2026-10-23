@@ -98,7 +98,7 @@ func TestSweepEndsOnlySessionsWhoseOwnerIsGone(t *testing.T) {
 	for _, o := range out {
 		verdicts[o.Record.Run+"/"+o.Record.Node] = o.Verdict
 	}
-	want := map[string]Verdict{"run-live/build": VerdictLive, "run-dead/build": VerdictReaped, "run-dead/test": VerdictReaped}
+	want := map[string]Verdict{"run-live/build": VerdictLive, "run-dead/build": verdictReaped, "run-dead/test": verdictReaped}
 	for k, v := range want {
 		if verdicts[k] != v {
 			t.Errorf("%s = %s, want %s", k, verdicts[k], v)
@@ -122,7 +122,7 @@ func TestSweepScopedToARunLeavesOtherRunsAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Record.Run != "run-a" || out[0].Verdict != VerdictReaped {
+	if len(out) != 1 || out[0].Record.Run != "run-a" || out[0].Verdict != verdictReaped {
 		t.Fatalf("outcomes = %+v", out)
 	}
 	left, _ := l.List()
@@ -158,7 +158,7 @@ func TestSweepKeepsARecordItCouldNotEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Verdict != VerdictFailed || out[0].Err == nil {
+	if len(out) != 1 || out[0].Verdict != verdictFailed || out[0].Err == nil {
 		t.Fatalf("outcomes = %+v", out)
 	}
 	if left, _ := l.List(); len(left) != 1 {
@@ -175,4 +175,4 @@ func TestSweepOfAMissingLedgerIsEmpty(t *testing.T) {
 }
 
 // OpenWithProbe returns the ledger at dir with a caller-supplied probe.
-func OpenWithProbe(dir string, probe Probe) *Ledger { return &Ledger{dir: dir, probe: probe} }
+func OpenWithProbe(dir string, probe probe) *Ledger { return &Ledger{dir: dir, probe: probe} }

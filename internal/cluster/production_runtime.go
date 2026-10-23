@@ -27,9 +27,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// ProductionRuntime composes installed commands with authenticated controller and native host services.
-func ProductionRuntime(version string) Runtime {
-	return Runtime{
+// productionRuntime composes installed commands with authenticated controller and native host services.
+func productionRuntime(version string) clusterRuntime {
+	return clusterRuntime{
 		Launcher: productionLauncher(version),
 		Runner: RunnerCLI{Factory: func(ctx context.Context, options RunnerOptions) (runners.RuntimeConfig, error) {
 			home, err := wingd.HomeDir("")

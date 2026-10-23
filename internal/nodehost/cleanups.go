@@ -16,9 +16,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-// CleanupTimeout bounds each cleanup a node registered. It is one constant for
+// cleanupTimeout bounds each cleanup a node registered. It is one constant for
 // every node, not a per-node setting.
-const CleanupTimeout = 2 * time.Minute
+const cleanupTimeout = 2 * time.Minute
 
 // safety: these bound what one node process may register, so a node cannot
 // grow the host's memory or its exit work without bound.
@@ -77,7 +77,7 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env procenv.Env, log
 		fmt.Fprintf(log, "cleanup %s failed: not found in the node's PATH\n", name)
 		return errors.New("registered cleanup program is unavailable")
 	}
-	ctx, cancel := context.WithTimeout(ctx, CleanupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
 	defer cancel()
 	cmd := procenv.Command(env, path, c.argv[1:]...)
 	cmd.Args[0] = name

@@ -25,21 +25,28 @@ func TestParseTriggerProfilePosition(t *testing.T) {
 
 func TestParseGrammar(t *testing.T) {
 	for _, args := range [][]string{
-		{"run", "check", "--sw-no-cache"}, {"run", "check", "--profile", "prod"},
-		{"run", "check", "--pipeline-arg", "value"}, {"run", "check", "extra"},
-		{"runs", "status", "123"}, {"runs", "list", "--limit", "0"},
-		{"runs", "list", "--limit", "invalid"}, {"runs", "list", "--output", "yaml"},
-		{"runs", "list", "--output="}, {"runs", "list", "--unknown"},
-		{"runs", "list", "--", "--output=json"}, {"runs", "status"},
+		{"run", "check", "--sw-no-cache"},
+		{"run", "check", "--profile", "prod"},
+		{"run", "check", "--pipeline-arg", "value"},
+		{"run", "check", "extra"},
+		{"runs", "status", "123"},
+		{"runs", "list", "--limit", "0"},
+		{"runs", "list", "--limit", "invalid"},
+		{"runs", "list", "--output", "yaml"},
+		{"runs", "list", "--output="},
+		{"runs", "list", "--unknown"},
+		{"runs", "list", "--", "--output=json"},
+		{"runs", "status"},
 		{"runs", "logs", "--events-only", "--no-events"},
-		{"daemon", "events", "--explain"}, {"secrets", "set", "--secret", "NAME", "--value", "sensitive", "--file", "f"},
+		{"daemon", "events", "--explain"},
+		{"secrets", "set", "--secret", "NAME", "--value", "sensitive", "--file", "f"},
 		{"runs", "list", "--limit", "1", "--limit", "2"},
 		{"pipeline", "trigger", "check", "--detach", "--sw-workers", "2", "--profile", "prod"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			_, err := Parse("sparkwing", args)
 			var usage *UsageError
-			if !errors.As(err, &usage) || usage.ExitCode() != ExitUsage || !strings.HasPrefix(err.Error(), "sparkwing:") || strings.Contains(err.Error(), "sensitive") {
+			if !errors.As(err, &usage) || usage.exitCode() != ExitUsage || !strings.HasPrefix(err.Error(), "sparkwing:") || strings.Contains(err.Error(), "sensitive") {
 				t.Fatalf("expected safe usage error, got %v", err)
 			}
 		})
@@ -48,8 +55,10 @@ func TestParseGrammar(t *testing.T) {
 		{"run", "check", "--sw-workers", "1", "--", "--x=1"},
 		{"__complete", "--kind=verbs", "--word=", "-o", "plain"},
 		{"pipeline", "trigger", "--resume", "r1", "--profile", "prod"},
-		{"runs", "cancel", "--run", "-"}, {"runs", "list", "-ojson", "--limit=1", "--cursor", "c"},
-		{"runs", "status", "--help"}, {"run", "--help-all"},
+		{"runs", "cancel", "--run", "-"},
+		{"runs", "list", "-ojson", "--limit=1", "--cursor", "c"},
+		{"runs", "status", "--help"},
+		{"run", "--help-all"},
 	} {
 		if _, err := Parse("sparkwing", args); err != nil {
 			t.Errorf("%v: %v", args, err)
@@ -59,8 +68,15 @@ func TestParseGrammar(t *testing.T) {
 
 func TestParseRemovedSurface(t *testing.T) {
 	for _, args := range [][]string{
-		{"crons"}, {"serve"}, {"cluster"}, {"cloud"}, {"configure"},
-		{"debug", "rerun"}, {"runs", "bounce"}, {"runs", "consumer"}, {"runs", "reattach"},
+		{"crons"},
+		{"serve"},
+		{"cluster"},
+		{"cloud"},
+		{"configure"},
+		{"debug", "rerun"},
+		{"runs", "bounce"},
+		{"runs", "consumer"},
+		{"runs", "reattach"},
 	} {
 		if _, err := Parse("sparkwing", args); err == nil {
 			t.Fatalf("removed command accepted: %v", args)

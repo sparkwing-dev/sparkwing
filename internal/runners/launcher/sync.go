@@ -15,8 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// ErrContainersRunning keeps the reservation until Kubernetes confirms every container has stopped.
-var ErrContainersRunning = errors.New("Cloud Job containers are still running")
+// errContainersRunning keeps the reservation until Kubernetes confirms every container has stopped.
+var errContainersRunning = errors.New("Cloud Job containers are still running")
 
 type bootstrapReference struct {
 	Name   string    `json:"name"`
@@ -72,7 +72,7 @@ func (l *Launcher) sync(ctx context.Context) (result error) {
 			observations = append(observations, CloudJobObservation{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID})
 		}
 		if remove {
-			if err := l.teardown(ctx, &job, reservation); err != nil && !errors.Is(err, ErrContainersRunning) {
+			if err := l.teardown(ctx, &job, reservation); err != nil && !errors.Is(err, errContainersRunning) {
 				errs = append(errs, err)
 			}
 		}
@@ -99,7 +99,7 @@ func (l *Launcher) sync(ctx context.Context) (result error) {
 			if err == nil {
 				err = l.teardown(ctx, job, reservation)
 			}
-			if err != nil && !errors.Is(err, ErrContainersRunning) {
+			if err != nil && !errors.Is(err, errContainersRunning) {
 				errs = append(errs, err)
 			}
 		}
@@ -238,7 +238,7 @@ func (l *Launcher) releaseOrphan(ctx context.Context, held CloudNodeReservation,
 	if apierrors.IsNotFound(err) {
 		err = l.Boundary.Release(ctx, held)
 	}
-	if errors.Is(err, ErrContainersRunning) {
+	if errors.Is(err, errContainersRunning) {
 		return false, nil
 	}
 	return false, err
@@ -333,7 +333,7 @@ func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation C
 	}
 	for _, pod := range pods.Items {
 		if !podStopped(pod) {
-			return ErrContainersRunning
+			return errContainersRunning
 		}
 	}
 	if err = l.Boundary.Release(ctx, reservation); err != nil {

@@ -42,13 +42,13 @@ type EvaluationInput struct {
 	Storage       StorageBinding
 }
 
-// EvaluationDependencies connects the evaluator to the same engine, protocol and
+// evaluationDependencies connects the evaluator to the same engine, protocol and
 // validation boundaries as execution. ReadOutput must authorize the persisted
 // terminal generation and return its recorded JSON, including explicit null.
 // Bind delegates a fresh process bearer; the host revokes it before joining and cleanup.
 // Start owns run-log attribution, masking and environment. Bound input requires Bind.
 // ChildContext applies the shared deadline policy to approval predicates.
-type EvaluationDependencies struct {
+type evaluationDependencies struct {
 	Store        EvaluationStore
 	Bind         func(context.Context, EvaluationInput) (ProcessGrant, error)
 	Start        func(context.Context, EvaluationInput) (ExecutorProcess, error)
@@ -63,12 +63,12 @@ type EvaluationDependencies struct {
 // OwnerEvaluator reconstructs accepted code and evaluates owner closures. It
 // never executes a job body or writes topology; OwnerHost submits its result.
 type OwnerEvaluator struct {
-	deps EvaluationDependencies
+	deps evaluationDependencies
 	sdkCode
 }
 
-// NewOwnerEvaluator requires explicit authority, output and process adapters.
-func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
+// newOwnerEvaluator requires explicit authority, output and process adapters.
+func newOwnerEvaluator(deps evaluationDependencies) (*OwnerEvaluator, error) {
 	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Masker == nil {
 		return nil, errors.New("owner evaluator requires store, process, engine and masking adapters")
 	}
@@ -87,7 +87,7 @@ func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
 // Expand evaluates every declared generator from the source's recorded output
 // in one reconstructed SDK process. Failed evaluation returns only a masked
 // failure; cancellation and stale input leave the barrier to the live owner.
-func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (body json.RawMessage, registration runspec.SecretRegistration, failure *store.ExpansionFailure, err error) {
+func (h *OwnerEvaluator) evaluateExpansion(ctx context.Context, input EvaluationInput) (body json.RawMessage, registration runspec.SecretRegistration, failure *store.ExpansionFailure, err error) {
 	defer func() { err = maskHostError(err, h.deps.Masker) }()
 	if err := h.deps.Masks.initializeSeal(input.Accepted); err != nil {
 		return nil, runspec.SecretRegistration{}, nil, err

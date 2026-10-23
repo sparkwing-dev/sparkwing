@@ -157,13 +157,13 @@ func TestDefaultsApplyWithoutPipelineAndExpansionUsesSameLayers(t *testing.T) {
 
 func TestSealedHostIgnoresAmbientPreferences(t *testing.T) {
 	in := Inputs{Flags: Values{Options: runspec.Options{Output: present("invalid")}}, Environment: Values{Options: runspec.Options{Output: present("invalid")}}, Machine: Values{Options: runspec.Options{Workers: present(-1)}}, Sealed: Values{Options: runspec.Options{Output: present("plain"), Workers: present(3)}}}
-	if value, _, err := Output(in); err != nil || value != "plain" {
+	if value, _, err := output(in); err != nil || value != "plain" {
 		t.Fatalf("output %q: %v", value, err)
 	}
-	if value, _, err := Workers(in); err != nil || value != 3 {
+	if value, _, err := workers(in); err != nil || value != 3 {
 		t.Fatalf("workers %d: %v", value, err)
 	}
-	if _, _, err := Output(Inputs{}); err == nil {
+	if _, _, err := output(Inputs{}); err == nil {
 		t.Fatal("accepted host invented absent sealed setting")
 	}
 }
@@ -176,13 +176,13 @@ func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
 	if v, _, err := JobTimeout(in); err != nil || v != 8*time.Hour {
 		t.Fatalf("timeout %v: %v", v, err)
 	}
-	if v, _, err := Priority(in); err != nil || v != 9 {
+	if v, _, err := priority(in); err != nil || v != 9 {
 		t.Fatalf("priority %v: %v", v, err)
 	}
 	if v, _, err := ClaimWait(in); err != nil || v != 2*time.Hour {
 		t.Fatalf("queue %v: %v", v, err)
 	}
-	if v, _, err := AdmissionClass(in); err != nil || v != "batch" {
+	if v, _, err := admissionClass(in); err != nil || v != "batch" {
 		t.Fatalf("class %q: %v", v, err)
 	}
 	if _, err := checkoutSetting(in); err != nil {
@@ -235,7 +235,7 @@ func TestCheckoutDeclarationsRejectForgedAuthority(t *testing.T) {
 	entry := d.Defaults.Args.Value["mode"]
 	entry.Origin.Layer = runspec.LayerFlag
 	d.Defaults.Args.Value["mode"] = entry
-	if err := ValidateCheckoutDeclarations(d); err == nil {
+	if err := validateCheckoutDeclarations(d); err == nil {
 		t.Fatal("forged nested authority accepted")
 	}
 	if _, err := ProjectCheckoutDeclarations([]byte("profiles: {cloud: {token: hidden-secret}}"), "sparkwing.yaml", "build"); err == nil || strings.Contains(err.Error(), "hidden-secret") {
@@ -269,7 +269,7 @@ func TestOutputDefaultsFollowTerminal(t *testing.T) {
 		terminal bool
 		want     string
 	}{{true, "pretty"}, {false, "json"}} {
-		value, _, err := Output(Inputs{Context: Context{Submitter: true, Terminal: tc.terminal}})
+		value, _, err := output(Inputs{Context: Context{Submitter: true, Terminal: tc.terminal}})
 		if err != nil || value != tc.want {
 			t.Fatalf("terminal %v: %q, %v", tc.terminal, value, err)
 		}
@@ -278,12 +278,12 @@ func TestOutputDefaultsFollowTerminal(t *testing.T) {
 
 func TestRetryBackoffRefusesValuesAboveExecutionBound(t *testing.T) {
 	for _, duration := range []time.Duration{5*time.Minute + time.Nanosecond, 6 * time.Minute} {
-		if _, _, err := RetryBackoff(Inputs{Code: Values{Options: runspec.Options{JobDefaults: runspec.JobExecutionSettings{RetryBackoff: present(duration)}}}, Context: Context{Submitter: true}}); err == nil {
+		if _, _, err := retryBackoff(Inputs{Code: Values{Options: runspec.Options{JobDefaults: runspec.JobExecutionSettings{RetryBackoff: present(duration)}}}, Context: Context{Submitter: true}}); err == nil {
 			t.Errorf("accepted %v", duration)
 		}
 	}
 	for _, duration := range []time.Duration{0, 5 * time.Minute} {
-		if got, _, err := RetryBackoff(Inputs{Code: Values{Options: runspec.Options{JobDefaults: runspec.JobExecutionSettings{RetryBackoff: present(duration)}}}, Context: Context{Submitter: true}}); err != nil || got != duration {
+		if got, _, err := retryBackoff(Inputs{Code: Values{Options: runspec.Options{JobDefaults: runspec.JobExecutionSettings{RetryBackoff: present(duration)}}}, Context: Context{Submitter: true}}); err != nil || got != duration {
 			t.Fatalf("%v: %v %v", duration, got, err)
 		}
 	}

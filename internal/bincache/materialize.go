@@ -25,7 +25,7 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if lease, found, err := entry.Acquire(ctx); err != nil {
 		return nil, false, err
 	} else if found {
-		lease.RecordUse(dir, parts)
+		lease.recordUse(dir, parts)
 		return lease, false, nil
 	}
 	if err := preparePipelineDependencies(ctx, dir, options); err != nil {
@@ -43,7 +43,7 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if err != nil {
 		return nil, false, err
 	}
-	lease.RecordUse(dir, parts)
+	lease.recordUse(dir, parts)
 	return lease, published, nil
 }
 
@@ -61,8 +61,8 @@ func preparePipelineDependencies(ctx context.Context, dir string, options Compil
 		}
 	}
 	args = append(args, ".")
-	return RunGo(ctx, dir, args, preparation)
+	return runGo(ctx, dir, args, preparation)
 }
 
-// Key returns the effective build-input key held by the lease.
-func (l *Lease) Key() string { return l.entry.key }
+// key returns the effective build-input key held by the lease.
+func (l *Lease) key() string { return l.entry.key }

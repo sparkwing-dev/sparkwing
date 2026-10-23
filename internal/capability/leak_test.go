@@ -1,4 +1,4 @@
-package capability_test
+package capability
 
 import (
 	"testing"

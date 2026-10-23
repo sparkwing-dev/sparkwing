@@ -25,12 +25,12 @@ func TestRunnerPreferencesMergeAndRejectInvalidRenewals(t *testing.T) {
 
 func TestParentCheckoutPrecedesMachineLocation(t *testing.T) {
 	in := Inputs{Context: Context{Submitter: true, ParentCheckout: "/parent"}, Machine: Values{Options: runspec.Options{RepoLocation: present("/registered")}}}
-	value, origin, err := RepoLocation(in)
-	if err != nil || value != "/parent" || origin.Source != Run {
+	value, origin, err := repoLocation(in)
+	if err != nil || value != "/parent" || origin.Source != sourceRun {
 		t.Fatalf("%q %+v %v", value, origin, err)
 	}
 	in.Flags.RepoLocation = present("/submitted")
-	value, _, err = RepoLocation(in)
+	value, _, err = repoLocation(in)
 	if err != nil || value != "/submitted" {
 		t.Fatalf("%q %v", value, err)
 	}

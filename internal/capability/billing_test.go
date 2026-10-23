@@ -1,19 +1,17 @@
-package capability_test
+package capability
 
 import (
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestOperationalBillingClassification(t *testing.T) {
-	want := map[capability.UnitKind]capability.BillingUnit{
-		capability.UnitTrigger: capability.BillingHost,
-		capability.UnitNode:    capability.BillingJob,
-		capability.UnitPlan:    capability.BillingPlan,
-		capability.UnitEval:    capability.BillingEval,
+	want := map[UnitKind]BillingUnit{
+		UnitTrigger: BillingHost,
+		UnitNode:    BillingJob,
+		UnitPlan:    BillingPlan,
+		UnitEval:    BillingEval,
 	}
-	for _, mapping := range capability.UnitBillingMappings() {
+	for _, mapping := range UnitBillingMappings() {
 		billing, ok := want[mapping.Operational]
 		if !ok || billing != mapping.Billing {
 			t.Errorf("invalid or duplicate billing mapping: %+v", mapping)

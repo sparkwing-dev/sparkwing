@@ -29,13 +29,13 @@ import (
 // from a transport or authorization error.
 var ErrMissing = errors.New("sparkwing: secret not found")
 
-// Resolver resolves a stored value to (plain, masked) at the moment of the
+// resolver resolves a stored value to (plain, masked) at the moment of the
 // call.
-type Resolver interface {
+type resolver interface {
 	Resolve(ctx context.Context, name string) (value string, masked bool, err error)
 }
 
-// FromSpec builds an uncached, unmasked [Resolver] for the secrets surface
+// fromSpec builds an uncached, unmasked [resolver] for the secrets surface
 // of spec. Callers wrap it with the run's cache and log masker.
 //
 //   - controller: GET spec.URL + /api/v1/secrets/<name> with
@@ -44,7 +44,7 @@ type Resolver interface {
 //     resolve to [ErrMissing] rather than the empty string.
 //   - env: looks up os.Getenv(spec.Prefix + name). An unset variable
 //     resolves to [ErrMissing].
-func FromSpec(spec backends.Spec) (Resolver, error) {
+func fromSpec(spec backends.Spec) (resolver, error) {
 	switch spec.Type {
 	case backends.TypeController:
 		if spec.URL == "" {

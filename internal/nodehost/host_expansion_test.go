@@ -109,7 +109,7 @@ func TestOwnerExpansion(t *testing.T) {
 				s.reject = refused
 			}
 			process := newExpansionSDK(plan, mode)
-			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: s, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil }, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			evaluator, err := newOwnerEvaluator(evaluationDependencies{Store: s, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil }, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return resolved, nil
 			}, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
 				if ref != s.node.Ref || generation != 4 {
@@ -136,7 +136,7 @@ func TestOwnerExpansion(t *testing.T) {
 				if input.Entry != entry || !reflect.DeepEqual(input.Engine, resolved) || !reflect.DeepEqual(input.GrantedRunner, runner) || input.Accepted.SpecHash != string(spec.Hash) || runspec.NodeID(input.NodeID) != row.Ref.NodeID || runspec.ClaimGeneration(input.Generation) != row.Generation || input.SpecHash != row.SpecHash || runspec.RunID(input.RouteBinding.RunID) != row.Ref.RunID || runspec.NodeID(input.RouteBinding.JobID) != row.Ref.NodeID {
 					t.Fatal("expansion lost acquired code or persisted evaluation identity")
 				}
-				return evaluator.Expand(ctx, input)
+				return evaluator.evaluateExpansion(ctx, input)
 			}}
 			host.Delegator = ownerDelegatorFixture{actor: store.Actor{Kind: store.ActorRunHost, Owner: owner}}
 			sealed, _ := json.Marshal(request.Request)

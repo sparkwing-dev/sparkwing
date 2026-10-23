@@ -39,7 +39,7 @@ func TestRemoteOwnerSchedulePreservesRecoveryAndEmptyGroups(t *testing.T) {
 		}},
 		Generators: []controllerwire.ScheduleGenerator{{ID: "empty", SourceJob: "source", State: "accepted", Members: []string{}}},
 	}}
-	got, err := (&RemoteOwnerStore{Controller: wire}).Schedule(t.Context(), "run")
+	got, err := (&RemoteOwnerStore{Controller: wire}).schedule(t.Context(), "run")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestRemoteOwnerScheduleRejectsMismatchedIdentity(t *testing.T) {
 		{RunID: "other"},
 		{RunID: "run", Jobs: []controllerwire.ScheduleJob{{JobDetail: controllerwire.JobDetail{ID: "one"}, Declaration: nodeproto.JobSpec{ID: "two"}}}},
 	} {
-		if _, err := (&RemoteOwnerStore{Controller: ownerWireFixture{snapshot: snapshot}}).Schedule(t.Context(), "run"); err == nil {
+		if _, err := (&RemoteOwnerStore{Controller: ownerWireFixture{snapshot: snapshot}}).schedule(t.Context(), "run"); err == nil {
 			t.Fatal("accepted mismatched snapshot")
 		}
 	}
@@ -71,7 +71,7 @@ func TestRemoteOwnerScheduleRejectsMismatchedIdentity(t *testing.T) {
 func TestRemoteOwnerSchedulePropagatesTransportErrors(t *testing.T) {
 	sentinel := errors.New("transport failed")
 	wire := ownerWireFixture{err: sentinel}
-	if _, err := (&RemoteOwnerStore{Controller: wire}).Schedule(t.Context(), "run"); !errors.Is(err, sentinel) {
+	if _, err := (&RemoteOwnerStore{Controller: wire}).schedule(t.Context(), "run"); !errors.Is(err, sentinel) {
 		t.Fatalf("error = %v", err)
 	}
 }

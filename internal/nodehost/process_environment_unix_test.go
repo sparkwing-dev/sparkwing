@@ -65,7 +65,7 @@ func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
 				case procenv.Plan:
 					process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Runner: input.GrantedRunner, Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci"}}, func(context.Context, nodeproto.FrameLog) error { return nil })
 				case procenv.Attempt:
-					process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
+					process, err = cfg.startNode(t.Context(), input, ExecutorActivity{})
 				case procenv.Eval:
 					process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
 				}
@@ -82,7 +82,7 @@ func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = process.Close() })
-				session := process.(*ProtocolSession)
+				session := process.(*protocolSession)
 				protocolTestHello(t, session)
 				reply, err := session.Request(t.Context(), nodeproto.Request{ID: "env", Op: nodeproto.OpDescribe})
 				if err != nil {
@@ -146,7 +146,7 @@ func TestNativeSDKStartsLoadCapturedValuesBeforeSharedEnvironmentPolicy(t *testi
 			case "plan":
 				process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Environment: seal, Run: nodeproto.RunContext{RunID: input.Accepted.RunID, Pipeline: "build"}}, func(context.Context, nodeproto.FrameLog) error { return nil })
 			case "attempt":
-				process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
+				process, err = cfg.startNode(t.Context(), input, ExecutorActivity{})
 			case "eval":
 				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash})
 			}
@@ -154,7 +154,7 @@ func TestNativeSDKStartsLoadCapturedValuesBeforeSharedEnvironmentPolicy(t *testi
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = process.Close() })
-			protocolTestHello(t, process.(*ProtocolSession))
+			protocolTestHello(t, process.(*protocolSession))
 			reply, err := process.Request(t.Context(), nodeproto.Request{ID: "environment", Op: nodeproto.OpDescribe})
 			if err != nil {
 				t.Fatal(err)
@@ -227,7 +227,7 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 					return nil
 				},
 			}
-			deps.Start = cfg.Start
+			deps.Start = cfg.startNode
 			deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return input.Engine, nil
 			}
@@ -271,7 +271,7 @@ func TestNativeSDKCleanupGetsCompleteAttemptEnvironment(t *testing.T) {
 			}
 			input.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "environment"}
 			cleanups := &ProcessCleanups{}
-			if _, err := cleanups.Register([]string{"/bin/sh", "-c", `printf '%s' "$DOCKER_HOST" > cleanup-env`}, ""); err != nil {
+			if _, err := cleanups.register([]string{"/bin/sh", "-c", `printf '%s' "$DOCKER_HOST" > cleanup-env`}, ""); err != nil {
 				t.Fatal(err)
 			}
 			revoked, cleaned := false, false
@@ -292,12 +292,12 @@ func TestNativeSDKCleanupGetsCompleteAttemptEnvironment(t *testing.T) {
 					if strings.Contains(strings.Join(slices.Collect(scope.Env.Values()), "\n"), "private-value") || slices.Contains(slices.Collect(scope.Env.Values()), "DOCKER_HOST=tcp://captured:2375") {
 						t.Fatal("cleanup inherited a credential or lost the body override")
 					}
-					return cleanups.Run(ctx, scope)
+					return cleanups.run(ctx, scope)
 				},
 			}
 			var process ExecutorProcess
 			if kind == procenv.Attempt {
-				process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
+				process, err = cfg.startNode(t.Context(), input, ExecutorActivity{})
 			} else {
 				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash})
 			}
@@ -305,7 +305,7 @@ func TestNativeSDKCleanupGetsCompleteAttemptEnvironment(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = process.Close() })
-			session := process.(*ProtocolSession)
+			session := process.(*protocolSession)
 			protocolTestHello(t, session)
 			reply, err := session.Request(t.Context(), nodeproto.Request{ID: "environment", Op: nodeproto.OpDescribe})
 			if err != nil {

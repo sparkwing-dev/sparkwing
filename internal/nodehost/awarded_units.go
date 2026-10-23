@@ -150,7 +150,7 @@ func (h *OwnerHost) commitExpansion(ctx context.Context, row store.NodeRow, acto
 		if err := json.Unmarshal(body, &plan); err != nil {
 			return err
 		}
-		return h.Masks.Accept(plan, commit)
+		return h.Masks.acceptPlan(plan, commit)
 	}
 	return commit()
 }
@@ -163,7 +163,7 @@ func (h *OwnerHost) evaluateApproval(ctx context.Context, input RunInput, accept
 	if entry != nil {
 		defer func() { err = errors.Join(err, entry.Close()) }()
 	}
-	var result OwnerLayerResult
+	var result ownerLayerResult
 	if err != nil || entry == nil {
 		if context.Cause(ctx) != nil {
 			return errors.Join(err, context.Cause(ctx))

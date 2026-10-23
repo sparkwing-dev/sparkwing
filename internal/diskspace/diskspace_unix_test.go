@@ -20,7 +20,7 @@ func TestUsageConvertsAvailableBlocksToBytes(t *testing.T) {
 		st.Blocks = 16
 		return nil
 	}
-	free, total, ok := Usage("volume")
+	free, total, ok := usage("volume")
 	if !ok || free != 12288 || total != 65536 {
 		t.Fatalf("Usage = %d, %d, %v; want 12288, 65536, true", free, total, ok)
 	}
@@ -35,7 +35,7 @@ func TestUsageRejectsStatfsFailure(t *testing.T) {
 		st.Blocks = 16
 		return syscall.EIO
 	}
-	free, total, ok := Usage("volume")
+	free, total, ok := usage("volume")
 	if ok || free != 0 || total != 0 {
 		t.Fatalf("failed statfs produced usage: %d, %d, %v", free, total, ok)
 	}

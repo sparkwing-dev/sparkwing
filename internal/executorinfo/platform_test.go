@@ -16,27 +16,27 @@ func TestDetectObservedPlatformNormalizesNativeAndWSL(t *testing.T) {
 		name, goos, goarch string
 		lookup             func(string) (string, bool)
 		read               func(string) ([]byte, error)
-		want               ObservedPlatform
+		want               observedPlatform
 	}{
-		{name: "native windows", goos: "windows", goarch: "amd64", lookup: lookupMissing, read: readMissing, want: ObservedPlatform{OS: "windows", Arch: "amd64", Environment: "native"}},
-		{name: "native mac", goos: "darwin", goarch: "arm64", lookup: lookupMissing, read: readMissing, want: ObservedPlatform{OS: "macos", Arch: "arm64", Environment: "native"}},
-		{name: "unsupported runtime", goos: "future-os", goarch: "future-arch", lookup: lookupMissing, read: readMissing, want: ObservedPlatform{OS: "unknown", Arch: "unknown", Environment: "native"}},
+		{name: "native windows", goos: "windows", goarch: "amd64", lookup: lookupMissing, read: readMissing, want: observedPlatform{OS: "windows", Arch: "amd64", Environment: "native"}},
+		{name: "native mac", goos: "darwin", goarch: "arm64", lookup: lookupMissing, read: readMissing, want: observedPlatform{OS: "macos", Arch: "arm64", Environment: "native"}},
+		{name: "unsupported runtime", goos: "future-os", goarch: "future-arch", lookup: lookupMissing, read: readMissing, want: observedPlatform{OS: "unknown", Arch: "unknown", Environment: "native"}},
 		{name: "wsl environment", goos: "linux", goarch: "amd64", lookup: func(key string) (string, bool) {
 			return map[string]string{"WSL_DISTRO_NAME": "private-distro-name"}[key], key == "WSL_DISTRO_NAME"
-		}, read: readMissing, want: ObservedPlatform{OS: "linux", Arch: "amd64", Environment: "wsl", HostOS: "windows"}},
+		}, read: readMissing, want: observedPlatform{OS: "linux", Arch: "amd64", Environment: "wsl", HostOS: "windows"}},
 		{name: "wsl kernel", goos: "linux", goarch: "arm64", lookup: lookupMissing, read: func(path string) ([]byte, error) {
 			if path == "/proc/sys/kernel/osrelease" {
 				return []byte("6.6.87.2-microsoft-standard-WSL2"), nil
 			}
 			return nil, errors.New("missing")
-		}, want: ObservedPlatform{OS: "linux", Arch: "arm64", Environment: "wsl", HostOS: "windows"}},
+		}, want: observedPlatform{OS: "linux", Arch: "arm64", Environment: "wsl", HostOS: "windows"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := detectObservedPlatform(tc.goos, tc.goarch, tc.lookup, tc.read)
 			if got != tc.want {
 				t.Fatalf("observed platform = %+v, want %+v", got, tc.want)
 			}
-			if err := got.Validate(); err != nil {
+			if err := got.validate(); err != nil {
 				t.Fatalf("validate detected platform: %v", err)
 			}
 		})
@@ -67,7 +67,7 @@ func TestObservedPlatformOutputCannotExposeDetectionInputsOrTrustLabels(t *testi
 }
 
 func TestObservedPlatformValidationRejectsContradictoryOrUnboundedFacts(t *testing.T) {
-	for _, observed := range []ObservedPlatform{
+	for _, observed := range []observedPlatform{
 		{OS: "linux", Arch: "amd64", Environment: "native", HostOS: "windows"},
 		{OS: "windows", Arch: "amd64", Environment: "wsl", HostOS: "windows"},
 		{OS: "linux", Arch: "amd64", Environment: "wsl"},
@@ -76,7 +76,7 @@ func TestObservedPlatformValidationRejectsContradictoryOrUnboundedFacts(t *testi
 		{OS: "linux", Arch: "private-arch", Environment: "native"},
 		{OS: "linux", Arch: "amd64", Environment: "container"},
 	} {
-		if err := observed.Validate(); err == nil {
+		if err := observed.validate(); err == nil {
 			t.Errorf("Validate(%+v) succeeded", observed)
 		}
 		if payload, err := json.Marshal(observed); err == nil || strings.Contains(string(payload), observed.Arch) {
@@ -84,7 +84,7 @@ func TestObservedPlatformValidationRejectsContradictoryOrUnboundedFacts(t *testi
 		}
 	}
 	var logs bytes.Buffer
-	slog.New(slog.NewJSONHandler(&logs, nil)).Info("platform", "observed_platform", ObservedPlatform{
+	slog.New(slog.NewJSONHandler(&logs, nil)).Info("platform", "observed_platform", observedPlatform{
 		OS: "linux", Arch: "private-credential-value", Environment: "native",
 	})
 	if strings.Contains(logs.String(), "private-credential-value") || !strings.Contains(logs.String(), `"status":"invalid"`) {

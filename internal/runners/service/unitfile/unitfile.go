@@ -51,8 +51,8 @@ func PlistArguments(body []byte) []string {
 	return args
 }
 
-// SystemdWords decodes literal native argv, refusing incomplete quotes and invalid escapes.
-func SystemdWords(s string) []string {
+// systemdWords decodes literal native argv, refusing incomplete quotes and invalid escapes.
+func systemdWords(s string) []string {
 	var words []string
 	var word strings.Builder
 	var quote byte

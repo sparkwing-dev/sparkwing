@@ -1,4 +1,4 @@
-package lease_test
+package lease
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
 )
 
 func FuzzKeeperCancellationReason(f *testing.F) {
@@ -16,13 +14,13 @@ func FuzzKeeperCancellationReason(f *testing.F) {
 	f.Add("cancelled by a newer run\nwith unicode: 雪")
 	f.Fuzz(func(t *testing.T, reason string) {
 		synctest.Test(t, func(t *testing.T) {
-			keeper := lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute, Renew: func(context.Context) (lease.Beat, error) {
-				return lease.Beat{CancelRequested: true, CancelReason: reason}, nil
+			keeper := Keeper{Interval: 10 * time.Second, Lease: time.Minute, Renew: func(context.Context) (Beat, error) {
+				return Beat{CancelRequested: true, CancelReason: reason}, nil
 			}}
 			ctx, stop := keeper.Run(t.Context())
 			defer stop()
 			<-ctx.Done()
-			var cancelled *lease.CancelError
+			var cancelled *CancelError
 			want := reason
 			if want == "" {
 				want = "cancel_requested"
@@ -41,18 +39,18 @@ func TestKeeperHonorsTheReturnedBoundAcrossSlowAndLostRenewals(t *testing.T) {
 				start := time.Now()
 				bound := start.Add(20 * time.Second)
 				calls, observed := 0, 0
-				keeper := lease.Keeper{
+				keeper := Keeper{
 					Interval: time.Minute, Lease: time.Hour,
-					Renew: func(ctx context.Context) (lease.Beat, error) {
+					Renew: func(ctx context.Context) (Beat, error) {
 						calls++
 						if calls == 1 {
 							time.Sleep(responseDelay)
-							return lease.Beat{ExpiresAt: bound}, nil
+							return Beat{ExpiresAt: bound}, nil
 						}
 						<-ctx.Done()
-						return lease.Beat{}, context.Cause(ctx)
+						return Beat{}, context.Cause(ctx)
 					},
-					Observe: func(lease.Beat) { observed++ },
+					Observe: func(Beat) { observed++ },
 				}
 				ctx, stop := keeper.Run(t.Context())
 				defer stop()
@@ -66,7 +64,7 @@ func TestKeeperHonorsTheReturnedBoundAcrossSlowAndLostRenewals(t *testing.T) {
 				if responseDelay < 20*time.Second && calls != 2 {
 					t.Fatalf("keeper made %d renewals; want a renewal within the funded slice", calls)
 				}
-				if !errors.Is(context.Cause(ctx), lease.ErrSilent) {
+				if !errors.Is(context.Cause(ctx), ErrSilent) {
 					t.Fatalf("cause=%v", context.Cause(ctx))
 				}
 			})
@@ -79,10 +77,10 @@ func TestKeeperStopsOtherExecutionWithoutDelayingSDKCancellation(t *testing.T) {
 		bound := time.Now().Add(20 * time.Second)
 		stopping, release := make(chan struct{}), make(chan struct{})
 		calls := 0
-		keeper := lease.Keeper{
+		keeper := Keeper{
 			Lease: time.Minute, Interval: time.Second,
-			Renew: func(context.Context) (lease.Beat, error) {
-				return lease.Beat{ExpiresAt: bound, CancelRequested: true}, nil
+			Renew: func(context.Context) (Beat, error) {
+				return Beat{ExpiresAt: bound, CancelRequested: true}, nil
 			},
 			ExecutionEnded: func() { calls++; close(stopping); <-release },
 		}
@@ -92,7 +90,7 @@ func TestKeeperStopsOtherExecutionWithoutDelayingSDKCancellation(t *testing.T) {
 		if calls != 0 {
 			t.Fatal("requested cancellation stopped execution before its cleanup bound")
 		}
-		execution := lease.ExecutionContext(ctx)
+		execution := ExecutionContext(ctx)
 		<-execution.Done()
 		<-stopping
 		if !time.Now().Equal(bound) {
@@ -110,18 +108,18 @@ func TestKeeperLeaseStartsWhenRenewalIsSent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
 		calls := 0
-		keeper := lease.Keeper{
+		keeper := Keeper{
 			Interval: 20 * time.Second, Lease: time.Minute,
-			Renew: func(ctx context.Context) (lease.Beat, error) {
+			Renew: func(ctx context.Context) (Beat, error) {
 				calls++
 				if calls == 2 {
 					time.Sleep(15 * time.Second)
 				}
 				if calls <= 2 {
-					return lease.Beat{}, nil
+					return Beat{}, nil
 				}
 				<-ctx.Done()
-				return lease.Beat{}, context.Cause(ctx)
+				return Beat{}, context.Cause(ctx)
 			},
 		}
 		ctx, stop := keeper.Run(t.Context())
@@ -130,7 +128,7 @@ func TestKeeperLeaseStartsWhenRenewalIsSent(t *testing.T) {
 		if got := time.Since(start); got != 80*time.Second {
 			t.Fatalf("lease lasted %v; want 80s including renewal round trip", got)
 		}
-		if !errors.Is(context.Cause(ctx), lease.ErrSilent) {
+		if !errors.Is(context.Cause(ctx), ErrSilent) {
 			t.Fatalf("cause=%v", context.Cause(ctx))
 		}
 	})

@@ -237,7 +237,7 @@ func TestLauncherVerifiesLiveAdmissionPolicies(t *testing.T) {
 		t.Fatal("policy naming another launcher accepted")
 	}
 	bindings := e.as(t, "admin").AdmissionregistrationV1().ValidatingAdmissionPolicyBindings()
-	binding, err := bindings.Get(t.Context(), AdmissionPolicyName("pods", "cloud"), metav1.GetOptions{})
+	binding, err := bindings.Get(t.Context(), admissionPolicyName("pods", "cloud"), metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,12 +259,12 @@ func TestLauncherVerifiesLiveAdmissionPolicies(t *testing.T) {
 func TestLaunchBoundariesRefuseMissingOrWeakenedAdmission(t *testing.T) {
 	for name, weaken := range map[string]func(*fake.Clientset){
 		"missing_policy": func(kube *fake.Clientset) {
-			if err := kube.Tracker().Delete(admissionv1.SchemeGroupVersion.WithResource("validatingadmissionpolicies"), "", AdmissionPolicyName("jobs", "cloud")); err != nil {
+			if err := kube.Tracker().Delete(admissionv1.SchemeGroupVersion.WithResource("validatingadmissionpolicies"), "", admissionPolicyName("jobs", "cloud")); err != nil {
 				t.Fatal(err)
 			}
 		},
 		"warn_only": func(kube *fake.Clientset) {
-			binding, err := kube.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Get(t.Context(), AdmissionPolicyName("pods", "cloud"), metav1.GetOptions{})
+			binding, err := kube.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Get(t.Context(), admissionPolicyName("pods", "cloud"), metav1.GetOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -274,7 +274,7 @@ func TestLaunchBoundariesRefuseMissingOrWeakenedAdmission(t *testing.T) {
 			}
 		},
 		"other_namespace": func(kube *fake.Clientset) {
-			policy, err := kube.AdmissionregistrationV1().ValidatingAdmissionPolicies().Get(t.Context(), AdmissionPolicyName("pods", "cloud"), metav1.GetOptions{})
+			policy, err := kube.AdmissionregistrationV1().ValidatingAdmissionPolicies().Get(t.Context(), admissionPolicyName("pods", "cloud"), metav1.GetOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}

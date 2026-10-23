@@ -6,17 +6,17 @@ import (
 	"time"
 )
 
-// EventKind is the node event a sweep appends for every session it ended
+// eventKind is the node event a sweep appends for every session it ended
 // or could not end, so `runs status` shows what happened to the work.
-const EventKind = "stray_session_reaped"
+const eventKind = "stray_session_reaped"
 
 // EventAppender is the store method a sweep needs to record its outcomes.
 type EventAppender interface {
 	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 }
 
-// EventPayload is the JSON body of an [EventKind] event.
-type EventPayload struct {
+// eventPayload is the JSON body of an [eventKind] event.
+type eventPayload struct {
 	Reaper    string    `json:"reaper"`
 	Verdict   Verdict   `json:"verdict"`
 	OwnerPID  int       `json:"owner_pid"`
@@ -28,14 +28,6 @@ type EventPayload struct {
 }
 
 type commandMaskKey struct{}
-
-// WithCommandMask makes [MaskCommand] pass a step's command line through
-// mask, the run's secret masker, before a ledger record stores it. A sweep
-// later copies that line into an [EventKind] event, long after the masker is
-// gone.
-func WithCommandMask(ctx context.Context, mask func(string) string) context.Context {
-	return context.WithValue(ctx, commandMaskKey{}, mask)
-}
 
 // MaskCommand returns command with the context's secrets hidden, or
 // unchanged when the context carries no mask.
@@ -55,7 +47,7 @@ func RecordOutcomes(ctx context.Context, st EventAppender, reaper string, outcom
 		if o.Verdict == VerdictLive || o.Verdict == VerdictWouldReap {
 			continue
 		}
-		p := EventPayload{
+		p := eventPayload{
 			Reaper: reaper, Verdict: o.Verdict,
 			OwnerPID: o.Record.OwnerPID, LeaderPID: o.Record.Handle.LeaderPID, JobName: o.Record.Handle.JobName,
 			Command: o.Record.Command, StartedAt: o.Record.StartedAt,
@@ -64,20 +56,9 @@ func RecordOutcomes(ctx context.Context, st EventAppender, reaper string, outcom
 			p.Error = o.Err.Error()
 		}
 		body, _ := json.Marshal(p)
-		if err := st.AppendEvent(ctx, o.Record.Run, o.Record.Node, EventKind, body); err != nil {
+		if err := st.AppendEvent(ctx, o.Record.Run, o.Record.Node, eventKind, body); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errs
-}
-
-// Acted reports whether any outcome ended or failed to end a session, so a
-// caller can skip opening a store when there is nothing to record.
-func Acted(outcomes []Outcome) bool {
-	for _, o := range outcomes {
-		if o.Verdict == VerdictReaped || o.Verdict == VerdictFailed {
-			return true
-		}
-	}
-	return false
 }

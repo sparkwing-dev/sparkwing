@@ -1,4 +1,4 @@
-package egress_test
+package egress
 
 import (
 	"testing"

@@ -298,7 +298,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 			probe := request
 			probe.Policy, probe.MaterializeOnly = store.SourceManualRetry, true
 			probe.Source = &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &selected}
-			reused, err := FollowReconciliation(ctx, h.Store, probe, h.WaitNode)
+			reused, err := followReconciliation(ctx, h.Store, probe, h.WaitNode)
 			if err != nil {
 				return err
 			}
@@ -366,7 +366,7 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 		return errors.New("self execution requires a node host and acquired entry")
 	}
 
-	result, err := FollowReconciliation(ctx, h.Store, request, h.WaitNode)
+	result, err := followReconciliation(ctx, h.Store, request, h.WaitNode)
 	if err != nil {
 		return err
 	}

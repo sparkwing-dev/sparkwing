@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-const RunHandleSchemaVersion = 1
+const runHandleSchemaVersion = 1
 
 // RunHandle identifies one accepted run through every execution mode.
 type RunHandle struct {
@@ -19,7 +19,7 @@ type RunHandle struct {
 
 func NewRunHandle(runID, pipeline, status string) RunHandle {
 	return RunHandle{
-		SchemaVersion: RunHandleSchemaVersion,
+		SchemaVersion: runHandleSchemaVersion,
 		RunID:         runID,
 		Pipeline:      pipeline,
 		Status:        status,

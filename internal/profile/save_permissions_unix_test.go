@@ -1,23 +1,21 @@
 //go:build !windows
 
-package profile_test
+package profile
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 func TestSaveKeepsTheConfigDirectoryAndFilePrivate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "sparkwing")
 	path := savedAt(t, filepath.Join(dir, "config.yaml"))
-	cfg := &profile.Config{Profiles: map[string]*profile.Profile{
-		"prod": {Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
+	cfg := &config{Profiles: map[string]*profile{
+		"prod": {Controller: &controllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
 	}}
-	if err := profile.Save(path, cfg); err != nil {
+	if err := save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -60,7 +58,7 @@ func TestSaveTightensAWorldReadableConfigDirectory(t *testing.T) {
 		t.Fatalf("chmod %s: %v", dir, err)
 	}
 	path := savedAt(t, filepath.Join(dir, "config.yaml"))
-	if err := profile.Save(path, &profile.Config{Profiles: map[string]*profile.Profile{}}); err != nil {
+	if err := save(path, &config{Profiles: map[string]*profile{}}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	info, err := os.Stat(dir)
@@ -88,10 +86,10 @@ func TestSaveIgnoresAPlantedTempSymlink(t *testing.T) {
 	}
 
 	path := savedAt(t, filepath.Join(dir, "config.yaml"))
-	cfg := &profile.Config{Profiles: map[string]*profile.Profile{
-		"prod": {Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
+	cfg := &config{Profiles: map[string]*profile{
+		"prod": {Controller: &controllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
 	}}
-	if err := profile.Save(path, cfg); err != nil {
+	if err := save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -110,10 +108,10 @@ func TestSaveIgnoresAPlantedTempSymlink(t *testing.T) {
 func TestSaveCreatesNoPredictableTempSibling(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "sparkwing")
 	path := savedAt(t, filepath.Join(dir, "config.yaml"))
-	cfg := &profile.Config{Profiles: map[string]*profile.Profile{
-		"prod": {Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
+	cfg := &config{Profiles: map[string]*profile{
+		"prod": {Controller: &controllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
 	}}
-	if err := profile.Save(path, cfg); err != nil {
+	if err := save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	if _, err := os.Lstat(path + ".tmp"); !os.IsNotExist(err) {

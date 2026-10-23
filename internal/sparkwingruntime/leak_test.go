@@ -1,4 +1,4 @@
-package sparkwingruntime_test
+package sparkwingruntime
 
 import (
 	"testing"

@@ -54,8 +54,8 @@ func NewProcessAuthorities(deps ProcessAuthorityDependencies) (*ProcessAuthoriti
 	return &ProcessAuthorities{deps: deps, live: map[[sha256.Size]byte]*processAuthority{}}, nil
 }
 
-// Delegate narrows controller authority and returns its bearer once with an idempotent revoker.
-func (a *ProcessAuthorities) Delegate(ctx context.Context, parent capability.CredentialLookup, spec capability.DelegateSpec, services *ProcessServices) (capability.Issued, func() error, error) {
+// delegate narrows controller authority and returns its bearer once with an idempotent revoker.
+func (a *ProcessAuthorities) delegate(ctx context.Context, parent capability.CredentialLookup, spec capability.DelegateSpec, services *ProcessServices) (capability.Issued, func() error, error) {
 	if err := context.Cause(ctx); err != nil {
 		return capability.Issued{}, nil, err
 	}
@@ -137,7 +137,7 @@ func (a *ProcessAuthorities) issue(ctx context.Context, parent capability.Creden
 	lifetime, cancel := context.WithCancel(context.Background())
 	bound.lifetime = lifetime
 	entry := &processAuthority{principal: capability.Principal{Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: child.Prefix}, Capability: retained}, parent: parent, services: &bound, cancel: cancel}
-	if err := bound.Masks.Register(raw); err != nil {
+	if err := bound.Masks.registerValue(raw); err != nil {
 		cancel()
 		return capability.Issued{}, nil, err
 	}

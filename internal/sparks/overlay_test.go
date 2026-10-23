@@ -64,7 +64,7 @@ func TestWriteOverlayWritesFiles(t *testing.T) {
 	})
 	goModBefore, _ := os.ReadFile(filepath.Join(dir, "go.mod"))
 
-	changed, err := WriteOverlay(context.Background(), dir, map[string]string{
+	changed, err := writeOverlay(context.Background(), dir, map[string]string{
 		"github.com/sparkwing-dev/sparks-core": "v0.10.3",
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func TestWriteOverlayWritesFiles(t *testing.T) {
 	if !strings.Contains(string(overlay), "sparks-core v0.10.3") {
 		t.Fatalf("overlay did not contain resolved version:\n%s", overlay)
 	}
-	if _, err := os.Stat(filepath.Join(dir, OverlaySumfileName)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, overlaySumfileName)); err != nil {
 		t.Fatalf("sum missing: %v", err)
 	}
 	goModAfter, _ := os.ReadFile(filepath.Join(dir, "go.mod"))
@@ -98,10 +98,10 @@ func TestWriteOverlayFastPath(t *testing.T) {
 	resolved := map[string]string{
 		"github.com/sparkwing-dev/sparks-core": "v0.10.3",
 	}
-	if _, err := WriteOverlay(context.Background(), dir, resolved); err != nil {
+	if _, err := writeOverlay(context.Background(), dir, resolved); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	changed, err := WriteOverlay(context.Background(), dir, resolved)
+	changed, err := writeOverlay(context.Background(), dir, resolved)
 	if err != nil {
 		t.Fatalf("second write: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestWriteOverlayAppendsMissingRequire(t *testing.T) {
 	fakeGoBin(t)
 	dir := t.TempDir()
 	writeGoMod(t, dir, nil)
-	_, err := WriteOverlay(context.Background(), dir, map[string]string{
+	_, err := writeOverlay(context.Background(), dir, map[string]string{
 		"github.com/sparkwing-dev/sparks-core": "v0.10.3",
 	})
 	if err != nil {
@@ -197,7 +197,7 @@ func TestGitignoreAdds(t *testing.T) {
 	}
 	writeGoMod(t, sparkwingDir, nil)
 
-	if _, err := WriteOverlay(context.Background(), sparkwingDir, map[string]string{
+	if _, err := writeOverlay(context.Background(), sparkwingDir, map[string]string{
 		"example.com/m": "v0.1.0",
 	}); err != nil {
 		t.Fatalf("overlay: %v", err)
@@ -210,7 +210,7 @@ func TestGitignoreAdds(t *testing.T) {
 		t.Fatalf("gitignore missing entry:\n%s", gi)
 	}
 
-	if _, err := WriteOverlay(context.Background(), sparkwingDir, map[string]string{
+	if _, err := writeOverlay(context.Background(), sparkwingDir, map[string]string{
 		"example.com/m": "v0.1.0",
 	}); err != nil {
 		t.Fatalf("second overlay: %v", err)
@@ -233,7 +233,7 @@ func TestGitignoreStaysInsideTheProjectWhenAnAncestorHoldsAGitDir(t *testing.T) 
 	}
 	writeGoMod(t, sparkwingDir, nil)
 
-	if _, err := WriteOverlay(context.Background(), sparkwingDir, map[string]string{
+	if _, err := writeOverlay(context.Background(), sparkwingDir, map[string]string{
 		"example.com/m": "v0.1.0",
 	}); err != nil {
 		t.Fatalf("overlay: %v", err)
@@ -245,7 +245,7 @@ func TestGitignoreStaysInsideTheProjectWhenAnAncestorHoldsAGitDir(t *testing.T) 
 	if err != nil {
 		t.Fatalf("gitignore missing: %v", err)
 	}
-	for _, want := range []string{OverlayModfileName, OverlaySumfileName} {
+	for _, want := range []string{OverlayModfileName, overlaySumfileName} {
 		if !gitignoreContains(string(gi), want) {
 			t.Fatalf("gitignore missing %s:\n%s", want, gi)
 		}
@@ -253,7 +253,7 @@ func TestGitignoreStaysInsideTheProjectWhenAnAncestorHoldsAGitDir(t *testing.T) 
 }
 
 func TestWriteOverlayRejectsEmptyDir(t *testing.T) {
-	if _, err := WriteOverlay(context.Background(), "", nil); err == nil {
+	if _, err := writeOverlay(context.Background(), "", nil); err == nil {
 		t.Fatal("expected error for empty dir")
 	}
 }

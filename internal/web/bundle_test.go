@@ -24,10 +24,10 @@ func TestBundleMissingReasonIsEmptyWhenTheBundleIsBuilt(t *testing.T) {
 }
 
 func TestVerifyBundleRefusesASuppliedBundleWithNoIndex(t *testing.T) {
-	if err := VerifyBundle(fstest.MapFS{"_next/static/app.js": &fstest.MapFile{}}); err == nil {
+	if err := verifyBundle(fstest.MapFS{"_next/static/app.js": &fstest.MapFile{}}); err == nil {
 		t.Fatal("a supplied bundle with no index.html must not be served as a dashboard")
 	}
-	if err := VerifyBundle(fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<title>Sparkwing</title>")}}); err != nil {
+	if err := verifyBundle(fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<title>Sparkwing</title>")}}); err != nil {
 		t.Errorf("a supplied bundle rooted at index.html must be served: %v", err)
 	}
 }

@@ -19,7 +19,7 @@ type cleanupBudgetProcess struct {
 
 func (p *cleanupBudgetProcess) Cleanup(ctx context.Context) error {
 	for range 2 {
-		command, cancel := context.WithTimeout(ctx, CleanupTimeout)
+		command, cancel := context.WithTimeout(ctx, cleanupTimeout)
 		if command.Err() != nil {
 			p.t.Fatal("cleanup inherited exhausted budget")
 		}
@@ -45,11 +45,11 @@ func TestLifecycleCleanupCommandsHaveIndependentBudgets(t *testing.T) {
 					}
 					process = &cleanupBudgetProcess{ExecutorProcess: base, t: t}
 					deps.Start = func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil }
-					host, err := NewOwnerEvaluator(deps)
+					host, err := newOwnerEvaluator(deps)
 					if err != nil {
 						t.Fatal(err)
 					}
-					_, _, failure, err := host.Expand(t.Context(), input)
+					_, _, failure, err := host.evaluateExpansion(t.Context(), input)
 					if err != nil || failure != nil {
 						t.Fatalf("failure=%v error=%v", failure, err)
 					}

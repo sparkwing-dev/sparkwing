@@ -8,34 +8,34 @@ import (
 	"testing"
 )
 
-func testExecutionPolicy() NodeExecutionPolicy {
+func testExecutionPolicy() nodeExecutionPolicy {
 	digest := "sha256:" + strings.Repeat("a", 64)
-	return NodeExecutionPolicy{
-		Version: NodeExecutionPolicyVersion, Pipeline: "release", NodeID: "deploy", AllowedLocations: []string{"cloud"},
-		Dependencies:           []NodeDependencyAuthority{{NodeID: "build", WholeOutput: true, MaxBytes: 1 << 20}},
+	return nodeExecutionPolicy{
+		Version: nodeExecutionPolicyVersion, Pipeline: "release", NodeID: "deploy", AllowedLocations: []string{"cloud"},
+		Dependencies:           []nodeDependencyAuthority{{NodeID: "build", WholeOutput: true, MaxBytes: 1 << 20}},
 		SecretNames:            []string{"DEPLOY_TOKEN"},
-		ArtifactInputs:         []NodeArtifactInput{{ProducerNodeID: "build", ManifestDigest: digest, Into: "artifacts/build", MaxBytes: 1 << 30, MaxFiles: 1000, MaxManifestBytes: 1 << 20}},
-		ArtifactOutputs:        []NodeArtifactOutput{{Glob: "reports/report-*", MaxBytes: 1 << 20, MaxFiles: 100}},
+		ArtifactInputs:         []nodeArtifactInput{{ProducerNodeID: "build", ManifestDigest: digest, Into: "artifacts/build", MaxBytes: 1 << 30, MaxFiles: 1000, MaxManifestBytes: 1 << 20}},
+		ArtifactOutputs:        []nodeArtifactOutput{{Glob: "reports/report-*", MaxBytes: 1 << 20, MaxFiles: 100}},
 		ArtifactOutputMaxBytes: 1 << 20,
 		ResultMaxBytes:         1 << 20,
-		Emission: NodeEmissionAuthority{
-			Events:  []NodeExecutionEventKind{NodeExecutionEventSummary, NodeExecutionEventAnnotation},
+		Emission: nodeEmissionAuthority{
+			Events:  []nodeExecutionEventKind{nodeExecutionEventSummary, nodeExecutionEventAnnotation},
 			StepIDs: []string{"publish"}, MaxEvents: 100, MaxPayloadBytes: 1 << 16, MaxTotalBytes: 1 << 20,
 		},
 		SupervisorRequirements: []string{fleetSupervisorRuntimeRequirement, "process-tree-v1"},
-		Body: NodeCompiledBodyAuthority{
-			ProtocolVersion: AssistedBodyProtocolVersion, RuntimeRequirements: []string{fleetBodyRuntimeRequirement, "actions-v1"},
-			Source: NodeBodySourceAuthority{Kind: "git", Identity: strings.Repeat("b", 40), ManifestDigest: digest, PlanDigest: digest},
+		Body: nodeCompiledBodyAuthority{
+			ProtocolVersion: assistedBodyProtocolVersion, RuntimeRequirements: []string{fleetBodyRuntimeRequirement, "actions-v1"},
+			Source: nodeBodySourceAuthority{Kind: "git", Identity: strings.Repeat("b", 40), ManifestDigest: digest, PlanDigest: digest},
 		},
-		Actions: []NodeExecutionGrant{
-			{GrantID: "ref-release", Kind: NodeExecutionActionRef, Ref: &NodeRefGrant{Pipeline: "release", NodeID: "notify", MaxBytes: 1 << 10}},
-			{GrantID: "tool-docker", Kind: NodeExecutionActionToolSlot, ToolSlot: &NodeToolSlotGrant{Group: "docker", Scope: "box", Capacity: 100, OnLimit: "queue", MaxCost: 1}},
+		Actions: []nodeExecutionGrant{
+			{GrantID: "ref-release", Kind: nodeExecutionActionRef, Ref: &nodeRefGrant{Pipeline: "release", NodeID: "notify", MaxBytes: 1 << 10}},
+			{GrantID: "tool-docker", Kind: nodeExecutionActionToolSlot, ToolSlot: &nodeToolSlotGrant{Group: "docker", Scope: "box", Capacity: 100, OnLimit: "queue", MaxCost: 1}},
 		},
 	}
 }
 
 func TestExecutionPolicyV1DoesNotPromiseUnimplementedOutputProjection(t *testing.T) {
-	sealed, err := SealNew(testExecutionPolicy())
+	sealed, err := sealNew(testExecutionPolicy())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,14 +46,14 @@ func TestExecutionPolicyV1DoesNotPromiseUnimplementedOutputProjection(t *testing
 
 func TestExecutionPolicyCanonicalSealIsStable(t *testing.T) {
 	policy := testExecutionPolicy()
-	first, err := SealNew(policy)
+	first, err := sealNew(policy)
 	if err != nil {
 		t.Fatal(err)
 	}
 	policy.SecretNames = []string{"DEPLOY_TOKEN"}
-	policy.Emission.Events = []NodeExecutionEventKind{NodeExecutionEventAnnotation, NodeExecutionEventSummary}
+	policy.Emission.Events = []nodeExecutionEventKind{nodeExecutionEventAnnotation, nodeExecutionEventSummary}
 	policy.Actions[0], policy.Actions[1] = policy.Actions[1], policy.Actions[0]
-	second, err := SealNew(policy)
+	second, err := sealNew(policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,22 +66,22 @@ func TestExecutionPolicyCanonicalSealIsStable(t *testing.T) {
 }
 
 func TestExecutionPolicyRejectsInexactIdentitiesAndOpenUnion(t *testing.T) {
-	for name, mutate := range map[string]func(*NodeExecutionPolicy){
-		"whitespace":            func(p *NodeExecutionPolicy) { p.NodeID = " deploy" },
-		"control":               func(p *NodeExecutionPolicy) { p.SecretNames = []string{"TOKEN\n"} },
-		"invalid utf8":          func(p *NodeExecutionPolicy) { p.Pipeline = string([]byte{0xff}) },
-		"coordinator placement": func(p *NodeExecutionPolicy) { p.AllowedLocations = []string{"coordinator"} },
-		"secret-shaped extension impossible": func(p *NodeExecutionPolicy) {
-			p.Actions[0].Await = &NodeAwaitGrant{Pipeline: "steal"}
+	for name, mutate := range map[string]func(*nodeExecutionPolicy){
+		"whitespace":            func(p *nodeExecutionPolicy) { p.NodeID = " deploy" },
+		"control":               func(p *nodeExecutionPolicy) { p.SecretNames = []string{"TOKEN\n"} },
+		"invalid utf8":          func(p *nodeExecutionPolicy) { p.Pipeline = string([]byte{0xff}) },
+		"coordinator placement": func(p *nodeExecutionPolicy) { p.AllowedLocations = []string{"coordinator"} },
+		"secret-shaped extension impossible": func(p *nodeExecutionPolicy) {
+			p.Actions[0].Await = &nodeAwaitGrant{Pipeline: "steal"}
 		},
-		"absolute output":     func(p *NodeExecutionPolicy) { p.ArtifactOutputs[0].Glob = "/tmp/**" },
-		"traversal output":    func(p *NodeExecutionPolicy) { p.ArtifactOutputs[0].Glob = "../**" },
-		"noncanonical digest": func(p *NodeExecutionPolicy) { p.Body.Source.ManifestDigest = strings.Repeat("a", 64) },
+		"absolute output":     func(p *nodeExecutionPolicy) { p.ArtifactOutputs[0].Glob = "/tmp/**" },
+		"traversal output":    func(p *nodeExecutionPolicy) { p.ArtifactOutputs[0].Glob = "../**" },
+		"noncanonical digest": func(p *nodeExecutionPolicy) { p.Body.Source.ManifestDigest = strings.Repeat("a", 64) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			policy := testExecutionPolicy()
 			mutate(&policy)
-			if _, err := SealNew(policy); !errors.Is(err, ErrExecutionPolicyInvalid) {
+			if _, err := sealNew(policy); !errors.Is(err, errExecutionPolicyInvalid) {
 				t.Fatalf("seal error = %v, want ErrExecutionPolicyInvalid", err)
 			}
 		})
@@ -101,7 +101,7 @@ func TestExecutionPolicyDecodeRejectsUnknownAndTrailingJSON(t *testing.T) {
 		"oversized": make([]byte, maxExecutionPolicyBytes+1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Decode(candidate); !errors.Is(err, ErrExecutionPolicyInvalid) {
+			if _, err := decode(candidate); !errors.Is(err, errExecutionPolicyInvalid) {
 				t.Fatalf("decode error = %v, want ErrExecutionPolicyInvalid", err)
 			}
 		})
@@ -109,11 +109,11 @@ func TestExecutionPolicyDecodeRejectsUnknownAndTrailingJSON(t *testing.T) {
 }
 
 func TestExecutionPolicyCarrierRejectsUnknownTrailingAndOwnsBytes(t *testing.T) {
-	var owner Carrier
-	if err := SetNew(&owner, testExecutionPolicy()); err != nil {
+	var owner carrier
+	if err := setNew(&owner, testExecutionPolicy()); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := EncodeCarrier(&owner)
+	raw, err := encodeCarrier(&owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,36 +123,36 @@ func TestExecutionPolicyCarrierRejectsUnknownTrailingAndOwnsBytes(t *testing.T) 
 		"trailing": append(append([]byte(nil), raw...), []byte(` {}`)...),
 	} {
 		t.Run(name, func(t *testing.T) {
-			var decoded Carrier
-			if err := DecodeCarrierStrict(candidate, &decoded); !errors.Is(err, ErrExecutionPolicyInvalid) {
+			var decoded carrier
+			if err := decodeCarrierStrict(candidate, &decoded); !errors.Is(err, errExecutionPolicyInvalid) {
 				t.Fatalf("decode %s carrier = %v, want invalid", name, err)
 			}
-			if IsSealed(&decoded) {
+			if isSealed(&decoded) {
 				t.Fatalf("decode %s partially changed owner", name)
 			}
 		})
 	}
 
 	raw[0] ^= 0xff
-	again, err := EncodeCarrier(&owner)
+	again, err := encodeCarrier(&owner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Equal(raw, again) {
 		t.Fatal("encoded carrier aliases its owned bytes")
 	}
-	var copied Carrier
-	CopyCarrier(&copied, &owner)
-	ClearCarrier(&owner)
-	if !IsSealed(&copied) {
+	var copied carrier
+	copyCarrier(&copied, &owner)
+	clearCarrier(&owner)
+	if !isSealed(&copied) {
 		t.Fatal("carrier copy aliased cleared source")
 	}
 }
 
 func TestExecutionPolicyDecodeDispatchesPersistedVersions(t *testing.T) {
-	for name, mutate := range map[string]func(*NodeExecutionPolicy){
-		"future policy": func(p *NodeExecutionPolicy) { p.Version = NodeExecutionPolicyVersion + 1 },
-		"future body":   func(p *NodeExecutionPolicy) { p.Body.ProtocolVersion = AssistedBodyProtocolVersion + 1 },
+	for name, mutate := range map[string]func(*nodeExecutionPolicy){
+		"future policy": func(p *nodeExecutionPolicy) { p.Version = nodeExecutionPolicyVersion + 1 },
+		"future body":   func(p *nodeExecutionPolicy) { p.Body.ProtocolVersion = assistedBodyProtocolVersion + 1 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			policy := testExecutionPolicy()
@@ -161,10 +161,10 @@ func TestExecutionPolicyDecodeDispatchesPersistedVersions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := Decode(raw); !errors.Is(err, ErrExecutionUpgradeRequired) {
+			if _, err := decode(raw); !errors.Is(err, errExecutionUpgradeRequired) {
 				t.Fatalf("decode error = %v, want upgrade required", err)
 			}
-			if _, err := SealNew(policy); !errors.Is(err, ErrExecutionPolicyInvalid) {
+			if _, err := sealNew(policy); !errors.Is(err, errExecutionPolicyInvalid) {
 				t.Fatalf("new seal error = %v, want invalid", err)
 			}
 		})
@@ -181,7 +181,7 @@ func TestExecutionPolicyRejectsNonPortableWindowsPaths(t *testing.T) {
 		t.Run(candidate, func(t *testing.T) {
 			policy := testExecutionPolicy()
 			policy.ArtifactInputs[0].Into = candidate
-			if _, err := SealNew(policy); !errors.Is(err, ErrExecutionPolicyInvalid) {
+			if _, err := sealNew(policy); !errors.Is(err, errExecutionPolicyInvalid) {
 				t.Fatalf("path %q error = %v, want invalid", candidate, err)
 			}
 		})
@@ -194,7 +194,7 @@ func TestExecutionPolicyRejectsNonPortableWindowsPaths(t *testing.T) {
 		t.Run("glob/"+candidate, func(t *testing.T) {
 			policy := testExecutionPolicy()
 			policy.ArtifactOutputs[0].Glob = candidate
-			if _, err := SealNew(policy); !errors.Is(err, ErrExecutionPolicyInvalid) {
+			if _, err := sealNew(policy); !errors.Is(err, errExecutionPolicyInvalid) {
 				t.Fatalf("glob %q error = %v, want invalid", candidate, err)
 			}
 		})
@@ -205,35 +205,35 @@ func TestExecutionPolicyRejectsNonPortableWindowsPaths(t *testing.T) {
 		other.ProducerNodeID = "other"
 		other.Into = "ARTIFACTS/BUILD"
 		policy.ArtifactInputs = append(policy.ArtifactInputs, other)
-		if _, err := SealNew(policy); !errors.Is(err, ErrExecutionPolicyInvalid) {
+		if _, err := sealNew(policy); !errors.Is(err, errExecutionPolicyInvalid) {
 			t.Fatalf("case-folded destination collision = %v, want invalid", err)
 		}
 	})
 	t.Run("non-adjacent case-insensitive globs", func(t *testing.T) {
 		policy := testExecutionPolicy()
-		policy.ArtifactOutputs = []NodeArtifactOutput{
+		policy.ArtifactOutputs = []nodeArtifactOutput{
 			{Glob: "A/report-*", MaxBytes: 1, MaxFiles: 1},
 			{Glob: "B/report-*", MaxBytes: 1, MaxFiles: 1},
 			{Glob: "a/report-*", MaxBytes: 1, MaxFiles: 1},
 		}
-		if _, err := SealNew(policy); !errors.Is(err, ErrExecutionPolicyInvalid) {
+		if _, err := sealNew(policy); !errors.Is(err, errExecutionPolicyInvalid) {
 			t.Fatalf("case-folded glob collision = %v, want invalid", err)
 		}
 	})
 	t.Run("supported glob grammar", func(t *testing.T) {
 		policy := testExecutionPolicy()
-		policy.ArtifactOutputs = []NodeArtifactOutput{
+		policy.ArtifactOutputs = []nodeArtifactOutput{
 			{Glob: "reports/report-*.json", MaxBytes: 1, MaxFiles: 1},
 			{Glob: "logs/?/entry-[a-z]*", MaxBytes: 1, MaxFiles: 1},
 		}
-		if _, err := SealNew(policy); err != nil {
+		if _, err := sealNew(policy); err != nil {
 			t.Fatalf("supported globs rejected: %v", err)
 		}
 	})
 }
 
 func TestExecutionPolicySeparatesSupervisorAndCompiledBodyRequirements(t *testing.T) {
-	sealed, err := SealNew(testExecutionPolicy())
+	sealed, err := sealNew(testExecutionPolicy())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestExecutionPolicySeparatesSupervisorAndCompiledBodyRequirements(t *testin
 
 func TestExecutionPolicySealOwnsNestedGrantMemory(t *testing.T) {
 	policy := testExecutionPolicy()
-	sealed, err := SealNew(policy)
+	sealed, err := sealNew(policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,20 +267,20 @@ func TestAssistedPlacementRejectsAmbiguousAndCoordinatorTerms(t *testing.T) {
 		"local", "location=coordinator", "location=unknown", "location=local,gpu",
 		"gpu,location=local", "location=local,location=cloud", "location=local,",
 	} {
-		binding := Binding{NeedsLabels: []string{term}}
-		if err := validateAssistedPlacement(binding, []string{"local"}); !errors.Is(err, ErrExecutionPolicyInvalid) {
+		binding := binding{NeedsLabels: []string{term}}
+		if err := validateAssistedPlacement(binding, []string{"local"}); !errors.Is(err, errExecutionPolicyInvalid) {
 			t.Errorf("term %q error = %v, want invalid policy", term, err)
 		}
 	}
 	for term, declared := range map[string][]string{"location=local": {"local"}, "gpu": {"cloud", "local"}} {
-		if err := validateAssistedPlacement(Binding{NeedsLabels: []string{term}}, declared); err != nil {
+		if err := validateAssistedPlacement(binding{NeedsLabels: []string{term}}, declared); err != nil {
 			t.Errorf("term %q unexpectedly rejected: %v", term, err)
 		}
 	}
-	if err := validateAssistedPlacement(Binding{NeedsLabels: []string{"location=cloud", "local"}}, []string{"cloud"}); !errors.Is(err, ErrExecutionPolicyInvalid) {
+	if err := validateAssistedPlacement(binding{NeedsLabels: []string{"location=cloud", "local"}}, []string{"cloud"}); !errors.Is(err, errExecutionPolicyInvalid) {
 		t.Errorf("conflicting pipeline/node placement error = %v, want invalid policy", err)
 	}
-	if err := validateAssistedPlacement(Binding{}, []string{"cloud", "local"}); err != nil {
+	if err := validateAssistedPlacement(binding{}, []string{"cloud", "local"}); err != nil {
 		t.Errorf("unconstrained two-location policy rejected: %v", err)
 	}
 }

@@ -9,19 +9,19 @@ import (
 	"time"
 )
 
-// WatchInterval is how often a parked loop looks for a rewritten
+// watchInterval is how often a parked loop looks for a rewritten
 // configuration. A stat is local, so the cost is the machine's, not the
 // controller's.
-const WatchInterval = 5 * time.Second
+const watchInterval = 5 * time.Second
 
-// Wait waits d, until ctx ends, or until changed reports true, and reports
+// wait waits d, until ctx ends, or until changed reports true, and reports
 // whether changed did. A nil changed waits d or ctx.
-func Wait(ctx context.Context, d time.Duration, changed func() bool) bool {
+func wait(ctx context.Context, d time.Duration, changed func() bool) bool {
 	deadline := time.NewTimer(d)
 	defer deadline.Stop()
 	var tick <-chan time.Time
 	if changed != nil {
-		t := time.NewTicker(WatchInterval)
+		t := time.NewTicker(watchInterval)
 		defer t.Stop()
 		tick = t.C
 	}
@@ -39,10 +39,10 @@ func Wait(ctx context.Context, d time.Duration, changed func() bool) bool {
 	}
 }
 
-// FileChanged returns a func reporting whether path's modification time or
+// fileChanged returns a func reporting whether path's modification time or
 // size differs from when FileChanged was called, or whether the file appeared
 // or vanished since.
-func FileChanged(path string) func() bool {
+func fileChanged(path string) func() bool {
 	before, beforeErr := os.Stat(path)
 	return func() bool {
 		now, err := os.Stat(path)

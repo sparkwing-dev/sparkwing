@@ -71,7 +71,7 @@ func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := FollowReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: before.Ref, Actor: f.Actor, Policy: store.SourceNone}, nil)
+		result, err := followReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: before.Ref, Actor: f.Actor, Policy: store.SourceNone}, nil)
 		if err != nil || result.Kind != store.KeepTerminal || result.Node.Outcome != store.NodeSuccess || result.Node.StateSeq != before.StateSeq || result.Node.Attempt != 1 || result.Node.Generation != input.Generation {
 			t.Fatalf("adopted = %+v, error %v", result, err)
 		}

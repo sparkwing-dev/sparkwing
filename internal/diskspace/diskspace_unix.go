@@ -6,10 +6,10 @@ import "syscall"
 
 var statfs = syscall.Statfs
 
-// Usage reports the bytes available to this user and the volume's total
+// usage reports the bytes available to this user and the volume's total
 // size. ok is false where the path cannot be stat'd, which a caller treats
 // as "unknown" rather than zero.
-func Usage(path string) (free, total uint64, ok bool) {
+func usage(path string) (free, total uint64, ok bool) {
 	var st syscall.Statfs_t
 	if err := statfs(path, &st); err != nil {
 		return 0, 0, false

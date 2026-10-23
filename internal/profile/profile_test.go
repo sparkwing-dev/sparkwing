@@ -1,4 +1,4 @@
-package profile_test
+package profile
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
@@ -22,12 +22,12 @@ func savedAt(t *testing.T, path string) string {
 
 func TestInheritControllerDefaults(t *testing.T) {
 	prefilledTokenEnv := "PREFILLED"
-	p := &profile.Profile{
-		Controller: &profile.ControllerSpec{URL: "https://ctrl.example", Token: "tok-from-ctrl"},
+	p := &profile{
+		Controller: &controllerSpec{URL: "https://ctrl.example", Token: "tok-from-ctrl"},
 		Secrets:    &backends.Spec{Type: backends.TypeController},
 		State:      &backends.Spec{Type: backends.TypeController, URL: "https://state.override", Token: "tok-state"},
 	}
-	p.InheritControllerDefaults()
+	p.inheritControllerDefaults()
 	if p.Secrets.URL != "https://ctrl.example" || p.Secrets.Token != "tok-from-ctrl" {
 		t.Errorf("Secrets not filled from controller: %+v", p.Secrets)
 	}
@@ -35,12 +35,12 @@ func TestInheritControllerDefaults(t *testing.T) {
 		t.Errorf("State (explicit) was overwritten: %+v", p.State)
 	}
 
-	envSecrets := &profile.Profile{
-		Controller: &profile.ControllerSpec{URL: "https://ctrl.example", Token: "tok-from-ctrl"},
+	envSecrets := &profile{
+		Controller: &controllerSpec{URL: "https://ctrl.example", Token: "tok-from-ctrl"},
 		Secrets:    &backends.Spec{Type: backends.TypeController, TokenEnv: prefilledTokenEnv},
 		State:      &backends.Spec{Type: backends.TypeSQLite, Path: "/var/sw.db"},
 	}
-	envSecrets.InheritControllerDefaults()
+	envSecrets.inheritControllerDefaults()
 	if envSecrets.Secrets.URL != "https://ctrl.example" || envSecrets.Secrets.Token != "" {
 		t.Errorf("Secrets: URL should fill but Token must stay empty when TokenEnv is set: %+v", envSecrets.Secrets)
 	}
@@ -50,7 +50,7 @@ func TestInheritControllerDefaults(t *testing.T) {
 }
 
 func TestLoad_MissingFile(t *testing.T) {
-	cfg, err := profile.Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	cfg, err := load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err != nil {
 		t.Fatalf("Load missing: %v", err)
 	}
@@ -61,17 +61,17 @@ func TestLoad_MissingFile(t *testing.T) {
 
 func TestLoadSaveRoundTrip(t *testing.T) {
 	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
-	cfg := &profile.Config{
-		Profiles: map[string]*profile.Profile{
+	cfg := &config{
+		Profiles: map[string]*profile{
 			"prod": {
-				Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
+				Controller: &controllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
 			},
 		},
 	}
-	if err := profile.Save(path, cfg); err != nil {
+	if err := save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	out, err := profile.Load(path)
+	out, err := load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -79,14 +79,14 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	if prod == nil {
 		t.Fatal("prod profile missing on reload")
 	}
-	if prod.ControllerURL() != "https://api.example.dev" || prod.ControllerToken() != "swu_x" {
+	if prod.controllerURL() != "https://api.example.dev" || prod.controllerToken() != "swu_x" {
 		t.Errorf("controller/token: %+v", prod)
 	}
 }
 
 func TestSave_0600Mode(t *testing.T) {
 	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
-	if err := profile.Save(path, &profile.Config{}); err != nil {
+	if err := save(path, &config{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	if runtime.GOOS != "windows" {
@@ -102,12 +102,12 @@ func TestSave_0600Mode(t *testing.T) {
 }
 
 func TestNames_Sorted(t *testing.T) {
-	cfg := &profile.Config{
-		Profiles: map[string]*profile.Profile{
+	cfg := &config{
+		Profiles: map[string]*profile{
 			"zebra": {}, "alpha": {}, "mango": {},
 		},
 	}
-	got := cfg.Names()
+	got := cfg.names()
 	want := []string{"alpha", "mango", "zebra"}
 	for i, n := range want {
 		if got[i] != n {
@@ -119,7 +119,7 @@ func TestNames_Sorted(t *testing.T) {
 func TestDefaultPath_RespectsEnv(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", "/tmp/custom.yaml")
 	t.Setenv("XDG_CONFIG_HOME", "")
-	got, err := profile.DefaultPath()
+	got, err := defaultPath()
 	if err != nil || got != "/tmp/custom.yaml" {
 		t.Errorf("got (%q, %v), want /tmp/custom.yaml", got, err)
 	}
@@ -131,7 +131,7 @@ func TestDefaultPath_XDG(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
-	got, err := profile.DefaultPath()
+	got, err := defaultPath()
 	if err != nil || got != filepath.Join("/tmp/xdg", "sparkwing", "config.yaml") {
 		t.Errorf("got (%q, %v), want /tmp/xdg/sparkwing/config.yaml", got, err)
 	}
@@ -147,7 +147,7 @@ func TestLoad_RefusesARemovedStateProfile(t *testing.T) {
 			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := profile.Load(path)
+			_, err := load(path)
 			if err == nil {
 				t.Fatal("Load accepted a removed state profile")
 			}
@@ -171,14 +171,14 @@ func TestLoad_RefusesRemovedKeys(t *testing.T) {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := profile.Load(path); err == nil || !strings.Contains(err.Error(), "profiles.prod."+key) {
+		if _, err := load(path); err == nil || !strings.Contains(err.Error(), "profiles.prod."+key) {
 			t.Errorf("Load = %v, want %s refused as an unknown field", err, key)
 		}
 	}
 }
 
 func TestSurfaces_NilSafe(t *testing.T) {
-	got := (*profile.Profile)(nil).Surfaces()
+	got := (*profile)(nil).surfaces()
 	if got.State != nil || got.Secrets != nil {
 		t.Errorf("nil profile should yield zero Surfaces; got %+v", got)
 	}
@@ -190,8 +190,8 @@ func TestSaveRewritesOnlyTheProfilesSection(t *testing.T) {
 	if err := fssecure.WriteFile(path, []byte(before)); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &profile.Config{Profiles: map[string]*profile.Profile{"prod": {Controller: &profile.ControllerSpec{URL: "https://ctrl.example"}}}}
-	if err := profile.Save(path, cfg); err != nil {
+	cfg := &config{Profiles: map[string]*profile{"prod": {Controller: &controllerSpec{URL: "https://ctrl.example"}}}}
+	if err := save(path, cfg); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(path)

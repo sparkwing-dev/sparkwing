@@ -9,39 +9,35 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
-type Profile struct {
+type profile struct {
 	Name string `yaml:"-"`
 
-	Controller *ControllerSpec `yaml:"controller,omitempty"`
+	Controller *controllerSpec `yaml:"controller,omitempty"`
 
 	Secrets *backends.Spec `yaml:"secrets,omitempty"`
 	State   *backends.Spec `yaml:"state,omitempty"`
 }
 
-type ControllerSpec struct {
+type controllerSpec struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token,omitempty"`
 }
 
-func (p *Profile) ControllerURL() string {
+func (p *profile) controllerURL() string {
 	if p == nil || p.Controller == nil {
 		return ""
 	}
 	return p.Controller.URL
 }
 
-func (p *Profile) ControllerToken() string {
+func (p *profile) controllerToken() string {
 	if p == nil || p.Controller == nil {
 		return ""
 	}
 	return p.Controller.Token
 }
 
-func (p *Profile) HasController() bool {
-	return p.ControllerURL() != ""
-}
-
-func (p *Profile) InheritControllerDefaults() {
+func (p *profile) inheritControllerDefaults() {
 	if p == nil || p.Controller == nil {
 		return
 	}
@@ -61,7 +57,7 @@ func (p *Profile) InheritControllerDefaults() {
 	}
 }
 
-func (p *Profile) Surfaces() backends.Surfaces {
+func (p *profile) surfaces() backends.Surfaces {
 	if p == nil {
 		return backends.Surfaces{}
 	}
@@ -71,38 +67,36 @@ func (p *Profile) Surfaces() backends.Surfaces {
 	}
 }
 
-// Config is the profiles section of config.yaml: profile name to profile.
-type Config struct {
-	Profiles map[string]*Profile
+// config is the profiles section of config.yaml: profile name to profile.
+type config struct {
+	Profiles map[string]*profile
 }
 
-var ErrNoProfile = errors.New("no profile configured")
+var errProfileNotFound = errors.New("profile not found")
 
-var ErrProfileNotFound = errors.New("profile not found")
-
-// DefaultPath reports the config.yaml profiles are read from and written to;
+// defaultPath reports the config.yaml profiles are read from and written to;
 // see [userconfig.Path].
-func DefaultPath() (string, error) {
+func defaultPath() (string, error) {
 	return userconfig.Path()
 }
 
-// Load reads the profiles section of the config.yaml at path. An absent file
+// load reads the profiles section of the config.yaml at path. An absent file
 // or section is an empty set of profiles.
-func Load(path string) (*Config, error) {
-	cfg := Config{Profiles: map[string]*Profile{}}
+func load(path string) (*config, error) {
+	cfg := config{Profiles: map[string]*profile{}}
 	if _, err := userconfig.Read(path, userconfig.Profiles, &cfg.Profiles); err != nil {
 		return nil, err
 	}
 	if cfg.Profiles == nil {
-		cfg.Profiles = map[string]*Profile{}
+		cfg.Profiles = map[string]*profile{}
 	}
 	for name, p := range cfg.Profiles {
 		if p == nil {
-			cfg.Profiles[name] = &Profile{Name: name}
+			cfg.Profiles[name] = &profile{Name: name}
 			continue
 		}
 		p.Name = name
-		p.InheritControllerDefaults()
+		p.inheritControllerDefaults()
 		if err := p.validateSurfaceFields(); err != nil {
 			return nil, fmt.Errorf("%s: profile %q: %w", path, name, err)
 		}
@@ -110,7 +104,7 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func (p *Profile) validateSurfaceFields() error {
+func (p *profile) validateSurfaceFields() error {
 	for surface, spec := range map[string]*backends.Spec{
 		"secrets": p.Secrets,
 		"state":   p.State,
@@ -122,10 +116,10 @@ func (p *Profile) validateSurfaceFields() error {
 	return nil
 }
 
-// Save replaces the profiles section of the config.yaml at path with cfg,
+// save replaces the profiles section of the config.yaml at path with cfg,
 // keeping every other section; see [userconfig.Write].
-func Save(path string, cfg *Config) error {
-	out := map[string]*Profile{}
+func save(path string, cfg *config) error {
+	out := map[string]*profile{}
 	for name, p := range cfg.Profiles {
 		if p == nil {
 			continue
@@ -137,20 +131,7 @@ func Save(path string, cfg *Config) error {
 	return userconfig.Write(path, userconfig.Profiles, "profiles", out)
 }
 
-func LoadAndResolve(explicitName string) (*Profile, error) {
-	path, err := DefaultPath()
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := Load(path)
-	if err != nil {
-		return nil, err
-	}
-	p, _, err := Resolve(explicitName, cfg)
-	return p, err
-}
-
-func (c *Config) Names() []string {
+func (c *config) names() []string {
 	out := make([]string, 0, len(c.Profiles))
 	for name := range c.Profiles {
 		out = append(out, name)

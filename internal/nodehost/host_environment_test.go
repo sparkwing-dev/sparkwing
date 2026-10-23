@@ -69,7 +69,7 @@ func TestSDKEnvironmentProjection(t *testing.T) {
 			case "plan":
 				process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Runner: input.GrantedRunner, Environment: spec.Request.Request.Env, Run: nodeproto.RunContext{RunID: input.Accepted.RunID, Pipeline: "build", DryRun: true}}, func(context.Context, nodeproto.FrameLog) error { return nil })
 			case "attempt":
-				process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
+				process, err = cfg.startNode(t.Context(), input, ExecutorActivity{})
 			case "eval":
 				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
 			}

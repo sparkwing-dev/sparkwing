@@ -29,13 +29,13 @@ func (f *installationFixture) Apply(context.Context, engine.VerifiedRelease) err
 
 func TestSoftwareUpdateRejectsMissingVerificationBeforeDrain(t *testing.T) {
 	f := &installationFixture{}
-	if err := ApplySoftwareUpdate(context.Background(), engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Required: true}, f); err == nil {
+	if err := applySoftwareUpdate(context.Background(), engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Required: true}, f); err == nil {
 		t.Fatal("unverified replacement accepted")
 	}
 	if len(f.calls) != 0 {
 		t.Fatal("unverified update started draining")
 	}
-	if err := ApplySoftwareUpdate(context.Background(), engine.SoftwareUpdate{CurrentVersion: "v0.20.0", Version: "v0.20.0"}, f); err != nil {
+	if err := applySoftwareUpdate(context.Background(), engine.SoftwareUpdate{CurrentVersion: "v0.20.0", Version: "v0.20.0"}, f); err != nil {
 		t.Fatal(err)
 	}
 }

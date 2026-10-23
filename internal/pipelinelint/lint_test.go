@@ -71,7 +71,7 @@ func (p *P) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs
 	return nil
 }`
 	findings := lintSource(t, src)
-	if got := countRule(findings, RulePlanIO); got != 1 {
+	if got := countRule(findings, rulePlanIO); got != 1 {
 		t.Fatalf("plan-io findings = %d, want 1: %+v", got, findings)
 	}
 }
@@ -83,7 +83,7 @@ func TestPlanIO_FlagsShellAndFileCallsInPlanBody(t *testing.T) {
 	return nil
 }`
 	findings := lintSource(t, src)
-	if got := countRule(findings, RulePlanIO); got != 2 {
+	if got := countRule(findings, rulePlanIO); got != 2 {
 		t.Fatalf("plan-io findings = %d, want 2: %+v", got, findings)
 	}
 }
@@ -119,7 +119,7 @@ func TestPlanRuntimeBranch_FlagsEnvAndRuntimeAndIsLocal(t *testing.T) {
 	return nil
 }`
 	findings := lintSource(t, src)
-	if got := countRule(findings, RulePlanRuntimeBranch); got != 3 {
+	if got := countRule(findings, rulePlanRuntimeBranch); got != 3 {
 		t.Fatalf("plan-runtime-branch findings = %d, want 3: %+v", got, findings)
 	}
 }
@@ -130,7 +130,7 @@ func TestRunnerLabel_FlagsBlankLabel(t *testing.T) {
 	return nil
 }`
 	findings := lintSource(t, src)
-	if got := countRule(findings, RuleRunnerLabel); got != 1 {
+	if got := countRule(findings, ruleRunnerLabel); got != 1 {
 		t.Fatalf("runner-label findings = %d, want 1: %+v", got, findings)
 	}
 }
@@ -141,7 +141,7 @@ func TestRunnerLabel_FlagsInlineWithRequires(t *testing.T) {
 	return nil
 }`
 	findings := lintSource(t, src)
-	if got := countRule(findings, RuleRunnerLabel); got != 1 {
+	if got := countRule(findings, ruleRunnerLabel); got != 1 {
 		t.Fatalf("runner-label findings = %d, want 1: %+v", got, findings)
 	}
 }
@@ -152,7 +152,7 @@ func TestRunnerLabel_CleanRequiresIsAllowed(t *testing.T) {
 	return nil
 }`
 	findings := lintSource(t, src)
-	if got := countRule(findings, RuleRunnerLabel); got != 0 {
+	if got := countRule(findings, ruleRunnerLabel); got != 0 {
 		t.Fatalf("runner-label findings = %d, want 0: %+v", got, findings)
 	}
 }
@@ -167,7 +167,7 @@ func (p *P) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, 
 	return nil
 }`
 	findings := lintSource(t, src)
-	if got := countRule(findings, RuleUnusedRef); got != 2 {
+	if got := countRule(findings, ruleUnusedRef); got != 2 {
 		t.Fatalf("unused-ref findings = %d, want 2: %+v", got, findings)
 	}
 }
@@ -187,7 +187,7 @@ type deployer struct {
 	Build sparkwing.Ref[Out]
 }`
 	findings := lintSource(t, src)
-	if got := countRule(findings, RuleUnusedRef); got != 0 {
+	if got := countRule(findings, ruleUnusedRef); got != 0 {
 		t.Fatalf("unused-ref findings = %d, want 0: %+v", got, findings)
 	}
 }
@@ -226,8 +226,8 @@ func TestGuardMisuse_RequireAndRejectSameToken(t *testing.T) {
 			Reject:  []string{"where:controller"},
 		},
 	}}}
-	findings := AnalyzeGuards(cfg)
-	if got := countRule(findings, RuleGuardMisuse); got != 1 {
+	findings := analyzeGuards(cfg)
+	if got := countRule(findings, ruleGuardMisuse); got != 1 {
 		t.Fatalf("guard-misuse findings = %d, want 1: %+v", got, findings)
 	}
 }
@@ -237,8 +237,8 @@ func TestGuardMisuse_LocalAndControllerBothRequired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings := AnalyzeGuards(cfg.Registry())
-	if got := countRule(findings, RuleGuardMisuse); got != 1 {
+	findings := analyzeGuards(cfg.Registry())
+	if got := countRule(findings, ruleGuardMisuse); got != 1 {
 		t.Fatalf("guard-misuse findings = %d, want 1: %+v", got, findings)
 	}
 }
@@ -249,8 +249,8 @@ func TestGuardMisuse_DuplicateToken(t *testing.T) {
 		Entrypoint: "Deploy",
 		Guards:     pipelines.Guards{Require: []string{"git:branch=main", "git:branch=main"}},
 	}}}
-	findings := AnalyzeGuards(cfg)
-	if got := countRule(findings, RuleGuardMisuse); got != 1 {
+	findings := analyzeGuards(cfg)
+	if got := countRule(findings, ruleGuardMisuse); got != 1 {
 		t.Fatalf("guard-misuse findings = %d, want 1: %+v", got, findings)
 	}
 }
@@ -261,16 +261,16 @@ func TestGuardMisuse_CleanGuardsPass(t *testing.T) {
 		Entrypoint: "Deploy",
 		Guards:     pipelines.Guards{Require: []string{"where:controller"}, Reject: []string{"git:branch=main"}},
 	}}}
-	if findings := AnalyzeGuards(cfg); len(findings) != 0 {
+	if findings := analyzeGuards(cfg); len(findings) != 0 {
 		t.Fatalf("clean guards should produce no findings: %+v", findings)
 	}
 }
 
 func TestRules_EveryRuleIsDocumented(t *testing.T) {
 	want := map[string]bool{
-		RulePlanIO: false, RulePlanRuntimeBranch: false, RuleRunnerLabel: false,
-		RuleUnusedRef: false, RuleGuardMisuse: false,
-		RuleGroupCacheShared: false, RuleDynamicGroupInert: false,
+		rulePlanIO: false, rulePlanRuntimeBranch: false, ruleRunnerLabel: false,
+		ruleUnusedRef: false, ruleGuardMisuse: false,
+		ruleGroupCacheShared: false, ruleDynamicGroupInert: false,
 	}
 	for _, d := range Rules() {
 		if _, ok := want[d.Name]; !ok {
@@ -331,7 +331,7 @@ func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunConte
 	findings := lintSource(t, src)
 	var got int
 	for _, f := range findings {
-		if f.Rule == RuleGroupCacheShared {
+		if f.Rule == ruleGroupCacheShared {
 			got++
 			if !strings.Contains(f.Message, "Members()") {
 				t.Errorf("finding does not name the way out: %q", f.Message)
@@ -339,7 +339,7 @@ func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunConte
 		}
 	}
 	if got != 1 {
-		t.Fatalf("got %d %s findings, want 1: %+v", got, RuleGroupCacheShared, findings)
+		t.Fatalf("got %d %s findings, want 1: %+v", got, ruleGroupCacheShared, findings)
 	}
 }
 
@@ -362,7 +362,7 @@ func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunConte
 type T struct{ sw.Base }
 `
 	for _, f := range lintSource(t, src) {
-		if f.Rule == RuleGroupCacheShared {
+		if f.Rule == ruleGroupCacheShared {
 			t.Errorf("flagged a single-job Cache: %+v", f)
 		}
 	}
@@ -390,14 +390,14 @@ func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunConte
 type T struct{ sw.Base }
 `
 	findings := lintSource(t, src)
-	if got := countRule(findings, RuleDynamicGroupInert); got != 2 {
-		t.Fatalf("got %d %s findings, want 2: %+v", got, RuleDynamicGroupInert, findings)
+	if got := countRule(findings, ruleDynamicGroupInert); got != 2 {
+		t.Fatalf("got %d %s findings, want 2: %+v", got, ruleDynamicGroupInert, findings)
 	}
-	if got := countRule(findings, RuleGroupCacheShared); got != 0 {
-		t.Fatalf("a dynamic group has no members to share a cache entry; got %d %s findings", got, RuleGroupCacheShared)
+	if got := countRule(findings, ruleGroupCacheShared); got != 0 {
+		t.Fatalf("a dynamic group has no members to share a cache entry; got %d %s findings", got, ruleGroupCacheShared)
 	}
 	for _, f := range findings {
-		if f.Rule == RuleDynamicGroupInert && strings.Contains(f.Message, "Requires") &&
+		if f.Rule == ruleDynamicGroupInert && strings.Contains(f.Message, "Requires") &&
 			!strings.Contains(f.Message, "RequiresProvider") {
 			t.Errorf("the label finding does not name the way out: %q", f.Message)
 		}
@@ -427,7 +427,7 @@ func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunConte
 
 type T struct{ sw.Base }
 `
-	if got := countRule(lintSource(t, src), RuleDynamicGroupInert); got != 0 {
+	if got := countRule(lintSource(t, src), ruleDynamicGroupInert); got != 0 {
 		t.Fatalf("reading a dynamic group is not configuring it; got %d findings", got)
 	}
 }
@@ -460,11 +460,11 @@ func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunConte
 type T struct{ sw.Base }
 `
 	findings := lintSource(t, src)
-	if got := countRule(findings, RuleGroupCacheShared); got != 1 {
-		t.Fatalf("got %d %s findings for a group memoized on the next line, want 1: %+v", got, RuleGroupCacheShared, findings)
+	if got := countRule(findings, ruleGroupCacheShared); got != 1 {
+		t.Fatalf("got %d %s findings for a group memoized on the next line, want 1: %+v", got, ruleGroupCacheShared, findings)
 	}
-	if got := countRule(findings, RuleDynamicGroupInert); got != 1 {
-		t.Fatalf("got %d %s findings for a dynamic group configured on the next line, want 1: %+v", got, RuleDynamicGroupInert, findings)
+	if got := countRule(findings, ruleDynamicGroupInert); got != 1 {
+		t.Fatalf("got %d %s findings for a dynamic group configured on the next line, want 1: %+v", got, ruleDynamicGroupInert, findings)
 	}
 }
 
@@ -474,7 +474,7 @@ func TestRunnerLabel_FlagsBlankWhenRunnerLabel(t *testing.T) {
 	return nil
 }`
 	findings := lintSource(t, src)
-	if got := countRule(findings, RuleRunnerLabel); got != 1 {
+	if got := countRule(findings, ruleRunnerLabel); got != 1 {
 		t.Fatalf("runner-label findings = %d, want 1: %+v", got, findings)
 	}
 }
@@ -485,7 +485,7 @@ func TestRunnerLabel_InlineWithWhenRunnerIsClean(t *testing.T) {
 	return nil
 }`
 	findings := lintSource(t, src)
-	if got := countRule(findings, RuleRunnerLabel); got != 0 {
+	if got := countRule(findings, ruleRunnerLabel); got != 0 {
 		t.Fatalf("WhenRunner is matched against the inline runner; got %d findings: %+v", got, findings)
 	}
 }
@@ -553,7 +553,7 @@ func TestPlanIO_FollowingAPlanIntoASamePackageHelper(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			findings := lintFiles(t, tc.files)
-			got := countRule(findings, RulePlanIO)
+			got := countRule(findings, rulePlanIO)
 			if got != tc.want {
 				t.Fatalf("plan-io findings = %d, want %d: %+v", got, tc.want, findings)
 			}
@@ -562,7 +562,7 @@ func TestPlanIO_FollowingAPlanIntoASamePackageHelper(t *testing.T) {
 			}
 			wantLine := lineOf(tc.files[tc.at], ".Bash(")
 			for _, f := range findings {
-				if f.Rule != RulePlanIO {
+				if f.Rule != rulePlanIO {
 					continue
 				}
 				if filepath.Base(f.File) != tc.at {

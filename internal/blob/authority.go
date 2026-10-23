@@ -107,7 +107,7 @@ func AuthorizeEdge(r EdgeRequest) error {
 		return ErrDigestNotReadable
 	}
 	for _, edge := range r.ReadSet.Edges {
-		if edge.Reader != r.ReadSet.Reader || edge.Digest != r.Digest || !slices.Contains(EdgeKinds, edge.Kind) {
+		if edge.Reader != r.ReadSet.Reader || edge.Digest != r.Digest || !slices.Contains(edgeKinds, edge.Kind) {
 			continue
 		}
 		if a.Attempt.Set {

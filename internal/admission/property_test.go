@@ -148,7 +148,7 @@ func randomSubmit(t *testing.T, l *Ledger, rng *rand.Rand, n int, totalCores flo
 		ExpectedP99MS: int64(rng.Intn(5001)),
 		BurstCores:    rng.Intn(5) == 0,
 	}
-	policies := []Policy{PolicyQueue, PolicyQueue, PolicyFail, PolicySkip, PolicyCancelOthers}
+	policies := []Policy{PolicyQueue, PolicyQueue, policyFail, policySkip, PolicyCancelOthers}
 	for _, i := range rng.Perm(len(semKeys))[:rng.Intn(len(semKeys)+1)] {
 		key := semKeys[i]
 		capacity := semCaps[key] + rng.Intn(2)

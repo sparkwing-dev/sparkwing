@@ -33,7 +33,7 @@ func TestResolvePeak(t *testing.T) {
 				duration = time.Minute
 			}
 			want := Resolution{Cores: tc.peak, MemoryBytes: tc.memory, Source: tc.source, ExpectedDuration: duration}
-			if got := ResolvePeak(tc.pin, tc.profile, 8, tc.hash); got != want {
+			if got := resolvePeak(tc.pin, tc.profile, 8, tc.hash); got != want {
 				t.Errorf("pod allocation = %+v, want %+v", got, want)
 			}
 			want.Cores = tc.host

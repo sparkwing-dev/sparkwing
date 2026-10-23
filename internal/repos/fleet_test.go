@@ -103,11 +103,11 @@ func TestGuidesBehind_CountsCrossedRange(t *testing.T) {
 
 func TestPinsDiverge(t *testing.T) {
 	same := []Repo{{Primary: "/a", Pin: "v1"}, {Primary: "/b", Pin: "v1"}}
-	if PinsDiverge(same) {
+	if pinsDiverge(same) {
 		t.Error("matching pins should not diverge")
 	}
 	diff := []Repo{{Primary: "/a", Pin: "v1"}, {Primary: "/b", Pin: "v2"}}
-	if !PinsDiverge(diff) {
+	if !pinsDiverge(diff) {
 		t.Error("mismatched pins should diverge")
 	}
 }

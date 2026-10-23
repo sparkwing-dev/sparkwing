@@ -20,8 +20,6 @@ func NewStoreBackend(tenant *store.Tenant, logStore storage.LogStore) *StoreBack
 
 var _ Backend = (*StoreBackend)(nil)
 
-func (b *StoreBackend) SetCapabilities(c Capabilities) { b.caps = c }
-
 func (b *StoreBackend) Capabilities(context.Context) (Capabilities, error) {
 	if b.caps.Mode == "" {
 		return Capabilities{

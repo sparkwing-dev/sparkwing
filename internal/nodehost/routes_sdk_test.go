@@ -1,4 +1,4 @@
-package nodehost_test
+package nodehost
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -52,7 +52,7 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 	s := start(t)
 	masker := secrets.NewMasker()
 	service := newService(t)
-	service.Masks = nodehost.NewMaskRegistry(masker)
+	service.Masks = NewMaskRegistry(masker)
 	service.Secrets = []string{"TOKEN"}
 	service.Secret = func(context.Context, capability.Authorized, string) (string, bool, error) {
 		return "resolved-credential", true, nil
@@ -60,22 +60,22 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 	service.Output = func(context.Context, capability.Authorized, string) (json.RawMessage, error) {
 		return json.RawMessage(`{"image":"ready"}`), nil
 	}
-	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (nodehost.ProcessOutput, error) {
-		return nodehost.ProcessOutput{RunID: "previous", Output: json.RawMessage(`{"image":"ready"}`)}, nil
+	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error) {
+		return ProcessOutput{RunID: "previous", Output: json.RawMessage(`{"image":"ready"}`)}, nil
 	}
-	service.OIDC = func(context.Context, capability.Authorized, string) (nodehost.ProcessOIDCToken, error) {
-		return nodehost.ProcessOIDCToken{Token: "minted-credential", ExpiresAt: time.Now().Add(time.Hour)}, nil
+	service.OIDC = func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error) {
+		return ProcessOIDCToken{Token: "minted-credential", ExpiresAt: time.Now().Add(time.Hour)}, nil
 	}
 	children := 0
-	service.StartChild = func(context.Context, capability.Authorized, nodehost.ChildRequest) (string, error) {
+	service.StartChild = func(context.Context, capability.Authorized, ChildRequest) (string, error) {
 		children++
 		return fmt.Sprintf("child-%d", children), nil
 	}
-	service.AwaitChild = func(_ context.Context, _ capability.Authorized, run, _ string, _ time.Duration) (nodehost.ProcessChildResult, error) {
+	service.AwaitChild = func(_ context.Context, _ capability.Authorized, run, _ string, _ time.Duration) (ProcessChildResult, error) {
 		if run == "child-2" {
-			return nodehost.ProcessChildResult{RunID: run, Status: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "dynamic-credential", Details: map[string]any{"why": "dynamic-credential"}}}, nil
+			return ProcessChildResult{RunID: run, Status: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "dynamic-credential", Details: map[string]any{"why": "dynamic-credential"}}}, nil
 		}
-		return nodehost.ProcessChildResult{RunID: run, Status: "success", Output: json.RawMessage(`{"image":"ready"}`)}, nil
+		return ProcessChildResult{RunID: run, Status: "success", Output: json.RawMessage(`{"image":"ready"}`)}, nil
 	}
 	var records []string
 	service.Annotation = func(_ context.Context, _ capability.Authorized, request nodeproto.AnnotationRequest) error {

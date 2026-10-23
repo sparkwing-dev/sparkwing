@@ -1,4 +1,4 @@
-package secretsource_test
+package secretsource
 
 import (
 	"os"
@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
@@ -20,7 +20,7 @@ func TestFilesystemSecretRefusesEscapingSymlink(t *testing.T) {
 	if err := os.Symlink(target, path); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	resolver, err := secretsource.FromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: path})
+	resolver, err := fromSpec(backends.Spec{Type: backends.TypeFilesystem, Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}

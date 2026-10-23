@@ -4,7 +4,7 @@
 //
 // Parse recognises the registration form those files use,
 // `mux.Handle("METHOD /path", requireScope(ScopeX, ...))`, and resolves the
-// scope constant through the map [Scopes] collects from the auth sources.
+// scope constant through the map [scopes] collects from the auth sources.
 package apiroutes
 
 import (
@@ -19,21 +19,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// Public marks a route registered outside the authentication middleware, so
+// public marks a route registered outside the authentication middleware, so
 // it answers without any credential.
-const Public = "public"
+const public = "public"
 
-// Authenticated marks a route behind the authentication middleware that
+// authenticated marks a route behind the authentication middleware that
 // declares no further scope, so any valid bearer satisfies it.
-const Authenticated = "authenticated"
+const authenticated = "authenticated"
 
-// Claim marks a route that answers a claim token, the credential one node
+// claim marks a route that answers a claim token, the credential one node
 // claim holds. A claim route that also names a scope answers either.
-const Claim = "claim"
+const claim = "claim"
 
-// Operator marks a route only a listed operator account's own browser session
+// operator marks a route only a listed operator account's own browser session
 // reaches. No token satisfies it, an admin token included.
-const Operator = "operator"
+const operator = "operator"
 
 var (
 	handleRE   = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
@@ -44,18 +44,18 @@ var (
 	scopeConstRE = regexp.MustCompile(`\b([A-Za-z]\w*)\s*=\s*"([a-z][a-z.]*)"`)
 )
 
-// Route is one registered HTTP route: its method, its pattern as the router
+// route is one registered HTTP route: its method, its pattern as the router
 // spells it, and the scope its handler chain demands.
-type Route struct {
+type route struct {
 	Method string
 	Path   string
 	Scope  string
 }
 
-// Scopes collects the scope constants declared in the given Go sources,
+// scopes collects the scope constants declared in the given Go sources,
 // keyed by constant name (`ScopeRunsRead`) and valued by wire scope
 // (`runs.read`).
-func Scopes(files ...string) (map[string]string, error) {
+func scopes(files ...string) (map[string]string, error) {
 	scopes := map[string]string{}
 	for _, file := range files {
 		// #nosec G703 -- a build-time tool reading paths the operator names
@@ -72,14 +72,14 @@ func Scopes(files ...string) (map[string]string, error) {
 	return scopes, nil
 }
 
-// Parse returns registered routes sorted by path then method, using policy for endpoint authentication.
-func Parse(file string, scopes map[string]string) ([]Route, error) {
+// parse returns registered routes sorted by path then method, using policy for endpoint authentication.
+func parse(file string, scopes map[string]string) ([]route, error) {
 	// #nosec G703 -- a build-time tool reading paths the operator names
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("read routes: %w", err)
 	}
-	var routes []Route
+	var routes []route
 	for _, group := range []struct{ registration, file string }{
 		{"s.operatorEndpoints()", "operator_routes.go"},
 		{"s.engineEndpoints()", "engine_routes.go"},
@@ -126,11 +126,11 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 			var alternatives []string
 			for _, access := range policy.Access {
 				if access.Credential == capability.CredentialOperator {
-					alternatives = append(alternatives, Operator)
+					alternatives = append(alternatives, operator)
 					continue
 				}
 				if len(access.Grants) == 0 {
-					alternatives = append(alternatives, Authenticated)
+					alternatives = append(alternatives, authenticated)
 					continue
 				}
 				var grants []string
@@ -141,11 +141,11 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 			}
 			scope := strings.Join(slices.Compact(alternatives), "` or `")
 			if policy.Authentication == capability.AuthPublic {
-				scope = Public
+				scope = public
 			} else if policy.Authentication != capability.AuthCapability {
 				scope = string(policy.Authentication)
 			}
-			routes = append(routes, Route{Method: match[1], Path: match[2], Scope: scope})
+			routes = append(routes, route{Method: match[1], Path: match[2], Scope: scope})
 		}
 	}
 	for line := range strings.SplitSeq(string(data), "\n") {
@@ -154,9 +154,9 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 			continue
 		}
 		receiver, method, path, rest := m[1], m[2], m[3], m[4]
-		scope := Public
+		scope := public
 		if receiver == "mux" {
-			scope = Authenticated
+			scope = authenticated
 		}
 		if matches := scopeRefRE.FindAllStringSubmatch(rest, -1); len(matches) > 0 {
 			seen := map[string]bool{}
@@ -174,16 +174,16 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 			scope = strings.Join(accepted, "` or `")
 		}
 		if receiver == "mux" && strings.Contains(rest, "requireOperator(") {
-			scope = Operator
+			scope = operator
 		}
 		if receiver == "mux" && strings.Contains(rest, "newClaim") {
-			if scope == Authenticated {
-				scope = Claim
+			if scope == authenticated {
+				scope = claim
 			} else {
-				scope = Claim + "` or `" + scope
+				scope = claim + "` or `" + scope
 			}
 		}
-		routes = append(routes, Route{Method: method, Path: path, Scope: scope})
+		routes = append(routes, route{Method: method, Path: path, Scope: scope})
 	}
 	sort.Slice(routes, func(i, j int) bool {
 		if routes[i].Path != routes[j].Path {

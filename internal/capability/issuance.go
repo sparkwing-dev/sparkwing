@@ -41,7 +41,7 @@ const (
 	OperatorConsole     Grant = "operator.console"
 )
 
-// Grants is the complete vocabulary.
+// grants is the complete vocabulary.
 var grants = []Grant{
 	RunsRead, RunsWrite, RunsControl, RunsState, NodesClaim, TriggersClaim, ClaimsLaunch,
 	LogsRead, SecretsRead, ApprovalsWrite, TeamAdmin, SecretsRelease, SourceRead,
@@ -99,10 +99,10 @@ type AwardPolicy struct {
 	Parent      ParentRule
 }
 
-// BootstrapGrants replaces the purpose's grants until Exchange consumes the bootstrap.
+// bootstrapGrants replaces the purpose's grants until Exchange consumes the bootstrap.
 var bootstrapGrants = []Grant{SourceRead, ClaimExchange}
 
-// BootstrapUnits confines pod delivery to units accepted by the launcher.
+// bootstrapUnits confines pod delivery to units accepted by the launcher.
 var bootstrapUnits = []UnitKind{UnitPlan, UnitEval, UnitNode}
 
 // ParentRule controls revocation ancestry independently of grant inheritance.
@@ -111,31 +111,29 @@ var bootstrapUnits = []UnitKind{UnitPlan, UnitEval, UnitNode}
 type ParentRule string
 
 const (
-	ParentDelegator       ParentRule = "delegator"
-	ParentClaimantRoot    ParentRule = "claimant_root"
-	ParentRequester       ParentRule = "requester"
-	ParentBootstrapParent ParentRule = "bootstrap_parent"
+	parentClaimantRoot ParentRule = "claimant_root"
+	parentRequester    ParentRule = "requester"
 )
 
-// AwardPolicies is exhaustive for execution grants, including the here trigger-Award case.
+// awardPolicies is exhaustive for execution grants, including the here trigger-Award case.
 // Eval reads are restricted to its source or the approval predicate declarations.
 var awardPolicies = []AwardPolicy{
 	{PurposeTrigger, UnitTrigger, []Grant{TriggersClaim, TriggerHost}, []Grant{
 		TriggerHost, RunsRead, RunsState, NodesClaim, NodeReport, NodeResult, LogTail,
 		SecretsRelease, SourceRead, DataRead, DataWrite, OIDCMint, RefsRead, ChildrenStart, ExpansionSubmit,
-	}, []BindingKind{BindingTrigger}, ParentClaimantRoot},
+	}, []BindingKind{BindingTrigger}, parentClaimantRoot},
 	{PurposeWork, UnitNode, []Grant{NodesClaim, ClaimsLaunch}, []Grant{
 		NodeReport, NodeResult, LogTail, SecretsRelease, SourceRead, DataRead, DataWrite,
 		OIDCMint, RefsRead, ChildrenStart,
-	}, []BindingKind{BindingNode}, ParentClaimantRoot},
+	}, []BindingKind{BindingNode}, parentClaimantRoot},
 	{PurposePlan, UnitPlan, []Grant{TriggersClaim, ClaimsLaunch}, []Grant{
 		SourceRead, SecretsRelease, DataRead, DataWrite, NodeReport, NodeResult, LogTail,
-	}, []BindingKind{BindingRun}, ParentClaimantRoot},
-	{PurposeEval, UnitEval, []Grant{NodesClaim, ClaimsLaunch}, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead}, []BindingKind{BindingNode}, ParentClaimantRoot},
+	}, []BindingKind{BindingRun}, parentClaimantRoot},
+	{PurposeEval, UnitEval, []Grant{NodesClaim, ClaimsLaunch}, []Grant{ExpansionSubmit, DataRead, SecretsRelease, RefsRead}, []BindingKind{BindingNode}, parentClaimantRoot},
 	{PurposeHere, UnitTrigger, []Grant{RunsWrite}, []Grant{
 		TriggerHost, RunsRead, RunsState, NodesClaim, NodeReport, NodeResult, LogTail,
 		SecretsRelease, SourceRead, DataRead, DataWrite, OIDCMint, RefsRead, ChildrenStart, ExpansionSubmit,
-	}, []BindingKind{BindingTrigger}, ParentRequester},
+	}, []BindingKind{BindingTrigger}, parentRequester},
 }
 
 // DelegateSpec can only narrow its parent's grants, repo/data scope, binding and lifetime.
@@ -234,7 +232,7 @@ func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) err
 	if ownerExpansion && child.Data != nil {
 		dataNarrowed = narrowOwnerExpansionData(p, child)
 	}
-	if !RepositoryScopeNarrows(p.Repositories, child.Repositories) || !dataNarrowed {
+	if !repositoryScopeNarrows(p.Repositories, child.Repositories) || !dataNarrowed {
 		return forbidden(apierr.ReasonRepositoryUnauthorized)
 	}
 	if (!narrowBinding(p.Binding, child.Binding) && !ownerExpansion) || !boundedExpiry(child.ExpiresAt, p.ExpiresAt, now) ||
@@ -248,7 +246,7 @@ func accountDataDelegation(parent Principal, child DelegateSpec) bool {
 	p, d := parent.Capability, child.Data
 	if p.Subject.Kind != SubjectAccount || p.Audience != Controller || p.Unit != "" || p.Data != nil ||
 		p.Binding != (Binding{Kind: BindingNone}) || d == nil || d.RepositoryKey == "" || child.Audience != Controller ||
-		!slices.Equal(child.Repositories, []string{d.RepositoryKey}) || !RepositoryScopeNarrows(p.Repositories, child.Repositories) || d.NodeID != "" || d.Attempt != 0 || d.Generation != 0 {
+		!slices.Equal(child.Repositories, []string{d.RepositoryKey}) || !repositoryScopeNarrows(p.Repositories, child.Repositories) || d.NodeID != "" || d.Attempt != 0 || d.Generation != 0 {
 		return false
 	}
 	switch d.Use {

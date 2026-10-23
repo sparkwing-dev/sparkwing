@@ -24,42 +24,37 @@ import (
 type Class string
 
 const (
-	// ClassPut counts object writes.
-	ClassPut Class = "put"
-	// ClassGet counts object reads, including HEAD, which stores bill
+	// classPut counts object writes.
+	classPut Class = "put"
+	// classGet counts object reads, including HEAD, which stores bill
 	// at the GET rate.
-	ClassGet Class = "get"
+	classGet Class = "get"
 	// ClassList counts bucket listings.
 	ClassList Class = "list"
-	// ClassDelete counts object deletions.
-	ClassDelete Class = "delete"
+	// classDelete counts object deletions.
+	classDelete Class = "delete"
 )
 
-// Classes lists every counted class in a stable order.
-func Classes() []Class { return []Class{ClassPut, ClassGet, ClassList, ClassDelete} }
-
-// IsWrite reports whether a class mutates the store. Write classes fail
-// closed the moment their budget trips; read classes keep serving until
-// their own budget trips.
-func (c Class) IsWrite() bool { return c == ClassPut || c == ClassDelete }
+// classes lists every counted class in a stable order.
+func classes() []Class { return []Class{classPut, classGet, ClassList, classDelete} }
 
 // Window names the budget a refusal came from.
 type Window string
 
 const (
-	// WindowMinute is the per-minute rate budget.
-	WindowMinute Window = "minute"
-	// WindowDay is the per-day request budget.
-	WindowDay Window = "day"
+	// windowMinute is the per-minute rate budget.
+	windowMinute Window = "minute"
+	// windowDay is the per-day request budget.
+	windowDay Window = "day"
 )
 
 // ErrBudgetExceeded matches every *BudgetError under errors.Is.
 var ErrBudgetExceeded = errors.New("object-store request budget exceeded")
 
-// BudgetError reports a refused object-store request. It names the
+// budgetError reports a refused object-store request. It names the
 // class, the budget that tripped, and its limit so an operator can act
 // on the message alone.
-type BudgetError struct {
+type budgetError struct {
 	Class  Class
 	Window Window
 	Limit  int
@@ -67,10 +62,10 @@ type BudgetError struct {
 	Tripped time.Time
 }
 
-func (e *BudgetError) Error() string {
+func (e *budgetError) Error() string {
 	return fmt.Sprintf(
 		"object-store %s budget exceeded: the per-%s limit of %d %s requests is spent, so the breaker tripped at %s and refuses further %s requests. "+
-			"The budget belongs to this process alone. On a controller, raise it with "+BudgetFlag+" %s:%s=<count>, "+
+			"The budget belongs to this process alone. On a controller, raise it with "+budgetFlag+" %s:%s=<count>, "+
 			"or clear it without restarting with `sparkwing operator object-store reset-breaker --profile NAME`",
 		e.Class, e.Window, e.Limit, e.Class,
 		e.Tripped.UTC().Format(time.RFC3339), e.Class,
@@ -78,12 +73,12 @@ func (e *BudgetError) Error() string {
 	)
 }
 
-func (e *BudgetError) Unwrap() error { return ErrBudgetExceeded }
+func (e *budgetError) Unwrap() error { return ErrBudgetExceeded }
 
 // RetryableError reports the refusal as final. The SDK retryer asks
 // before re-sending, and a budget that is spent is not going to be
 // unspent by another attempt.
-func (e *BudgetError) RetryableError() bool { return false }
+func (e *budgetError) RetryableError() bool { return false }
 
 // Limit is one class's pair of budgets. A zero or negative value means
 // that budget does not apply.
@@ -96,10 +91,10 @@ type Limit struct {
 type TripReset string
 
 const (
-	// TripResetDay clears a tripped class when its day window rolls.
-	TripResetDay TripReset = "day"
-	// TripResetManual keeps a class tripped until an explicit reset.
-	TripResetManual TripReset = "manual"
+	// tripResetDay clears a tripped class when its day window rolls.
+	tripResetDay TripReset = "day"
+	// tripResetManual keeps a class tripped until an explicit reset.
+	tripResetManual TripReset = "manual"
 )
 
 // Config is a Limiter's whole configuration.
@@ -123,29 +118,29 @@ type Config struct {
 // peak, so a leak that stays under the minute rate is still caught the
 // same day.
 const (
-	DefaultPutPerMinute = 1200
-	DefaultPutPerDay    = 200000
+	defaultPutPerMinute = 1200
+	defaultPutPerDay    = 200000
 
-	DefaultGetPerMinute = 3000
-	DefaultGetPerDay    = 500000
+	defaultGetPerMinute = 3000
+	defaultGetPerDay    = 500000
 
-	DefaultListPerMinute = 600
-	DefaultListPerDay    = 100000
+	defaultListPerMinute = 600
+	defaultListPerDay    = 100000
 
-	DefaultDeletePerMinute = 600
-	DefaultDeletePerDay    = 100000
+	defaultDeletePerMinute = 600
+	defaultDeletePerDay    = 100000
 )
 
-// DefaultConfig returns the built-in budgets.
-func DefaultConfig() Config {
+// defaultConfig returns the built-in budgets.
+func defaultConfig() Config {
 	return Config{
 		Enabled: true,
-		Reset:   TripResetDay,
+		Reset:   tripResetDay,
 		Limits: map[Class]Limit{
-			ClassPut:    {PerMinute: DefaultPutPerMinute, PerDay: DefaultPutPerDay},
-			ClassGet:    {PerMinute: DefaultGetPerMinute, PerDay: DefaultGetPerDay},
-			ClassList:   {PerMinute: DefaultListPerMinute, PerDay: DefaultListPerDay},
-			ClassDelete: {PerMinute: DefaultDeletePerMinute, PerDay: DefaultDeletePerDay},
+			classPut:    {PerMinute: defaultPutPerMinute, PerDay: defaultPutPerDay},
+			classGet:    {PerMinute: defaultGetPerMinute, PerDay: defaultGetPerDay},
+			ClassList:   {PerMinute: defaultListPerMinute, PerDay: defaultListPerDay},
+			classDelete: {PerMinute: defaultDeletePerMinute, PerDay: defaultDeletePerDay},
 		},
 	}
 }
@@ -211,14 +206,14 @@ func New(cfg Config) *Limiter {
 	l := &Limiter{
 		enabled:  cfg.Enabled,
 		reset:    cfg.Reset,
-		counters: make(map[Class]*classCounters, len(Classes())),
+		counters: make(map[Class]*classCounters, len(classes())),
 		ceiling:  NewCeiling(cfg.Ceiling),
 		now:      time.Now,
 	}
 	if l.reset == "" {
-		l.reset = TripResetDay
+		l.reset = tripResetDay
 	}
-	for _, c := range Classes() {
+	for _, c := range classes() {
 		l.counters[c] = &classCounters{limit: cfg.Limits[c]}
 	}
 	return l
@@ -228,11 +223,11 @@ func New(cfg Config) *Limiter {
 // its request budgets.
 func (l *Limiter) Ceiling() *Ceiling { return l.ceiling }
 
-// RecordWrite folds one completed object-store operation into the
+// recordWrite folds one completed object-store operation into the
 // bucket ceiling's incremental counters, by the operation name the SDK
 // uses. See [WriteDelta] for what each operation counts.
-func (l *Limiter) RecordWrite(operation string, bytes int64) {
-	l.ceiling.Record(WriteDelta(operation, bytes))
+func (l *Limiter) recordWrite(operation string, bytes int64) {
+	l.ceiling.record(writeDelta(operation, bytes))
 }
 
 // Allow records one request of class c and reports whether it may
@@ -251,7 +246,7 @@ func (l *Limiter) Allow(c Class) error {
 
 	// safety: only writes freeze, because deleting objects is how a bucket over
 	// its ceiling gets back under one.
-	if c == ClassPut && l.enabled {
+	if c == classPut && l.enabled {
 		if err := l.ceiling.Allow(); err != nil {
 			return err
 		}
@@ -259,7 +254,7 @@ func (l *Limiter) Allow(c Class) error {
 
 	if st.tripped && l.enabled {
 		st.refused++
-		return &BudgetError{Class: c, Window: st.trippedWindow, Limit: l.limitFor(st, st.trippedWindow), Tripped: st.trippedAt}
+		return &budgetError{Class: c, Window: st.trippedWindow, Limit: l.limitFor(st, st.trippedWindow), Tripped: st.trippedAt}
 	}
 	if window, limit, over := overBudget(st); over {
 		if !st.tripped {
@@ -270,7 +265,7 @@ func (l *Limiter) Allow(c Class) error {
 		}
 		if l.enabled {
 			st.refused++
-			return &BudgetError{Class: c, Window: window, Limit: limit, Tripped: st.trippedAt}
+			return &budgetError{Class: c, Window: window, Limit: limit, Tripped: st.trippedAt}
 		}
 	}
 	st.minuteUsed++
@@ -281,16 +276,16 @@ func (l *Limiter) Allow(c Class) error {
 
 func overBudget(st *classCounters) (Window, int, bool) {
 	if st.limit.PerMinute > 0 && st.minuteUsed >= st.limit.PerMinute {
-		return WindowMinute, st.limit.PerMinute, true
+		return windowMinute, st.limit.PerMinute, true
 	}
 	if st.limit.PerDay > 0 && st.dayUsed >= st.limit.PerDay {
-		return WindowDay, st.limit.PerDay, true
+		return windowDay, st.limit.PerDay, true
 	}
 	return "", 0, false
 }
 
 func (l *Limiter) limitFor(st *classCounters, w Window) int {
-	if w == WindowDay {
+	if w == windowDay {
 		return st.limit.PerDay
 	}
 	return st.limit.PerMinute
@@ -303,7 +298,7 @@ func (l *Limiter) rollWindows(st *classCounters, now time.Time) {
 	if st.minuteStart.IsZero() || now.Sub(st.minuteStart) >= time.Minute {
 		st.minuteStart = now.Truncate(time.Minute)
 		st.minuteUsed = 0
-		if st.tripped && st.trippedWindow == WindowMinute {
+		if st.tripped && st.trippedWindow == windowMinute {
 			st.clearTrip()
 		}
 	}
@@ -315,7 +310,7 @@ func (l *Limiter) rollWindows(st *classCounters, now time.Time) {
 	if day.After(st.dayStart) {
 		st.dayStart = day
 		st.dayUsed = 0
-		if l.reset == TripResetDay {
+		if l.reset == tripResetDay {
 			st.clearTrip()
 		}
 	}
@@ -335,7 +330,7 @@ func (l *Limiter) Reset() []Class {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var cleared []Class
-	for _, c := range Classes() {
+	for _, c := range classes() {
 		if l.resetLocked(c) {
 			cleared = append(cleared, c)
 		}
@@ -343,9 +338,9 @@ func (l *Limiter) Reset() []Class {
 	return cleared
 }
 
-// ResetClass clears one class's tripped state and window counters. It
+// resetClass clears one class's tripped state and window counters. It
 // reports whether the class was tripped.
-func (l *Limiter) ResetClass(c Class) bool {
+func (l *Limiter) resetClass(c Class) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.resetLocked(c)
@@ -363,8 +358,8 @@ func (l *Limiter) resetLocked(c Class) bool {
 	return was
 }
 
-// Tripped reports whether any class is currently tripped.
-func (l *Limiter) Tripped() bool {
+// tripped reports whether any class is currently tripped.
+func (l *Limiter) tripped() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, st := range l.counters {
@@ -381,7 +376,7 @@ func (l *Limiter) State() State {
 	defer l.mu.Unlock()
 	now := l.now().UTC()
 	out := State{Enabled: l.enabled, Reset: l.reset, Ceiling: l.ceiling.State()}
-	for _, c := range Classes() {
+	for _, c := range classes() {
 		st := l.counters[c]
 		if st == nil {
 			continue

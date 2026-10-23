@@ -1,17 +1,15 @@
-package egress_test
+package egress
 
 import (
 	"strings"
 	"testing"
 
 	flag "github.com/spf13/pflag"
-
-	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
 func TestBindDefaultsToUnlimited(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	read := egress.Bind(fs)
+	read := Bind(fs)
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -19,14 +17,14 @@ func TestBindDefaultsToUnlimited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read = %v, want nil", err)
 	}
-	if cfg.Budgeted() {
+	if cfg.budgeted() {
 		t.Fatalf("config = %+v, want every budget unlimited", cfg)
 	}
 }
 
 func TestBindReadsTheFlags(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	read := egress.Bind(fs)
+	read := Bind(fs)
 	if err := fs.Parse([]string{"--egress-daily-alarm-bytes=900", "--egress-max-downloads=4", "--egress-max-log-streams=3"}); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +40,7 @@ func TestBindReadsTheFlags(t *testing.T) {
 func TestBindIgnoresTheEnvironment(t *testing.T) {
 	t.Setenv("SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES", "not a number")
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	read := egress.Bind(fs)
+	read := Bind(fs)
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +51,7 @@ func TestBindIgnoresTheEnvironment(t *testing.T) {
 
 func TestBindRefusesANegativeBudget(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	read := egress.Bind(fs)
+	read := Bind(fs)
 	if err := fs.Parse([]string{"--egress-daily-alarm-bytes=-1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +59,7 @@ func TestBindRefusesANegativeBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("a negative budget was accepted")
 	}
-	if !strings.Contains(err.Error(), egress.FlagDailyAlarmBytes) {
+	if !strings.Contains(err.Error(), flagDailyAlarmBytes) {
 		t.Errorf("error %q does not name the flag", err)
 	}
 }
@@ -73,14 +71,14 @@ func TestBind_NamedReportsAZeroOnTheCommandLine(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
-		want egress.Named
+		want Named
 	}{
 		{name: "nothing named"},
-		{name: "zero on the command line", args: []string{"--egress-max-downloads=0"}, want: egress.Named{MaxDownloads: true}},
+		{name: "zero on the command line", args: []string{"--egress-max-downloads=0"}, want: Named{MaxDownloads: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := flag.NewFlagSet("controller", flag.ContinueOnError)
-			read := egress.Bind(fs)
+			read := Bind(fs)
 			if err := fs.Parse(tc.args); err != nil {
 				t.Fatal(err)
 			}

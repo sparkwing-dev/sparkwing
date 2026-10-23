@@ -57,9 +57,9 @@ func ResolveHold(configPath string) (Hold, error) {
 	return Hold{Value: value, Source: configPath}, nil
 }
 
-// ResolveHoldStrict distinguishes an invalid configured ceiling from the
+// resolveHoldStrict distinguishes an invalid configured ceiling from the
 // absence of one so unattended updaters can fail closed.
-func ResolveHoldStrict(configPath string) (Hold, error) {
+func resolveHoldStrict(configPath string) (Hold, error) {
 	hold, err := ResolveHold(configPath)
 	if err != nil {
 		return hold, err
@@ -67,14 +67,14 @@ func ResolveHoldStrict(configPath string) (Hold, error) {
 	if hold.Value == "" {
 		return hold, nil
 	}
-	if !ValidHold(hold.Value) {
+	if !validHold(hold.Value) {
 		return hold, fmt.Errorf("invalid version hold %q from %s: use vMAJOR.MINOR or vMAJOR.MINOR.PATCH", hold.Value, hold.Source)
 	}
 	return hold, nil
 }
 
-// ValidHold reports whether value is a stable minor-series or exact release ceiling.
-func ValidHold(value string) bool {
+// validHold reports whether value is a stable minor-series or exact release ceiling.
+func validHold(value string) bool {
 	value = strings.TrimSpace(value)
 	if buildinfo.IsReleaseVersion(value) {
 		return true

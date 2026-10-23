@@ -1,4 +1,4 @@
-package nodehost_test
+package nodehost
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 )
 
 func TestTenAwaitsOnTenChildrenAllSucceed(t *testing.T) {
@@ -17,14 +16,14 @@ func TestTenAwaitsOnTenChildrenAllSucceed(t *testing.T) {
 	entered := make(chan struct{}, 10)
 	release := make(chan struct{})
 	done := make(chan int, 10)
-	service.AwaitChild = func(ctx context.Context, _ capability.Authorized, run, _ string, _ time.Duration) (nodehost.ProcessChildResult, error) {
+	service.AwaitChild = func(ctx context.Context, _ capability.Authorized, run, _ string, _ time.Duration) (ProcessChildResult, error) {
 		entered <- struct{}{}
 		select {
 		case <-release:
 		case <-ctx.Done():
-			return nodehost.ProcessChildResult{}, ctx.Err()
+			return ProcessChildResult{}, ctx.Err()
 		}
-		return nodehost.ProcessChildResult{RunID: run, Status: "success"}, nil
+		return ProcessChildResult{RunID: run, Status: "success"}, nil
 	}
 	bearer := admitService(t, s, service)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -59,11 +58,11 @@ func TestAwaitEndsWhenTheGrantIsRevoked(t *testing.T) {
 			service := newService(t)
 			entered := make(chan struct{})
 			stopped := make(chan error, 1)
-			service.AwaitChild = func(ctx context.Context, _ capability.Authorized, _, _ string, _ time.Duration) (nodehost.ProcessChildResult, error) {
+			service.AwaitChild = func(ctx context.Context, _ capability.Authorized, _, _ string, _ time.Duration) (ProcessChildResult, error) {
 				close(entered)
 				<-ctx.Done()
 				stopped <- ctx.Err()
-				return nodehost.ProcessChildResult{}, ctx.Err()
+				return ProcessChildResult{}, ctx.Err()
 			}
 			bearer, revoke, err := s.Admit(routeNode{Service: service})
 			if err != nil {
@@ -72,7 +71,9 @@ func TestAwaitEndsWhenTheGrantIsRevoked(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			done := make(chan reply, 1)
-			go func() { done <- ask(t, s, http.MethodGet, "/node/v1/children/child/await?wait_ms=60000", bearer, "") }()
+			go func() {
+				done <- askRoute(t, s, http.MethodGet, "/node/v1/children/child/await?wait_ms=60000", bearer, "")
+			}()
 			select {
 			case <-entered:
 			case <-ctx.Done():

@@ -31,7 +31,7 @@ func Lookup(name string) (Var, bool) {
 	if match.Name != "" {
 		return match, true
 	}
-	return Var{Name: name, Class: User, Owner: "user"}, false
+	return Var{Name: name, Class: user, Owner: "user"}, false
 }
 
 func envKey(name string) string { return NameKey(name, runtime.GOOS) }
@@ -111,7 +111,7 @@ func build(k Kind, b Base, rt Runtime) ([]string, error) {
 		}
 		env[envKey(name)] = name + "=" + value
 	}
-	if k == Plan || k == Attempt || k == Eval || k == RunHost || k == NodeHost {
+	if k == Plan || k == Attempt || k == Eval || k == runHost || k == nodeHost {
 		composeRuntime(env, k, rt)
 	}
 	if k == Attempt || k == Eval {
@@ -153,7 +153,7 @@ func parseEntry(entry string) (string, string, error) {
 
 func credentialName(row Var, name string) bool {
 	// safety: the registry's exact CA-file entries are public paths, not credential values.
-	if row.Class == Tool && row.RemoteBase && !row.Prefix {
+	if row.Class == tool && row.RemoteBase && !row.Prefix {
 		return false
 	}
 	return row.Class == Credential || envredact.CredentialName(name)
@@ -178,19 +178,19 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 	}
 	switch k {
 	case CLI:
-		return row.Class == Tool || (known && (row.Class == User || row.Class == Diagnostic))
-	case DaemonSpawn:
+		return row.Class == tool || (known && (row.Class == user || row.Class == diagnostic))
+	case daemonSpawn:
 		return row.RemoteBase || strings.HasPrefix(name, "XDG_")
-	case Controller, Runner, Launcher:
-		return row.Class == Tool
-	case RunHost, NodeHost:
+	case controller, runner, launcher:
+		return row.Class == tool
+	case runHost, nodeHost:
 		return false
-	case JobContainer:
+	case jobContainer:
 		return row.RemoteBase || name == "GOCACHE" || name == "GOMODCACHE" || name == "npm_config_cache" || name == "XDG_CACHE_HOME"
 	case HostChild:
-		return row.Class != Diagnostic
+		return row.Class != diagnostic
 	case Plan, Attempt, Eval, Install:
-		if k == Install && row.Class == Diagnostic {
+		if k == Install && row.Class == diagnostic {
 			return false
 		}
 		if b.Local || ownerTool(b, row) {
@@ -265,7 +265,7 @@ func inheritAttempt(env []string, masker *secrets.Masker) ([]string, error) {
 			return nil, err
 		}
 		row, _ := Lookup(name)
-		if credentialName(row, name) || row.Class == Protocol || (row.Owner == "engine" && row.Class != RuntimeClass) {
+		if credentialName(row, name) || row.Class == Protocol || (row.Owner == "engine" && row.Class != runtimeClass) {
 			return nil, fmt.Errorf("attempt environment contains reserved variable %q", name)
 		}
 		if err := registerMasks(masker, name, value, false); err != nil {

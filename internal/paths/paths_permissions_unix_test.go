@@ -1,18 +1,16 @@
 //go:build !windows
 
-package paths_test
+package paths
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
 func TestEnsureRootAndRunDirArePrivate(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "home")
-	p := paths.PathsAt(root)
+	p := PathsAt(root)
 	if err := os.MkdirAll(p.RunDir("run-1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +22,7 @@ func TestEnsureRootAndRunDirArePrivate(t *testing.T) {
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.EnsureRunDir("run-1"); err != nil {
+	if err := p.ensureRunDir("run-1"); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{root, p.RunsDir(), p.RunDir("run-1")} {

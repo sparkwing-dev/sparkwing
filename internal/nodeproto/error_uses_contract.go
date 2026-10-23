@@ -2,16 +2,16 @@ package nodeproto
 
 import "github.com/sparkwing-dev/sparkwing/internal/apierr"
 
-// ErrorUse names a canonical error and its refusal detail at one protocol boundary.
-type ErrorUse struct {
+// errorUse names a canonical error and its refusal detail at one protocol boundary.
+type errorUse struct {
 	Code    apierr.Code
 	Surface string
 	Reason  apierr.Reason
 }
 
-// ErrorUses inventories consumers; apierr.Codes remains the sole code/status registry.
-func ErrorUses() []ErrorUse {
-	return []ErrorUse{
+// errorUses inventories consumers; apierr.Codes remains the sole code/status registry.
+func errorUses() []errorUse {
+	return []errorUse{
 		{apierr.UnknownOp, "sdk", ""},
 		{apierr.UnknownPipeline, "sdk", ""},
 		{apierr.UnknownJob, "sdk,node_route", ""},

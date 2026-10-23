@@ -1,4 +1,4 @@
-package nodehost_test
+package nodehost
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 
 const claimToken = "swk_parent-credential-never-shown"
 
-func ask(t testing.TB, s *server, method, path, bearer, body string) reply {
+func askRoute(t testing.TB, s *server, method, path, bearer, body string) reply {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, s.URL()+path, strings.NewReader(body))
 	if err != nil {
@@ -51,6 +51,6 @@ func TestUnavailableProcessServiceRefuses(t *testing.T) {
 		{http.MethodPost, "/node/v1/children", `{"pipeline":"build"}`},
 		{http.MethodGet, "/node/v1/children/child/await", ""},
 	} {
-		wantRefusal(t, ask(t, s, call.method, call.path, bearer, call.body), http.StatusServiceUnavailable, "unavailable")
+		wantRefusal(t, askRoute(t, s, call.method, call.path, bearer, call.body), http.StatusServiceUnavailable, "unavailable")
 	}
 }

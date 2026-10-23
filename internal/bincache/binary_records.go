@@ -9,10 +9,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
-// BinaryData binds binary records and verified bytes to a host's live authority.
+// binaryData binds binary records and verified bytes to a host's live authority.
 // The host obtains Trust from team policy, never from a pipeline declaration.
 // Local runs use the machine's binary cache without this remote binding.
-type BinaryData struct {
+type binaryData struct {
 	Bytes     blob.Store
 	Records   blob.RecordStore
 	Authority blob.Authority
@@ -21,9 +21,9 @@ type BinaryData struct {
 	Budget    blob.Budget
 }
 
-// DownloadBinary installs only the exact authorized record's EOF-verified bytes.
+// downloadBinary installs only the exact authorized record's EOF-verified bytes.
 // A provenance or integrity refusal leaves an existing destination unchanged.
-func DownloadBinary(ctx context.Context, data *BinaryData, hash, dest string) (err error) {
+func downloadBinary(ctx context.Context, data *binaryData, hash, dest string) (err error) {
 	defer func() {
 		if errors.Is(err, context.DeadlineExceeded) {
 			err = errors.Join(blob.ErrBudget, err)
@@ -52,7 +52,7 @@ func DownloadBinary(ctx context.Context, data *BinaryData, hash, dest string) (e
 		return err
 	}
 	if !result.Found {
-		return ErrMiss
+		return errMiss
 	}
 	if result.Record.Key != key {
 		return blob.ErrDigestNotReadable
@@ -89,9 +89,9 @@ func installBinary(ctx context.Context, dest string, reader blob.VerifiedReader)
 	return os.Rename(path, dest)
 }
 
-// UploadBinary commits a binary record only after its exact uploader has a
+// uploadBinary commits a binary record only after its exact uploader has a
 // verified receipt. Provenance is assigned by RecordStore, never by this host.
-func UploadBinary(ctx context.Context, data *BinaryData, hash, src string) error {
+func uploadBinary(ctx context.Context, data *binaryData, hash, src string) error {
 	if data == nil || data.Bytes == nil || data.Records == nil {
 		return errors.New("binary storage binding is required")
 	}

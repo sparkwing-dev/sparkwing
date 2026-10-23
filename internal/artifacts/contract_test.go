@@ -511,12 +511,12 @@ func TestStageMasksSpecialModeBits(t *testing.T) {
 
 func TestCheckPathsRejectsWorkspaceEscapes(t *testing.T) {
 	for _, globs := range [][]string{{"../secret"}, {"/absolute"}} {
-		if err := CheckPaths(globs, nil); err == nil {
+		if err := checkPaths(globs, nil); err == nil {
 			t.Fatalf("accepted outputs %q", globs)
 		}
 	}
 	for _, into := range []string{"../other", "/absolute"} {
-		if err := CheckPaths(nil, []Edge{{Into: into}}); err == nil {
+		if err := checkPaths(nil, []Edge{{Into: into}}); err == nil {
 			t.Fatalf("accepted prefix %q", into)
 		}
 	}

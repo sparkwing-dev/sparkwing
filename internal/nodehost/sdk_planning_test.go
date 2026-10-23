@@ -85,7 +85,7 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	if len(logs) != 1 || strings.Contains(logs[0].Message, supplied) || strings.Contains(string(logs[0].Attrs), supplied) {
 		t.Fatalf("logs = %+v", logs)
 	}
-	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Plan); err != nil {
+	if _, err := planInitial(t.Context(), prepared.Input, prepared.Plan); err != nil {
 		t.Fatal(err)
 	}
 	if len(processes) != 2 {
@@ -108,7 +108,7 @@ func TestSDKPlanningValidatesFreshIdentifiersAgainstIssuedValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = PlanInitial(t.Context(), prepared.Input, func(context.Context) (json.RawMessage, error) {
+	_, err = planInitial(t.Context(), prepared.Input, func(context.Context) (json.RawMessage, error) {
 		return json.RawMessage(`{"jobs":[{"id":"new-issued-token","steps":[{"id":"run"}]}]}`), nil
 	})
 	var failure *apierr.Error
@@ -179,7 +179,7 @@ func TestSDKPlanningRetainsSealedRunContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	input.Run.Git.SHA, input.Run.Trigger.User, input.Run.Trigger.PullRequest.Number = "later", "later", 99
-	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Plan); err != nil {
+	if _, err := planInitial(t.Context(), prepared.Input, prepared.Plan); err != nil {
 		t.Fatal(err)
 	}
 	if !planned || len(*processes) != 2 {
@@ -305,9 +305,9 @@ func TestSDKPlanningFailuresDiscardPlanAndMaskErrors(t *testing.T) {
 				p.Log = func(context.Context, nodeproto.FrameLog) error { return failure }
 			}
 			prepared, err := p.Prepare(t.Context(), input, f.input)
-			var result PlannedInitial
+			var result plannedInitial
 			if err == nil {
-				result, err = PlanInitial(t.Context(), prepared.Input, prepared.Plan)
+				result, err = planInitial(t.Context(), prepared.Input, prepared.Plan)
 			}
 			if err == nil || strings.Contains(err.Error(), secret) || len(result.CanonicalPlan) != 0 {
 				t.Fatalf("plan = %+v, error = %v", result, err)

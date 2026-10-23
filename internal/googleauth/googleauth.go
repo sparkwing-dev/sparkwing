@@ -25,9 +25,9 @@ import (
 // Google's published endpoints. Config carries them as fields so a test can
 // point a client at a local issuer.
 const (
-	GoogleAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
-	GoogleTokenURL = "https://oauth2.googleapis.com/token"
-	GoogleJWKSURL  = "https://www.googleapis.com/oauth2/v3/certs"
+	googleAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
+	googleTokenURL = "https://oauth2.googleapis.com/token"
+	googleJWKSURL  = "https://www.googleapis.com/oauth2/v3/certs"
 )
 
 var googleIssuers = []string{"https://accounts.google.com", "accounts.google.com"}
@@ -62,7 +62,7 @@ type Config struct {
 func Google(clientID, clientSecret string) Config {
 	return Config{
 		ClientID: clientID, ClientSecret: clientSecret,
-		AuthURL: GoogleAuthURL, TokenURL: GoogleTokenURL, JWKSURL: GoogleJWKSURL,
+		AuthURL: googleAuthURL, TokenURL: googleTokenURL, JWKSURL: googleJWKSURL,
 		Issuers: googleIssuers,
 	}
 }

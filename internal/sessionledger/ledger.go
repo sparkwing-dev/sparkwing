@@ -57,10 +57,10 @@ type Record struct {
 }
 
 // Path is the file the record lives in, set on records read back by List.
-func (r Record) Path() string { return r.path }
+func (r Record) filename() string { return r.path }
 
-// Probe answers the two platform questions a sweep asks.
-type Probe interface {
+// probe answers the two platform questions a sweep asks.
+type probe interface {
 	// OwnerAlive reports whether the node that wrote the record still runs:
 	// the pid exists and its birth token matches.
 	OwnerAlive(rec Record) (bool, error)
@@ -72,7 +72,7 @@ type Probe interface {
 // Ledger is the directory of records for one sparkwing home.
 type Ledger struct {
 	dir   string
-	probe Probe
+	probe probe
 }
 
 // Open returns the ledger at dir with the platform probe.
@@ -83,7 +83,7 @@ func Open(dir string) *Ledger {
 // dispatchProbe owns the cross-platform handle kinds (docker) and delegates
 // the rest to the platform probe, so a session or job is ended the way its
 // OS requires while a container is ended the same way everywhere.
-type dispatchProbe struct{ platform Probe }
+type dispatchProbe struct{ platform probe }
 
 func (d dispatchProbe) OwnerAlive(rec Record) (bool, error) { return d.platform.OwnerAlive(rec) }
 
@@ -197,13 +197,13 @@ type Verdict string
 const (
 	// VerdictLive means the owner still runs; the record stays.
 	VerdictLive Verdict = "live"
-	// VerdictReaped means the owner is gone and the session was ended.
-	VerdictReaped Verdict = "reaped"
+	// verdictReaped means the owner is gone and the session was ended.
+	verdictReaped Verdict = "reaped"
 	// VerdictWouldReap is VerdictReaped under a dry run: nothing was killed.
 	VerdictWouldReap Verdict = "would-reap"
-	// VerdictFailed means the owner is gone but the session could not be
+	// verdictFailed means the owner is gone but the session could not be
 	// ended; the record stays for the next sweep.
-	VerdictFailed Verdict = "failed"
+	verdictFailed Verdict = "failed"
 )
 
 // Outcome pairs a record with the sweep's verdict.
@@ -238,7 +238,7 @@ func (l *Ledger) Sweep(ctx context.Context, opts SweepOptions) ([]Outcome, error
 		}
 		alive, err := l.probe.OwnerAlive(rec)
 		if err != nil {
-			out = append(out, Outcome{Record: rec, Verdict: VerdictFailed, Err: err})
+			out = append(out, Outcome{Record: rec, Verdict: verdictFailed, Err: err})
 			continue
 		}
 		if alive {
@@ -259,11 +259,11 @@ func (l *Ledger) Sweep(ctx context.Context, opts SweepOptions) ([]Outcome, error
 			if rec.Handle.Kind == "command" {
 				_ = os.Remove(rec.path)
 			}
-			out = append(out, Outcome{Record: rec, Verdict: VerdictFailed, Err: err})
+			out = append(out, Outcome{Record: rec, Verdict: verdictFailed, Err: err})
 			continue
 		}
 		_ = os.Remove(rec.path)
-		out = append(out, Outcome{Record: rec, Verdict: VerdictReaped})
+		out = append(out, Outcome{Record: rec, Verdict: verdictReaped})
 	}
 	return out, nil
 }

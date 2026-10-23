@@ -1,14 +1,12 @@
-package sparkwingruntime_test
+package sparkwingruntime
 
 import (
 	"reflect"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 )
 
 func TestSortedUniqueRisks_Dedupes(t *testing.T) {
-	got := sparkwingruntime.SortedUniqueRisks(
+	got := sortedUniqueRisks(
 		[]string{"prod", "destructive"},
 		[]string{"prod", "money"},
 		[]string{"", "destructive"},

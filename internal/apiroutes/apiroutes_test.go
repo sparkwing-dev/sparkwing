@@ -16,14 +16,14 @@ func TestParseOperatorEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(path, []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{
+	want := []route{
 		{Method: "GET", Path: "/api/v1/operator/limits", Scope: "operator.limits` or `operator"},
 		{Method: "GET", Path: "/api/v1/operator/object-store", Scope: "operator.object_store` or `operator"},
-		{Method: "GET", Path: "/api/v1/operator/teams", Scope: Operator},
+		{Method: "GET", Path: "/api/v1/operator/teams", Scope: operator},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("operator registrations = %+v, want %+v", got, want)
@@ -31,7 +31,7 @@ func TestParseOperatorEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{Method: "GET", Pattern: "/unclassified", Handle: s.unclassified},`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Parse(src, nil); err == nil {
+	if _, err := parse(src, nil); err == nil {
 		t.Fatal("operator endpoint without policy was documented")
 	}
 }
@@ -44,11 +44,11 @@ func TestParseCapabilityEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "capability_management.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{
+	want := []route{
 		{Method: "GET", Path: "/api/v1/operator/tokens/{token}", Scope: "operator.tokens` or `operator"},
 		{Method: "POST", Path: "/api/v1/operator/tokens/{token}/rotate", Scope: "operator.tokens` or `operator"},
 		{Method: "GET", Path: "/api/v1/tokens", Scope: "runs.read"},
@@ -66,11 +66,11 @@ func TestParseGitHubRunnerEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "github_runner_admin.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{
+	want := []route{
 		{Method: "GET", Path: "/api/v1/runners/github", Scope: "runs.read"},
 		{Method: "POST", Path: "/api/v1/runners/github", Scope: "team.admin"},
 		{Method: "DELETE", Path: "/api/v1/runners/github/{repository}", Scope: "team.admin"},
@@ -88,11 +88,11 @@ func TestParseEngineEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "engine_routes.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{{Method: "POST", Path: "/api/v1/runs/{run}/jobs/{job}/expansion", Scope: "expansion.submit"}}
+	want := []route{{Method: "POST", Path: "/api/v1/runs/{run}/jobs/{job}/expansion", Scope: "expansion.submit"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("engine registrations = %+v, want %+v", got, want)
 	}
@@ -104,11 +104,11 @@ func TestParseQueueEndpointUsesActualRegistration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "queue_view.go"), []byte(endpoint), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []Route{{Method: "GET", Path: "/api/v1/queue", Scope: "runs.read"}}; !reflect.DeepEqual(got, want) {
+	if want := []route{{Method: "GET", Path: "/api/v1/queue", Scope: "runs.read"}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("queue registration=%+v want=%+v", got, want)
 	}
 }
@@ -119,11 +119,11 @@ func TestParseBrowserSessionEndpointUsesNamedProof(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "browser_session_routes.go"), []byte(endpoint), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []Route{{Method: "POST", Path: "/logout", Scope: "browser_flow_csrf_nonce"}}; !reflect.DeepEqual(got, want) {
+	if want := []route{{Method: "POST", Path: "/logout", Scope: "browser_flow_csrf_nonce"}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("browser session registration=%+v want=%+v", got, want)
 	}
 }
@@ -135,11 +135,11 @@ func TestParseOAuthEndpointsUsesNamedProof(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "browser_oauth_routes.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{
+	want := []route{
 		{Method: "GET", Path: "/auth/{provider}/callback", Scope: "browser_flow_csrf_nonce"},
 		{Method: "GET", Path: "/auth/{provider}/start", Scope: "browser_flow_csrf_nonce"},
 	}
@@ -155,11 +155,11 @@ func TestParseIdentityLinkEndpointsUsesNamedProof(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "identity_link_routes.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{
+	want := []route{
 		{Method: "POST", Path: "/auth/{provider}/link", Scope: "browser_flow_csrf_nonce"},
 		{Method: "GET", Path: "/auth/{provider}/link/complete", Scope: "browser_flow_csrf_nonce"},
 	}
@@ -174,11 +174,11 @@ func TestParseSourceEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "source_controller.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{{Method: "POST", Path: "/api/v1/runs/{run}/source-credential", Scope: "source.read"}}
+	want := []route{{Method: "POST", Path: "/api/v1/runs/{run}/source-credential", Scope: "source.read"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("source registrations=%+v want=%+v", got, want)
 	}
@@ -197,17 +197,17 @@ func TestParseAuthorityEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "authority_routes.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{
-		{Method: "GET", Path: "/.well-known/jwks.json", Scope: Public},
-		{Method: "GET", Path: "/.well-known/openid-configuration", Scope: Public},
-		{Method: "GET", Path: "/api/v1/auth/whoami", Scope: Authenticated},
-		{Method: "GET", Path: "/api/v1/data/capabilities", Scope: Authenticated},
+	want := []route{
+		{Method: "GET", Path: "/.well-known/jwks.json", Scope: public},
+		{Method: "GET", Path: "/.well-known/openid-configuration", Scope: public},
+		{Method: "GET", Path: "/api/v1/auth/whoami", Scope: authenticated},
+		{Method: "GET", Path: "/api/v1/data/capabilities", Scope: authenticated},
 		{Method: "DELETE", Path: "/api/v1/operator/tokens/{token}", Scope: "operator.tokens` or `operator"},
-		{Method: "GET", Path: "/api/v1/services", Scope: Authenticated},
+		{Method: "GET", Path: "/api/v1/services", Scope: authenticated},
 		{Method: "PATCH", Path: "/api/v1/team/members/{account}", Scope: "team.admin"},
 		{Method: "DELETE", Path: "/api/v1/tokens/{token}", Scope: "runs.read"},
 	}
@@ -236,7 +236,7 @@ const (
 
 var ScopeAll = "admin"
 `)
-	got, err := Scopes(src)
+	got, err := scopes(src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,14 +269,14 @@ func (s *Server) routes() {
 }
 `)
 	scopes := map[string]string{"ScopeRunsState": "runs.state", "ScopeRunsRead": "runs.read", "ScopeTriggersRead": "triggers.read", "ScopeNodesClaim": "nodes.claim", "ScopeTriggersClaim": "triggers.claim"}
-	got, err := Parse(src, scopes)
+	got, err := parse(src, scopes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{
-		{Method: "GET", Path: "/api/v1/auth/whoami", Scope: Authenticated},
+	want := []route{
+		{Method: "GET", Path: "/api/v1/auth/whoami", Scope: authenticated},
 		{Method: "GET", Path: "/api/v1/gitcache/git/{path...}", Scope: "ScopeUnknown"},
-		{Method: "GET", Path: "/api/v1/health", Scope: Public},
+		{Method: "GET", Path: "/api/v1/health", Scope: public},
 		{Method: "POST", Path: "/api/v1/runs", Scope: "runs.state"},
 		{Method: "GET", Path: "/api/v1/runs/{id}", Scope: "runs.read"},
 		{Method: "GET", Path: "/api/v1/triggers/{id}", Scope: "triggers.read` or `nodes.claim` or `triggers.claim"},
@@ -302,11 +302,11 @@ func TestParseSizingEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "sizing_routes.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{
+	want := []route{
 		{Method: "GET", Path: "/api/v1/pipelines/{name}/sizing", Scope: "runs.read` or `source.read"},
 		{Method: "POST", Path: "/api/v1/pipelines/{name}/sizing/contention", Scope: "node.report"},
 		{Method: "POST", Path: "/api/v1/pipelines/{name}/sizing/observations", Scope: "node.report"},
@@ -331,11 +331,11 @@ func TestParseCredentialEndpoints(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "credential_inventory.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{
+	want := []route{
 		{Method: "GET", Path: "/api/v1/secrets", Scope: "runs.read` or `team.admin"},
 		{Method: "POST", Path: "/api/v1/secrets", Scope: "team.admin"},
 		{Method: "DELETE", Path: "/api/v1/secrets/{name}", Scope: "team.admin"},
@@ -350,7 +350,7 @@ func TestParseCredentialEndpoints(t *testing.T) {
 }
 
 func TestParseMissingFile(t *testing.T) {
-	if _, err := Parse(filepath.Join(t.TempDir(), "absent.go"), nil); err == nil {
+	if _, err := parse(filepath.Join(t.TempDir(), "absent.go"), nil); err == nil {
 		t.Fatal("Parse on a missing file returned no error")
 	}
 }
@@ -363,11 +363,11 @@ func TestParseCreditEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "credit_routes.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{{Method: "GET", Path: "/api/v1/credits", Scope: "runs.read"}, {Method: "GET", Path: "/api/v1/credits/history", Scope: "runs.read"}}
+	want := []route{{Method: "GET", Path: "/api/v1/credits", Scope: "runs.read"}, {Method: "GET", Path: "/api/v1/credits/history", Scope: "runs.read"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("credit registrations=%+v want %+v", got, want)
 	}
@@ -380,11 +380,11 @@ func TestParseDataEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "data_routes.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{
+	want := []route{
 		{Method: "POST", Path: "/api/v1/data/download", Scope: "data.read` or `source.read"},
 		{Method: "POST", Path: "/api/v1/data/has-many", Scope: "data.read"},
 	}
@@ -399,11 +399,11 @@ func TestParseActionsEndpointUsesActualProof(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "github_actions_exchange.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Parse(src, nil)
+	got, err := parse(src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Route{{Method: "POST", Path: "/api/v1/runners/github/exchange", Scope: "github_actions_oidc"}}
+	want := []route{{Method: "POST", Path: "/api/v1/runners/github/exchange", Scope: "github_actions_oidc"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Actions registration=%+v want=%+v", got, want)
 	}
@@ -418,7 +418,7 @@ func TestParseConcurrencyEndpointsUsesActualRegistrations(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "concurrency_routes.go"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	routes, err := Parse(src, nil)
+	routes, err := parse(src, nil)
 	if err != nil || len(routes) != 1 {
 		t.Fatalf("routes=%+v error=%v", routes, err)
 	}
@@ -428,7 +428,7 @@ func TestParseConcurrencyEndpointsUsesActualRegistrations(t *testing.T) {
 }
 
 func TestParseControllerBusinessRegistrations(t *testing.T) {
-	routes, err := Parse("../../internal/controller/server.go", nil)
+	routes, err := parse("../../internal/controller/server.go", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

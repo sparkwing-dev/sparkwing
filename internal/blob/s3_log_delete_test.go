@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"encoding/xml"
@@ -11,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 type logDeletePage struct {
@@ -40,7 +38,7 @@ func TestS3LogDeletionScope(t *testing.T) {
 			for _, id := range []string{run, run + "-other"} {
 				for _, class := range []string{"r30", "r90", "r365"} {
 					for _, index := range []int64{0, 1} {
-						key, err := blob.LogObjectKey(blob.LogSubject{Kind: blob.LogOwnerUnit, Team: owner, RunID: id, Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: 1}}, class, index)
+						key, err := LogObjectKey(LogSubject{Kind: LogOwnerUnit, Team: owner, RunID: id, Unit: &LogUnit{Kind: LogPlan, Generation: 1}}, class, index)
 						if err != nil {
 							t.Log(err)
 							return false

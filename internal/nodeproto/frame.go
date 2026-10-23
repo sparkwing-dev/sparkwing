@@ -12,9 +12,9 @@ import (
 )
 
 var (
-	// ErrLineTooLong reports a line longer than [MaxLineBytes]. It ends a
+	// errLineTooLong reports a line longer than [MaxLineBytes]. It ends a
 	// [Reader]: the rest of the line is never read.
-	ErrLineTooLong = errors.New("nodeproto: line exceeds the maximum size")
+	errLineTooLong = errors.New("nodeproto: line exceeds the maximum size")
 	// ErrMalformed reports a request or frame that does not have the
 	// protocol's shape.
 	ErrMalformed = errors.New("nodeproto: malformed line")
@@ -43,7 +43,7 @@ func NewReader(r io.Reader) *Reader {
 // ReadLine returns the next line without its newline or a trailing carriage
 // return. The slice is valid until the next read. A final line without a
 // newline is still returned; io.EOF follows it. A line of more than
-// [MaxLineBytes], newline included, fails with [ErrLineTooLong] as soon as
+// [MaxLineBytes], newline included, fails with [errLineTooLong] as soon as
 // the bound is crossed, without waiting for the newline, and every later
 // read fails the same way.
 func (r *Reader) ReadLine() ([]byte, error) {
@@ -62,7 +62,7 @@ func (r *Reader) ReadLine() ([]byte, error) {
 			size++
 		}
 		if size > r.max {
-			r.err = ErrLineTooLong
+			r.err = errLineTooLong
 			return nil, r.err
 		}
 		switch {
@@ -109,7 +109,7 @@ func NewWriter(w io.Writer) *Writer {
 }
 
 // Send writes v as one line. A value whose line, newline included, exceeds
-// [MaxLineBytes] is refused with [ErrLineTooLong] and nothing is written.
+// [MaxLineBytes] is refused with [errLineTooLong] and nothing is written.
 func (w *Writer) Send(v any) error {
 	// safety: encode under the lock, so senders queued behind a slow reader
 	// hold their values but never a second, encoded copy of each.
@@ -120,7 +120,7 @@ func (w *Writer) Send(v any) error {
 		return err
 	}
 	if len(b)+1 > w.max {
-		return ErrLineTooLong
+		return errLineTooLong
 	}
 	n, err := w.w.Write(append(b, '\n'))
 	if err == nil && n != len(b)+1 {

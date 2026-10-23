@@ -11,12 +11,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
-type Entry struct {
+type entry struct {
 	Path string `yaml:"path"`
 }
 
-type Config struct {
-	Repos []*Entry `yaml:"repos,omitempty"`
+type config struct {
+	Repos []*entry `yaml:"repos,omitempty"`
 
 	FallbackPaths []string `yaml:"fallback_paths,omitempty"`
 
@@ -29,16 +29,16 @@ type Config struct {
 	IncludeWorktrees bool `yaml:"include_worktrees,omitempty"`
 }
 
-// DefaultPath reports the config.yaml the repo registry is read from and
+// defaultPath reports the config.yaml the repo registry is read from and
 // written to; see [userconfig.Path].
-func DefaultPath() (string, error) {
+func defaultPath() (string, error) {
 	return userconfig.Path()
 }
 
-// Load reads the repos section of the config.yaml at path. An absent file or
+// load reads the repos section of the config.yaml at path. An absent file or
 // section is an empty registry.
-func Load(path string) (*Config, error) {
-	var cfg Config
+func load(path string) (*config, error) {
+	var cfg config
 	if _, err := userconfig.Read(path, userconfig.Repos, &cfg); err != nil {
 		return nil, err
 	}
@@ -47,12 +47,12 @@ func Load(path string) (*Config, error) {
 
 // safety: the registry changes under the settings file's lock, so two
 // registrations racing each keep their entry.
-func update(change func(cfg *Config) (bool, error)) error {
-	path, err := DefaultPath()
+func update(change func(cfg *config) (bool, error)) error {
+	path, err := defaultPath()
 	if err != nil {
 		return err
 	}
-	var cfg Config
+	var cfg config
 	errUnchanged := errors.New("unchanged")
 	err = userconfig.Update(path, userconfig.Repos, "the repo registry", &cfg, func(bool) error {
 		changed, err := change(&cfg)
@@ -67,12 +67,12 @@ func update(change func(cfg *Config) (bool, error)) error {
 	return err
 }
 
-func AutoRegister(absPath string) error {
-	path, err := DefaultPath()
+func autoRegister(absPath string) error {
+	path, err := defaultPath()
 	if err != nil {
 		return err
 	}
-	settings, err := Load(path)
+	settings, err := load(path)
 	if err != nil {
 		return err
 	}
@@ -97,13 +97,13 @@ func AutoRegister(absPath string) error {
 		return nil
 	}
 
-	return update(func(cfg *Config) (bool, error) {
+	return update(func(cfg *config) (bool, error) {
 		for _, e := range cfg.Repos {
 			if pathsEqual(e.Path, abs) {
 				return false, nil
 			}
 		}
-		cfg.Repos = append(cfg.Repos, &Entry{Path: abs})
+		cfg.Repos = append(cfg.Repos, &entry{Path: abs})
 		return true, nil
 	})
 }
@@ -116,13 +116,13 @@ func Add(absPath string) error {
 	if _, err := repoKind(abs); err != nil {
 		return err
 	}
-	return update(func(cfg *Config) (bool, error) {
+	return update(func(cfg *config) (bool, error) {
 		for _, e := range cfg.Repos {
 			if pathsEqual(e.Path, abs) {
 				return false, nil
 			}
 		}
-		cfg.Repos = append(cfg.Repos, &Entry{Path: abs})
+		cfg.Repos = append(cfg.Repos, &entry{Path: abs})
 		return true, nil
 	})
 }
@@ -130,7 +130,7 @@ func Add(absPath string) error {
 func Remove(match string) (int, error) {
 	matchAbs, _ := filepath.Abs(match)
 	removed := 0
-	err := update(func(cfg *Config) (bool, error) {
+	err := update(func(cfg *config) (bool, error) {
 		keep := cfg.Repos[:0]
 		for _, e := range cfg.Repos {
 			if pathsEqual(e.Path, matchAbs) || filepath.Base(e.Path) == match {
@@ -150,7 +150,7 @@ func Remove(match string) (int, error) {
 
 func Prune() ([]string, error) {
 	var dropped []string
-	err := update(func(cfg *Config) (bool, error) {
+	err := update(func(cfg *config) (bool, error) {
 		keep := cfg.Repos[:0]
 		for _, e := range cfg.Repos {
 			if !hasSparkwingDir(e.Path) {
@@ -175,11 +175,11 @@ type ListEntry struct {
 }
 
 func List() ([]ListEntry, error) {
-	cfgPath, err := DefaultPath()
+	cfgPath, err := defaultPath()
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := Load(cfgPath)
+	cfg, err := load(cfgPath)
 	if err != nil {
 		return nil, err
 	}
@@ -206,11 +206,11 @@ type Candidate struct {
 }
 
 func CandidatePaths() ([]Candidate, error) {
-	cfgPath, err := DefaultPath()
+	cfgPath, err := defaultPath()
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := Load(cfgPath)
+	cfg, err := load(cfgPath)
 	if err != nil {
 		return nil, err
 	}

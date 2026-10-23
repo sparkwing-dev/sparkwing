@@ -12,19 +12,19 @@ import (
 type CeilingReason string
 
 const (
-	// CeilingBytes is the stored-byte ceiling.
-	CeilingBytes CeilingReason = "bytes"
-	// CeilingObjects is the object-count ceiling.
-	CeilingObjects CeilingReason = "objects"
+	// ceilingBytes is the stored-byte ceiling.
+	ceilingBytes CeilingReason = "bytes"
+	// ceilingObjects is the object-count ceiling.
+	ceilingObjects CeilingReason = "objects"
 )
 
-// ErrCeilingFrozen matches every *CeilingError under errors.Is.
-var ErrCeilingFrozen = errors.New("object-store bucket ceiling reached")
+// errCeilingFrozen matches every *CeilingError under errors.Is.
+var errCeilingFrozen = errors.New("object-store bucket ceiling reached")
 
-// CeilingError reports a write refused because the bucket sits above
+// ceilingError reports a write refused because the bucket sits above
 // its ceiling. It names the measurement and the ceiling it crossed, so
 // an operator can act on the message alone.
-type CeilingError struct {
+type ceilingError struct {
 	// Subject names the store that is full, so a service that keeps its
 	// own ceiling says which one refused.
 	Subject string
@@ -39,10 +39,10 @@ type CeilingError struct {
 	Frozen time.Time
 }
 
-func (e *CeilingError) Error() string {
+func (e *ceilingError) Error() string {
 	subject, remedy := e.Subject, e.Remedy
 	if subject == "" {
-		subject = DefaultCeilingSubject
+		subject = defaultCeilingSubject
 	}
 	if remedy == "" {
 		remedy = defaultRemedy(e.Reason)
@@ -53,20 +53,20 @@ func (e *CeilingError) Error() string {
 	)
 }
 
-// DefaultCeilingSubject names the store a Ceiling bounds when its owner
+// defaultCeilingSubject names the store a Ceiling bounds when its owner
 // names none.
-const DefaultCeilingSubject = "the bucket"
+const defaultCeilingSubject = "the bucket"
 
 func defaultRemedy(r CeilingReason) string {
 	return "Delete objects until the next measurement puts the store under the ceiling, or raise " +
 		ceilingFlag(r)
 }
 
-func (e *CeilingError) Unwrap() error { return ErrCeilingFrozen }
+func (e *ceilingError) Unwrap() error { return errCeilingFrozen }
 
 // RetryableError reports the refusal as final. A bucket over its
 // ceiling is not under it again by the next attempt.
-func (e *CeilingError) RetryableError() bool { return false }
+func (e *ceilingError) RetryableError() bool { return false }
 
 // CeilingLimit is the pair of ceilings and the pair of warning marks a
 // bucket is held to. A zero or negative field removes that bound, which
@@ -79,8 +79,8 @@ type CeilingLimit struct {
 	WarnObjects int64
 }
 
-// Enforced reports whether either ceiling can freeze writes.
-func (l CeilingLimit) Enforced() bool { return l.MaxBytes > 0 || l.MaxObjects > 0 }
+// enforced reports whether either ceiling can freeze writes.
+func (l CeilingLimit) enforced() bool { return l.MaxBytes > 0 || l.MaxObjects > 0 }
 
 // DefaultCeilingReconcile is how often a measured bucket total replaces
 // the incremental counters when an operator sets no interval.
@@ -114,9 +114,9 @@ type Usage struct {
 	Partial bool `json:"partial,omitempty"`
 }
 
-// ErrMeasurementPartial reports a measurement that stopped before it
+// errMeasurementPartial reports a measurement that stopped before it
 // had seen the whole store.
-var ErrMeasurementPartial = errors.New("store measurement did not finish")
+var errMeasurementPartial = errors.New("store measurement did not finish")
 
 // CeilingState is the ceiling at a point in time, as the health route
 // and the metrics collector report it.
@@ -213,7 +213,7 @@ func (c *Ceiling) Configure(cfg CeilingConfig) {
 func (c *Ceiling) Enforced() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.limit.Enforced()
+	return c.limit.enforced()
 }
 
 // Reconcile is the gap between measured bucket totals. A value at or
@@ -224,10 +224,10 @@ func (c *Ceiling) Reconcile() time.Duration {
 	return c.reconcile
 }
 
-// Record adds one write's delta to the incremental counters and
+// record adds one write's delta to the incremental counters and
 // re-evaluates the freeze. Bytes and objects may be negative, which is
 // how a deletion gives its object back.
-func (c *Ceiling) Record(bytes, objects int64) {
+func (c *Ceiling) record(bytes, objects int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.bytes += bytes
@@ -285,10 +285,10 @@ func (c *Ceiling) evaluateLocked() {
 
 func (c *Ceiling) overLocked() (CeilingReason, int64, bool) {
 	if c.limit.MaxBytes > 0 && c.bytes >= c.limit.MaxBytes {
-		return CeilingBytes, c.bytes, true
+		return ceilingBytes, c.bytes, true
 	}
 	if c.limit.MaxObjects > 0 && c.objects >= c.limit.MaxObjects {
-		return CeilingObjects, c.objects, true
+		return ceilingObjects, c.objects, true
 	}
 	return "", 0, false
 }
@@ -310,10 +310,10 @@ func (c *Ceiling) Allow() error {
 	}
 	c.refused++
 	limit := c.limit.MaxBytes
-	if c.frozenReason == CeilingObjects {
+	if c.frozenReason == ceilingObjects {
 		limit = c.limit.MaxObjects
 	}
-	return &CeilingError{
+	return &ceilingError{
 		Subject:  c.subject,
 		Remedy:   c.remedy,
 		Reason:   c.frozenReason,
@@ -324,7 +324,7 @@ func (c *Ceiling) Allow() error {
 }
 
 // Frozen reports whether the ceiling is refusing writes.
-func (c *Ceiling) Frozen() bool {
+func (c *Ceiling) isFrozen() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.frozen
@@ -335,7 +335,7 @@ func (c *Ceiling) State() CeilingState {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	st := CeilingState{
-		Enforced:     c.limit.Enforced(),
+		Enforced:     c.limit.enforced(),
 		MaxBytes:     c.limit.MaxBytes,
 		MaxObjects:   c.limit.MaxObjects,
 		WarnBytes:    c.limit.WarnBytes,
@@ -393,7 +393,7 @@ func (c *Ceiling) Measure(ctx context.Context, src UsageSource) error {
 	}
 	if u.Partial {
 		err := fmt.Errorf("measure store usage: %w after %d bytes in %d objects",
-			ErrMeasurementPartial, u.Bytes, u.Objects)
+			errMeasurementPartial, u.Bytes, u.Objects)
 		c.markIncomplete(err)
 		return err
 	}
@@ -409,7 +409,7 @@ func (c *Ceiling) markIncomplete(err error) {
 }
 
 func ceilingFlag(r CeilingReason) string {
-	if r == CeilingObjects {
+	if r == ceilingObjects {
 		return "--max-bucket-objects"
 	}
 	return "--max-bucket-bytes"

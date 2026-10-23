@@ -11,7 +11,7 @@ func TestProtocolErrorUsesCanonicalRegistry(t *testing.T) {
 	for _, definition := range apierr.Codes {
 		registered[definition.Code] = true
 	}
-	for _, use := range ErrorUses() {
+	for _, use := range errorUses() {
 		if !registered[use.Code] {
 			t.Errorf("%s uses unregistered code %q", use.Surface, use.Code)
 		}

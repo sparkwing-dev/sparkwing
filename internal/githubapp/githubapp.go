@@ -40,8 +40,8 @@ import (
 
 // GitHub's production endpoints.
 const (
-	GitHubWebURL = "https://github.com"
-	GitHubAPIURL = "https://api.github.com"
+	gitHubWebURL = "https://github.com"
+	gitHubAPIURL = "https://api.github.com"
 )
 
 const (
@@ -157,10 +157,10 @@ type Client struct{ cfg Config }
 // any left empty.
 func New(cfg Config) *Client {
 	if cfg.WebURL == "" {
-		cfg.WebURL = GitHubWebURL
+		cfg.WebURL = gitHubWebURL
 	}
 	if cfg.APIURL == "" {
-		cfg.APIURL = GitHubAPIURL
+		cfg.APIURL = gitHubAPIURL
 	}
 	cfg.WebURL = strings.TrimRight(cfg.WebURL, "/")
 	cfg.APIURL = strings.TrimRight(cfg.APIURL, "/")

@@ -1,10 +1,5 @@
 package nodeproto
 
-import (
-	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-)
-
 // Git is the trigger-time snapshot of the run's checkout.
 type Git struct {
 	SHA           string `json:"sha"`
@@ -30,12 +25,4 @@ type PullRequest struct {
 	BaseSHA string `json:"base_sha,omitempty"`
 	HeadRef string `json:"head_ref,omitempty"`
 	HeadSHA string `json:"head_sha,omitempty"`
-}
-
-// CheckOutputSize rejects output larger than the shared output bound.
-func CheckOutputSize(n int) error {
-	if int64(n) > limits.NodeOutputBytes {
-		return fmt.Errorf("step output exceeds %d bytes", limits.NodeOutputBytes)
-	}
-	return nil
 }

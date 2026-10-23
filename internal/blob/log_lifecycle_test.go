@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"context"
@@ -11,8 +11,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 func TestLifecycleRuleMustExpireTheClassPrefixAfterItsDays(t *testing.T) {
@@ -43,16 +41,16 @@ func TestLifecycleRuleMustExpireTheClassPrefixAfterItsDays(t *testing.T) {
 		"and filter":     {[]types.LifecycleRule{{Status: types.ExpirationStatusEnabled, Expiration: &types.LifecycleExpiration{Days: aws.Int32(90)}, Filter: &types.LifecycleRuleFilter{And: &types.LifecycleRuleAndOperator{Prefix: aws.String(prefix)}}}}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := blob.LogLifecycleExpires(tc.rules, prefix, 90); got != tc.want {
+			if got := logLifecycleExpires(tc.rules, prefix, 90); got != tc.want {
 				t.Fatalf("lifecycleExpires = %v, want %v", got, tc.want)
 			}
 		})
 	}
-	if blob.LogLifecycleExpires([]types.LifecycleRule{rule(prefix, 90, true)}, prefix, 0) {
+	if logLifecycleExpires([]types.LifecycleRule{rule(prefix, 90, true)}, prefix, 0) {
 		t.Fatal("zero-day class appeared configured")
 	}
 	if largeDays := uint64(1)<<32 + 90; uint64(int(^uint(0)>>1)) >= largeDays {
-		if blob.LogLifecycleExpires([]types.LifecycleRule{rule(prefix, 90, true)}, prefix, int(largeDays)) {
+		if logLifecycleExpires([]types.LifecycleRule{rule(prefix, 90, true)}, prefix, int(largeDays)) {
 			t.Fatal("overflowed class matched a 90-day rule")
 		}
 	}
@@ -66,7 +64,7 @@ func TestS3LogLifecycleReadiness(t *testing.T) {
 					if r.Method != http.MethodGet || r.URL.Path != "/bucket" || !r.URL.Query().Has("lifecycle") {
 						t.Fatalf("unexpected lifecycle request: %s %s", r.Method, r.URL.Path)
 					}
-					days, _ := blob.LogClassDays(class)
+					days, _ := LogClassDays(class)
 					if response == "wrong days" {
 						days++
 					}

@@ -20,7 +20,7 @@ func declarationOrigin(source Source, file, key string, node *yaml.Node) runspec
 	if node != nil {
 		line = node.Line
 	}
-	return runspec.SettingOrigin{Layer: OriginLayers[source], File: file, Key: key, Line: line}
+	return runspec.SettingOrigin{Layer: originLayers[source], File: file, Key: key, Line: line}
 }
 
 func declaration[T any](value T, origin runspec.SettingOrigin) runspec.Setting[T] {
@@ -57,7 +57,7 @@ func checkoutLayer(value projectconfig.Defaults, node *yaml.Node, source Source,
 func ProjectCheckoutDeclarations(raw []byte, file, pipeline string) (runspec.CheckoutDeclarations, error) {
 	out := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion, File: file}
 	if len(raw) == 0 {
-		return out, ValidateCheckoutDeclarations(out)
+		return out, validateCheckoutDeclarations(out)
 	}
 	cfg, err := projectconfig.Parse(raw)
 	if err != nil {
@@ -68,11 +68,11 @@ func ProjectCheckoutDeclarations(raw []byte, file, pipeline string) (runspec.Che
 		return out, fmt.Errorf("%s: invalid YAML", file)
 	}
 	if len(doc.Content) == 0 {
-		return out, ValidateCheckoutDeclarations(out)
+		return out, validateCheckoutDeclarations(out)
 	}
 	root := doc.Content[0]
 	if cfg.Defaults != nil {
-		out.Defaults = checkoutLayer(*cfg.Defaults, userconfig.YAMLField(root, "defaults"), ProjectDefaults, file, "defaults.")
+		out.Defaults = checkoutLayer(*cfg.Defaults, userconfig.YAMLField(root, "defaults"), projectDefaults, file, "defaults.")
 	}
 	for i, entry := range cfg.Pipelines {
 		if entry.Name != pipeline {
@@ -83,13 +83,13 @@ func ProjectCheckoutDeclarations(raw []byte, file, pipeline string) (runspec.Che
 			node = list.Content[i]
 		}
 		prefix := fmt.Sprintf("pipelines[%d].", i)
-		out.Pipeline = checkoutLayer(projectconfig.Defaults{Args: entry.Args, Guards: entry.Guards, Requires: entry.Requires, Prefers: entry.Prefers}, node, ProjectPipeline, file, prefix)
+		out.Pipeline = checkoutLayer(projectconfig.Defaults{Args: entry.Args, Guards: entry.Guards, Requires: entry.Requires, Prefers: entry.Prefers}, node, projectPipeline, file, prefix)
 		if entry.Profile != nil {
-			out.Pipeline.Profile = declaration(*entry.Profile, declarationOrigin(ProjectPipeline, file, prefix+"profile", userconfig.YAMLField(node, "profile")))
+			out.Pipeline.Profile = declaration(*entry.Profile, declarationOrigin(projectPipeline, file, prefix+"profile", userconfig.YAMLField(node, "profile")))
 		}
 		break
 	}
-	return out, ValidateCheckoutDeclarations(out)
+	return out, validateCheckoutDeclarations(out)
 }
 
 func validateDeclarationOrigin(origin runspec.SettingOrigin, layer runspec.Layer, file string) error {
@@ -110,7 +110,7 @@ func validateDeclaration[T any](setting runspec.Setting[T], layer runspec.Layer,
 }
 
 func validateLayer(value runspec.CheckoutLayer, source Source, file string) error {
-	layer := OriginLayers[source]
+	layer := originLayers[source]
 	if err := validateDeclaration(value.Args, layer, file); err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func validateLayer(value runspec.CheckoutLayer, source Source, file string) erro
 	if value.Requires.Set && value.Requires.Value == nil || value.Prefers.Set && value.Prefers.Value == nil {
 		return fmt.Errorf("present checkout list must not be null")
 	}
-	if source == ProjectDefaults && value.Profile.Set {
+	if source == projectDefaults && value.Profile.Set {
 		return fmt.Errorf("profile is not permitted in project defaults")
 	}
 
@@ -184,7 +184,7 @@ func validateDeclarationKey(origin runspec.SettingOrigin, source Source, key str
 		return fmt.Errorf("checkout field is not permitted by its source")
 	}
 	expected := "defaults."
-	if source == ProjectPipeline {
+	if source == projectPipeline {
 		if !strings.HasSuffix(origin.Key, "."+key) {
 			return fmt.Errorf("checkout origin names a different field")
 		}
@@ -203,11 +203,11 @@ func validateDeclarationKey(origin runspec.SettingOrigin, source Source, key str
 	return nil
 }
 
-// ValidateCheckoutDeclarations checks the format, presence and field/source membership in Table.
+// validateCheckoutDeclarations checks the format, presence and field/source membership in Table.
 // Every nested Origin must agree with its structural layer and checkout-relative file. An origin
 // claiming flag, env, run, machine or operator authority is invalid. Explicit empty/zero survives.
 // Both acceptance and expansion call this before resolving any author-provided setting.
-func ValidateCheckoutDeclarations(value runspec.CheckoutDeclarations) error {
+func validateCheckoutDeclarations(value runspec.CheckoutDeclarations) error {
 	if value.Version != runspec.CheckoutDeclarationsVersion {
 		return fmt.Errorf("unsupported checkout declarations version")
 	}
@@ -217,8 +217,8 @@ func ValidateCheckoutDeclarations(value runspec.CheckoutDeclarations) error {
 	if value.File == "" && (!reflect.DeepEqual(value.Pipeline, runspec.CheckoutLayer{}) || !reflect.DeepEqual(value.Defaults, runspec.CheckoutLayer{})) {
 		return fmt.Errorf("checkout declarations require a file")
 	}
-	if err := validateLayer(value.Pipeline, ProjectPipeline, value.File); err != nil {
+	if err := validateLayer(value.Pipeline, projectPipeline, value.File); err != nil {
 		return err
 	}
-	return validateLayer(value.Defaults, ProjectDefaults, value.File)
+	return validateLayer(value.Defaults, projectDefaults, value.File)
 }

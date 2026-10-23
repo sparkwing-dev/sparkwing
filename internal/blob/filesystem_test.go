@@ -1,4 +1,4 @@
-package blob_test
+package blob
 
 import (
 	"errors"
@@ -11,14 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestFilesystemSignedCommit(t *testing.T) {
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
-	backend, err := blob.NewFilesystem(blob.FilesystemOptions{
+	backend, err := NewFilesystem(FilesystemOptions{
 		Directory: dir, Endpoint: "https://controller.invalid",
 		SigningKey: []byte(strings.Repeat("x", 32)), Now: func() time.Time { return now },
 	})
@@ -26,7 +25,7 @@ func TestFilesystemSignedCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = backend.Close() })
-	object := blob.Blob{Team: "team", Digest: digest("hello"), Size: 5}
+	object := Blob{Team: "team", Digest: digest("hello"), Size: 5}
 	key := "teams/team/pending/ticket"
 	signed, err := backend.Sign(t.Context(), capability.ObjectToSign{
 		Method: http.MethodPut, Key: key, Size: 5, SHA256: string(object.Digest), ExpiresAt: now.Add(time.Minute),
@@ -46,7 +45,7 @@ func TestFilesystemSignedCommit(t *testing.T) {
 	if err := backend.CommitObject(t.Context(), key, object); err != nil {
 		t.Fatalf("retry before settlement: %v", err)
 	}
-	final, err := blob.ObjectKey(object.Team, object.Digest)
+	final, err := ObjectKey(object.Team, object.Digest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +63,7 @@ func TestFilesystemSignedCommit(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, filepath.FromSlash(key))); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.CommitObject(t.Context(), key, object); !errors.Is(err, blob.ErrNotFound) {
+	if err := backend.CommitObject(t.Context(), key, object); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("commit without this ticket's staging: %v", err)
 	}
 	response = httptest.NewRecorder()
@@ -75,20 +74,20 @@ func TestFilesystemSignedCommit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(final)), []byte("jello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.CommitObject(t.Context(), key, object); !errors.Is(err, blob.ErrIntegrity) {
+	if err := backend.CommitObject(t.Context(), key, object); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("adopt corrupt object: %v", err)
 	}
 }
 
 var (
-	_ io.Closer             = (*blob.Filesystem)(nil)
-	_ capability.DataSigner = (*blob.Filesystem)(nil)
+	_ io.Closer             = (*Filesystem)(nil)
+	_ capability.DataSigner = (*Filesystem)(nil)
 )
 
 func TestFilesystemRefusesInvalidTransfers(t *testing.T) {
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
-	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32)), Now: func() time.Time { return now }})
+	backend, err := NewFilesystem(FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32)), Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +149,7 @@ func TestFilesystemRefusesInvalidTransfers(t *testing.T) {
 
 func TestFilesystemSigningRejectsPathsAndLogs(t *testing.T) {
 	now := time.Now()
-	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32))})
+	backend, err := NewFilesystem(FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +175,7 @@ func TestFilesystemSigningRejectsPathsAndLogs(t *testing.T) {
 
 func TestFilesystemTeamDeletionRemovesCASAndPendingOnlyForThatTeam(t *testing.T) {
 	dir := t.TempDir()
-	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32))})
+	backend, err := NewFilesystem(FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -38,7 +38,7 @@ func TestSDKWorkspaceOverride_FindsALocalSDKUse(t *testing.T) {
 	sw := filepath.Join(repo, ".sparkwing")
 	writeWork(t, sw, "../../sparkwing")
 
-	got := SDKWorkspaceOverride(sw)
+	got := sdkWorkspaceOverride(sw)
 	want, err := filepath.EvalSymlinks(sdk)
 	if err != nil {
 		want = sdk
@@ -58,7 +58,7 @@ func TestSDKWorkspaceOverride_FindsALocalSDKUse(t *testing.T) {
 func TestSDKWorkspaceOverride_EmptyWithoutAWorkspace(t *testing.T) {
 	repo := filepath.Join(t.TempDir(), "app")
 	writeSparkwingPin(t, repo, "v0.17.25")
-	if got := SDKWorkspaceOverride(filepath.Join(repo, ".sparkwing")); got != "" {
+	if got := sdkWorkspaceOverride(filepath.Join(repo, ".sparkwing")); got != "" {
 		t.Fatalf("SDKWorkspaceOverride = %q, want empty", got)
 	}
 }
@@ -77,7 +77,7 @@ func TestSDKWorkspaceOverride_IgnoresAWorkspaceThatDoesNotUseTheSDK(t *testing.T
 	sw := filepath.Join(repo, ".sparkwing")
 	writeWork(t, sw, "../../helper")
 
-	if got := SDKWorkspaceOverride(sw); got != "" {
+	if got := sdkWorkspaceOverride(sw); got != "" {
 		t.Fatalf("SDKWorkspaceOverride = %q, want empty for a non-SDK workspace", got)
 	}
 }

@@ -34,7 +34,7 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 	if err != nil {
 		return nil, err
 	}
-	client := StoreController{Engine: engine, Bearer: cfg.Bearer, Router: router}
+	client := storeController{Engine: engine, Bearer: cfg.Bearer, Router: router}
 	loop := &Loop{
 		Config: cfg.Loop, Controller: client,
 		Host:    StoreHosting{Controller: engine, Bind: cfg.Bind},
@@ -46,14 +46,14 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 	return loop, nil
 }
 
-// StoreController applies shared route policy to the embedded local queue.
-type StoreController struct {
+// storeController applies shared route policy to the embedded local queue.
+type storeController struct {
 	Router *controller.PolicyRouter
 	Engine *controller.EngineController
 	Bearer func(context.Context) (string, error)
 }
 
-func (c StoreController) checkVersion(ctx context.Context, version string, kinds []capability.UnitKind) error {
+func (c storeController) checkVersion(ctx context.Context, version string, kinds []capability.UnitKind) error {
 	ctx, authorized, err := c.authorize(ctx, "/api/v1/runners/claim", capability.Target{ClaimKinds: slices.Clone(kinds)})
 	if err != nil {
 		return err
@@ -63,7 +63,7 @@ func (c StoreController) checkVersion(ctx context.Context, version string, kinds
 }
 
 // Claim authorizes every selected kind before the controller issues an award.
-func (c StoreController) Claim(ctx context.Context, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+func (c storeController) Claim(ctx context.Context, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 	pattern := "/api/v1/runners/claim"
 	if body.RunID != "" && body.JobID == "" && len(body.Kinds) == 1 && body.Kinds[0] == capability.UnitTrigger {
 		pattern = "/api/v1/runs/{run}/claim"
@@ -76,7 +76,7 @@ func (c StoreController) Claim(ctx context.Context, body controllerwire.ClaimReq
 	return c.Engine.Claim(ctx, authorized, body)
 }
 
-func (c StoreController) authorize(ctx context.Context, pattern string, target capability.Target) (context.Context, capability.Authorized, error) {
+func (c storeController) authorize(ctx context.Context, pattern string, target capability.Target) (context.Context, capability.Authorized, error) {
 	if err := context.Cause(ctx); err != nil {
 		return ctx, capability.Authorized{}, err
 	}

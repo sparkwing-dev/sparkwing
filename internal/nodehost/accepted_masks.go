@@ -24,7 +24,7 @@ func (r *MaskRegistry) initialize(request runspec.SealedRequest, resolved *runsp
 		return err
 	}
 	for _, value := range projection.Values {
-		if err := r.Register(value); err != nil {
+		if err := r.registerValue(value); err != nil {
 			return err
 		}
 	}
@@ -103,7 +103,7 @@ func (r *MaskRegistry) initializeSnapshot(snapshot store.RunSnapshot, accepted A
 	}
 	for _, expansion := range snapshot.Expansions {
 		for _, value := range expansion.Registration.Values {
-			if err := r.Register(value); err != nil {
+			if err := r.registerValue(value); err != nil {
 				return err
 			}
 		}

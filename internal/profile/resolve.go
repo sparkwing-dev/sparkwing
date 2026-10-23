@@ -4,35 +4,35 @@ import (
 	"fmt"
 )
 
-type ChainSource string
+type chainSource string
 
 const (
-	ChainSourceFlag ChainSource = "flag"
-	ChainSourceNone ChainSource = "none"
+	chainSourceFlag chainSource = "flag"
+	chainSourceNone chainSource = "none"
 )
 
-type ConsideredEntry struct {
-	Source ChainSource
+type consideredEntry struct {
+	Source chainSource
 	Name   string
 	Reason string
 }
 
-type Chain struct {
+type chain struct {
 	Selected   string
-	Source     ChainSource
-	Considered []ConsideredEntry
+	Source     chainSource
+	Considered []consideredEntry
 }
 
-func Resolve(cliFlag string, file *Config) (*Profile, Chain, error) {
+func resolve(cliFlag string, file *config) (*profile, chain, error) {
 	if cliFlag == "" {
-		return nil, Chain{Source: ChainSourceNone}, nil
+		return nil, chain{Source: chainSourceNone}, nil
 	}
 	if file == nil || file.Profiles == nil {
-		return nil, Chain{}, fmt.Errorf("%w: %q (from --profile); no profiles loaded", ErrProfileNotFound, cliFlag)
+		return nil, chain{}, fmt.Errorf("%w: %q (from --profile); no profiles loaded", errProfileNotFound, cliFlag)
 	}
 	p, ok := file.Profiles[cliFlag]
 	if !ok || p == nil {
-		return nil, Chain{}, fmt.Errorf("%w: %q (from --profile)", ErrProfileNotFound, cliFlag)
+		return nil, chain{}, fmt.Errorf("%w: %q (from --profile)", errProfileNotFound, cliFlag)
 	}
-	return p, Chain{Selected: cliFlag, Source: ChainSourceFlag}, nil
+	return p, chain{Selected: cliFlag, Source: chainSourceFlag}, nil
 }

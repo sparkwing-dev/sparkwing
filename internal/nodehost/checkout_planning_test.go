@@ -72,7 +72,7 @@ func TestOwnerHostResolvesValidatedPlansBeforeAcceptance(t *testing.T) {
 			planning := newPlanningFixture(t)
 			functions := planning.functions()
 			if repeated {
-				if _, err := PlanInitial(t.Context(), planning.input, functions); err != nil {
+				if _, err := planInitial(t.Context(), planning.input, functions); err != nil {
 					t.Fatal(err)
 				}
 			}

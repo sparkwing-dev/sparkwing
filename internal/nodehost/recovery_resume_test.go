@@ -19,7 +19,7 @@ func TestResumeOnlyAdoptsTerminalRecoveryResults(t *testing.T) {
 			claim, input := claimRemote(t, f, "job")
 			ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "job"}
 			waits := 0
-			result, err := FollowReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone}, func(context.Context, controllerwire.NodeRef, int64) error {
+			result, err := followReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone}, func(context.Context, controllerwire.NodeRef, int64) error {
 				waits++
 				if terminal {
 					return f.report(t.Context(), input, store.NodeFailed)

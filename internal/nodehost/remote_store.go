@@ -123,9 +123,9 @@ func executionRow(runID string, job controllerwire.ExecutionJob) (store.NodeRow,
 	}, nil
 }
 
-// Schedule reconstructs only the store's scheduling projection; the owner calls
+// schedule reconstructs only the store's scheduling projection; the owner calls
 // the same Decide used locally. HTTP never serializes Actor or caller authority.
-func (s *RemoteOwnerStore) Schedule(ctx context.Context, runID string) (store.ScheduleSnapshot, error) {
+func (s *RemoteOwnerStore) schedule(ctx context.Context, runID string) (store.ScheduleSnapshot, error) {
 	if s.Controller == nil {
 		return store.ScheduleSnapshot{}, errors.New("scheduling requires an authenticated controller")
 	}
@@ -163,6 +163,6 @@ func (s *RemoteOwnerStore) Schedule(ctx context.Context, runID string) (store.Sc
 }
 
 var (
-	_ Reconciler     = (*RemoteOwnerStore)(nil)
-	_ ExpansionStore = (*RemoteOwnerStore)(nil)
+	_ reconciler     = (*RemoteOwnerStore)(nil)
+	_ expansionStore = (*RemoteOwnerStore)(nil)
 )

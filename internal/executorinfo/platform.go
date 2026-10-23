@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"os"
 	"regexp"
-	"runtime"
 	"strings"
 )
 
@@ -25,23 +23,17 @@ var normalizedArch = map[string]bool{
 	"ppc64": true, "ppc64le": true, "riscv64": true, "s390x": true, "wasm": true,
 }
 
-// ObservedPlatform contains machine facts detected by the helper itself. It
+// observedPlatform contains machine facts detected by the helper itself. It
 // stays separate from controller-owned capabilities and placement policy.
-type ObservedPlatform struct {
+type observedPlatform struct {
 	OS          string `json:"os"`
 	Arch        string `json:"arch"`
 	Environment string `json:"environment"`
 	HostOS      string `json:"host_os,omitempty"`
 }
 
-// DetectObservedPlatform reports bounded runtime facts without reading host
-// names, user names, distro names, network peers, or credentials.
-func DetectObservedPlatform() ObservedPlatform {
-	return detectObservedPlatform(runtime.GOOS, runtime.GOARCH, os.LookupEnv, os.ReadFile)
-}
-
-func detectObservedPlatform(goos, goarch string, lookupEnv func(string) (string, bool), readFile func(string) ([]byte, error)) ObservedPlatform {
-	observed := ObservedPlatform{
+func detectObservedPlatform(goos, goarch string, lookupEnv func(string) (string, bool), readFile func(string) ([]byte, error)) observedPlatform {
+	observed := observedPlatform{
 		OS: normalizeOS(goos), Arch: normalizeArch(goarch), Environment: "native",
 	}
 	if strings.EqualFold(goos, "linux") && detectsWSL(lookupEnv, readFile) {
@@ -84,9 +76,9 @@ func normalizeArch(value string) string {
 	return "unknown"
 }
 
-// Validate rejects malformed or contradictory observations before they cross
+// validate rejects malformed or contradictory observations before they cross
 // a heartbeat boundary.
-func (p ObservedPlatform) Validate() error {
+func (p observedPlatform) validate() error {
 	if (!platformValuePattern.MatchString(p.OS) || (p.OS != "unknown" && normalizedOS[p.OS] != p.OS)) ||
 		(!platformValuePattern.MatchString(p.Arch) || (p.Arch != "unknown" && !normalizedArch[p.Arch])) {
 		return errors.New("observed platform requires bounded normalized os and arch")
@@ -108,17 +100,17 @@ func (p ObservedPlatform) Validate() error {
 
 // MarshalJSON refuses to put unbounded or contradictory self-observations on
 // a wire before the controller can validate them again.
-func (p ObservedPlatform) MarshalJSON() ([]byte, error) {
-	if err := p.Validate(); err != nil {
+func (p observedPlatform) MarshalJSON() ([]byte, error) {
+	if err := p.validate(); err != nil {
 		return nil, err
 	}
-	type plain ObservedPlatform
+	type plain observedPlatform
 	return json.Marshal(plain(p))
 }
 
 // LogValue keeps structured output limited to the four bounded public facts.
-func (p ObservedPlatform) LogValue() slog.Value {
-	if err := p.Validate(); err != nil {
+func (p observedPlatform) LogValue() slog.Value {
+	if err := p.validate(); err != nil {
 		return slog.GroupValue(slog.String("status", "invalid"))
 	}
 	attrs := []slog.Attr{

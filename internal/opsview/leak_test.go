@@ -1,4 +1,4 @@
-package opsview_test
+package opsview
 
 import (
 	"testing"

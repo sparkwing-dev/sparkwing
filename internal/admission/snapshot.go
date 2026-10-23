@@ -205,7 +205,7 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 		tokenGen = randomToken
 	}
 	if snap.TotalMilliCores < 0 || snap.HeadroomMilliCores < 0 || snap.BurstMilliCores < 0 {
-		return nil, fmt.Errorf("%w: negative core capacity", ErrInvalidSnapshot)
+		return nil, fmt.Errorf("%w: negative core capacity", errInvalidSnapshot)
 	}
 	upgradeLegacyAdmitRanks(&snap)
 	scheduling := cloneSchedulingPolicy(snap.Scheduling)
@@ -232,7 +232,7 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 	}
 	for runID, p := range snap.PriorityOverrides {
 		if runID == "" {
-			return nil, fmt.Errorf("%w: priority override with an empty run id", ErrInvalidSnapshot)
+			return nil, fmt.Errorf("%w: priority override with an empty run id", errInvalidSnapshot)
 		}
 		l.priorityOverrides[runID] = p
 	}
@@ -252,7 +252,7 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 		}
 	}
 	if err := l.invariantViolation(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidSnapshot, err)
+		return nil, fmt.Errorf("%w: %v", errInvalidSnapshot, err)
 	}
 	return l, nil
 }
@@ -298,26 +298,26 @@ func ranklessLegacySnapshot(snap Snapshot) bool {
 
 func (l *Ledger) restoreLease(ls LeaseState) error {
 	if ls.ID == "" || ls.Token == "" || ls.RequestID == "" {
-		return fmt.Errorf("%w: lease %q with empty id, token, or request id", ErrInvalidSnapshot, ls.ID)
+		return fmt.Errorf("%w: lease %q with empty id, token, or request id", errInvalidSnapshot, ls.ID)
 	}
 	if _, dup := l.leases[ls.ID]; dup {
-		return fmt.Errorf("%w: duplicate lease %s", ErrInvalidSnapshot, ls.ID)
+		return fmt.Errorf("%w: duplicate lease %s", errInvalidSnapshot, ls.ID)
 	}
 	if _, dup := l.tokens[ls.Token]; dup {
-		return fmt.Errorf("%w: duplicate token on lease %s", ErrInvalidSnapshot, ls.ID)
+		return fmt.Errorf("%w: duplicate token on lease %s", errInvalidSnapshot, ls.ID)
 	}
 	if ls.MilliCores < 0 {
-		return fmt.Errorf("%w: lease %s negative cores", ErrInvalidSnapshot, ls.ID)
+		return fmt.Errorf("%w: lease %s negative cores", errInvalidSnapshot, ls.ID)
 	}
 	if err := validateStoredOwnerRank(ls.OwnerID, ls.OwnerAdmit, ls.Admit, l.admitSeq, "lease "+string(ls.ID)); err != nil {
 		return err
 	}
 	if len(ls.Members) == 0 {
-		return fmt.Errorf("%w: lease %s has no members", ErrInvalidSnapshot, ls.ID)
+		return fmt.Errorf("%w: lease %s has no members", errInvalidSnapshot, ls.ID)
 	}
 	claims, err := restoreClaims(ls.Claims)
 	if err != nil {
-		return fmt.Errorf("%w: lease %s: %v", ErrInvalidSnapshot, ls.ID, err)
+		return fmt.Errorf("%w: lease %s: %v", errInvalidSnapshot, ls.ID, err)
 	}
 	ownerAdmit := ls.OwnerAdmit
 	if ownerAdmit == 0 {
@@ -354,17 +354,17 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 	}
 	for _, m := range ls.Members {
 		if m == "" {
-			return fmt.Errorf("%w: lease %s has an empty member id", ErrInvalidSnapshot, ls.ID)
+			return fmt.Errorf("%w: lease %s has an empty member id", errInvalidSnapshot, ls.ID)
 		}
 		if _, dup := l.memberOf[m]; dup {
-			return fmt.Errorf("%w: member %q appears twice", ErrInvalidSnapshot, m)
+			return fmt.Errorf("%w: member %q appears twice", errInvalidSnapshot, m)
 		}
 		le.members[m] = struct{}{}
 		l.memberOf[m] = ls.ID
 	}
 	for child, parent := range ls.Parents {
 		if child == ls.RequestID || parent == "" || parent == child {
-			return fmt.Errorf("%w: invalid parent for member %q", ErrInvalidSnapshot, child)
+			return fmt.Errorf("%w: invalid parent for member %q", errInvalidSnapshot, child)
 		}
 		le.parents[child] = parent
 	}
@@ -379,11 +379,11 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 	for child := range le.parents {
 		for parent, seen := le.parents[child], map[string]bool{child: true}; parent != ls.RequestID && parent != ls.OwnerID; parent = le.parents[parent] {
 			if parent == "" || seen[parent] {
-				return fmt.Errorf("%w: cyclic or missing parent for %q", ErrInvalidSnapshot, child)
+				return fmt.Errorf("%w: cyclic or missing parent for %q", errInvalidSnapshot, child)
 			}
 			if _, ok := le.parents[parent]; !ok {
 				if _, live := le.members[parent]; !live {
-					return fmt.Errorf("%w: unknown parent %q", ErrInvalidSnapshot, parent)
+					return fmt.Errorf("%w: unknown parent %q", errInvalidSnapshot, parent)
 				}
 			}
 			seen[parent] = true
@@ -398,13 +398,13 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 
 func (l *Ledger) restoreSemaphore(ss SemaphoreState) error {
 	if ss.Key == "" {
-		return fmt.Errorf("%w: semaphore with empty key", ErrInvalidSnapshot)
+		return fmt.Errorf("%w: semaphore with empty key", errInvalidSnapshot)
 	}
 	if _, dup := l.sems[ss.Key]; dup {
-		return fmt.Errorf("%w: duplicate semaphore %q", ErrInvalidSnapshot, ss.Key)
+		return fmt.Errorf("%w: duplicate semaphore %q", errInvalidSnapshot, ss.Key)
 	}
 	if len(ss.Holds) == 0 {
-		return fmt.Errorf("%w: semaphore %q has no holds", ErrInvalidSnapshot, ss.Key)
+		return fmt.Errorf("%w: semaphore %q has no holds", errInvalidSnapshot, ss.Key)
 	}
 	sem := &semaphore{lastCapacity: ss.LastCapacity}
 	for _, hs := range ss.Holds {
@@ -422,20 +422,20 @@ func (l *Ledger) restoreSemaphore(ss SemaphoreState) error {
 
 func (l *Ledger) restoreWaiter(ws WaiterState) error {
 	if ws.RequestID == "" {
-		return fmt.Errorf("%w: waiter with empty request id", ErrInvalidSnapshot)
+		return fmt.Errorf("%w: waiter with empty request id", errInvalidSnapshot)
 	}
 	if ws.MilliCores < 0 || ws.MilliCores > l.totalMilliCores {
-		return fmt.Errorf("%w: waiter %q cores %d outside total %d", ErrInvalidSnapshot, ws.RequestID, ws.MilliCores, l.totalMilliCores)
+		return fmt.Errorf("%w: waiter %q cores %d outside total %d", errInvalidSnapshot, ws.RequestID, ws.MilliCores, l.totalMilliCores)
 	}
 	if ws.MemoryBytes > l.totalMemory {
-		return fmt.Errorf("%w: waiter %q memory %d outside total %d", ErrInvalidSnapshot, ws.RequestID, ws.MemoryBytes, l.totalMemory)
+		return fmt.Errorf("%w: waiter %q memory %d outside total %d", errInvalidSnapshot, ws.RequestID, ws.MemoryBytes, l.totalMemory)
 	}
 	if err := validateStoredOwnerRank(ws.OwnerID, ws.OwnerAdmit, ws.Admit, l.admitSeq, "waiter "+ws.RequestID); err != nil {
 		return err
 	}
 	claims, err := restoreClaims(ws.Claims)
 	if err != nil {
-		return fmt.Errorf("%w: waiter %q: %v", ErrInvalidSnapshot, ws.RequestID, err)
+		return fmt.Errorf("%w: waiter %q: %v", errInvalidSnapshot, ws.RequestID, err)
 	}
 	ownerAdmit := ws.OwnerAdmit
 	if ownerAdmit == 0 {
@@ -466,18 +466,18 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 
 func validateStoredOwnerRank(ownerID string, ownerAdmit, admit, admitSeq uint64, subject string) error {
 	if ownerID != "" && ownerAdmit == 0 {
-		return fmt.Errorf("%w: %s has no owner admission", ErrInvalidSnapshot, subject)
+		return fmt.Errorf("%w: %s has no owner admission", errInvalidSnapshot, subject)
 	}
 	if ownerAdmit == 0 {
 		return nil
 	}
 	if ownerAdmit > admit || ownerAdmit > admitSeq {
 		return fmt.Errorf("%w: %s owner admission %d outside participant admission %d and counter %d",
-			ErrInvalidSnapshot, subject, ownerAdmit, admit, admitSeq)
+			errInvalidSnapshot, subject, ownerAdmit, admit, admitSeq)
 	}
 	if ownerID == "" && ownerAdmit != admit {
 		return fmt.Errorf("%w: %s ownerless admission %d differs from participant admission %d",
-			ErrInvalidSnapshot, subject, ownerAdmit, admit)
+			errInvalidSnapshot, subject, ownerAdmit, admit)
 	}
 	return nil
 }

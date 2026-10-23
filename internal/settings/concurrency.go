@@ -7,8 +7,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// ResolveConcurrency preserves declarations and fills omitted policy fields.
-func ResolveConcurrency(declarations []nodeproto.ConcurrencySpec) ([]runspec.Concurrency, error) {
+// resolveConcurrency preserves declarations and fills omitted policy fields.
+func resolveConcurrency(declarations []nodeproto.ConcurrencySpec) ([]runspec.Concurrency, error) {
 	result := make([]runspec.Concurrency, 0, len(declarations))
 	seen := map[string]bool{}
 	for i, declaration := range declarations {

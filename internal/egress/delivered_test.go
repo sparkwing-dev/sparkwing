@@ -1,12 +1,10 @@
-package egress_test
+package egress
 
 import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
 type partialDelivery struct{ *httptest.ResponseRecorder }
@@ -17,7 +15,7 @@ func (w partialDelivery) Write(p []byte) (int, error) {
 }
 
 func TestHandleReportsDeliveredBytesWithoutAMeter(t *testing.T) {
-	for _, meter := range []*egress.Meter{nil, egress.New(egress.Config{})} {
+	for _, meter := range []*Meter{nil, New(Config{})} {
 		for _, tc := range []struct {
 			method string
 			status int
@@ -29,7 +27,7 @@ func TestHandleReportsDeliveredBytesWithoutAMeter(t *testing.T) {
 			{http.MethodGet, http.StatusPartialContent, 3},
 		} {
 			r := httptest.NewRequest(tc.method, "/", nil)
-			got := meter.Handle(partialDelivery{httptest.NewRecorder()}, r, "principal", egress.ClassLog, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			got := meter.Handle(partialDelivery{httptest.NewRecorder()}, r, "principal", ClassLog, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte("payload"))
 			}))

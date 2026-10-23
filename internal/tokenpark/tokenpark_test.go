@@ -15,7 +15,7 @@ func TestFileChanged_SeesARewriteAndNothingElse(t *testing.T) {
 	if err := os.WriteFile(path, []byte("token: old\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	changed := FileChanged(path)
+	changed := fileChanged(path)
 	if changed() {
 		t.Fatal("an untouched file reported a change")
 	}
@@ -30,7 +30,7 @@ func TestFileChanged_SeesARewriteAndNothingElse(t *testing.T) {
 
 func TestFileChanged_SeesAFileAppearOrVanish(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
-	appeared := FileChanged(path)
+	appeared := fileChanged(path)
 	if appeared() {
 		t.Fatal("a file still absent reported a change")
 	}
@@ -40,7 +40,7 @@ func TestFileChanged_SeesAFileAppearOrVanish(t *testing.T) {
 	if !appeared() {
 		t.Fatal("a file that appeared was not reported")
 	}
-	vanished := FileChanged(path)
+	vanished := fileChanged(path)
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestFileChanged_SeesAFileAppearOrVanish(t *testing.T) {
 func TestWait_EndsAtTheDeadlineOrTheChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
-		if Wait(t.Context(), time.Hour, func() bool { return false }) {
+		if wait(t.Context(), time.Hour, func() bool { return false }) {
 			t.Fatal("Wait reported a change nobody made")
 		}
 		if got := time.Since(start); got != time.Hour {
@@ -63,17 +63,17 @@ func TestWait_EndsAtTheDeadlineOrTheChange(t *testing.T) {
 		var flipped atomic.Bool
 		// safety: the change lands between watch ticks, so the tick after it is the one that must see it.
 		time.AfterFunc(time.Minute+2*time.Second, func() { flipped.Store(true) })
-		if !Wait(t.Context(), time.Hour, flipped.Load) {
+		if !wait(t.Context(), time.Hour, flipped.Load) {
 			t.Fatal("Wait missed the change")
 		}
-		if got := time.Since(start); got != time.Minute+WatchInterval {
+		if got := time.Since(start); got != time.Minute+watchInterval {
 			t.Fatalf("a change 62s in ended the wait after %s, want at the next watch tick", got)
 		}
 
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
 		start = time.Now()
-		if Wait(ctx, time.Hour, nil) || time.Since(start) != time.Second {
+		if wait(ctx, time.Hour, nil) || time.Since(start) != time.Second {
 			t.Fatal("a cancelled context did not end the wait at once")
 		}
 	})

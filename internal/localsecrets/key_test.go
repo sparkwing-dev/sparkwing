@@ -1,4 +1,4 @@
-package localsecrets_test
+package localsecrets
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
+
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -24,9 +24,9 @@ import (
 func keyFileIn(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, "secrets.key")
-	t.Setenv(localsecrets.KeyFileEnv, path)
-	t.Setenv(localsecrets.KeyEnv, "")
-	t.Setenv(localsecrets.PreviousKeyEnv, "")
+	t.Setenv(KeyFileEnv, path)
+	t.Setenv(keyEnv, "")
+	t.Setenv(previousKeyEnv, "")
 	return path
 }
 
@@ -40,9 +40,9 @@ func openStore(t *testing.T) *store.Store {
 	return st
 }
 
-func loadRing(t *testing.T) *localsecrets.Keyring {
+func loadRing(t *testing.T) *Keyring {
 	t.Helper()
-	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
+	ring, err := LoadKeyring(KeyringOptions{Create: true})
 	if err != nil {
 		t.Fatalf("load keyring: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestKeyring_ConcurrentCreatorsAgreeOnOneKey(t *testing.T) {
 	keyFileIn(t, t.TempDir())
 	st := openStore(t)
 	const creators = 8
-	rings := make([]*localsecrets.Keyring, creators)
+	rings := make([]*Keyring, creators)
 	for i := range rings {
 		rings[i] = loadRing(t)
 	}
@@ -136,7 +136,7 @@ func TestKeyring_ConcurrentCreatorsAgreeOnOneKey(t *testing.T) {
 			}
 		}
 	}
-	entries, err := os.ReadDir(filepath.Dir(os.Getenv(localsecrets.KeyFileEnv)))
+	entries, err := os.ReadDir(filepath.Dir(os.Getenv(KeyFileEnv)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,10 +153,10 @@ func TestKeyring_RefusesToCreateAKeyOverRowsSealedUnderAnother(t *testing.T) {
 	lost := keyFileIn(t, t.TempDir())
 	ring := loadRing(t)
 	_, err := ring.For(st.AsOperator()).Seal("new")
-	if !errors.Is(err, localsecrets.ErrNoKey) || !errors.Is(err, secrets.ErrKeyRefused) {
+	if !errors.Is(err, errNoKey) || !errors.Is(err, secrets.ErrKeyRefused) {
 		t.Fatalf("seal with the key file gone = %v, want ErrNoKey marked as a key refusal", err)
 	}
-	for _, want := range []string{lost, localsecrets.KeyEnv} {
+	for _, want := range []string{lost, keyEnv} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %s", err, want)
 		}
@@ -164,7 +164,7 @@ func TestKeyring_RefusesToCreateAKeyOverRowsSealedUnderAnother(t *testing.T) {
 	if _, statErr := os.Stat(lost); !errors.Is(statErr, os.ErrNotExist) {
 		t.Errorf("a key was created at %s despite sealed rows", lost)
 	}
-	if err := ring.MissingKey(context.Background(), st.AsOperator()); !errors.Is(err, localsecrets.ErrNoKey) {
+	if err := ring.MissingKey(context.Background(), st.AsOperator()); !errors.Is(err, errNoKey) {
 		t.Errorf("MissingKey = %v, want ErrNoKey", err)
 	}
 }
@@ -175,7 +175,7 @@ func TestKeyring_EnvKeyOverridesTheKeyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	envKey := bytes.Repeat([]byte{2}, secrets.KeySize)
-	t.Setenv(localsecrets.KeyEnv, base64.StdEncoding.EncodeToString(envKey))
+	t.Setenv(keyEnv, base64.StdEncoding.EncodeToString(envKey))
 	st := openStore(t)
 
 	ring := loadRing(t)
@@ -207,8 +207,8 @@ func TestKeyring_PreviousKeyOpensWhatTheOldKeySealed(t *testing.T) {
 	}
 	sealRow(t, old, st, "TOKEN", "abc")
 
-	t.Setenv(localsecrets.KeyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, secrets.KeySize)))
-	t.Setenv(localsecrets.PreviousKeyEnv, base64.StdEncoding.EncodeToString(oldKey))
+	t.Setenv(keyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, secrets.KeySize)))
+	t.Setenv(previousKeyEnv, base64.StdEncoding.EncodeToString(oldKey))
 	if got, err := openRow(t, loadRing(t).For(st.AsOperator()), st, "TOKEN"); err != nil || got != "abc" {
 		t.Errorf("opened %q, %v under the previous key; want abc", got, err)
 	}
@@ -216,7 +216,7 @@ func TestKeyring_PreviousKeyOpensWhatTheOldKeySealed(t *testing.T) {
 
 func TestKeyring_OpenWithoutAKeySaysSo(t *testing.T) {
 	keyFileIn(t, t.TempDir())
-	if _, err := loadRing(t).For(nil).Open("enc:v1:AAAA"); !errors.Is(err, localsecrets.ErrNoKey) {
+	if _, err := loadRing(t).For(nil).Open("enc:v1:AAAA"); !errors.Is(err, errNoKey) {
 		t.Fatalf("open with no key = %v, want ErrNoKey", err)
 	}
 }
@@ -239,7 +239,7 @@ func TestKeyring_RefusesAKeyFileOthersCanWrite(t *testing.T) {
 	if err := os.Chmod(path, 0o664); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "writable") {
+	if _, err := LoadKeyring(KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "writable") {
 		t.Fatalf("load with a group-writable key file = %v, want a writable-target refusal", err)
 	}
 }
@@ -256,7 +256,7 @@ func TestKeyring_RefusesAKeyFileOthersCanRead(t *testing.T) {
 		if err := os.Chmod(path, mode); err != nil {
 			t.Fatal(err)
 		}
-		_, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
+		_, err := LoadKeyring(KeyringOptions{})
 		if err == nil || !strings.Contains(err.Error(), "chmod 600 "+path) {
 			t.Fatalf("load with a %o key file = %v, want a refusal naming chmod 600", mode, err)
 		}
@@ -273,7 +273,7 @@ func TestKeyring_RefusesAKeyFileSymlink(t *testing.T) {
 	if err := os.Symlink(target, path); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "outside") {
+	if _, err := LoadKeyring(KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "outside") {
 		t.Fatalf("load through a symlinked key file = %v, want a symlink refusal", err)
 	}
 }
@@ -281,13 +281,13 @@ func TestKeyring_RefusesAKeyFileSymlink(t *testing.T) {
 func TestKeyring_OnlyACreatingProcessMakesTheKey(t *testing.T) {
 	path := keyFileIn(t, t.TempDir())
 	st := openStore(t)
-	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
+	ring, err := LoadKeyring(KeyringOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = ring.For(st.AsOperator()).Seal("value")
-	if !errors.Is(err, localsecrets.ErrNoKeyToCreate) || !errors.Is(err, secrets.ErrKeyRefused) || !strings.Contains(err.Error(), localsecrets.KeyEnv) {
-		t.Fatalf("seal in a non-creating process = %v, want ErrNoKeyToCreate naming %s", err, localsecrets.KeyEnv)
+	if !errors.Is(err, errNoKeyToCreate) || !errors.Is(err, secrets.ErrKeyRefused) || !strings.Contains(err.Error(), keyEnv) {
+		t.Fatalf("seal in a non-creating process = %v, want ErrNoKeyToCreate naming %s", err, keyEnv)
 	}
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("a non-creating process created %s", path)

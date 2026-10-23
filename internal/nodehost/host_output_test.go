@@ -175,7 +175,7 @@ func TestOutputRecordRead(t *testing.T) {
 				b.value = []byte(`"` + strings.Repeat("x", int(limits.NodeOutputBytes)-2) + `"`)
 			}
 			request := blob.RecordLookup{Authority: b.upload.Authority, Key: b.upload.Key}
-			value, err := adapter.ReadOutput(t.Context(), request)
+			value, err := adapter.readOutput(t.Context(), request)
 			ok := mode == "success" || mode == "null" || mode == "at_limit"
 			if ok {
 				if err != nil || !bytes.Equal(value, b.value) || b.lookup == nil || *b.lookup != request || b.get == nil || b.get.Authority != request.Authority || b.get.Digest != outputDigest(b.value) {

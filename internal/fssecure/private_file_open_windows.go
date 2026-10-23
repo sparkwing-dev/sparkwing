@@ -84,7 +84,7 @@ func openPrivateFile(path string, flag int) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(path, flag&^os.O_EXCL, FileMode)
+	file, err := os.OpenFile(path, flag&^os.O_EXCL, fileMode)
 	if err != nil {
 		return nil, err
 	}
@@ -101,11 +101,11 @@ func openPrivateFile(path string, flag int) (*os.File, error) {
 
 func openExistingPrivateFile(path string, flag int) (*os.File, error) {
 	// safety: a replaced path must fail the identity check before truncation can touch its target.
-	file, err := os.OpenFile(path, flag&^os.O_TRUNC, FileMode)
+	file, err := os.OpenFile(path, flag&^os.O_TRUNC, fileMode)
 	if err != nil {
 		return nil, err
 	}
-	if err := tightenOpen(file, FileMode); err != nil {
+	if err := tightenOpen(file, fileMode); err != nil {
 		_ = file.Close()
 		return nil, err
 	}

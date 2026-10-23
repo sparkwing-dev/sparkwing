@@ -1,4 +1,4 @@
-package opsview_test
+package opsview
 
 import (
 	"os"
@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
-	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 )
 
 func writeInstall(t *testing.T, dir string) string {
@@ -26,7 +25,7 @@ func TestInstallConflict_SilentOnASingleInstall(t *testing.T) {
 	dir := t.TempDir()
 	self := writeInstall(t, filepath.Join(dir, "local", "bin"))
 
-	if c := opsview.InstallConflict(self, []string{filepath.Dir(self)}); c != nil {
+	if c := InstallConflict(self, []string{filepath.Dir(self)}); c != nil {
 		t.Fatalf("one install reported a conflict: %+v", c)
 	}
 }
@@ -36,7 +35,7 @@ func TestInstallConflict_ReportsEveryOtherInstall(t *testing.T) {
 	self := writeInstall(t, filepath.Join(dir, "local", "bin"))
 	stale := writeInstall(t, filepath.Join(dir, "go", "bin"))
 
-	c := opsview.InstallConflict(self, []string{filepath.Dir(self), filepath.Dir(stale)})
+	c := InstallConflict(self, []string{filepath.Dir(self), filepath.Dir(stale)})
 	if c == nil {
 		t.Fatal("a second install went unreported")
 	}
@@ -59,7 +58,7 @@ func TestInstallConflict_SeesInstallsOffTheCallersPath(t *testing.T) {
 	env := map[string]string{"PATH": filepath.Dir(self)}
 	dirs := installsite.SearchDirs(func(k string) string { return env[k] }, home)
 
-	c := opsview.InstallConflict(self, dirs)
+	c := InstallConflict(self, dirs)
 	if c == nil {
 		t.Fatal("an install off the caller's PATH went unreported")
 	}

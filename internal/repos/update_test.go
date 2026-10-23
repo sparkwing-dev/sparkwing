@@ -75,7 +75,7 @@ func TestUpdateRepo_CleanWhenPlanIdentical(t *testing.T) {
 		planBefore: map[string]Plan{"p": planWith("a", "b")},
 		planAfter:  map[string]Plan{"p": planWith("a", "b")},
 	}
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
+	v := updateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
 	if v.Kind != VerdictClean {
 		t.Fatalf("kind = %s, want clean", v.Kind)
 	}
@@ -94,7 +94,7 @@ func TestUpdateRepo_PlanDiffersRendersDiff(t *testing.T) {
 		planBefore: map[string]Plan{"p": planWith("a", "b")},
 		planAfter:  map[string]Plan{"p": planWith("a", "b", "c")},
 	}
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
+	v := updateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
 	if v.Kind != VerdictPlanDiffers {
 		t.Fatalf("kind = %s, want plan-differs", v.Kind)
 	}
@@ -116,7 +116,7 @@ func TestUpdateRepo_BrokenOnCompileCarriesGuides(t *testing.T) {
 			return []Guide{{Version: "v0.15.7", Title: "Renamed OldAPI"}}
 		},
 	}
-	v := UpdateRepo(f, "/repo", "my-app", cfg)
+	v := updateRepo(f, "/repo", "my-app", cfg)
 	if v.Kind != VerdictBroken {
 		t.Fatalf("kind = %s, want broken", v.Kind)
 	}
@@ -135,7 +135,7 @@ func TestUpdateRepo_ApplyCommitsWithConventionalMessage(t *testing.T) {
 		planBefore: map[string]Plan{"p": planWith("a")},
 		planAfter:  map[string]Plan{"p": planWith("a")},
 	}
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8", Apply: true})
+	v := updateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8", Apply: true})
 	if v.Kind != VerdictClean || !v.Committed {
 		t.Fatalf("apply of a clean bump should commit; got %s committed=%v", v.Kind, v.Committed)
 	}
@@ -149,8 +149,8 @@ func TestUpdateRepo_ApplyCommitsWithConventionalMessage(t *testing.T) {
 
 func TestUpdateRepo_SkipsDirty(t *testing.T) {
 	f := &fakeOps{pin: "v0.15.6", dirty: true}
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
-	if v.Kind != VerdictSkippedDirty {
+	v := updateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
+	if v.Kind != verdictSkippedDirty {
 		t.Fatalf("kind = %s, want skipped-dirty", v.Kind)
 	}
 	if f.afterBump {
@@ -160,7 +160,7 @@ func TestUpdateRepo_SkipsDirty(t *testing.T) {
 
 func TestUpdateRepo_UpToDate(t *testing.T) {
 	f := &fakeOps{pin: "v0.15.8"}
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
+	v := updateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
 	if v.Kind != VerdictUpToDate {
 		t.Fatalf("kind = %s, want up-to-date", v.Kind)
 	}
@@ -168,8 +168,8 @@ func TestUpdateRepo_UpToDate(t *testing.T) {
 
 func TestUpdateRepo_SkipsReplaceDirective(t *testing.T) {
 	f := &fakeOps{pin: "v0.15.6", replace: "../sparkwing"}
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
-	if v.Kind != VerdictSkippedMissing {
+	v := updateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
+	if v.Kind != verdictSkippedMissing {
 		t.Fatalf("kind = %s, want skipped-missing", v.Kind)
 	}
 }
@@ -182,7 +182,7 @@ func TestUpdateRepo_VerifyFailureIsBroken(t *testing.T) {
 		planAfter:  map[string]Plan{"p": planWith("a")},
 		verifyErr:  errors.New("pre-commit: lint failed"),
 	}
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8", Verify: true})
+	v := updateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8", Verify: true})
 	if v.Kind != VerdictBroken {
 		t.Fatalf("kind = %s, want broken", v.Kind)
 	}
@@ -202,7 +202,7 @@ func TestUpdateRepo_ReportsEachStep(t *testing.T) {
 	cfg := UpdateConfig{Target: "v0.15.8", Verify: true, Apply: true, Progress: func(repo, msg string) {
 		got = append(got, repo+": "+msg)
 	}}
-	if v := UpdateRepo(f, "/repo", "my-app", cfg); v.Kind != VerdictClean {
+	if v := updateRepo(f, "/repo", "my-app", cfg); v.Kind != VerdictClean {
 		t.Fatalf("kind = %s, want clean", v.Kind)
 	}
 	want := []string{
@@ -252,7 +252,7 @@ func TestUpdateRepo_BaselineFailurePreventsBumpAndCommit(t *testing.T) {
 		beforeErr:  map[string]error{"deploy": errors.New("inputs for pipeline deploy: --tag is required")},
 		planBefore: map[string]Plan{"gate": planWith("a")}, planAfter: map[string]Plan{"gate": planWith("a")},
 	}
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8", Apply: true})
+	v := updateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8", Apply: true})
 	if v.Kind != VerdictBroken || !strings.Contains(v.Err, "deploy (before bump)") || f.afterBump || f.committed || !f.restored {
 		t.Fatalf("verdict=%+v bumped=%v committed=%v restored=%v", v, f.afterBump, f.committed, f.restored)
 	}
@@ -268,7 +268,7 @@ func TestUpdateRepo_InterruptMidBumpRestoresInsteadOfBroken(t *testing.T) {
 		planErr:    errors.New("signal: interrupt"),
 	}
 	f.onBump = cancel
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8", Context: ctx})
+	v := updateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8", Context: ctx})
 	if v.Kind != VerdictInterrupted {
 		t.Fatalf("kind = %s (%s), want interrupted", v.Kind, v.Err)
 	}
@@ -308,7 +308,7 @@ func TestUpdateRepo_RestoreFailureIsNamed(t *testing.T) {
 		planBefore: map[string]Plan{"p": planWith("a")},
 		planAfter:  map[string]Plan{"p": planWith("a")},
 	}}
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
+	v := updateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
 	if !strings.Contains(v.Detail, "restore failed") || !strings.Contains(v.Detail, "disk full") {
 		t.Fatalf("detail = %q, want the restore failure named", v.Detail)
 	}

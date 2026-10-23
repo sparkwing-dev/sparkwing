@@ -1,4 +1,4 @@
-package diskspace_test
+package diskspace
 
 import (
 	"testing"
