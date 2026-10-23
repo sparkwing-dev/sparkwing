@@ -958,8 +958,6 @@ components:
           type: string
         run_id:
           type: string
-        warning:
-          type: string
         write_scope:
           type: string
       required:
