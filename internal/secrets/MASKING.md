@@ -1,17 +1,19 @@
 # Host masking contract
 
-The Go host owns one `secrets.Masker`. It registers each accepted secret value,
-including each normalized list item, before author code can release it. Host
-issued values are registered before a service returns them. `Register` and
-`Validate` refuse values shorter than four Unicode code points. Refusal applies
-to stored secrets, supplied secret arguments and nonempty secret defaults of
-the selected pipeline. Each nonempty list item participates. An empty supplied
-argument or default carries no value. Use a plain config variable for values that
-fail this rule. Invalid derived proxy parts are skipped. Unselected defaults do
-not refuse the selected pipeline. Their valid raw values and list items still
-register, while short items are skipped.
+The Go host owns one `secrets.Masker`. Secret values shorter than four Unicode
+code points are accepted, encrypted and access-controlled like other secrets,
+but `Register` skips them before deriving any masking patterns. This applies to
+stored and local secrets, supplied secret arguments, defaults and normalized
+list items. The CLI and console show a one-time warning after saving a short
+secret. The API save response carries the warning. No warning includes the value.
+Empty supplied arguments and defaults carry no value.
 
-Each accepted value is matched literally and through its JSON/Go quoted, URL
+For values of at least four code points, the host registers each accepted value,
+including each normalized list item, before author code can release it. Host
+issued values are registered before a service returns them. Derived proxy parts
+shorter than four code points are skipped as well.
+
+Each registered value is matched literally and through its JSON/Go quoted, URL
 query/path/component, standard and URL-safe base64, and embedded base64
 spellings. Percent escape hex digits match regardless of case. Encoded forms
 are not recursively derived. The marker is `***`. Overlapping matches merge,

@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func TestDeclarationRefusalOnlyAppliesToSelectedDefaults(t *testing.T) {
+func TestDeclarationAcceptsShortDefaults(t *testing.T) {
 	for _, value := range []string{"a", "ab***cd", ""} {
 		t.Run(value, func(t *testing.T) {
 			masker := secrets.NewMasker()
@@ -26,13 +26,9 @@ func TestDeclarationRefusalOnlyAppliesToSelectedDefaults(t *testing.T) {
 			if _, err := gate.Resolve("selected", nil, nil); err != nil {
 				t.Fatal(err)
 			}
-			_, err = gate.Resolve("other", nil, nil)
-			if value != "a" {
-				if err != nil {
-					t.Fatal(err)
-				}
-			} else if !errors.Is(err, secrets.ErrInvalidValue) {
-				t.Fatalf("selected default not refused: %v", err)
+			resolved, err := gate.Resolve("other", nil, nil)
+			if err != nil || resolved.Args["token"] != value {
+				t.Fatalf("default not accepted: %+v %v", resolved, err)
 			}
 		})
 	}
@@ -120,8 +116,8 @@ func TestUnselectedListDefaultRegistersEveryValidCandidate(t *testing.T) {
 	if got := restored.Mask("x"); got != "x" {
 		t.Fatalf("short sibling item was registered: %q", got)
 	}
-	if _, err := gate.Resolve("other", nil, nil); !errors.Is(err, secrets.ErrInvalidValue) {
-		t.Fatalf("selected short list item was not refused: %v", err)
+	if _, err := gate.Resolve("other", nil, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

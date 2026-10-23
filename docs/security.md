@@ -55,19 +55,15 @@ secret defaults, effective values and every normalized list item. Stored secrets
 and OIDC tokens are registered before the host releases them. Explicit `Mask`
 registers author-generated values before subsequent output.
 
-Stored secrets, supplied secret arguments and nonempty secret defaults of the
-selected pipeline must contain at least four characters, including each nonempty
-list item. Use a plain config variable for shorter values. Empty supplied
-arguments and defaults carry no value. Defaults of unselected pipelines do not
-refuse a run. Their valid values and list items still register, while short
-items are skipped. Secrets containing `***` are accepted. Replacement markers can
+See [secret values](secrets.md#values-that-can-be-secrets) for the masking
+length rule and save-time warning. Empty supplied arguments and defaults carry no value.
+Defaults of unselected pipelines still register when they are long enough. Secrets containing `***` are accepted. Replacement markers can
 form a registered value containing `***`, or a value containing `*` beside a marker,
 across published stream emissions. This rare marker-edge case is accepted.
 The old twelve-byte line/list fragment policy
 is removed. Remote environment values still use their separate twelve-byte
 registration threshold. Plain submitted config is preserved when it is too short
-to register a mask. Derived proxy credential parts shorter than four characters
-are skipped. Planning output waits until declarations are known.
+to register a mask. Planning output waits until declarations are known.
 Failed discovery withholds output. A healthy selected pipeline can still plan
 when a sibling fails discovery, with planning output withheld. Private
 declarations drive lookup, flag parsing and routing. Help, display and the

@@ -46,6 +46,7 @@ type SecretWrite struct {
 }
 
 type SecretWritten struct {
+	Warning  string         `json:"warning,omitempty"`
 	Secret   SecretMetadata `json:"secret"`
 	Replayed bool           `json:"replayed"`
 }

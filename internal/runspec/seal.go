@@ -9,18 +9,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // SealRequest snapshots authorized intake values without resolving their precedence.
 func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 	for _, name := range request.SecretArgs.Value {
-		value, present := request.RequestedArgs[name]
+		_, present := request.RequestedArgs[name]
 		if !present {
 			return SealedRequest{}, errors.New("secret argument classification names an absent argument")
-		}
-		if err := secrets.Validate(value); err != nil {
-			return SealedRequest{}, err
 		}
 	}
 	if request.Burst != nil {

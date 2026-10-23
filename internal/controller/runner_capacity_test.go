@@ -58,14 +58,14 @@ func TestRegisteredRunnerRequiresEveryRequestedLabel(t *testing.T) {
 	}
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_display=? WHERE id='run'`, requestBody, sealed.Request.Git.Repository.Display)
 	engineAcceptedFixturePlan(t, e, "a", "run")
-	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu","tool:terraform"]}}`))
-	request := `{"runner_version":"v1.2.3","kinds":["node"],"labels":["sparkwing-4cpu"],"os":"linux","arch":"arm64"}`
+	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"requires":{"set":true,"value":["team-4cpu","tool:terraform"]}}`))
+	request := `{"runner_version":"v1.2.3","kinds":["node"],"labels":["team-4cpu"],"os":"linux","arch":"arm64"}`
 	response := engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", request, 200)
 	var claim controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &claim); err != nil || claim.Claim != nil {
 		t.Fatalf("machine missing a required label received work: %s error=%v", response.Body, err)
 	}
-	request = `{"runner_version":"v1.2.3","kinds":["node"],"labels":["sparkwing-4cpu","tool:terraform"],"os":"linux","arch":"arm64"}`
+	request = `{"runner_version":"v1.2.3","kinds":["node"],"labels":["team-4cpu","tool:terraform"],"os":"linux","arch":"arm64"}`
 	response = engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", request, 200)
 	if err := json.Unmarshal(response.Body.Bytes(), &claim); err != nil || claim.Claim == nil || claim.Claim.JobID != "job" || claim.Claim.Runner.Name != "capacity-machine" {
 		t.Fatalf("matching registered machine lost its award: %s error=%v", response.Body, err)

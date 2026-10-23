@@ -28,7 +28,7 @@ func checkStoreCredentialMutations(ctx context.Context, s *store.Store, team sto
 	if err != nil {
 		return err
 	}
-	if err := tenant.WriteSecret(ctx, a, sealed); err != nil {
+	if _, err := tenant.WriteSecret(ctx, a, sealed); err != nil {
 		return err
 	}
 	row, err := tenant.ReadSecret(ctx, a)

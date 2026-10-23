@@ -69,7 +69,7 @@ func TestSecrets_DashboardSessionsWriteSecretsAndReadVariables(t *testing.T) {
 		{"name": "REGION", "value": "us-west-2", "shared": true, "masked": false},
 		{"name": "WEB_TOKEN", "value": "line one\nline two", "pipeline": "deploy-web"},
 	} {
-		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", row); code != http.StatusNoContent {
+		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", row); code != http.StatusOK {
 			t.Fatalf("write %v: HTTP %d %s", row["name"], code, body)
 		}
 	}
@@ -118,7 +118,7 @@ func TestSecrets_ListOpensAVariablesEnvelope(t *testing.T) {
 		`{"name":"TOKEN","value":"supersecret"}`,
 	} {
 		w := f.serve(f.cookieRequest(http.MethodPost, "/api/v1/secrets", row))
-		if w.Code != http.StatusNoContent {
+		if w.Code != http.StatusOK {
 			t.Fatalf("write secret: HTTP %d %s", w.Code, w.Body)
 		}
 	}
@@ -162,7 +162,7 @@ func TestSecrets_MaskedValuesStayWriteOnlyForMembersAndDeploymentCredentials(t *
 		{"name": "DEPLOY_KEY", "value": "hunter2", "shared": true},
 		{"name": "REGION", "value": "us-west-2", "shared": true, "masked": false},
 	} {
-		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", owner, row); code != http.StatusNoContent {
+		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", owner, row); code != http.StatusOK {
 			t.Fatalf("owner bearer write: HTTP %d %s", code, body)
 		}
 	}
@@ -200,7 +200,7 @@ func TestSecrets_EveryResponseIsNoStore(t *testing.T) {
 		method, path, body string
 		status             int
 	}{
-		{"POST", "/api/v1/secrets", `{"name":"DEPLOY_KEY","value":"private-key","shared":true}`, http.StatusNoContent},
+		{"POST", "/api/v1/secrets", `{"name":"DEPLOY_KEY","value":"private-key","shared":true}`, http.StatusOK},
 		{"GET", "/api/v1/secrets", "", http.StatusOK},
 		{"GET", "/api/v1/secrets/DEPLOY_KEY", "", http.StatusForbidden},
 		{"DELETE", "/api/v1/secrets/DEPLOY_KEY", "", http.StatusNoContent},
@@ -258,7 +258,7 @@ func TestSecretsDashboardMaskedValuesProperty(t *testing.T) {
 			pipeline, path = "deploy", path+"?pipeline=deploy"
 		}
 		code, body, _ := secretsRequest(t, owner, "POST", "/api/v1/secrets", "", map[string]any{"name": "PROP_TOKEN", "value": private, "shared": shared, "pipeline": pipeline})
-		if code != http.StatusNoContent {
+		if code != http.StatusOK {
 			t.Fatalf("write: HTTP %d %s", code, body)
 		}
 		listed := listSecretsAs(t, viewer, private)

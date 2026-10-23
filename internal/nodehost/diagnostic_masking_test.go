@@ -82,7 +82,7 @@ func FuzzExecutorDiagnosticSinks(f *testing.F) {
 		secret := "private-" + strings.ToValidUTF8(input, "�") + "-value"
 		masker := secrets.NewMasker()
 		if err := masker.Register(secret); err != nil {
-			if secrets.Validate(secret) == nil {
+			if secrets.Maskable(secret) {
 				t.Fatal(err)
 			}
 			return

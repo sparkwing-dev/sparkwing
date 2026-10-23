@@ -8,7 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
@@ -29,9 +28,6 @@ func validateLocalSecrets(names []string, values map[string]string) error {
 		}
 		if _, ok := values[name]; !ok {
 			return authorityError(apierr.BadRequest, "local secret names and resolved values must match")
-		}
-		if err := secrets.Validate(values[name]); err != nil {
-			return authorityError(apierr.BadRequest, err.Error())
 		}
 		seen[name] = true
 	}

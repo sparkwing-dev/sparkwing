@@ -17,11 +17,11 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
-	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -81,12 +81,19 @@ func (f *credentialMutationFake) record(a capability.Authorized) error {
 	return f.err
 }
 
-func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Authorized, sealed store.SealedSecret) error {
+func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Authorized, sealed store.SealedSecret) (store.Secret, error) {
 	row := sealed.Row()
 	if err := f.record(a); err != nil {
-		return err
+		return store.Secret{}, err
 	}
-	return teststore.SeedSecret(f.store, f.Team(), row, teststore.Now(f.store))
+	if err := teststore.SeedSecret(f.store, f.Team(), row, teststore.Now(f.store)); err != nil {
+		return store.Secret{}, err
+	}
+	stored, err := f.Tenant.GetSecretRow(row.Name, row.Pipeline)
+	if err != nil {
+		return store.Secret{}, err
+	}
+	return *stored, nil
 }
 
 func (f *credentialMutationFake) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error {
@@ -164,26 +171,26 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 		}
 		w := authorityHTTP(h, b, "POST", "/api/v1/secrets?"+query.Encode(), string(body))
 		row, err := target.GetSecretRow("KEY", pipeline)
-		if masked && utf8.RuneCountInString(value) < 4 {
-			assertEngineError(t, w, http.StatusBadRequest, apierr.InvalidArgs)
-			if !strings.Contains(w.Body.String(), "use a plain config variable") || row != nil || !errors.Is(err, store.ErrNotFound) {
-				return false
-			}
-		} else {
-			if w.Code != 204 || w.Body.Len() != 0 || w.Header().Get("Cache-Control") != "no-store" || err != nil || row.Principal != "account" || row.Masked != masked || row.Shared != shared {
-				return false
-			}
-			plain, err := cipher.OpenBound(secrets.PurposeSecret, "team", "KEY", pipeline, shared, masked, row.Value)
-			if err != nil || plain != value || row.Value == value {
-				return false
-			}
-			if _, err := cipher.OpenBound(secrets.PurposeSecret, "foreign", "KEY", pipeline, shared, masked, row.Value); err == nil {
-				return false
-			}
-			w = authorityHTTP(h, b, "DELETE", "/api/v1/secrets/KEY?"+query.Encode(), "")
-			if _, err := target.GetSecretRow("KEY", pipeline); w.Code != 204 || !errors.Is(err, store.ErrNotFound) {
-				return false
-			}
+		var receipt controllerwire.SecretWritten
+		if json.Unmarshal(w.Body.Bytes(), &receipt) != nil {
+			return false
+		}
+		if (receipt.Warning != "") != (masked && !secrets.Maskable(value)) {
+			return false
+		}
+		if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" || err != nil || row.Principal != "account" || row.Masked != masked || row.Shared != shared {
+			return false
+		}
+		plain, err := cipher.OpenBound(secrets.PurposeSecret, "team", "KEY", pipeline, shared, masked, row.Value)
+		if err != nil || plain != value || row.Value == value {
+			return false
+		}
+		if _, err := cipher.OpenBound(secrets.PurposeSecret, "foreign", "KEY", pipeline, shared, masked, row.Value); err == nil {
+			return false
+		}
+		w = authorityHTTP(h, b, "DELETE", "/api/v1/secrets/KEY?"+query.Encode(), "")
+		if _, err := target.GetSecretRow("KEY", pipeline); w.Code != 204 || !errors.Is(err, store.ErrNotFound) {
+			return false
 		}
 		other, err := foreign.GetSecretRow("KEY", pipeline)
 		if err != nil || other.Value != "foreign-value" {
@@ -471,7 +478,7 @@ func TestCredentialMutationsHTTPMemberTransports(t *testing.T) {
 		}
 		h := mutationServer(t, s, cipher, b)
 		w := authorityHTTP(h, b, "POST", "/api/v1/secrets", `{"name":"KEY","value":"default-masked"}`)
-		if w.Code != 204 {
+		if w.Code != http.StatusOK {
 			t.Fatalf("class %s HTTP %d %s", class, w.Code, w.Body.String())
 		}
 		tenant, err := s.ForTeam(t.Context(), "team")

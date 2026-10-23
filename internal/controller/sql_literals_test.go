@@ -134,13 +134,13 @@ func TestSecretMutationsTreatSQLMetacharactersAsLiteral(t *testing.T) {
 		}
 		assertRows(t)
 		for _, key := range keys {
-			wantStatus := http.StatusNoContent
+			wantStatus := http.StatusOK
 			if key[0] == name {
 				wantStatus = http.StatusBadRequest
 			}
 			f.call(http.MethodPost, "/api/v1/secrets", f.writer,
 				map[string]string{"name": key[0], "pipeline": key[1], "value": "replacement"}, wantStatus, nil)
-			if wantStatus == http.StatusNoContent {
+			if wantStatus == http.StatusOK {
 				want[teamA.Team()][key] = "replacement"
 			}
 			assertRows(t)

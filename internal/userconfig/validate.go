@@ -91,6 +91,11 @@ func validURL(raw string) bool {
 }
 
 func validateRunner(r RunnerConfig) error {
+	for _, label := range r.Labels {
+		if strings.HasPrefix(strings.TrimSpace(label), "sparkwing-") {
+			return Invalid("runner.labels", "labels beginning with sparkwing- belong to Sparkwing Cloud; use another prefix for self-hosted, personal or pool runners")
+		}
+	}
 	if r.Controller != nil && !validURL(*r.Controller) {
 		return Invalid("runner.controller", "expected an HTTP or HTTPS controller URL without credentials")
 	}

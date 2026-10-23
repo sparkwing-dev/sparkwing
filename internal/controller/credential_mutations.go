@@ -16,7 +16,7 @@ import (
 // CredentialWriter rechecks live member authority and tenancy in each committing transaction.
 type CredentialWriter interface {
 	Team() store.Team
-	WriteSecret(context.Context, capability.Authorized, store.SealedSecret) error
+	WriteSecret(context.Context, capability.Authorized, store.SealedSecret) (store.Secret, error)
 	RemoveSecret(context.Context, capability.Authorized, string, string) error
 	WriteGitCredential(context.Context, capability.Authorized, store.SealedGitCredential) (store.GitCredential, error)
 	ConfirmGitCredentialFor(context.Context, capability.Authorized, string, string, string) (store.GitCredential, error)
@@ -50,8 +50,6 @@ func decodeCredentialRequest[T any](r *http.Request) (*T, error) {
 
 func credentialWriteError(err error) error {
 	switch {
-	case errors.Is(err, secrets.ErrInvalidValue):
-		return &apierr.Error{Code: apierr.InvalidArgs, Message: secrets.ErrInvalidValue.Error()}
 	case errors.Is(err, errBoundCipherRequired):
 		return &apierr.Error{Code: apierr.Unavailable, Message: "bound credential encryption is unavailable"}
 	case errors.Is(err, secrets.ErrKeyRefused):

@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
@@ -51,7 +52,7 @@ func runSecret(inv clisurface.Invocation) error {
 	if err != nil {
 		return err
 	}
-	return manageSecrets(ctx, inv, manager, os.Stdin, os.Stdout, inv.Value("profile") == "")
+	return manageSecrets(ctx, inv, manager, os.Stdin, os.Stdout, os.Stderr, inv.Value("profile") == "")
 }
 
 func validateSecretInvocation(inv clisurface.Invocation) error {
@@ -63,7 +64,7 @@ func validateSecretInvocation(inv clisurface.Invocation) error {
 	return nil
 }
 
-func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager controllerwire.SecretManager, in io.Reader, out io.Writer, local bool) error {
+func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager controllerwire.SecretManager, in io.Reader, out, diagnostics io.Writer, local bool) error {
 	if err := validateSecretInvocation(inv); err != nil {
 		return err
 	}
@@ -85,7 +86,16 @@ func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager contr
 		if err != nil {
 			return err
 		}
+		if input.Masked && !secrets.Maskable(input.Value) {
+			result.Warning = secrets.ShortValueWarning
+		}
+		if result.Warning != "" {
+			if _, err := fmt.Fprintln(diagnostics, "warning: "+result.Warning); err != nil {
+				return err
+			}
+		}
 		if format == "json" {
+			result.Warning = ""
 			return json.NewEncoder(out).Encode(result)
 		}
 		if format == "plain" {
