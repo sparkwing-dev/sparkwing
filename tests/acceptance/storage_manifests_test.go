@@ -21,6 +21,7 @@ import (
 )
 
 func checkStorageFilesystemManifests(t *testing.T) {
+	recordLeaf(t)
 	objects, dir := storageFilesystem(t)
 	checkStorageManifests(t, objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}, func(key string, body []byte) {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(key)), body, 0o600); err != nil {
@@ -30,6 +31,7 @@ func checkStorageFilesystemManifests(t *testing.T) {
 }
 
 func checkStorageS3Manifests(t *testing.T) {
+	recordLeaf(t)
 	objects, transport := storageS3(t)
 	checkStorageManifests(t, objects, blob.TransferClient{Transport: transport}, func(key string, body []byte) {
 		transport.objects[key] = bytes.Clone(body)
@@ -37,6 +39,7 @@ func checkStorageS3Manifests(t *testing.T) {
 }
 
 func checkStorageFilesystemManifestRecords(t *testing.T) {
+	recordLeaf(t)
 	objects, _ := storageFilesystem(t)
 	if err := checkBlobManifestRecords(t, t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}); err != nil {
 		t.Fatal(err)
@@ -44,6 +47,7 @@ func checkStorageFilesystemManifestRecords(t *testing.T) {
 }
 
 func checkStorageS3ManifestRecords(t *testing.T) {
+	recordLeaf(t)
 	objects, transport := storageS3(t)
 	if err := checkBlobManifestRecords(t, t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
 		t.Fatal(err)

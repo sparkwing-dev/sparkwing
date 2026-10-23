@@ -18,19 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// safety: component proofs do not replace the native target's transaction and transport evidence.
-func storageBoundaryChecks() map[string]func(*testing.T) {
-	return map[string]func(*testing.T){
-		"storage-cas-integrity":                          checkStorageCAS,
-		"storage-reference-edge-laundering":              checkStorageReceipts,
-		"storage-memo-and-depcache-scope":                checkStorageNamespaces,
-		"storage-binary-provenance":                      checkStorageBinaryTrust,
-		"storage-owner-receipts-and-stream-verification": checkStorageOwnerReceipts,
-		"storage-hasmany-large-budget":                   checkStoragePresence,
-		"storage-local-remote-cache-opt-in":              checkStorageRemoteCache,
-	}
-}
-
 func checkStorageCAS(t *testing.T) {
 	t.Run("streams", checkStorageStreams)
 	t.Run("filesystem", checkStorageFilesystemCAS)
@@ -63,6 +50,7 @@ func storageIdentity(seed [16]byte, ordinal uint32) (blob.UploadIdentity, blob.A
 }
 
 func checkStorageReceipts(t *testing.T) {
+	recordLeaf(t)
 	// safety: a receipt never transfers between identities, even when the CAS digest is identical.
 	storageProperty(t, func(seed [16]byte, ordinal uint32) bool {
 		i, a := storageIdentity(seed, ordinal)
@@ -110,6 +98,7 @@ func checkStorageReceipts(t *testing.T) {
 }
 
 func checkStorageOwnerReceipts(t *testing.T) {
+	recordLeaf(t)
 	// safety: an owner-unit receipt retains its unit fence and grants no unrelated job output edge.
 	storageProperty(t, func(seed [16]byte, ordinal uint32) bool {
 		job, a := storageIdentity(seed, ordinal)
@@ -147,6 +136,7 @@ func checkStorageOwnerReceipts(t *testing.T) {
 }
 
 func checkStorageNamespaces(t *testing.T) {
+	recordLeaf(t)
 	// safety: component boundaries and the verified-ref tag cannot alias another cache namespace.
 	storageProperty(t, func(parts [5]string) bool {
 		for i, part := range parts {
@@ -194,6 +184,7 @@ func checkStorageNamespaces(t *testing.T) {
 }
 
 func checkStorageBinaryTrust(t *testing.T) {
+	recordLeaf(t)
 	// safety: executable trust requires the exact committed digest, tenant and server provenance.
 	storageProperty(t, func(seed [16]byte, optIn bool) bool {
 		digest := storageDigest(seed[:])
@@ -235,6 +226,7 @@ func (s storageTransfer) Transfer(context.Context, blob.SignedTransfer, io.Reade
 }
 
 func checkStorageStreams(t *testing.T) {
+	recordLeaf(t)
 	// safety: successful verification requires intact bytes through EOF, even at an exact Content-Length.
 	storageProperty(t, func(seed [64]byte, length uint8) bool {
 		body := seed[:int(length)%len(seed)+1]
@@ -303,6 +295,7 @@ func checkStoragePresence(t *testing.T) {
 	}
 	for _, fault := range []string{"", "expired", "cancelled", "unsolicited"} {
 		t.Run(fault, func(t *testing.T) {
+			recordLeaf(t)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			signer := &storagePresence{result: blob.Presence{Present: append(append([]blob.Digest{}, readable...), readable...)}}

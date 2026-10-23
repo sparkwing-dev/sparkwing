@@ -38,6 +38,7 @@ func testGoSDKReplayEnvironment(t *testing.T) {
 	protocolProbeReply(t, process, "plan")
 	for _, source := range []string{"source", "child"} {
 		t.Run(source, func(t *testing.T) {
+			recordLeaf(t)
 			closure := source + "/generate/0"
 			value, err := host.Eval(t.Context(), fake, source, closure, json.RawMessage("null"))
 			if err != nil {

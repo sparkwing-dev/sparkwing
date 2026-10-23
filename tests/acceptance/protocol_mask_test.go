@@ -28,6 +28,7 @@ func testGoSDKFakeHostAttributeMasks(t *testing.T) {
 		{"colliding-keys", "attribute-sentinel", `{"attribute-sentinel":1,"***":2}`, `{"masked_attrs":"***"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			recordLeaf(t)
 			host := sparkwingtest.New(sparkwingtest.Options{Secrets: map[string]sparkwingtest.Secret{
 				"TOKEN": {Value: test.secret, Masked: true},
 			}})
@@ -55,6 +56,7 @@ func testGoSDKFakeHostAttributeMasks(t *testing.T) {
 		})
 	}
 	t.Run("overlapping-registrations", func(t *testing.T) {
+		recordLeaf(t)
 		host := sparkwingtest.New(sparkwingtest.Options{})
 		t.Cleanup(func() { _ = host.Close() })
 		ctx := host.Context(t.Context())
@@ -88,6 +90,7 @@ func (s *maskAcknowledgement) Mask(ctx context.Context, value string) error {
 }
 
 func testGoSDKMaskAcknowledgement(t *testing.T) {
+	recordLeaf(t)
 	synctest.Test(t, func(t *testing.T) {
 		host := sparkwingtest.New(sparkwingtest.Options{})
 		defer host.Close()

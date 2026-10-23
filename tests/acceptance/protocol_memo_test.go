@@ -43,6 +43,7 @@ func testGoSDKMemoInputBoundaries(t *testing.T) {
 		})},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			recordLeaf(t)
 			raw, err := evalGoSDKMemo(t, test.resolve)
 			var failure *apierr.Error
 			if len(raw) != 0 || !errors.As(err, &failure) || failure.Code != apierr.SDKError {
@@ -51,6 +52,7 @@ func testGoSDKMemoInputBoundaries(t *testing.T) {
 		})
 	}
 	t.Run("no-memo", func(t *testing.T) {
+		recordLeaf(t)
 		calls := 0
 		resolve := inputs.Compose(func(context.Context) (sparkwing.MemoValue, error) {
 			return sparkwing.NoMemo, nil
@@ -63,6 +65,7 @@ func testGoSDKMemoInputBoundaries(t *testing.T) {
 		}
 	})
 	t.Run("fingerprints", func(t *testing.T) {
+		recordLeaf(t)
 		assertKey := func(resolve sparkwing.MemoKeyFn, want string) {
 			t.Helper()
 			raw, err := evalGoSDKMemo(t, resolve)
@@ -85,6 +88,7 @@ func testGoSDKMemoInputBoundaries(t *testing.T) {
 }
 
 func testGoSDKMemoTreeIsolation(t *testing.T) {
+	recordLeaf(t)
 	root, outside := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("fixture contents\n"), 0o600); err != nil {
 		t.Fatal(err)

@@ -14,11 +14,13 @@ import (
 )
 
 func checkStorageFilesystemPublication(t *testing.T) {
+	recordLeaf(t)
 	objects, _ := storageFilesystem(t)
 	checkStoragePublication(t, objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)})
 }
 
 func checkStorageS3Publication(t *testing.T) {
+	recordLeaf(t)
 	objects, transport := storageS3(t)
 	checkStoragePublication(t, objects, blob.TransferClient{Transport: transport})
 }

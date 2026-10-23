@@ -34,6 +34,7 @@ func testGoSDKReplyFrameLimit(t *testing.T) {
 	for _, id := range []string{"describe", strings.Repeat("quoted-\"", 128)} {
 		for _, excess := range []int{0, 1} {
 			t.Run(map[int]string{0: "at-limit", 1: "over-limit"}[excess], func(t *testing.T) {
+				recordLeaf(t)
 				doc := nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "fixture", Help: "x", Args: []nodeproto.ArgumentDescription{}}}}
 				raw, err := json.Marshal(doc)
 				if err != nil {
@@ -91,6 +92,7 @@ func testGoSDKReplyFrameLimit(t *testing.T) {
 func testGoSDKFrameLimit(t *testing.T) {
 	for _, excess := range []int{0, 1} {
 		t.Run(map[int]string{0: "at-limit", 1: "over-limit"}[excess], func(t *testing.T) {
+			recordLeaf(t)
 			empty, err := json.Marshal(nodeproto.FrameLog{TS: "2026-10-14T00:00:00Z", Message: "x"})
 			if err != nil {
 				t.Fatal(err)

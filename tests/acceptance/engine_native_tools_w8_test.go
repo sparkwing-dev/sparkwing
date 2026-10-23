@@ -19,10 +19,10 @@ import (
 
 func TestEngineNativeNPMW8Components(t *testing.T) {
 	if _, err := pipelineentry.NPMCommand(t.Context(), procenv.Env{}, runtime.GOOS, exec.LookPath, "--version"); err != nil {
-		t.Skipf("native npm is not installed: %v", err)
+		t.Fatalf("native npm is not installed: %v", err)
 	}
 	if _, err := exec.LookPath("node"); err != nil {
-		t.Skipf("native Node.js is not installed: %v", err)
+		t.Fatalf("native Node.js is not installed: %v", err)
 	}
 	root := t.TempDir()
 	t.Setenv("HOME", root)

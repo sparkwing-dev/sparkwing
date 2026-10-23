@@ -21,7 +21,10 @@ func testGoSDKRecoveryChains(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	t.Run("describe", func(t *testing.T) { testRecoveryChainDescription(t, bin) })
+	t.Run("describe", func(t *testing.T) {
+		recordLeaf(t)
+		testRecoveryChainDescription(t, bin)
+	})
 	t.Run("arguments", func(t *testing.T) { testRecoveryChainArguments(t, bin, host) })
 	t.Run("generated", func(t *testing.T) { testGeneratedRecoveryChain(t, bin, host) })
 }
@@ -65,6 +68,7 @@ func testRecoveryChainArguments(t *testing.T, bin string, host sparkwingtest.Hos
 		{"enum", "", map[string]string{"recipient": "team", "notification": "invalid"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			recordLeaf(t)
 			fake, err := host.Plan(t.Context(), protocolgo.RecoveryChainName, tc.args)
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()
@@ -123,6 +127,7 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 		{"override", `{"Mode":"chat"}`, map[string]string{"notification": "chat"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			recordLeaf(t)
 			process := startProtocolProbe(t, bin)
 			hello := probeHello()
 			hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: "notify", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture"}}

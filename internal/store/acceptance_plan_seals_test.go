@@ -89,10 +89,10 @@ func storePlanSealRequest(ctx context.Context, s *store.Store) (*store.Tenant, s
 }
 
 func storePlanSealRequestWith(ctx context.Context, s *store.Store, configure func(*store.IntakeRequest, *nodeproto.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
-	return storePlanSealRequestFor(ctx, s, string(acceptanceTeam), configure)
+	return storePlanSealRequestFor(ctx, s, string(acceptanceTeam), false, configure)
 }
 
-func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity string, configure func(*store.IntakeRequest, *nodeproto.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
+func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity string, metered bool, configure func(*store.IntakeRequest, *nodeproto.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
 	team := store.Team(identity)
 	member, err := s.AsOperator().ResolveSignIn(ctx, googleProfile(identity, identity+"@example.test"), store.SignUpConditions{})
 	if err != nil {
@@ -107,8 +107,16 @@ func storePlanSealRequestFor(ctx context.Context, s *store.Store, identity strin
 	}
 	digest := sha256.Sum256([]byte(raw))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
+	provisionAuthority := authority
+	if metered {
+		operator, err := acceptanceBootstrap(ctx, s)
+		if err != nil {
+			return nil, store.PlanAcceptance{}, err
+		}
+		provisionAuthority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
+	}
 	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{
-		Kind: capability.ProvisionMachine, Authority: &authority, Team: string(team),
+		Kind: capability.ProvisionMachine, Authority: &provisionAuthority, Team: string(team), Metered: metered,
 		RegistrationID: "runner:" + identity + ":host", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"},
 		Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"},
 		Grants: []capability.Grant{capability.TriggersClaim},

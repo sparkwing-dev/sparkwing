@@ -25,6 +25,7 @@ func testGoSDKEnvelopeTranscripts(t *testing.T) {
 	}
 	defer cleanup()
 	t.Run("reused-request-id", func(t *testing.T) {
+		recordLeaf(t)
 		process := startProtocolProbe(t, bin)
 		sendProtocolProbe(t, process, probeHello())
 		protocolProbeReply(t, process, "hello")
@@ -41,6 +42,7 @@ func testGoSDKEnvelopeTranscripts(t *testing.T) {
 			process, job := planEnvelopeProbe(t, bin, mode)
 			for _, closure := range envelopeClosures(job) {
 				t.Run(closure.kind, func(t *testing.T) {
+					recordLeaf(t)
 					sendProtocolProbe(t, process, nodeproto.Request{
 						ID: closure.kind, Op: nodeproto.OpEval, Closure: closure.id,
 						Input: json.RawMessage(`{"outcome":"success"}`),
@@ -77,7 +79,10 @@ func testGoSDKEnvelopeTranscripts(t *testing.T) {
 			}
 		})
 	}
-	t.Run("targeted-eval-cancel", func(t *testing.T) { testEnvelopeCancel(t, bin) })
+	t.Run("targeted-eval-cancel", func(t *testing.T) {
+		recordLeaf(t)
+		testEnvelopeCancel(t, bin)
+	})
 }
 
 func testProtocolMalformedReplies(t *testing.T) {
@@ -89,6 +94,7 @@ func testProtocolMalformedReplies(t *testing.T) {
 		"double-error":      `{"reply":"1","ok":false,"error":{"error":{"code":"sdk_error","message":"bad"}}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
+			recordLeaf(t)
 			var tracker nodeproto.Tracker
 			id := tracker.Start(nodeproto.OpEval)
 			if frame, err := nodeproto.ParseFrame([]byte(raw)); !errors.Is(err, nodeproto.ErrMalformed) || frame.Reply != nil {
@@ -102,6 +108,7 @@ func testProtocolMalformedReplies(t *testing.T) {
 }
 
 func testProtocolReplyCorrelation(t *testing.T) {
+	recordLeaf(t)
 	property := func(suffix string) bool {
 		var tracker nodeproto.Tracker
 		id := tracker.Start(nodeproto.OpEval)
@@ -136,6 +143,7 @@ func testProtocolEvalValueTypes(t *testing.T) {
 		"generate": {"[]"},
 	} {
 		t.Run(kind, func(t *testing.T) {
+			recordLeaf(t)
 			for _, value := range []string{"true", "false", `"key"`, `""`, "null", "[]", "{}", "1"} {
 				var result nodeproto.EvalResult
 				if err := (nodeproto.Reply{ID: "eval", OK: true, Result: json.RawMessage(`{"value":` + value + `}`)}).Decode(&result); err != nil {
