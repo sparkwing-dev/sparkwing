@@ -22,8 +22,10 @@ Replace CPU and memory requests in pipeline declarations with runner labels.
 Cloud size labels are `sparkwing-2cpu`, `sparkwing-4cpu`, `sparkwing-8cpu`,
 `sparkwing-16cpu`, `sparkwing-32cpu` and `sparkwing-64cpu`. Without a size label,
 Cloud uses `sparkwing-2cpu`. Billing follows the selected size's credit class.
-Self-hosted runners advertise the labels their jobs need. Every selector term
-must match, and alternatives within a term still use OR.
+The `sparkwing-` prefix belongs to Cloud. A required Cloud size label selects a
+fresh, isolated Cloud pod. Rename any self-hosted, personal or pool runner size
+labels using that prefix. Configuration refuses them, and claims strip them.
+Every selector term must match, and alternatives within a term still use OR.
 
 Go `Resources` and TypeScript `resources` declarations are
 removed. Update SDK dependencies and author code together. Remove CPU and memory

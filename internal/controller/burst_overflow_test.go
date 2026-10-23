@@ -39,7 +39,7 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 			request := sealWith(t, run.Request, run.Request.Provenance)
 			engineSQL(t, e.Store, `UPDATE runs SET request_json=?,created_principal='account',created_subject_kind='account'`, request)
 			for _, id := range []string{"one", "two"} {
-				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu"]}}`))
+				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu,team-4cpu"]}}`))
 			}
 			engineAcceptedFixturePlan(t, e, "a", "run", "one", "two")
 			e.claimProfiles = billingCloudProfile{}
@@ -73,7 +73,7 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 				t.Fatal(err)
 			}
 			local := machine.Raw
-			engineClaimHTTP(t, h, local, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"two","labels":["sparkwing-4cpu"]}`, http.StatusOK)
+			engineClaimHTTP(t, h, local, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"two","labels":["team-4cpu"]}`, http.StatusOK)
 			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "two"})
 			if err != nil || node.ClaimedBy != "own-machine" {
 				t.Fatalf("local continuation: %+v %v", node, err)

@@ -348,7 +348,9 @@ Cloud offers `sparkwing-2cpu`, `sparkwing-4cpu`, `sparkwing-8cpu`,
 `sparkwing-16cpu`, `sparkwing-32cpu` and `sparkwing-64cpu`; an installation must
 price a size before it can award it. Billing uses that label's exact credit class.
 Without a size requirement, Cloud uses `sparkwing-2cpu`.
-Self-hosted runners advertise their own labels. Each selector term must match;
+The `sparkwing-` prefix belongs to Cloud. Requiring a Cloud size label selects
+a fresh, isolated Cloud pod. Self-hosted, personal and pool runners advertise
+their own sizes with other labels. Each selector term must match;
 comma-separated alternatives within a term are ORed. CPU and memory resource
 declarations are removed. `plan.Priority(value)` sets admission priority.
 `plan.ClaimWait(duration)` declares a positive maximum wait for a runner claim.
