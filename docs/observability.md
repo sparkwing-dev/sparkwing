@@ -61,7 +61,9 @@ Flush effort is bounded by the existing one-minute log tail window. Log I/O hold
 no lock shared across jobs. Log subjects use the committed attempt, without
 logging-only principal refreshes or node lookups. The store creates each stream
 in the transaction that starts its attempt or claims its owner unit. Hosts open
-spools without a registration request. If a retry refuses the prior attempt's
+spools without a registration request. Hosts also seal streams that produced no
+bytes, so quiet units do not keep log follow waiting after completion.
+If a retry refuses the prior attempt's
 detached flush, that stream stays visible in run details and maintenance seals it
 incomplete.
 The host emits a `run logs incomplete` operator error with the run identity,

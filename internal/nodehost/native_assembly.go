@@ -153,6 +153,9 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	}
 	serve, closeHTTP := localProcessHTTP(ctx, listener, router, authorities.Close)
 	logs := &localLogs{principal: cfg.Principal, upload: cfg.Logs, masker: masker, run: run.Run.ID}
+	if cfg.Principal.Capability.Unit != capability.UnitNode {
+		logs.bind(cfg.Principal, 0)
+	}
 	closeResources = func() error {
 		logs.finish(ctx, "")
 		// State transitions already committed. Keep bearer transports alive for the bounded tail.

@@ -27,7 +27,8 @@ without changing the job's result. Failed spool writes or closure mark the final
 incomplete, including when a later write succeeds. The store creates each stream
 in the transaction that starts its attempt or claims its owner unit, or imports its published
 attempt. Hosts open spools without a registration request. Detached uploads commit
-only to existing streams. If retry fences a flush, maintenance seals that attempt
+only to existing streams. Hosts seal streams with no output as complete and empty.
+If retry fences a flush, maintenance seals that attempt
 incomplete and run details retain its stream. Failed uploads emit a masked operator
 error. Log I/O holds no lock shared across jobs, and native host acceptance and
 result reporting never wait for uploads or closure.

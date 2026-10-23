@@ -149,24 +149,32 @@ func FuzzNativeServicesRejectMissingBindings(f *testing.F) {
 	})
 }
 
-func TestLogSpoolFailureRemainsVisibleAfterRecovery(t *testing.T) {
-	records := &nativeLogRecords{objects: map[string][]byte{}}
-	logs := &localLogs{run: "run", masker: secrets.NewMasker(), principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitPlan, Binding: capability.Binding{RunID: "run", Generation: 1}}}, upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
-		records.view.Subject = subject
-		return records, nil
-	}}
-	spoolDir := t.TempDir()
-	t.Setenv("TMPDIR", spoolDir+"/missing")
-	if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "discarded"}); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TMPDIR", spoolDir)
-	if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "retained"}); err != nil {
-		t.Fatal(err)
-	}
-	<-logs.finish(t.Context(), "")
-	if records.view.Complete || records.view.IncompleteReason == "" || len(records.objects) != 1 {
-		t.Fatalf("spool recovery hid lost bytes: %+v", records.view)
+func TestLogSpoolFailureRemainsVisible(t *testing.T) {
+	for _, recovery := range []string{"recovered", "unavailable"} {
+		t.Run(recovery, func(t *testing.T) {
+			records := &nativeLogRecords{objects: map[string][]byte{}}
+			logs := &localLogs{run: "run", masker: secrets.NewMasker(), principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitPlan, Binding: capability.Binding{RunID: "run", Generation: 1}}}, upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
+				records.view.Subject = subject
+				return records, nil
+			}}
+			spoolDir := t.TempDir()
+			t.Setenv("TMPDIR", spoolDir+"/missing")
+			if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "discarded"}); err != nil {
+				t.Fatal(err)
+			}
+			wantObjects := 0
+			if recovery == "recovered" {
+				wantObjects = 1
+				t.Setenv("TMPDIR", spoolDir)
+				if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "retained"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			<-logs.finish(t.Context(), "")
+			if records.view.Complete || records.view.IncompleteReason == "" || len(records.objects) != wantObjects {
+				t.Fatalf("log seal hid lost bytes: %+v", records.view)
+			}
+		})
 	}
 }
 
@@ -437,6 +445,49 @@ func TestNativeServiceCloseJoinsLogsAfterTerminalCommit(t *testing.T) {
 			t.Fatal("transport retired before detached log flush finished")
 		}
 	})
+}
+
+func TestNativeServiceCloseSealsLogsWithoutOutput(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		t.Run(string(kind), func(t *testing.T) {
+			cfg, _ := nativeConfigFixture(t)
+			cfg.Principal.Capability.Unit = kind
+			if kind == capability.UnitEval {
+				cfg.Principal.Capability.Binding.Expansion = &capability.LeaseRef{Generation: 1}
+			}
+			cfg.Refresh = func(context.Context) (capability.Principal, error) { return cfg.Principal, nil }
+			cfg.Storage = func(context.Context, capability.Principal) (StorageBinding, error) {
+				data := &nativeStorageFixture{}
+				return StorageBinding{Bytes: data, Records: data, Authority: blob.Authority{CapabilityRef: cfg.Principal.Capability.Prefix}}, nil
+			}
+			records := &nativeLogRecords{objects: map[string][]byte{}}
+			calls := 0
+			cfg.Logs = func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
+				calls++
+				records.view.Subject = subject
+				return records, nil
+			}
+			listener := &processListener{closed: make(chan struct{})}
+			services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == capability.UnitNode {
+				if _, err := services.Config.Executor.BindStorage(t.Context(), NodeInput{NodeID: "job", Generation: 2, Attempt: 1}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if calls != 0 {
+				t.Fatal("tracking a quiet stream contacted log storage")
+			}
+			if err := services.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if calls != 1 || !records.view.Complete || len(records.objects) != 0 {
+				t.Fatalf("quiet stream was not sealed empty: calls=%d view=%+v", calls, records.view)
+			}
+		})
+	}
 }
 
 func TestLogShutdownEffortEndsAtTailBudget(t *testing.T) {

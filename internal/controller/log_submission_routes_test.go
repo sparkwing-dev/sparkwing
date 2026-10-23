@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -162,7 +164,7 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	}
 }
 
-func TestEmptyLogRegistrationDoesNotNeedPhysicalBackend(t *testing.T) {
+func TestAttemptLogsWithoutSegmentsDoNotNeedPhysicalBackend(t *testing.T) {
 	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 	server := New(e.Store, nil).WithEngineController(e.EngineController)
 	h := server.Handler()
@@ -175,10 +177,10 @@ func TestEmptyLogRegistrationDoesNotNeedPhysicalBackend(t *testing.T) {
 	engineAdmitBearer(t, e.Store, claim.Capability)
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Binding.Generation}}
-	body, _ := json.Marshal(logCommitRequest{Subject: subject})
-	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(body), 200)
 	view, err := teststore.ForTeam(t, e.Store, "a").ReadRunView(t.Context(), "run")
-	if err != nil || len(view.Logs) != 1 {
-		t.Fatalf("stream not registered: %+v %v", view.Logs, err)
+	if err != nil || !slices.ContainsFunc(view.Logs, func(got blob.LogSubject) bool { return reflect.DeepEqual(got, subject) }) {
+		t.Fatalf("attempt start did not register its stream: %+v %v", view.Logs, err)
 	}
+	body, _ := json.Marshal(logCommitRequest{Subject: subject, Final: true})
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(body), 200)
 }

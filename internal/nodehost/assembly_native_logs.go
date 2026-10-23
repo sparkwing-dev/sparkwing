@@ -138,7 +138,11 @@ func (s *localLogStream) close(ctx context.Context) error {
 	defer s.mu.Unlock()
 	s.closed = true
 	if s.sink == nil {
-		return s.upload.PutManifest(ctx, logseg.Manifest{Version: 1, Subject: &s.subject, Status: "incomplete", Reason: "log persistence failed", SealedBy: "node", SealedAt: time.Now().UTC()})
+		manifest := logseg.Manifest{Version: 1, Subject: &s.subject, Status: logseg.StatusComplete, SealedBy: "node", SealedAt: time.Now().UTC()}
+		if s.failed {
+			manifest.Status, manifest.Reason = "incomplete", "log persistence failed"
+		}
+		return s.upload.PutManifest(ctx, manifest)
 	}
 	manifest, err := s.sink.Close(ctx, logseg.End{})
 	if err == nil && manifest.Status == "incomplete" {
@@ -148,13 +152,20 @@ func (s *localLogStream) close(ctx context.Context) error {
 }
 
 func (l *localLogs) bind(p capability.Principal, attempt int64) {
-	p.Capability.Binding.Attempt = attempt
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.nodes == nil {
-		l.nodes = map[string]capability.Principal{}
+	node := ""
+	if p.Capability.Unit == capability.UnitNode {
+		p.Capability.Binding.Attempt = attempt
+		node = p.Capability.Binding.NodeID
+		l.mu.Lock()
+		if l.nodes == nil {
+			l.nodes = map[string]capability.Principal{}
+		}
+		l.nodes[node] = p
+		l.mu.Unlock()
 	}
-	l.nodes[p.Capability.Binding.NodeID] = p
+	if _, err := l.open(node); err != nil {
+		l.alert(node, err)
+	}
 }
 
 // subject uses authority captured at assembly or after a committed attempt's storage binding.
@@ -217,30 +228,19 @@ func (u *logUpload) PutManifest(ctx context.Context, manifest logseg.Manifest) e
 	return up.PutManifest(ctx, manifest)
 }
 
-func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto.FrameLog) error {
-	if frame.Stream != "" || frame.StreamData != "" || frame.StreamEnd {
-		return errors.New("raw SDK streams require the host egress adapter")
-	}
-	if run != l.run || l.masker == nil {
-		return errors.New("local logs require the awarded run and shared masker")
-	}
+func (l *localLogs) open(node string) (*localLogStream, error) {
 	p, subject, err := l.subject(node)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	key, err := json.Marshal(subject)
 	if err != nil {
-		return err
-	}
-	body, err := json.Marshal(l.masker.Log(frame))
-	if err != nil {
-		return err
+		return nil, err
 	}
 	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.closed {
-		l.mu.Unlock()
-		l.alert(node, logseg.ErrClosed)
-		return nil
+		return nil, logseg.ErrClosed
 	}
 	if l.streams == nil {
 		l.streams = map[string]*localLogStream{}
@@ -250,7 +250,28 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 		stream = &localLogStream{subject: subject, upload: &logUpload{open: func(ctx context.Context) (logseg.Uploader, error) { return l.upload(ctx, p, subject) }}}
 		l.streams[string(key)] = stream
 	}
-	l.mu.Unlock()
+	return stream, nil
+}
+
+func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto.FrameLog) error {
+	if frame.Stream != "" || frame.StreamData != "" || frame.StreamEnd {
+		return errors.New("raw SDK streams require the host egress adapter")
+	}
+	if run != l.run || l.masker == nil {
+		return errors.New("local logs require the awarded run and shared masker")
+	}
+	stream, err := l.open(node)
+	if errors.Is(err, logseg.ErrClosed) {
+		l.alert(node, err)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(l.masker.Log(frame))
+	if err != nil {
+		return err
+	}
 	if err := stream.write(ctx, body); err != nil {
 		l.alert(node, err)
 	}
