@@ -235,7 +235,6 @@ func TestCurrentContractSymbolInventories(t *testing.T) {
 	}
 	packages["sparkwingtest"] = contractSymbols(t, root+"sparkwing/sparkwingtest")
 	checkContractInventory(t, fake, "sparkwingtest", packages)
-
 }
 
 func checkContractInventory(t *testing.T, inventory, defaultOwner string, packages map[string]map[string]string) {
@@ -264,13 +263,29 @@ func TestContractSourceSymbolLinks(t *testing.T) {
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("contracts: %v", err)
 	}
+	paths = append(paths, "../../CHANGELOG.md")
 	links := regexp.MustCompile("\\[`([A-Za-z][A-Za-z0-9_.]+)`\\]\\(([^)]+\\.go)\\)")
+	packageLinks := regexp.MustCompile("\\[`((?:internal|pkg)/[A-Za-z0-9_/]+)`\\]\\(([^)]+)\\)")
 	packages := map[string]map[string]string{}
 	checked := 0
 	for _, path := range paths {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if filepath.Base(path) == "CHANGELOG.md" {
+			_, unreleased, ok := strings.Cut(string(body), "## [Unreleased]\n")
+			if !ok {
+				t.Fatal("missing Unreleased changelog section")
+			}
+			unreleased, _, _ = strings.Cut(unreleased, "\n## ")
+			body = []byte(unreleased)
+		}
+		for _, ref := range packageLinks.FindAllStringSubmatch(string(body), -1) {
+			directory := filepath.Join(filepath.Dir(path), ref[2])
+			if filepath.Clean(directory) != filepath.Join("../..", ref[1]) || len(contractSymbols(t, directory)) == 0 {
+				t.Errorf("%s: package ownership link %s does not resolve to its Go declarations", path, ref[1])
+			}
 		}
 		for _, ref := range links.FindAllStringSubmatch(string(body), -1) {
 			checked++

@@ -8,8 +8,9 @@ list only shrinks. `go run ./internal/guardcheck .` fails when:
 - a list holds a line its version at the merge base with `origin/main` lacks
   (`GREW`). Set `SPARKWING_GUARD_BASE` to judge against another ref.
 
-`-fast` judges only the depguard lists, which is what `pre-push` runs. `gate`
-runs everything. Neither uses the `origin/main` baseline that `.golangci.yml`
+`-fast` judges the depguard lists and the SDK production dependency closure,
+which is what `pre-push` runs. `gate` runs everything.
+Neither uses the `origin/main` baseline that `.golangci.yml`
 applies, so both judge the whole tree.
 
 | File | Guard | Line format |
@@ -31,3 +32,8 @@ The typed spawn guard has no allow-list. It rejects raw process constructors,
 It inventories production source independently and fails on uncovered build
 profiles. Protected pipeline paths also require `procenv.Build` provenance.
 See [guard scope and accepted residuals](../internal/guardcheck/README).
+
+The SDK dependency guard has no allow-list. It runs `go list -deps` on every
+`sparkwing/` package without tests. It rejects server packages even when reached
+through `pkg/` or another intermediate package. The denied package roots live
+in `internal/guardcheck/sdk.go` and include their subpackages.

@@ -20,7 +20,7 @@ unlock.
 
 ## [Unreleased]
 
-- **packages (Breaking):** Shared engine identities, route policy and execution values are separated from controller and store implementations. SDK transport helpers live under `pkg/`. `pkg/secretname.ErrMissing` is removed; use `sparkwing.ErrSecretMissing`. Controller responses project explicit wire types. See [migration](docs/migrations/_unreleased.md#secret-missing-sentinel).
+- **packages (Breaking):** Shared engine identities, route policy and execution values are separated from controller and store implementations. SDK transport helpers live in [`internal/sdkserve`](internal/sdkserve). `pkg/secretname.ErrMissing` is removed; use `sparkwing.ErrSecretMissing`. Controller responses project explicit wire types. See [migration](docs/migrations/_unreleased.md#secret-missing-sentinel).
 
 - **runner ranking:** Unnamed jobs wait up to 5 seconds for the best-ranked tier with a live, label-matching claimant on the same team and a free slot in its latest poll. Each award consumes one advertised slot until the runner polls again. Busy or offline higher tiers cause no wait. After the window, any eligible claimant can take the job. Recorded asks and the extra 2-second grace are removed. Explicit `Prefers` holds require an allowed claimant with a free slot; preference scores are removed. See [migration](docs/migrations/_unreleased.md#ranking-uses-available-claimants).
 
