@@ -117,6 +117,7 @@ func (s *Server) handleDeleteRunner(w http.ResponseWriter, r *http.Request, a ca
 	if err != nil {
 		return engineLookupError(err)
 	}
+	noteAuditTarget(r.Context(), "machine_id", name)
 	writeJSON(w, http.StatusOK, map[string]any{"runner": name, "deleted": deleted})
 	return nil
 }

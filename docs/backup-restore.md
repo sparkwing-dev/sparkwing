@@ -2,7 +2,24 @@
 
 ## Restore
 
-Recovery is manual; follow the operator runbook kept outside this repository.
+Stop every controller before replacing the database. Preserve the latest external
+`credential-epoch` file, then run `sparkwing-controller restore prepare` against
+the restored database with the same store and credential-directory flags as startup.
+Preparation cancels restored unfinished scheduled runs and holds new schedule
+admissions. Sessions, API tokens, runner and machine credentials, and API/local
+schedule consent remain valid. `restore acknowledge` discards schedule catch-up
+through its timestamp and lifts the hold without requiring new consent.
+
+For a security incident, such as a stolen database or leaked keys, use
+`restore prepare --sign-out-everyone`. It rotates the external epoch and
+invalidates all earlier credentials and API/local schedule consent. Supply a
+fresh bootstrap seed, reissue credentials, and rearm those schedules.
+
+A backup can revive credentials revoked after it was taken. Keep the controller's
+audit log stream outside the database and reapply revocations, member removals
+and demotions since the backup using its token prefixes, account IDs, machine
+IDs and teams. Payment recovery and targeted revocation recovery are manual;
+follow the operator runbook kept outside this repository.
 
 ## Schema compatibility
 

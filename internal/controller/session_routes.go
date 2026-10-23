@@ -141,6 +141,9 @@ func (s *Server) endVerifiedSession(w http.ResponseWriter, r *http.Request) erro
 	if err := s.operator.DeleteSession(proof.session.ID); err != nil {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 	}
+	notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{
+		Team: string(proof.session.Team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: proof.session.AccountID},
+	}})
 	clearSessionCookies(w, s.cookiesSecure())
 	return nil
 }

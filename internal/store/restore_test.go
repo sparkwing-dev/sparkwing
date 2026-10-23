@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestRestoreHoldsSchedulesUntilAcknowledgement(t *testing.T) {
@@ -111,6 +112,95 @@ func TestRestorePreparationCancelsScheduledWorkBeforeClaims(t *testing.T) {
 					if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
 						t.Fatal(err)
 					}
+				}
+			})
+		}
+	}
+}
+
+// Local source facts were captured when the checkout schedule was armed.
+type restoreSchedulePolicy struct{ scheduleFixturePolicy }
+
+func (p restoreSchedulePolicy) ResolveScheduleSource(ctx context.Context, row CronSchedule, request runspec.Request) (runspec.Request, error) {
+	if row.Where == CronWhereLocal {
+		return request, nil
+	}
+	return p.scheduleFixturePolicy.ResolveScheduleSource(ctx, row, request)
+}
+
+func TestRestorePreservesScheduleConsentUnlessEpochRotates(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		for _, signOut := range []bool{false, true} {
+			t.Run(fmt.Sprintf("local=%t/sign-out=%t", local, signOut), func(t *testing.T) {
+				tenant, a, body, now := consentedScheduleFixture(t)
+				s := tenant.s
+				s.credentialEpoch = "original"
+				rewriteSchemaExec(t, s.db, `UPDATE sessions SET credential_epoch='original'`)
+				s.intakePolicy = restoreSchedulePolicy{s.intakePolicy.(scheduleFixturePolicy)}
+				if err := s.EnsureCredentialEpoch(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				var ids []string
+				var err error
+				if local {
+					rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1) ON CONFLICT(name) DO NOTHING`, DefaultTeam)
+					tenant = &Tenant{s: s, team: DefaultTeam}
+					snapshot, lookupErr := s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}}, capability.RequestEvidence{})
+					if lookupErr != nil {
+						t.Fatal(lookupErr)
+					}
+					principal := snapshot.Authorities[0].Principal
+					a = capability.Authorized{Principal: principal, Target: capability.Target{Team: string(DefaultTeam)}}
+					root := t.TempDir()
+					repository, repoErr := runspec.CanonicalRepository(runspec.RepoInput{AbsolutePath: root})
+					if repoErr != nil {
+						t.Fatal(repoErr)
+					}
+					row := CronSchedule{RepoPath: root, Pipeline: "nightly", Cron: "* * * * *", Overlap: CronOverlapQueue, Where: CronWhereLocal, GitBranch: body.Branch, LockedRef: body.SHA}
+					request := runspec.Request{Git: runspec.Git{Repository: repository, Ref: body.Branch, SHA: body.SHA}, Source: runspec.Source{Ref: body.SHA, Location: runspec.SourceLocation{LocalCheckout: root}}}
+					ids, _, err = tenant.ReplaceAuthorizedLocalSchedules(t.Context(), a, root, []CronSchedule{row}, []runspec.Request{request}, true)
+				} else {
+					ids, _, err = tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				row, err := tenant.GetCronSchedule(t.Context(), ids[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				*now = *row.NextDueAt
+				if result, err := tenant.AdmitScheduledRun(t.Context(), row, *now); err != nil || result.RunID == "" {
+					t.Fatalf("pre-restore consent: %+v %v", result, err)
+				}
+				epoch := "original"
+				if signOut {
+					epoch = "rotated"
+				}
+				if err := s.AsOperator().PrepareRestore(t.Context(), epoch); err != nil {
+					t.Fatal(err)
+				}
+				// The controller reopens the store with the external epoch after preparation.
+				s.credentialEpoch = epoch
+				*now = now.Add(time.Minute)
+				if _, err := tenant.AdmitScheduledRun(t.Context(), row, *now); err == nil || !signOut && !errors.Is(err, ErrRestorePending) {
+					t.Fatalf("schedule escaped restore hold: %v", err)
+				}
+				if err := s.AsOperator().AcknowledgeRestore(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				row, err = tenant.GetCronSchedule(t.Context(), ids[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				*now = now.Add(time.Minute)
+				result, err := tenant.AdmitScheduledRun(t.Context(), row, *now)
+				if signOut {
+					if err == nil {
+						t.Fatal("epoch rotation retained schedule consent")
+					}
+				} else if err != nil || result.RunID == "" || result.Replayed {
+					t.Fatalf("normal restore required new consent: %+v %v", result, err)
 				}
 			})
 		}
