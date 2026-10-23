@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -16,13 +17,14 @@ func (t *Tenant) mutateCredentials(ctx context.Context, a capability.Authorized,
 	})
 }
 
-// WriteSecret stores a secret under current tenant administration authority.
-func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, sealed SealedSecret) error {
+// WriteSecret stores a secret under current tenant administration authority and returns its committed metadata.
+func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, sealed SealedSecret) (Secret, error) {
 	if sealed.team != t.team || sealed.team == "" || !secrets.IsBound(sealed.row.Value) {
-		return ErrInvalidInput
+		return Secret{}, ErrInvalidInput
 	}
 	row := sealed.row
-	return t.mutateCredentials(ctx, a, "WriteSecret", row.Pipeline+"/"+row.Name, func(tx *storeTx, actor string) error {
+	var out Secret
+	err := t.mutateCredentials(ctx, a, "WriteSecret", row.Pipeline+"/"+row.Name, func(tx *storeTx, actor string) error {
 		if err := secretname.Validate(row.Name); err != nil {
 			return ErrInvalidInput
 		}
@@ -42,9 +44,17 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 			}
 		}
 		at := tx.now(ctx).UnixNano()
-		_, err := tx.ExecContext(ctx, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(team,name,pipeline) DO UPDATE SET value=excluded.value,principal=excluded.principal,masked=excluded.masked,shared=excluded.shared,updated_at=excluded.updated_at`, t.team, row.Name, row.Value, actor, row.Pipeline, boolInt(row.Masked), boolInt(row.Shared), at, at)
+		var masked, shared int
+		var created, updated int64
+		err := tx.QueryRowContext(ctx, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(team,name,pipeline) DO UPDATE SET value=excluded.value,principal=excluded.principal,masked=excluded.masked,shared=excluded.shared,updated_at=excluded.updated_at RETURNING name,principal,pipeline,masked,shared,created_at,updated_at`, t.team, row.Name, row.Value, actor, row.Pipeline, boolInt(row.Masked), boolInt(row.Shared), at, at).Scan(&out.Name, &out.Principal, &out.Pipeline, &masked, &shared, &created, &updated)
+		out.Masked, out.Shared = masked != 0, shared != 0
+		out.CreatedAt, out.UpdatedAt = time.Unix(0, created).UTC(), time.Unix(0, updated).UTC()
 		return err
 	})
+	if err != nil {
+		return Secret{}, err
+	}
+	return out, nil
 }
 
 // RemoveSecret deletes an exact secret scope under current administration authority.

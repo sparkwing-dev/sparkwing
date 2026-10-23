@@ -43,10 +43,10 @@ func TestMaskerHidesEncodedSecrets(t *testing.T) {
 	}
 }
 
-func TestMaskerRejectsShortSecrets(t *testing.T) {
+func TestMaskerSkipsShortSecrets(t *testing.T) {
 	m := NewMasker()
-	if err := m.Register("ab"); err == nil {
-		t.Fatal("short value accepted")
+	if err := m.Register("ab"); err != nil {
+		t.Fatal(err)
 	}
 	if err := m.Register("plainalnum"); err != nil {
 		t.Fatal(err)

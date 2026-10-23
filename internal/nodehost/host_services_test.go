@@ -3,7 +3,6 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -82,9 +81,11 @@ func TestHostServices(t *testing.T) {
 	if masker.Mask("private-secret") != "***" || !registry.ContainsSecret("private-secret-job") {
 		t.Fatal("acknowledged mask was absent from sinks or validation")
 	}
-	err := call("/node/v1/masks", nodeproto.MaskRequest{Value: "j"})
-	if !errors.Is(err, secrets.ErrInvalidValue) {
-		t.Fatalf("short mask error = %v", err)
+	if err := call("/node/v1/masks", nodeproto.MaskRequest{Value: "j"}); err != nil {
+		t.Fatal(err)
+	}
+	if masker.Mask("j") != "j" {
+		t.Fatal("short value was masked")
 	}
 	if err := call("/node/v1/annotations", nodeproto.AnnotationRequest{Level: "warn", Message: "private-secret", File: "private-secret.go", Line: 2, EndLine: 4, Column: 1, Step: "step"}); err != nil {
 		t.Fatal(err)

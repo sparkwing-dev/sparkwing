@@ -105,12 +105,12 @@ describe("draftProblem", () => {
     );
   });
 
-  it("needs a value for a secret but lets a variable be empty", () => {
-    assert.notEqual(secrets.draftProblem({ ...base, value: "" }), null);
-    assert.equal(
-      secrets.draftProblem({ ...base, value: "", masked: false }),
-      null,
-    );
+  it("accepts secrets and variables of any length", () => {
+    for (const masked of [true, false]) {
+      for (const value of ["", "abc", "ééé", "abcd"]) {
+        assert.equal(secrets.draftProblem({ ...base, value, masked }), null);
+      }
+    }
   });
 
   it("reports a bad name first", () => {
@@ -206,8 +206,7 @@ describe("listing", () => {
       secrets.scopeLabel({ pipeline: "deploy" }, "local"),
       "Pipeline: deploy",
     );
-    assert.doesNotMatch(secrets.scopeLabel({}, "local"), /No runs/);
-    assert.match(secrets.scopeLabel({}, "local"), /Every pipeline/);
+    assert.equal(secrets.scopeLabel({}, "local"), "No runs (operator reads only)");
   });
 
   it("finds the row a draft would replace", () => {
@@ -244,12 +243,14 @@ describe("API helpers", () => {
   });
 
   it("posts a write with an explicit masked flag", async () => {
-    await secrets.writeSecret({
+    respond = () => Response.json({ secret: row({ name: "R", masked: false }) });
+    const result = await secrets.writeSecret({
       name: "R",
       value: "v",
       masked: false,
       shared: true,
     });
+    assert.equal(result.warning, undefined);
     assert.equal(calls[0].method, "POST");
     assert.equal(calls[0].url, "/api/v1/secrets");
     assert.deepEqual(JSON.parse(calls[0].body), {
@@ -258,6 +259,16 @@ describe("API helpers", () => {
       masked: false,
       shared: true,
     });
+  });
+
+  it("returns the save-time warning for a short secret", async () => {
+    const warning =
+      "Secret values shorter than 4 characters cannot be masked in logs.";
+    respond = () => Response.json({ secret: row({ name: "KEY" }), warning });
+    const result = await secrets.writeSecret({
+      name: "KEY", value: "abc", masked: true,
+    });
+    assert.equal(result.warning, warning);
   });
 
   it("escapes the name and names the pipeline on delete", async () => {

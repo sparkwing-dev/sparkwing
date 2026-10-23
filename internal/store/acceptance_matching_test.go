@@ -47,7 +47,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	pools := []string(nil)
 	switch scenario {
 	case "capacity":
-		job.Requires = append(job.Requires, "sparkwing-4cpu")
+		job.Requires = append(job.Requires, "team-4cpu")
 		labels = []string{"sparkwing-2cpu"}
 	case "name":
 		job.Requires, labels = []string{"name=other"}, []string{"name=other"}
@@ -117,7 +117,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	}
 	switch scenario {
 	case "capacity":
-		demand.Labels = []string{"sparkwing-4cpu"}
+		demand.Labels = []string{"team-4cpu"}
 	case "name":
 		replacement, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":other", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "other"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 		if err != nil {

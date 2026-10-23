@@ -291,25 +291,14 @@ func intakeCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, run RunR
 	if runner := options.Runner; runner.Set && runner.Value.Kind == runspec.RunnerLabel {
 		terms = append(terms, runner.Value.Value)
 	}
-	// Observed labels and platform never make an otherwise free placement paid-only.
-	var selector []string
-	for _, term := range terms {
-		placementOnly := true
-		for _, alternative := range strings.Split(term, ",") {
-			key, _, _ := strings.Cut(strings.TrimSpace(alternative), "=")
-			if key != "class" && key != "pool" && key != "name" && key != "location" && key != "local" {
-				placementOnly = false
-			}
-		}
-		if placementOnly {
-			selector = append(selector, term)
-		}
-	}
-	if !match.Evaluate(match.Profile{Class: match.ClassCloud, Location: TierCloud}, match.Demand{Selector: selector}).OK() {
+	cloudPossible := slices.ContainsFunc(match.CloudSizes(), func(size match.CloudSize) bool {
+		return match.PlacementPossible(match.Profile{Class: match.ClassCloud, Location: TierCloud, Labels: []string{size.Label}}, terms)
+	})
+	if !cloudPossible {
 		return "", nil
 	}
-	paidOnly := !match.Evaluate(match.Profile{Class: match.ClassAgent, Location: "local"}, match.Demand{Selector: selector}).OK() &&
-		!match.Evaluate(match.Profile{Class: match.ClassCoordinator, Location: "local"}, match.Demand{Selector: selector}).OK()
+	paidOnly := !match.PlacementPossible(match.Profile{Class: match.ClassAgent, Location: "local"}, terms) &&
+		!match.PlacementPossible(match.Profile{Class: match.ClassCoordinator, Location: "local"}, terms)
 	if rankedUnit(request, match.Demand{Selector: options.Requires.Value}) {
 		ranking, err := claimRankingTx(ctx, tx, team)
 		if err != nil {

@@ -16,7 +16,7 @@ func TestCredentialWritersRejectUnsealedValuesProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(739, 201))
 	for i := range 32 {
 		plain := fmt.Sprintf("plain/%x", random.Uint64())
-		if err := tenant.WriteSecret(t.Context(), a, SealedSecret{team: tenant.team, row: Secret{Name: "KEY", Value: plain}}); err == nil {
+		if _, err := tenant.WriteSecret(t.Context(), a, SealedSecret{team: tenant.team, row: Secret{Name: "KEY", Value: plain}}); err == nil {
 			t.Fatal("plaintext secret stored")
 		}
 		if _, err := tenant.WriteGitCredential(t.Context(), a, SealedGitCredential{team: tenant.team, row: GitCredential{HostWide: true, Host: "git.test", Kind: GitCredentialHTTPS, Secret: plain}}); err == nil {
@@ -26,13 +26,13 @@ func TestCredentialWritersRejectUnsealedValuesProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := foreign.WriteSecret(t.Context(), a, secret); !errors.Is(err, ErrInvalidInput) {
+		if _, err := foreign.WriteSecret(t.Context(), a, secret); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("foreign sealed secret: %v", err)
 		}
 		copy := secret.Row()
 		copy.Value = plain
 		copy.Masked = !copy.Masked
-		if err := tenant.WriteSecret(t.Context(), a, secret); err != nil {
+		if _, err := tenant.WriteSecret(t.Context(), a, secret); err != nil {
 			t.Fatal(err)
 		}
 		stored, err := tenant.GetSecretRow(secret.Row().Name, "")

@@ -61,7 +61,10 @@ func TestMeteredRootPolicyCannotRewriteAwardProperty(t *testing.T) {
 				}
 				want := int64(0)
 				if wantMetered {
-					want = 600
+					want = 120
+					if cloud {
+						want = 600
+					}
 				}
 				unitBillingTotal(t, s, want, true)
 			}

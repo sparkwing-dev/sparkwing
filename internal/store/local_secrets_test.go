@@ -36,9 +36,9 @@ func localSecretFixture(t *testing.T, value string) (*Tenant, capability.Authori
 }
 
 func TestLocalSecretsIntakePlanAndLiveClaim(t *testing.T) {
-	tenant, a := localSecretFixture(t, "requester-private-value")
+	tenant, a := localSecretFixture(t, "abc")
 	row, err := tenant.ReadSecret(t.Context(), a)
-	if err != nil || row == nil || row.Value != "requester-private-value" || !row.Masked || !row.Ephemeral {
+	if err != nil || row == nil || row.Value != "abc" || !row.Masked || !row.Ephemeral {
 		t.Fatalf("local release: %#v %v", row, err)
 	}
 	events, err := tenant.BusinessEvents(t.Context(), "secret.released", 1000, "")

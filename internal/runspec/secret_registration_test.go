@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 func TestSecretRegistrationIncludesRawEffectiveDefaultsAndListItems(t *testing.T) {
@@ -31,13 +33,22 @@ func TestSecretRegistrationIncludesRawEffectiveDefaultsAndListItems(t *testing.T
 	}
 }
 
-func TestSecretRegistrationRefusesShortListItems(t *testing.T) {
+func TestSecretRegistrationAcceptsShortListItems(t *testing.T) {
 	for _, raw := range []string{"ab,long-enough", "long-enough,abc"} {
 		request := Request{RequestedArgs: map[string]string{"tokens": raw}, SecretArgs: Optional[[]string]{Set: true, Value: []string{"tokens"}}}
 		resolved := Resolved{Args: map[string]string{"tokens": raw}, SecretArgs: []string{"tokens"}, SecretRegistration: SecretRegistration{ListArgs: []string{"tokens"}}}
-		_, err := BuildSecretRegistration(request, resolved)
-		if err == nil || !strings.Contains(err.Error(), "plain config variable") {
-			t.Fatalf("%q: expected plain-config refusal, got %v", raw, err)
+		registration, err := BuildSecretRegistration(request, resolved)
+		if err != nil {
+			t.Fatal(err)
+		}
+		masker := secrets.NewMasker()
+		for _, value := range registration.Values {
+			if err := masker.Register(value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := masker.Mask("ab abc long-enough"); got != "ab abc ***" {
+			t.Fatalf("Mask = %q", got)
 		}
 	}
 }

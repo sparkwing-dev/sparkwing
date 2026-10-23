@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -62,12 +63,21 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 	if err != nil {
 		return credentialWriteError(err)
 	}
-	if err := tn.WriteSecret(r.Context(), a, stored); err != nil {
+	committed, err := tn.WriteSecret(r.Context(), a, stored)
+	if err != nil {
 		return credentialWriteError(err)
 	}
 
 	noteAuditTarget(r.Context(), "secret_name", req.Name)
-	w.WriteHeader(http.StatusNoContent)
+	response := controllerwire.SecretWritten{Secret: controllerwire.SecretMetadata{
+		Name: committed.Name, Principal: committed.Principal,
+		Pipeline: committed.Pipeline, Masked: committed.Masked, Shared: committed.Shared, Bound: true,
+		CreatedAt: committed.CreatedAt.Unix(), UpdatedAt: committed.UpdatedAt.Unix(),
+	}}
+	if masked && !secrets.Maskable(req.Value) {
+		response.Warning = secrets.ShortValueWarning
+	}
+	writeJSON(w, http.StatusOK, response)
 	return nil
 }
 

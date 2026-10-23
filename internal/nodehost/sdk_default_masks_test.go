@@ -18,7 +18,7 @@ func FuzzSDKPlanningIntakeSecretDefaults(f *testing.F) {
 		f.Add(value)
 	}
 	f.Fuzz(func(t *testing.T, value string) {
-		if secrets.Validate(value) != nil || len(value) > 128 || strings.ToValidUTF8(value, "�") != value {
+		if !secrets.Maskable(value) || len(value) > 128 || strings.ToValidUTF8(value, "�") != value {
 			t.Skip()
 		}
 		checkIntakeSecretDefault(t, value)
