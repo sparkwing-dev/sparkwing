@@ -17,7 +17,6 @@ func TestCompletedOwnerLogsRetainOnlyTheirFinalTail(t *testing.T) {
 			for _, change := range []string{"tail", "deadline", "late", "holder", "generation", "revoked parent"} {
 				t.Run(change, func(t *testing.T) {
 					s, tenant, commit := maintenanceOwnerLogFixture(t, kind)
-					rewriteSchemaExec(t, s.db, "DELETE FROM log_streams")
 					finished := s.now()
 					table, filter := "triggers", "id='run'"
 					if kind == capability.UnitEval {
@@ -120,11 +119,16 @@ func TestPlanAcceptanceRetainsFinalLogPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, "UPDATE capabilities SET authority_json=?,grants=? WHERE prefix='planner'", body, grants)
+	actor := request.Actor
+	actor.Holder, actor.Generation = "host", 1
+	if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error {
+		return createLogStreamTx(t.Context(), tx, blob.LogSubject{Kind: blob.LogOwnerUnit, Team: string(tenant.team), RunID: request.RunID, Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: 1}})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	actor := request.Actor
-	actor.Holder, actor.Generation = "host", 1
 	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: request.RunID, Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: 1}}
 	if _, err := tenant.PrepareLogWrite(t.Context(), subject, actor); err != nil {
 		t.Fatalf("accepted plan lost log signing: %v", err)

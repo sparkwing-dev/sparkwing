@@ -71,12 +71,7 @@ func (c *LocalHostClient) LogUploader(ctx context.Context, principal capability.
 	} else if subject.Unit == nil || string(subject.Unit.Kind) != string(principal.Capability.Unit) {
 		return nil, localHostClientRefusal()
 	}
-	uploader := &nativeLogUploader{transport: transport, subject: subject, pattern: pattern, path: path}
-	// Register before uploading segments so maintenance can seal an interrupted stream incomplete.
-	if err := uploader.commit(ctx, nil, false, ""); err != nil {
-		return nil, err
-	}
-	return uploader, nil
+	return &nativeLogUploader{transport: transport, subject: subject, pattern: pattern, path: path}, nil
 }
 
 func (u *nativeLogUploader) signed(ctx context.Context, index int64, body []byte) (blob.LogUploadURL, error) {

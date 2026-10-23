@@ -27,8 +27,7 @@ type localLogs struct {
 	principal capability.Principal
 	nodes     map[string]capability.Principal
 	upload    func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
-	sinks     map[string]*logseg.Sink
-	failed    map[string]capability.Principal
+	streams   map[string]*localLogStream
 	closed    bool
 }
 
@@ -72,7 +71,7 @@ func (l *localLogs) alert(node string, err error) {
 
 // finish detaches streams before committing lifecycle state. Uploads share no host lock.
 func (l *localLogs) finish(ctx context.Context, node string) <-chan struct{} {
-	sinks, failed := l.take(node)
+	streams := l.take(node)
 	done := make(chan struct{})
 	l.flushes.Add(1)
 	go func() {
@@ -80,62 +79,72 @@ func (l *localLogs) finish(ctx context.Context, node string) <-chan struct{} {
 		defer close(done)
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.LogSealGrace)
 		defer cancel()
-		if err := l.flush(ctx, sinks, failed); err != nil {
-			l.alert(node, err)
+		for _, stream := range streams {
+			if err := stream.close(ctx); err != nil {
+				l.alert(node, err)
+			}
 		}
 	}()
 	return done
 }
 
-func (l *localLogs) take(node string) (map[string]*logseg.Sink, map[string]capability.Principal) {
+func (l *localLogs) take(node string) []*localLogStream {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	sinks := map[string]*logseg.Sink{}
-	failed := map[string]capability.Principal{}
 	if node == "" {
 		l.closed = true
 	}
-	matches := func(key string) bool {
-		var subject blob.LogSubject
-		return node == "" || json.Unmarshal([]byte(key), &subject) == nil && subject.Attempt != nil && subject.Attempt.NodeID == node
-	}
-	for key, sink := range l.sinks {
-		if matches(key) {
-			sinks[key] = sink
-			delete(l.sinks, key)
+	var streams []*localLogStream
+	for key, stream := range l.streams {
+		if node == "" || stream.subject.Attempt != nil && stream.subject.Attempt.NodeID == node {
+			streams = append(streams, stream)
+			delete(l.streams, key)
 		}
 	}
-	for key, principal := range l.failed {
-		if matches(key) {
-			failed[key] = principal
-			delete(l.failed, key)
-		}
-	}
-	return sinks, failed
+	return streams
 }
 
-func (l *localLogs) flush(ctx context.Context, sinks map[string]*logseg.Sink, failed map[string]capability.Principal) error {
-	var result error
-	for _, sink := range sinks {
-		manifest, err := sink.Close(ctx, logseg.End{})
-		if err == nil && manifest.Status == "incomplete" {
-			l.alert("", errors.New(manifest.Reason))
-		}
-		result = errors.Join(result, err)
+type localLogStream struct {
+	mu      sync.Mutex
+	subject blob.LogSubject
+	upload  *logUpload
+	sink    *logseg.Sink
+	failed  bool
+	closed  bool
+}
+
+func (s *localLogStream) write(ctx context.Context, body []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return logseg.ErrClosed
 	}
-	for key, principal := range failed {
-		var subject blob.LogSubject
-		if err := json.Unmarshal([]byte(key), &subject); err != nil {
-			result = errors.Join(result, err)
-			continue
+	if s.sink == nil {
+		var err error
+		s.sink, err = logseg.NewSink(ctx, s.upload, logseg.Options{Subject: s.subject})
+		if err != nil {
+			s.failed = true
+			return err
 		}
-		uploader, err := l.upload(ctx, principal, subject)
-		if err == nil {
-			err = uploader.PutManifest(ctx, logseg.Manifest{Version: 1, Subject: &subject, Status: "incomplete", Reason: "log persistence failed", SealedBy: "node", SealedAt: time.Now().UTC()})
+		if s.failed {
+			s.sink.MarkIncomplete()
 		}
-		result = errors.Join(result, err)
 	}
-	return result
+	return s.sink.Append(body, "", 0, 0)
+}
+
+func (s *localLogStream) close(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	if s.sink == nil {
+		return s.upload.PutManifest(ctx, logseg.Manifest{Version: 1, Subject: &s.subject, Status: "incomplete", Reason: "log persistence failed", SealedBy: "node", SealedAt: time.Now().UTC()})
+	}
+	manifest, err := s.sink.Close(ctx, logseg.End{})
+	if err == nil && manifest.Status == "incomplete" {
+		err = errors.New(manifest.Reason)
+	}
+	return err
 }
 
 func (l *localLogs) bind(p capability.Principal, attempt int64) {
@@ -175,17 +184,37 @@ func (l *localLogs) subject(node string) (capability.Principal, blob.LogSubject,
 
 // logUpload bounds background segment uploads independently of lifecycle calls.
 type logUpload struct {
-	up logseg.Uploader
+	open func(context.Context) (logseg.Uploader, error)
+	up   logseg.Uploader
+}
+
+func (u *logUpload) uploader(ctx context.Context) (logseg.Uploader, error) {
+	if u.up == nil {
+		up, err := u.open(ctx)
+		if err != nil {
+			return nil, err
+		}
+		u.up = up
+	}
+	return u.up, nil
 }
 
 func (u *logUpload) PutSegment(ctx context.Context, segment logseg.Segment, body []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, limits.LogSealGrace)
 	defer cancel()
-	return u.up.PutSegment(ctx, segment, body)
+	up, err := u.uploader(ctx)
+	if err != nil {
+		return err
+	}
+	return up.PutSegment(ctx, segment, body)
 }
 
 func (u *logUpload) PutManifest(ctx context.Context, manifest logseg.Manifest) error {
-	return u.up.PutManifest(ctx, manifest)
+	up, err := u.uploader(ctx)
+	if err != nil {
+		return err
+	}
+	return up.PutManifest(ctx, manifest)
 }
 
 func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto.FrameLog) error {
@@ -208,37 +237,21 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 		return err
 	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if l.closed {
+		l.mu.Unlock()
 		l.alert(node, logseg.ErrClosed)
 		return nil
 	}
-	if l.sinks == nil {
-		l.sinks = map[string]*logseg.Sink{}
+	if l.streams == nil {
+		l.streams = map[string]*localLogStream{}
 	}
-	sink := l.sinks[string(key)]
-	if sink == nil {
-		// Register while this attempt is current so a refused late flush stays visible.
-		uploader, err := l.upload(ctx, p, subject)
-		if err == nil {
-			sink, err = logseg.NewSink(ctx, &logUpload{up: uploader}, logseg.Options{Subject: subject})
-		}
-		if err != nil {
-			l.alert(node, err)
-			if l.failed == nil {
-				l.failed = map[string]capability.Principal{}
-			}
-			l.failed[string(key)] = p
-			return nil
-		}
-		l.sinks[string(key)] = sink
-		// Earlier discarded bytes must remain visible even if storage recovers.
-		if _, failed := l.failed[string(key)]; failed {
-			sink.MarkIncomplete()
-			delete(l.failed, string(key))
-		}
+	stream := l.streams[string(key)]
+	if stream == nil {
+		stream = &localLogStream{subject: subject, upload: &logUpload{open: func(ctx context.Context) (logseg.Uploader, error) { return l.upload(ctx, p, subject) }}}
+		l.streams[string(key)] = stream
 	}
-	if err := sink.Append(body, "", 0, 0); err != nil {
+	l.mu.Unlock()
+	if err := stream.write(ctx, body); err != nil {
 		l.alert(node, err)
 	}
 	return nil

@@ -104,7 +104,7 @@ func FuzzLocalNativeLogsPreserveAuthorityAndMasking(f *testing.F) {
 		attrs, _ := json.Marshal(map[string]string{secret: secret})
 		err := logs.write(t.Context(), run, "", nodeproto.FrameLog{Message: secret, Attrs: attrs})
 		if foreign {
-			if err == nil || len(logs.sinks) != 0 {
+			if err == nil || len(logs.streams) != 0 {
 				t.Fatal("refused authority reached storage")
 			}
 			return
@@ -149,27 +149,52 @@ func FuzzNativeServicesRejectMissingBindings(f *testing.F) {
 	})
 }
 
-func TestLogRegistrationFailureRemainsVisibleAfterRecovery(t *testing.T) {
+func TestLogSpoolFailureRemainsVisibleAfterRecovery(t *testing.T) {
 	records := &nativeLogRecords{objects: map[string][]byte{}}
-	calls := 0
 	logs := &localLogs{run: "run", masker: secrets.NewMasker(), principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitPlan, Binding: capability.Binding{RunID: "run", Generation: 1}}}, upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
-		calls++
-		if calls == 1 {
-			return nil, errors.New("storage unavailable")
-		}
 		records.view.Subject = subject
 		return records, nil
 	}}
+	spoolDir := t.TempDir()
+	t.Setenv("TMPDIR", spoolDir+"/missing")
 	if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "discarded"}); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("TMPDIR", spoolDir)
 	if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "retained"}); err != nil {
 		t.Fatal(err)
 	}
 	<-logs.finish(t.Context(), "")
-	if calls != 2 || records.view.Complete || records.view.IncompleteReason == "" || len(records.objects) != 1 {
-		t.Fatalf("registration recovery hid lost bytes: calls=%d view=%+v", calls, records.view)
+	if records.view.Complete || records.view.IncompleteReason == "" || len(records.objects) != 1 {
+		t.Fatalf("spool recovery hid lost bytes: %+v", records.view)
 	}
+}
+
+func TestLogUploaderInitializationPreservesBufferedBytes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		records := &nativeLogRecords{objects: map[string][]byte{}}
+		calls := 0
+		logs := &localLogs{run: "run", masker: secrets.NewMasker(), principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitPlan, Binding: capability.Binding{RunID: "run", Generation: 1}}}, upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
+			calls++
+			if calls == 1 {
+				return nil, errors.New("storage unavailable")
+			}
+			records.view.Subject = subject
+			return records, nil
+		}}
+		for _, message := range []string{"first", "second"} {
+			if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: message}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if calls != 0 {
+			t.Fatal("opening a spool contacted log storage")
+		}
+		<-logs.finish(t.Context(), "")
+		if calls != 2 || !records.view.Complete || len(records.objects) != 1 {
+			t.Fatalf("uploader recovery lost buffered bytes: calls=%d view=%+v", calls, records.view)
+		}
+	})
 }
 
 func TestLogLifecycleDetachesFlush(t *testing.T) {
@@ -183,7 +208,7 @@ func TestLogLifecycleDetachesFlush(t *testing.T) {
 					t.Fatal(err)
 				}
 				key, _ := json.Marshal(subject)
-				logs := &localLogs{run: "run", masker: secrets.NewMasker(), sinks: map[string]*logseg.Sink{string(key): sink}}
+				logs := &localLogs{run: "run", masker: secrets.NewMasker(), streams: map[string]*localLogStream{string(key): {subject: subject, sink: sink}}}
 				t.Cleanup(logs.flushes.Wait)
 				committed := false
 				state := logHostStore{NativeHostStore: completingUnitStore{commit: func(ctx context.Context) error {
@@ -314,6 +339,65 @@ func TestLogUploadsDoNotHoldOtherJobs(t *testing.T) {
 	})
 }
 
+func TestStalledLogUploaderInitializationDoesNotDelayAnotherJobsReport(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "healthy", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
+		actors := map[string]store.Actor{}
+		for _, node := range []string{"slow", "healthy"} {
+			ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(node)}
+			if _, err := f.Tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
+				t.Fatal(err)
+			}
+			award, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
+			if err != nil || award.Kind != store.Execute {
+				t.Fatalf("award: %+v %v", award, err)
+			}
+			actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}}
+			if err := awaitStart(t.Context(), f.Tenant, store.CapacityBinding{RunID: string(ref.RunID), NodeID: node, Generation: int64(actor.Generation)}, actor, nil); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &award.Node.Attempt}); err != nil {
+				t.Fatal(err)
+			}
+			actors[node] = actor
+		}
+		principal, err := f.Store.AsOperator().ResolveAuthority(t.Context(), actors["slow"].Authority)
+		if err != nil {
+			t.Fatal(err)
+		}
+		logs := &localLogs{run: f.Accepted.RunID, masker: secrets.NewMasker(), upload: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
+			time.Sleep(3 * time.Second)
+			return nil, errors.New("storage unavailable")
+		}}
+		logs.bind(principal, 1)
+		wrote := make(chan struct{})
+		go func() {
+			defer close(wrote)
+			if err := logs.write(t.Context(), f.Accepted.RunID, "slow", nodeproto.FrameLog{Message: "work"}); err != nil {
+				t.Error(err)
+			}
+			<-logs.finish(t.Context(), "slow")
+		}()
+		synctest.Wait()
+		state := logHostStore{NativeHostStore: f.Tenant, logs: logs}
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "healthy"}
+		attempt := runspec.AttemptOrdinal(1)
+		if _, err := state.TransitionNode(ctx, store.ReportNode{Ref: ref, Actor: actors["healthy"], SourceAttempt: &attempt, Outcome: store.NodeSuccess}); err != nil {
+			t.Errorf("another job's stalled uploader blocked terminal commit: %v", err)
+		}
+		row, err := f.Tenant.ReadNode(t.Context(), ref)
+		if err != nil || row.Outcome != store.NodeSuccess || row.Status != store.StatusDone {
+			t.Errorf("terminal result was not committed: %+v %v", row, err)
+		}
+		<-wrote
+		<-logs.finish(t.Context(), "")
+		logs.flushes.Wait()
+	})
+}
+
 func TestNativeServiceCloseJoinsLogsAfterTerminalCommit(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cfg, _ := nativeConfigFixture(t)
@@ -404,15 +488,9 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 					t.Fatal(err)
 				}
 				gate := make(chan struct{})
-				var registered blob.LogSubject
-				var uploader *fencedLogUploader
-				logs := &localLogs{run: input.Accepted.RunID, masker: secrets.NewMasker(), upload: func(ctx context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
-					commit := store.SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30"}
-					if err := f.Tenant.RecordSegments(ctx, commit); err != nil {
-						return nil, err
-					}
-					registered = subject
-					uploader = &fencedLogUploader{tenant: f.Tenant, commit: commit, gate: gate}
+				registered := blob.LogSubject{Kind: blob.LogJobAttempt, Team: principal.Capability.Team, RunID: input.Accepted.RunID, Attempt: &runspec.AttemptIdentity{Team: principal.Capability.Team, RunID: input.Accepted.RunID, NodeID: "job", Generation: int64(input.Generation), Attempt: int64(started.Attempt)}}
+				uploader := &fencedLogUploader{tenant: f.Tenant, commit: store.SegmentCommit{Subject: registered, Actor: actor, RetentionClass: "r30"}, gate: gate}
+				logs := &localLogs{run: input.Accepted.RunID, masker: secrets.NewMasker(), upload: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
 					return uploader, nil
 				}}
 				defer func() {
@@ -424,13 +502,17 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 					<-logs.finish(t.Context(), "")
 					logs.flushes.Wait()
 				}()
+				view, err := f.Tenant.ReadRunView(t.Context(), input.Accepted.RunID)
+				found := false
+				for _, subject := range view.Logs {
+					found = found || subject.Attempt != nil && *subject.Attempt == *registered.Attempt
+				}
+				if err != nil || !found {
+					t.Fatalf("started attempt has no persisted stream before output: %+v %v", view.Logs, err)
+				}
 				logs.bind(principal, int64(started.Attempt))
 				if err := logs.write(t.Context(), input.Accepted.RunID, "job", nodeproto.FrameLog{Message: "attempt output"}); err != nil {
 					t.Fatal(err)
-				}
-				view, err := f.Tenant.ReadRunView(t.Context(), input.Accepted.RunID)
-				if err != nil || len(view.Logs) != 1 || view.Logs[0].Attempt == nil || view.Logs[0].Attempt.Attempt != int64(started.Attempt) {
-					t.Fatalf("spool has no persisted attempt stream: %+v %v", view.Logs, err)
 				}
 				state := logHostStore{NativeHostStore: f.Tenant, logs: logs}
 				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)

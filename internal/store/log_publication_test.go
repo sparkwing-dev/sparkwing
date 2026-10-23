@@ -137,7 +137,7 @@ func TestLogPersistencePublishedAttemptsRecheckAuthority(t *testing.T) {
 			if err := tenant.RecordSegments(t.Context(), commit); err == nil {
 				t.Fatal("unauthorized publication committed logs")
 			}
-			rewriteSchemaCount(t, s.db, "log_streams", 0)
+			rewriteSchemaCount(t, s.db, "log_streams", 1)
 			rewriteSchemaCount(t, s.db, "log_segments", 0)
 		})
 	}

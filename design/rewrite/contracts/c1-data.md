@@ -2256,8 +2256,11 @@ source job and immutable source generation, separate from its own lease fence.
 represent pre-job logs.
 
 `log_streams` persists that tagged identity, its generation, retention class and
-final commit digest. `log_segments` references the stream with the same generation.
-The writer rechecks its exact capability binding and persisted generation.
+final commit digest. The transaction that starts an attempt or claims an owner
+unit also creates its stream. Publication imports create their streams in the same transaction.
+`RecordSegments` appends and seals existing streams, refusing a missing registration.
+`log_segments` references the stream with the same generation. The writer rechecks
+its exact capability binding and persisted generation.
 An unsealed final job attempt may flush after its result commits until the
 persisted finish time plus `limits.LogSealGrace`. C1 rechecks the recorded writer,
 attempt, generation, current credential ancestry/expiry/membership and absence
@@ -3658,7 +3661,7 @@ migration or backfill is introduced.
 
 `TestMemoizedSourceZeroClaimsRenewsAndPublishesEvalLog` drives the persisted
 boundaries. `FuzzZeroSourceEvalCannotBorrowAnotherFence` refuses changed source
-and lease identities without committing a log stream.
+and lease identities without appending or sealing the awarded log stream.
 
 ## W9 launcher preparation renewal
 

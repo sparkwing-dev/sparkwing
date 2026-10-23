@@ -57,11 +57,13 @@ authorized reset operation. It changes no state.
 
 Log storage runs independently of plan acceptance, expansion acceptance, run
 completion and node reporting. Those commits never wait for log uploads or closure.
-Flush effort is bounded by the existing one-minute log tail window. Uploads hold
+Flush effort is bounded by the existing one-minute log tail window. Log I/O holds
 no lock shared across jobs. Log subjects use the committed attempt, without
-logging-only principal refreshes or node lookups. Each stream is registered before
-its spool opens. If a retry refuses the prior attempt's detached flush, that
-attempt's stream remains visible in run details and maintenance seals it incomplete.
+logging-only principal refreshes or node lookups. The store creates each stream
+in the transaction that starts its attempt or claims its owner unit. Hosts open
+spools without a registration request. If a retry refuses the prior attempt's
+detached flush, that stream stays visible in run details and maintenance seals it
+incomplete.
 The host emits a `run logs incomplete` operator error with the run identity,
 node when known, and
 a masked error. A failed stream is recorded as incomplete. Streams that cannot publish

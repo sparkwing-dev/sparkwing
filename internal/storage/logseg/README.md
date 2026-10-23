@@ -24,12 +24,13 @@ Each segment and the final manifest is signed separately with its
 exact stored size and SHA-256. The final manifest contains the exact committed
 segment list and its tagged identity. The sink can mark a lost tail incomplete
 without changing the job's result. Failed spool writes or closure mark the final manifest
-incomplete, including when a later write succeeds. Native clients register an
-open stream synchronously before opening the spool, using a store write without
-object I/O. If retry fences a detached flush, maintenance seals that attempt
-incomplete and run details retain its stream. Registration failures emit a masked
-operator error; later recovery keeps any discarded bytes visible as incomplete.
-Native host acceptance and result reporting never wait for uploads or closure.
+incomplete, including when a later write succeeds. The store creates each stream
+in the transaction that starts its attempt or claims its owner unit, or imports its published
+attempt. Hosts open spools without a registration request. Detached uploads commit
+only to existing streams. If retry fences a flush, maintenance seals that attempt
+incomplete and run details retain its stream. Failed uploads emit a masked operator
+error. Log I/O holds no lock shared across jobs, and native host acceptance and
+result reporting never wait for uploads or closure.
 
 `Signer` signs one segment or manifest URL with a fifteen-minute expiry. The
 controller supplies the run's persisted retention class after authorizing its

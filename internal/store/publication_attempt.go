@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -19,5 +20,5 @@ func importPublishedAttemptTx(ctx context.Context, tx *storeTx, team Team, row *
 		return err
 	}
 	row.Attempt, row.Generation, row.StartedAt = runspec.AttemptOrdinal(a.Attempt), runspec.ClaimGeneration(a.Generation), &a.StartedAt
-	return nil
+	return createLogStreamTx(ctx, tx, blob.LogSubject{Kind: blob.LogJobAttempt, Team: string(team), RunID: string(row.Ref.RunID), Attempt: &runspec.AttemptIdentity{Team: string(team), RunID: string(row.Ref.RunID), NodeID: string(row.Ref.NodeID), Attempt: a.Attempt, Generation: a.Generation}})
 }

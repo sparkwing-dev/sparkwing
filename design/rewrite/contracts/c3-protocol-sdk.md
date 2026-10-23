@@ -1133,7 +1133,9 @@ eval/controller leases. Step and work writes still require a node award.
 submission route. The controller derives a narrower source capability and C1
 rechecks it transactionally. Direct store hosts retain `OwnerDelegator`.
 The adapter uses the existing award and authenticated transport without another
-bearer route. Native hosts register each log stream before opening its spool.
+bearer route. The store creates each log stream in the transaction that starts
+its attempt or claims its owner unit. Hosts open spools without a registration request, and
+log I/O holds no lock shared across jobs.
 Plan/eval closure runs independently of acceptance and may finish after lease
 retirement. If retry or reacquisition fences a late flush, the registered stream
 remains visible and maintenance seals it incomplete.

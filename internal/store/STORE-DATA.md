@@ -392,7 +392,10 @@ Recoverable bytes can still be lost in a rare race, including identical S3
 bytes with the same ETag. A referenced digest with missing bytes fails loudly.
 A collecting digest that has gained a reference fails the pass loudly.
 
-`RecordSegments` and `ReadLogSegments` accept tagged job or owner-unit subjects.
+Attempt-start and owner-unit claim transactions create their log streams. Publication
+imports create their streams atomically too. `RecordSegments` appends and seals
+existing streams, refusing a missing registration. `RecordSegments` and
+`ReadLogSegments` accept tagged job or owner-unit subjects.
 `Segment.Size` and `Offset` count decoded bytes. `StoredBytes` counts the
 compressed object whose hash is `Digest`. Retained storage and billing count
 stored bytes once. Cursors continue to count decoded bytes. Both lengths are

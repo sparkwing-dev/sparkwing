@@ -80,6 +80,17 @@ func logIdentity(subject blob.LogSubject) (logStreamIdentity, error) {
 	return identity, nil
 }
 
+func createLogStreamTx(ctx context.Context, tx *storeTx, subject blob.LogSubject) error {
+	identity, err := logIdentity(subject)
+	if err != nil {
+		return err
+	}
+	now := tx.now(ctx).UnixNano()
+	_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at)
+		SELECT team,id,?,?,?,?,?,?,?,?,?,log_retention_class,?,? FROM runs WHERE team=? AND id=?`, identity.id, string(subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, now, now, subject.Team, subject.RunID)
+	return err
+}
+
 // RecordSegments atomically commits contiguous segments and seals under the current writer fence.
 func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error {
 	if commit.Subject.Team != string(t.team) {
@@ -140,11 +151,7 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 		return tx.Commit()
 	}
 	if !exists {
-		now := tx.now(ctx)
-		_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.team, commit.Subject.RunID, identity.id, string(commit.Subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, retention, now.UnixNano(), now.UnixNano())
-		if err != nil {
-			return err
-		}
+		return authorityError(apierr.Conflict, "log stream was not registered with its attempt or unit")
 	}
 	if err := appendSegmentsTx(ctx, tx, t.team, commit.Subject.RunID, identity, commit.Segments); err != nil {
 		return err

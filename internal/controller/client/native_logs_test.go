@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func TestNativeLogUploaderEmptyRegistrationRequiresAcknowledgement(t *testing.T) {
+func TestNativeLogCommitRequiresAcknowledgement(t *testing.T) {
 	for _, acknowledged := range []bool{false, true} {
 		t.Run(map[bool]string{false: "refused", true: "recorded"}[acknowledged], func(t *testing.T) {
 			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "team", RunID: "run", Unit: &blob.LogUnit{Kind: "plan", Generation: 1}}
@@ -20,7 +20,7 @@ func TestNativeLogUploaderEmptyRegistrationRequiresAcknowledgement(t *testing.T)
 			transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
 				called = true
 				if request.Method != "POST" || request.URL.Path != "/api/v1/claims/plan/log-manifest" {
-					t.Fatalf("unexpected registration route: %s %s", request.Method, request.URL.Path)
+					t.Fatalf("unexpected commit route: %s %s", request.Method, request.URL.Path)
 				}
 				var body struct {
 					Subject  blob.LogSubject `json:"subject"`
@@ -31,8 +31,8 @@ func TestNativeLogUploaderEmptyRegistrationRequiresAcknowledgement(t *testing.T)
 				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 					t.Fatal(err)
 				}
-				if body.Subject.RunID != subject.RunID || len(body.Segments) != 0 || body.Final || body.Reason != "" {
-					t.Fatalf("invalid empty registration: %+v", body)
+				if body.Subject.RunID != subject.RunID || len(body.Segments) != 0 || !body.Final || body.Reason != "" {
+					t.Fatalf("invalid log commit: %+v", body)
 				}
 				if acknowledged {
 					return engineResponse(200, `{"recorded":true}`), nil
@@ -40,9 +40,9 @@ func TestNativeLogUploaderEmptyRegistrationRequiresAcknowledgement(t *testing.T)
 				return engineResponse(200, `{"recorded":false}`), nil
 			})
 			uploader := &nativeLogUploader{transport: transport, subject: subject, pattern: "/api/v1/claims/{claim}", path: "/api/v1/claims/plan"}
-			err := uploader.commit(t.Context(), nil, false, "")
+			err := uploader.commit(t.Context(), nil, true, "")
 			if !called || (err == nil) != acknowledged {
-				t.Fatalf("registration acknowledgement lost: called=%v error=%v", called, err)
+				t.Fatalf("commit acknowledgement lost: called=%v error=%v", called, err)
 			}
 		})
 	}
@@ -86,8 +86,12 @@ func TestNativeLogUploaderUsesCommittedBearerWithoutMetadataReads(t *testing.T) 
 			if kind == "adopted-node" {
 				host.nodes = map[string]localNodeBearer{"job": {raw: raw, prefix: "award", generation: 2}}
 			}
-			if _, err := host.LogUploader(t.Context(), p, subject); err != nil || calls != 1 {
-				t.Fatalf("log upload depended on execution metadata: calls=%d error=%v", calls, err)
+			uploader, err := host.LogUploader(t.Context(), p, subject)
+			if err != nil || calls != 0 {
+				t.Fatalf("opening an uploader contacted the controller: calls=%d error=%v", calls, err)
+			}
+			if err := uploader.(*nativeLogUploader).commit(t.Context(), nil, true, "tail lost"); err != nil || calls != 1 {
+				t.Fatalf("log commit lost its bound bearer: calls=%d error=%v", calls, err)
 			}
 			p.Capability.Digest = sha256.Sum256([]byte("another-award"))
 			if _, err := host.LogUploader(context.Background(), p, subject); err == nil || calls != 1 {

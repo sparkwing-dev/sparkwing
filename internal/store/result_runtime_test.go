@@ -29,6 +29,9 @@ func resultFixture(t *testing.T) (*Store, *Tenant, Actor, runspec.AttemptIdentit
 	}
 	rewriteSchemaExec(t, tx, "UPDATE nodes SET capability_prefix = ? WHERE team = 'a' AND run_id = 'run' AND node_id = 'job'", issued.Capability.Prefix)
 	rewriteSchemaExec(t, tx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES ('a','run','job',2,7,'machine',?,'runner','machine','remote',?)`, issued.Capability.Prefix, s.now().Add(-time.Second).UnixNano())
+	if err := createLogStreamTx(t.Context(), tx, blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 2, Generation: 7}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}

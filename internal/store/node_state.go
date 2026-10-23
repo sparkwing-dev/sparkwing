@@ -891,6 +891,9 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		if err != nil {
 			return err
 		}
+		if err := createLogStreamTx(ctx, tx, blob.LogSubject{Kind: blob.LogJobAttempt, Team: string(team), RunID: string(row.Ref.RunID), Attempt: &runspec.AttemptIdentity{Team: string(team), RunID: string(row.Ref.RunID), NodeID: string(row.Ref.NodeID), Generation: int64(row.Generation), Attempt: int64(row.Attempt)}}); err != nil {
+			return err
+		}
 	case NodeApprovalPending:
 		var job nodeproto.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
