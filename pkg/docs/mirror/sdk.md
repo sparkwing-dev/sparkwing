@@ -64,7 +64,7 @@ Initial jobs must use argument declarations discovered by zero-input describe,
 even when invocation inputs change job IDs. New declarations belong in generated
 jobs, whose secrets the host registers before execution.
 
-Secret flag values are masked in logs and diagnostics. Input masking does not
+Secret flag values of 4 or more characters are masked in logs and diagnostics (see the secret values rule). Input masking does not
 remove those values from stored invocation arguments, so use declared secrets
 for credentials.
 
@@ -417,7 +417,7 @@ type, with all unclassified text withheld after incomplete discovery.
 The stream matcher publishes complete safe lines within the current write.
 It holds only suffixes that could complete a registered spelling. Safe partial
 lines flush after 25 ms of idle output. Prefixes that could complete a secret
-stay private until more input or EOF. A stored secret read is masked even when
+stay private until more input or EOF. A stored secret read of 4 or more characters is masked even when
 its value occurs in an accepted job identifier, including subsequent steps.
 Size and idle flushes preserve complete UTF-8 boundaries. Output delivery
 failures stop the session even when a timer triggers the flush.
