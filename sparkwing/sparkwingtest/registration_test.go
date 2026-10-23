@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -103,19 +104,24 @@ func TestOutputGateIsScopedToOneOperation(t *testing.T) {
 	}
 }
 
-func TestHostRefusesShortSecretListItems(t *testing.T) {
-	const name = "sparkwingtest-registration-list-refusal"
+func TestHostAcceptsShortSecretListItemsWithWarning(t *testing.T) {
+	const name = "sparkwingtest-registration-short-list"
 	sparkwing.Register[registrationArgs](name, func() sparkwing.Pipeline[registrationArgs] { return registrationPipeline{} })
 	for _, raw := range []string{"abc,valid-secret", "valid-secret,abc"} {
 		t.Run(raw, func(t *testing.T) {
 			h := newHost(Options{}).(*host)
 			defer h.Close()
 			_, err := h.Plan(t.Context(), name, map[string]string{"tokens": raw})
-			if err == nil || !strings.Contains(err.Error(), "plain config variable") {
-				t.Fatalf("refusal = %v", err)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if len(h.Records()) != 0 {
-				t.Fatalf("refused discovery released output: %+v", h.Records())
+			if h.masker.Mask("abc") != "abc" {
+				t.Fatal("short secret was masked")
+			}
+			if !slices.ContainsFunc(h.Records(), func(record sparkwing.LogRecord) bool {
+				return record.Level == "warn" && record.Msg == secrets.ShortValueWarning
+			}) {
+				t.Fatalf("missing warning: %+v", h.Records())
 			}
 		})
 	}
@@ -156,10 +162,10 @@ func TestHostMasksChildChunksAcrossNewlines(t *testing.T) {
 	}
 }
 
-func TestHostRefusesEmptyExplicitMask(t *testing.T) {
+func TestHostSkipsEmptyExplicitMask(t *testing.T) {
 	h := newHost(Options{}).(*host)
 	defer h.Close()
-	if err := h.Mask(t.Context(), ""); err == nil || !strings.Contains(err.Error(), "plain config variable") {
+	if err := h.Mask(t.Context(), ""); err != nil {
 		t.Fatalf("empty mask = %v", err)
 	}
 }

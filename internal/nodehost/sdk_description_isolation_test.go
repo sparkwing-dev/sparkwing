@@ -10,31 +10,53 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func TestSelectedShortSecretDefaultKeepsConfigVariableGuidance(t *testing.T) {
-	planner, input, fixture, _ := sdkPlanningFixture(t)
-	start := planner.Start
-	planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-		process, err := start(ctx, in, log)
-		if err != nil {
-			return process, err
-		}
-		proc := process.(*executorProcess)
-		answer := proc.answer
-		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
-			if request.Op == nodeproto.OpDescribe {
-				value := "ab"
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: input.Run.Pipeline, Args: []nodeproto.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &value}}}}}, nil
+func TestSDKShortSecretArgumentsAndDefaultsWarnWithoutMasking(t *testing.T) {
+	for _, kind := range []string{"default", "supplied", "list"} {
+		t.Run(kind, func(t *testing.T) {
+			planner, input, fixture, _ := sdkPlanningFixture(t)
+			var logs strings.Builder
+			planner.Log = func(_ context.Context, frame nodeproto.FrameLog) error { logs.WriteString(frame.Message); return nil }
+			argument := nodeproto.ArgumentDescription{Name: "token", Type: "string", Secret: true}
+			value := "abc"
+			if kind == "default" {
+				argument.Default = &value
+			} else {
+				input.Args = map[string]string{"token": value}
 			}
-			return answer(ctx, request)
-		}
-		return process, nil
-	}
-	_, err := planner.Prepare(t.Context(), input, fixture.input)
-	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.InvalidArgs || !strings.Contains(failure.Message, "plain config variable") {
-		t.Fatalf("refusal lost guidance: %v", err)
+			if kind == "list" {
+				argument.Type = "[]string"
+				input.Args["token"] = "abc,long-token"
+			}
+			start := planner.Start
+			planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+				process, err := start(ctx, in, log)
+				if err != nil {
+					return process, err
+				}
+				proc := process.(*executorProcess)
+				answer := proc.answer
+				proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
+					if request.Op == nodeproto.OpDescribe {
+						return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: input.Run.Pipeline, Args: []nodeproto.ArgumentDescription{argument}}}}, nil
+					}
+					return answer(ctx, request)
+				}
+				return process, nil
+			}
+			prepared, err := planner.Prepare(t.Context(), input, fixture.input)
+			if err != nil || prepared.Args["token"] == "" {
+				t.Fatalf("short secret refused: %+v %v", prepared, err)
+			}
+			if !strings.Contains(logs.String(), secrets.ShortValueWarning) {
+				t.Fatalf("missing warning: %s", &logs)
+			}
+			if got := planner.Masker.Mask(value); got != value {
+				t.Fatalf("short value masked: %q", got)
+			}
+		})
 	}
 }
 

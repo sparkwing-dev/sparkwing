@@ -102,7 +102,7 @@ Restricted --only-on secrets require matching pool demands at seal and reserved 
 
 If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.
 
-Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. JSON returns metadata and replay without the value; plain emits the name.
+Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. Secret values shorter than 4 characters cannot be masked in logs. Writes warn on stderr for short secrets; JSON also includes a warning field. JSON returns metadata and replay without the value; plain emits the name.
 
 ### Flags
 

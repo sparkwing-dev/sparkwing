@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -62,12 +61,6 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	}
 	input.EnvironmentSource = runspec.EnvironmentSubmitted
 	created, err := c.CreateRun(t.Context(), controllerwire.CreateRunRequest{Request: input, IdempotencyKey: "local-secret", LocalSecrets: map[string]string{"TOKEN": value}, SubmittedEnv: map[string][]byte{"BUILD_REGION": []byte(submittedValue), "BUILD_EMPTY": {}}})
-	if utf8.RuneCountInString(value) < 4 {
-		if err == nil || !strings.Contains(err.Error(), "plain config variable") {
-			t.Fatalf("invalid local secret intake: %v", err)
-		}
-		return
-	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +268,9 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 }
 
 func TestHTTPIntakeReplayValidatesPrivateInputs(t *testing.T) {
-	httpIntakeReplayPrivateInputs(t, "original-secret")
+	for _, value := range []string{"original-secret", "abc"} {
+		t.Run(value, func(t *testing.T) { httpIntakeReplayPrivateInputs(t, value) })
+	}
 }
 
 func FuzzHTTPIntakeReplayValidatesPrivateInputs(f *testing.F) {
@@ -319,14 +314,12 @@ func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 		}
 		return w.Body.String()
 	}
-	if utf8.RuneCountInString(value) < 4 {
-		if body := send(s.Handler(), request, http.StatusBadRequest); !strings.Contains(body, "plain config variable") {
-			t.Fatalf("invalid local secret refusal: %s", body)
+	for _, status := range []int{http.StatusCreated, http.StatusOK} {
+		var receipt controllerwire.CreateRunResponse
+		if body := send(s.Handler(), request, status); json.Unmarshal([]byte(body), &receipt) != nil || (receipt.Warning != "") != !secrets.Maskable(value) {
+			t.Fatalf("local secret masking warning missing: %s", body)
 		}
-		return
 	}
-	send(s.Handler(), request, http.StatusCreated)
-	send(s.Handler(), request, http.StatusOK)
 	changed := request
 	changed.LocalSecrets = map[string]string{"SIGNING_MATERIAL": value + "changed"}
 	send(s.Handler(), changed, http.StatusConflict)

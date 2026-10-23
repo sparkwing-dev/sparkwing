@@ -31,6 +31,8 @@ import { fmtDateTime } from "@/lib/timeFormat";
 
 const labelClass =
   "block text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1";
+const shortSecretNote =
+  "Secret values shorter than 4 characters cannot be masked in logs.";
 
 const copy: Record<
   SecretsAudience,
@@ -266,6 +268,7 @@ function SecretRow({
             value={value}
             onChange={(e) => setValue(e.target.value)}
           />
+          <p className="text-xs text-[var(--muted)]">{shortSecretNote}</p>
           <div className="flex gap-2">
             <button
               type="submit"
@@ -479,6 +482,9 @@ function CreateForm({
             value={value}
             onChange={(e) => setValue(e.target.value)}
           />
+          {masked ? (
+            <p className="mt-1 text-xs text-[var(--muted)]">{shortSecretNote}</p>
+          ) : null}
         </div>
         <fieldset className="flex flex-wrap items-center gap-4 text-sm">
           <legend className={labelClass}>Scope</legend>

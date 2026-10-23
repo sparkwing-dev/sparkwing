@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -78,7 +79,9 @@ func (s *EngineController) admitRun(ctx context.Context, team string, request st
 	if err != nil {
 		return controllerwire.CreateRunResponse{}, engineLookupError(err)
 	}
-	return createRunResponse(admitted), nil
+	response := createRunResponse(admitted)
+	response.Warning = intakeSecretWarning(request)
+	return response, nil
 }
 
 func (s *EngineController) replayRun(ctx context.Context, team string, request store.IntakeRequest) (controllerwire.CreateRunResponse, bool, error) {
@@ -90,7 +93,9 @@ func (s *EngineController) replayRun(ctx context.Context, team string, request s
 	if err != nil {
 		return controllerwire.CreateRunResponse{}, false, engineLookupError(err)
 	}
-	return createRunResponse(admitted), found, nil
+	response := createRunResponse(admitted)
+	response.Warning = intakeSecretWarning(request)
+	return response, found, nil
 }
 
 func createRunResponse(admitted store.AdmissionResult) controllerwire.CreateRunResponse {
@@ -282,3 +287,17 @@ func invalidEngineBody(message string) *apierr.Error {
 }
 
 var _ RunTransactions = (*store.Tenant)(nil)
+
+func intakeSecretWarning(request store.IntakeRequest) string {
+	for _, value := range request.LocalSecrets {
+		if !secrets.Maskable(value) {
+			return secrets.ShortValueWarning
+		}
+	}
+	for _, name := range request.Request.SecretArgs.Value {
+		if value := request.Request.RequestedArgs[name]; value != "" && !secrets.Maskable(value) {
+			return secrets.ShortValueWarning
+		}
+	}
+	return ""
+}

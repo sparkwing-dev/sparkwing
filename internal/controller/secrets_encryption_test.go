@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -56,7 +56,7 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 		if masked {
 			name = "TOKEN"
 		}
-		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": name, "value": "supersecret", "pipeline": "ci", "masked": masked}); code != http.StatusNoContent {
+		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": name, "value": "supersecret", "pipeline": "ci", "masked": masked}); code != http.StatusOK {
 			t.Fatalf("write: HTTP %d %s", code, body)
 		}
 		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow(name, "ci")
@@ -80,19 +80,24 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSecrets_InvalidMaskedValuesRequirePlainConfig(t *testing.T) {
+func TestSecrets_ShortValuesWarnAndStayWriteOnly(t *testing.T) {
 	f := newBrowserFixture(t, nil)
-	for _, value := range []string{"", "abc"} {
-		code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": value})
-		if code != http.StatusBadRequest || !strings.Contains(body, "plain config variable") {
-			t.Fatalf("masked value %q: HTTP %d %s", value, code, body)
+	for _, value := range []string{"", "abc", "ééé"} {
+		code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": value, "pipeline": "ci"})
+		var response controllerwire.SecretWritten
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &response) != nil || response.Warning != secrets.ShortValueWarning || !response.Secret.Masked {
+			t.Fatalf("short secret: HTTP %d %s", code, body)
 		}
-		if _, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", ""); !errors.Is(err, store.ErrNotFound) {
-			t.Fatalf("refused secret persisted: %v", err)
+		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", "ci")
+		if err != nil || !row.Masked || !secrets.IsBound(row.Value) {
+			t.Fatalf("short secret lost protection: %+v %v", row, err)
+		}
+		if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/TOKEN?pipeline=ci", "", nil); code != http.StatusForbidden {
+			t.Fatalf("member read: HTTP %d %s", code, body)
 		}
 		code, body, _ = secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "VARIABLE", "value": value, "masked": false})
-		if code != http.StatusNoContent {
-			t.Fatalf("plain config %q: HTTP %d %s", value, code, body)
+		if code != http.StatusOK || strings.Contains(body, `"warning"`) {
+			t.Fatalf("plain config: HTTP %d %s", code, body)
 		}
 	}
 }
@@ -106,7 +111,7 @@ func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 func checkSecretBindingMutation(t *testing.T, field, private string) {
 	t.Helper()
 	f := newBrowserFixture(t, nil)
-	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": private, "pipeline": "ci"}); code != http.StatusNoContent {
+	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": private, "pipeline": "ci"}); code != http.StatusOK {
 		t.Fatalf("write: HTTP %d %s", code, body)
 	}
 	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", "ci")
@@ -225,7 +230,7 @@ func TestSecretsEnvelopeBindingProperty(t *testing.T) {
 
 func TestSecrets_ListNamesUnboundRows(t *testing.T) {
 	f := newBrowserFixture(t, nil)
-	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "BOUND", "value": "fresh"}); code != http.StatusNoContent {
+	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "BOUND", "value": "fresh"}); code != http.StatusOK {
 		t.Fatalf("write: HTTP %d %s", code, body)
 	}
 	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{42}, secrets.KeySize))
@@ -295,7 +300,7 @@ func TestSecretsMalformedEnvelopeReadsProperty(t *testing.T) {
 func TestSecrets_MarkerContainingValuesAreAccepted(t *testing.T) {
 	f := newBrowserFixture(t, nil)
 	code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": "prefix***suffix"})
-	if code != http.StatusNoContent {
+	if code != http.StatusOK {
 		t.Fatalf("HTTP %d %s", code, body)
 	}
 }

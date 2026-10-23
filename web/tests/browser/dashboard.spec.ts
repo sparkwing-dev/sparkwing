@@ -1912,7 +1912,7 @@ test("manages local secrets without an account", async ({ page }) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       writes.push(body);
-      stored.push({
+      const entry = {
         name: body.name,
         masked: body.masked,
         shared: body.shared,
@@ -1921,7 +1921,10 @@ test("manages local secrets without an account", async ({ page }) => {
         bound: true,
         created_at: 1,
         updated_at: 1,
-      });
+      };
+      const index = stored.findIndex((row) => row.name === body.name);
+      if (index === -1) stored.push(entry);
+      else stored[index] = entry;
       await route.fulfill({ status: 204 });
       return;
     }
@@ -1931,19 +1934,37 @@ test("manages local secrets without an account", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Secrets and variables", level: 1 }),
   ).toBeVisible();
+  const maskingNote = page.getByText(
+    "Secret values shorter than 4 characters cannot be masked in logs.",
+    { exact: true },
+  );
+  await expect(maskingNote).toBeVisible();
   await page.getByLabel("Name", { exact: true }).fill("DEPLOY_KEY");
-  await page.getByLabel("Value", { exact: true }).fill("hunter2");
+  await page.getByLabel("Value", { exact: true }).fill("🔑ab");
   await page.getByRole("button", { name: "Save secret" }).click();
   await expect(page.getByText("DEPLOY_KEY", { exact: true })).toBeVisible();
   await expect(page.getByText(/^Every pipeline · updated/)).toBeVisible();
 
+  await page.getByRole("button", { name: "Update", exact: true }).click();
+  const replacement = page.getByLabel("New value for DEPLOY_KEY", { exact: true });
+  const updateForm = page.locator("form").filter({ has: replacement });
+  await expect(updateForm.getByText(
+    "Secret values shorter than 4 characters cannot be masked in logs.",
+    { exact: true },
+  )).toBeVisible();
+  await replacement.fill("xy");
+  await page.getByRole("button", { name: "Replace value", exact: true }).click();
+  await expect(replacement).toHaveCount(0);
+
   await page.getByRole("radio", { name: /^Variable/ }).check();
+  await expect(maskingNote).toHaveCount(0);
   await page.getByLabel("Name", { exact: true }).fill("REGION");
   await page.getByLabel("Value", { exact: true }).fill("us-west-2");
   await page.getByRole("button", { name: "Save variable" }).click();
   await expect(page.getByText("us-west-2", { exact: true })).toBeVisible();
   expect(writes).toEqual([
-    { name: "DEPLOY_KEY", value: "hunter2", masked: true, shared: true },
+    { name: "DEPLOY_KEY", value: "🔑ab", masked: true, shared: true },
+    { name: "DEPLOY_KEY", value: "xy", masked: true, shared: true },
     { name: "REGION", value: "us-west-2", masked: false, shared: true },
   ]);
 });

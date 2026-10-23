@@ -16,6 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 type secretManagerFake struct {
@@ -76,7 +78,7 @@ func TestSecretManagementPreservesValueAndRestrictions(t *testing.T) {
 		}}
 		args := append([]string{"set", "--secret", "DEPLOY_KEY", "--pipeline", "deploy", "--only-on", "prod", "-o", "json"}, tc.args...)
 		var out bytes.Buffer
-		err := manageSecrets(t.Context(), secretInvocation(t, args...), manager, strings.NewReader(tc.stdin), &out, false)
+		err := manageSecrets(t.Context(), secretInvocation(t, args...), manager, strings.NewReader(tc.stdin), &out, io.Discard, false)
 		if err != nil || got.Value != tc.want || got.Name != "DEPLOY_KEY" || got.Pipeline != "deploy" || !got.Masked || got.Shared || got.OnlyOn != "prod" || got.IdempotencyKey == "" {
 			t.Fatalf("write: %+v %v", got, err)
 		}
@@ -97,7 +99,7 @@ func TestSecretManagementLocalDefaultsAndVariables(t *testing.T) {
 		}}
 		inv := secretInvocation(t, append([]string{"set", "--secret", "REGION", "--value", "us-east-1", "--variable", "-o", "plain"}, args...)...)
 		var out bytes.Buffer
-		if err := manageSecrets(t.Context(), inv, manager, strings.NewReader(""), &out, true); err != nil || out.String() != "REGION\n" {
+		if err := manageSecrets(t.Context(), inv, manager, strings.NewReader(""), &out, io.Discard, true); err != nil || out.String() != "REGION\n" {
 			t.Fatalf("write: %s %v", &out, err)
 		}
 	}
@@ -110,7 +112,7 @@ func TestSecretManagementListsOnlyMetadata(t *testing.T) {
 	for _, format := range []string{"pretty", "json", "plain"} {
 		var out bytes.Buffer
 		inv := secretInvocation(t, "list", "--search", "token", "-o", format)
-		if err := manageSecrets(t.Context(), inv, manager, nil, &out, false); err != nil {
+		if err := manageSecrets(t.Context(), inv, manager, nil, &out, io.Discard, false); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(out.String(), "TOKEN") || strings.Contains(out.String(), "REGION") {
@@ -132,7 +134,7 @@ func TestSecretManagementListsOnlyMetadata(t *testing.T) {
 	manager.list = func() (controllerwire.Secrets, error) { return controllerwire.Secrets{}, nil }
 	for _, format := range []string{"json", "plain"} {
 		var out bytes.Buffer
-		if err := manageSecrets(t.Context(), secretInvocation(t, "list", "-o", format), manager, nil, &out, false); err != nil || out.Len() != 0 {
+		if err := manageSecrets(t.Context(), secretInvocation(t, "list", "-o", format), manager, nil, &out, io.Discard, false); err != nil || out.Len() != 0 {
 			t.Fatalf("empty %s: %q %v", format, &out, err)
 		}
 	}
@@ -156,7 +158,7 @@ func TestSecretManagementExplicitReadAndExactDeletion(t *testing.T) {
 	}
 	for _, format := range []string{"pretty", "json", "plain"} {
 		var out bytes.Buffer
-		if err := manageSecrets(t.Context(), secretInvocation(t, "get", "--secret", "TOKEN", "--pipeline", "deploy", "-o", format), manager, nil, &out, false); err != nil {
+		if err := manageSecrets(t.Context(), secretInvocation(t, "get", "--secret", "TOKEN", "--pipeline", "deploy", "-o", format), manager, nil, &out, io.Discard, false); err != nil {
 			t.Fatal(err)
 		}
 		if format == "json" {
@@ -168,7 +170,7 @@ func TestSecretManagementExplicitReadAndExactDeletion(t *testing.T) {
 			t.Fatalf("value changed: %q", &out)
 		}
 		out.Reset()
-		if err := manageSecrets(t.Context(), secretInvocation(t, "delete", "--secret", "TOKEN", "--pipeline", "deploy", "-o", format), manager, nil, &out, false); err != nil {
+		if err := manageSecrets(t.Context(), secretInvocation(t, "delete", "--secret", "TOKEN", "--pipeline", "deploy", "-o", format), manager, nil, &out, io.Discard, false); err != nil {
 			t.Fatal(err)
 		}
 		if format == "json" && !strings.Contains(out.String(), `"deleted":false`) {
@@ -187,7 +189,7 @@ func TestSecretManagementRotationPreservesSkippedRows(t *testing.T) {
 	}}
 	for _, format := range []string{"pretty", "json", "plain"} {
 		var out bytes.Buffer
-		if err := manageSecrets(t.Context(), secretInvocation(t, "rotate", "-o", format), manager, nil, &out, false); err != nil {
+		if err := manageSecrets(t.Context(), secretInvocation(t, "rotate", "-o", format), manager, nil, &out, io.Discard, false); err != nil {
 			t.Fatal(err)
 		}
 		if format == "json" {
@@ -207,7 +209,7 @@ func TestSecretManagementFailureEmitsNoSuccess(t *testing.T) {
 		return controllerwire.SecretWritten{}, failure
 	}}
 	var out bytes.Buffer
-	err := manageSecrets(t.Context(), secretInvocation(t, "set", "--secret", "TOKEN", "--value", "secret", "-o", "json"), manager, nil, &out, false)
+	err := manageSecrets(t.Context(), secretInvocation(t, "set", "--secret", "TOKEN", "--value", "secret", "-o", "json"), manager, nil, &out, io.Discard, false)
 	if !errors.Is(err, failure) || out.Len() != 0 {
 		t.Fatalf("failure: %s %v", &out, err)
 	}
@@ -222,7 +224,7 @@ func TestSecretManagementInputFailureDoesNotWrite(t *testing.T) {
 		t.Fatal("failed input was sent")
 		return controllerwire.SecretWritten{}, nil
 	}}
-	if err := manageSecrets(t.Context(), secretInvocation(t, "set", "--secret", "TOKEN"), manager, failingSecretInput{}, io.Discard, false); !errors.Is(err, io.ErrUnexpectedEOF) {
+	if err := manageSecrets(t.Context(), secretInvocation(t, "set", "--secret", "TOKEN"), manager, failingSecretInput{}, io.Discard, io.Discard, false); !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("input failure: %v", err)
 	}
 }
@@ -268,5 +270,54 @@ func TestSecretManagementCommandUsesFinalControllerAPI(t *testing.T) {
 	})
 	if result != nil || calls != 1 || strings.Contains(out, "private-value") || strings.Contains(out, "private-credential") || !strings.Contains(out, `"only_on":"prod"`) {
 		t.Fatalf("command: %s %v", out, result)
+	}
+}
+
+func TestSecretSetWarnsForShortValues(t *testing.T) {
+	for _, format := range []string{"json", "plain", "pretty"} {
+		for _, local := range []bool{false, true} {
+			manager := secretManagerFake{write: func(input controllerwire.SecretWrite) (controllerwire.SecretWritten, error) {
+				if input.Value != "abc" || !input.Masked {
+					t.Fatal("secret changed")
+				}
+				return controllerwire.SecretWritten{Secret: controllerwire.SecretMetadata{Name: input.Name, Masked: true}}, nil
+			}}
+			var out, diagnostics bytes.Buffer
+			inv := secretInvocation(t, "set", "--secret", "TOKEN", "--value", "abc", "-o", format)
+			if err := manageSecrets(t.Context(), inv, manager, nil, &out, &diagnostics, local); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(diagnostics.String(), secrets.ShortValueWarning) {
+				t.Fatalf("missing warning: %s", &diagnostics)
+			}
+			if format == "json" {
+				var result controllerwire.SecretWritten
+				if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.Warning != secrets.ShortValueWarning {
+					t.Fatalf("invalid JSON warning: %s %v", &out, err)
+				}
+			}
+		}
+	}
+}
+
+func TestLocalSecretIntakeWarnsWithoutChangingValue(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "warning")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	original := os.Stderr
+	os.Stderr = file
+	defer func() { os.Stderr = original }()
+	values, err := resolveBurstSecrets(t.Context(), []string{"TOKEN"}, []nodeproto.SecretDeclaration{{Name: "TOKEN"}}, map[string]string{"TOKEN": "abc"})
+	if err != nil || values["TOKEN"] != "abc" {
+		t.Fatalf("local secret refused: %v %v", values, err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	warning, err := io.ReadAll(file)
+	if err != nil || !strings.Contains(string(warning), secrets.ShortValueWarning) {
+		t.Fatalf("missing warning: %s %v", warning, err)
 	}
 }

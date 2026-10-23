@@ -101,6 +101,9 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 		if !complete {
 			return err
 		}
+		if warning := prepared.SecretRegistration.Warning(); warning != "" {
+			err = errors.Join(err, logs.write(ctx, nodeproto.FrameLog{Level: "warn", Message: warning}))
+		}
 		return errors.Join(err, logs.release(ctx))
 	})
 	if err != nil {
@@ -206,9 +209,6 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 }
 
 func (p SDKPlanner) planningError(ctx context.Context, err error, known bool) error {
-	if errors.Is(err, secrets.ErrInvalidValue) {
-		return &apierr.Error{Code: apierr.InvalidArgs, Message: secrets.ErrInvalidValue.Error()}
-	}
 	code := apierr.SDKError
 	var structured *apierr.Error
 	if errors.As(err, &structured) {

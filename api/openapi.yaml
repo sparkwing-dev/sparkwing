@@ -958,6 +958,8 @@ components:
           type: string
         run_id:
           type: string
+        warning:
+          type: string
         write_scope:
           type: string
       required:
@@ -3880,6 +3882,8 @@ components:
           type: boolean
         secret:
           $ref: '#/components/schemas/internal.controllerwire.SecretMetadata'
+        warning:
+          type: string
       required:
         - secret
         - replayed

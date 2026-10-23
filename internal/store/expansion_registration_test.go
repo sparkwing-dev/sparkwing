@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 func TestExpansionRequiresExplicitVersionedRegistration(t *testing.T) {
@@ -78,11 +79,15 @@ func TestExpansionRegistrationPersistsOutsideGeneratedPlanAndBindsReplay(t *test
 	}
 }
 
-func TestExpansionRegistrationRefusesShortItem(t *testing.T) {
+func TestExpansionRegistrationAcceptsShortItem(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
 	request.Registration.Defaults = []runspec.SecretValue{{Raw: "ab,long-private", List: true}}
-	if _, err := tenant.AcceptExpansion(t.Context(), request); err == nil || !strings.Contains(err.Error(), "plain config variable") {
-		t.Fatalf("expected short-item refusal, got %v", err)
+	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	projection, err := runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{SecretRegistration: request.Registration})
+	if err != nil || projection.Warning() != secrets.ShortValueWarning {
+		t.Fatalf("lost warning: %+v %v", projection, err)
 	}
 }
 
