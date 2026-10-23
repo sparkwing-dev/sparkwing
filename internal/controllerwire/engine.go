@@ -49,7 +49,6 @@ type CreateRunRequest struct {
 
 // CreateRunResponse returns the accepted run and any first-intake here bearer.
 type CreateRunResponse struct {
-	Warning    string          `json:"warning,omitempty"`
 	RunID      string          `json:"run_id"`
 	Number     int64           `json:"number"`
 	Inputs     runspec.Display `json:"inputs"`

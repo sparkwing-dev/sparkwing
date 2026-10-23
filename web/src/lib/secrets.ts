@@ -142,8 +142,11 @@ export async function listSecrets(): Promise<StoredSecret[]> {
   return asList<StoredSecret>(await res.json(), "secrets");
 }
 
-export async function writeSecret(body: SecretWriteBody): Promise<void> {
-  await send("POST", "/api/v1/secrets", `Save ${body.name}`, body);
+export async function writeSecret(
+  body: SecretWriteBody,
+): Promise<{ warning?: string }> {
+  const res = await send("POST", "/api/v1/secrets", `Save ${body.name}`, body);
+  return res.json();
 }
 
 export async function deleteSecret(

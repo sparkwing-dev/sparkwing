@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -23,7 +22,6 @@ type triggerSubmission struct {
 }
 
 type triggerReceipt struct {
-	Warning  string        `json:"warning,omitempty"`
 	RunID    string        `json:"run_id"`
 	Number   int64         `json:"number"`
 	Replayed bool          `json:"replayed"`
@@ -72,9 +70,6 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 	if err != nil {
 		return err
 	}
-	if receipt.Warning != "" {
-		fmt.Fprintln(os.Stderr, "warning: "+receipt.Warning)
-	}
 	if here {
 		if connection.here == nil {
 			resultErr = incompleteHereHandoff(response.RunID, &apierr.Error{Code: apierr.Unavailable, Message: "here hosting requires a shared host binding"})
@@ -96,7 +91,7 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 }
 
 func initialTriggerReceipt(pipeline string, here bool, response controllerwire.CreateRunResponse) (triggerReceipt, error) {
-	receipt := triggerReceipt{RunID: response.RunID, Number: response.Number, Replayed: response.Replayed, Warning: response.Warning}
+	receipt := triggerReceipt{RunID: response.RunID, Number: response.Number, Replayed: response.Replayed}
 	validIdentity := response.RunID != "" && response.Number > 0 && response.Inputs.Pipeline == pipeline
 	expectsBearer := here && !response.Replayed
 	if !validIdentity || response.Here != here || (response.HereBearer != "") != expectsBearer {

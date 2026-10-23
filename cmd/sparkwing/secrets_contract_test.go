@@ -287,7 +287,7 @@ func TestSecretSetWarnsForShortValues(t *testing.T) {
 			if err := manageSecrets(t.Context(), inv, manager, nil, &out, &diagnostics, local); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(diagnostics.String(), secrets.ShortValueWarning) {
+			if diagnostics.String() != "warning: "+secrets.ShortValueWarning+"\n" {
 				t.Fatalf("missing warning: %s", &diagnostics)
 			}
 			if format == "json" {
@@ -300,7 +300,7 @@ func TestSecretSetWarnsForShortValues(t *testing.T) {
 	}
 }
 
-func TestLocalSecretIntakeWarnsWithoutChangingValue(t *testing.T) {
+func TestLocalSecretIntakeDoesNotWarnOrChangeValue(t *testing.T) {
 	file, err := os.CreateTemp(t.TempDir(), "warning")
 	if err != nil {
 		t.Fatal(err)
@@ -317,7 +317,32 @@ func TestLocalSecretIntakeWarnsWithoutChangingValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	warning, err := io.ReadAll(file)
-	if err != nil || !strings.Contains(string(warning), secrets.ShortValueWarning) {
-		t.Fatalf("missing warning: %s %v", warning, err)
+	if err != nil || len(warning) != 0 {
+		t.Fatalf("unexpected warning: %s %v", warning, err)
+	}
+}
+
+func TestSecretSetWarnsOnlyAfterSavingAShortSecret(t *testing.T) {
+	failure := errors.New("save failed")
+	for _, test := range []struct {
+		name  string
+		flags []string
+		err   error
+	}{
+		{name: "failed", flags: []string{"--value", "abc"}, err: failure},
+		{name: "long", flags: []string{"--value", "abcd"}},
+		{name: "variable", flags: []string{"--value", "abc", "--variable"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager := secretManagerFake{write: func(input controllerwire.SecretWrite) (controllerwire.SecretWritten, error) {
+				return controllerwire.SecretWritten{Secret: controllerwire.SecretMetadata{Name: input.Name}}, test.err
+			}}
+			flags := append([]string{"set", "--secret", "TOKEN", "-o", "plain"}, test.flags...)
+			var out, diagnostics bytes.Buffer
+			err := manageSecrets(t.Context(), secretInvocation(t, flags...), manager, nil, &out, &diagnostics, true)
+			if !errors.Is(err, test.err) || diagnostics.Len() != 0 {
+				t.Fatalf("save error=%v diagnostics=%q", err, &diagnostics)
+			}
+		})
 	}
 }

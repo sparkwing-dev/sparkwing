@@ -3245,12 +3245,9 @@ Run pipeline code through a Sparkwing host to get masked logs and diagnostics.
 The SDKs no longer mask standalone execution. Continue calling `Mask` before
 logging author-generated credentials.
 
-Short secrets now remain secrets: values shorter than four Unicode characters
-are accepted with the same encryption and access controls, but cannot be
-masked in logs. CLI writes, API responses, console forms and host SDK argument
-preparation warn about this limit. Secret writes return HTTP 200 with metadata
-and an optional `warning` field. Run intake and detached CLI receipts also
-include the warning. No masking fragments are derived from short values. Empty supplied arguments and defaults carry no value.
+Short secrets now remain secrets. See [secret values](../secrets.md#values-that-can-be-secrets)
+for the masking length rule and save-time warning. Secret writes return
+HTTP 200 with metadata and an optional `warning` field.
 Host argument registration
 now includes raw values, defaults,
 effective values and every normalized list item. Planning and generator output
@@ -3263,8 +3260,7 @@ declared restore workflow. Successful expansion submissions must explicitly
 supply version 1 registration, even when empty. An accepted expansion without
 its registration is refused rather than resumed with incomplete masking. Runs sealed without version 1
 host masking registrations cannot resume. Start a new run. This is a pre-launch
-format cut with no migration. Previously stored short secrets remain usable,
-with the same masking warning.
+format cut with no migration. Previously stored short secrets remain usable.
 
 ## Ranking uses available claimants
 

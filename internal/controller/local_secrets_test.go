@@ -106,7 +106,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value != "" {
+	if secrets.Maskable(value) {
 		badPlan := plan
 		badPlan.Jobs = append([]nodeproto.JobSpec{}, plan.Jobs...)
 		badPlan.Jobs[0].ID = value
@@ -187,7 +187,8 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		t.Fatal(err)
 	}
 	persisted, err := json.Marshal([]any{stored, events})
-	if err != nil || value != "" && strings.Contains(string(persisted), value) {
+	// Short strings can occur in unrelated hashes and database bytes.
+	if err != nil || secrets.Maskable(value) && strings.Contains(string(persisted), value) {
 		t.Fatal("plaintext persisted")
 	}
 	var sequence int
@@ -200,7 +201,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		if suffix != "" && os.IsNotExist(err) {
 			continue
 		}
-		if err != nil || value != "" && bytes.Contains(body, []byte(value)) {
+		if err != nil || secrets.Maskable(value) && bytes.Contains(body, []byte(value)) {
 			t.Fatalf("requester secret reached SQLite%s: %v", suffix, err)
 		}
 	}
@@ -316,8 +317,8 @@ func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 	}
 	for _, status := range []int{http.StatusCreated, http.StatusOK} {
 		var receipt controllerwire.CreateRunResponse
-		if body := send(s.Handler(), request, status); json.Unmarshal([]byte(body), &receipt) != nil || (receipt.Warning != "") != !secrets.Maskable(value) {
-			t.Fatalf("local secret masking warning missing: %s", body)
+		if body := send(s.Handler(), request, status); json.Unmarshal([]byte(body), &receipt) != nil || strings.Contains(body, `"warning"`) {
+			t.Fatalf("local secret intake returned a warning or invalid receipt: %s", body)
 		}
 	}
 	changed := request

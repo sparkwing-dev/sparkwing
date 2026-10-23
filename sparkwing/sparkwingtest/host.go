@@ -123,9 +123,6 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 	} else {
 		h.releaseGate(discoveryGate)
 	}
-	if warning := selected.Registration.Warning(); warning != "" {
-		h.emit(baseCtx, nodeproto.FrameLog{Level: "warn", Message: warning}, "")
-	}
 	planGate := &outputGate{}
 	ctx = h.Context(context.WithValue(baseCtx, outputGateKey{}, planGate))
 	_, doc, err := sdkserve.DefaultOperations.Plan(ctx, name, selected.Args, h.runContext(name))
@@ -292,16 +289,10 @@ func (h *host) output(ctx context.Context, raw json.RawMessage) json.RawMessage 
 
 func (h *host) registerGenerated(arguments []nodeproto.ArgumentDescription) error {
 	h.mu.Lock()
-	registered, err := runspec.RegisterArguments(arguments, h.args, nil, h.replayMasks)
+	defer h.mu.Unlock()
+	_, err := runspec.RegisterArguments(arguments, h.args, nil, h.replayMasks)
 	h.masker.Merge(h.replayMasks)
-	h.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	if warning := registered.Registration.Warning(); warning != "" {
-		h.emit(h.ctx, nodeproto.FrameLog{Level: "warn", Message: warning}, "")
-	}
-	return nil
+	return err
 }
 
 func (h *host) stepSnapshot(p *sparkwing.Plan, job string) []string {

@@ -1925,7 +1925,14 @@ test("manages local secrets without an account", async ({ page }) => {
       const index = stored.findIndex((row) => row.name === body.name);
       if (index === -1) stored.push(entry);
       else stored[index] = entry;
-      await route.fulfill({ status: 204 });
+      await route.fulfill({
+        json: {
+          secret: entry,
+          warning: body.masked && Array.from(String(body.value)).length < 4
+            ? "Secret values shorter than 4 characters cannot be masked in logs."
+            : undefined,
+        },
+      });
       return;
     }
     await route.fulfill({ json: { secrets: stored } });
@@ -1935,37 +1942,45 @@ test("manages local secrets without an account", async ({ page }) => {
     page.getByRole("heading", { name: "Secrets and variables", level: 1 }),
   ).toBeVisible();
   const maskingNote = page.getByText(
-    "Secret values shorter than 4 characters cannot be masked in logs.",
-    { exact: true },
+    /Secret values shorter than 4 characters cannot be masked in logs\./,
   );
-  await expect(maskingNote).toBeVisible();
+  await expect(maskingNote).toHaveCount(0);
   await page.getByLabel("Name", { exact: true }).fill("DEPLOY_KEY");
   await page.getByLabel("Value", { exact: true }).fill("🔑ab");
   await page.getByRole("button", { name: "Save secret" }).click();
+  await expect(maskingNote).toHaveText(
+    "Saved secret DEPLOY_KEY. Secret values shorter than 4 characters cannot be masked in logs.",
+  );
+  await page.getByRole("button", { name: "dismiss", exact: true }).click();
+  await expect(maskingNote).toHaveCount(0);
   await expect(page.getByText("DEPLOY_KEY", { exact: true })).toBeVisible();
   await expect(page.getByText(/^Every pipeline · updated/)).toBeVisible();
 
   await page.getByRole("button", { name: "Update", exact: true }).click();
   const replacement = page.getByLabel("New value for DEPLOY_KEY", { exact: true });
-  const updateForm = page.locator("form").filter({ has: replacement });
-  await expect(updateForm.getByText(
-    "Secret values shorter than 4 characters cannot be masked in logs.",
-    { exact: true },
-  )).toBeVisible();
+  await expect(maskingNote).toHaveCount(0);
   await replacement.fill("xy");
   await page.getByRole("button", { name: "Replace value", exact: true }).click();
   await expect(replacement).toHaveCount(0);
+  await expect(maskingNote).toHaveText(
+    "Updated DEPLOY_KEY. Secret values shorter than 4 characters cannot be masked in logs.",
+  );
+  await page.getByRole("button", { name: "dismiss", exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Update", exact: true })).toBeVisible();
+  await expect(maskingNote).toHaveCount(0);
 
   await page.getByRole("radio", { name: /^Variable/ }).check();
   await expect(maskingNote).toHaveCount(0);
   await page.getByLabel("Name", { exact: true }).fill("REGION");
-  await page.getByLabel("Value", { exact: true }).fill("us-west-2");
+  await page.getByLabel("Value", { exact: true }).fill("abc");
   await page.getByRole("button", { name: "Save variable" }).click();
-  await expect(page.getByText("us-west-2", { exact: true })).toBeVisible();
+  await expect(page.getByText("abc", { exact: true })).toBeVisible();
+  await expect(maskingNote).toHaveCount(0);
   expect(writes).toEqual([
     { name: "DEPLOY_KEY", value: "🔑ab", masked: true, shared: true },
     { name: "DEPLOY_KEY", value: "xy", masked: true, shared: true },
-    { name: "REGION", value: "us-west-2", masked: false, shared: true },
+    { name: "REGION", value: "abc", masked: false, shared: true },
   ]);
 });
 

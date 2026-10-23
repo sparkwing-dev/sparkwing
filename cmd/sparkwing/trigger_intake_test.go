@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -378,49 +376,5 @@ func TestInitialHereHandoffClaimsAndRunsSharedHost(t *testing.T) {
 	}
 	if strings.Contains(out.String(), response.HereBearer) || strings.Contains(out.String(), award.Capability) {
 		t.Fatal("receipt exposed authority")
-	}
-}
-
-func TestDetachedTriggerPreservesShortSecretWarning(t *testing.T) {
-	request := initialTriggerRequest(false)
-	request.Request.RequestedArgs = map[string]string{"token": "abc"}
-	request.Request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"token"}}
-	response := initialTriggerResponse(t, request)
-	response.Warning = secrets.ShortValueWarning
-	warningFile, err := os.CreateTemp(t.TempDir(), "warning")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer warningFile.Close()
-	previous := os.Stderr
-	os.Stderr = warningFile
-	defer func() { os.Stderr = previous }()
-	var output bytes.Buffer
-	err = submitTriggeredRun(t.Context(), request, true, "json", &output, triggerSubmission{Controller: initialTriggerController{create: func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
-		return response, nil
-	}}})
-	var receipt triggerReceipt
-	if err != nil || json.Unmarshal(output.Bytes(), &receipt) != nil || receipt.Warning != secrets.ShortValueWarning {
-		t.Fatalf("lost warning: %s %v", &output, err)
-	}
-	if _, err := warningFile.Seek(0, io.SeekStart); err != nil {
-		t.Fatal(err)
-	}
-	warning, err := io.ReadAll(warningFile)
-	if err != nil || !strings.Contains(string(warning), secrets.ShortValueWarning) {
-		t.Fatalf("stderr warning missing: %s %v", warning, err)
-	}
-}
-
-func TestDetachedLocalReceiptPreservesShortSecretWarning(t *testing.T) {
-	var out bytes.Buffer
-	if err := emitLocalRunReceipt(&out, controllerwire.CreateRunResponse{RunID: "run", Warning: secrets.ShortValueWarning}, "json"); err != nil {
-		t.Fatal(err)
-	}
-	var receipt struct {
-		Warning string `json:"warning"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &receipt); err != nil || receipt.Warning != secrets.ShortValueWarning {
-		t.Fatalf("lost warning: %s %v", &out, err)
 	}
 }

@@ -140,8 +140,8 @@ func TestGeneratedDeclarationsRegisterRawDefaultsAndListItemsBeforeRelease(t *te
 	if strings.Contains(output.String(), "private") || strings.Contains(output.String(), "default") {
 		t.Fatalf("unmasked output %q", output.String())
 	}
-	if masker.Mask("abc") != "abc" || !strings.Contains(output.String(), secrets.ShortValueWarning) {
-		t.Fatalf("short generator default lost masking warning: %s", &output)
+	if masker.Mask("abc") != "abc" || strings.Contains(output.String(), secrets.ShortValueWarning) {
+		t.Fatalf("short generator default masked or warned: %s", &output)
 	}
 	projection, err := generatorRegistration(spec, result.Arguments)
 	if err != nil {

@@ -402,12 +402,9 @@ Masking is provided by the Go host. Neither SDK masks output or sends automatic
 mask registrations. Pipeline code run without a Sparkwing host is unmasked.
 The host registers accepted secret arguments, defaults and normalized list items
 before execution. Stored secrets and OIDC tokens are registered before release.
-Stored and local secrets, supplied secret arguments, defaults and each nonempty
-list item are accepted at any length. Values shorter than four Unicode
-characters cannot be masked in logs; the host skips their raw and derived
-masking patterns and logs a warning when resolving SDK declarations. Encryption,
-secret classification and access controls stay the same. Empty supplied
-arguments and defaults carry no value. Secrets containing `***` are accepted.
+See [secret values](secrets.md#values-that-can-be-secrets) for the masking
+length rule. Empty supplied arguments and defaults carry no value.
+Secrets containing `***` are accepted.
 Defaults from unselected pipelines register when long enough. Short derived
 proxy credential parts are skipped.
 Stdout and stderr are masked before line splitting. Describe and generator output

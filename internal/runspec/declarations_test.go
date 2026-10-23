@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func TestDeclarationAcceptsShortDefaultsWithWarning(t *testing.T) {
+func TestDeclarationAcceptsShortDefaults(t *testing.T) {
 	for _, value := range []string{"a", "ab***cd", ""} {
 		t.Run(value, func(t *testing.T) {
 			masker := secrets.NewMasker()
@@ -29,9 +29,6 @@ func TestDeclarationAcceptsShortDefaultsWithWarning(t *testing.T) {
 			resolved, err := gate.Resolve("other", nil, nil)
 			if err != nil || resolved.Args["token"] != value {
 				t.Fatalf("default not accepted: %+v %v", resolved, err)
-			}
-			if got := resolved.Registration.Warning(); (got != "") != (value == "a") {
-				t.Fatalf("masking warning = %q", got)
 			}
 		})
 	}
@@ -119,8 +116,8 @@ func TestUnselectedListDefaultRegistersEveryValidCandidate(t *testing.T) {
 	if got := restored.Mask("x"); got != "x" {
 		t.Fatalf("short sibling item was registered: %q", got)
 	}
-	if selected, err := gate.Resolve("other", nil, nil); err != nil || selected.Registration.Warning() != secrets.ShortValueWarning {
-		t.Fatalf("selected short list item lost warning: %+v %v", selected, err)
+	if _, err := gate.Resolve("other", nil, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

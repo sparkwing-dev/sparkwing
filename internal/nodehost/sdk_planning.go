@@ -101,9 +101,6 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 		if !complete {
 			return err
 		}
-		if warning := prepared.SecretRegistration.Warning(); warning != "" {
-			err = errors.Join(err, logs.write(ctx, nodeproto.FrameLog{Level: "warn", Message: warning}))
-		}
 		return errors.Join(err, logs.release(ctx))
 	})
 	if err != nil {

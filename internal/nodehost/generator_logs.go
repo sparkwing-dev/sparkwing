@@ -38,11 +38,6 @@ func (s *protocolSession) releaseDeclarations(ctx context.Context, spec runspec.
 			return err
 		}
 	}
-	if warning := projection.Warning(); warning != "" {
-		if err := s.cfg.output.write(ctx, nodeproto.FrameLog{Level: "warn", Message: warning}); err != nil {
-			return err
-		}
-	}
 	return s.cfg.output.release(ctx)
 }
 

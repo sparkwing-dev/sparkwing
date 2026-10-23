@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func TestSDKShortSecretArgumentsAndDefaultsWarnWithoutMasking(t *testing.T) {
+func TestSDKShortSecretArgumentsAndDefaultsStayUnmaskedWithoutWarning(t *testing.T) {
 	for _, kind := range []string{"default", "supplied", "list"} {
 		t.Run(kind, func(t *testing.T) {
 			planner, input, fixture, _ := sdkPlanningFixture(t)
@@ -50,8 +50,8 @@ func TestSDKShortSecretArgumentsAndDefaultsWarnWithoutMasking(t *testing.T) {
 			if err != nil || prepared.Args["token"] == "" {
 				t.Fatalf("short secret refused: %+v %v", prepared, err)
 			}
-			if !strings.Contains(logs.String(), secrets.ShortValueWarning) {
-				t.Fatalf("missing warning: %s", &logs)
+			if strings.Contains(logs.String(), secrets.ShortValueWarning) {
+				t.Fatalf("unexpected warning: %s", &logs)
 			}
 			if got := planner.Masker.Mask(value); got != value {
 				t.Fatalf("short value masked: %q", got)

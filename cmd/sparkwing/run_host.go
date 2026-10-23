@@ -150,9 +150,6 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err := validateLocalIntake(response, pipeline); err != nil {
 		return err
 	}
-	if response.Warning != "" {
-		fmt.Fprintln(os.Stderr, "warning: "+response.Warning)
-	}
 	if handlePath != "" {
 		if err := orchestrator.PublishRunHandle(handlePath, orchestrator.NewRunHandle(response.RunID, pipeline, "pending")); err != nil {
 			return fmt.Errorf("run %s is admitted but its handle could not be published: %w", response.RunID, err)
@@ -333,8 +330,7 @@ func emitLocalRunReceipt(out io.Writer, response controllerwire.CreateRunRespons
 		RunID     string `json:"run_id"`
 		RequestID string `json:"request_id,omitempty"`
 		Replayed  bool   `json:"replayed"`
-		Warning   string `json:"warning,omitempty"`
-	}{response.RunID, response.RequestID, response.Replayed, response.Warning}
+	}{response.RunID, response.RequestID, response.Replayed}
 	switch format {
 	case "json":
 		return json.NewEncoder(out).Encode(receipt)

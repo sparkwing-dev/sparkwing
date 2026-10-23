@@ -33,13 +33,13 @@ func TestSecretRegistrationIncludesRawEffectiveDefaultsAndListItems(t *testing.T
 	}
 }
 
-func TestSecretRegistrationAcceptsShortListItemsWithWarning(t *testing.T) {
+func TestSecretRegistrationAcceptsShortListItems(t *testing.T) {
 	for _, raw := range []string{"ab,long-enough", "long-enough,abc"} {
 		request := Request{RequestedArgs: map[string]string{"tokens": raw}, SecretArgs: Optional[[]string]{Set: true, Value: []string{"tokens"}}}
 		resolved := Resolved{Args: map[string]string{"tokens": raw}, SecretArgs: []string{"tokens"}, SecretRegistration: SecretRegistration{ListArgs: []string{"tokens"}}}
 		registration, err := BuildSecretRegistration(request, resolved)
-		if err != nil || registration.Warning() != secrets.ShortValueWarning {
-			t.Fatalf("%q: missing warning: %+v %v", raw, registration, err)
+		if err != nil {
+			t.Fatal(err)
 		}
 		masker := secrets.NewMasker()
 		for _, value := range registration.Values {

@@ -244,12 +244,14 @@ describe("API helpers", () => {
   });
 
   it("posts a write with an explicit masked flag", async () => {
-    await secrets.writeSecret({
+    respond = () => Response.json({ secret: row({ name: "R", masked: false }) });
+    const result = await secrets.writeSecret({
       name: "R",
       value: "v",
       masked: false,
       shared: true,
     });
+    assert.equal(result.warning, undefined);
     assert.equal(calls[0].method, "POST");
     assert.equal(calls[0].url, "/api/v1/secrets");
     assert.deepEqual(JSON.parse(calls[0].body), {
@@ -258,6 +260,16 @@ describe("API helpers", () => {
       masked: false,
       shared: true,
     });
+  });
+
+  it("returns the save-time warning for a short secret", async () => {
+    const warning =
+      "Secret values shorter than 4 characters cannot be masked in logs.";
+    respond = () => Response.json({ secret: row({ name: "KEY" }), warning });
+    const result = await secrets.writeSecret({
+      name: "KEY", value: "abc", masked: true,
+    });
+    assert.equal(result.warning, warning);
   });
 
   it("escapes the name and names the pipeline on delete", async () => {

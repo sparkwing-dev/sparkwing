@@ -104,7 +104,7 @@ func TestOutputGateIsScopedToOneOperation(t *testing.T) {
 	}
 }
 
-func TestHostAcceptsShortSecretListItemsWithWarning(t *testing.T) {
+func TestHostAcceptsShortSecretListItemsWithoutWarning(t *testing.T) {
 	const name = "sparkwingtest-registration-short-list"
 	sparkwing.Register[registrationArgs](name, func() sparkwing.Pipeline[registrationArgs] { return registrationPipeline{} })
 	for _, raw := range []string{"abc,valid-secret", "valid-secret,abc"} {
@@ -118,10 +118,10 @@ func TestHostAcceptsShortSecretListItemsWithWarning(t *testing.T) {
 			if h.masker.Mask("abc") != "abc" {
 				t.Fatal("short secret was masked")
 			}
-			if !slices.ContainsFunc(h.Records(), func(record sparkwing.LogRecord) bool {
+			if slices.ContainsFunc(h.Records(), func(record sparkwing.LogRecord) bool {
 				return record.Level == "warn" && record.Msg == secrets.ShortValueWarning
 			}) {
-				t.Fatalf("missing warning: %+v", h.Records())
+				t.Fatalf("unexpected warning: %+v", h.Records())
 			}
 		})
 	}

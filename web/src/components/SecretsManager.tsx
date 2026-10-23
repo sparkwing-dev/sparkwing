@@ -31,8 +31,6 @@ import { fmtDateTime } from "@/lib/timeFormat";
 
 const labelClass =
   "block text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1";
-const shortSecretNote =
-  "Secret values shorter than 4 characters cannot be masked in logs.";
 
 const copy: Record<
   SecretsAudience,
@@ -212,8 +210,11 @@ function SecretRow({
     if (value === "") return;
     setSaving(true);
     try {
-      await writeSecret(updateBody(row, value));
-      toast(`Updated ${row.name}`, "success");
+      const result = await writeSecret(updateBody(row, value));
+      toast(
+        `Updated ${row.name}${result.warning ? `. ${result.warning}` : ""}`,
+        "success",
+      );
       close();
       await onSaved();
     } catch (err) {
@@ -268,7 +269,6 @@ function SecretRow({
             value={value}
             onChange={(e) => setValue(e.target.value)}
           />
-          <p className="text-xs text-[var(--muted)]">{shortSecretNote}</p>
           <div className="flex gap-2">
             <button
               type="submit"
@@ -417,8 +417,11 @@ function CreateForm({
     if (problem) return;
     setSaving(true);
     try {
-      await writeSecret(draftBody(draft));
-      toast(`Saved ${masked ? "secret" : "variable"} ${name}`, "success");
+      const result = await writeSecret(draftBody(draft));
+      toast(
+        `Saved ${masked ? "secret" : "variable"} ${name}${result.warning ? `. ${result.warning}` : ""}`,
+        "success",
+      );
       setName("");
       setValue("");
       setTouched(false);
@@ -482,9 +485,6 @@ function CreateForm({
             value={value}
             onChange={(e) => setValue(e.target.value)}
           />
-          {masked ? (
-            <p className="mt-1 text-xs text-[var(--muted)]">{shortSecretNote}</p>
-          ) : null}
         </div>
         <fieldset className="flex flex-wrap items-center gap-4 text-sm">
           <legend className={labelClass}>Scope</legend>

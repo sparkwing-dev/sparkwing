@@ -55,13 +55,8 @@ secret defaults, effective values and every normalized list item. Stored secrets
 and OIDC tokens are registered before the host releases them. Explicit `Mask`
 registers author-generated values before subsequent output.
 
-Stored and local secrets, supplied secret arguments, defaults and nonempty list
-items are accepted at any length. Values shorter than four Unicode characters
-cannot be masked in logs, and produce no derived masking fragments. They keep
-the same encryption and access controls. CLI writes and local-secret intake
-warn; API writes and intake return a `warning` field; console forms show an
-inline note. The host warns for short SDK arguments and defaults. Warnings
-never include the value. Empty supplied arguments and defaults carry no value.
+See [secret values](secrets.md#values-that-can-be-secrets) for the masking
+length rule and save-time warning. Empty supplied arguments and defaults carry no value.
 Defaults of unselected pipelines still register when they are long enough. Secrets containing `***` are accepted. Replacement markers can
 form a registered value containing `***`, or a value containing `*` beside a marker,
 across published stream emissions. This rare marker-edge case is accepted.

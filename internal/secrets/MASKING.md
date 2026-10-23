@@ -4,10 +4,8 @@ The Go host owns one `secrets.Masker`. Secret values shorter than four Unicode
 code points are accepted, encrypted and access-controlled like other secrets,
 but `Register` skips them before deriving any masking patterns. This applies to
 stored and local secrets, supplied secret arguments, defaults and normalized
-list items. CLI writes and local-secret intake warn; API write and intake
-responses include a `warning` field; console forms show an inline note. The
-host warns when SDK arguments or defaults contain short values, including
-those discovered by generators. No warning includes the secret's value.
+list items. The CLI and console show a one-time warning after saving a short
+secret. The API save response carries the warning. No warning includes the value.
 Empty supplied arguments and defaults carry no value.
 
 For values of at least four code points, the host registers each accepted value,

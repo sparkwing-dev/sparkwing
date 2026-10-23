@@ -584,7 +584,7 @@ func TestTeamBoundary_SecretsStayWithTheirTeam(t *testing.T) {
 			{"name": "DEPLOY_KEY", "value": "team-a-secret-value"},
 			{"name": "REGION", "value": "team-a-region", "masked": false, "shared": true},
 		} {
-			if code, body := f.do("POST", "/api/v1/secrets", f.ownerA, row); code != http.StatusNoContent {
+			if code, body := f.do("POST", "/api/v1/secrets", f.ownerA, row); code != http.StatusOK {
 				t.Fatalf("team A owner set %v = %d: %s", row["name"], code, body)
 			}
 		}

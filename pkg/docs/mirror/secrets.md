@@ -45,9 +45,8 @@ Secrets of any length are accepted, encrypted and access-controlled like other
 secrets. Values shorter than four Unicode characters cannot be masked in logs,
 and the host derives no masking fragments from them. This includes local
 secrets, secret arguments, defaults and each nonempty secret list item.
-The CLI warns, API secret writes and run intake return a `warning` field,
-and console create/update forms show an inline note. The host logs a warning
-for short SDK secret arguments and defaults. Warnings never include the value.
+The CLI prints one warning line after a short secret is saved. The console
+shows the warning once when the save succeeds. Warnings never include the value.
 `POST /api/v1/secrets` returns HTTP 200 with secret metadata and an optional
 `warning`; the value stays private. Secrets containing `***` are accepted.
 Masking is provided by the Sparkwing host. Pipeline code run on its own is unmasked.

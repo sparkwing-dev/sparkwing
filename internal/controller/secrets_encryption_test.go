@@ -80,12 +80,16 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSecrets_ShortValuesWarnAndStayWriteOnly(t *testing.T) {
+func TestSecrets_SaveWarningAndWriteOnlyAccess(t *testing.T) {
 	f := newBrowserFixture(t, nil)
-	for _, value := range []string{"", "abc", "ééé"} {
+	for _, value := range []string{"", "abc", "ééé", "abcd", "éééé"} {
 		code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": value, "pipeline": "ci"})
 		var response controllerwire.SecretWritten
-		if code != http.StatusOK || json.Unmarshal([]byte(body), &response) != nil || response.Warning != secrets.ShortValueWarning || !response.Secret.Masked {
+		wantWarning := ""
+		if !secrets.Maskable(value) {
+			wantWarning = secrets.ShortValueWarning
+		}
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &response) != nil || response.Warning != wantWarning || !response.Secret.Masked {
 			t.Fatalf("short secret: HTTP %d %s", code, body)
 		}
 		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", "ci")

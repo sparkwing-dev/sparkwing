@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 func TestExpansionRequiresExplicitVersionedRegistration(t *testing.T) {
@@ -86,8 +85,8 @@ func TestExpansionRegistrationAcceptsShortItem(t *testing.T) {
 		t.Fatal(err)
 	}
 	projection, err := runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{SecretRegistration: request.Registration})
-	if err != nil || projection.Warning() != secrets.ShortValueWarning {
-		t.Fatalf("lost warning: %+v %v", projection, err)
+	if err != nil || !slices.Contains(projection.Values, "ab") {
+		t.Fatalf("lost short item: %+v %v", projection, err)
 	}
 }
 

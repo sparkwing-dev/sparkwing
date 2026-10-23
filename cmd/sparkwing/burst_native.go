@@ -21,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -233,17 +232,8 @@ func resolveBurstSecrets(ctx context.Context, names []string, declarations []nod
 			return nil, fmt.Errorf("run: local secret %s must be declared by the pipeline", name)
 		}
 	}
-	values, err := client.ResolveLocalSecrets(ctx, selected, func(ctx context.Context, name string) (string, bool, error) {
+	return client.ResolveLocalSecrets(ctx, selected, func(ctx context.Context, name string) (string, bool, error) {
 		value, present := held[name]
 		return value, present, ctx.Err()
 	})
-	if err == nil {
-		for _, value := range values {
-			if !secrets.Maskable(value) {
-				fmt.Fprintln(os.Stderr, "warning: "+secrets.ShortValueWarning)
-				break
-			}
-		}
-	}
-	return values, err
 }

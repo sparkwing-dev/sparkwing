@@ -5,7 +5,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/argvalue"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // BuildSecretRegistration derives the accepted run's complete argument mask set.
@@ -77,14 +76,4 @@ func secretCandidates(raw string, list bool) []string {
 		values = argvalue.List(raw)
 	}
 	return append(values, raw)
-}
-
-// Warning reports accepted argument values that cannot be masked in logs.
-func (r SecretRegistration) Warning() string {
-	for _, value := range r.Values {
-		if !secrets.Maskable(value) {
-			return secrets.ShortValueWarning
-		}
-	}
-	return ""
 }
