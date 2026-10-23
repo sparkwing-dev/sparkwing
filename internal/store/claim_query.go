@@ -277,9 +277,15 @@ func (q *claimSQL) trim(value string) string {
 }
 
 func (q *claimSQL) pinned(selector string) string {
-	return q.anyAlternative(selector, func(alt string) string {
+	pinned := q.anyAlternative(selector, func(alt string) string {
 		return `substr(` + alt + `,1,5)='pool=' OR substr(` + alt + `,1,5)='name=' OR substr(` + alt + `,1,6)='class='`
 	})
+	position := "instr"
+	if q.dialect == DialectPostgres {
+		position = "strpos"
+	}
+	// Escaped JSON can conceal the required '=' until alternatives are decoded.
+	return `CASE WHEN ` + selector + ` IS NULL THEN FALSE WHEN ` + position + `(` + selector + `,'=')=0 AND ` + position + `(` + selector + `,'\')=0 THEN FALSE ELSE ` + pinned + ` END`
 }
 
 func (q *claimSQL) anywhere(request string) string {
@@ -556,7 +562,14 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	}
 	headsCTE := ""
 	if q.heads != nil {
-		raw, err := q.jsonParam(q.heads)
+		heads := make([]struct {
+			Team Team
+			Unit UnitRef
+		}, len(q.heads))
+		for i, head := range q.heads {
+			heads[i].Team, heads[i].Unit = head.Team, head.Unit
+		}
+		raw, err := q.jsonParam(heads)
 		if err != nil {
 			return "", err
 		}
@@ -613,6 +626,12 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	if q.holdProof && !cloudObservers {
 		overflowAllowed = `1=1`
 	}
+	claimantMaterialized := "MATERIALIZED"
+	claimantScopes := `claimant_scopes(team,facts) AS MATERIALIZED (SELECT tf.team,c.facts FROM team_facts tf JOIN claimants c ON c.is_cloud=1 UNION ALL SELECT c.team,c.facts FROM claimants c WHERE c.is_cloud=0)`
+	if !cloudObservers {
+		claimantMaterialized = "NOT MATERIALIZED"
+		claimantScopes = `claimant_scopes AS NOT MATERIALIZED (SELECT team,facts FROM claimants)`
+	}
 	claimants := `SELECT value,` + q.at("fact.value", "team") + `,` + q.number(q.at("fact.value", "cloud")) + ` FROM ` + q.array(factsParam, "fact")
 	eligibility := q.predicate()
 	workProjection := "w.*"
@@ -628,18 +647,23 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 			workProjection += ",w.created_principal"
 		}
 	}
+	materialized := "MATERIALIZED"
+	// The proof consumes eligibility once without a size projection to retain.
+	if q.holdProof && !fundingNeeded {
+		materialized = "NOT MATERIALIZED"
+	}
 	fundingCTEs := `,sized AS MATERIALIZED (SELECT unfunded.*,` + class + ` AS cpu_class FROM unfunded),eligible AS MATERIALIZED (SELECT sized.*,rates.price FROM sized LEFT JOIN rates ON rates.cpu_class=sized.cpu_class JOIN team_facts tf ON tf.team=sized.team WHERE ` + funded + ` AND ` + overflowAllowed + `)`
 	if !fundingNeeded {
-		fundingCTEs = `,eligible AS MATERIALIZED (SELECT sized.*,NULL AS cpu_class,NULL AS price FROM unfunded sized WHERE ` + overflowAllowed + `)`
+		fundingCTEs = `,eligible AS ` + materialized + ` (SELECT sized.*,NULL AS cpu_class,NULL AS price FROM unfunded sized WHERE ` + overflowAllowed + `)`
 	}
-	ctes := `WITH RECURSIVE clock(now) AS (SELECT ` + clock + `),` + currentCTE + `claimants(facts,team,is_cloud) AS MATERIALIZED (` + claimants + `),
+	ctes := `WITH RECURSIVE clock(now) AS (SELECT ` + clock + `),` + currentCTE + `claimants(facts,team,is_cloud) AS ` + claimantMaterialized + ` (` + claimants + `),
  team_facts AS MATERIALIZED (SELECT ` + q.at("tf.value", "team") + ` AS team,` + q.number(q.at("tf.value", "available")) + ` AS available,` + q.number(q.at("tf.value", "balance")) + ` AS balance,` + q.number(q.at("tf.value", "held")) + ` AS held FROM ` + q.array(teamsParam, "tf") + `),
- claimant_scopes(team,facts) AS MATERIALIZED (SELECT tf.team,c.facts FROM team_facts tf JOIN claimants c ON c.is_cloud=1 UNION ALL SELECT c.team,c.facts FROM claimants c WHERE c.is_cloud=0),
+ ` + claimantScopes + `,
  overflow_facts AS MATERIALIZED (SELECT ` + q.at("of.value", "team") + ` AS team,` + q.at("of.value", "account") + ` AS account,` + q.number(q.at("of.value", "used_seconds")) + ` AS used_seconds,` + q.at("of.value", "monthly_minutes") + ` AS monthly_minutes FROM ` + q.array(overflowParam, "of") + `),
  rates AS MATERIALIZED (SELECT ` + q.number(q.at("rate.value", "cores")) + ` AS cpu_class,` + q.number(q.at("rate.value", "micro_per_second")) + ` AS price FROM ` + q.array(rateParam, "rate") + `),
  ` + headsCTE + `source(team,run_id,node_id,source_generation,arrived,kind,execution,requirements) AS MATERIALIZED (` + ready + `),ready AS NOT MATERIALIZED (SELECT * FROM source ` + readyFilter + `),work_input AS MATERIALIZED (` + raw + `),work AS MATERIALIZED (SELECT base.*,CASE WHEN ` + q.anywhere("base.request") + ` THEN 1 ELSE 0 END AS run_anywhere,CASE WHEN ` + q.pinned("base.selectors") + ` THEN 1 ELSE 0 END AS pinned FROM work_input base),
  ancestors(team,child,id,origin,parent) AS (SELECT ar.team,ar.id,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM runs ar JOIN work aw ON aw.team=ar.team AND aw.run_id=ar.id UNION SELECT a.team,a.child,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM ancestors a JOIN runs ar ON ar.team=a.team AND ar.id=a.parent),
- unfunded AS MATERIALIZED (SELECT ` + workProjection + `,c.facts FROM work w JOIN claimant_scopes c ON c.team=w.team,clock WHERE ` + eligibility + `)` + fundingCTEs
+ unfunded AS ` + materialized + ` (SELECT ` + workProjection + `,c.facts FROM work w JOIN claimant_scopes c ON c.team=w.team,clock WHERE ` + eligibility + `)` + fundingCTEs
 	placement, err := q.placementCTEs(q.policy)
 	if err != nil {
 		return "", err

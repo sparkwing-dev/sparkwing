@@ -112,6 +112,15 @@ func TestPostgresClaimLocksDelegatedClaimantRootBeforeRun(t *testing.T) {
 }
 
 func TestPostgresTeamDeletionWaitsForClaimBeforeLedger(t *testing.T) {
+	postgresTeamMutationWaitsForClaimBeforeLedger(t, false)
+}
+
+func TestPostgresBillingWaitsForClaimBeforeLedger(t *testing.T) {
+	postgresTeamMutationWaitsForClaimBeforeLedger(t, true)
+}
+
+func postgresTeamMutationWaitsForClaimBeforeLedger(t *testing.T, billing bool) {
+	t.Helper()
 	st := storetest.NewPostgres(t).Open(t)
 	st.DB().SetMaxOpenConns(8)
 	f := st.TestOnlyRankingFixture(t, true)
@@ -121,6 +130,9 @@ func TestPostgresTeamDeletionWaitsForClaimBeforeLedger(t *testing.T) {
 	f.At(time.Second)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
+	if err := st.AsOperator().SetPaymentMode(ctx, capability.PaymentTest); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.DB().ExecContext(ctx, `UPDATE capabilities SET authority_json=convert_to(jsonb_set(convert_from(authority_json,'UTF8')::jsonb,'{root_metered}','true')::text,'UTF8') WHERE prefix=$1`, f.Self); err != nil {
 		t.Fatal(err)
 	}
@@ -142,14 +154,21 @@ func TestPostgresTeamDeletionWaitsForClaimBeforeLedger(t *testing.T) {
 		return err
 	})
 	b.waitBlocked(1)
-	b.start(func() error { _, err := tenant.DeleteAuthorizedTeam(ctx, a); return err })
+	b.start(func() error {
+		if billing {
+			_, err := tenant.PrepareAuthorizedBillingPage(ctx, a, capability.BillingPageCredits, 2000, "claim-contention")
+			return err
+		}
+		_, err := tenant.DeleteAuthorizedTeam(ctx, a)
+		return err
+	})
 	b.waitBlocked(2)
 	var free bool
 	if err := b.tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtext('sparkwing/ledger/a'))`).Scan(&free); err != nil {
 		t.Fatal(err)
 	}
 	if !free {
-		t.Fatal("deletion holds the ledger while waiting for the claim's team lock")
+		t.Fatal("team mutation holds the ledger while waiting for the claim's team lock")
 	}
 	b.release(2)
 }

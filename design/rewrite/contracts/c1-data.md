@@ -859,8 +859,8 @@ ordinal, then arrival and stable identity. Only an awarded claim advances that
 ordinal. Queue arbitration serializes holds and awards. Claims take the controller
 lease, queue arbitration, authority and unit rows, then the ledger. Taking queue
 arbitration or a new team lock after a ledger lock poisons the transaction before
-acquisition. Team and account deletion take team rows and authority before ledger
-locks. Team rows use no-key-update strength because their names never change;
+acquisition. Billing pages, standing decisions, and team and account deletion
+take team rows and authority before ledger locks. Team rows use no-key-update strength because their names never change;
 ledger writes can take foreign-key key-share locks without waiting for deletion. Award rechecks SQL eligibility and reserves the unit and funding atomically.
 For a ready job naming no runner, the existing placement-hold predicate holds
 work for the best-ranked tier with a live claimant on the same team, matching
@@ -3582,8 +3582,8 @@ collection releases every decline hold on that team.
 
 ## Decision 112 production hosted pages
 
-`Tenant` implements C2's `BillingWriter` directly. Billing writes lock the ledger
-before the team and recheck current member authority at commit. `billing_pages`
+`Tenant` implements C2's `BillingWriter` directly. Billing writes lock the team
+and member authority before the ledger, then recheck authority at commit. `billing_pages`
 is a tenant table with the reservation ID, caller account ID, request key,
 payment mode, immutable page facts and failed-delivery time. Its unique key is
 `(team, account_id, request_key)`. Changing kind or requested amount conflicts.

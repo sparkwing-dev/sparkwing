@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -194,6 +195,61 @@ func TestClaimRequirementReferencesProtectLiveWork(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `UPDATE `+table+` SET claim_requirements=''`)
 			rewriteSchemaExec(t, s.db, `DELETE FROM claim_requirements WHERE team='a' AND id=?`, id)
 			rewriteSchemaCount(t, s.db, "claim_requirement_terms", 0)
+		})
+	}
+}
+
+func TestClaimPinnedSelectorsPreserveDecodedPrefixes(t *testing.T) {
+	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
+		t.Run(dialect.String(), func(t *testing.T) {
+			driver, dsn := "sqlite", ":memory:"
+			if dialect == DialectPostgres {
+				driver, dsn = "pgx", os.Getenv("SPARKWING_TEST_PG_URL")
+				if dsn == "" {
+					t.Skip("PostgreSQL pin test requires SPARKWING_TEST_PG_URL")
+				}
+			}
+			db, err := sql.Open(driver, dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			q := claimSQL{dialect: dialect}
+			query := rewritePh(dialect, `WITH selector(value) AS (SELECT CAST(? AS TEXT)) SELECT `+q.pinned("selector.value")+` FROM selector`)
+			for _, test := range []struct {
+				name     string
+				selector any
+				want     bool
+			}{
+				{name: "missing"},
+				{name: "empty", selector: `[]`},
+				{name: "ordinary", selector: `["eligible"]`},
+				{name: "size", selector: `["sparkwing-4cpu"]`},
+				{name: "pool", selector: `["pool=gpu"]`, want: true},
+				{name: "name", selector: `["name=runner"]`, want: true},
+				{name: "class", selector: `["class=cloud"]`, want: true},
+				{name: "alternatives", selector: `["gpu, name=runner"]`, want: true},
+				{name: "ordinary alternatives", selector: `["ordinary, sparkwing-4cpu"]`},
+				{name: "unicode trim", selector: `["\u2003class=cloud\u2003"]`, want: true},
+				{name: "escaped equals", selector: `["name\u003drunner"]`, want: true},
+				{name: "escaped prefix", selector: `["\u0070ool=gpu"]`, want: true},
+				{name: "embedded prefix", selector: `["metadata-pool=gpu"]`},
+				{name: "escaped ordinary", selector: `["ordinary\\label"]`},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					var got bool
+					if err := db.QueryRowContext(t.Context(), query, test.selector).Scan(&got); err != nil {
+						t.Fatal(err)
+					}
+					if got != test.want {
+						t.Fatalf("pinned(%v) = %v, want %v", test.selector, got, test.want)
+					}
+				})
+			}
 		})
 	}
 }

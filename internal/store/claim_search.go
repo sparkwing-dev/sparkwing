@@ -166,17 +166,12 @@ func (template *claimSQL) routesSQL() (string, []any, error) {
 }
 
 func decodeClaimHead(head *claimHead, raw string) error {
-	var row []json.RawMessage
+	row := []any{&head.Team, &head.Unit.RunID, &head.Unit.NodeID, &head.Unit.SourceGeneration, &head.Unit.Kind, &head.Arrived}
 	if err := json.Unmarshal([]byte(raw), &row); err != nil {
 		return err
 	}
 	if len(row) != 6 {
 		return errors.New("invalid claim route head")
-	}
-	for i, dest := range []any{&head.Team, &head.Unit.RunID, &head.Unit.NodeID, &head.Unit.SourceGeneration, &head.Unit.Kind, &head.Arrived} {
-		if err := json.Unmarshal(row[i], dest); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -300,6 +295,9 @@ func rankingHeldContextsTx(ctx context.Context, tx *storeTx, demand UnitDemand, 
 	facts, err := claimProofFactsTx(ctx, tx, fresh, template.facts, teams)
 	if err != nil {
 		return nil, err
+	}
+	if len(facts) == 1 {
+		return nil, nil
 	}
 	funding := slices.DeleteFunc(slices.Clone(template.teams), func(t claimTeamFacts) bool { return !teams[t.Team] })
 	q := claimSQL{dialect: template.dialect, policy: template.policy, overflow: template.overflow, heads: fresh, holdProof: true, preferencesFree: true}

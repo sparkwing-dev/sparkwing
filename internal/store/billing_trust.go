@@ -87,10 +87,10 @@ func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTr
 	if c.Actor == "" || c.Reason == "" {
 		return before, after, fmt.Errorf("%w: a standing decision names its actor and reason", ErrInvalidInput)
 	}
-	if _, err = lockLedgerTx(ctx, tx, t.team); err != nil {
+	if err = t.lockTeamTx(ctx, tx); err != nil {
 		return before, after, err
 	}
-	if err = t.lockTeamTx(ctx, tx); err != nil {
+	if _, err = lockLedgerTx(ctx, tx, t.team); err != nil {
 		return before, after, err
 	}
 	if before, err = trustStandingTx(ctx, tx, t.team, now); err != nil {
