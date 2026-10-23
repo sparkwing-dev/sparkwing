@@ -37,9 +37,7 @@ type githubAppState struct {
 	client   *githubapp.Client
 	stateKey []byte
 
-	// safety: GitHub's answer for which installation covers a repository is
-	// read on every run and token, so it is kept briefly rather than asked
-	// for each time.
+	// perf: reuse installation discovery briefly across App intake requests.
 	mu           sync.Mutex
 	covering     map[string]coveringEntry
 	warnedChecks map[int64]bool
@@ -52,8 +50,7 @@ type coveringEntry struct {
 }
 
 // WithGitHubApp enables the deployment's GitHub App. The client holds the
-// App's private key; the controller hands out only tokens restricted to one
-// repository.
+// App's private key; source tokens cover only the approved repository-ID set.
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
 	s.githubAppProblem = nil
 	client := githubapp.New(cfg)

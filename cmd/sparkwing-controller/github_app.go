@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -9,27 +10,42 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 )
 
 type githubAppFlags struct {
-	AppID        string
-	Slug         string
-	ClientID     string
-	ClientSecret string
-	PrivateKey   string
+	AppID           string
+	Slug            string
+	ClientID        string
+	ClientSecret    string
+	PrivateKey      string
+	RedirectURIs    string
+	CredentialError error
 }
 
 func configureGitHubApp(srv *controller.Server, f githubAppFlags, hook deployment.KeyPair) {
-	if f.AppID == "" && f.Slug == "" && f.PrivateKey == "" && hook.Current() == nil && hook.Previous() == nil {
-		return
+	requested := f.AppID != "" || f.Slug != "" || f.PrivateKey != "" || hook.Current() != nil || hook.Previous() != nil
+	var cfg githubapp.Config
+	var appErr error
+	if requested {
+		cfg, appErr = githubAppConfig(f, hook)
 	}
-	cfg, err := githubAppConfig(f, hook)
-	if err != nil {
+	signIn, oauthErr := providerConfigured("GitHub", "github", f.ClientID, f.ClientSecret)
+	var uris []string
+	if signIn && oauthErr == nil {
+		uris, oauthErr = redirectAllowlist(f.RedirectURIs)
+	}
+	if err := errors.Join(f.CredentialError, appErr, oauthErr); err != nil {
 		srv.WithGitHubAppUnavailable(err)
 		slog.Warn("GitHub App unavailable", "reason", err)
 		return
 	}
-	srv.WithGitHubApp(cfg)
+	if requested {
+		srv.WithGitHubApp(cfg)
+	}
+	if signIn {
+		srv.WithGitHubSignIn(githubauth.New(githubauth.GitHub(f.ClientID, f.ClientSecret)), uris)
+	}
 }
 
 func githubAppConfig(f githubAppFlags, hook deployment.KeyPair) (githubapp.Config, error) {

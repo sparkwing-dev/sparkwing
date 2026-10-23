@@ -83,6 +83,7 @@ type controllerCredentials struct {
 	OIDCPublishedKey       []byte
 	BootstrapAdminToken    string
 	License                string
+	GitHubError            error
 	GitHubClientSecret     string
 	GoogleClientSecret     string
 	GitHubAppKey           string
@@ -99,20 +100,25 @@ func readCredentials(path string) (controllerCredentials, error) {
 		return c, err
 	}
 	for name, dst := range map[string]*string{
-		credPGURL:                  &c.PGURL,
-		credBootstrapAdminToken:    &c.BootstrapAdminToken,
-		credLicense:                &c.License,
-		credGitHubClientSecret:     &c.GitHubClientSecret,
-		credGoogleClientSecret:     &c.GoogleClientSecret,
-		credGitHubAppKey:           &c.GitHubAppKey,
-		credGitHubAppWebhookSecret: &c.GitHubAppWebhookSecret,
-		credGitHubAppPreviousHook:  &c.GitHubAppPreviousHook,
-		credCloudFrontKey:          &c.CloudFrontKey,
-		credBillingToken:           &c.BillingToken,
+		credPGURL:               &c.PGURL,
+		credBootstrapAdminToken: &c.BootstrapAdminToken,
+		credLicense:             &c.License,
+		credGoogleClientSecret:  &c.GoogleClientSecret,
+		credCloudFrontKey:       &c.CloudFrontKey,
+		credBillingToken:        &c.BillingToken,
 	} {
 		if *dst, err = readCredential(dir, name); err != nil {
 			return c, err
 		}
+	}
+	for name, dst := range map[string]*string{
+		credGitHubClientSecret:     &c.GitHubClientSecret,
+		credGitHubAppKey:           &c.GitHubAppKey,
+		credGitHubAppWebhookSecret: &c.GitHubAppWebhookSecret,
+		credGitHubAppPreviousHook:  &c.GitHubAppPreviousHook,
+	} {
+		*dst, err = readCredential(dir, name)
+		c.GitHubError = errors.Join(c.GitHubError, err)
 	}
 	for name, dst := range map[string]*[]byte{
 		credOIDCKey:          &c.OIDCKey,
@@ -136,7 +142,7 @@ func readCredentials(path string) (controllerCredentials, error) {
 }
 
 // safety: a present but empty file is a mistake, not a way to turn a
-// credential off, so it refuses startup naming the file.
+// credential off, so its feature refuses to operate, naming the file.
 func readCredential(dir credentials.Dir, name string) (string, error) {
 	raw, err := dir.ReadBytes(name)
 	if err != nil || raw == nil {
