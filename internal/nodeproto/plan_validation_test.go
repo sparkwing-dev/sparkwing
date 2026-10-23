@@ -331,3 +331,33 @@ func TestValidatePlanNormalizesRunnerLabels(t *testing.T) {
 		t.Fatalf("normalized preferences = %q", got)
 	}
 }
+
+func TestMemoRecipeRequiresOneHostInputSource(t *testing.T) {
+	for _, recipe := range []string{
+		`{"kind":"files","patterns":["**/*.go"]}`,
+		`{"kind":"repo_files","patterns":["cache/"]}`,
+		`{"kind":"tree","root":"src"}`,
+		`{"kind":"const","value":"v1"}`,
+		`{"kind":"parts","parts":[""]}`,
+		`{"kind":"env","names":["MODE"]}`,
+		`{"kind":"parts","parts":[{"n":9007199254740993},"v1",null,[1,false]]}`,
+		`{"kind":"compose","inputs":[{"kind":"env","names":[]},{"kind":"parts"}]}`,
+	} {
+		raw := `{"jobs":[{"id":"build","memo":{"input":` + recipe + `},"steps":[{"id":"run"}]}]}`
+		checkPlan(t, raw, planContext(), "")
+	}
+	for _, fields := range []string{
+		`"memo":{"input":{"kind":"parts","parts":[{"duplicate":1,"duplicate":2}]}}`,
+		`"memo":{"input":{"kind":"env","names":["MODE"]}},"closures":{"memo_key":"callback"}`,
+		`"memo":{"input":{"kind":"unknown"}}`,
+		`"memo":{"input":{"kind":"env","root":"src"}}`,
+		`"memo":{"input":{"kind":"tree"}}`,
+		`"memo":{"input":{"kind":"const"}}`,
+		`"memo":{"input":{"kind":"const","value":""}}`,
+		`"memo":{"input":{"kind":"compose","inputs":[{"kind":"const","value":""}]}}`,
+		`"memo":{"input":{"kind":"parts","value":"smuggled"}}`,
+		`"memo":{"input":{"kind":"compose","inputs":[{"kind":"unknown"}]}}`,
+	} {
+		checkPlan(t, `{"jobs":[{"id":"build",`+fields+`,"steps":[{"id":"run"}]}]}`, planContext(), apierr.PlanInvalid)
+	}
+}

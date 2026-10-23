@@ -3,6 +3,7 @@ package sparkwing
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -39,11 +40,14 @@ func TestV2Declarations(t *testing.T) {
 }
 
 func TestMemoKeyBoundaries(t *testing.T) {
-	if MemoKey("ab", "c") == MemoKey("a", "bc") {
+	if reflect.DeepEqual(MemoKey("ab", "c"), MemoKey("a", "bc")) {
 		t.Fatal("ambiguous key")
 	}
-	if MemoKey("value") != MemoKey("value") {
+	if !reflect.DeepEqual(MemoKey("value"), MemoKey("value")) {
 		t.Fatal("unstable key")
+	}
+	if MemoKey("memo:none") == NoMemo {
+		t.Fatal("literal part bypassed memoization")
 	}
 	if MemoKey(NoMemo) != NoMemo {
 		t.Fatal("NoMemo did not propagate")

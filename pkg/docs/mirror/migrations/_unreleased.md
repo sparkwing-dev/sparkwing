@@ -3276,3 +3276,33 @@ are removed. Explicit `Prefers` holds remain; preference scores are removed.
 Runner claim clients can send `free_slots`; omission offers one slot, while
 an explicit zero reports that the claimant is busy. Each award consumes one
 advertised slot until the next poll.
+
+## Memo inputs run on the host
+
+Existing memo entries are invalidated. Jobs execute once to populate the new
+namespace. No cache migration is needed.
+
+Go `inputs.Files`, `RepoFiles`, `Tree`, `Env`, `Const`, `Parts` and `Compose`, and
+TypeScript `files`, `repoFiles`, `tree`, `env`, `parts`, `constant` and `compose`, return
+input recipes. Pass them directly to `Memo` / `memo` instead of invoking them
+as callbacks. Recipes travel in the plan and run on the executing host after
+admission and SkipIf, before the job body.
+
+`MemoKey` / `memoKey` collect ordered JSON values. Author callbacks can still
+resolve references or other inputs and return those values for host hashing.
+`NoMemo` / `noMemo` still bypass reuse. Callback errors and empty strings fail.
+`Compose` / `compose` combine recipes. Combine author values inside a callback
+with `MemoKey` / `memoKey`.
+
+Tree roots must be relative paths inside the checkout. Absolute and escaping
+roots are refused. Symlink directory components and replacements cannot redirect
+fingerprinting outside that scope. Empty `Const` / `constant` values fail host
+validation. TypeScript recipe literals must be JSON values. Nonfinite numbers and
+`undefined` are refused, including nested values.
+
+Environment recipes read the effective job environment, including body and
+startup declarations. Names compare case-insensitively on Windows. Unset remains
+distinct from empty. Filesystem errors are host errors. Go and TypeScript now
+use the same path rule: basenames match anywhere, trailing slashes match a
+literal prefix from the checkout root, and `**` spans path segments. TypeScript
+`ignore("cache/")` therefore keeps `nested/cache/data`. See [Caching](../caching.md).

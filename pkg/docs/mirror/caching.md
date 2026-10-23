@@ -6,27 +6,56 @@ content. The host authorizes the storage namespace independently.
 
 ## The model
 
-`Memo` reuses a successful job's recorded output and artifacts. The key callback
-runs on the executing host after dependencies settle and SkipIf permits the job,
-inside the job's acquired concurrency slot under its actual execution award.
-Return `MemoKey(parts...)` with every input that affects the result, or `NoMemo`
-to execute without publishing a memo record.
-Errors and empty keys fail rather than becoming a cache hit.
+`Memo` reuses a successful job's recorded output and artifacts. It accepts a
+built-in input recipe or an author callback returning a JSON value. After
+SkipIf permits the job, the executing host evaluates the recipe or callback and
+hashes its value under the job's admission permit, before the body runs.
 
 ```go
-sparkwing.Job(plan, "coverage-shard-1", func(context.Context) error { return nil }).
-    Memo(func(context.Context) (sparkwing.MemoValue, error) {
-        return sparkwing.MemoKey("coverage", "shard-1", "toolchain-v1"), nil
-    }, sparkwing.MemoTTL(7*24*time.Hour))
+sparkwing.Job(plan, "build", func(context.Context) error { return nil }).
+    Memo(inputs.Compose(
+        inputs.Files("**/*.go", "go.mod", "go.sum"),
+        inputs.Env("GOOS", "GOARCH"),
+        inputs.Const("toolchain-v1"),
+    ), sparkwing.MemoTTL(7*24*time.Hour))
 ```
 
-`MemoTTL` accepts at most 30 days. A missing or corrupt object produces a miss.
-Use `sparkwing/inputs` helpers to fingerprint repository files, directories,
-environment and composed inputs. See [Memo](sdk.md#memo-caches-and-artifacts).
+The `sparkwing/inputs` helpers declare recipes in the plan. `Files` selects
+tracked files, `RepoFiles` selects all tracked files with optional `Ignore`
+patterns, and `Tree` includes every regular file recursively, including untracked
+files, while skipping symlinks. Tree roots must be relative paths inside the
+checkout. Absolute paths and paths escaping the checkout are refused. Traversal
+and reads use scoped filesystem handles that confine access to the checkout.
+Concurrent same-inode symlink swaps inside the checkout can go undetected.
+Tracked symlinks contribute their target text and entry type. Their target
+contents are never read. Missing or unreadable inputs fail on the host.
+
+Tree traversal keeps directory handles open along the current path. Deeply nested
+trees can exhaust the host's file-descriptor limit and fail the job. Raise that
+limit or narrow the tree input before retrying.
+
+Patterns without a slash match basenames anywhere. A trailing slash matches a
+literal directory prefix from the checkout root, so `cache/` excludes
+`cache/data` but keeps `nested/cache/data`. Other patterns match full paths,
+where `**` spans path segments. These rules are shared by Go and TypeScript
+because the host performs all matching.
+
+`Env` reads the effective job environment, including startup and body declarations.
+Names use the platform's comparison, including case-insensitive lookup on Windows.
+Unset variables differ from empty values. `Parts` declares ordered JSON values.
+TypeScript refuses nonfinite numbers and `undefined`, including nested values,
+because JSON transport would lose their identity. `Const` declares a nonempty
+string, validated by the host. `Compose` combines recipes in order.
+TypeScript provides `files`, `repoFiles`, `ignore`, `tree`, `env`, `parts`, `constant` and
+`compose` with the same host semantics.
+
+`MemoTTL` accepts at most 30 days. Missing or corrupt cached bytes produce a miss.
+Lookup refusals fail the job. Publication requires committed success.
 
 ## Building keys
 
-Resolve a typed reference inside the key callback when its result is an input:
+`MemoKey(parts...)` collects values for host hashing. It performs no hashing in
+the SDK. Resolve a typed reference inside a callback when its result is an input:
 
 ```go
 build := sparkwing.Job(plan, "build", &Build{})

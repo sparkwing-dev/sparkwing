@@ -127,7 +127,7 @@ export interface JobGroup {
   beforeRun(hook: Hook): this;
   verify(hook: Hook): this;
   afterRun(hook: AfterRunFn): this;
-  memo(key: MemoKeyFn, options?: MemoOptions): this;
+  memo(key: MemoInput | MemoKeyFn, options?: MemoOptions): this;
   cache(...caches: readonly CacheSpec[]): this;
   artifacts(...globs: readonly string[]): this;
   consumes(producer: Job<unknown>, options?: { into?: string }): this;
@@ -185,26 +185,38 @@ export declare function npm(): CacheSpec;
 export declare function dir(path: string, ...keyFiles: readonly string[]): CacheSpec;
 /** contract: A memo miss sentinel keeps empty keys distinct from disabled reuse. */
 export declare const noMemo: unique symbol;
-/** contract: Keys are evaluated by the SDK; trust and namespace are owned by the host. */
-export type MemoKeyFn = (ctx: Context) => Awaitable<string | typeof noMemo>;
-/** contract: Filters keep the same repository subset across machines. */
-export interface RepoFilesOption { readonly ignore: readonly string[]; }
-/** contract: Basenames match anywhere, trailing slashes match directories, and ** spans path segments. */
+/** contract: Author callbacks return JSON values for host hashing, or noMemo to bypass. */
+export type MemoKeyFn = (ctx: Context) => Awaitable<unknown>;
+/** contract: Built-in memo recipes are evaluated by the executing host. */
+export type MemoInput =
+  | { readonly kind: "const"; readonly value: string }
+  | { readonly kind: "files" | "repo_files"; readonly patterns: readonly string[] }
+  | { readonly kind: "tree"; readonly root: string }
+  | { readonly kind: "env"; readonly names: readonly string[] }
+  | { readonly kind: "parts"; readonly parts: readonly unknown[] }
+  | { readonly kind: "compose"; readonly inputs: readonly MemoInput[] };
+/** contract: Excludes matching tracked paths. */
+export interface RepoFilesOption {
+  readonly ignore: readonly string[];
+}
+/** contract: Basenames match anywhere, trailing slashes match a root prefix, and ** spans segments. */
 export declare function ignore(...patterns: readonly string[]): RepoFilesOption;
-/** contract: Matching tracked file bytes contribute to memo identity; invalid patterns fail. */
-export declare function files(...globs: readonly string[]): MemoKeyFn;
-/** contract: Sorted environment names distinguish unset from explicitly empty values. */
-export declare function env(...names: readonly string[]): MemoKeyFn;
-/** contract: Constants supply a stable key; an empty value fails. */
-export declare function constant(value: string): MemoKeyFn;
-/** contract: Regular tree files contribute recursively, skipping symlinks; missing roots fail. */
-export declare function tree(path: string): MemoKeyFn;
-/** contract: Repository-relative selection gives matching keys across checkout roots. */
-export declare function repoFiles(...options: readonly RepoFilesOption[]): MemoKeyFn;
-/** contract: A failed or bypassed input cannot accidentally become a reusable key. */
-export declare function compose(...inputs: readonly MemoKeyFn[]): MemoKeyFn;
-/** contract: Structured parts form an SDK-computed key without storage authority. */
-export declare function memoKey(...parts: readonly unknown[]): string;
+/** contract: Matching tracked files contribute to host-computed memo identity. */
+export declare function files(...globs: readonly string[]): MemoInput;
+/** contract: The effective job environment distinguishes unset from empty. */
+export declare function env(...names: readonly string[]): MemoInput;
+/** contract: Declares ordered JSON values for host hashing. */
+export declare function parts(...values: readonly unknown[]): MemoInput;
+/** contract: Declares a nonempty literal string, validated by the host. */
+export declare function constant(value: string): MemoInput;
+/** contract: Regular files contribute recursively inside the checkout, skipping symlinks; missing roots fail on the host. */
+export declare function tree(path: string): MemoInput;
+/** contract: Repository-relative selection includes all tracked files except declared exclusions. */
+export declare function repoFiles(...options: readonly RepoFilesOption[]): MemoInput;
+/** contract: Combines input recipes in order. */
+export declare function compose(...inputs: readonly MemoInput[]): MemoInput;
+/** contract: Collects ordered JSON parts for host hashing. */
+export declare function memoKey(...parts: readonly unknown[]): readonly unknown[] | typeof noMemo;
 /** contract: Generated topology is accepted once; replay only reconstructs code. */
 export type GenerateFn<T> = (generated: Generated, output: T, ctx: Context) => Awaitable<void>;
 /** contract: A generator handle names the settlement barrier consumed by dependencies. */
@@ -234,7 +246,7 @@ export declare class Job<T = unknown> {
   beforeRun(hook: Hook): this;
   verify(hook: Hook): this;
   afterRun(hook: AfterRunFn): this;
-  memo(key: MemoKeyFn, options?: MemoOptions): this;
+  memo(key: MemoInput | MemoKeyFn, options?: MemoOptions): this;
   cache(...caches: readonly CacheSpec[]): this;
   artifacts(...globs: readonly string[]): this;
   consumes(producer: Dependency, options?: { into?: string }): this;

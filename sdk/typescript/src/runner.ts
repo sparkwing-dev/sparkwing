@@ -350,7 +350,7 @@ class Session {
     }
     if (closure.kind === "memo_key") {
       if (result === noMemo) return null;
-      if (typeof result !== "string" || result === "") throw failure("sdk_error", "memo key must be nonempty or noMemo");
+      if (result === undefined || result === "") throw failure("sdk_error", "memo callback must return a JSON value or noMemo");
       return result;
     }
     return null;

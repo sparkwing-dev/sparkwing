@@ -285,7 +285,7 @@ The gate itself only declares a decision.
 ## Memo, caches and artifacts
 
 `Memo` reuses a successful job result. Its callback returns `sw.MemoValue` and an
-error. Build keys with `sw.MemoKey(parts...)`, set retention with
+error. The host hashes that JSON value. Collect parts with `sw.MemoKey(parts...)`, set retention with
 `sw.MemoTTL(duration)`, and return `sw.NoMemo` to bypass reuse. Empty keys fail.
 The key callback runs after SkipIf on the executing host under the job's actual
 award, inside its concurrency slot. A memo hit releases the job's groups without
@@ -300,7 +300,9 @@ sw.Job(plan, "build", Build{}).
 ```
 
 The `sparkwing/inputs` package supplies `RepoFiles`, `Files`, `Tree`, `Env`,
-`Const` and `Compose` memo-key functions. Include every input that affects the
+`Parts`, `Const` and `Compose` input recipes, evaluated by the host against its
+checkout and effective job environment. Pass a recipe directly to `Memo`.
+Include every input that affects the
 result. The host scopes reuse by the accepted repository and trust policy.
 
 `Cache` restores and saves dependency directories. `sw.GoModules()` and

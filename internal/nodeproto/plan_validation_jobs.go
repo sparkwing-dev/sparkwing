@@ -73,7 +73,15 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 			return planInvalid(path+".memo.ttl_ms", "duration is negative")
 		}
 	}
-	if (job.Closures.MemoKey != "") != (job.Memo != nil) {
+	if job.Memo != nil && job.Memo.Input != nil {
+		if job.Closures.MemoKey != "" {
+			return planInvalid(path+".memo", "choose a recipe or a value callback")
+		}
+		if err := validateMemoInput(*job.Memo.Input, path+".memo.input"); err != nil {
+			return err
+		}
+	}
+	if (job.Closures.MemoKey != "" || job.Memo != nil && job.Memo.Input != nil) != (job.Memo != nil) {
 		return planInvalid(path+".memo", "memo policy and memo key must be declared together")
 	}
 	if len(job.Closures.Generate) > 0 {

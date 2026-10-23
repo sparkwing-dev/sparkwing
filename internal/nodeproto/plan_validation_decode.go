@@ -39,7 +39,7 @@ func checkPlanValue(decoder *json.Decoder, kind reflect.Type, path string, secre
 	if err != nil {
 		return planInvalid(path, "malformed JSON")
 	}
-	if token == nil {
+	if token == nil && kind.Kind() != reflect.Interface {
 		return planInvalid(path, "null is not a declaration")
 	}
 	open, isDelim := token.(json.Delim)
@@ -48,7 +48,7 @@ func checkPlanValue(decoder *json.Decoder, kind reflect.Type, path string, secre
 	}
 	switch open {
 	case '{':
-		if kind.Kind() != reflect.Struct && kind.Kind() != reflect.Map {
+		if kind.Kind() != reflect.Struct && kind.Kind() != reflect.Map && kind.Kind() != reflect.Interface {
 			return planInvalid(path, "unexpected object")
 		}
 		seen := make(map[string]bool)
@@ -71,7 +71,9 @@ func checkPlanValue(decoder *json.Decoder, kind reflect.Type, path string, secre
 			}
 			seen[key] = true
 			var childType reflect.Type
-			if kind.Kind() == reflect.Map {
+			if kind.Kind() == reflect.Interface {
+				childType = kind
+			} else if kind.Kind() == reflect.Map {
 				childType = kind.Elem()
 			} else {
 				var found bool
@@ -98,11 +100,15 @@ func checkPlanValue(decoder *json.Decoder, kind reflect.Type, path string, secre
 			}
 		}
 	case '[':
-		if kind.Kind() != reflect.Slice && kind.Kind() != reflect.Array {
+		if kind.Kind() != reflect.Slice && kind.Kind() != reflect.Array && kind.Kind() != reflect.Interface {
 			return planInvalid(path, "unexpected array")
 		}
+		childType := kind
+		if kind.Kind() != reflect.Interface {
+			childType = kind.Elem()
+		}
 		for i := 0; decoder.More(); i++ {
-			if err := checkPlanValue(decoder, kind.Elem(), fmt.Sprintf("%s[%d]", path, i), secrets); err != nil {
+			if err := checkPlanValue(decoder, childType, fmt.Sprintf("%s[%d]", path, i), secrets); err != nil {
 				return err
 			}
 		}

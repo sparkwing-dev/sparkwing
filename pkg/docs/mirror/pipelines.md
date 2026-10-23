@@ -463,11 +463,12 @@ sw.Job(plan, "build", &Build{}).Memo(
 )
 ```
 
-`sparkwing.MemoKey(parts...)` hashes arbitrary parts into a stable string --
-use it rather than hand-concatenating. Return `sparkwing.NoMemo, nil`
+`sparkwing.MemoKey(parts...)` collects ordered JSON values for the executing host
+to hash. Pass an `inputs.Compose(...)` recipe directly to `Memo` for built-in
+file, tree, environment and literal inputs. Return `sparkwing.NoMemo, nil`
 to bypass memoization for one invocation. Return errors when inputs cannot
 be resolved. Errors, panics, empty keys, and resolution deadlines fail
-before dispatch. See [Caching](caching.md).
+on the executing host before the body runs. See [Caching](caching.md).
 
 Caching is content only. To bound how many nodes run at once -- a mutex,
 a semaphore, a deploy gate -- use `.Concurrency(group)`; see

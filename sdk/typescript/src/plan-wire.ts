@@ -30,7 +30,7 @@ export interface JobSpec {
   inline?: boolean;
   optional?: boolean;
   continue_on_error?: boolean;
-  memo?: { ttl_ms?: number };
+  memo?: { ttl_ms?: number; input?: import("../index.d.ts").MemoInput };
   caches?: CacheSpec[];
   concurrency?: ConcurrencySpec[];
   closures?: ClosureSpec;

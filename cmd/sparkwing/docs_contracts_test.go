@@ -82,7 +82,6 @@ func TestDocsMentionEnvVarRequiresWholeIdentifierToken(t *testing.T) {
 
 var userNamedEnvReads = map[string]string{
 	"pkg/backends/backends.go: s.TokenEnv":       "the backend config says which variable holds its token",
-	"sparkwing/inputs/memo_contract.go: name":    "a pipeline declares which variables its inputs read",
 	"internal/secretsource/secretsource.go: key": "a secret source's configured prefix plus the secret's name",
 	"cmd/sparkwing/local_run_host.go: name":      "the user's machine config names the local secrets a burst run reads",
 }

@@ -1,6 +1,7 @@
 package procenv
 
 import (
+	"runtime"
 	"slices"
 	"testing"
 
@@ -37,5 +38,22 @@ func TestEnvGoToolKeepsPolicyAndDoesNotMutateItsSource(t *testing.T) {
 	command.Env[0] = "CUSTOM_TOKEN=mutated"
 	if slices.Contains(slices.Collect(configured.Values()), "CUSTOM_TOKEN=mutated") {
 		t.Fatal("command owns the environment's backing storage")
+	}
+}
+
+func TestLookupEnvUsesPlatformComparisonAndPreservesPresence(t *testing.T) {
+	env := Env{values: []string{"Path=tools", "EMPTY="}}
+	if value, present := env.LookupEnv("Path"); value != "tools" || !present {
+		t.Fatalf("exact lookup = %q, %v", value, present)
+	}
+	value, present := env.LookupEnv("PATH")
+	if want := runtime.GOOS == "windows"; present != want || (want && value != "tools") {
+		t.Fatalf("platform lookup = %q, %v", value, present)
+	}
+	if value, present := env.LookupEnv("EMPTY"); value != "" || !present {
+		t.Fatalf("empty lookup = %q, %v", value, present)
+	}
+	if value, present := env.LookupEnv("ABSENT"); value != "" || present {
+		t.Fatalf("absent lookup = %q, %v", value, present)
 	}
 }

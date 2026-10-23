@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -65,6 +66,7 @@ type ExecutorActivity struct {
 // Configured storage requires this factory; failed refresh suppresses finalizer writes.
 // Log receives masked host diagnostics with their committed attempt; delivery errors stop work.
 type ExecutorDependencies struct {
+	memoEnvironment  func(context.Context, NodeInput) (procenv.Env, error)
 	Log              func(context.Context, NodeInput, nodeproto.FrameLog) error
 	BindStorage      func(context.Context, NodeInput) (StorageBinding, error)
 	Store            NodeTransitionStore

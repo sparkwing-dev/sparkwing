@@ -155,10 +155,11 @@ export function jsonOutput(value: unknown): unknown {
     throw failure("sdk_error", `output exceeds ${MAX_OUTPUT_BYTES} bytes`);
   return output;
 }
-export function jsonValue(value: unknown): unknown {
-  if (value === undefined) return undefined;
+export function jsonValue(value: unknown, rejectUndefined = false): unknown {
+  if (value === undefined && !rejectUndefined) return undefined;
   const json = JSON.stringify(value, (_key, child: unknown) => {
     if (
+      (rejectUndefined && child === undefined) ||
       typeof child === "function" ||
       typeof child === "symbol" ||
       typeof child === "bigint" ||

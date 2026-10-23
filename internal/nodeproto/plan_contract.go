@@ -109,7 +109,8 @@ type RetrySpec struct {
 
 // MemoSpec enables result reuse independently of dependency-directory caches.
 type MemoSpec struct {
-	TTLMS *int64 `json:"ttl_ms,omitempty"`
+	TTLMS *int64     `json:"ttl_ms,omitempty"`
+	Input *MemoInput `json:"input,omitempty"`
 }
 
 // CacheSpec is wire-only so SDK binaries need not link engine storage implementations.
@@ -157,4 +158,15 @@ type ValidationContext struct {
 func ValidatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, error) {
 	plan, err := validatePlan(raw, context)
 	return plan, sanitizePlanError(err, context.Secrets)
+}
+
+// MemoInput declares inputs evaluated by the executing host against its checkout and job environment.
+type MemoInput struct {
+	Kind     string      `json:"kind"`
+	Value    string      `json:"value,omitempty"`
+	Patterns []string    `json:"patterns,omitempty"`
+	Root     string      `json:"root,omitempty"`
+	Names    []string    `json:"names,omitempty"`
+	Parts    []any       `json:"parts,omitempty"`
+	Inputs   []MemoInput `json:"inputs,omitempty"`
 }
