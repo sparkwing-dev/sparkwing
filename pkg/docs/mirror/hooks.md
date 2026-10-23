@@ -331,7 +331,7 @@ content, format version, executability, and whether each hook is required.
 Status, fleet status, and doctor use these same observations. Blocking gates and
 global forwarders are required. A missing or stale required hook is broken,
 including a deleted forwarder for a global hook. Notifiers are optional.
-Remove obsolete managed hooks whose triggers or global hooks are no longer declared,
+Remove managed hooks whose triggers or global hooks are no longer declared,
 then run `sparkwing pipeline hooks install` to replace stale scripts. For a manual
 execution check, use a throwaway commit in a disposable checkout.
 

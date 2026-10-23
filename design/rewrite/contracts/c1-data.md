@@ -22,6 +22,10 @@ renewal, rejection, reservation validation and snapshot reads. A failed award
 returns an explicit deferred fence, preserving its Job while healthy awards
 continue. Database failures and invalid claimant authority still fail the request.
 
+Transaction commit preserves context cancellation when the database has already
+rolled back the cancelled transaction. An owner interrupting its state wait can
+continue scheduling without treating that rollback as a database failure.
+
 
 ## Collection and required blob reads
 

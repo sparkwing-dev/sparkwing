@@ -77,6 +77,36 @@ func TestTransactionClockCancellationAfterAutomaticRollback(t *testing.T) {
 	}
 }
 
+func TestTransactionCommitCancellationAfterAutomaticRollback(t *testing.T) {
+	for _, read := range []bool{false, true} {
+		for _, cancelled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("read=%t/cancelled=%t", read, cancelled), func(t *testing.T) {
+				db := sql.OpenDB(&clockFailureConnector{})
+				defer db.Close()
+				s := &Store{db: db, dialect: DialectSQLite}
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				tx, err := s.beginStoreTx(ctx, read)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Complete database/sql's cancellation rollback before the caller commits.
+				if err := tx.tx.Rollback(); err != nil {
+					t.Fatal(err)
+				}
+				want := sql.ErrTxDone
+				if cancelled {
+					cancel()
+					want = context.Canceled
+				}
+				if err := tx.Commit(); err != want {
+					t.Fatalf("commit after rollback = %v, want %v", err, want)
+				}
+			})
+		}
+	}
+}
+
 func TestTransactionResultRequiresCommit(t *testing.T) {
 	for _, failure := range []string{"", "body", "clock", "commit"} {
 		t.Run(failure, func(t *testing.T) {
