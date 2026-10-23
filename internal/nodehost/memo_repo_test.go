@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -279,6 +280,27 @@ func TestTree_BustsOnEdit(t *testing.T) {
 			t.Fatalf("Tree should bust on file edit: %q", before)
 		}
 	})
+}
+
+func TestTreeHashesNonUTF8Names(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows filenames use Unicode")
+	}
+	for _, name := range []string{"tree/file\xff", "tree/dir\xff/file"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeAll(t, dir, map[string]string{name: "first"})
+			before, err := hashTree(t.Context(), dir, "tree")
+			if err != nil || before == "" {
+				t.Fatalf("hash tree = %q, %v", before, err)
+			}
+			writeAll(t, dir, map[string]string{name: "second"})
+			after, err := hashTree(t.Context(), dir, "tree")
+			if err != nil || after == before {
+				t.Fatalf("edited tree = %q, %v; before %q", after, err, before)
+			}
+		})
+	}
 }
 
 func TestTree_BustsOnGitignoredFile(t *testing.T) {

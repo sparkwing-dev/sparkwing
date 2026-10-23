@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	pathmatch "path"
@@ -175,19 +174,39 @@ func hashTree(ctx context.Context, checkout, name string) (string, error) {
 	}
 	defer root.Close()
 	var paths []string
-	err = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
+	var walk func(*os.Root, string) error
+	walk = func(current *os.Root, prefix string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !entry.IsDir() && entry.Type().IsRegular() {
-			paths = append(paths, path)
+		directory, err := current.Open(".")
+		if err != nil {
+			return err
+		}
+		entries, err := directory.ReadDir(-1)
+		directory.Close()
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			path := pathmatch.Join(prefix, entry.Name())
+			if entry.IsDir() {
+				child, err := openMemoDirectory(current, entry.Name())
+				if err != nil {
+					return err
+				}
+				err = walk(child, path)
+				child.Close()
+				if err != nil {
+					return err
+				}
+			} else if entry.Type().IsRegular() {
+				paths = append(paths, path)
+			}
 		}
 		return nil
-	})
-	if err != nil {
+	}
+	if err := walk(root, ""); err != nil {
 		return "", err
 	}
 	return hashMemoFiles(ctx, root, paths, false)
@@ -269,7 +288,7 @@ func readMemoFile(root *os.Root, name string, tracked bool) ([]byte, bool, error
 		return nil, false, err
 	}
 	defer file.Close()
-	// Compare the opened file before reading, including a replacement by an in-root symlink.
+	// A same-inode symlink swap can pass this check; os.Root confines the read.
 	opened, err := file.Stat()
 	if err == nil && !os.SameFile(info, opened) {
 		err = errors.New("memo input changed before reading")

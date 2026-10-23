@@ -25,8 +25,8 @@ tracked files, `RepoFiles` selects all tracked files with optional `Ignore`
 patterns, and `Tree` includes every regular file recursively, including untracked
 files, while skipping symlinks. Tree roots must be relative paths inside the
 checkout. Absolute paths and paths escaping the checkout are refused. Traversal
-and reads use scoped filesystem handles. Symlink directory components and files
-replaced by symlinks during tree hashing fail before the body runs.
+and reads use scoped filesystem handles that confine access to the checkout.
+Concurrent same-inode symlink swaps inside the checkout can go undetected.
 Tracked symlinks contribute their target text and entry type. Their target
 contents are never read. Missing or unreadable inputs fail on the host.
 
