@@ -122,6 +122,7 @@ type Server struct {
 	githubRunners githubRunnerConfig
 
 	githubApp         *githubAppState
+	githubAppProblem  error
 	checkout          *billingCheckout
 	paymentDeployment string
 	paymentVerifier   capability.PaymentAuthenticator

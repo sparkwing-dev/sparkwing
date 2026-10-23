@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
@@ -164,7 +163,7 @@ func (s *Server) resolveAutomationRepository(ctx context.Context, tenant *store.
 
 func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {

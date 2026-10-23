@@ -2,11 +2,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -45,6 +47,7 @@ func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
 						t.Fatal(err)
 					}
 					server := New(st, nil).WithLocalSessions(directory)
+					server.WithGitHubAppUnavailable(errors.New("private key is malformed"))
 					listener := &localScheduleListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 					ctx, cancel := context.WithCancel(t.Context())
 					done := make(chan error, 1)
@@ -63,6 +66,10 @@ func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
 						}
 					})
 					findings, err := client.SweepLocalSessions(t.Context(), client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: transport}}, dry)
+					if len(findings) == 0 || findings[0].Code != "github_app_unavailable" || !strings.Contains(findings[0].Message, "GitHub App unavailable: private key is malformed") {
+						t.Fatalf("missing App finding: %+v", findings)
+					}
+					findings = findings[1:]
 					if (err != nil) != (!dry && command == "false") {
 						t.Fatalf("cleanup failure=%t: %v", !dry && command == "false", err)
 					}

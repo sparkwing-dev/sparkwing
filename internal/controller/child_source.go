@@ -170,13 +170,13 @@ func (*intakeRevisionAccess) BundleURL(context.Context, string) (string, error) 
 
 // CoveredChildRepositories confirms App coverage independently of event subscriptions.
 func (s *Server) CoveredChildRepositories(ctx context.Context, installations []store.GitHubAppInstallation) ([]string, error) {
-	if s.githubApp == nil {
-		return nil, nil
+	if s.githubApp == nil && len(installations) > 0 {
+		return nil, s.githubAppUnavailable()
 	}
 	var keys []string
 	for _, in := range installations {
 		repositories, err := s.githubApp.client.InstallationRepositories(ctx, in.InstallationID)
-		if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
+		if err != nil {
 			return nil, err
 		}
 		for _, repo := range repositories {

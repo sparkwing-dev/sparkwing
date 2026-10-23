@@ -51,6 +51,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		problems = append(problems, problem)
 	}
 
+	if s.githubAppProblem != nil {
+		problems = append(problems, s.githubAppProblem.Error())
+	}
+
 	resp := map[string]any{
 		"status": "ok", "auth": authState,
 		"object_store": objectStore, "database": s.storageHealth(),

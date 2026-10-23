@@ -149,8 +149,8 @@ func (s *Server) sourceAdapter() *SourceController {
 	}
 	cipher, _ := s.secretsCipher.(BoundCipher)
 	source := &SourceController{ResolveTenant: s.resolveTenant, Cipher: cipher}
-	if s.githubApp != nil {
-		source.GitHub = s.githubApp.client
+	if s.githubApp != nil || s.githubAppProblem != nil {
+		source.GitHub = s
 	}
 	return source
 }
