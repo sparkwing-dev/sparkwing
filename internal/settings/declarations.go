@@ -203,7 +203,7 @@ func validateDeclarationKey(origin runspec.SettingOrigin, source Source, key str
 	return nil
 }
 
-// validateCheckoutDeclarations checks the format, presence and field/source membership in Table.
+// validateCheckoutDeclarations checks the format, presence and field/source membership in table.
 // Every nested Origin must agree with its structural layer and checkout-relative file. An origin
 // claiming flag, env, run, machine or operator authority is invalid. Explicit empty/zero survives.
 // Both acceptance and expansion call this before resolving any author-provided setting.

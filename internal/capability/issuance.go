@@ -106,7 +106,7 @@ var bootstrapGrants = []Grant{SourceRead, ClaimExchange}
 var bootstrapUnits = []UnitKind{UnitPlan, UnitEval, UnitNode}
 
 // ParentRule controls revocation ancestry independently of grant inheritance.
-// ParentClaimantRoot stops at the nearest here Award, otherwise at the registered claimant root.
+// parentClaimantRoot stops at the nearest here Award, otherwise at the registered claimant root.
 // Walking past a here Award would detach its descendants from the requester's live runs.write.
 type ParentRule string
 

@@ -123,9 +123,9 @@ type Config struct {
 	// refusal tells the operator which one to raise. The zero value uses
 	// the unprefixed names.
 	Flags FlagNames
-	// Persisted marks a meter whose owner drains it with [Meter.Flush].
+	// Persisted marks a meter whose owner drains it with [Meter.flush].
 	// Only such a meter parks a month's closing totals; see
-	// [Meter.WithPersistence], which sets the same thing after the fact.
+	// [Meter.withPersistence], which sets the same thing after the fact.
 	Persisted bool
 }
 
@@ -238,9 +238,9 @@ type Meter struct {
 	now        func() time.Time
 	principals map[string]*principalCounters
 	// safety: a month roll zeroes a principal's counter, so the closing
-	// total is parked here for the next Flush rather than lost between
+	// total is parked here for the next flush rather than lost between
 	// the roll and the flush that would have persisted it. Only a meter
-	// whose owner drains it parks anything; see [Meter.WithPersistence].
+	// whose owner drains it parks anything; see [Meter.withPersistence].
 	persists       bool
 	pending        []pendingUsage
 	nextPendingID  uint64
@@ -280,7 +280,7 @@ func (m *Meter) WithLogger(l *slog.Logger) *Meter {
 }
 
 // withPersistence marks this meter as one whose owner drains it with
-// [Meter.Flush] and persists what comes out. Only such a meter parks a
+// [Meter.flush] and persists what comes out. Only such a meter parks a
 // month's closing totals for the next drain; a meter nobody drains would
 // otherwise accumulate one entry per principal per month roll forever.
 func (m *Meter) withPersistence() *Meter {
@@ -527,7 +527,7 @@ type DayUsage struct {
 }
 
 // flushDay gives persist today's process total when it moved since the
-// last successful FlushDay, and acknowledges it only when persist
+// last successful flushDay, and acknowledges it only when persist
 // succeeds and nothing was charged meanwhile.
 func (m *Meter) flushDay(persist func(DayUsage) error) error {
 	if m == nil {

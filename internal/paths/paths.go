@@ -74,8 +74,7 @@ func (p Paths) SessionLedgerDir() string { return filepath.Join(p.Root, "session
 func (p Paths) refWorktreesDir() string { return filepath.Join(p.Root, "ref-worktrees") }
 
 // standaloneDir holds the runs stores written by pipeline binaries that could
-// not reach the admission daemon. The read verbs merge these with
-// [Paths.StateDB]; [Paths.StandaloneStores] enumerates them.
+// not reach the admission daemon.
 func (p Paths) standaloneDir() string { return filepath.Join(p.Root, "standalone") }
 
 // standaloneStateDB is the store standalone runs share.
@@ -85,7 +84,6 @@ func (p Paths) standaloneStateDB() string {
 
 // standaloneSchemaDir is where a build before the store baseline kept a
 // standalone store the shared one refused, one directory per schema version.
-// Nothing writes there now; [Paths.StandaloneStores] still lists what is left.
 func (p Paths) standaloneSchemaDir(version int) string {
 	return filepath.Join(p.standaloneDir(), fmt.Sprintf("schema-%d", version))
 }

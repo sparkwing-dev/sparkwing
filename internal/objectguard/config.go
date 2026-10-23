@@ -11,7 +11,7 @@ import (
 // budgetFlag is the controller flag ParseBudget reads.
 const budgetFlag = "--object-store-budget"
 
-// ParseBudget layers spec onto DefaultConfig. spec is a comma-separated list
+// ParseBudget layers spec onto defaultConfig. spec is a comma-separated list
 // of class:window=count entries, such as "put:minute=600,get:day=0", where
 // class is put, get, list or delete, window is minute or day, and 0 leaves
 // that window unlimited. A class and window spec does not name keeps its
@@ -56,7 +56,7 @@ var (
 )
 
 // Shared returns the process-wide limiter: the one [ConfigureShared] built,
-// or one on DefaultConfig. Every object-store client Sparkwing constructs
+// or one on defaultConfig. Every object-store client Sparkwing constructs
 // draws on it, so one runaway caller spends the same budget every other
 // caller sees.
 func Shared() *Limiter {

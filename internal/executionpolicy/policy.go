@@ -175,7 +175,7 @@ type nodeRefGrant struct {
 }
 
 // sealed is the canonical result of validating one policy. Callers receive
-// owned copies; a Carrier stores only its encoded immutable representation.
+// owned copies; a carrier stores only its encoded immutable representation.
 type sealed struct {
 	Policy                     nodeExecutionPolicy
 	Canonical                  []byte

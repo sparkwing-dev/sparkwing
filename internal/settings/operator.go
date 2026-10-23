@@ -30,7 +30,7 @@ func operatorPick[T any](in OperatorInputs, key string, field func(OperatorValue
 
 func pointer[T any](value T) *T { return &value }
 
-// ControllerCeilings resolves each operator key with OperatorPrecedence. Shared
+// ControllerCeilings resolves each operator key with operatorPrecedence. Shared
 // store quota reservations enforce deployment guards; replica guards only shed.
 func ControllerCeilings(in OperatorInputs) (OperatorValues, error) {
 	out := OperatorValues{Origins: map[string]Origin{}}

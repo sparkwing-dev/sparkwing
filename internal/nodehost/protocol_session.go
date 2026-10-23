@@ -26,7 +26,7 @@ import (
 )
 
 // ProtocolSessionConfig launches a protocol-v2 process. Native Start methods
-// build environments through Environments; StartProtocolSession takes the
+// build environments through Environments; startProtocolSession takes the
 // explicit Environment transport input. Log must mask before storage and
 // return when its context ends.
 // Revoke removes route authority before Close joins the process.

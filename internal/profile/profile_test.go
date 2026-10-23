@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
-// safety: Save refuses a profiles path outside the sparkwing home unless the
+// safety: save refuses a profiles path outside the sparkwing home unless the
 // operator named the file, and a test binary's home is the test sandbox.
 func savedAt(t *testing.T, path string) string {
 	t.Helper()

@@ -16,7 +16,7 @@ const (
 // planCapability names each declarative feature checked by the shared validator.
 type planCapability string
 
-// CapabilityJobs through CapabilitySource name the declarative features checked during validation.
+// capabilityJobs through capabilitySource name the declarative features checked during validation.
 const (
 	capabilityJobs                  planCapability = "jobs"
 	capabilitySteps                 planCapability = "steps"

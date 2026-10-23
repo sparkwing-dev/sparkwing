@@ -2,7 +2,7 @@
 // routing source, so every generated API reference describes the routes and
 // scopes the server actually registers.
 //
-// Parse recognises the registration form those files use,
+// parse recognises the registration form those files use,
 // `mux.Handle("METHOD /path", requireScope(ScopeX, ...))`, and resolves the
 // scope constant through the map [scopes] collects from the auth sources.
 package apiroutes

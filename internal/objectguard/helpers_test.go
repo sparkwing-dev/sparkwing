@@ -10,7 +10,7 @@ func setClock(l *Limiter, now func() time.Time) {
 	l.now = now
 }
 
-// setBackoffRandom makes a Backoff's jitter deterministic.
+// setBackoffRandom makes a backoff's jitter deterministic.
 func setBackoffRandom(b backoff, random func(int64) int64) backoff {
 	b.random = random
 	return b

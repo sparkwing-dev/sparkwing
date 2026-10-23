@@ -558,7 +558,7 @@ func sameArgs(a, b map[string]string) bool {
 // avoid. What the checkout has done since is derived on read instead, and
 // reaches an operator through the lock state in `sparkwing crons list`.
 //
-// Refresh only ever republishes rows that already exist. A pipeline that starts
+// refresh only ever republishes rows that already exist. A pipeline that starts
 // declaring a schedule is armed by `sparkwing crons install`, because which
 // host evaluates a schedule is a decision an operator makes on that host, and a
 // schedule `crons uninstall --name` removed is gone from the store, so nothing here can

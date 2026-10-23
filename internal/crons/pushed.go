@@ -16,7 +16,7 @@ func (s *Service) disarmRepoURL(ctx context.Context, repoURL string) (int, error
 	return s.Schedules.DeleteCronSchedulesForRepo(ctx, repoURL)
 }
 
-// ControllerHealth is [Service.Health] for a process that evaluates schedules
+// ControllerHealth is [Service.health] for a process that evaluates schedules
 // from a loop of its own rather than an OS timer: the counts and the last tick
 // come from the store, and the timer state names the loop.
 func (s *Service) ControllerHealth(ctx context.Context) (Health, error) {

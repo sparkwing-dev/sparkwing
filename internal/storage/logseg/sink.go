@@ -17,8 +17,8 @@ import (
 )
 
 // Cutting bounds and the per-node byte cap. A segment is cut when
-// SegmentInterval has passed since the last cut with bytes pending, or
-// when SegmentBytes are pending, whichever comes first.
+// segmentInterval has passed since the last cut with bytes pending, or
+// when segmentBytes are pending, whichever comes first.
 const (
 	segmentInterval       = 10 * time.Second
 	segmentBytes          = 1 << 20
@@ -26,7 +26,7 @@ const (
 )
 
 // truncationMarker is the last line of a log that reached
-// [MaxNodeBytes]; the sink keeps nothing after it.
+// [maxNodeBytes]; the sink keeps nothing after it.
 const truncationMarker = "[sparkwing] truncated: the node log reached its 64 MiB cap\n"
 
 const maxTrackedGaps = 32
@@ -37,7 +37,7 @@ type Uploader interface {
 	// PutSegment stores seg's compressed body under segment number
 	// seg.N. Writing the same number twice writes the same bytes.
 	PutSegment(ctx context.Context, seg Segment, body []byte) error
-	// PutManifest seals the persisted stream; identical replay succeeds and conflicting seals return ErrSealed.
+	// PutManifest seals the persisted stream; identical replay succeeds and conflicting seals return errSealed.
 	PutManifest(ctx context.Context, m Manifest) error
 }
 
@@ -58,7 +58,7 @@ type Options struct {
 	MaxBytes     int64
 	// Live, when set, receives stored appends in order with the byte
 	// offset in the log each begins at, for the controller's live view,
-	// while a viewer watches the node (see [Sink.SetWatched]). It must
+	// while a viewer watches the node (see [Sink.setWatched]). It must
 	// not block.
 	Live func(offset int64, data []byte)
 	// AfterFunc schedules the interval cut; time.AfterFunc when nil.
@@ -408,7 +408,7 @@ func (s *Sink) retry(ctx context.Context, put func() error) error {
 
 // Close cuts the last segment, uploads every segment still pending, and
 // writes the manifest, which seals the log. It returns the manifest it
-// wrote. ErrSealed means the controller sealed the attempt first.
+// wrote. errSealed means the controller sealed the attempt first.
 func (s *Sink) Close(ctx context.Context, end End) (Manifest, error) {
 	s.mu.Lock()
 	if s.closed {

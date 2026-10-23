@@ -239,7 +239,7 @@ type Authenticated struct {
 // nodes.claim authorizes node and eval, triggers.claim authorizes trigger and plan, and
 // claims.launch authorizes plan/eval/node only. The request cannot combine alternatives to widen authority.
 // The named trigger route also accepts a here Award's trigger.host for its exact
-// reserved run under LiveHereClaim. This exception never opens an ordered queue scan.
+// reserved run under liveHereClaim. This exception never opens an ordered queue scan.
 type BindingChecker interface {
 	CheckBinding(context.Context, Principal, BindingRule, Target) error
 }

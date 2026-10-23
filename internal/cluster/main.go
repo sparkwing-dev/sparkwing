@@ -15,7 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-// Runtime supplies the shared service bindings used by every runner command.
+// clusterRuntime supplies the shared service bindings used by every runner command.
 type clusterRuntime struct {
 	Runner    RunnerCLI
 	Launcher  LauncherFactory

@@ -40,7 +40,7 @@ func wait(ctx context.Context, d time.Duration, changed func() bool) bool {
 }
 
 // fileChanged returns a func reporting whether path's modification time or
-// size differs from when FileChanged was called, or whether the file appeared
+// size differs from when fileChanged was called, or whether the file appeared
 // or vanished since.
 func fileChanged(path string) func() bool {
 	before, beforeErr := os.Stat(path)

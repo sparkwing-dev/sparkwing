@@ -15,7 +15,7 @@ import (
 // Source preserves the origin needed to explain a refusal without leaking values.
 type Source string
 
-// Sources are ordered by Precedence; operator sources use OperatorPrecedence.
+// Sources are ordered by precedence; operator sources use operatorPrecedence.
 const (
 	Flag            Source = "flag"
 	Env             Source = "env"

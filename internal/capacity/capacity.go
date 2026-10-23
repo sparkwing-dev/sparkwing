@@ -170,7 +170,7 @@ func applyHostCeiling(res Resolution, pipeline string, machineCores, grantableCo
 
 // applyCeiling caps a resolution at a hard ceiling, whatever its source. A
 // zero ceiling in either dimension leaves that dimension alone. Unlike
-// [ApplyHostCeiling], a pin is capped too: on a backend that turns the
+// [applyHostCeiling], a pin is capped too: on a backend that turns the
 // resolution into an enforced allocation, an operator ceiling outranks a
 // pipeline's own declaration.
 func applyCeiling(res Resolution, ceilingCores float64, ceilingMemoryBytes int64) Resolution {

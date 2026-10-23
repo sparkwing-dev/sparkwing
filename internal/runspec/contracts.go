@@ -473,7 +473,7 @@ type SealInput struct {
 	Now          time.Time
 }
 
-// safety: Projections supplies write-once indexed fields derived only from the sealed spec.
+// safety: projections supplies write-once indexed fields derived only from the sealed spec.
 type projections struct {
 	RepoKey       RepoKey
 	RepoDisplay   string

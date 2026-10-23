@@ -18,7 +18,7 @@ const (
 	ceilingObjects CeilingReason = "objects"
 )
 
-// errCeilingFrozen matches every *CeilingError under errors.Is.
+// errCeilingFrozen matches every *ceilingError under errors.Is.
 var errCeilingFrozen = errors.New("object-store bucket ceiling reached")
 
 // ceilingError reports a write refused because the bucket sits above
@@ -90,7 +90,7 @@ const DefaultCeilingReconcile = time.Hour
 type CeilingConfig struct {
 	Limit CeilingLimit
 	// Subject names the store in a refusal, such as "the log store".
-	// Empty uses DefaultCeilingSubject.
+	// Empty uses defaultCeilingSubject.
 	Subject string
 	// Remedy is the operator instruction a refusal ends with. Empty
 	// names the controller's flags.
@@ -148,14 +148,14 @@ type CeilingState struct {
 
 // Ceiling holds a bucket to a total size and a total object count.
 //
-// Counting is incremental: [Ceiling.Record] adds one write's bytes as
+// Counting is incremental: [Ceiling.record] adds one write's bytes as
 // it happens, which costs nothing per request. Those counters drift,
 // because an overwrite counts its key twice and a delete cannot know
 // what it removed, so [Ceiling.Observe] replaces them with a measured
 // total on the reconciliation interval.
 //
 // A total that reaches a ceiling freezes writes: every further object
-// write is refused with a *CeilingError until a measurement puts the
+// write is refused with a *ceilingError until a measurement puts the
 // bucket back under the ceiling or the ceiling is raised. Safe for concurrent use.
 type Ceiling struct {
 	mu        sync.Mutex
@@ -301,7 +301,7 @@ func (c *Ceiling) warningLocked() bool {
 }
 
 // Allow reports whether an object write may proceed. A frozen bucket
-// returns a *CeilingError and counts the refusal.
+// returns a *ceilingError and counts the refusal.
 func (c *Ceiling) Allow() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

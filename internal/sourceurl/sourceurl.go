@@ -108,7 +108,7 @@ func validateHost(host string) error {
 	return nil
 }
 
-// HostPolicy is a deployment's own answer to whether a clone may go to host. It
+// cloneHostPolicy is a deployment's own answer to whether a clone may go to host. It
 // sees the lowercased host with any trailing dot removed, only after the
 // built-in checks have passed, and its error reaches the caller unchanged.
 type cloneHostPolicy func(host string) error

@@ -155,7 +155,7 @@ type Claims struct {
 // The repository sits between team and pipeline because a team holds
 // repositories and a repository declares pipelines, so a trust condition
 // ending in "*" narrows from coarse to fine, and a pipeline name shared by
-// two repositories never yields one subject. It fails with ErrInvalidClaim when a value holds a separator, a wildcard
+// two repositories never yields one subject. It fails with errInvalidClaim when a value holds a separator, a wildcard
 // a trust policy would match on, or whitespace, because such a value could
 // forge a later segment.
 func (c Claims) Subject() (string, error) {
@@ -193,7 +193,7 @@ func forbiddenInSubject(r rune) bool {
 	return r == ':' || r == '*' || r == '?' || r <= ' ' || r >= 0x7f
 }
 
-// ValidateAudience accepts 1 to MaxAudienceLen printable ASCII characters
+// ValidateAudience accepts 1 to maxAudienceLen printable ASCII characters
 // with no spaces, which covers URLs and plain identifiers alike.
 func ValidateAudience(aud string) error {
 	if aud == "" {

@@ -4,7 +4,7 @@
 // One Limiter per process counts PUT, GET, LIST and DELETE separately,
 // against a per-minute rate and a per-day budget each. Exceeding either
 // budget trips that class: every further request of that class is
-// refused with a *BudgetError and nothing is queued. Classes are
+// refused with a *budgetError and nothing is queued. Classes are
 // independent, so a tripped PUT budget leaves reads working on their
 // own budget.
 //
@@ -48,7 +48,7 @@ const (
 	windowDay Window = "day"
 )
 
-// ErrBudgetExceeded matches every *BudgetError under errors.Is.
+// ErrBudgetExceeded matches every *budgetError under errors.Is.
 var ErrBudgetExceeded = errors.New("object-store request budget exceeded")
 
 // budgetError reports a refused object-store request. It names the
@@ -225,13 +225,13 @@ func (l *Limiter) Ceiling() *Ceiling { return l.ceiling }
 
 // recordWrite folds one completed object-store operation into the
 // bucket ceiling's incremental counters, by the operation name the SDK
-// uses. See [WriteDelta] for what each operation counts.
+// uses. See [writeDelta] for what each operation counts.
 func (l *Limiter) recordWrite(operation string, bytes int64) {
 	l.ceiling.record(writeDelta(operation, bytes))
 }
 
 // Allow records one request of class c and reports whether it may
-// proceed. A refusal returns a *BudgetError and consumes no budget,
+// proceed. A refusal returns a *budgetError and consumes no budget,
 // because the request never reaches the store.
 func (l *Limiter) Allow(c Class) error {
 	l.mu.Lock()

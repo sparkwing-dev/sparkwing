@@ -11,7 +11,7 @@ import (
 // Cipher is the controller cipher for one local store. It is never nil where
 // a controller takes it, so no local write stores a value as plaintext: the
 // first seal on a machine with no key creates one. Opening needs a key that
-// already exists and fails with [ErrNoKey] otherwise.
+// already exists and fails with [errNoKey] otherwise.
 type Cipher struct {
 	ring *Keyring
 	st   *store.Operator
