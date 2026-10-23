@@ -1046,3 +1046,7 @@ separate operations; no database transaction stays open across a provider call.
 - Amends decision 47. A normal restore (corruption, bad migration) keeps every session, token, runner credential and schedule consent valid. Revocations made between the restore point and the incident are recovered by hand: the operator searches the controller's audit log stream (outside the database) and re-applies them, per the vault runbook. Logging everyone out is too harsh a default for a rare event with a manual recovery.
 - `sparkwing-controller restore prepare --sign-out-everyone` keeps the credential-epoch bump as a deliberate switch for security incidents (stolen database, leaked keys).
 - Principle for future designs: when a rare event needs recovery, prefer a targeted manual step from logs over a blanket mechanism that degrades every customer.
+
+## 2026-10-23 Korey decision 55: the sparkwing- label prefix belongs to Sparkwing Cloud
+
+- Self-hosted, personal and pool runners cannot advertise labels beginning with `sparkwing-`; such self-reported labels are stripped like pool=, name= and class= terms. A job requesting a Cloud size label (e.g. `sparkwing-4cpu`) therefore always runs on a fresh, isolated Cloud pod. Teams name their own runner sizes with any other label. A team opt-in for self-hosted runners to serve Cloud sizes can be added later if customers ask.
