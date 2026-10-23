@@ -74,7 +74,7 @@ func TestGitHubAppDocsDescribeNarrowFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, term := range []string{"GitHub App unavailable: <reason>", "reads every page", "repositories_removed", "failed"} {
+	for _, term := range []string{"GitHub App unavailable: <reason>", "reads every page", "repositories_removed", "failed", "inherited child runs"} {
 		if !strings.Contains(page, term) {
 			t.Errorf("GitHub App guide omits %q", term)
 		}

@@ -448,20 +448,14 @@ type githubInstallationWithdrawal struct {
 	Count        int64
 }
 
-// WithdrawGitHubCronInstallation stops App schedules without touching manual rows.
-func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64) (int64, error) {
-	result, err := t.withdrawGitHubInstallation(ctx, installationID, nil, false)
-	return result.Count, err
-}
-
 // ReconcileGitHubInstallationRepositories withdraws consent and schedules for
 // repositories absent from the listing. A delivery replay keeps its original targets.
 func (t *Tenant) ReconcileGitHubInstallationRepositories(ctx context.Context, installationID int64, covered []int64) error {
-	_, err := t.withdrawGitHubInstallation(ctx, installationID, covered, true)
+	_, err := t.withdrawGitHubInstallation(ctx, installationID, covered)
 	return err
 }
 
-func (t *Tenant) withdrawGitHubInstallation(ctx context.Context, installationID int64, covered []int64, consent bool) (githubInstallationWithdrawal, error) {
+func (t *Tenant) withdrawGitHubInstallation(ctx context.Context, installationID int64, covered []int64) (githubInstallationWithdrawal, error) {
 	return inTxResult(ctx, t.s, func(tx *storeTx) (githubInstallationWithdrawal, error) {
 		return githubDeliveryResultTx(ctx, tx, fmt.Sprintf("withdraw-installation:%s:%d", t.team, installationID), func() (githubInstallationWithdrawal, error) {
 			var result githubInstallationWithdrawal
@@ -482,10 +476,8 @@ func (t *Tenant) withdrawGitHubInstallation(ctx context.Context, installationID 
 				return result, err
 			}
 			for _, repository := range result.Repositories {
-				if consent {
-					if err := t.withdrawGitHubAppAutomationTx(ctx, tx, installationID, repository); err != nil {
-						return result, err
-					}
+				if err := t.withdrawGitHubAppAutomationTx(ctx, tx, installationID, repository); err != nil {
+					return result, err
 				}
 				n, err := t.withdrawGitHubCronsTx(ctx, tx, fmt.Sprintf("withdraw:%d:%d", installationID, repository), repository, `github_installation_id=? AND github_repository_id=?`, installationID, repository)
 				if err != nil {

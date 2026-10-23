@@ -270,9 +270,8 @@ func missingEndpointPolicy() *apierr.Error {
 
 func writePolicyError(w http.ResponseWriter, err error) {
 	// safety: App configuration failures contain no credentials and must remain actionable.
-	var appUnavailable githubAppUnavailableError
-	if errors.As(err, &appUnavailable) {
-		_ = apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: appUnavailable.Error()})
+	if errors.Is(err, errGitHubAppUnavailable) {
+		_ = apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: err.Error()})
 		return
 	}
 	var failure *apierr.Error

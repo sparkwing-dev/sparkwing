@@ -111,12 +111,9 @@ func (s *Server) keyedRepositoryDisplay(ctx context.Context, team string, reques
 var errUncoveredGitHubRepository = errors.New("no GitHub App installation of this team covers the repository")
 
 func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID string) (string, error) {
-	if s.githubApp == nil {
-		return "", s.githubAppUnavailable()
-	}
 	refused := errUncoveredGitHubRepository
 	id, err := strconv.ParseInt(rawID, 10, 64)
-	if err != nil || id <= 0 || s.operator == nil {
+	if err != nil || id <= 0 || s.githubApp == nil || s.operator == nil {
 		return "", refused
 	}
 	tenant, err := s.tenantForTeam(ctx, store.Team(team))

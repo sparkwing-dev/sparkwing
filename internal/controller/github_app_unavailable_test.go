@@ -41,3 +41,9 @@ func TestGitHubAppUnavailableKeepsControllerAvailable(t *testing.T) {
 		t.Fatalf("App schedule: %v", err)
 	}
 }
+
+func TestGitHubAppUnavailableAllowsInheritedChildSource(t *testing.T) {
+	e, h, claim := childIntakeFixture(t)
+	e.Server.WithGitHubAppUnavailable(errors.New("private key is malformed"))
+	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}), http.StatusCreated)
+}

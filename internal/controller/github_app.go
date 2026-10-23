@@ -68,7 +68,7 @@ func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
 // WithGitHubAppUnavailable records a configuration failure while other controller features remain available.
 func (s *Server) WithGitHubAppUnavailable(reason error) *Server {
 	s.githubApp = nil
-	s.githubAppProblem = githubAppUnavailableError(reason.Error())
+	s.githubAppProblem = fmt.Errorf("%w: %v", errGitHubAppUnavailable, reason)
 	return s
 }
 
@@ -80,15 +80,13 @@ func (s *Server) InstallationTokenByIDs(ctx context.Context, installation int64,
 	return s.githubApp.client.InstallationTokenByIDs(ctx, installation, ids, permissions)
 }
 
-type githubAppUnavailableError string
-
-func (e githubAppUnavailableError) Error() string { return "GitHub App unavailable: " + string(e) }
+var errGitHubAppUnavailable = errors.New("GitHub App unavailable")
 
 func (s *Server) githubAppUnavailable() error {
 	if s.githubAppProblem != nil {
 		return s.githubAppProblem
 	}
-	return githubAppUnavailableError("not configured")
+	return fmt.Errorf("%w: not configured", errGitHubAppUnavailable)
 }
 
 func (s *Server) githubAppEnabled(w http.ResponseWriter) bool {

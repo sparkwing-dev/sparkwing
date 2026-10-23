@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -15,87 +14,62 @@ import (
 )
 
 func TestGitHubInstallationWithdrawalReplayKeepsOriginalTargets(t *testing.T) {
-	for _, reconcile := range []bool{false, true} {
-		t.Run(fmt.Sprint(reconcile), func(t *testing.T) {
-			s, tenant, in := appAdmissionFixture(t, true, "fixture")
-			defer s.Close()
-			ctx := t.Context()
-			arm := func(repository int64) CronSchedule {
-				t.Helper()
-				row := CronSchedule{ID: fmt.Sprintf("cron-%d", repository), RepoPath: fmt.Sprintf("https://github.com/acme/repo-%d", repository), Pipeline: "ci", Name: "nightly", Cron: "0 * * * *", TZ: "UTC", Where: CronWhereController, GitHubInstallationID: 7, GitHubRepositoryID: repository}
-				stored, _, err := tenant.ArmCronSchedule(ctx, row)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return stored
-			}
-			original := arm(701)
-			op, now := s.AsOperator(), in.Request.Git.App.Value.VerifiedAt
-			if err := op.EnqueueGitHubDelivery(ctx, "withdraw", "installation_repositories", []byte(`{"installation":{"id":7},"action":"removed"}`), now); err != nil {
-				t.Fatal(err)
-			}
-			apply := func(dc context.Context) int64 {
-				t.Helper()
-				if reconcile {
-					if err := tenant.ReconcileGitHubInstallationRepositories(dc, 7, nil); err != nil {
-						t.Fatal(err)
-					}
-					return 1
-				}
-				n, err := tenant.WithdrawGitHubCronInstallation(dc, 7)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return n
-			}
-			delivery, err := op.ClaimGitHubDelivery(ctx, now)
-			if err != nil || delivery == nil {
-				t.Fatalf("claim: %v %v", delivery, err)
-			}
-			if n := apply(delivery.Context(ctx)); n != 1 {
-				t.Fatalf("first withdrawal = %d, want 1", n)
-			}
-			if err := op.FinishGitHubDelivery(ctx, *delivery, "listing outage", now); err != nil {
-				t.Fatal(err)
-			}
-			later := arm(702)
-			rewriteSchemaExec(t, s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a','gh:702',702,'acme/repo-702',7,'owner',?)`, now.Add(time.Second).UnixNano())
-			rewriteSchemaExec(t, s.db, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id='withdraw'`)
-			delivery, err = op.ClaimGitHubDelivery(ctx, now.Add(time.Second))
-			if err != nil || delivery == nil {
-				t.Fatalf("reclaim: %v %v", delivery, err)
-			}
-			if n := apply(delivery.Context(ctx)); n != 1 {
-				t.Fatalf("replayed result = %d, want original 1", n)
-			}
-			// A recovered or newly unavailable listing changes the handler's branch, not its effect.
-			if err := tenant.ReconcileGitHubInstallationRepositories(delivery.Context(ctx), 7, nil); err != nil {
-				t.Fatal(err)
-			}
-			if n, err := tenant.WithdrawGitHubCronInstallation(delivery.Context(ctx), 7); err != nil || n != 1 {
-				t.Fatalf("changed listing replay = %d: %v", n, err)
-			}
-			for _, want := range []struct {
-				id       string
-				declared bool
-			}{{original.ID, false}, {later.ID, true}} {
-				row, err := tenant.GetCronSchedule(ctx, want.id)
-				if err != nil || row.Declared != want.declared {
-					t.Fatalf("schedule %s declared=%t, want %t: %v", want.id, row.Declared, want.declared, err)
-				}
-			}
-			if _, err := tenant.GitHubAppAutomation(ctx, 7, 702); err != nil {
-				t.Fatalf("replay withdrew later consent: %v", err)
-			}
-			var result githubInstallationWithdrawal
-			var raw string
-			if err := s.db.QueryRow(`SELECT result FROM github_app_delivery_effects WHERE effect LIKE 'withdraw-installation:%'`).Scan(&raw); err != nil {
-				t.Fatal(err)
-			}
-			if err := json.Unmarshal([]byte(raw), &result); err != nil || !reflect.DeepEqual(result.Repositories, []int64{701}) || result.Count != 1 {
-				t.Fatalf("receipt did not keep original targets and result: %+v %v", result, err)
-			}
-		})
+	s, tenant, in := appAdmissionFixture(t, true, "fixture")
+	defer s.Close()
+	ctx := t.Context()
+	arm := func(repository int64) CronSchedule {
+		t.Helper()
+		row := CronSchedule{ID: fmt.Sprintf("cron-%d", repository), RepoPath: fmt.Sprintf("https://github.com/acme/repo-%d", repository), Pipeline: "ci", Name: "nightly", Cron: "0 * * * *", TZ: "UTC", Where: CronWhereController, GitHubInstallationID: 7, GitHubRepositoryID: repository}
+		stored, _, err := tenant.ArmCronSchedule(ctx, row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return stored
+	}
+	original := arm(701)
+	op, now := s.AsOperator(), in.Request.Git.App.Value.VerifiedAt
+	if err := op.EnqueueGitHubDelivery(ctx, "withdraw", "installation_repositories", []byte(`{"installation":{"id":7},"action":"removed"}`), now); err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := op.ClaimGitHubDelivery(ctx, now)
+	if err != nil || delivery == nil {
+		t.Fatalf("claim: %v %v", delivery, err)
+	}
+	if err := tenant.ReconcileGitHubInstallationRepositories(delivery.Context(ctx), 7, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.FinishGitHubDelivery(ctx, *delivery, "listing outage", now); err != nil {
+		t.Fatal(err)
+	}
+	later := arm(702)
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a','gh:702',702,'acme/repo-702',7,'owner',?)`, now.Add(time.Second).UnixNano())
+	rewriteSchemaExec(t, s.db, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id='withdraw'`)
+	delivery, err = op.ClaimGitHubDelivery(ctx, now.Add(time.Second))
+	if err != nil || delivery == nil {
+		t.Fatalf("reclaim: %v %v", delivery, err)
+	}
+	if err := tenant.ReconcileGitHubInstallationRepositories(delivery.Context(ctx), 7, []int64{701}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		id       string
+		declared bool
+	}{{original.ID, false}, {later.ID, true}} {
+		row, err := tenant.GetCronSchedule(ctx, want.id)
+		if err != nil || row.Declared != want.declared {
+			t.Fatalf("schedule %s declared=%t, want %t: %v", want.id, row.Declared, want.declared, err)
+		}
+	}
+	if _, err := tenant.GitHubAppAutomation(ctx, 7, 702); err != nil {
+		t.Fatalf("replay withdrew later consent: %v", err)
+	}
+	var result githubInstallationWithdrawal
+	var raw string
+	if err := s.db.QueryRow(`SELECT result FROM github_app_delivery_effects WHERE effect LIKE 'withdraw-installation:%'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(raw), &result); err != nil || !reflect.DeepEqual(result.Repositories, []int64{701}) || result.Count != 1 {
+		t.Fatalf("receipt did not keep original targets and result: %+v %v", result, err)
 	}
 }
 
@@ -238,16 +212,16 @@ func TestGitHubDeliveryRejectsEmptyEffect(t *testing.T) {
 	}
 }
 
-func TestGitHubInstallationWithdrawalFencesFirstPublication(t *testing.T) {
+func TestGitHubRepositoryWithdrawalFencesFirstPublication(t *testing.T) {
 	s, tenant, in := appAdmissionFixture(t, true, "fixture")
 	defer s.Close()
 	prepared := prepareAppPublication(t, tenant, 7, 701)
-	if _, err := tenant.WithdrawGitHubCronInstallation(t.Context(), 7); err != nil {
+	if _, err := tenant.WithdrawGitHubCronRepository(t.Context(), 7, 701); err != nil {
 		t.Fatal(err)
 	}
 	rows, requests := publicationRows(in)
 	if _, _, err := tenant.ReplaceGitHubAppSchedules(t.Context(), prepared, in.Request.Source.Location.RemoteURL, rows, requests); !errors.Is(err, ErrGitHubPublicationStale) {
-		t.Fatalf("installation withdrawal admitted previously prepared source: %v", err)
+		t.Fatalf("repository withdrawal admitted previously prepared source: %v", err)
 	}
 }
 
