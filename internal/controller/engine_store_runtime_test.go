@@ -14,9 +14,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -116,7 +117,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 				}
 			}
 			run, err := tenant.ReadRun(t.Context(), "run")
-			if err != nil || run.State != store.RunRunning || (run.CancelRequestedAt != nil) != current {
+			if err != nil || run.State != runstate.RunRunning || (run.CancelRequestedAt != nil) != current {
 				t.Fatalf("run state=%s cancellation=%v, %v", run.State, run.CancelRequestedAt, err)
 			}
 			events, err := tenant.ReadStateEvents(t.Context(), "run", 0, 10)
@@ -190,8 +191,8 @@ func TestEngineJobLifecycleRenewsAndReplaysUnderStoreFences(t *testing.T) {
 	if _, err := server.Renew(t.Context(), authorized, controllerwire.RenewalRequest{}); err == nil {
 		t.Fatal("completed claim renewed")
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || row.Outcome != store.NodeSuccess || row.ClaimedBy != "" || row.StateSeq != 3 {
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || row.Outcome != runstate.NodeSuccess || row.ClaimedBy != "" || row.StateSeq != 3 {
 		t.Fatalf("terminal row: %+v, %v", row, err)
 	}
 	events, err := tenant.ReadStateEvents(t.Context(), "run", 0, 10)
@@ -256,7 +257,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 		t.Fatal("finish ignored the owner write failure")
 	}
 	run, err = tenant.ReadRun(t.Context(), "run")
-	if err != nil || run.State != store.RunRunning || run.FinishedAt != nil {
+	if err != nil || run.State != runstate.RunRunning || run.FinishedAt != nil {
 		t.Fatalf("partial finish: state=%s finished=%v, %v", run.State, run.FinishedAt, err)
 	}
 	engineSQL(t, server.Store, `DROP TRIGGER refuse_owner_finish`)
@@ -267,7 +268,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 		}
 	}
 	run, err = tenant.ReadRun(t.Context(), "run")
-	if err != nil || run.State != store.RunSuccess || run.FinishedAt == nil {
+	if err != nil || run.State != runstate.RunSuccess || run.FinishedAt == nil {
 		t.Fatalf("finished state=%s at %v, %v", run.State, run.FinishedAt, err)
 	}
 	var status string
@@ -312,7 +313,7 @@ func engineAcceptedFixturePlan(t *testing.T, e *engineFixture, team store.Team, 
 		t.Fatal(err)
 	}
 	spec, err := runspec.SealSpec(runspec.SealInput{Request: run.Request, Declarations: declarations, Plan: rawPlan, Now: time.Unix(0, 1), Resolved: runspec.Resolved{
-		Args: run.Request.Request.RequestedArgs, SecretArgs: append([]string{}, run.Request.Request.SecretArgs.Value...), Settings: resolved, Engine: engine.Identity{Version: "v1.2.3"}, Guards: runspec.Guards{Passed: true},
+		Args: run.Request.Request.RequestedArgs, SecretArgs: append([]string{}, run.Request.Request.SecretArgs.Value...), Settings: resolved, Engine: engineid.Identity{Version: "v1.2.3"}, Guards: runspec.Guards{Passed: true},
 	}})
 	if err != nil {
 		t.Fatal(err)

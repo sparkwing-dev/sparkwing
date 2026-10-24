@@ -9,7 +9,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -56,7 +55,7 @@ func (t *Tenant) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID st
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
-	if _, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(nodeID)}); err != nil {
+	if _, err := readNodeTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(nodeID)}); err != nil {
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT attempt,generation,holder,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason FROM node_attempts WHERE team=? AND run_id=? AND node_id=? ORDER BY attempt`, t.team, runID, nodeID)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 // APIDrainWindow bounds the API request drain before the finalization drain.
@@ -14,7 +16,7 @@ const APIDrainWindow = 5 * time.Second
 // Missing kernel UID or client SID evidence refuses access before Accept returns.
 type APIConn interface {
 	net.Conn
-	PeerIdentity() LocalPeerIdentity
+	PeerIdentity() localhostwire.LocalPeerIdentity
 }
 
 func (d *Daemon) startAPI(ctx context.Context) error {
@@ -96,7 +98,7 @@ func (l apiListener) Accept() (net.Conn, error) {
 		peer, perr := acceptedPeerIdentity(nc)
 		var connection *apiConn
 		if perr == nil {
-			var owner LocalPeerIdentity
+			var owner localhostwire.LocalPeerIdentity
 			owner, perr = controllerPeerIdentity()
 			if perr == nil {
 				connection, perr = newAPIConn(nc, peer, owner)
@@ -113,22 +115,14 @@ func (l apiListener) Accept() (net.Conn, error) {
 
 type apiConn struct {
 	net.Conn
-	identity LocalPeerIdentity
+	identity localhostwire.LocalPeerIdentity
 }
 
-func newAPIConn(nc net.Conn, peer, owner LocalPeerIdentity) (*apiConn, error) {
+func newAPIConn(nc net.Conn, peer, owner localhostwire.LocalPeerIdentity) (*apiConn, error) {
 	if _, err := LocalSubject(peer, owner); err != nil {
 		return nil, err
 	}
-	return &apiConn{Conn: nc, identity: copyPeerIdentity(peer)}, nil
+	return &apiConn{Conn: nc, identity: peer.Clone()}, nil
 }
 
-func (c *apiConn) PeerIdentity() LocalPeerIdentity { return copyPeerIdentity(c.identity) }
-
-func copyPeerIdentity(identity LocalPeerIdentity) LocalPeerIdentity {
-	if identity.UID != nil {
-		uid := *identity.UID
-		identity.UID = &uid
-	}
-	return identity
-}
+func (c *apiConn) PeerIdentity() localhostwire.LocalPeerIdentity { return c.identity.Clone() }

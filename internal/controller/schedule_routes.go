@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -20,10 +22,10 @@ import (
 // ScheduleWriter rechecks authority and repository policy in each atomic schedule or intake transaction.
 type ScheduleWriter interface {
 	Team() store.Team
-	ReplaceAuthorizedSchedules(context.Context, capability.Authorized, controllerwire.ScheduleRepoRequest) ([]string, []string, error)
+	ReplaceAuthorizedSchedules(context.Context, capability.Authorized, store.ScheduleRepoRequest) ([]string, []string, error)
 	DeleteAuthorizedSchedules(context.Context, capability.Authorized, string) (int, error)
 	PauseAuthorizedSchedule(context.Context, capability.Authorized, string, bool) (string, error)
-	OverrideAuthorizedSchedule(context.Context, capability.Authorized, string, *controllerwire.ScheduleOverride) (string, error)
+	OverrideAuthorizedSchedule(context.Context, capability.Authorized, string, *cronspec.Override) (string, error)
 	RunAuthorizedSchedule(context.Context, capability.Authorized, string, string) (string, string, bool, error)
 	DeleteAuthorizedSchedule(context.Context, capability.Authorized, string) (string, bool, error)
 }
@@ -32,8 +34,8 @@ func (s *Server) scheduleWriter(r *http.Request, a capability.Authorized) (Sched
 	return tenantPort[ScheduleWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
-func (s *Server) scheduleEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) scheduleEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "PUT", Pattern: "/api/v1/schedules/local/repos", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleRegisterLocalSchedules},
 		{Method: "POST", Pattern: "/api/v1/schedules/local/tick", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTickLocalSchedules},
 		{Method: "POST", Pattern: "/api/v1/schedules/{schedule}/pin", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePinLocalSchedule},
@@ -87,7 +89,7 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return err
 	}
-	ids, withdrawn, err := writer.ReplaceAuthorizedSchedules(r.Context(), a, body)
+	ids, withdrawn, err := writer.ReplaceAuthorizedSchedules(r.Context(), a, scheduleRequestForStore(body))
 	if err != nil {
 		if s.writeComputeLimitRefusal(w, r, err) {
 			return nil
@@ -141,9 +143,9 @@ func (s *Server) handlePauseSchedule(w http.ResponseWriter, r *http.Request, a c
 }
 
 func (s *Server) handleScheduleOverride(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var body *controllerwire.ScheduleOverride
+	var body *cronspec.Override
 	if r.Method == http.MethodPut {
-		body = &controllerwire.ScheduleOverride{}
+		body = &cronspec.Override{}
 		if err := decodeEngineRequest(r, body); err != nil {
 			return err
 		}
@@ -253,4 +255,8 @@ func (s *Server) withScheduleLock(r *http.Request, a capability.Authorized, edit
 		return err
 	}
 	return service.WithLocalLock(r.Context(), edit)
+}
+
+func scheduleRequestForStore(body controllerwire.ScheduleRepoRequest) store.ScheduleRepoRequest {
+	return store.ScheduleRepoRequest{Mode: store.ScheduleWriteMode(body.Mode), RepoURL: body.RepoURL, Branch: body.Branch, SHA: body.SHA, Follow: body.Follow, Schedules: body.Schedules}
 }

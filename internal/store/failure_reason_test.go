@@ -4,16 +4,17 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
 func TestJobFinishPersistsMetadataAndRefusesOverwrite(t *testing.T) {
-	for _, outcome := range []store.NodeState{store.NodeFailed, store.NodeSuccess} {
+	for _, outcome := range []runstate.NodeState{runstate.NodeFailed, runstate.NodeSuccess} {
 		t.Run(string(outcome), func(t *testing.T) {
 			f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
-			result := &store.NodeResult{Outcome: outcome}
-			if outcome == store.NodeFailed {
+			result := &runstate.NodeResult{Outcome: outcome}
+			if outcome == runstate.NodeFailed {
 				code := 137
 				result.Reason, result.MaskedError, result.ExitCode = store.FailureOOMKilled, "container killed", &code
 			}
@@ -28,7 +29,7 @@ func TestJobFinishPersistsMetadataAndRefusesOverwrite(t *testing.T) {
 			if err != nil || node.Outcome != string(outcome) || node.FailureReason != result.Reason || !reflect.DeepEqual(node.ExitCode, result.ExitCode) || node.Error != result.MaskedError || node.FinishedAt == nil {
 				t.Fatalf("metadata=%+v, %v", node, err)
 			}
-			finish.Result = &store.NodeResult{Outcome: outcome, MaskedError: "changed"}
+			finish.Result = &runstate.NodeResult{Outcome: outcome, MaskedError: "changed"}
 			if _, err := f.tenant.TransitionNode(t.Context(), finish); err == nil {
 				t.Fatal("different terminal metadata overwrote result")
 			}

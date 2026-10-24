@@ -16,13 +16,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const (
@@ -329,7 +329,7 @@ type githubAppIntake struct {
 	sha    string
 	env    map[string]string
 	at     time.Time
-	prInfo *sparkwing.PullRequest
+	prInfo *nodeproto.PullRequest
 	// headRepo is GitHub's ID for the repository a pull request's head lives in.
 	headRepo int64
 }
@@ -525,12 +525,12 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 }
 
 // PullRequestForTrigger projects authenticated trigger metadata into the SDK run context.
-func PullRequestForTrigger(env map[string]string) *sparkwing.PullRequest {
+func PullRequestForTrigger(env map[string]string) *nodeproto.PullRequest {
 	if env["GITHUB_EVENT_NAME"] != "pull_request" {
 		return nil
 	}
 	number, _ := strconv.Atoi(env["GITHUB_PR_NUMBER"])
-	return &sparkwing.PullRequest{
+	return &nodeproto.PullRequest{
 		Number: number, Action: env["GITHUB_PR_ACTION"],
 		BaseRef: env["GITHUB_BASE_REF"], BaseSHA: env["GITHUB_BASE_SHA"],
 		HeadRef: env["GITHUB_HEAD_REF"], HeadSHA: env["GITHUB_HEAD_SHA"],
@@ -954,7 +954,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 			var refusal *apierr.Error
 			if errors.As(err, &refusal) && refusal.Details["retry_after_ms"] != nil {
 				if !githubAppStartedAny(resp.Runs) {
-					writePolicyError(w, err)
+					routepolicy.WritePolicyError(w, err)
 					return
 				}
 				failed++

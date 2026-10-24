@@ -9,6 +9,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -19,8 +21,8 @@ type sessionProof struct {
 	role    store.Role
 }
 
-func (s *Server) sessionEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) sessionEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/auth/session", Authentication: capability.AuthBrowserFlow, Verify: s.verifySessionFlow, Handle: s.handleSession},
 		{Method: "POST", Pattern: "/api/v1/auth/logout", Authentication: capability.AuthBrowserFlow, Verify: s.verifySessionFlow, Handle: s.handleLogout},
 	}
@@ -80,7 +82,7 @@ func (s *Server) readSessionFlow(r *http.Request) (*store.Session, error) {
 		return nil, err
 	}
 	if s.operator == nil {
-		return nil, missingEndpointPolicy()
+		return nil, routepolicy.MissingEndpointPolicy()
 	}
 	if !s.deployment.MultiTeam() {
 		return nil, sessionUnavailable()
@@ -108,7 +110,7 @@ func (s *Server) validateSessionFlow(session *store.Session) error {
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	proof, ok := r.Context().Value(sessionProofKey{}).(sessionProof)
 	if !ok || proof.session == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	session := proof.session
 	writeJSON(w, http.StatusOK, sessionResp{
@@ -136,7 +138,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, _ capabili
 func (s *Server) endVerifiedSession(w http.ResponseWriter, r *http.Request) error {
 	proof, ok := r.Context().Value(sessionProofKey{}).(sessionProof)
 	if !ok || proof.session == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	if err := s.operator.DeleteSession(proof.session.ID); err != nil {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)

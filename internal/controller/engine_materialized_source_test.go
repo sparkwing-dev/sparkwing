@@ -6,6 +6,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -44,7 +46,7 @@ func FuzzEngineSnapshotPreservesGuardVerdict(f *testing.F) {
 	f.Add("", false, true)
 	f.Add("not a refusal", true, false)
 	f.Fuzz(func(t *testing.T, reason string, passed, cancel bool) {
-		snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run", Plan: []byte(`{"jobs":[]}`), Spec: &runspec.Spec{Resolved: runspec.Resolved{Guards: runspec.Guards{When: []string{"where:local"}, Reason: reason, Passed: passed}}}}}
+		snapshot := store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: "run", Plan: []byte(`{"jobs":[]}`), Spec: &runspec.Spec{Resolved: runspec.Resolved{Guards: runspec.Guards{When: []string{"where:local"}, Reason: reason, Passed: passed}}}}}}
 		if cancel {
 			now := time.Unix(1, 0)
 			snapshot.Run.CancelRequestedAt = &now

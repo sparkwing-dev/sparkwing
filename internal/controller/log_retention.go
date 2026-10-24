@@ -1,8 +1,9 @@
 package controller
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"maps"
+
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // WithLogRetention keeps the log segments of the named teams for the

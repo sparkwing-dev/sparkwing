@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -28,14 +28,14 @@ func checkNodeOrderAfterStarts(t *testing.T, target *storetest.Target) {
 		t.Fatal(err)
 	}
 	for i := len(ids) - 1; i >= 0; i-- {
-		ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(ids[i])}
-		reconciled, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: plan.Actor, Policy: store.SourceNone})
-		if err != nil || reconciled.Kind != store.Execute || reconciled.Claim == nil {
+		ref := runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(ids[i])}
+		reconciled, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: plan.Actor, Policy: runstate.SourceNone})
+		if err != nil || reconciled.Kind != runstate.Execute || reconciled.Claim == nil {
 			t.Fatalf("reconcile %s: %+v, %v", ids[i], reconciled, err)
 		}
 		claim := reconciled.Claim
-		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix}, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
-		if result, err := tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(actor.RunID), NodeID: string(actor.NodeID), Generation: int64(actor.Generation)}, actor); err != nil || result.Kind != store.AcquireGranted {
+		actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix}, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
+		if result, err := tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: string(actor.RunID), NodeID: string(actor.NodeID), Generation: int64(actor.Generation)}, actor); err != nil || result.Kind != runstate.AcquireGranted {
 			t.Fatalf("execution admission: %+v, %v", result, err)
 		}
 		if _, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: acceptanceAttempt(0)}); err != nil {
@@ -48,7 +48,7 @@ func checkNodeOrderAfterStarts(t *testing.T, target *storetest.Target) {
 		t.Fatalf("nodes = %d, %v; want %d", len(nodes), err, len(ids))
 	}
 	for i, n := range nodes {
-		if n.Ref.NodeID != runspec.NodeID(ids[i]) || n.Status != store.StatusRunning || n.StartedAt == nil {
+		if n.Ref.NodeID != runspec.NodeID(ids[i]) || n.Status != runstate.StatusRunning || n.StartedAt == nil {
 			t.Fatalf("node %d = %+v; want running %s", i, n, ids[i])
 		}
 	}
@@ -66,10 +66,10 @@ func TestPlanFixtureReconcileUsesConfiguredClaimProfile(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		profile store.ClaimProfileResolver
-		want    store.ReconcileKind
+		want    runstate.ReconcileKind
 	}{
-		{name: "without host observation", want: store.Dispatch},
-		{name: "with claim profile", profile: acceptanceClaimProfile{}, want: store.Execute},
+		{name: "without host observation", want: runstate.Dispatch},
+		{name: "with claim profile", profile: acceptanceClaimProfile{}, want: runstate.Execute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := storetest.NewSQLite(t).Open(t, fixturePolicies(store.Policies{ClaimProfiles: tc.profile}))
@@ -80,9 +80,9 @@ func TestPlanFixtureReconcileUsesConfiguredClaimProfile(t *testing.T) {
 			if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
 				t.Fatal(err)
 			}
-			ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "alpha"}
-			got, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: plan.Actor, Policy: store.SourceNone})
-			if err != nil || got.Kind != tc.want || (got.Claim != nil) != (tc.want == store.Execute) {
+			ref := runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "alpha"}
+			got, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: plan.Actor, Policy: runstate.SourceNone})
+			if err != nil || got.Kind != tc.want || (got.Claim != nil) != (tc.want == runstate.Execute) {
 				t.Fatalf("reconcile kind=%s claim=%+v: %v; want %s", got.Kind, got.Claim, err, tc.want)
 			}
 		})

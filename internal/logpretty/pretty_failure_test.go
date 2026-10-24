@@ -5,20 +5,18 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func renderRunFailure(t *testing.T, nodes []any) string {
 	t.Helper()
 	var buf bytes.Buffer
 	r := NewPrettyRendererTo(&buf, false)
-	r.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "run_summary", Attrs: map[string]any{
+	r.Emit(Record{TS: time.Now(), Level: "info", Event: "run_summary", Attrs: map[string]any{
 		"status":      "failed",
 		"duration_ms": int64(154000),
 		"nodes":       nodes,
 	}})
-	r.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "run_finish", Attrs: map[string]any{
+	r.Emit(Record{TS: time.Now(), Level: "info", Event: "run_finish", Attrs: map[string]any{
 		"run_id":      "run-xyz",
 		"status":      "failed",
 		"duration_ms": int64(154000),

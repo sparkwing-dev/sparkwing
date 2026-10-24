@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func lockClaimOwnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
@@ -42,7 +42,7 @@ func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capab
 		}
 		return nil
 	}
-	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}}
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, CapabilityPrefix: c.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}}
 
 	return checkOwnerTx(ctx, tx, Team(c.Team), actor, string(unit.RunID))
 }
@@ -65,7 +65,7 @@ func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 	}
 	wait := runClaimWait(run)
 	if unit.Kind == capability.UnitNode {
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
+		row, err := readNodeTx(ctx, tx, team, runspec.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
 		if err != nil {
 			return err
 		}
@@ -73,7 +73,7 @@ func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 		if err != nil {
 			return err
 		}
-		if state != NodeReady || row.CancelRequestedAt != nil || row.ReadyAt.UnixNano() > now {
+		if state != runstate.NodeReady || row.CancelRequestedAt != nil || row.ReadyAt.UnixNano() > now {
 			return holderRefusal()
 		}
 		if wait.Set && wait.Value > 0 && (row.QueueStartedAt == nil || !row.QueueStartedAt.Add(wait.Value).After(time.Unix(0, now))) {

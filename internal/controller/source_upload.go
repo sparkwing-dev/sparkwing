@@ -16,8 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func (s *Server) sourceUploadEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) sourceUploadEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/data/source", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSourceUpload},
 		{Method: "POST", Pattern: "/api/v1/data/source/{upload}/commit", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSourceCommit},
 	}

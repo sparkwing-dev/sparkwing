@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
@@ -94,7 +94,7 @@ func checkStoreCapabilityManagement(t *testing.T) (err error) {
 	if next.Issued.Raw == "" || next.Issued.Capability.Parent == nil || *next.Issued.Capability.Parent != authority {
 		return errors.New("reopening lost root provisioning origin")
 	}
-	if err := tenant.RevokeAuthority(ctx, store.Actor{Authority: authority}, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}); err != nil {
+	if err := tenant.RevokeAuthority(ctx, runstate.Actor{Authority: authority}, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}); err != nil {
 		return err
 	}
 	for _, c := range []capability.Capability{issued.Capability, child.Capability} {

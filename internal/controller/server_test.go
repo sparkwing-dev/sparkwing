@@ -13,6 +13,8 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -51,9 +53,7 @@ func TestController_HealthHidesDatabaseErrors(t *testing.T) {
 func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
 	f := newCronsFixture(t)
 	for i := range 20 {
-		if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{
-			ID: fmt.Sprintf("failed-%d", i), Pipeline: "demo", Status: "failed", StartedAt: time.Now(),
-		}); err != nil {
+		if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: fmt.Sprintf("failed-%d", i), Pipeline: "demo", Status: "failed", StartedAt: time.Now()}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -94,7 +94,7 @@ func (f *queueGroupReaderFake) ReadAuthorizedGroup(ctx context.Context, a capabi
 func checkQueueArrival(t *testing.T, arrival int64) {
 	t.Helper()
 	f := newCronsFixture(t)
-	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{ID: "run", Pipeline: "ci", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run", Pipeline: "ci", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.SeedNode(f.store, t.Context(), store.Node{RunID: "run", NodeID: "job", Status: "running"}); err != nil {
@@ -173,7 +173,7 @@ func TestController_GetRunBeforePlanning(t *testing.T) {
 
 func seedReportRun(t *testing.T, f *cronsFixture, id string, jobs []string) {
 	t.Helper()
-	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{ID: id, Pipeline: "ci", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: "ci", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, job := range jobs {
@@ -191,7 +191,7 @@ func TestControllerPublicHealthHidesWorkloadProperty(t *testing.T) {
 		if failed {
 			status = "failed"
 		}
-		if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{ID: "private-run", Pipeline: secret, Status: status, Error: secret, Args: map[string]string{"secret": secret}, StartedAt: time.Now()}); err != nil {
+		if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "private-run", Pipeline: secret, Status: status, Error: secret, Args: map[string]string{"secret": secret}, StartedAt: time.Now()}}); err != nil {
 			t.Fatal(err)
 		}
 		r := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)

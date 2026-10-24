@@ -11,8 +11,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	award "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -33,7 +35,7 @@ func TestClaimedRunnerRefusesAwardWithoutSourceBeforeAcquisition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inputs, err := nativeInputs(t.Context(), state, unit, principal, input)
+	inputs, err := NativeInputs(t.Context(), state, unit, principal, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +47,7 @@ func TestClaimedRunnerRefusesAwardWithoutSourceBeforeAcquisition(t *testing.T) {
 		},
 	}
 	host.Lease.Interval, host.Lease.Lease = time.Second, time.Minute
-	if err := host.Execute(t.Context(), inputs.node); err == nil || !strings.Contains(err.Error(), "sealed source requires exactly one acquisition location") {
+	if err := host.Execute(t.Context(), inputs.Node); err == nil || !strings.Contains(err.Error(), "sealed source requires exactly one acquisition location") {
 		t.Fatalf("sourceless award: %v", err)
 	}
 }
@@ -53,14 +55,14 @@ func TestClaimedRunnerRefusesAwardWithoutSourceBeforeAcquisition(t *testing.T) {
 type hostingState struct {
 	nodehost.NativeHostStore
 	snapshot store.RunSnapshot
-	node     store.NodeRow
+	node     runstate.NodeRow
 }
 
 func (s *hostingState) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
 	return s.snapshot, nil
 }
 
-func (s *hostingState) ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
+func (s *hostingState) ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error) {
 	return s.node, nil
 }
 
@@ -68,7 +70,7 @@ func hostingStateFor(t *testing.T, kind capability.UnitKind) (controllerwire.Cla
 	t.Helper()
 	unit := hostingAward(kind)
 	if kind == capability.UnitNode {
-		unit.Engine.Pin = engine.Pin{SDK: engine.GoSDK, Version: unit.Engine.Version}
+		unit.Engine.Pin = engineid.Pin{SDK: engineid.GoSDK, Version: unit.Engine.Version}
 		unit.Engine.ManifestDigest = "manifest"
 		unit.Accepted.Spec.Resolved.Engine = *unit.Engine
 		unit.Accepted.Spec.PlanHash = unit.Accepted.PlanHash
@@ -78,14 +80,14 @@ func hostingStateFor(t *testing.T, kind capability.UnitKind) (controllerwire.Cla
 	p := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "award"}, Capability: capability.Capability{
 		Prefix: "award", Issuance: capability.Award, Team: "team", Unit: kind, UnitID: unit.UnitID, Purpose: unit.Purpose, Delivery: unit.Delivery, Binding: unit.Binding,
 	}}
-	row := store.RunRow{ID: unit.RunID, Team: "team", Request: unit.Request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)}}}
+	row := store.RunRow{Team: "team", Execution: runstate.Execution{ID: unit.RunID, Request: unit.Request, Owner: &runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)}}}}
 	state := &hostingState{snapshot: store.RunSnapshot{Run: row}}
 	if kind == capability.UnitNode {
 		unit.Accepted.Spec.Request = unit.Request
 		state.snapshot.Run.Spec = &unit.Accepted.Spec
 		state.snapshot.Run.Plan = unit.Accepted.Plan
 		state.snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
-		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), Attempt: runspec.AttemptOrdinal(unit.Binding.Attempt), SpecHash: "job-hash", Status: store.StatusPending, Execution: *unit.Execution}
+		state.node = runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), Attempt: runspec.AttemptOrdinal(unit.Binding.Attempt), SpecHash: "job-hash", Status: runstate.StatusPending, Execution: *unit.Execution}
 	}
 	// safety: the store's snapshot must not share mutable objects with the received award.
 	body, err := json.Marshal(state.snapshot)
@@ -107,16 +109,16 @@ func TestNativeInputsUsePersistedAuthority(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := nativeInputs(t.Context(), state, unit, p, input)
+			got, err := NativeInputs(t.Context(), state, unit, p, input)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if kind == capability.UnitNode {
-				if got.node.Entry != nil || got.node.Authority.CapabilityPrefix != p.Capability.Prefix || got.node.Engine.Identity != *unit.Engine || !reflect.DeepEqual(got.node.GrantedRunner, unit.Runner) || got.node.SpecHash != state.node.SpecHash || got.node.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || got.node.Attempt != runspec.AttemptOrdinal(unit.Binding.Attempt) {
-					t.Fatalf("node input=%+v", got.node)
+				if got.Node.Entry != nil || got.Node.Authority.CapabilityPrefix != p.Capability.Prefix || got.Node.Engine.Identity != *unit.Engine || !reflect.DeepEqual(got.Node.GrantedRunner, unit.Runner) || got.Node.SpecHash != state.node.SpecHash || got.Node.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || got.Node.Attempt != runspec.AttemptOrdinal(unit.Binding.Attempt) {
+					t.Fatalf("node input=%+v", got.Node)
 				}
-			} else if got.run.Owner.Authority != p.Authority || got.run.Owner.Owner != *state.snapshot.Run.Owner {
-				t.Fatalf("owner=%+v", got.run.Owner)
+			} else if got.Run.Owner.Authority != p.Authority || got.Run.Owner.Owner != *state.snapshot.Run.Owner {
+				t.Fatalf("owner=%+v", got.Run.Owner)
 			}
 		})
 	}
@@ -158,7 +160,7 @@ func FuzzAwardInputCapturesRetrySeals(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := nativeInputs(t.Context(), state, unit, principal, input); err != nil {
+		if _, err := NativeInputs(t.Context(), state, unit, principal, input); err != nil {
 			t.Fatal(err)
 		}
 		if node && input.Accepted.RunID != unit.RunID {
@@ -218,7 +220,7 @@ func FuzzNativeInputsRejectChangedAwards(f *testing.F) {
 		}
 		input, err := nodehost.NewRunInput(unit)
 		if err == nil {
-			_, err = nativeInputs(t.Context(), state, unit, p, input)
+			_, err = NativeInputs(t.Context(), state, unit, p, input)
 		}
 		if err == nil {
 			t.Fatal("changed award crossed the persisted execution fence")

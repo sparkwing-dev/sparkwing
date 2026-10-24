@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -22,14 +23,14 @@ import (
 
 func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 	f := newPlanningFixture(t)
-	resolved := engine.Resolved{Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("a", 64)}}
+	resolved := engine.Resolved{Identity: engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("a", 64)}}
 	var logs []nodeproto.FrameLog
 	var processes []*executorProcess
 	defaultValue, supplied := "sdk-private-default", "explicit-private-value"
 	empty, fallback := "", "public-default"
 	planner := SDKPlanner{
 		Masker: secrets.NewMasker(),
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
 		Log: func(_ context.Context, record nodeproto.FrameLog) error { logs = append(logs, record); return nil },
@@ -120,12 +121,12 @@ func TestSDKPlanningValidatesFreshIdentifiersAgainstIssuedValues(t *testing.T) {
 func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planningFixture, *[]*executorProcess) {
 	t.Helper()
 	f := newPlanningFixture(t)
-	resolved := engine.Resolved{Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("a", 64)}}
+	resolved := engine.Resolved{Identity: engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("a", 64)}}
 	processes := &[]*executorProcess{}
 	input := PlanningProcessInput{Entry: &source.Entry{Engine: resolved}, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Run: nodeproto.RunContext{RunID: "run", Pipeline: "build"}}
 	p := SDKPlanner{
 		Masker: secrets.NewMasker(), Log: func(context.Context, nodeproto.FrameLog) error { return nil },
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
 		Start: func(_ context.Context, _ PlanningProcessInput, _ func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
@@ -369,8 +370,8 @@ func TestSDKPlanningRefusesChangedEngineAndSDK(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			p, input, f, processes := sdkPlanningFixture(t)
 			if mode == "engine" {
-				p.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
-					return engine.Resolved{Identity: engine.Identity{Version: "different"}}, nil
+				p.EnsureEngine = func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
+					return engine.Resolved{Identity: engineid.Identity{Version: "different"}}, nil
 				}
 			} else {
 				start := p.Start

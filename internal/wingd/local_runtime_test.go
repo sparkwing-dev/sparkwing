@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -24,7 +25,7 @@ type runtimeControllerFixture struct {
 	home       string
 	reconcile  func(context.Context) (LocalActivity, error)
 	background func(context.Context, func(LocalActivity) error) error
-	http       func() LocalHTTP
+	http       func() localhostwire.LocalHTTP
 	closed     atomic.Bool
 	closeErr   error
 }
@@ -44,11 +45,11 @@ func (f *runtimeControllerFixture) Run(ctx context.Context, report func(LocalAct
 	return nil
 }
 
-func (f *runtimeControllerFixture) HTTP() LocalHTTP {
+func (f *runtimeControllerFixture) HTTP() localhostwire.LocalHTTP {
 	if f.http != nil {
 		return f.http()
 	}
-	return LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()}
+	return localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()}
 }
 
 func (f *runtimeControllerFixture) Close() error {
@@ -572,13 +573,13 @@ func TestLocalRuntimeDefersConsumersUntilPrivateAPIReady(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		entered, release, consumed := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		f := &runtimeControllerFixture{
-			http: func() LocalHTTP {
+			http: func() localhostwire.LocalHTTP {
 				close(entered)
 				select {
 				case <-release:
 				case <-ctx.Done():
 				}
-				return LocalHTTP{API: http.NotFoundHandler()}
+				return localhostwire.LocalHTTP{API: http.NotFoundHandler()}
 			},
 			background: func(ctx context.Context, _ func(LocalActivity) error) error {
 				close(consumed)

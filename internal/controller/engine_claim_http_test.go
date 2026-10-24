@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -38,7 +39,7 @@ func revokeEngineMachine(t *testing.T, s *store.Store, prefix string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: admin.Prefix}}, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+	if err := tenant.RevokeAuthority(t.Context(), runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: admin.Prefix}}, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
 		t.Fatal(err)
 	}
 }

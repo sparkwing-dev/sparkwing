@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -29,7 +31,7 @@ func seedTeam(t *testing.T, st *store.Store, tn *store.Tenant, ownerID, runID st
 	now := time.Now()
 	if err := tn.TestOnlySeedTriggerWithRun(ctx,
 		store.Trigger{ID: runID, Pipeline: "build", CreatedAt: now},
-		store.Run{ID: runID, Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
+		store.Run{RunSummary: runstate.RunSummary{ID: runID, Pipeline: "build", Status: "pending", StartedAt: now}}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	if err := teststore.SeedSecret(st, tn.Team(), store.Secret{Name: "API_KEY", Value: "v-" + runID}, now); err != nil {
@@ -306,7 +308,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	runCtx := store.FixtureWithCreatingPrincipal(ctx, "leaver@example.com")
 	if err := shared.TestOnlySeedTriggerWithRun(runCtx,
 		store.Trigger{ID: "run-l", Pipeline: "build", CreatedAt: now, TriggerUser: "leaver@example.com"},
-		store.Run{ID: "run-l", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
+		store.Run{RunSummary: runstate.RunSummary{ID: "run-l", Pipeline: "build", Status: "pending", StartedAt: now}}); err != nil {
 		t.Fatal(err)
 	}
 

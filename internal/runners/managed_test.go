@@ -3,7 +3,6 @@ package runners
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -15,8 +14,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 )
 
 type unavailableVersions struct{ err error }
@@ -170,18 +169,15 @@ func runnerPolicyFixtures(t *testing.T) (engine.VerifiedIndex, engine.VerifiedIn
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := releaseauth.TrustedPublicKeys
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Now().UTC()
 	published := now.AddDate(0, -1, 0)
-	policy := engine.VersionIndex{Format: engine.VersionIndexFormat, PublishedAt: now.Add(-time.Minute), Latest: "v0.10.0", Versions: []engine.VersionInfo{{Version: "v0.10.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}}}
+	policy := engine.VersionIndex{Format: engine.VersionIndexFormat, PublishedAt: now.Add(-time.Minute), Latest: "v0.10.0", Versions: []engineid.VersionInfo{{Version: "v0.10.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}}}
 	verify := func() engine.VerifiedIndex {
 		body, err := json.Marshal(policy)
 		if err != nil {
 			t.Fatal(err)
 		}
-		verified, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: ed25519.Sign(key, body)}, now)
+		verified, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: ed25519.Sign(key, body)}, now, []ed25519.PublicKey{public})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,7 +186,7 @@ func runnerPolicyFixtures(t *testing.T) (engine.VerifiedIndex, engine.VerifiedIn
 	initial := verify()
 	policy.PublishedAt = now
 	policy.Latest = "v0.20.0"
-	policy.Versions = append(policy.Versions, engine.VersionInfo{Version: "v0.20.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)})
+	policy.Versions = append(policy.Versions, engineid.VersionInfo{Version: "v0.20.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)})
 	policy.Minimum = engine.Restriction{Version: "v0.20.0", Reason: "security fixture", Security: true, AnnouncedAt: now.Add(-time.Minute), EffectiveAt: now.Add(-time.Second)}
 	return initial, verify()
 }

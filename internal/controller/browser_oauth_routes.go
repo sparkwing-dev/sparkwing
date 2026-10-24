@@ -8,6 +8,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -20,8 +22,8 @@ type oauthProof struct {
 	raw     string
 }
 
-func (s *Server) oauthEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) oauthEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/auth/{provider}/start", Authentication: capability.AuthBrowserFlow, Verify: s.verifyOAuthStart, Handle: s.handleOAuthStart},
 		{Method: "GET", Pattern: "/auth/{provider}/callback", Authentication: capability.AuthBrowserFlow, Verify: s.verifyOAuthCallback, Handle: s.handleOAuthCallback},
 	}
@@ -77,7 +79,7 @@ func (s *Server) verifyOAuthCallback(r *http.Request) error {
 		proof.flow.Code = query.Get("code")
 	} else {
 		if s.operator == nil {
-			return missingEndpointPolicy()
+			return routepolicy.MissingEndpointPolicy()
 		}
 		proof.session, proof.raw, err = s.oauthSignIn(r.Context(), name, query.Get("code"), flow.Verifier, browserURL(r, oauthCallbackPath(name)))
 		if err != nil {

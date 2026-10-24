@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 	s, _, now := maintenanceStore(t)
-	for i, status := range []RunState{RunPending, RunRunning, RunSuccess, RunFailed, RunCancelled} {
+	for i, status := range []runstate.RunState{runstate.RunPending, runstate.RunRunning, runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled} {
 		maintenanceRun(t, s, fmt.Sprintf("run-%d", i), i+1, status)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET team='b' WHERE id='run-1'`)
@@ -22,7 +22,7 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 		want[state] = 0
 	}
 	random := rand.New(rand.NewPCG(401, 807))
-	states := []NodeState{nodePending, NodeReady, NodeClaimed, NodeRunning, NodeApprovalPending, NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeMemoized, NodeSuperseded}
+	states := []runstate.NodeState{nodePending, runstate.NodeReady, runstate.NodeClaimed, runstate.NodeRunning, runstate.NodeApprovalPending, runstate.NodeSuccess, runstate.NodeFailed, runstate.NodeCancelled, runstate.NodeSkipped, runstate.NodeMemoized, runstate.NodeSuperseded}
 	for i := range 256 {
 		run := i % 5
 		team := Team("a")
@@ -30,24 +30,24 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 			team = "b"
 		}
 		state := states[i%len(states)]
-		row := NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(fmt.Sprintf("run-%d", run)), NodeID: runspec.NodeID(fmt.Sprintf("job-%d", i))}, Status: StatusPending}
-		if random.IntN(2) == 0 || state == NodeReady {
+		row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(fmt.Sprintf("run-%d", run)), NodeID: runspec.NodeID(fmt.Sprintf("job-%d", i))}, Status: runstate.StatusPending}
+		if random.IntN(2) == 0 || state == runstate.NodeReady {
 			row.ReadyAt = now
 		}
 		switch state {
 		case nodePending:
 			row.ReadyAt = nil
-		case NodeClaimed, NodeRunning:
+		case runstate.NodeClaimed, runstate.NodeRunning:
 			row.ClaimedBy, row.CapabilityPrefix, row.Generation = fmt.Sprintf("holder-%d", i%3), "claim", 1
 			until := now.Add(time.Duration(random.IntN(3)-1) * time.Minute)
 			row.LeaseExpiresAt = &until
-			if state == NodeRunning {
-				row.Status, row.Attempt, row.StartedAt = StatusRunning, 1, now
+			if state == runstate.NodeRunning {
+				row.Status, row.Attempt, row.StartedAt = runstate.StatusRunning, 1, now
 			}
-		case NodeApprovalPending:
-			row.Status = StatusApprovalPending
-		case NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeMemoized, NodeSuperseded:
-			row.Status, row.Outcome, row.FinishedAt = StatusDone, state, now
+		case runstate.NodeApprovalPending:
+			row.Status = runstate.StatusApprovalPending
+		case runstate.NodeSuccess, runstate.NodeFailed, runstate.NodeCancelled, runstate.NodeSkipped, runstate.NodeMemoized, runstate.NodeSuperseded:
+			row.Status, row.Outcome, row.FinishedAt = runstate.StatusDone, state, now
 		}
 		if got, err := nodeState(row); err != nil || got != state {
 			t.Fatalf("fixture: %s, %v", got, err)
@@ -57,7 +57,7 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 			holder = row.ClaimedBy
 		}
 		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,ready_at,claimed_by,capability_prefix,generation,attempt,lease_expires_at,finished_at,started_at,spec_json,execution_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Status, row.Outcome, timeNS(row.ReadyAt), holder, row.CapabilityPrefix, row.Generation, row.Attempt, timeNS(row.LeaseExpiresAt), timeNS(row.FinishedAt), timeNS(row.StartedAt), []byte(`{}`), []byte(`{}`))
-		if run < 2 && row.Status != StatusDone {
+		if run < 2 && row.Status != runstate.StatusDone {
 			key := string(state)
 			if state == nodePending {
 				key = QueueStateWaiting
@@ -93,7 +93,7 @@ func TestTenantPendingTriggersIgnoreForeignQueueProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(618, 211))
 	for i := range 64 {
 		id := fmt.Sprintf("run-%d", i)
-		maintenanceRun(t, s, id, i+1, RunPending)
+		maintenanceRun(t, s, id, i+1, runstate.RunPending)
 		team := Team("a")
 		if random.IntN(2) == 0 {
 			team = "b"

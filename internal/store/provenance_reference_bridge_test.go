@@ -11,10 +11,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 const (
@@ -70,13 +70,13 @@ func referenceWorld(t *testing.T, s *Store, repo string) *Tenant {
 	return &Tenant{s: s, team: "a"}
 }
 
-func referenceMember(t *testing.T, s *Store, id string, role Role) Actor {
+func referenceMember(t *testing.T, s *Store, id string, role Role) runstate.Actor {
 	t.Helper()
 	s.testOnlyExec(t, "INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?, ?, 1, 1)", id, id+"@example.test")
 	s.testOnlyExec(t, "INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a',?,?,1)", id, role)
 	s.testOnlyExec(t, "INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,'a',?)", id, id, "runs.read,runs.write,runs.control,team.admin", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano(), id)
 	s.testOnlyExec(t, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'a',0)`, id)
-	return Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
+	return runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
 }
 
 // referencePolicy answers intake for every entrypoint the reference model drives.
@@ -262,9 +262,9 @@ func memberScheduleReference(t *testing.T, s *Store, role Role) (*Tenant, string
 	t.Helper()
 	tenant := referenceWorld(t, s, "gh:701")
 	armer := referenceMember(t, s, "armer", role)
-	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), teamAuthorization(t, s, armer, "a", "PUT", "/api/v1/schedules/repos"), controllerwire.ScheduleRepoRequest{
-		Mode: controllerwire.ScheduleReplace, RepoURL: "https://github.com/acme/app.git", Branch: "main", Follow: true,
-		Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}},
+	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), teamAuthorization(t, s, armer, "a", "PUT", "/api/v1/schedules/repos"), ScheduleRepoRequest{
+		Mode: ScheduleReplace, RepoURL: "https://github.com/acme/app.git", Branch: "main", Follow: true,
+		Schedules: []runspec.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}},
 	})
 	if err != nil {
 		t.Fatal(err)

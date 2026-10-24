@@ -19,8 +19,9 @@ No new route or grant is introduced.
 
 <!-- design:begin -->
 
-Team machine enrollment settings share controllerwire.TeamSettings with the
-store, HTTP routes and concrete client.TeamSettingsClient. ReadTeamSettings
+Team machine enrollment settings use [`controllerwire.TeamSettings`](../../../internal/controllerwire/team_settings.go)
+at HTTP and client boundaries. Persistence uses [`store.TeamSettings`](../../../internal/store/controller_requests.go).
+Controller handlers project between the two representations. ReadTeamSettings
 uses GET `/api/v1/team/settings` under `runs.read`; SetTeamSettings uses PUT
 under current `team.admin` with an explicit `members_can_add_machines` boolean.
 The default is true. Personal issuance still needs an independent account
@@ -352,7 +353,8 @@ one envelope and use `apierr.DecodeInner`.
 | `RenewalRequest`, `RenewalResponse` | Shared keeper activity, expiry, cancellation and watched jobs. |
 | `JobResult`, `JobTransitionRequest`, `Applied` | One transition/report boundary, authorized output records and replay result. |
 | `StepReportRequest`, `StepRecorded` | Attempt-specific step state and acknowledged persistence on the C2 start/finish/skip routes. |
-| `LauncherObservation`, `LauncherCapacityObservation`, `LauncherActivation`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and retirement decisions. Kubernetes cleanup identities remain in the launcher. |
+| `capability.LauncherObservation`, `capability.LauncherActivation` | Award-fenced observations and activations shared with persistence. |
+| `LauncherCapacityObservation`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and retirement decisions. Kubernetes cleanup identities remain in the launcher. |
 | `ExpansionSubmission`, `ExpansionAccepted`, `ExpandedJob` | Exactly one success body with private `registration`, or a structured failure, and the persisted topology/settings. |
 | `ReuseSource`, `ReconcileRequest`, `ReconcileResponse` | C1 reconciliation over a proposed source, with persisted source outcome and committed claim. |
 | `FinishRequest`, `CancelRequest`, `RetryRequest` | Owner finish, cooperative cancellation and retry lineage. |
@@ -755,7 +757,7 @@ replay. `DeleteSchedule` deletes `/{schedule}` and returns canonical
 
 `ScheduleRepositoryManager` puts `/schedules/repos` using `ScheduleRepoRequest`:
 repository URL, branch, original SHA or follow policy, and the complete array of
-`ScheduleDeclaration` entries for the selected `replace` or `upsert` mode.
+[`runspec.ScheduleDeclaration`](../../../internal/runspec/schedule.go) entries for the selected `replace` or `upsert` mode.
 `ScheduleRepoWritten` retains rows and withdrawn
 display names. Delete uses `repo_url` and returns the same URL and nonnegative
 removed count. These are proposals. C2 derives team/repository authority.

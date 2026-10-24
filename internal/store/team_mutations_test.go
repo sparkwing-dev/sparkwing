@@ -11,9 +11,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func teamAuthorization(t *testing.T, s *Store, actor Actor, team Team, method, path string) capability.Authorized {
+func teamAuthorization(t *testing.T, s *Store, actor runstate.Actor, team Team, method, path string) capability.Authorized {
 	t.Helper()
 	p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {

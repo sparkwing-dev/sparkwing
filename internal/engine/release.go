@@ -11,16 +11,13 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"crypto/ed25519"
+
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 )
 
 // VerifyRelease authenticates bytes and inspects their build identity without executing them.
-func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBundle) (VerifiedRelease, error) {
-	keys, err := releaseauth.PublicKeys()
-	if err != nil {
-		return VerifiedRelease{}, integrity(err)
-	}
+func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBundle, keys []ed25519.PublicKey) (VerifiedRelease, error) {
 	asset, err := releaseasset.VerifyForVersion(keys, version, bundle.Manifest, bundle.ManifestSignature, target, bundle.Asset, bundle.AssetSignature)
 	if err != nil {
 		return VerifiedRelease{}, integrity(err)
@@ -92,7 +89,7 @@ func (r *Resolver) fetchRelease(ctx context.Context, version string, target rele
 		}
 		*item.body = body
 	}
-	return VerifyRelease(version, target, bundle)
+	return VerifyRelease(version, target, bundle, r.config.TrustedKeys)
 }
 
 func (r *Resolver) fetch(ctx context.Context, address string, release bool) ([]byte, error) {

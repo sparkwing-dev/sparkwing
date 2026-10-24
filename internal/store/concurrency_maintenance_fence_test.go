@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func maintenanceReaper(t *testing.T, s *Store) SingletonLease {
@@ -117,7 +119,7 @@ func TestLeasedConcurrencyMaintenancePreservesBlockedLiveWaiter(t *testing.T) {
 func TestLeasedConcurrencyMaintenanceRemovesTerminalWorkInEveryScope(t *testing.T) {
 	tenant, now, _ := capacityFixture(t)
 	s := tenant.s
-	maintenanceRun(t, s, "finished", 2, RunFailed)
+	maintenanceRun(t, s, "finished", 2, runstate.RunFailed)
 	for _, key := range []string{"run:finished:build", "box:host:build", "job:global:deploy"} {
 		rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a',?,1,1)`, key)
 		rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at) VALUES ('a',?,'terminal','finished','',1,?)`, key, now.Add(time.Hour).UnixNano())

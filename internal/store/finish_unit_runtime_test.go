@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestFinishRunAndUnitRefusesNonterminalTransition(t *testing.T) {
@@ -13,12 +14,12 @@ func TestFinishRunAndUnitRefusesNonterminalTransition(t *testing.T) {
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	finish := FinishRunRequest{Unit: request.Actor.Owner, Transition: RunCompletion{RunID: runspec.RunID(request.RunID), Cause: RunStart, Actor: request.Actor}}
+	finish := runstate.FinishRunRequest{Unit: request.Actor.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(request.RunID), Cause: runstate.RunStart, Actor: request.Actor}}
 	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
 		t.Fatal("nonterminal transition closed the owner unit")
 	}
 	run, err := tenant.ReadRun(t.Context(), request.RunID)
-	if err != nil || run.State != RunPending || run.StateSeq != 0 {
+	if err != nil || run.State != runstate.RunPending || run.StateSeq != 0 {
 		t.Fatalf("refused finish changed run: %+v, %v", run, err)
 	}
 	var status string
@@ -33,8 +34,8 @@ func TestFinishRunAndUnitCommitsTogetherAndReplays(t *testing.T) {
 			s, _, claim, _ := renewalFixture(t, capability.UnitTrigger)
 			rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 			tenant := &Tenant{s: s, team: claim.Team}
-			actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-			finish := FinishRunRequest{Unit: claim.Owner, Transition: RunCompletion{RunID: runspec.RunID(claim.RunID), Cause: RunFinish, Actor: actor}}
+			actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+			finish := runstate.FinishRunRequest{Unit: claim.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(claim.RunID), Cause: runstate.RunFinish, Actor: actor}}
 			if failure == "owner_write" {
 				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_finish BEFORE UPDATE ON triggers BEGIN SELECT RAISE(ABORT,'owner unavailable'); END`)
 			} else if failure == "outbox_write" {
@@ -45,7 +46,7 @@ func TestFinishRunAndUnitCommitsTogetherAndReplays(t *testing.T) {
 					t.Fatal("finish ignored failed persistence")
 				}
 				run, err := tenant.ReadRun(t.Context(), claim.RunID)
-				if err != nil || run.State != RunRunning || run.FinishedAt != nil || run.StateSeq != 0 {
+				if err != nil || run.State != runstate.RunRunning || run.FinishedAt != nil || run.StateSeq != 0 {
 					t.Fatalf("partial finish: %+v, %v", run, err)
 				}
 				rewriteSchemaCount(t, s.db, "events", 0)
@@ -65,7 +66,7 @@ func TestFinishRunAndUnitCommitsTogetherAndReplays(t *testing.T) {
 				t.Fatalf("owner survived finish: %s %v %v %v, %v", status, holder, prefix, expiry, err)
 			}
 			run, err := tenant.ReadRun(t.Context(), claim.RunID)
-			if err != nil || run.State != RunFailed || run.StateSeq != 1 || run.FinishedAt == nil {
+			if err != nil || run.State != runstate.RunFailed || run.StateSeq != 1 || run.FinishedAt == nil {
 				t.Fatalf("finished run: %+v, %v", run, err)
 			}
 			rewriteSchemaCount(t, s.db, "events", 1)

@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -92,7 +93,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 		t.Fatal(err)
 	}
 	request := runspec.Request{LocalForeground: true, Version: 1, Team: "local", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/acme/repo"}, Ref: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}, RequestedArgs: map[string]string{}}
-	state := store.LocalPublication{RunSnapshot: store.RunSnapshot{Run: store.RunRow{ID: "local-run", Team: "local", Pipeline: "ci", State: store.RunSuccess, Request: runspec.SealedRequest{Request: request}, Spec: &runspec.Spec{Declarations: runspec.CheckoutDeclarations{Version: 1}, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"LOCAL_TOKEN"}, Guards: runspec.Guards{Passed: true}}}, Plan: raw, FinishedAt: &now}, Nodes: []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "local-run", NodeID: "job"}, Spec: rawJob(t, plan.Jobs[0]), Status: store.StatusDone, Outcome: store.NodeSuccess, Attempt: 1, Generation: 1, StartedAt: &now, FinishedAt: &now}}}}
+	state := store.LocalPublication{RunSnapshot: store.RunSnapshot{Run: store.RunRow{Team: "local", Execution: runstate.Execution{ID: "local-run", Pipeline: "ci", State: runstate.RunSuccess, Request: runspec.SealedRequest{Request: request}, Spec: &runspec.Spec{Declarations: runspec.CheckoutDeclarations{Version: 1}, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"LOCAL_TOKEN"}, Guards: runspec.Guards{Passed: true}}}, Plan: raw, FinishedAt: &now}}, Nodes: []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "local-run", NodeID: "job"}, Spec: rawJob(t, plan.Jobs[0]), Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Attempt: 1, Generation: 1, StartedAt: &now, FinishedAt: &now}}}}
 	values := map[string]string{}
 	for _, name := range shellNames {
 		values[name] = "private shell value"
@@ -102,17 +103,17 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 		t.Fatal(err)
 	}
 	state.Run.Request.Request.Env, state.Run.Spec.Resolved.Env = localEnv, localEnv
-	state.Run.State = store.RunState(outcome)
-	state.Nodes[0].Outcome = store.NodeState(outcome)
+	state.Run.State = runstate.RunState(outcome)
+	state.Nodes[0].Outcome = runstate.NodeState(outcome)
 	masked, exit := "", 0
 	if outcome == "failed" {
 		masked, exit = "retained masked error ***", 7
 	}
-	terminal := store.NodeResult{Outcome: store.NodeState(outcome), Reason: "local-result", MaskedError: masked, ExitCode: &exit}
+	terminal := runstate.NodeResult{Outcome: runstate.NodeState(outcome), Reason: "local-result", MaskedError: masked, ExitCode: &exit}
 	if outcome == "failed" {
 		terminal.Failure = &nodeproto.JobFailure{Job: "job", Stage: "action", Error: &apierr.Error{Code: apierr.BadRequest, Message: masked}}
 	}
-	state.Results = map[string]store.NodeResult{"job": terminal}
+	state.Results = map[string]runstate.NodeResult{"job": terminal}
 	content := map[blob.Digest][]byte{}
 	put := func(body string) blob.Digest {
 		digest := blob.Digest(fmt.Sprintf("%x", sha256.Sum256([]byte(body))))
@@ -134,7 +135,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 		}
 		state.Records = append(state.Records, record)
 	}
-	run, err := client.PublishLocalRun(t.Context(), options, client.PublicationInput{State: state, Logs: publicationLogReader{}, OpenBlob: func(_ context.Context, digest blob.Digest) (io.ReadCloser, int64, error) {
+	run, err := client.PublishLocalRun(t.Context(), options, client.PublicationInput{State: runstate.LocalPublication{RunSnapshot: state.RunSnapshot.ExecutionSnapshot(), Records: state.Records, Results: state.Results}, Logs: publicationLogReader{}, OpenBlob: func(_ context.Context, digest blob.Digest) (io.ReadCloser, int64, error) {
 		body, ok := content[digest]
 		if !ok {
 			return nil, 0, fmt.Errorf("unselected digest %s", digest)
@@ -149,7 +150,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 		t.Fatal(err)
 	}
 	snapshot, err := tenant.ReadSnapshot(t.Context(), run)
-	if err != nil || snapshot.Run.State != store.RunState(outcome) || snapshot.Run.Owner != nil || len(snapshot.Nodes) != 1 || snapshot.Nodes[0].OutputRecord == nil || snapshot.Nodes[0].ManifestRecord == nil {
+	if err != nil || snapshot.Run.State != runstate.RunState(outcome) || snapshot.Run.Owner != nil || len(snapshot.Nodes) != 1 || snapshot.Nodes[0].OutputRecord == nil || snapshot.Nodes[0].ManifestRecord == nil {
 		t.Fatalf("published history: %+v %v", snapshot, err)
 	}
 	persisted, err := json.Marshal(snapshot)

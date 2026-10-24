@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -55,9 +57,7 @@ func TestOpenTightensExistingSQLiteFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = first.Close() }()
-	if err := teststore.ForTeam(t, first, store.DefaultTeam).TestOnlySeedRun(t.Context(), store.Run{
-		ID: "run-before", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
+	if err := teststore.ForTeam(t, first, store.DefaultTeam).TestOnlySeedRun(t.Context(), store.Run{RunSummary: runstate.RunSummary{ID: "run-before", Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 	files := []string{path, path + "-wal", path + "-shm"}

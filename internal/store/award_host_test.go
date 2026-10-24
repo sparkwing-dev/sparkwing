@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -119,14 +118,14 @@ func testLauncherSealedBox(t *testing.T, kind capability.UnitKind) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := controllerwire.LauncherObservation{
+	observation := capability.LauncherObservation{
 		Award: capability.LeaseRef{Kind: claim.Kind, ID: unitID, Generation: int64(claim.Award.Generation), Holder: claim.Award.Holder},
 	}
-	activation := controllerwire.LauncherActivation{Award: observation.Award, NodeUID: "node-uid", ReservationID: "reservation"}
+	activation := capability.LauncherActivation{Award: observation.Award, NodeUID: "node-uid", ReservationID: "reservation"}
 	for _, reservation := range []bool{false, true} {
 		observed := observation
 		observed.Reservation = reservation
-		if _, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, []controllerwire.LauncherObservation{observed}, nil, nil, nil, nil); err != nil {
+		if _, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, []capability.LauncherObservation{observed}, nil, nil, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -140,7 +139,7 @@ func testLauncherSealedBox(t *testing.T, kind capability.UnitKind) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if _, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, []controllerwire.LauncherObservation{observation}, nil, nil, nil, []controllerwire.LauncherActivation{activation}); err != nil {
+		if _, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, []capability.LauncherObservation{observation}, nil, nil, nil, []capability.LauncherActivation{activation}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -151,7 +150,7 @@ func testLauncherSealedBox(t *testing.T, kind capability.UnitKind) {
 	}
 	assertAwardBox(t, s, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}, "run", "node:node-uid")
 	activation.NodeUID = "other-node"
-	if _, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, []controllerwire.LauncherObservation{observation}, nil, nil, nil, []controllerwire.LauncherActivation{activation}); err == nil {
+	if _, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, []capability.LauncherObservation{observation}, nil, nil, nil, []capability.LauncherActivation{activation}); err == nil {
 		t.Fatal("changed the node of an exchanged award")
 	}
 	assertAwardBox(t, s, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}, "run", "node:node-uid")
@@ -175,12 +174,12 @@ func TestLauncherExpiredUnplacedAwardCanReleaseReservation(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					observation := controllerwire.LauncherObservation{
+					observation := capability.LauncherObservation{
 						Award:       capability.LeaseRef{Kind: kind, ID: unitID, Generation: int64(claim.Award.Generation), Holder: claim.Award.Holder},
 						Reservation: true,
 					}
 					*now = claim.Award.LeaseExpiresAt
-					awards, prepared, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, []controllerwire.LauncherObservation{observation}, []capability.LeaseRef{observation.Award}, []capability.LeaseRef{observation.Award}, nil, nil)
+					awards, prepared, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, []capability.LauncherObservation{observation}, []capability.LeaseRef{observation.Award}, []capability.LeaseRef{observation.Award}, nil, nil)
 					if err != nil || len(awards) != 1 || !awards[0].Gone || awards[0].Fence != observation.Award || len(prepared) != 0 {
 						t.Fatalf("expired reservation (exchange=%t): awards=%+v prepared=%+v: %v", exchange, awards, prepared, err)
 					}

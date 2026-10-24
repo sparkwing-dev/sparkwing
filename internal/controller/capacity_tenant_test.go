@@ -13,7 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
@@ -45,7 +45,7 @@ func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, strings.ReplaceAll(query, " ", "%20"), nil)
 		rec := httptest.NewRecorder()
 		if err := handler(rec, req, capability.Authorized{Target: capability.Target{Team: string(team)}}); err != nil {
-			writePolicyError(rec, err)
+			routepolicy.WritePolicyError(rec, err)
 		}
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), string(team)+"-only") {
 			t.Fatalf("request %d read wrong team: %d %s", i, rec.Code, rec.Body)
@@ -65,7 +65,7 @@ func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/sizing", nil)
 		rec := httptest.NewRecorder()
 		if err := handler(rec, req, capability.Authorized{Target: capability.Target{Team: string(team)}}); err != nil {
-			writePolicyError(rec, err)
+			routepolicy.WritePolicyError(rec, err)
 		}
 		var failure apierr.Envelope
 		if rec.Code != tc.status || json.Unmarshal(rec.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != tc.code {

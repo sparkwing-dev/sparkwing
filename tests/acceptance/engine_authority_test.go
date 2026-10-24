@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func expansionAuthority() capability.Authorized {
@@ -37,9 +37,9 @@ func TestEngineExpansionAuthorityAdapter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Source != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || got.SourceGeneration != 4 ||
+		if got.Source != (runspec.NodeRef{RunID: "run", NodeID: "job"}) || got.SourceGeneration != 4 ||
 			got.Actor.Authority != a.Principal.Authority || got.Actor.CapabilityPrefix != "claim" ||
-			got.Actor.Owner.Kind != store.OwnerEval || got.Actor.Owner.Name != "eval" ||
+			got.Actor.Owner.Kind != runstate.OwnerEval || got.Actor.Owner.Name != "eval" ||
 			got.Actor.Owner.Generation != 9 || got.Actor.Owner.Holder != "controller" ||
 			got.Actor.Owner.SourceGeneration != 4 || got.Actor.Owner.SourceNodeID != "job" {
 			t.Fatalf("authority was lost: %+v", got)

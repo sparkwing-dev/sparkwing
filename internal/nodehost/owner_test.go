@@ -16,11 +16,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -34,9 +35,9 @@ type ownerFixture struct {
 	finishErr error
 	acceptErr error
 	renewErr  error
-	nodeRenew func(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error)
+	nodeRenew func(context.Context, runspec.NodeRef, runstate.Actor) (runstate.LeaseBeat, error)
 	accepted  store.PlanAcceptance
-	finished  store.FinishRunRequest
+	finished  runstate.FinishRunRequest
 	changed   chan struct{}
 }
 
@@ -46,17 +47,17 @@ func (f *ownerFixture) record(value string) {
 	f.trace = append(f.trace, value)
 }
 
-func (f *ownerFixture) RenewOwner(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
+func (f *ownerFixture) RenewOwner(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error) {
 	f.record("renew")
-	return store.LeaseBeat{}, f.renewErr
+	return runstate.LeaseBeat{}, f.renewErr
 }
 
-func (f *ownerFixture) RenewNodeClaim(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+func (f *ownerFixture) RenewNodeClaim(ctx context.Context, ref runspec.NodeRef, actor runstate.Actor) (runstate.LeaseBeat, error) {
 	if f.nodeRenew != nil {
 		return f.nodeRenew(ctx, ref, actor)
 	}
 	f.record("node_renew")
-	return store.LeaseBeat{}, nil
+	return runstate.LeaseBeat{}, nil
 }
 
 func TestOwnerHostReportsCurrentComputeOnRenewal(t *testing.T) {
@@ -66,16 +67,16 @@ func TestOwnerHostReportsCurrentComputeOnRenewal(t *testing.T) {
 		var computing atomic.Bool
 		host.Computing = func(string) bool { return computing.Load() }
 		beats := make(chan bool, 1)
-		host.Renew = func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
+		host.Renew = func(ctx context.Context, actor runstate.Actor, executing bool) (runstate.LeaseBeat, error) {
 			if actor != input.Owner {
 				t.Error("renewal changed owner authority")
 			}
 			select {
 			case beats <- executing:
 			case <-ctx.Done():
-				return store.LeaseBeat{}, context.Cause(ctx)
+				return runstate.LeaseBeat{}, context.Cause(ctx)
 			}
-			return store.LeaseBeat{}, nil
+			return runstate.LeaseBeat{}, nil
 		}
 		host.Decide = func(store.ScheduleSnapshot) store.ScheduleDecision { return store.ScheduleDecision{} }
 		waiting := make(chan struct{})
@@ -104,12 +105,12 @@ func TestOwnerHostReportsCurrentComputeOnRenewal(t *testing.T) {
 func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		state, host, input := newOwnerFixture(t, true)
-		state.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Spec: json.RawMessage(`{"id":"remote"}`), Status: store.StatusRunning, ClaimedBy: "personal-machine"}}
+		state.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Spec: json.RawMessage(`{"id":"remote"}`), Status: runstate.StatusRunning, ClaimedBy: "personal-machine"}}
 		host.Lease.Interval = time.Second
 		var beats atomic.Int64
 		observed := make(chan struct{}, 1)
-		host.Renew = func(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
-			return store.LeaseBeat{CancelRequested: beats.Add(1) > 1}, nil
+		host.Renew = func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error) {
+			return runstate.LeaseBeat{CancelRequested: beats.Add(1) > 1}, nil
 		}
 		host.Lease.Observe = func(lease.Beat) {
 			if beats.Load() == 2 {
@@ -117,7 +118,7 @@ func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
 			}
 		}
 		host.Decide = func(snapshot store.ScheduleSnapshot) store.ScheduleDecision {
-			if snapshot.Nodes[0].Status == string(store.StatusDone) {
+			if snapshot.Nodes[0].Status == string(runstate.StatusDone) {
 				return store.ScheduleDecision{Outcome: "cancelled"}
 			}
 			return store.ScheduleDecision{}
@@ -132,7 +133,7 @@ func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
 				return err
 			}
 			state.mu.Lock()
-			state.snapshot.Nodes[0].Status, state.snapshot.Nodes[0].Outcome = store.StatusDone, store.NodeCancelled
+			state.snapshot.Nodes[0].Status, state.snapshot.Nodes[0].Outcome = runstate.StatusDone, runstate.NodeCancelled
 			state.mu.Unlock()
 			state.record("remote-joined")
 			return nil
@@ -149,7 +150,7 @@ func TestOwnerHostWaitsForAlreadyRequestedRemoteCancellation(t *testing.T) {
 	state, host, input := newOwnerFixture(t, true)
 	now := time.Now()
 	state.snapshot.Run.CancelRequestedAt = &now
-	state.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Spec: json.RawMessage(`{"id":"remote"}`), Status: store.StatusRunning, ClaimedBy: "personal-machine", CancelRequestedAt: &now}}
+	state.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Spec: json.RawMessage(`{"id":"remote"}`), Status: runstate.StatusRunning, ClaimedBy: "personal-machine", CancelRequestedAt: &now}}
 	host.Project = func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
 		row := snapshot.Nodes[0]
 		return store.ScheduleSnapshot{CancelRequested: true, Nodes: []store.ScheduleNode{{ID: string(row.Ref.NodeID), Status: string(row.Status), Claimed: row.ClaimedBy != "", Outcome: string(row.Outcome)}}}, nil
@@ -157,7 +158,7 @@ func TestOwnerHostWaitsForAlreadyRequestedRemoteCancellation(t *testing.T) {
 	host.Decide = store.Decide
 	host.Wait = func(context.Context, store.RunSnapshot) error {
 		state.mu.Lock()
-		state.snapshot.Nodes[0].Status, state.snapshot.Nodes[0].Outcome = store.StatusDone, store.NodeCancelled
+		state.snapshot.Nodes[0].Status, state.snapshot.Nodes[0].Outcome = runstate.StatusDone, runstate.NodeCancelled
 		state.mu.Unlock()
 		state.record("remote-joined")
 		return nil
@@ -174,12 +175,12 @@ func TestOwnerHostAuthorityLossStopsWhileWaitingForRemoteAttempt(t *testing.T) {
 			state, host, input := newOwnerFixture(t, true)
 			host.Lease.Interval = time.Second
 			var beats atomic.Int64
-			host.Renew = func(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
+			host.Renew = func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error) {
 				if beats.Add(1) > 1+int64(selector%4) {
 					codes := []apierr.Code{apierr.LockHeld, apierr.Unauthenticated, apierr.Forbidden}
-					return store.LeaseBeat{}, &apierr.Error{Code: codes[selector%3]}
+					return runstate.LeaseBeat{}, &apierr.Error{Code: codes[selector%3]}
 				}
-				return store.LeaseBeat{}, nil
+				return runstate.LeaseBeat{}, nil
 			}
 			host.Decide = func(store.ScheduleSnapshot) store.ScheduleDecision { return store.ScheduleDecision{} }
 			host.Wait = func(ctx context.Context, _ store.RunSnapshot) error {
@@ -203,8 +204,8 @@ func TestOwnerHostCancellationStopsSourcePreparation(t *testing.T) {
 		state, host, input := newOwnerFixture(t, false)
 		host.Lease.Interval = time.Second
 		var beats atomic.Int64
-		host.Renew = func(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
-			return store.LeaseBeat{CancelRequested: beats.Add(1) > 1}, nil
+		host.Renew = func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error) {
+			return runstate.LeaseBeat{CancelRequested: beats.Add(1) > 1}, nil
 		}
 		host.Acquire = func(ctx context.Context, _ RunInput) (*source.Entry, error) {
 			<-ctx.Done()
@@ -222,11 +223,11 @@ func (f *ownerFixture) ReadSnapshot(context.Context, string) (store.RunSnapshot,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	s := f.snapshot
-	s.Nodes = append([]store.NodeRow(nil), s.Nodes...)
+	s.Nodes = append([]runstate.NodeRow(nil), s.Nodes...)
 	return s, nil
 }
 
-func (f *ownerFixture) ReadNode(_ context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
+func (f *ownerFixture) ReadNode(_ context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, row := range f.snapshot.Nodes {
@@ -234,7 +235,7 @@ func (f *ownerFixture) ReadNode(_ context.Context, ref controllerwire.NodeRef) (
 			return row, nil
 		}
 	}
-	return store.NodeRow{}, store.ErrNotFound
+	return runstate.NodeRow{}, store.ErrNotFound
 }
 
 func (f *ownerFixture) AcceptPlan(_ context.Context, input store.PlanAcceptance) (store.AcceptedPlan, error) {
@@ -253,13 +254,13 @@ func (f *ownerFixture) AcceptPlan(_ context.Context, input store.PlanAcceptance)
 	return store.AcceptedPlan{Spec: spec, Plan: input.Seal.Plan, PlanHash: string(hash)}, nil
 }
 
-func (f *ownerFixture) TransitionRun(_ context.Context, change store.RunTransition) (store.Applied, error) {
+func (f *ownerFixture) TransitionRun(_ context.Context, change runstate.RunTransition) (runstate.Applied, error) {
 	f.record("start")
 	f.snapshot.Run.State = change.To
-	return store.Applied{}, nil
+	return runstate.Applied{}, nil
 }
 
-func (f *ownerFixture) TransitionNode(_ context.Context, command store.NodeCommand) (store.Applied, error) {
+func (f *ownerFixture) TransitionNode(_ context.Context, command store.NodeCommand) (runstate.Applied, error) {
 	change := captureNodeCommand(command)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -270,55 +271,55 @@ func (f *ownerFixture) TransitionNode(_ context.Context, command store.NodeComma
 			continue
 		}
 		row.StateSeq++
-		if change.To == store.NodeReady {
+		if change.To == runstate.NodeReady {
 			now := time.Now()
 			row.ReadyAt = &now
-		} else if change.To == store.NodeApprovalPending {
-			row.Status = store.StatusApprovalPending
+		} else if change.To == runstate.NodeApprovalPending {
+			row.Status = runstate.StatusApprovalPending
 		} else {
-			row.Status, row.Outcome = store.StatusDone, change.To
+			row.Status, row.Outcome = runstate.StatusDone, change.To
 		}
 	}
 	select {
 	case f.changed <- struct{}{}:
 	default:
 	}
-	return store.Applied{}, nil
+	return runstate.Applied{}, nil
 }
 
-func (f *ownerFixture) ReconcileNode(ctx context.Context, request store.ReconcileRequest) (store.ReconciledNode, error) {
+func (f *ownerFixture) ReconcileNode(ctx context.Context, request store.ReconcileRequest) (runstate.ReconciledNode, error) {
 	f.record("claim")
 	expires := time.Now().Add(time.Hour)
 	row, _ := f.ReadNode(ctx, request.Ref)
-	row.Ref, row.Status, row.ClaimedBy, row.CapabilityPrefix = request.Ref, store.StatusPending, "runner", "claim"
+	row.Ref, row.Status, row.ClaimedBy, row.CapabilityPrefix = request.Ref, runstate.StatusPending, "runner", "claim"
 	row.Generation, row.LeaseExpiresAt = 2, &expires
-	return store.ReconciledNode{Kind: store.Execute, Node: row, Claim: &store.ClaimAward{Holder: "runner", CapabilityPrefix: "claim", Generation: 2, LeaseExpiresAt: expires}}, nil
+	return runstate.ReconciledNode{Kind: runstate.Execute, Node: row, Claim: &runstate.ClaimAward{Holder: "runner", CapabilityPrefix: "claim", Generation: 2, LeaseExpiresAt: expires}}, nil
 }
 
-func (f *ownerFixture) FinishRunAndUnit(_ context.Context, request store.FinishRunRequest) (store.Applied, error) {
+func (f *ownerFixture) FinishRunAndUnit(_ context.Context, request runstate.FinishRunRequest) (runstate.Applied, error) {
 	f.record("finish")
 	f.finished = request
 	if f.finishErr != nil {
-		return store.Applied{}, f.finishErr
+		return runstate.Applied{}, f.finishErr
 	}
 	graph := store.ScheduleSnapshot{CancelRequested: f.snapshot.Run.CancelRequestedAt != nil}
 	for _, row := range f.snapshot.Nodes {
 		graph.Nodes = append(graph.Nodes, store.ScheduleNode{ID: string(row.Ref.NodeID), Status: string(row.Status), Outcome: string(row.Outcome)})
 	}
 	decision := store.Decide(graph)
-	f.snapshot.Run.State = store.RunState(decision.Outcome)
+	f.snapshot.Run.State = runstate.RunState(decision.Outcome)
 	reason := decision.Reason
 	if graph.CancelRequested {
 		reason = f.snapshot.Run.CancelReason
 	}
-	return store.Applied{Outcome: f.snapshot.Run.State, Reason: reason}, nil
+	return runstate.Applied{Outcome: f.snapshot.Run.State, Reason: reason}, nil
 }
 
 type ownerNodeFunc func(context.Context, NodeInput) error
 
 func (fn ownerNodeFunc) Execute(ctx context.Context, in NodeInput) error { return fn(ctx, in) }
 
-type ownerDelegatorFixture struct{ actor store.Actor }
+type ownerDelegatorFixture struct{ actor runstate.Actor }
 
 func (f ownerDelegatorFixture) ResolveAuthority(context.Context, capability.AuthorityRef) (capability.Principal, error) {
 	owner := f.actor.Owner
@@ -336,11 +337,11 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	if err != nil {
 		t.Fatal(err)
 	}
-	unit := store.OwnerLeaseRef{Kind: store.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 4}}
-	f := &ownerFixture{changed: make(chan struct{}, 1), snapshot: store.RunSnapshot{Run: store.RunRow{ID: "run", State: store.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &unit}}}
-	in := RunInput{RunID: "run", SealedRequest: raw, RequestHash: "request", Owner: store.Actor{Kind: store.ActorRunHost, Owner: unit}}
+	unit := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 4}}
+	f := &ownerFixture{changed: make(chan struct{}, 1), snapshot: store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: "run", State: runstate.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &unit}}}}
+	in := RunInput{RunID: "run", SealedRequest: raw, RequestHash: "request", Owner: runstate.Actor{Kind: runstate.ActorRunHost, Owner: unit}}
 	in.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
-	selected := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}}
+	selected := engine.Resolved{Identity: engineid.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}}
 	h := OwnerHost{
 		executionAdmission: ComposeStartGate(f, nil, false),
 		Masker:             secrets.NewMasker(),
@@ -450,7 +451,7 @@ func TestOwnerHostRejectedReattachNeverAcquires(t *testing.T) {
 
 func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
-	f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending, SpecHash: "job-hash"}}
+	f.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: runstate.StatusPending, SpecHash: "job-hash"}}
 	h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 		if s.Nodes[0].Outcome == "success" {
 			return store.ScheduleDecision{Outcome: "success"}
@@ -460,14 +461,14 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 		}
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
-	h.Local = func(store.NodeRow) bool { return true }
-	setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (ownerLayerResult, error) {
+	h.Local = func(runstate.NodeRow) bool { return true }
+	setTestPolicies(&h, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ runstate.NodeRow, binding StorageBinding) (ownerLayerResult, error) {
 		f.record(layer.Name)
 		return ownerLayerResult{}, nil
 	})
 	h.Executor = ownerNodeFunc(func(ctx context.Context, n NodeInput) error {
 		f.record("execute")
-		_, err := f.TransitionNode(ctx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(n.Accepted.RunID), NodeID: runspec.NodeID(n.NodeID)}, Outcome: store.NodeSuccess})
+		_, err := f.TransitionNode(ctx, store.ReportNode{Ref: runspec.NodeRef{RunID: runspec.RunID(n.Accepted.RunID), NodeID: runspec.NodeID(n.NodeID)}, Outcome: runstate.NodeSuccess})
 		return err
 	})
 	if _, err := h.Run(t.Context(), in); err != nil {
@@ -514,7 +515,7 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f, h, in := newOwnerFixture(t, true)
-				f.snapshot.Nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: store.StatusPending, SpecHash: "job-hash"}}
+				f.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Spec: json.RawMessage(`{"id":"job"}`), Status: runstate.StatusPending, SpecHash: "job-hash"}}
 				h.Lease = lease.Keeper{Interval: time.Second, Lease: time.Hour}
 				h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 					if s.Nodes[0].Ready {
@@ -522,8 +523,8 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 					}
 					return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 				}
-				h.Local = func(store.NodeRow) bool { return true }
-				setTestPolicies(&h, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (ownerLayerResult, error) {
+				h.Local = func(runstate.NodeRow) bool { return true }
+				setTestPolicies(&h, func(context.Context, testPolicyName, EvaluationInput, runstate.NodeRow, StorageBinding) (ownerLayerResult, error) {
 					return ownerLayerResult{}, nil
 				})
 				deadline := time.Now().Add(time.Minute)
@@ -536,16 +537,16 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 					return nil
 				})
 				var renewed bool
-				h.Renew = func(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
-					return store.LeaseBeat{ExpiresAt: time.Now().Add(3 * time.Minute)}, nil
+				h.Renew = func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error) {
+					return runstate.LeaseBeat{ExpiresAt: time.Now().Add(3 * time.Minute)}, nil
 				}
-				f.nodeRenew = func(context.Context, controllerwire.NodeRef, store.Actor) (store.LeaseBeat, error) {
+				f.nodeRenew = func(context.Context, runspec.NodeRef, runstate.Actor) (runstate.LeaseBeat, error) {
 					if lost && renewed {
-						return store.LeaseBeat{}, &apierr.Error{Code: apierr.Unavailable, Message: "controller unreachable"}
+						return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.Unavailable, Message: "controller unreachable"}
 					}
 					cancelled := !lost && renewed
 					renewed = true
-					return store.LeaseBeat{ExpiresAt: deadline, CancelRequested: cancelled, CancelReason: "out of credits"}, nil
+					return runstate.LeaseBeat{ExpiresAt: deadline, CancelRequested: cancelled, CancelReason: "out of credits"}, nil
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 				defer cancel()
@@ -568,15 +569,15 @@ func TestOwnerHostStopsASelfClaimedJob(t *testing.T) {
 	}
 }
 
-func (f *ownerFixture) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
-	return store.Applied{}, nil
+func (f *ownerFixture) ReleaseEvaluation(context.Context, runspec.NodeRef, runstate.Actor) (runstate.Applied, error) {
+	return runstate.Applied{}, nil
 }
 
-func (f *ownerFixture) MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse, error) {
+func (f *ownerFixture) MayStart(context.Context, runstate.CapacityBinding, runstate.Actor) (runstate.AcquireSlotResponse, error) {
 	f.record("admission")
-	return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+	return runstate.AcquireSlotResponse{Kind: runstate.AcquireGranted}, nil
 }
 
-func (*ownerFixture) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error {
+func (*ownerFixture) RelinquishStart(context.Context, runstate.CapacityBinding, runstate.Actor) error {
 	return errors.New("unexpected provisional award relinquishment")
 }

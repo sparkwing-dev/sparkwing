@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestOwnerReclaimFencesLostHostAndKeepsTerminalAbsorbing(t *testing.T) {
@@ -35,9 +35,9 @@ func TestOwnerReclaimFencesLostHostAndKeepsTerminalAbsorbing(t *testing.T) {
 		t.Fatalf("reclaim: %+v, %v", second, err)
 	}
 	tenant := &Tenant{s: s, team: first.Team}
-	finish := func(claim UnitClaim) (Applied, error) {
-		actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-		return tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: claim.Owner, Transition: RunCompletion{RunID: runspec.RunID(claim.RunID), Cause: RunFinish, Actor: actor}})
+	finish := func(claim UnitClaim) (runstate.Applied, error) {
+		actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+		return tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: claim.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(claim.RunID), Cause: runstate.RunFinish, Actor: actor}})
 	}
 	if _, err := finish(first); err == nil {
 		t.Fatal("lost owner finished the replacement's run")
@@ -55,7 +55,7 @@ func TestOwnerReclaimFencesLostHostAndKeepsTerminalAbsorbing(t *testing.T) {
 		t.Fatal("terminal run was claimed again")
 	}
 	run, err := tenant.ReadRun(t.Context(), first.RunID)
-	if err != nil || run.State != RunFailed || run.FinishedAt == nil {
+	if err != nil || run.State != runstate.RunFailed || run.FinishedAt == nil {
 		t.Fatalf("terminal run: %+v, %v", run, err)
 	}
 }
@@ -64,7 +64,7 @@ func TestOwnerReaperLimitRecoversUnstartedWorkAcrossTeams(t *testing.T) {
 	s, _, now := maintenanceStore(t)
 	for i, team := range []Team{"a", "b"} {
 		id := "run-" + string(team)
-		maintenanceRun(t, s, id, i+1, RunPending)
+		maintenanceRun(t, s, id, i+1, runstate.RunPending)
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET team=? WHERE id=?`, team, id)
 		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES (?,?,'claimed','trigger',1,1,'owner','owner-cap',7,?,?,?,1)`, team, id, now.UnixNano(), []byte(`[]`), []byte(`[]`))
 	}
@@ -85,7 +85,7 @@ func TestOwnerReaperLimitRecoversUnstartedWorkAcrossTeams(t *testing.T) {
 	}
 	for team := range seen {
 		row, err := (&Tenant{s: s, team: team}).ReadRun(t.Context(), "run-"+string(team))
-		if err != nil || row.State != RunPending || row.FinishedAt != nil {
+		if err != nil || row.State != runstate.RunPending || row.FinishedAt != nil {
 			t.Fatalf("unstarted run: %+v, %v", row, err)
 		}
 	}

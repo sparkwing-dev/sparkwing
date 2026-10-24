@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 type loginClock struct {
@@ -34,13 +36,13 @@ func (c *loginClock) advance(d time.Duration) {
 
 type loginProbe struct {
 	mu    sync.Mutex
-	peers []LocalPeerIdentity
+	peers []localhostwire.LocalPeerIdentity
 	calls int
 }
 
 func (p *loginProbe) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		peer, ok := LocalPeer(r.Context())
+		peer, ok := localhostwire.LocalPeer(r.Context())
 		p.mu.Lock()
 		p.calls++
 		if ok {
@@ -100,8 +102,8 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 	clock := &loginClock{now: time.Unix(1_800_000_000, 0)}
 	api, dashboard, shell := &loginProbe{}, &loginProbe{}, &loginProbe{}
 	f := &runtimeControllerFixture{}
-	f.http = func() LocalHTTP {
-		return LocalHTTP{API: api.handler(), Dashboard: dashboard.handler(), Shell: shell.handler()}
+	f.http = func() localhostwire.LocalHTTP {
+		return localhostwire.LocalHTTP{API: api.handler(), Dashboard: dashboard.handler(), Shell: shell.handler()}
 	}
 	r := newRuntimeFixture(t, f)
 	r.listen, r.now = nil, clock.Now
@@ -196,7 +198,7 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 		t.Fatal("TCP reached the socket-only mint route")
 	}
 	dashboard.mu.Lock()
-	peers := append([]LocalPeerIdentity(nil), dashboard.peers...)
+	peers := append([]localhostwire.LocalPeerIdentity(nil), dashboard.peers...)
 	dashboard.mu.Unlock()
 	api.mu.Lock()
 	socketPeer := api.peers[0]
@@ -298,7 +300,7 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 func TestLocalDashboardMintRefusesWithoutServingDashboard(t *testing.T) {
 	logins := newDashboardLogins(nil)
 	uid := uint32(7)
-	if _, failure := logins.mint(LocalPeerIdentity{GOOS: "linux", UID: &uid}); failure == nil || failure.Hint == "" {
+	if _, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid}); failure == nil || failure.Hint == "" {
 		t.Fatalf("mint without a dashboard = %v", failure)
 	}
 	response := httptest.NewRecorder()
@@ -319,15 +321,15 @@ func FuzzLocalDashboardRequiresBearer(f *testing.F) {
 		w.WriteHeader(http.StatusOK)
 	})
 	shell := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := LocalPeer(r.Context()); ok {
+		if _, ok := localhostwire.LocalPeer(r.Context()); ok {
 			reached.Store(r.Header.Get("X-Probe"), true)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	server.Config.Handler = guardDashboard(LocalHTTP{Dashboard: dashboard, Shell: shell}, server.Listener.Addr().String(), logins)
+	server.Config.Handler = guardDashboard(localhostwire.LocalHTTP{Dashboard: dashboard, Shell: shell}, server.Listener.Addr().String(), logins)
 	logins.serving(server.URL)
 	uid := uint32(1000)
-	login, failure := logins.mint(LocalPeerIdentity{GOOS: "linux", UID: &uid})
+	login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid})
 	if failure != nil {
 		f.Fatal(failure)
 	}
@@ -389,7 +391,7 @@ func signedInBearer(t *testing.T, r *localRuntime) string {
 	logins := r.run.logins
 	r.mu.Unlock()
 	uid := uint32(1000)
-	login, failure := logins.mint(LocalPeerIdentity{GOOS: "linux", UID: &uid})
+	login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid})
 	if failure != nil {
 		t.Fatal(failure)
 	}
@@ -410,7 +412,7 @@ func TestLocalDashboardStreamsEndWithTheirSession(t *testing.T) {
 			clock := &loginClock{now: time.Unix(1_800_000_000, 0)}
 			logins := newDashboardLogins(clock.Now)
 			logins.serving("http://127.0.0.1:1")
-			login, failure := logins.mint(LocalPeerIdentity{GOOS: "linux"})
+			login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux"})
 			if failure != nil {
 				t.Fatal(failure)
 			}

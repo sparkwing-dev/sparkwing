@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-func ownerPlacementFixture(t *testing.T) (*Tenant, Actor) {
+func ownerPlacementFixture(t *testing.T) (*Tenant, runstate.Actor) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
@@ -24,7 +24,7 @@ func ownerPlacementFixture(t *testing.T) (*Tenant, Actor) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Tenant{s: s, team: "a"}, Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+	return &Tenant{s: s, team: "a"}, runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
 }
 
 func TestOwnerSnapshotPlanAndEvalUseTheirOwnLease(t *testing.T) {
@@ -110,10 +110,10 @@ func TestOwnerSnapshotRechecksLabelsAndLivePreferences(t *testing.T) {
 			if err != nil || OwnerCanExecute(owner)(updated.Nodes[0]) != want {
 				t.Fatalf("current eligibility want=%v: %v", want, err)
 			}
-			result, err := tenant.ReconcileNode(ctx, ReconcileRequest{Ref: snapshot.Nodes[0].Ref, Actor: actor, Policy: SourceNone})
-			kind := Dispatch
+			result, err := tenant.ReconcileNode(ctx, ReconcileRequest{Ref: snapshot.Nodes[0].Ref, Actor: actor, Policy: runstate.SourceNone})
+			kind := runstate.Dispatch
 			if want {
-				kind = Execute
+				kind = runstate.Execute
 			}
 			if err != nil || result.Kind != kind {
 				t.Fatalf("transactional stale projection recheck: %s want=%s %v", result.Kind, kind, err)
@@ -157,10 +157,10 @@ func TestOwnerSnapshotUsesOnlyAuthenticatedAncestorPollForRemoteSelfClaim(t *tes
 			if err != nil || OwnerCanExecute(owner)(snapshot.Nodes[0]) != (observation == "live" || observation == "stale") {
 				t.Fatalf("remote observation %s: %v", observation, err)
 			}
-			result, err := tenant.ReconcileNode(ctx, ReconcileRequest{Ref: snapshot.Nodes[0].Ref, Actor: actor, Policy: SourceNone})
-			want := Dispatch
+			result, err := tenant.ReconcileNode(ctx, ReconcileRequest{Ref: snapshot.Nodes[0].Ref, Actor: actor, Policy: runstate.SourceNone})
+			want := runstate.Dispatch
 			if observation == "live" || observation == "stale" {
-				want = Execute
+				want = runstate.Execute
 			}
 			if err != nil || result.Kind != want {
 				t.Fatalf("remote selfclaim=%s want=%s: %v", result.Kind, want, err)
@@ -189,7 +189,7 @@ func TestLiveOwnerKeepsCapturedPlacementWhileRootDoesNotPoll(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant := &Tenant{s: s, team: "a"}
-	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
 	var body []byte
 	if err := s.queryRow(t.Context(), `SELECT claim_observation_json FROM capabilities WHERE team='a' AND prefix='runner'`).Scan(&body); err != nil {
 		t.Fatal(err)
@@ -216,8 +216,8 @@ func TestLiveOwnerKeepsCapturedPlacementWhileRootDoesNotPoll(t *testing.T) {
 	if err != nil || !OwnerCanExecute(owner)(snapshot.Nodes[0]) {
 		t.Fatalf("live owner lost its captured placement: %v", err)
 	}
-	result, err := tenant.ReconcileNode(ctx, ReconcileRequest{Ref: snapshot.Nodes[0].Ref, Actor: actor, Policy: SourceNone})
-	if err != nil || result.Kind != Execute {
+	result, err := tenant.ReconcileNode(ctx, ReconcileRequest{Ref: snapshot.Nodes[0].Ref, Actor: actor, Policy: runstate.SourceNone})
+	if err != nil || result.Kind != runstate.Execute {
 		t.Fatalf("owner did not execute its job after consuming the queue slot: %s %v", result.Kind, err)
 	}
 	now = now.Add(time.Hour)
@@ -264,7 +264,7 @@ func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
 				t.Fatalf("requested=%s capacity=%s eligible=%v", requested, capacity, got)
 			}
 			if requested == capacity {
-				for _, mutate := range []func(*NodeRow){func(n *NodeRow) { n.Generation++ }, func(n *NodeRow) { n.SpecHash += "changed" }, func(n *NodeRow) { n.Ref.NodeID += "other" }} {
+				for _, mutate := range []func(*runstate.NodeRow){func(n *runstate.NodeRow) { n.Generation++ }, func(n *runstate.NodeRow) { n.SpecHash += "changed" }, func(n *runstate.NodeRow) { n.Ref.NodeID += "other" }} {
 					forged := node
 					mutate(&forged)
 					if OwnerCanExecute(owner)(forged) {
@@ -276,10 +276,10 @@ func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
 					t.Fatal("foreign owner generation authorized execution")
 				}
 			}
-			result, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: node.Ref, Actor: actor, Policy: SourceNone})
-			want := Execute
+			result, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: node.Ref, Actor: actor, Policy: runstate.SourceNone})
+			want := runstate.Execute
 			if requested != capacity {
-				want = Dispatch
+				want = runstate.Dispatch
 			}
 			if err != nil || result.Kind != want {
 				t.Fatalf("recheck=%s want=%s error=%v", result.Kind, want, err)
@@ -309,7 +309,7 @@ func TestOwnerNodeReadsMatchTheSnapshotPlacementDecision(t *testing.T) {
 	if err != nil || len(nodes) != len(snapshot.Nodes) || nodes[0].OwnerExecution != nil {
 		t.Fatalf("authority read computed placement decisions: %+v %v", nodes, err)
 	}
-	if _, err := tenant.ReadOwnerNode(t.Context(), actor.Authority, controllerwire.NodeRef{RunID: "run", NodeID: "missing"}); !errors.Is(err, ErrNotFound) {
+	if _, err := tenant.ReadOwnerNode(t.Context(), actor.Authority, runspec.NodeRef{RunID: "run", NodeID: "missing"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing node: %v", err)
 	}
 }
@@ -321,7 +321,7 @@ func TestOwnerNodeReadsRefuseWhatTheSnapshotRefuses(t *testing.T) {
 			return err
 		},
 		"node": func(tenant *Tenant, ref capability.AuthorityRef) error {
-			_, err := tenant.ReadOwnerNode(t.Context(), ref, controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			_, err := tenant.ReadOwnerNode(t.Context(), ref, runspec.NodeRef{RunID: "run", NodeID: "job"})
 			return err
 		},
 	}

@@ -7,7 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // Prepare implements the artifact portion of ExecutorDependencies.PrepareArtifacts.
@@ -52,8 +52,8 @@ func (a ArtifactRecords) Prepare(ctx context.Context, input NodeInput, job nodep
 	if len(job.Artifacts) == 0 {
 		return nil, nil
 	}
-	return func(ctx context.Context, current NodeInput, result *store.NodeResult) error {
-		if result.Outcome != store.NodeSuccess {
+	return func(ctx context.Context, current NodeInput, result *runstate.NodeResult) error {
+		if result.Outcome != runstate.NodeSuccess {
 			return nil
 		}
 		key, err := a.Publish(ctx, current, sdkWorkingDirectory(input.Entry), job.Artifacts, a.Warn)

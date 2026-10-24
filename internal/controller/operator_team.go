@@ -7,6 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -16,7 +17,7 @@ func (s *Server) handleOperatorCreateTeam(w http.ResponseWriter, r *http.Request
 		return err
 	}
 	if s.operator == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	issued, err := s.operator.CreateOperatorTeam(r.Context(), a, request.Slug, request.DisplayName)
 	if errors.Is(err, store.ErrSlugTaken) {

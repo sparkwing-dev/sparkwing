@@ -26,18 +26,22 @@ type tokenManagerFake struct {
 func (f *tokenManagerFake) ListTokens(context.Context, controllerwire.TokenQuery) (controllerwire.Tokens, error) {
 	return controllerwire.Tokens{Tokens: []controllerwire.TokenMetadata{f.metadata}}, f.err
 }
+
 func (f *tokenManagerFake) ReadToken(_ context.Context, prefix string) (controllerwire.TokenMetadata, error) {
 	f.prefix = prefix
 	return f.metadata, f.err
 }
+
 func (f *tokenManagerFake) CreateToken(_ context.Context, input controllerwire.TokenCreate) (controllerwire.TokenCreated, error) {
 	f.create = input
 	return controllerwire.TokenCreated{Token: "swk_secret", Metadata: f.metadata}, f.err
 }
+
 func (f *tokenManagerFake) RotateToken(_ context.Context, prefix string, input controllerwire.TokenRotate) (controllerwire.TokenRotated, error) {
 	f.prefix, f.rotate = prefix, input
 	return controllerwire.TokenRotated{Token: "swk_rotated", Metadata: f.metadata, OldPrefix: prefix, OldRevokedAt: 42}, f.err
 }
+
 func (f *tokenManagerFake) RevokeToken(_ context.Context, prefix string) (controllerwire.TokenRevoked, error) {
 	f.prefix = prefix
 	return controllerwire.TokenRevoked{Prefix: prefix, Revoked: true}, f.err

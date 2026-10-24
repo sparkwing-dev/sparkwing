@@ -7,12 +7,10 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -20,7 +18,7 @@ import (
 )
 
 func bindRunnerIdentityW8(unit *controllerwire.ClaimedUnit) {
-	identity := engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK, Version: "v0.20.0", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v0.20.0", ManifestDigest: strings.Repeat("b", 64)}
+	identity := engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.20.0", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v0.20.0", ManifestDigest: strings.Repeat("b", 64)}
 	unit.Engine = &identity
 	unit.Request = runspec.SealedRequest{RunID: unit.RunID, Hash: "request-hash", Request: runspec.Request{Team: "team"}}
 	unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", Resolved: runspec.Resolved{Engine: identity}}, Plan: []byte(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}

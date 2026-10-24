@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -45,7 +47,7 @@ func (f *identityFixture) seedRun(team store.Team, id string) {
 	now := time.Now()
 	if err := teststore.SeedTriggerWithRun(f.store, context.Background(), tn.Team(),
 		store.Trigger{ID: id, Pipeline: "build", CreatedAt: now},
-		store.Run{ID: id, Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
+		store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: "build", Status: "pending", StartedAt: now}}); err != nil {
 		f.t.Fatal(err)
 	}
 }

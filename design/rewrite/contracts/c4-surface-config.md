@@ -777,7 +777,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`DialSocket`](../../../internal/wingd/socket_transport.go) | Connects to the platform's private controller transport under the caller's context and timeout. |
 | [`ListenSocket`](../../../internal/wingd/socket_transport.go) | Binds that transport and yields only authenticated APIConn connections. |
 | [`LocalActivity`](../../../internal/wingd/lifecycle.go) | LocalActivity counts live state, not historical runs or configured schedules. |
-| [`LocalPeerIdentity`](../../../internal/wingd/lifecycle.go) | LocalPeerIdentity comes from the transport's kernel credentials, never request input. |
+| [`localhostwire.LocalPeerIdentity`](../../../internal/localhostwire/transport.go) | LocalPeerIdentity comes from the transport's kernel credentials, never request input. |
 | [`LocalSubject`](../../../internal/wingd/lifecycle.go) | LocalSubject checks the peer against the controller's OS account before minting local authority. |
 | [`LocalStartOptions`](../../../internal/wingd/lifecycle.go) | LocalStartOptions carries spawn plumbing in arguments rather than environment variables. |
 | [`LocalRuntime`](../../../internal/wingd/lifecycle.go) | LocalRuntime uses the same internal/controller implementation, route policy and state owner. |
@@ -785,7 +785,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`ManagedUnitKind`](../../../internal/wingd/lifecycle.go) | ManagedUnitKind gives schedules and the controller one upgrade path. |
 | [`ManagedUnit`](../../../internal/wingd/lifecycle.go) | ManagedUnit records rendered argv for doctor to detect removed verbs as well as stale versions. |
 | [`ManagedUnitManager`](../../../internal/wingd/lifecycle.go) | ManagedUnitManager is shared by update, dashboard installation and schedule installation. |
-| [`LocalDoctorFinding`](../../../internal/wingd/lifecycle.go) | LocalDoctorFinding makes incompatible stores, version skew and removed unit verbs actionable. |
+| [`localhostwire.LocalDoctorFinding`](../../../internal/localhostwire/transport.go) | LocalDoctorFinding makes incompatible stores, version skew and removed unit verbs actionable. |
 | [`LocalLifecycle`](../../../internal/wingd/lifecycle.go) | LocalLifecycle starts on demand and shares the runtime used by explicit dashboard commands. |
 | [`NewLocalLifecycle`](../../../internal/wingd/lifecycle.go) | NewLocalLifecycle keeps service management outside controller request handling. |
 

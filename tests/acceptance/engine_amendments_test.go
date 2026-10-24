@@ -15,7 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -23,7 +23,7 @@ func TestEngineAmendmentsPreservePrivateWireContract(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		t.Run(endpoint, func(t *testing.T) {
 			now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
-			want := controllerwire.ReconcileResponse{Kind: "execute", Job: controllerwire.ExecutionJob{JobDetail: controllerwire.JobDetail{ID: "build", Status: "running", Generation: 3, Attempt: 4, StateSeq: 19, Expansion: "accepted", CancelRequestedAt: &now}, Spec: json.RawMessage(`{"id":"build"}`), SpecHash: "spec-hash", ApplicationRetries: 2, Disruptions: 1, ClaimedBy: "granted-runner", LeaseExpiresAt: &now}, Claim: &controllerwire.ClaimedUnit{Capability: "private-award", SourceGeneration: 3, OwnerDeadline: &now, Engine: &engine.Identity{Version: "v1.2.3", ManifestDigest: "verified-manifest"}}}
+			want := controllerwire.ReconcileResponse{Kind: "execute", Job: controllerwire.ExecutionJob{JobDetail: controllerwire.JobDetail{ID: "build", Status: "running", Generation: 3, Attempt: 4, StateSeq: 19, Expansion: "accepted", CancelRequestedAt: &now}, Spec: json.RawMessage(`{"id":"build"}`), SpecHash: "spec-hash", ApplicationRetries: 2, Disruptions: 1, ClaimedBy: "granted-runner", LeaseExpiresAt: &now}, Claim: &controllerwire.ClaimedUnit{Capability: "private-award", SourceGeneration: 3, OwnerDeadline: &now, Engine: &engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified-manifest"}}}
 			want.Claim.Runner.Name = "granted-runner"
 			want.Claim.Request.Request.Git.SHA = "sealed-sha"
 			want.Claim.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://example.com/team/repo.git", PipelineDir: "ci"}

@@ -106,7 +106,7 @@ func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 	if err != nil {
 		t.Fatal(err)
 	}
-	registered, err := manager.RegisterLocalSchedules(ctx, controllerwire.LocalScheduleRegistration{Mode: controllerwire.ScheduleReplace, RepoPath: repo, Project: project, Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "ci", Cron: "* * * * *"}}, Environment: os.Environ(), Follow: true})
+	registered, err := manager.RegisterLocalSchedules(ctx, controllerwire.LocalScheduleRegistration{Mode: controllerwire.ScheduleReplace, RepoPath: repo, Project: project, Schedules: []runspec.ScheduleDeclaration{{Pipeline: "ci", Cron: "* * * * *"}}, Environment: os.Environ(), Follow: true})
 	if err != nil || len(registered.Schedules) != 1 {
 		t.Fatalf("registration: %+v %v", registered, err)
 	}

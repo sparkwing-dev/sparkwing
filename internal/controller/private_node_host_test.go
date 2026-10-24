@@ -6,11 +6,10 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -25,7 +24,7 @@ func FuzzPrivateNodeHostConfinesStateAndAuthority(f *testing.F) {
 			engineSQL(t, server.store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(`{"id":"`+id+`"}`), []byte(`{}`))
 		}
 		a := capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}}
-		award, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Actor: engineActor(a), Policy: store.SourceNone})
+		award, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "build"}, Actor: engineActor(a), Policy: runstate.SourceNone})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -42,15 +41,15 @@ func FuzzPrivateNodeHostConfinesStateAndAuthority(f *testing.F) {
 		if err != nil || len(snapshot.Nodes) != 1 || snapshot.Nodes[0].Ref.NodeID != "build" {
 			t.Fatalf("node snapshot disclosed siblings: %+v %v", snapshot.Nodes, err)
 		}
-		actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Generation: award.Node.Generation}}
-		if _, err := host.RenewNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}, actor, false); (err == nil) != (run == "run" && node == "build") {
+		actor := runstate.Actor{Kind: runstate.ActorHolder, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Generation: award.Node.Generation}}
+		if _, err := host.RenewNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}, actor, false); (err == nil) != (run == "run" && node == "build") {
 			t.Fatalf("renewed outside node award: %v", err)
 		}
 		actor.Generation++
-		if _, err := host.RenewNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "build"}, actor, true); err == nil {
+		if _, err := host.RenewNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "build"}, actor, true); err == nil {
 			t.Fatal("stale node actor renewed")
 		}
-		_, err = host.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)})
+		_, err = host.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)})
 		if (err == nil) != (run == "run" && node == "build") {
 			t.Fatalf("node scope run=%q node=%q: %v", run, node, err)
 		}
@@ -63,10 +62,10 @@ func FuzzPrivateNodeHostConfinesStateAndAuthority(f *testing.F) {
 		}
 		actor.Generation = award.Node.Generation
 		engineAcceptedFixturePlan(t, server.engine, "a", "run", "build", "sibling")
-		if result, err := host.MayStart(t.Context(), store.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(award.Node.Generation)}, actor); err != nil || result.Kind != store.AcquireGranted {
+		if result, err := host.MayStart(t.Context(), runstate.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(award.Node.Generation)}, actor); err != nil || result.Kind != runstate.AcquireGranted {
 			t.Fatalf("execution admission: %+v, %v", result, err)
 		}
-		_, err = host.TransitionNode(t.Context(), store.StartNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&sourceAttempt)})
+		_, err = transitionLocalNode(t.Context(), host, store.StartNode{Ref: runspec.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&sourceAttempt)})
 		if (err == nil) != (run == "run" && node == "build" && sourceAttempt == 0) {
 			t.Fatalf("node transition escaped exact run/node/attempt fence: %v", err)
 		}

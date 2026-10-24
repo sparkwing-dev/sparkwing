@@ -5,28 +5,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func (f *storeHostFixture) report(ctx context.Context, input NodeInput, outcome store.NodeState) error {
-	actor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: input.Authority.CapabilityPrefix, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
-	if outcome == store.NodeCancelled {
-		_, err := f.State.TransitionNode(ctx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(input.Attempt), Outcome: outcome, Result: &store.NodeResult{Outcome: outcome}})
+func (f *storeHostFixture) report(ctx context.Context, input NodeInput, outcome runstate.NodeState) error {
+	actor := runstate.Actor{Kind: runstate.ActorHolder, CapabilityPrefix: input.Authority.CapabilityPrefix, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
+	if outcome == runstate.NodeCancelled {
+		_, err := f.State.TransitionNode(ctx, store.ReportNode{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(input.Attempt), Outcome: outcome, Result: &runstate.NodeResult{Outcome: outcome}})
 		return err
 	}
-	if err := awaitStart(ctx, f.Tenant, store.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, actor, nil); err != nil {
+	if err := awaitStart(ctx, f.Tenant, runstate.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, actor, nil); err != nil {
 		return err
 	}
-	started, err := f.State.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(input.Attempt)})
+	started, err := f.State.TransitionNode(ctx, store.StartNode{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(input.Attempt)})
 	if err != nil {
 		return err
 	}
-	_, err = f.State.TransitionNode(ctx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(started.Attempt), Outcome: outcome, Result: &store.NodeResult{Outcome: outcome}})
+	_, err = f.State.TransitionNode(ctx, store.ReportNode{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: actor, SourceAttempt: new(started.Attempt), Outcome: outcome, Result: &runstate.NodeResult{Outcome: outcome}})
 	return err
 }
 
@@ -39,14 +38,14 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 		{ID: "superseded", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}})
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
-		outcome := store.NodeSuccess
+		outcome := runstate.NodeSuccess
 		switch input.NodeID {
 		case "boom":
-			outcome = store.NodeFailed
+			outcome = runstate.NodeFailed
 		case "skipper":
-			outcome = store.NodeSkipped
+			outcome = runstate.NodeSkipped
 		case "superseded":
-			outcome = store.NodeSuperseded
+			outcome = runstate.NodeSuperseded
 		}
 		return f.report(ctx, input, outcome)
 	})

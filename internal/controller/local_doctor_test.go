@@ -11,11 +11,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
@@ -30,7 +33,7 @@ func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
 						teststore.SeedTeam(t, st, team)
 					}
 					if scope != "pruned" {
-						if err := teststore.SeedRun(st, t.Context(), team, store.Run{ID: "selected", Pipeline: "ci", Status: "pending"}); err != nil {
+						if err := teststore.SeedRun(st, t.Context(), team, store.Run{RunSummary: runstate.RunSummary{ID: "selected", Pipeline: "ci", Status: "pending"}}); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -48,7 +51,7 @@ func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
 					listener := &localScheduleListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 					ctx, cancel := context.WithCancel(t.Context())
 					done := make(chan error, 1)
-					go func() { done <- server.HTTP().ServeAPI(ctx, listener) }()
+					go func() { done <- wingd.ServeAPI(ctx, listener, server.HTTP()) }()
 					peer, _ := localControllerIdentity(t)
 					transport := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
 						local, remote := net.Pipe()

@@ -5,14 +5,15 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 // HTTP supplies shared policy handlers for the elected local runtime.
-func (s *Server) HTTP() wingd.LocalHTTP {
+func (s *Server) HTTP() localhostwire.LocalHTTP {
 	s.localHTTPOnce.Do(func() {
 		s.WithPeerIdentity(func(r *http.Request) capability.Subject {
-			peer, ok := wingd.LocalPeer(r.Context())
+			peer, ok := localhostwire.LocalPeer(r.Context())
 			if !ok {
 				return capability.Subject{}
 			}
@@ -29,9 +30,9 @@ func (s *Server) HTTP() wingd.LocalHTTP {
 			return capability.Subject{}
 		})
 		router := s.rebuildRouters()
-		s.registerControllerEndpoints(router, []Endpoint{{Method: "POST", Pattern: "/api/v1/local/doctor", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.localDoctor}})
+		s.registerControllerEndpoints(router, []controllerwire.Endpoint{{Method: "POST", Pattern: "/api/v1/local/doctor", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.localDoctor}})
 		api := s.observedHandler(router.ServeMux)
-		s.localHTTP = wingd.LocalHTTP{API: api, Dashboard: api}
+		s.localHTTP = localhostwire.LocalHTTP{API: api, Dashboard: api}
 		if s.dashboard != nil {
 			s.localHTTP.Dashboard = s.browserHandler(api)
 		}

@@ -10,9 +10,9 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -27,8 +27,8 @@ func localAdmissionSeal(t *testing.T, options runspec.Options) AcceptedRun {
 	return AcceptedRun{RunID: testRunID, SpecHash: "spec", PlanHash: "plan", Spec: raw}
 }
 
-func localAdmissionRow(id string) store.NodeRow {
-	return store.NodeRow{Ref: controllerwire.NodeRef{RunID: testRunID, NodeID: runspec.NodeID(id)}}
+func localAdmissionRow(id string) runstate.NodeRow {
+	return runstate.NodeRow{Ref: runspec.NodeRef{RunID: testRunID, NodeID: runspec.NodeID(id)}}
 }
 
 func localAdmissionOptions() runspec.Options {
@@ -230,11 +230,11 @@ func TestAdmissionLeaseEndings(t *testing.T) {
 			if err == nil || mode == "evicted" && !strings.Contains(err.Error(), "newer") || mode == "daemon cancel" && !strings.Contains(err.Error(), "operator said stop") || mode == "rejected after restart" && !strings.Contains(err.Error(), "lease lost") {
 				t.Fatalf("ending=%s error=%v", mode, err)
 			}
-			want := store.NodeSuperseded
+			want := runstate.NodeSuperseded
 			if mode == "daemon cancel" {
-				want = store.NodeCancelled
+				want = runstate.NodeCancelled
 			}
-			if len(state.changes) != 2 || state.changes[0].To != store.NodeRunning || state.changes[1].To != want || state.changes[1].Cause != store.CauseReport {
+			if len(state.changes) != 2 || state.changes[0].To != runstate.NodeRunning || state.changes[1].To != want || state.changes[1].Cause != runstate.CauseReport {
 				t.Fatalf("ending=%s changes=%+v", mode, state.changes)
 			}
 			for _, process := range *processes {

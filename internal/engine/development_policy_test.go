@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
@@ -20,7 +21,7 @@ func TestDevelopmentPolicySkipsIndexAndRunnerUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, evaluate := range []func(VerifiedIndex, string, time.Time) ([]Notice, error){Evaluate, EvaluateRunner} {
+	for _, evaluate := range []func(VerifiedIndex, string, time.Time) ([]engineid.Notice, error){Evaluate, EvaluateRunner} {
 		if notices, err := evaluate(index.Index, "(devel)", time.Now()); err != nil || len(notices) != 0 {
 			t.Fatalf("development evaluation: %+v: %v", notices, err)
 		}

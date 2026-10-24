@@ -5,8 +5,6 @@ import (
 	"io"
 	"strings"
 	"sync"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type quietRenderer struct {
@@ -15,7 +13,7 @@ type quietRenderer struct {
 	errW     io.Writer
 	useColor bool
 
-	pendingSummary *sparkwing.LogRecord
+	pendingSummary *Record
 }
 
 func (q *quietRenderer) color(s, code string) string {
@@ -35,11 +33,7 @@ func (q *quietRenderer) sanitize(s string) string {
 
 func (q *quietRenderer) sanitizeInline(s string) string { return foldLines(q.sanitize(s)) }
 
-func (q *quietRenderer) Log(level, msg string) {
-	q.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
-}
-
-func (q *quietRenderer) Emit(rec sparkwing.LogRecord) {
+func (q *quietRenderer) emit(rec Record) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	switch rec.Event {
@@ -58,12 +52,12 @@ func (q *quietRenderer) Flush() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.pendingSummary != nil {
-		q.writeFinish(sparkwing.LogRecord{})
+		q.writeFinish(Record{})
 		q.pendingSummary = nil
 	}
 }
 
-func (q *quietRenderer) writeStart(rec sparkwing.LogRecord) {
+func (q *quietRenderer) writeStart(rec Record) {
 	pipeline, _ := rec.Attrs["pipeline"].(string)
 	if pipeline == "" {
 		pipeline = "pipeline"
@@ -89,7 +83,7 @@ func profileName(attrs map[string]any) string {
 	return name
 }
 
-func (q *quietRenderer) writeFinish(finish sparkwing.LogRecord) {
+func (q *quietRenderer) writeFinish(finish Record) {
 	runID, _ := finish.Attrs["run_id"].(string)
 	status, _ := finish.Attrs["status"].(string)
 

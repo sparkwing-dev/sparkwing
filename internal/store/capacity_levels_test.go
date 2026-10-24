@@ -5,10 +5,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -53,23 +52,23 @@ func TestCapacityLevelsBreakOpposingPlanJobCycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Both runs retain their plan group before either asks for its job group.
-			if result, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: "job", Generation: int64(f.holder.Generation)}, f.holder); err != nil || result.Kind != store.AcquireGranted {
+			if result, err := f.tenant.MayStart(ctx, runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: "job", Generation: int64(f.holder.Generation)}, f.holder); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("first job admission: %+v, %v", result, err)
 			}
 			if _, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
 
-			ref := controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "job"}
+			ref := runspec.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "job"}
 			if _, err := f.tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: owner}); err != nil {
 				t.Fatal(err)
 			}
-			next, err := f.tenant.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: owner, Policy: store.SourceResume})
-			if err != nil || next.Kind != store.Execute || next.Claim == nil {
+			next, err := f.tenant.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: owner, Policy: runstate.SourceResume})
+			if err != nil || next.Kind != runstate.Execute || next.Claim == nil {
 				t.Fatalf("second run did not execute: %+v, %v", next, err)
 			}
-			holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Claim.CapabilityPrefix}, CapabilityPrefix: next.Claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: next.Claim.Holder, Generation: next.Claim.Generation}}
-			if result, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: admitted.RunID, NodeID: "job", Generation: int64(holder.Generation)}, holder); err != nil || result.Kind != store.AcquireGranted {
+			holder := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Claim.CapabilityPrefix}, CapabilityPrefix: next.Claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: next.Claim.Holder, Generation: next.Claim.Generation}}
+			if result, err := f.tenant.MayStart(ctx, runstate.CapacityBinding{RunID: admitted.RunID, NodeID: "job", Generation: int64(holder.Generation)}, holder); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("claimed job lost its reservation: %+v, %v", result, err)
 			}
 			if _, err := f.tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)}); err != nil {
@@ -81,17 +80,17 @@ func TestCapacityLevelsBreakOpposingPlanJobCycle(t *testing.T) {
 					t.Fatalf("independent group %s: %+v, %v", key, state, err)
 				}
 			}
-			if _, err := f.tenant.TransitionNode(ctx, store.ReportNode{Ref: f.ref, Actor: f.holder, Outcome: store.NodeSuccess, SourceAttempt: acceptanceAttempt(1)}); err != nil {
+			if _, err := f.tenant.TransitionNode(ctx, store.ReportNode{Ref: f.ref, Actor: f.holder, Outcome: runstate.NodeSuccess, SourceAttempt: acceptanceAttempt(1)}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.tenant.TransitionNode(ctx, store.ReportNode{Ref: ref, Actor: holder, Outcome: store.NodeSuccess, SourceAttempt: acceptanceAttempt(1)}); err != nil {
+			if _, err := f.tenant.TransitionNode(ctx, store.ReportNode{Ref: ref, Actor: holder, Outcome: runstate.NodeSuccess, SourceAttempt: acceptanceAttempt(1)}); err != nil {
 				t.Fatal(err)
 			}
 			for _, run := range []struct {
 				id    string
-				actor store.Actor
+				actor runstate.Actor
 			}{{string(f.ref.RunID), f.owner}, {admitted.RunID, owner}} {
-				if _, err := f.tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunCompletion{RunID: runspec.RunID(run.id), Actor: run.actor, Cause: store.RunFinish}, Unit: run.actor.Owner}); err != nil {
+				if _, err := f.tenant.FinishRunAndUnit(ctx, runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: runspec.RunID(run.id), Actor: run.actor, Cause: runstate.RunFinish}, Unit: run.actor.Owner}); err != nil {
 					t.Fatalf("finish %s: %v", run.id, err)
 				}
 			}

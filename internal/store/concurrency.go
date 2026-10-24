@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func fitsBudget(used, cost, capacity int) bool {
@@ -43,17 +44,6 @@ const (
 // owner liveness retains it only within that lease and leaseBoundTx deadlines.
 const defaultConcurrencyLease = DefaultLeaseDuration
 
-// AcquireKind covers user-selectable + non-selectable outcomes.
-type AcquireKind string
-
-const (
-	AcquireGranted          AcquireKind = "granted"
-	AcquireQueued           AcquireKind = "queued"
-	AcquireSkipped          AcquireKind = "skipped"
-	AcquireFailed           AcquireKind = "failed"
-	AcquireCancellingOthers AcquireKind = "cancelling_others"
-)
-
 // acquireSlotRequest selects a group and the work consuming its capacity.
 type acquireSlotRequest struct {
 	Key      string
@@ -71,45 +61,10 @@ type acquireSlotRequest struct {
 	Cost int
 }
 
-// AcquireSlotResponse: fields are populated per Kind.
-type AcquireSlotResponse struct {
-	FailureReason    string
-	Kind             AcquireKind
-	HolderID         string
-	LeaseExpiresAt   time.Time
-	SupersededIDs    []string
-	PreviousCapacity int
-	DriftNote        string
-
-	// Observability for a queued arrival (Kind == AcquireQueued):
-	// Position is the number of queue-policy waiters that arrived earlier,
-	// QueueLength is the total queued for the key, and Holders are the slots
-	// currently held. Weighted admission may backfill a later waiter that fits
-	// while an earlier waiter stays queued. Zero/empty for other kinds.
-	Position    int
-	QueueLength int
-	Holders     []ConcurrencyHolder
-}
-
 // ConcurrencyHolder mirrors the concurrency_holders row.
 type ConcurrencyHolder struct {
-	Key            string
-	HolderID       string
-	RunID          string
-	NodeID         string
-	ClaimedAt      time.Time
-	QueueArrivedAt time.Time
-	LeaseExpiresAt time.Time
-	Superseded     bool
-
-	// Cost is the admission weight this holder draws from the key's
-	// budget; DeclaredCapacity is the capacity it declared. Both are loaded
-	// for admission and the operator budget view.
-	Cost             int
-	DeclaredCapacity int
-
-	// safety: the store derives keys from accepted declarations and placement.
-	// The fleet-wide reaper retains the team privately to delete the right row.
+	runstate.ConcurrencyHolder
+	// The fleet reaper retains the team privately to delete the right row.
 	team Team
 }
 
@@ -162,27 +117,27 @@ type ConcurrencyState struct {
 	Waiters           []ConcurrencyWaiter
 }
 
-func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req acquireSlotRequest, fence *capacityFence, deadline time.Time) (AcquireSlotResponse, error) {
+func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req acquireSlotRequest, fence *capacityFence, deadline time.Time) (runstate.AcquireSlotResponse, error) {
 	if fence != nil {
 		if err := checkCapacityFenceTx(ctx, tx, t.team, req.Key, *fence); err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
 		expires, err := capacityLeaseCeilingTx(ctx, tx, t.team, req.RunID, req.NodeID, tx.now(ctx).Add(defaultConcurrencyLease).UnixNano())
 		if err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
 		deadline = time.Unix(0, expires)
 		req.Lease = defaultConcurrencyLease
 		req, err = sealedCapacityRequestTx(ctx, tx, t.team, req, fence.actor.Authority)
 		if err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
 	}
 	if req.Key == "" {
-		return AcquireSlotResponse{}, errors.New("concurrency: empty key")
+		return runstate.AcquireSlotResponse{}, errors.New("concurrency: empty key")
 	}
 	if req.HolderID == "" {
-		return AcquireSlotResponse{}, errors.New("concurrency: empty holder_id")
+		return runstate.AcquireSlotResponse{}, errors.New("concurrency: empty holder_id")
 	}
 	if req.Policy == "" {
 		req.Policy = OnLimitQueue
@@ -199,19 +154,19 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 
 	if req.Cost > req.Capacity {
 		if req.Policy == OnLimitSkip {
-			return AcquireSlotResponse{Kind: AcquireSkipped}, nil
+			return runstate.AcquireSlotResponse{Kind: runstate.AcquireSkipped}, nil
 		}
-		return AcquireSlotResponse{Kind: AcquireFailed}, nil
+		return runstate.AcquireSlotResponse{Kind: runstate.AcquireFailed}, nil
 	}
 
 	var err error
 
 	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, req.Key); err != nil {
-		return AcquireSlotResponse{}, err
+		return runstate.AcquireSlotResponse{}, err
 	}
 
 	if err := checkCapacityMutationTx(ctx, tx, t.team, req.Key, req.HolderID, fence); err != nil {
-		return AcquireSlotResponse{}, err
+		return runstate.AcquireSlotResponse{}, err
 	}
 
 	now := tx.now(ctx)
@@ -234,7 +189,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 			 ON CONFLICT (team, key) DO NOTHING`,
 			string(t.team), req.Key, req.Capacity, req.RunID, req.NodeID, nowNS,
 		); err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
 		// safety: a conflict-losing insert holds no row lock; re-read FOR
 		// UPDATE so two first-acquires of a key serialize like later pairs.
@@ -243,10 +198,10 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 			ctx,
 			`SELECT capacity FROM concurrency_entries WHERE team = ? AND key = ?`+t.s.forUpdate(), string(t.team), req.Key,
 		).Scan(&relockCap); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
 	case err != nil:
-		return AcquireSlotResponse{}, err
+		return runstate.AcquireSlotResponse{}, err
 	default:
 		if existingCap != req.Capacity {
 			prevCap = existingCap
@@ -261,7 +216,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 				  WHERE team = ? AND key = ?`,
 				req.Capacity, existingCap, req.RunID, req.NodeID, nowNS, string(t.team), req.Key,
 			); err != nil {
-				return AcquireSlotResponse{}, err
+				return runstate.AcquireSlotResponse{}, err
 			}
 		} else {
 			if _, err := tx.ExecContext(
@@ -271,7 +226,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 				  WHERE team = ? AND key = ?`,
 				req.RunID, req.NodeID, nowNS, string(t.team), req.Key,
 			); err != nil {
-				return AcquireSlotResponse{}, err
+				return runstate.AcquireSlotResponse{}, err
 			}
 		}
 	}
@@ -284,10 +239,10 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		req.Lease = slotLease(now, deadline, req.Lease)
 	}
 	if req.Lease <= 0 {
-		return AcquireSlotResponse{}, holderRefusal()
+		return runstate.AcquireSlotResponse{}, holderRefusal()
 	}
 	if _, err := reapStaleConcurrencyHoldersTx(ctx, tx, t.team, req.Key); err != nil {
-		return AcquireSlotResponse{}, err
+		return runstate.AcquireSlotResponse{}, err
 	}
 
 	var existingLeaseNS int64
@@ -301,17 +256,17 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	if err == nil && holderCountsForBudget(existingSuperInt == 1, existingLeaseNS, nowNS) {
 		newExpires, err := capacityLeaseCeilingTx(ctx, tx, t.team, req.RunID, req.NodeID, now.Add(req.Lease).UnixNano())
 		if err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
 		if _, err := tx.ExecContext(
 			ctx,
 			`UPDATE concurrency_holders SET lease_expires_at = ? WHERE team = ? AND key = ? AND holder_id = ?`,
 			newExpires, string(t.team), req.Key, req.HolderID,
 		); err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
-		return AcquireSlotResponse{
-			Kind:             AcquireGranted,
+		return runstate.AcquireSlotResponse{
+			Kind:             runstate.AcquireGranted,
 			HolderID:         req.HolderID,
 			LeaseExpiresAt:   time.Unix(0, newExpires),
 			PreviousCapacity: prevCap,
@@ -319,12 +274,12 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		}, nil
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return AcquireSlotResponse{}, err
+		return runstate.AcquireSlotResponse{}, err
 	}
 
 	acct, err := txConcurrencyAccounting(ctx, tx, t.team, req.Key, nowNS)
 	if err != nil {
-		return AcquireSlotResponse{}, err
+		return runstate.AcquireSlotResponse{}, err
 	}
 	activeCost := acct.used
 	effCap := acct.effectiveCapacity(req.Capacity)
@@ -335,7 +290,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	if policy == OnLimitQueue {
 		blocked, err := txEarlierRunnableQueueWaiter(ctx, tx, t.team, req.Key, req.RunID, req.NodeID, nowNS, acct)
 		if err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
 		queueBlocked = blocked
 	}
@@ -345,10 +300,10 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 			team: t.team, key: req.Key, holderID: req.HolderID, runID: req.RunID, nodeID: req.NodeID,
 			cost: req.Cost, declaredCapacity: req.Capacity,
 		}, nowNS, expiresNS); err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
-		return AcquireSlotResponse{
-			Kind:             AcquireGranted,
+		return runstate.AcquireSlotResponse{
+			Kind:             runstate.AcquireGranted,
 			HolderID:         req.HolderID,
 			LeaseExpiresAt:   time.Unix(0, expiresNS),
 			PreviousCapacity: prevCap,
@@ -358,10 +313,10 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 
 	switch policy {
 	case OnLimitSkip:
-		return AcquireSlotResponse{Kind: AcquireSkipped, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
+		return runstate.AcquireSlotResponse{Kind: runstate.AcquireSkipped, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
 
 	case OnLimitFail:
-		return AcquireSlotResponse{Kind: AcquireFailed, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
+		return runstate.AcquireSlotResponse{Kind: runstate.AcquireFailed, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
 
 	case OnLimitCancelOthers:
 		var supersededIDs []string
@@ -375,11 +330,11 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		}
 		for _, id := range supersededIDs {
 			if err := txSupersede(ctx, tx, t.team, req.Key, id); err != nil {
-				return AcquireSlotResponse{}, err
+				return runstate.AcquireSlotResponse{}, err
 			}
 			if fence != nil {
 				if err := cancelSupersededCapacityTx(ctx, tx, t.team, req.Key, id, fence.actor); err != nil {
-					return AcquireSlotResponse{}, err
+					return runstate.AcquireSlotResponse{}, err
 				}
 			}
 		}
@@ -388,10 +343,10 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 			team: t.team, key: req.Key, holderID: req.HolderID, runID: req.RunID, nodeID: req.NodeID,
 			cost: req.Cost, declaredCapacity: req.Capacity,
 		}, nowNS, expiresNS); err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
-		return AcquireSlotResponse{
-			Kind:             AcquireCancellingOthers,
+		return runstate.AcquireSlotResponse{
+			Kind:             runstate.AcquireCancellingOthers,
 			HolderID:         req.HolderID,
 			LeaseExpiresAt:   time.Unix(0, expiresNS),
 			SupersededIDs:    supersededIDs,
@@ -404,18 +359,18 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	default:
 		arrivedNS := nowNS
 		if queuedArrivedNS, queued, err := txQueueWaiterArrivedAt(ctx, tx, t.team, req.Key, req.RunID, req.NodeID); err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		} else if queued {
 			arrivedNS = queuedArrivedNS
 		} else if arrivedNS, err = txNextQueueArrival(ctx, tx, t.team, req.Key, nowNS); err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
 		if err := txPark(ctx, tx, t.team, ConcurrencyWaiter{
 			Key: req.Key, RunID: req.RunID, NodeID: req.NodeID, HolderID: req.HolderID,
 			Policy: OnLimitQueue,
 			Cost:   req.Cost, DeclaredCapacity: req.Capacity,
 		}, arrivedNS, now.Add(req.Lease).UnixNano()); err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
 		var position, queueLen int
 		if err := tx.QueryRowContext(
@@ -423,22 +378,22 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 			`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy = ? AND arrived_at < ?`,
 			string(t.team), req.Key, OnLimitQueue, arrivedNS,
 		).Scan(&position); err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
 		if err := tx.QueryRowContext(
 			ctx,
 			`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy = ?`,
 			string(t.team), req.Key, OnLimitQueue,
 		).Scan(&queueLen); err != nil {
-			return AcquireSlotResponse{}, err
+			return runstate.AcquireSlotResponse{}, err
 		}
-		return AcquireSlotResponse{
-			Kind:             AcquireQueued,
+		return runstate.AcquireSlotResponse{
+			Kind:             runstate.AcquireQueued,
 			PreviousCapacity: prevCap,
 			DriftNote:        driftNote,
 			Position:         position,
 			QueueLength:      queueLen,
-			Holders:          acct.holders,
+			Holders:          admissionHolders(acct.holders),
 		}, nil
 	}
 }
@@ -993,7 +948,7 @@ func reapStaleConcurrencyHoldersTx(ctx context.Context, tx *storeTx, team Team, 
 	}
 	var stale []ConcurrencyHolder
 	for _, h := range holders {
-		live, err := capacityWorkLiveTx(ctx, tx, team, CapacityBinding{RunID: h.RunID, NodeID: h.NodeID}, h.LeaseExpiresAt.UnixNano())
+		live, err := capacityWorkLiveTx(ctx, tx, team, runstate.CapacityBinding{RunID: h.RunID, NodeID: h.NodeID}, h.LeaseExpiresAt.UnixNano())
 		if err != nil {
 			return nil, err
 		}
@@ -1082,4 +1037,12 @@ func nodeIDOrDash(nodeID string) string {
 		return "-"
 	}
 	return nodeID
+}
+
+func admissionHolders(rows []ConcurrencyHolder) []runstate.ConcurrencyHolder {
+	var holders []runstate.ConcurrencyHolder
+	for _, h := range rows {
+		holders = append(holders, h.ConcurrencyHolder)
+	}
+	return holders
 }

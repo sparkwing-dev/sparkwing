@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -174,7 +175,7 @@ func TestReportingReadsCurrentJobLifecycle(t *testing.T) {
 	foreign := tenantFor(t, f.s, "foreign")
 	for _, started := range []bool{false, true} {
 		if started {
-			if result, err := f.tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(f.holder.RunID), NodeID: string(f.holder.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || result.Kind != store.AcquireGranted {
+			if result, err := f.tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: string(f.holder.RunID), NodeID: string(f.holder.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("execution admission: %+v, %v", result, err)
 			}
 			if _, err := f.tenant.TransitionNode(t.Context(), store.StartNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(0)}); err != nil {

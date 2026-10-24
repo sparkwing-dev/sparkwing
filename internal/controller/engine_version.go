@@ -8,6 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 // SignedEngineVersionPolicy reads release metadata and notices through the engine owner.
@@ -19,8 +20,8 @@ type SignedEngineVersionPolicy struct {
 type engineVersionContracts interface {
 	Index(context.Context, *engine.Resolver, time.Time) (engine.IndexResult, error)
 	Policy(engine.VerifiedIndex) engine.VersionIndex
-	Evaluate(engine.VerifiedIndex, string, time.Time) ([]engine.Notice, error)
-	CompatibilityFor(engine.VersionInfo) controllerwire.Compatibility
+	Evaluate(engine.VerifiedIndex, string, time.Time) ([]engineid.Notice, error)
+	CompatibilityFor(engineid.VersionInfo) controllerwire.Compatibility
 }
 
 type sharedEngineVersionContracts struct{}
@@ -33,11 +34,11 @@ func (sharedEngineVersionContracts) Policy(index engine.VerifiedIndex) engine.Ve
 	return index.Policy()
 }
 
-func (sharedEngineVersionContracts) Evaluate(index engine.VerifiedIndex, version string, now time.Time) ([]engine.Notice, error) {
+func (sharedEngineVersionContracts) Evaluate(index engine.VerifiedIndex, version string, now time.Time) ([]engineid.Notice, error) {
 	return engine.Evaluate(index, version, now)
 }
 
-func (sharedEngineVersionContracts) CompatibilityFor(release engine.VersionInfo) controllerwire.Compatibility {
+func (sharedEngineVersionContracts) CompatibilityFor(release engineid.VersionInfo) controllerwire.Compatibility {
 	return controllerwire.CompatibilityFor(release)
 }
 
@@ -90,7 +91,7 @@ func (p SignedEngineVersionPolicy) CheckRunner(ctx context.Context, version stri
 }
 
 // Notices retains signed warnings and displays enforcement without hiding persisted run status.
-func (p SignedEngineVersionPolicy) Notices(ctx context.Context, version string) ([]engine.Notice, error) {
+func (p SignedEngineVersionPolicy) Notices(ctx context.Context, version string) ([]engineid.Notice, error) {
 	if version == "" {
 		return nil, invalidEngineBody("engine version is required")
 	}
@@ -108,10 +109,10 @@ func (p SignedEngineVersionPolicy) Notices(ctx context.Context, version string) 
 	if err != nil && (!errors.As(err, &failure) || (failure.Code != apierr.VersionRevoked && failure.Code != apierr.VersionUnsupported)) {
 		return nil, err
 	}
-	out := append([]engine.Notice{}, index.Notices...)
+	out := append([]engineid.Notice{}, index.Notices...)
 	out = append(out, notices...)
 	if err != nil {
-		out = append(out, engine.Notice{Kind: engine.NoticeEnforcement, Version: version, Reason: failure.Message, Hint: failure.Hint})
+		out = append(out, engineid.Notice{Kind: engineid.NoticeEnforcement, Version: version, Reason: failure.Message, Hint: failure.Hint})
 	}
 	return out, nil
 }

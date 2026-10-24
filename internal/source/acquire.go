@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -43,13 +44,13 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 		}
 	}()
 	if options.SDK == "" {
-		options.SDK = engine.GoSDK
+		options.SDK = engineid.GoSDK
 		typescript, err := pipelineentry.IsTypeScript(entry.Directory)
 		if err != nil {
 			return entry, err
 		}
 		if typescript {
-			options.SDK = engine.TypeScriptSDK
+			options.SDK = engineid.TypeScriptSDK
 		}
 	}
 	entry.Engine, err = resolveEngine(ctx, spec, options, entry.Directory)

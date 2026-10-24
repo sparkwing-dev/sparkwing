@@ -13,174 +13,29 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
-
-// NodeState separates offerability and claim ownership from the persisted status.
-type NodeState string
 
 // Logical node states use the terminal outcome as the terminal state name.
 const (
-	nodePending         NodeState = "pending"
-	NodeReady           NodeState = "ready"
-	NodeClaimed         NodeState = "claimed"
-	NodeRunning         NodeState = "running"
-	NodeApprovalPending NodeState = "approval_pending"
-	NodeSuccess         NodeState = "success"
-	NodeFailed          NodeState = "failed"
-	NodeCancelled       NodeState = "cancelled"
-	NodeSkipped         NodeState = "skipped"
-	NodeSuperseded      NodeState = "superseded"
-	NodeMemoized        NodeState = "memoized"
+	nodePending runstate.NodeState = "pending"
 )
-
-// NodeStatus is the persisted status; ready and claimed are derived by nodeState.
-type NodeStatus string
-
-// Persisted node status values match the schema CHECK.
-const (
-	StatusPending         NodeStatus = "pending"
-	StatusRunning         NodeStatus = "running"
-	StatusDone            NodeStatus = "done"
-	StatusApprovalPending NodeStatus = "approval_pending"
-)
-
-// ExpansionState prevents settlement before generated jobs have been accepted.
-type ExpansionState string
-
-// Expansion outcomes distinguish an absent generator from one that will never run.
-const (
-	ExpansionAbsent   ExpansionState = ""
-	ExpansionExpected ExpansionState = "expected"
-	ExpansionAccepted ExpansionState = "accepted"
-	ExpansionFailed   ExpansionState = "failed"
-	ExpansionNone     ExpansionState = "none"
-)
-
-// ActorKind identifies which store-verified authority may take an edge.
-type ActorKind string
-
-// Actor kinds never grant authority without the corresponding transactional proof.
-const (
-	ActorRunHost    ActorKind = "run_host"
-	ActorHolder     ActorKind = "holder"
-	ActorClaimant   ActorKind = "claimant"
-	ActorController ActorKind = "controller"
-	ActorReaper     ActorKind = "reaper"
-	ActorOperator   ActorKind = "operator"
-	ActorLauncher   ActorKind = "launcher"
-)
-
-// OwnerLeaseKind selects the persisted liveness row; local hosts use a trigger lease too.
-type OwnerLeaseKind string
-
-// Owner lease kinds keep eval claim liveness separate from its terminal source job.
-const (
-	OwnerTrigger    OwnerLeaseKind = "trigger"
-	OwnerController OwnerLeaseKind = "controller"
-	OwnerEval       OwnerLeaseKind = "eval"
-)
-
-// OwnerLeaseRef identifies a fence to re-read under the store clock, never a caller's liveness assertion.
-type OwnerLeaseRef struct {
-	Kind OwnerLeaseKind
-	Name string
-	runspec.EvalFence
-}
-
-// Actor carries server-derived tagged authority; C2 resolves it through the current
-// transaction. CapabilityPrefix is a separate claim fence and never substitutes
-// for a session, console or peer authority reference.
-type Actor struct {
-	Result           *capability.RecordedResult
-	ConsoleProof     *capability.ConsoleProof
-	Authority        capability.AuthorityRef
-	Kind             ActorKind
-	CapabilityPrefix string
-	runspec.NodeFence
-	Owner OwnerLeaseRef
-}
-
-// NodeRow contains the state facts consumed by the shared decision and reconciliation functions.
-type NodeRow struct {
-	Ref                   controllerwire.NodeRef
-	Status                NodeStatus
-	Outcome               NodeState
-	StatusDetail          string
-	ClaimedBy             string
-	CapabilityPrefix      string
-	OwnerCapabilityPrefix string
-	Generation            runspec.ClaimGeneration
-	Attempt               runspec.AttemptOrdinal
-	ApplicationRetries    int
-	Disruptions           int
-	ReadyAt               *time.Time
-	QueueStartedAt        *time.Time
-	LeaseExpiresAt        *time.Time
-	StartedAt             *time.Time
-	FinishedAt            *time.Time
-	CancelRequestedAt     *time.Time
-	CancelReason          string
-	StateSeq              int64
-	StateDigest           string
-	StateActor            Actor
-	Expansion             ExpansionState
-	ExpansionDigest       string
-	Execution             runspec.JobExecutionSettings
-	Spec                  json.RawMessage
-	SpecHash              string
-	OutputRecord          *blob.RecordKey
-	ManifestRecord        *blob.RecordKey
-	OwnerExecution        *OwnerExecution `json:",omitempty"`
-}
-
-// NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal.
-// A node starts at attempt zero. CauseStart allocates one on first execution and
-// the next ordinal after a started disruption. CauseRetry allocates the next ordinal
-// under the same claim. An unstarted release consumes no ordinal. Applied.Attempt is authoritative.
-type NodeAttempt struct {
-	Identity         runspec.AttemptIdentity
-	Holder           string
-	CapabilityPrefix string
-	ExecutorKind     string
-	ExecutorName     string
-	ExecutorLocation string
-	StartedAt        time.Time
-	FinishedAt       *time.Time
-	Outcome          NodeState
-	FailureReason    string
-}
-
-// TransitionCause selects edge-specific validation rather than accepting arbitrary column updates.
-type TransitionCause string
 
 // Causes distinguish retry, materialization and cancellation even when their logical states coincide.
 const (
-	CauseRelease         TransitionCause = "release"
-	causeDependency      TransitionCause = "dependency"
-	causeOwnerPolicy     TransitionCause = "owner_policy"
-	CauseUnpriced        TransitionCause = "unpriced"
-	CauseApprovalOpen    TransitionCause = "approval_open"
-	causeApprovalResolve TransitionCause = "approval_resolve"
-	causeApprovalTimeout TransitionCause = "approval_timeout"
-	CauseRevoke          TransitionCause = "revoke"
-	CauseAward           TransitionCause = "award"
-	CauseQueueTimeout    TransitionCause = "queue_timeout"
-	causeMaterialize     TransitionCause = "materialize"
-	CauseStart           TransitionCause = "start"
-	CauseReport          TransitionCause = "report"
-	CauseLaunchRejected  TransitionCause = "launch_rejected"
-	CauseRetry           TransitionCause = "retry"
-	CauseLeaseLapse      TransitionCause = "lease_lapse"
-	causeCancel          TransitionCause = "cancel"
-	CausePublish         TransitionCause = "publish"
-	CausePublishAttempt  TransitionCause = "publish_attempt"
+	causeDependency  runstate.TransitionCause = "dependency"
+	causeOwnerPolicy runstate.TransitionCause = "owner_policy"
+
+	causeApprovalResolve runstate.TransitionCause = "approval_resolve"
+	causeApprovalTimeout runstate.TransitionCause = "approval_timeout"
+
+	causeMaterialize runstate.TransitionCause = "materialize"
+
+	causeCancel runstate.TransitionCause = "cancel"
 )
 
 // EdgeGuard names predicates that the transition re-checks after locking the row.
@@ -210,10 +65,10 @@ const (
 
 // NodeEdge is a complete legal edge family; absence from the table means refusal.
 type NodeEdge struct {
-	From        []NodeState
-	To          []NodeState
-	Actors      []ActorKind
-	Cause       TransitionCause
+	From        []runstate.NodeState
+	To          []runstate.NodeState
+	Actors      []runstate.ActorKind
+	Cause       runstate.TransitionCause
 	Guards      []EdgeGuard
 	RequestOnly bool
 }
@@ -221,113 +76,60 @@ type NodeEdge struct {
 // NodeTransitions returns fresh data so callers cannot mutate the store's legal transition table.
 // Insertions start at pending with state_seq=0 through AcceptPlan or AcceptExpansion and are not edges.
 func NodeTransitions() []NodeEdge {
-	terminal := []NodeState{NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized}
-	owners := []ActorKind{ActorController, ActorRunHost}
-	cancellers := []ActorKind{ActorOperator, ActorController, ActorReaper}
+	terminal := []runstate.NodeState{runstate.NodeSuccess, runstate.NodeFailed, runstate.NodeCancelled, runstate.NodeSkipped, runstate.NodeSuperseded, runstate.NodeMemoized}
+	owners := []runstate.ActorKind{runstate.ActorController, runstate.ActorRunHost}
+	cancellers := []runstate.ActorKind{runstate.ActorOperator, runstate.ActorController, runstate.ActorReaper}
 	return []NodeEdge{
-		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeFailed}, []ActorKind{ActorLauncher}, CauseLaunchRejected, []EdgeGuard{GuardLauncherAward}, false},
-		{[]NodeState{nodePending, NodeReady}, []NodeState{NodeFailed}, []ActorKind{ActorClaimant}, CauseUnpriced, []EdgeGuard{GuardUnclaimed, GuardUnpriced}, false},
-		{[]NodeState{nodePending}, terminal, []ActorKind{ActorOperator}, CausePublish, []EdgeGuard{GuardPublication}, false},
-		{[]NodeState{nodePending}, []NodeState{nodePending}, []ActorKind{ActorOperator}, CausePublishAttempt, []EdgeGuard{GuardPublication}, false},
-		{[]NodeState{nodePending}, []NodeState{NodeReady}, owners, CauseRelease, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
-		{[]NodeState{nodePending}, []NodeState{NodeSkipped, NodeCancelled}, owners, causeDependency, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
-		{[]NodeState{nodePending}, []NodeState{NodeSuccess, NodeFailed, NodeSkipped}, owners, causeOwnerPolicy, []EdgeGuard{GuardOwner, GuardUnclaimed, GuardOwnerPolicy}, false},
-		{[]NodeState{nodePending, NodeReady}, []NodeState{NodeApprovalPending}, owners, CauseApprovalOpen, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
-		{[]NodeState{NodeApprovalPending}, []NodeState{NodeSuccess, NodeFailed}, []ActorKind{ActorOperator}, causeApprovalResolve, []EdgeGuard{GuardApproval}, false},
-		{[]NodeState{NodeApprovalPending}, []NodeState{NodeSuccess, NodeFailed}, []ActorKind{ActorReaper, ActorRunHost}, causeApprovalTimeout, []EdgeGuard{GuardApprovalTimeout}, false},
-		{[]NodeState{NodeReady}, []NodeState{nodePending}, owners, CauseRevoke, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
-		{[]NodeState{NodeReady}, []NodeState{NodeClaimed}, []ActorKind{ActorHolder, ActorRunHost}, CauseAward, []EdgeGuard{GuardAward, GuardUnclaimed}, false},
-		{[]NodeState{nodePending, NodeReady}, []NodeState{NodeFailed}, []ActorKind{ActorReaper}, CauseQueueTimeout, []EdgeGuard{GuardQueueDeadline, GuardUnclaimed}, false},
-		{[]NodeState{nodePending, NodeReady, NodeClaimed}, terminal, []ActorKind{ActorRunHost}, causeMaterialize, []EdgeGuard{GuardOwner, GuardMaterialize}, false},
-		{[]NodeState{NodeClaimed}, []NodeState{NodeRunning}, []ActorKind{ActorHolder}, CauseStart, []EdgeGuard{GuardHolder}, false},
-		{[]NodeState{NodeClaimed}, []NodeState{nodePending}, []ActorKind{ActorHolder}, CauseRelease, []EdgeGuard{GuardHolder}, false},
-		{[]NodeState{NodeClaimed}, []NodeState{nodePending}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardExpired}, false},
-		{[]NodeState{NodeClaimed}, terminal, []ActorKind{ActorHolder}, CauseReport, []EdgeGuard{GuardHolder}, false},
-		{[]NodeState{NodeRunning}, []NodeState{NodeRunning}, []ActorKind{ActorHolder}, CauseRetry, []EdgeGuard{GuardHolder, GuardRetry}, false},
-		{[]NodeState{NodeRunning}, terminal, []ActorKind{ActorHolder}, CauseReport, []EdgeGuard{GuardHolder}, false},
-		{[]NodeState{NodeRunning}, []NodeState{nodePending}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardExpired, GuardDisruptions}, false},
-		{[]NodeState{NodeRunning}, []NodeState{NodeFailed}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardDisruptionCap}, false},
-		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardCancelLapse}, false},
-		{[]NodeState{nodePending, NodeReady, NodeApprovalPending}, []NodeState{NodeCancelled}, cancellers, causeCancel, []EdgeGuard{GuardCancel, GuardUnclaimed}, false},
-		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, cancellers, causeCancel, []EdgeGuard{GuardCancel}, true},
-		{[]NodeState{nodePending, NodeReady, NodeApprovalPending}, []NodeState{NodeCancelled}, []ActorKind{ActorRunHost}, causeCancel, []EdgeGuard{GuardOwner, GuardCancel, GuardUnclaimed}, false},
-		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, []ActorKind{ActorRunHost}, causeCancel, []EdgeGuard{GuardOwner, GuardCancel}, true},
+		{[]runstate.NodeState{runstate.NodeClaimed, runstate.NodeRunning}, []runstate.NodeState{runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorLauncher}, runstate.CauseLaunchRejected, []EdgeGuard{GuardLauncherAward}, false},
+		{[]runstate.NodeState{nodePending, runstate.NodeReady}, []runstate.NodeState{runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorClaimant}, runstate.CauseUnpriced, []EdgeGuard{GuardUnclaimed, GuardUnpriced}, false},
+		{[]runstate.NodeState{nodePending}, terminal, []runstate.ActorKind{runstate.ActorOperator}, runstate.CausePublish, []EdgeGuard{GuardPublication}, false},
+		{[]runstate.NodeState{nodePending}, []runstate.NodeState{nodePending}, []runstate.ActorKind{runstate.ActorOperator}, runstate.CausePublishAttempt, []EdgeGuard{GuardPublication}, false},
+		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeReady}, owners, runstate.CauseRelease, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
+		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeSkipped, runstate.NodeCancelled}, owners, causeDependency, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
+		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeSuccess, runstate.NodeFailed, runstate.NodeSkipped}, owners, causeOwnerPolicy, []EdgeGuard{GuardOwner, GuardUnclaimed, GuardOwnerPolicy}, false},
+		{[]runstate.NodeState{nodePending, runstate.NodeReady}, []runstate.NodeState{runstate.NodeApprovalPending}, owners, runstate.CauseApprovalOpen, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
+		{[]runstate.NodeState{runstate.NodeApprovalPending}, []runstate.NodeState{runstate.NodeSuccess, runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorOperator}, causeApprovalResolve, []EdgeGuard{GuardApproval}, false},
+		{[]runstate.NodeState{runstate.NodeApprovalPending}, []runstate.NodeState{runstate.NodeSuccess, runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorReaper, runstate.ActorRunHost}, causeApprovalTimeout, []EdgeGuard{GuardApprovalTimeout}, false},
+		{[]runstate.NodeState{runstate.NodeReady}, []runstate.NodeState{nodePending}, owners, runstate.CauseRevoke, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
+		{[]runstate.NodeState{runstate.NodeReady}, []runstate.NodeState{runstate.NodeClaimed}, []runstate.ActorKind{runstate.ActorHolder, runstate.ActorRunHost}, runstate.CauseAward, []EdgeGuard{GuardAward, GuardUnclaimed}, false},
+		{[]runstate.NodeState{nodePending, runstate.NodeReady}, []runstate.NodeState{runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorReaper}, runstate.CauseQueueTimeout, []EdgeGuard{GuardQueueDeadline, GuardUnclaimed}, false},
+		{[]runstate.NodeState{nodePending, runstate.NodeReady, runstate.NodeClaimed}, terminal, []runstate.ActorKind{runstate.ActorRunHost}, causeMaterialize, []EdgeGuard{GuardOwner, GuardMaterialize}, false},
+		{[]runstate.NodeState{runstate.NodeClaimed}, []runstate.NodeState{runstate.NodeRunning}, []runstate.ActorKind{runstate.ActorHolder}, runstate.CauseStart, []EdgeGuard{GuardHolder}, false},
+		{[]runstate.NodeState{runstate.NodeClaimed}, []runstate.NodeState{nodePending}, []runstate.ActorKind{runstate.ActorHolder}, runstate.CauseRelease, []EdgeGuard{GuardHolder}, false},
+		{[]runstate.NodeState{runstate.NodeClaimed}, []runstate.NodeState{nodePending}, []runstate.ActorKind{runstate.ActorReaper}, runstate.CauseLeaseLapse, []EdgeGuard{GuardExpired}, false},
+		{[]runstate.NodeState{runstate.NodeClaimed}, terminal, []runstate.ActorKind{runstate.ActorHolder}, runstate.CauseReport, []EdgeGuard{GuardHolder}, false},
+		{[]runstate.NodeState{runstate.NodeRunning}, []runstate.NodeState{runstate.NodeRunning}, []runstate.ActorKind{runstate.ActorHolder}, runstate.CauseRetry, []EdgeGuard{GuardHolder, GuardRetry}, false},
+		{[]runstate.NodeState{runstate.NodeRunning}, terminal, []runstate.ActorKind{runstate.ActorHolder}, runstate.CauseReport, []EdgeGuard{GuardHolder}, false},
+		{[]runstate.NodeState{runstate.NodeRunning}, []runstate.NodeState{nodePending}, []runstate.ActorKind{runstate.ActorReaper}, runstate.CauseLeaseLapse, []EdgeGuard{GuardExpired, GuardDisruptions}, false},
+		{[]runstate.NodeState{runstate.NodeRunning}, []runstate.NodeState{runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorReaper}, runstate.CauseLeaseLapse, []EdgeGuard{GuardDisruptionCap}, false},
+		{[]runstate.NodeState{runstate.NodeClaimed, runstate.NodeRunning}, []runstate.NodeState{runstate.NodeCancelled}, []runstate.ActorKind{runstate.ActorReaper}, runstate.CauseLeaseLapse, []EdgeGuard{GuardCancelLapse}, false},
+		{[]runstate.NodeState{nodePending, runstate.NodeReady, runstate.NodeApprovalPending}, []runstate.NodeState{runstate.NodeCancelled}, cancellers, causeCancel, []EdgeGuard{GuardCancel, GuardUnclaimed}, false},
+		{[]runstate.NodeState{runstate.NodeClaimed, runstate.NodeRunning}, []runstate.NodeState{runstate.NodeCancelled}, cancellers, causeCancel, []EdgeGuard{GuardCancel}, true},
+		{[]runstate.NodeState{nodePending, runstate.NodeReady, runstate.NodeApprovalPending}, []runstate.NodeState{runstate.NodeCancelled}, []runstate.ActorKind{runstate.ActorRunHost}, causeCancel, []EdgeGuard{GuardOwner, GuardCancel, GuardUnclaimed}, false},
+		{[]runstate.NodeState{runstate.NodeClaimed, runstate.NodeRunning}, []runstate.NodeState{runstate.NodeCancelled}, []runstate.ActorKind{runstate.ActorRunHost}, causeCancel, []EdgeGuard{GuardOwner, GuardCancel}, true},
 	}
-}
-
-// NodeResult references authorized records; raw digests alone never authorize output attachment.
-type NodeResult struct {
-	Outcome        NodeState
-	Reason         string
-	MaskedError    string
-	ExitCode       *int
-	OutputRecord   *blob.RecordKey
-	ManifestRecord *blob.RecordKey
-	Failure        *nodeproto.JobFailure
-}
-
-// MaterializeSource preserves the read edge that permits copying another result.
-type MaterializeSource struct {
-	Kind   SourcePolicy
-	Source runspec.AttemptIdentity
-	Record blob.RecordKey
-	Result *MaterializedResultSource
-}
-
-// MaterializedResultSource names a committed terminal result by state sequence,
-// independently of earlier execution attempts. It is exclusive with Source.
-type MaterializedResultSource struct {
-	Ref      controllerwire.NodeRef
-	StateSeq int64
 }
 
 // transitionExtra carries only the columns owned by a particular edge; mismatched fields are refused.
 type transitionExtra struct {
 	Publication *runspec.PublishedAttempt
-	OwnerPolicy *OwnerPolicyResult
-	Result      *NodeResult
-	Materialize *MaterializeSource
-	Approval    *ApprovalResolution
-	Claim       *ClaimAward
-	Attempt     *NodeAttempt
+	OwnerPolicy *runstate.OwnerPolicyResult
+	Result      *runstate.NodeResult
+	Materialize *runstate.MaterializeSource
+	Approval    *runstate.ApprovalResolution
+	Claim       *runstate.ClaimAward
+	Attempt     *runstate.NodeAttempt
 	RetryAt     *time.Time
-}
-
-// ApprovalResolution records the resolver and policy result in the same transaction as the node edge.
-type ApprovalResolution struct {
-	ApprovalID string
-	Decision   string
-	Comment    string
-}
-
-// ClaimAward identifies an award already derived by the store; callers cannot choose its team or grants.
-type ClaimAward struct {
-	CapabilityPrefix string
-	Holder           string
-	Generation       runspec.ClaimGeneration
-	LeaseExpiresAt   time.Time
 }
 
 // nodeTransition has no caller-selected event kind or clock; the edge determines both.
 type nodeTransition struct {
-	Ref           controllerwire.NodeRef
-	To            NodeState
-	Actor         Actor
-	Cause         TransitionCause
+	Ref           runspec.NodeRef
+	To            runstate.NodeState
+	Actor         runstate.Actor
+	Cause         runstate.TransitionCause
 	SourceAttempt *runspec.AttemptOrdinal
 	Extra         transitionExtra
-}
-
-// Applied distinguishes an identical replay from a state change or a cooperative cancellation request.
-type Applied struct {
-	Waiting         bool
-	Outcome         RunState
-	Reason          string
-	Replayed        bool
-	CancelRequested bool
-	StateSeq        int64
-	Generation      runspec.ClaimGeneration
-	Attempt         runspec.AttemptOrdinal
 }
 
 // IllegalTransitionReason maps stale authority to lock_held and invalid edges to illegal_transition.
@@ -345,7 +147,7 @@ const (
 type ErrIllegalTransition struct {
 	From   string
 	To     string
-	Actor  ActorKind
+	Actor  runstate.ActorKind
 	Reason IllegalTransitionReason
 }
 
@@ -355,12 +157,12 @@ func (e *ErrIllegalTransition) Error() string {
 }
 
 // TransitionNode changes state, attempts, events, expansion barriers, holder release and settlement atomically.
-func (t *Tenant) TransitionNode(ctx context.Context, command NodeCommand) (Applied, error) {
+func (t *Tenant) TransitionNode(ctx context.Context, command NodeCommand) (runstate.Applied, error) {
 	if nilNodeCommand(command) {
-		return Applied{}, authorityError(apierr.BadRequest, "node command is required")
+		return runstate.Applied{}, authorityError(apierr.BadRequest, "node command is required")
 	}
 	change := command.nodeChange()
-	var out Applied
+	var out runstate.Applied
 	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
 		var err error
 
@@ -371,24 +173,24 @@ func (t *Tenant) TransitionNode(ctx context.Context, command NodeCommand) (Appli
 }
 
 // safety: an expired claim is still claimed or running until the reaper commits an edge; readers cannot release it.
-func nodeState(row NodeRow) (NodeState, error) {
+func nodeState(row runstate.NodeRow) (runstate.NodeState, error) {
 	switch row.Status {
-	case StatusDone:
-		if !slices.Contains([]NodeState{NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized}, row.Outcome) || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.OwnerCapabilityPrefix != "" || row.FinishedAt == nil {
+	case runstate.StatusDone:
+		if !slices.Contains([]runstate.NodeState{runstate.NodeSuccess, runstate.NodeFailed, runstate.NodeCancelled, runstate.NodeSkipped, runstate.NodeSuperseded, runstate.NodeMemoized}, row.Outcome) || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.OwnerCapabilityPrefix != "" || row.FinishedAt == nil {
 			return "", authorityError(apierr.IntegrityFailure, "invalid terminal job state")
 		}
 		return row.Outcome, nil
-	case StatusRunning:
+	case runstate.StatusRunning:
 		if row.ClaimedBy == "" || row.LeaseExpiresAt == nil || row.CapabilityPrefix == "" || row.Generation <= 0 || row.Attempt <= 0 {
 			return "", authorityError(apierr.IntegrityFailure, "running job has no claim or attempt")
 		}
-		return NodeRunning, nil
-	case StatusApprovalPending:
+		return runstate.NodeRunning, nil
+	case runstate.StatusApprovalPending:
 		if row.ClaimedBy != "" || row.Outcome != "" {
 			return "", authorityError(apierr.IntegrityFailure, "invalid approval state")
 		}
-		return NodeApprovalPending, nil
-	case StatusPending:
+		return runstate.NodeApprovalPending, nil
+	case runstate.StatusPending:
 		if row.Outcome != "" || row.FinishedAt != nil {
 			return "", authorityError(apierr.IntegrityFailure, "invalid pending job")
 		}
@@ -396,13 +198,13 @@ func nodeState(row NodeRow) (NodeState, error) {
 			if row.LeaseExpiresAt == nil || row.CapabilityPrefix == "" || row.Generation <= 0 {
 				return "", authorityError(apierr.IntegrityFailure, "incomplete job claim")
 			}
-			return NodeClaimed, nil
+			return runstate.NodeClaimed, nil
 		}
 		if row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.OwnerCapabilityPrefix != "" {
 			return "", authorityError(apierr.IntegrityFailure, "orphan job claim fields")
 		}
 		if row.ReadyAt != nil {
-			return NodeReady, nil
+			return runstate.NodeReady, nil
 		}
 		return nodePending, nil
 	default:
@@ -411,66 +213,66 @@ func nodeState(row NodeRow) (NodeState, error) {
 }
 
 // safety: holder rights and replay digest are rechecked under locks using the store clock before any status write.
-func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition) (Applied, error) {
+func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition) (runstate.Applied, error) {
 	if err := validateSourceAttempt(change); err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	if err := prepareStateActorTx(ctx, tx, team, string(change.Ref.RunID), change.Actor); err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	if change.Cause == causeMaterialize {
 		var err error
 		change, err = materializeChangeTx(ctx, tx, team, change)
 		if err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
 	}
 	if err := lockStateRunTx(ctx, tx, team, string(change.Ref.RunID)); err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	now := tx.now(ctx)
 	row, err := readNodeTx(ctx, tx, team, change.Ref)
 	if err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	from, err := nodeState(row)
 	if err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	if change.Cause == causeApprovalTimeout && change.To == "" {
 		var policy string
 		if err := tx.QueryRowContext(ctx, `SELECT on_timeout FROM approvals WHERE team=? AND run_id=? AND node_id=?`, team, row.Ref.RunID, row.Ref.NodeID).Scan(&policy); err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
 		change.To = approvalTimeoutOutcome(policy)
 	}
 	digest, err := stateHash(change)
 	if err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
-	if change.Actor.Kind == ActorReaper {
+	if change.Actor.Kind == runstate.ActorReaper {
 		if err := checkReaperTx(ctx, tx, change.Actor); err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
 	}
 	if row.StateDigest == digest && reflect.DeepEqual(row.StateActor, change.Actor) {
-		if change.Actor.Kind == ActorRunHost {
+		if change.Actor.Kind == runstate.ActorRunHost {
 			if err := checkOwnerTx(ctx, tx, team, change.Actor, string(change.Ref.RunID)); err != nil {
-				return Applied{}, err
+				return runstate.Applied{}, err
 			}
 		}
-		return Applied{Replayed: true, CancelRequested: row.CancelRequestedAt != nil && row.Status != StatusDone, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
+		return runstate.Applied{Replayed: true, CancelRequested: row.CancelRequestedAt != nil && row.Status != runstate.StatusDone, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
 	}
 	if err := validateResultProofTx(ctx, tx, team, change.Actor, change.Ref, int64(row.Attempt)); err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	if change.SourceAttempt != nil && *change.SourceAttempt != row.Attempt {
-		return Applied{}, holderRefusal()
+		return runstate.Applied{}, holderRefusal()
 	}
-	refusal := func(reason IllegalTransitionReason) (Applied, error) {
-		return Applied{}, &ErrIllegalTransition{From: string(from), To: string(change.To), Actor: change.Actor.Kind, Reason: reason}
+	refusal := func(reason IllegalTransitionReason) (runstate.Applied, error) {
+		return runstate.Applied{}, &ErrIllegalTransition{From: string(from), To: string(change.To), Actor: change.Actor.Kind, Reason: reason}
 	}
-	if row.Status == StatusDone {
+	if row.Status == runstate.StatusDone {
 		return refusal(ReasonTerminal)
 	}
 	var edge *NodeEdge
@@ -485,64 +287,64 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 		return refusal(ReasonIllegalEdge)
 	}
 	if err := guardNodeEdgeTx(ctx, tx, team, row, change, *edge, now); err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
-	if change.Cause == CauseStart || change.Cause == CauseRetry {
+	if change.Cause == runstate.CauseStart || change.Cause == runstate.CauseRetry {
 		if err := checkStartPermitTx(ctx, tx, team, row); err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
 	}
 	releasedEvaluation := false
-	if change.To == NodeApprovalPending || change.Extra.OwnerPolicy != nil && (change.Extra.OwnerPolicy.Kind == PolicyApprovalBypass || change.Extra.OwnerPolicy.Kind == PolicyApprovalFail) {
+	if change.To == runstate.NodeApprovalPending || change.Extra.OwnerPolicy != nil && (change.Extra.OwnerPolicy.Kind == runstate.PolicyApprovalBypass || change.Extra.OwnerPolicy.Kind == runstate.PolicyApprovalFail) {
 		releasedEvaluation, err = evaluationReleasedTx(ctx, tx, team, change.Ref, "job_approval_ready", row.Generation)
 		if err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
 	}
-	if (change.To == NodeReady || change.To == NodeApprovalPending) && !releasedEvaluation {
+	if (change.To == runstate.NodeReady || change.To == runstate.NodeApprovalPending) && !releasedEvaluation {
 		admitted, err := admitReleaseTx(ctx, tx, team, string(change.Ref.RunID), change.Actor)
 		if err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
 		if !admitted {
-			return Applied{Waiting: true}, nil
+			return runstate.Applied{Waiting: true}, nil
 		}
 	}
 	if err := attachNodeResultRecordsTx(ctx, tx, team, row, change); err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	previous := row
 	if err := applyNodeEdgeTx(ctx, tx, team, &row, change, *edge, now); err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	row.StateSeq++
 	row.StateDigest = digest
 	row.StateActor = change.Actor
 	if err := writeNodeStateTx(ctx, tx, team, row); err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	if !edge.RequestOnly {
 		if err := persistNodeResultSelectorsTx(ctx, tx, team, row, change.Extra.Result); err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
 	}
 	if result := change.Extra.Result; result != nil && !edge.RequestOnly {
 		var failure []byte
 		if result.Failure != nil {
 			if err := validateRecordedFailure(row.Ref, result.Failure); err != nil {
-				return Applied{}, err
+				return runstate.Applied{}, err
 			}
 			failure, err = json.Marshal(result.Failure)
 			if err != nil {
-				return Applied{}, err
+				return runstate.Applied{}, err
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET error=?,failure_reason=?,exit_code=?,failure_json=? WHERE team=? AND run_id=? AND node_id=?`, result.MaskedError, result.Reason, result.ExitCode, failure, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
-	} else if row.Status == StatusDone || change.To == NodeRunning {
+	} else if row.Status == runstate.StatusDone || change.To == runstate.NodeRunning {
 		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET failure_json=NULL WHERE team=? AND run_id=? AND node_id=?`, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
 	}
 	kind := ""
@@ -553,29 +355,29 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 		}
 	}
 	if kind == "" {
-		return Applied{}, errors.New("job transition has no event")
+		return runstate.Applied{}, errors.New("job transition has no event")
 	}
 	if err := appendStateEventTx(ctx, tx, team, change.Ref, kind, row.StateSeq, change.Extra.Result, now); err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	if err := transitionNodeBillingTx(ctx, tx, team, previous, change, *edge, now); err != nil {
-		return Applied{}, err
+		return runstate.Applied{}, err
 	}
 	if row.CancelRequestedAt != nil {
 		if err := clampRunLeasesTx(ctx, tx, team, string(change.Ref.RunID), string(change.Ref.NodeID)); err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
 	}
-	if change.Actor.Kind == ActorRunHost && change.Actor.Owner.Kind == OwnerEval {
+	if change.Actor.Kind == runstate.ActorRunHost && change.Actor.Owner.Kind == runstate.OwnerEval {
 		if err := finishApprovalEvaluationTx(ctx, tx, team, previous, change); err != nil {
-			return Applied{}, err
+			return runstate.Applied{}, err
 		}
 	}
-	return Applied{CancelRequested: edge.RequestOnly, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
+	return runstate.Applied{CancelRequested: edge.RequestOnly, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
 }
 
 func validateSourceAttempt(change nodeTransition) error {
-	required := change.Actor.Kind == ActorHolder && slices.Contains([]TransitionCause{CauseStart, CauseRetry, CauseReport, CauseRelease}, change.Cause)
+	required := change.Actor.Kind == runstate.ActorHolder && slices.Contains([]runstate.TransitionCause{runstate.CauseStart, runstate.CauseRetry, runstate.CauseReport, runstate.CauseRelease}, change.Cause)
 	if required {
 		if change.SourceAttempt == nil || *change.SourceAttempt < 0 {
 			return authorityError(apierr.BadRequest, "holder transition requires a nonnegative source attempt")
@@ -586,7 +388,7 @@ func validateSourceAttempt(change nodeTransition) error {
 	return nil
 }
 
-func validateRecordedFailure(ref controllerwire.NodeRef, failure *nodeproto.JobFailure) error {
+func validateRecordedFailure(ref runspec.NodeRef, failure *nodeproto.JobFailure) error {
 	if runspec.NodeID(failure.Job) != ref.NodeID || failure.Stage == "" || failure.Error == nil {
 		return authorityError(apierr.BadRequest, "failure requires its job, stage and structured error")
 	}
@@ -602,8 +404,8 @@ func validateRecordedFailure(ref controllerwire.NodeRef, failure *nodeproto.JobF
 }
 
 // safety: plan and expansion insertion share state_seq=0 and reject a conflicting spec hash.
-func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) error {
-	if row.Ref.RunID == "" || row.Ref.NodeID == "" || row.Status != StatusPending || row.StateSeq != 0 || row.ClaimedBy != "" || row.Generation != 0 || row.SpecHash == "" {
+func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow) error {
+	if row.Ref.RunID == "" || row.Ref.NodeID == "" || row.Status != runstate.StatusPending || row.StateSeq != 0 || row.ClaimedBy != "" || row.Generation != 0 || row.SpecHash == "" {
 		return errors.New("invalid initial job")
 	}
 	if err := enforceNodesPerRunTx(ctx, tx, team, string(row.Ref.RunID)); err != nil {
@@ -634,15 +436,15 @@ func stateHash(value any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change nodeTransition, edge NodeEdge, now time.Time) error {
+func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, change nodeTransition, edge NodeEdge, now time.Time) error {
 	if change.Extra.Result != nil {
-		if change.Extra.Result.Failure != nil && change.Extra.Result.Outcome != NodeFailed {
+		if change.Extra.Result.Failure != nil && change.Extra.Result.Outcome != runstate.NodeFailed {
 			return authorityError(apierr.BadRequest, "recorded failure requires a failed outcome")
 		}
-		if !slices.Contains([]NodeState{NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized}, change.Extra.Result.Outcome) {
+		if !slices.Contains([]runstate.NodeState{runstate.NodeSuccess, runstate.NodeFailed, runstate.NodeCancelled, runstate.NodeSkipped, runstate.NodeSuperseded, runstate.NodeMemoized}, change.Extra.Result.Outcome) {
 			return errors.New("result requires terminal outcome")
 		}
-		if change.Extra.Result.Outcome != change.To && change.Cause != CauseRetry {
+		if change.Extra.Result.Outcome != change.To && change.Cause != runstate.CauseRetry {
 			return errors.New("result does not match transition")
 		}
 		if int64(len(change.Extra.Result.MaskedError)) > limits.ErrorBytes {
@@ -658,22 +460,22 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 	if change.Extra.Approval != nil && change.Cause != causeApprovalResolve && change.Cause != causeApprovalTimeout {
 		return errors.New("unexpected approval")
 	}
-	if change.Extra.Claim != nil && change.Cause != CauseAward {
+	if change.Extra.Claim != nil && change.Cause != runstate.CauseAward {
 		return errors.New("unexpected claim")
 	}
-	if change.Extra.Attempt != nil && change.Cause != CauseStart {
+	if change.Extra.Attempt != nil && change.Cause != runstate.CauseStart {
 		return errors.New("unexpected attempt")
 	}
-	if change.Extra.RetryAt != nil && change.Cause != CauseRetry {
+	if change.Extra.RetryAt != nil && change.Cause != runstate.CauseRetry {
 		return errors.New("unexpected retry time")
 	}
-	if change.Extra.Publication != nil && change.Cause != CausePublishAttempt {
+	if change.Extra.Publication != nil && change.Cause != runstate.CausePublishAttempt {
 		return errors.New("unexpected publication attempt")
 	}
 	for _, guard := range edge.Guards {
 		switch guard {
 		case GuardOwner:
-			if change.Actor.Owner.Kind == OwnerEval {
+			if change.Actor.Owner.Kind == runstate.OwnerEval {
 				if err := checkApprovalEvaluationTx(ctx, tx, team, row, change); err != nil {
 					return err
 				}
@@ -686,7 +488,7 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 			if err := check(ctx, tx, team, change.Actor, string(row.Ref.RunID)); err != nil {
 				return err
 			}
-			if change.To == NodeReady {
+			if change.To == runstate.NodeReady {
 				run, err := readRunTx(ctx, tx, team, string(row.Ref.RunID))
 				if err != nil {
 					return err
@@ -750,7 +552,7 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 				return errors.New("job disruption limit not reached")
 			}
 		case GuardRetry:
-			if change.Extra.Result == nil || change.Extra.Result.Outcome != NodeFailed || row.ApplicationRetries >= row.Execution.Retry.Value || row.CancelRequestedAt != nil {
+			if change.Extra.Result == nil || change.Extra.Result.Outcome != runstate.NodeFailed || row.ApplicationRetries >= row.Execution.Retry.Value || row.CancelRequestedAt != nil {
 				return errors.New("job retry budget exhausted or invalid retry")
 			}
 		case GuardAward:
@@ -788,8 +590,8 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 			if err := checkPublisherTx(ctx, tx, team, change.Actor, string(row.Ref.RunID)); err != nil {
 				return err
 			}
-			if change.Cause == CausePublish && row.Attempt > 0 {
-				var outcome NodeState
+			if change.Cause == runstate.CausePublish && row.Attempt > 0 {
+				var outcome runstate.NodeState
 				if err := tx.QueryRowContext(ctx, `SELECT outcome FROM node_attempts WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=?`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation).Scan(&outcome); err != nil {
 					return err
 				}
@@ -804,8 +606,8 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 	return nil
 }
 
-func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, change nodeTransition, edge NodeEdge, now time.Time) error {
-	if change.Cause == CausePublishAttempt {
+func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.NodeRow, change nodeTransition, edge NodeEdge, now time.Time) error {
+	if change.Cause == runstate.CausePublishAttempt {
 		return importPublishedAttemptTx(ctx, tx, team, row, change)
 	}
 	if edge.RequestOnly {
@@ -817,15 +619,15 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		}
 		return nil
 	}
-	if row.Status == StatusRunning && (change.To != NodeRunning || change.Cause == CauseRetry) {
+	if row.Status == runstate.StatusRunning && (change.To != runstate.NodeRunning || change.Cause == runstate.CauseRetry) {
 		outcome, reason := change.To, ""
 		if change.Extra.Result != nil {
 			outcome, reason = change.Extra.Result.Outcome, change.Extra.Result.Reason
 		}
-		if change.Cause == CauseLeaseLapse {
-			outcome, reason = NodeFailed, FailureAgentLost
-			if change.To == NodeCancelled {
-				outcome, reason = NodeCancelled, "cancelled"
+		if change.Cause == runstate.CauseLeaseLapse {
+			outcome, reason = runstate.NodeFailed, FailureAgentLost
+			if change.To == runstate.NodeCancelled {
+				outcome, reason = runstate.NodeCancelled, "cancelled"
 			}
 		}
 		result, err := tx.ExecContext(ctx, `UPDATE node_attempts SET finished_at=?,outcome=?,failure_reason=? WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=? AND finished_at IS NULL`, now.UnixNano(), outcome, reason, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation)
@@ -841,7 +643,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		}
 		// Reusable memos become independent of producer retention with committed success.
 		memoSQL := `DELETE FROM blob_records WHERE team=? AND kind='memo' AND run_id=? AND source_node_id=? AND source_attempt=? AND source_generation=?`
-		if outcome == NodeSuccess {
+		if outcome == runstate.NodeSuccess {
 			memoSQL = `UPDATE blob_records SET run_id=NULL WHERE team=? AND kind='memo' AND run_id=? AND source_node_id=? AND source_attempt=? AND source_generation=?`
 		}
 		if _, err := tx.ExecContext(ctx, memoSQL, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation); err != nil {
@@ -849,9 +651,9 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		}
 		stepState := StepFailed
 		switch outcome {
-		case NodeSuccess:
+		case runstate.NodeSuccess:
 			stepState = StepPassed
-		case NodeCancelled:
+		case runstate.NodeCancelled:
 			stepState = StepCancelled
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE node_steps SET status=?,finished_at=? WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=? AND status='running'`, stepState, now.UnixNano(), team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation); err != nil {
@@ -859,22 +661,22 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		}
 	}
 	switch change.To {
-	case NodeReady:
+	case runstate.NodeReady:
 		row.ReadyAt = &now
 		if row.QueueStartedAt == nil {
 			row.QueueStartedAt = &now
 		}
-	case NodeClaimed:
+	case runstate.NodeClaimed:
 		award := change.Extra.Claim
 		row.ClaimedBy = award.Holder
 		row.CapabilityPrefix = award.CapabilityPrefix
 		row.Generation = award.Generation
 		row.LeaseExpiresAt = &award.LeaseExpiresAt
-	case NodeRunning:
+	case runstate.NodeRunning:
 		if _, err := tx.ExecContext(ctx, "UPDATE nodes SET summary='',annotations_json=NULL WHERE team=? AND run_id=? AND node_id=?", team, row.Ref.RunID, row.Ref.NodeID); err != nil {
 			return err
 		}
-		row.Status = StatusRunning
+		row.Status = runstate.StatusRunning
 		row.QueueStartedAt = nil
 		row.Attempt++
 		row.StartedAt = &now
@@ -891,7 +693,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		if err != nil {
 			return err
 		}
-	case NodeApprovalPending:
+	case runstate.NodeApprovalPending:
 		var job nodeproto.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
 			return err
@@ -907,30 +709,30 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		if _, err := tx.ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,timeout_ms,on_timeout) VALUES (?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, now.UnixNano(), job.Approval.Message, timeout, policy); err != nil {
 			return err
 		}
-		row.Status = StatusApprovalPending
+		row.Status = runstate.StatusApprovalPending
 	case nodePending:
-		if change.Cause == CauseRelease {
+		if change.Cause == runstate.CauseRelease {
 			if err := releaseCapacityTx(ctx, tx, team, string(row.Ref.RunID), string(row.Ref.NodeID)); err != nil {
 				return err
 			}
 		}
-		if row.Status == StatusRunning && change.Cause == CauseLeaseLapse {
+		if row.Status == runstate.StatusRunning && change.Cause == runstate.CauseLeaseLapse {
 			row.Disruptions++
 		}
-		row.Status = StatusPending
+		row.Status = runstate.StatusPending
 		row.StartedAt = nil
 		clearNodeClaim(row)
 	default:
-		if change.Cause == CauseLeaseLapse && row.Status == StatusRunning && change.To == NodeFailed {
+		if change.Cause == runstate.CauseLeaseLapse && row.Status == runstate.StatusRunning && change.To == runstate.NodeFailed {
 			row.Disruptions++
 		}
-		row.Status = StatusDone
+		row.Status = runstate.StatusDone
 		row.Outcome = change.To
 		row.FinishedAt = &now
 		row.QueueStartedAt = nil
 		clearNodeClaim(row)
-		if row.Expansion == ExpansionExpected && change.To != NodeSuccess && change.To != NodeMemoized {
-			row.Expansion = ExpansionNone
+		if row.Expansion == runstate.ExpansionExpected && change.To != runstate.NodeSuccess && change.To != runstate.NodeMemoized {
+			row.Expansion = runstate.ExpansionNone
 		}
 		if err := releaseCapacityTx(ctx, tx, team, string(row.Ref.RunID), string(row.Ref.NodeID)); err != nil {
 			return err
@@ -939,7 +741,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 	return nil
 }
 
-func clearNodeClaim(row *NodeRow) {
+func clearNodeClaim(row *runstate.NodeRow) {
 	row.ClaimedBy = ""
 	row.CapabilityPrefix = ""
 	row.OwnerCapabilityPrefix = ""
@@ -947,7 +749,7 @@ func clearNodeClaim(row *NodeRow) {
 	row.ReadyAt = nil
 }
 
-func writeNodeStateTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) error {
+func writeNodeStateTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow) error {
 	actor, err := json.Marshal(row.StateActor)
 	if err != nil {
 		return err
@@ -977,7 +779,7 @@ func timeNS(value *time.Time) any {
 	return value.UnixNano()
 }
 
-func appendStateEventTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.NodeRef, kind string, stateSeq int64, payload any, now time.Time) error {
+func appendStateEventTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, kind string, stateSeq int64, payload any, now time.Time) error {
 	seq, err := appendEventTx(ctx, tx, team, string(ref.RunID), string(ref.NodeID), kind, payload, now)
 	if err != nil {
 		return err
@@ -986,7 +788,7 @@ func appendStateEventTx(ctx context.Context, tx *storeTx, team Team, ref control
 	return err
 }
 
-func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change nodeTransition, now time.Time) error {
+func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, change nodeTransition, now time.Time) error {
 	var requested, timeout int64
 	var policy string
 	var resolved sql.NullInt64
@@ -1003,7 +805,7 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 		if timeout <= 0 || time.Unix(0, requested).Add(time.Duration(timeout)*time.Millisecond).After(now) {
 			return errors.New("approval deadline not reached")
 		}
-		if change.Actor.Kind != ActorReaper {
+		if change.Actor.Kind != runstate.ActorReaper {
 			if err := checkOwnerTx(ctx, tx, team, change.Actor, string(row.Ref.RunID)); err != nil {
 				return err
 			}
@@ -1025,7 +827,7 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 		}
 		approver = principal.Capability.Subject.ID
 		resolution = change.Extra.Approval.Decision
-		if (resolution != "approved" && resolution != "denied") || (resolution == "approved") != (change.To == NodeSuccess) {
+		if (resolution != "approved" && resolution != "denied") || (resolution == "approved") != (change.To == runstate.NodeSuccess) {
 			return errors.New("approval decision mismatch")
 		}
 	}
@@ -1037,9 +839,9 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 	return err
 }
 
-func approvalTimeoutOutcome(policy string) NodeState {
+func approvalTimeoutOutcome(policy string) runstate.NodeState {
 	if policy == "approve" {
-		return NodeSuccess
+		return runstate.NodeSuccess
 	}
-	return NodeFailed
+	return runstate.NodeFailed
 }

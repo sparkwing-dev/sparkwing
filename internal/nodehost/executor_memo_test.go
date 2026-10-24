@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func executorMemoFixture(t *testing.T, value []byte) (*nodeExecutor, NodeInput, runspec.Spec, nodeproto.JobSpec, *executorSession, *memoBackendFixture) {
@@ -47,7 +47,7 @@ func TestExecutorMemoCopiesVerifiedHitToAwardedAttempt(t *testing.T) {
 	wantKey, _ := memoValueKey("key")
 	wantHash := runspec.Hash(wantKey)
 	want := blob.ResultRecordKey(input.Storage.Authority.Attempt.Value, "repo", input.Storage.Authority.Ref.Scope, "ci", blob.KindOutput)
-	if err != nil || hash != wantHash || result == nil || result.Outcome != store.NodeMemoized || result.OutputRecord == nil || *result.OutputRecord != want {
+	if err != nil || hash != wantHash || result == nil || result.Outcome != runstate.NodeMemoized || result.OutputRecord == nil || *result.OutputRecord != want {
 		t.Fatalf("hash=%s result=%+v error=%v", hash, result, err)
 	}
 	if backend.lookup == nil || backend.lookup.Authority != input.Storage.Authority || backend.lookup.Key.Hash != hash || backend.copy == nil || backend.copy.Destination != input.Storage.Authority.Attempt.Value {
@@ -161,14 +161,14 @@ func TestExecutorMemoSavesExplicitEmptyOutputAndRetention(t *testing.T) {
 		return blob.Record{Key: request.Key, Digest: request.Digest, Source: request.Source, ManifestDigest: request.ManifestDigest}, nil
 	}
 	before := time.Now()
-	if err := host.saveMemo(t.Context(), input, hash, store.NodeResult{Outcome: store.NodeSuccess}); err != nil {
+	if err := host.saveMemo(t.Context(), input, hash, runstate.NodeResult{Outcome: runstate.NodeSuccess}); err != nil {
 		t.Fatal(err)
 	}
 	if len(commits) != 2 || commits[0].Key.Kind != blob.KindOutput || commits[1].Key.Kind != blob.KindMemo || commits[1].Digest != outputDigest(nil) || commits[1].Key.Scope.Key != string(hash) || !commits[1].ExpiresAt.Set || commits[1].ExpiresAt.Value.Before(before.Add(time.Hour)) {
 		t.Fatalf("memo publication=%+v", commits)
 	}
-	for _, outcome := range []store.NodeState{store.NodeFailed, store.NodeSkipped, store.NodeMemoized} {
-		if err := host.saveMemo(t.Context(), input, hash, store.NodeResult{Outcome: outcome}); err != nil || len(commits) != 2 {
+	for _, outcome := range []runstate.NodeState{runstate.NodeFailed, runstate.NodeSkipped, runstate.NodeMemoized} {
+		if err := host.saveMemo(t.Context(), input, hash, runstate.NodeResult{Outcome: outcome}); err != nil || len(commits) != 2 {
 			t.Fatalf("non-success published memo: outcome=%s error=%v", outcome, err)
 		}
 	}
@@ -213,7 +213,7 @@ func TestExecutorMemoPublishesOnlyCurrentResultReferences(t *testing.T) {
 		committed = &request
 		return blob.Record{Key: request.Key, Digest: request.Digest, Source: request.Source, ManifestDigest: request.ManifestDigest}, nil
 	}
-	result := store.NodeResult{Outcome: store.NodeSuccess, OutputRecord: &output, ManifestRecord: &manifest}
+	result := runstate.NodeResult{Outcome: runstate.NodeSuccess, OutputRecord: &output, ManifestRecord: &manifest}
 	if err := host.saveMemo(t.Context(), input, hash, result); err != nil || committed == nil || committed.Digest != backend.hit.Output.Value || !committed.ManifestDigest.Set || committed.ManifestDigest.Value != manifestDigest {
 		t.Fatalf("saved references=%+v error=%v", committed, err)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func machineEnrollment(t *testing.T) (*Store, capability.ProvisionSpec) {
@@ -39,7 +40,7 @@ func TestMachineEnrollmentUsesStoreOrigin(t *testing.T) {
 	if again, err := s.AsOperator().ProvisionCapability(t.Context(), spec); !errors.Is(err, ErrAgentNameTaken) || again.Raw != "" {
 		t.Fatalf("duplicate: %+v, %v", again.Capability, err)
 	}
-	actor := Actor{Authority: *spec.Authority}
+	actor := runstate.Actor{Authority: *spec.Authority}
 	a := inventoryAuthorization(t, s, actor, "a", issued.Capability.Prefix)
 	rotation, err := (&Tenant{s: s, team: "a"}).RotateCapability(t.Context(), a, time.Hour, nil)
 	if err != nil || !sameRotationScope(issued.Capability, rotation.Issued.Capability) {
@@ -169,7 +170,7 @@ func TestMachineEnrollmentNameReuseProperty(t *testing.T) {
 		}
 		if revoked {
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}
-			if err := (&Tenant{s: s, team: "a"}).RevokeAuthority(t.Context(), Actor{Authority: *spec.Authority}, ref); err != nil {
+			if err := (&Tenant{s: s, team: "a"}).RevokeAuthority(t.Context(), runstate.Actor{Authority: *spec.Authority}, ref); err != nil {
 				t.Fatal(err)
 			}
 		} else {
@@ -248,7 +249,7 @@ func TestRotationKeepsTheRunnerTrustClass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := inventoryAuthorization(t, s, Actor{Authority: *spec.Authority}, "a", issued.Capability.Prefix)
+	a := inventoryAuthorization(t, s, runstate.Actor{Authority: *spec.Authority}, "a", issued.Capability.Prefix)
 	rotation, err := (&Tenant{s: s, team: "a"}).RotateCapability(t.Context(), a, time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)

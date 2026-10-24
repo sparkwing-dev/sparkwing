@@ -6,8 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -21,7 +20,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = st.Close() })
 			start := time.Now()
-			run := store.Run{ID: "r", Pipeline: "coverage", Status: "running", StartedAt: start}
+			run := store.Run{RunSummary: runstate.RunSummary{ID: "r", Pipeline: "coverage", Status: "running", StartedAt: start}}
 			if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, run); err != nil {
 				t.Fatal(err)
 			}
@@ -33,7 +32,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				if id == "c" && mode == "memoized" {
 					outcome = "memoized"
 				}
-				if err := teststore.SeedNodeFinish(st, t.Context(), store.DefaultTeam, controllerwire.NodeRef{RunID: "r", NodeID: runspec.NodeID(id)}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
+				if err := teststore.SeedNodeFinish(st, t.Context(), store.DefaultTeam, runspec.NodeRef{RunID: "r", NodeID: runspec.NodeID(id)}, runstate.NodeResult{Outcome: runstate.NodeState(outcome), MaskedError: ""}); err != nil {
 					t.Fatal(err)
 				}
 				cpu := int64(100)

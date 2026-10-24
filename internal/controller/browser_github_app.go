@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
 // safety: the flow cookie is what proves the browser GitHub returns is the one that started connecting, and it holds
@@ -52,7 +53,7 @@ func (s *Server) setGitHubAppFlow(w http.ResponseWriter, flow githubAppFlow) boo
 func (s *Server) connectingBrowser(w http.ResponseWriter, r *http.Request) (githubBrowserProof, bool) {
 	proof, ok := r.Context().Value(githubBrowserProofKey{}).(githubBrowserProof)
 	if !ok {
-		writePolicyError(w, missingEndpointPolicy())
+		routepolicy.WritePolicyError(w, routepolicy.MissingEndpointPolicy())
 	}
 	return proof, ok
 }

@@ -3,12 +3,12 @@ package client
 import (
 	"context"
 	"errors"
+
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 // SweepLocalSessions invokes the elected local controller's session sweep.
-func SweepLocalSessions(ctx context.Context, options EngineOptions, dryRun bool) ([]wingd.LocalDoctorFinding, error) {
+func SweepLocalSessions(ctx context.Context, options EngineOptions, dryRun bool) ([]localhostwire.LocalDoctorFinding, error) {
 	transport, err := newEngineClient(options)
 	if err != nil {
 		return nil, err

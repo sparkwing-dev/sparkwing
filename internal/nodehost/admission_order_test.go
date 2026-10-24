@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -46,10 +46,10 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 	})
 	config, _, _, _ := nativeHostFixture(t)
 	config.Store, config.Owner = fixture.Tenant, ownerOperationsFixture(fixture.Host)
-	config.Owner.Local = func(row store.NodeRow) bool { return row.Ref.NodeID == "b" }
+	config.Owner.Local = func(row runstate.NodeRow) bool { return row.Ref.NodeID == "b" }
 	config.Admission = ComposeStartGate(fixture.Tenant, &LocalAdmission{Daemon: admitter}, false)
 	ownerQueued := make(chan struct{}, 1)
-	config.Admission.Queued = func(_ context.Context, ref controllerwire.NodeRef, _ store.AcquireSlotResponse) error {
+	config.Admission.Queued = func(_ context.Context, ref runspec.NodeRef, _ runstate.AcquireSlotResponse) error {
 		if ref.NodeID == "b" {
 			ownerQueued <- struct{}{}
 		}
@@ -70,7 +70,7 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 		if live, _, _ := machine.counts(); live != 1 {
 			return fmt.Errorf("execution lost machine admission: live=%d", live)
 		}
-		return fixture.report(ctx, input, store.NodeSuccess)
+		return fixture.report(ctx, input, runstate.NodeSuccess)
 	})
 	owner.Executor, claimed.Executor = execute, execute
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

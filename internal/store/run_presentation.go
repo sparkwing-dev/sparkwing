@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -46,7 +48,7 @@ func (s *Store) refreshRunPresentations(ctx context.Context, runs []*Run) error 
 func (s *Store) refreshTriggerPresentations(ctx context.Context, triggers []*Trigger) error {
 	runs := make([]*Run, len(triggers))
 	for i, trigger := range triggers {
-		runs[i] = &Run{team: trigger.Team, ID: trigger.ID}
+		runs[i] = &Run{team: trigger.Team, RunSummary: runstate.RunSummary{ID: trigger.ID}}
 	}
 	if err := s.refreshRunPresentations(ctx, runs); err != nil {
 		return err

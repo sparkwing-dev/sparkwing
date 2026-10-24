@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -14,17 +16,7 @@ import (
 func fixedRun() *store.Run {
 	start := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
 	end := start.Add(15 * time.Second)
-	return &store.Run{
-		ID:           "run-fixed-1",
-		Pipeline:     "deploy",
-		Status:       "success",
-		GitSHA:       "abc1234",
-		Args:         map[string]string{"env": "prod", "tag": "v1.2.3"},
-		Invocation:   map[string]any{store.InvocationSecretArgsKey: []string{}},
-		PlanSnapshot: []byte(`{"nodes":["build","deploy"]}`),
-		StartedAt:    start,
-		FinishedAt:   &end,
-	}
+	return &store.Run{PlanSnapshot: []byte(`{"nodes":["build","deploy"]}`), RunSummary: runstate.RunSummary{ID: "run-fixed-1", Pipeline: "deploy", Status: "success", GitSHA: "abc1234", Args: map[string]string{"env": "prod", "tag": "v1.2.3"}, Invocation: map[string]any{store.InvocationSecretArgsKey: []string{}}, StartedAt: start, FinishedAt: &end}}
 }
 
 func outputDigest(output []byte) string {

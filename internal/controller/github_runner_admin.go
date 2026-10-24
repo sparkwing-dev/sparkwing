@@ -8,6 +8,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -23,8 +25,8 @@ func (s *Server) githubRunnerRegistry(ctx context.Context, team string) (GitHubR
 	return tenantPort[GitHubRunnerRegistry](ctx, s, store.Team(team))
 }
 
-func (s *Server) githubRunnerEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) githubRunnerEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/runners/github", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleListGitHubRunnerBindings},
 		{Method: "POST", Pattern: "/api/v1/runners/github", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleAddGitHubRunnerBinding},
 		{Method: "DELETE", Pattern: "/api/v1/runners/github/{repository}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleRemoveGitHubRunnerBinding},
@@ -108,7 +110,7 @@ func (s *Server) resolveGitHubRunnerIdentity(ctx context.Context, team string, r
 		return nil
 	}
 	if s.operator == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(ctx, store.Team(team))
 	if err != nil {

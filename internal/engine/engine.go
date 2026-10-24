@@ -3,53 +3,34 @@ package engine
 
 import (
 	"context"
+	"crypto/ed25519"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 )
 
-// SDKKind distinguishes the two pin formats without selecting a different engine.
-type SDKKind string
-
 const (
-	GoSDK              SDKKind = "go"
-	TypeScriptSDK      SDKKind = "typescript"
-	GoModule                   = "github.com/sparkwing-dev/sparkwing"
-	TypeScriptPackage          = "@sparkwing/sdk"
-	UpgradeCommand             = "sparkwing upgrade"
-	VersionIndexFormat         = 1
+	GoModule           = "github.com/sparkwing-dev/sparkwing"
+	TypeScriptPackage  = "@sparkwing/sdk"
+	UpgradeCommand     = "sparkwing upgrade"
+	VersionIndexFormat = 1
 )
-
-// Pin records the SDK requirement, applicable replacement and source files.
-type Pin struct {
-	SDK          SDKKind `json:"sdk"`
-	Version      string  `json:"version"`
-	Manifest     string  `json:"manifest"`
-	Lockfile     string  `json:"lockfile,omitempty"`
-	InputsDigest string  `json:"inputs_digest"`
-	Replacement  string  `json:"replacement,omitempty"`
-}
-
-// Identity binds the selected engine to SDK inputs in the accepted run seal.
-type Identity struct {
-	Pin            Pin    `json:"pin"`
-	Version        string `json:"version"`
-	ManifestDigest string `json:"manifest_digest"`
-}
 
 // Resolved includes the selected executable for this machine's platform.
 type Resolved struct {
-	Identity    Identity
+	Identity    engineid.Identity
 	Target      releaseasset.Target
 	AssetDigest string
 	Executable  string
-	Notices     []Notice
+	Notices     []engineid.Notice
+	trustedKeys []ed25519.PublicKey
 }
 
-// ReleaseBundle is untrusted until VerifyRelease checks the shared release trust roots.
+// ReleaseBundle is untrusted until VerifyRelease checks it against the keys its caller supplies; the resolver supplies the production roots.
 type ReleaseBundle struct {
 	Manifest          []byte
 	ManifestSignature []byte
@@ -72,6 +53,8 @@ type Config struct {
 	HTTPClient     *http.Client
 	BuildVersion   string
 	LocalOnly      bool
+	// TrustedKeys defaults to releaseauth.PublicKeys when nil. NewResolver copies every key.
+	TrustedKeys []ed25519.PublicKey
 }
 
 // Resolver owns the version-index cache and verified executable cache for one machine.
@@ -85,13 +68,6 @@ type Resolver struct {
 	command   func(context.Context, string, string, ...string) error
 }
 
-// VersionInfo retains every published release, including releases beyond their support window.
-type VersionInfo struct {
-	Version      string    `json:"version"`
-	PublishedAt  time.Time `json:"published_at"`
-	SupportUntil time.Time `json:"support_until"`
-}
-
 // Restriction carries signed notice and enforcement dates; an empty Version means no restriction.
 type Restriction struct {
 	Version     string    `json:"version"`
@@ -103,12 +79,12 @@ type Restriction struct {
 
 // VersionIndex is signed as the exact JSON body bytes. Versions is append-only by release identity.
 type VersionIndex struct {
-	Format      int           `json:"format"`
-	PublishedAt time.Time     `json:"published_at"`
-	Latest      string        `json:"latest"`
-	Minimum     Restriction   `json:"minimum"`
-	Revoked     []Restriction `json:"revoked"`
-	Versions    []VersionInfo `json:"versions"`
+	Format      int                    `json:"format"`
+	PublishedAt time.Time              `json:"published_at"`
+	Latest      string                 `json:"latest"`
+	Minimum     Restriction            `json:"minimum"`
+	Revoked     []Restriction          `json:"revoked"`
+	Versions    []engineid.VersionInfo `json:"versions"`
 }
 
 // SignedIndex keeps the exact bytes and detached signature for verification and persistent fallback.
@@ -130,30 +106,5 @@ type VerifiedIndex struct {
 type IndexResult struct {
 	Index    VerifiedIndex
 	Fallback bool
-	Notices  []Notice
-}
-
-// NoticeKind is stable presentation data shared by run output and controller API/dashboard readers.
-type NoticeKind string
-
-const (
-	NoticeSupportEnding     NoticeKind = "support_ending"
-	NoticeSupportEnded      NoticeKind = "support_ended"
-	NoticeEnforcement       NoticeKind = "version_enforcement"
-	NoticeIndexFallback     NoticeKind = "version_index_fallback"
-	NoticePinDisabled       NoticeKind = "engine_pin_disabled"
-	NoticePolicyUnavailable NoticeKind = "version_policy_unavailable"
-	NoticeUnclaimed         NoticeKind = "unclaimed_work"
-	NoticeCreditHold        NoticeKind = "credit_hold"
-	NoticeNoEligibleRunner  NoticeKind = "no_eligible_runner"
-)
-
-// Notice carries actionable policy text without turning a warning into an implicit revocation.
-type Notice struct {
-	Kind         NoticeKind `json:"kind"`
-	Version      string     `json:"version,omitempty"`
-	Reason       string     `json:"reason"`
-	Hint         string     `json:"hint,omitempty"`
-	SupportUntil *time.Time `json:"support_until,omitempty"`
-	EnforceAt    *time.Time `json:"enforce_at,omitempty"`
+	Notices  []engineid.Notice
 }

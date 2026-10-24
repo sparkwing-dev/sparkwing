@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 type localHTTPListener struct {
@@ -33,10 +35,10 @@ func (*localHTTPListener) Addr() net.Addr { return &net.UnixAddr{Name: "api.sock
 
 type localHTTPConnection struct {
 	net.Conn
-	peer LocalPeerIdentity
+	peer localhostwire.LocalPeerIdentity
 }
 
-func (c localHTTPConnection) PeerIdentity() LocalPeerIdentity { return c.peer }
+func (c localHTTPConnection) PeerIdentity() localhostwire.LocalPeerIdentity { return c.peer }
 
 func TestLocalHTTPPropagatesVerifiedIdentityAndJoinsRequests(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
@@ -52,15 +54,15 @@ func TestLocalHTTPPropagatesVerifiedIdentityAndJoinsRequests(t *testing.T) {
 	listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 	client, server := net.Pipe()
 	defer client.Close()
-	listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
+	listener.connections <- localHTTPConnection{Conn: server, peer: localhostwire.LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
 	entered, stopped := make(chan struct{}), make(chan struct{})
-	services := LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		peer, ok := LocalPeer(r.Context())
+	services := localhostwire.LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		peer, ok := localhostwire.LocalPeer(r.Context())
 		if !ok || peer.GOOS != owner.GOOS || peer.UID == nil || *peer.UID != uid {
 			t.Error("request lost verified connection identity")
 		}
 		*peer.UID = 456
-		if again, _ := LocalPeer(r.Context()); *again.UID != uid {
+		if again, _ := localhostwire.LocalPeer(r.Context()); *again.UID != uid {
 			t.Error("request changed connection identity")
 		}
 		close(entered)
@@ -68,7 +70,7 @@ func TestLocalHTTPPropagatesVerifiedIdentityAndJoinsRequests(t *testing.T) {
 		close(stopped)
 	})}
 	done := make(chan error, 1)
-	go func() { done <- services.ServeAPI(ctx, listener) }()
+	go func() { done <- ServeAPI(ctx, listener, services) }()
 	if _, err := io.WriteString(client, "GET /api/v1/runs HTTP/1.1\r\nHost: private\r\nX-Peer-UID: 999\r\n\r\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -100,11 +102,11 @@ func TestLocalHTTPRefusesUnverifiedConnections(t *testing.T) {
 	client, server := net.Pipe()
 	defer client.Close()
 	listener.connections <- server
-	services := LocalHTTP{API: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("served unverified connection") })}
-	if err := services.ServeAPI(t.Context(), listener); err == nil || errors.Is(err, http.ErrServerClosed) {
+	services := localhostwire.LocalHTTP{API: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("served unverified connection") })}
+	if err := ServeAPI(t.Context(), listener, services); err == nil || errors.Is(err, http.ErrServerClosed) {
 		t.Fatalf("unverified transport: %v", err)
 	}
-	if _, ok := LocalPeer(t.Context()); ok {
+	if _, ok := localhostwire.LocalPeer(t.Context()); ok {
 		t.Fatal("ambient context manufactured a peer")
 	}
 }
@@ -124,9 +126,9 @@ func TestLocalHTTPJoinsHijackedHandlers(t *testing.T) {
 		listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 		client, server := net.Pipe()
 		defer client.Close()
-		listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
+		listener.connections <- localHTTPConnection{Conn: server, peer: localhostwire.LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
 		entered, exited := make(chan struct{}), make(chan struct{})
-		services := LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		services := localhostwire.LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			connection, _, err := w.(http.Hijacker).Hijack()
 			if err != nil {
 				t.Error(err)
@@ -139,7 +141,7 @@ func TestLocalHTTPJoinsHijackedHandlers(t *testing.T) {
 			close(exited)
 		})}
 		done := make(chan error, 1)
-		go func() { done <- services.ServeAPI(ctx, listener) }()
+		go func() { done <- ServeAPI(ctx, listener, services) }()
 		if _, err := io.WriteString(client, "GET /api/v1/runs HTTP/1.1\r\nHost: private\r\n\r\n"); err != nil {
 			t.Fatal(err)
 		}
@@ -173,16 +175,16 @@ func FuzzLocalHTTPIdentity(f *testing.F) {
 		listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 		client, server := net.Pipe()
 		defer client.Close()
-		listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
-		services := LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			peer, ok := LocalPeer(r.Context())
+		listener.connections <- localHTTPConnection{Conn: server, peer: localhostwire.LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
+		services := localhostwire.LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			peer, ok := localhostwire.LocalPeer(r.Context())
 			if !ok || peer.UID == nil || *peer.UID != uid || peer.SID != "" {
 				t.Error("HTTP input selected the peer identity")
 			}
 			w.WriteHeader(http.StatusNoContent)
 		})}
 		done := make(chan error, 1)
-		go func() { done <- services.ServeAPI(ctx, listener) }()
+		go func() { done <- ServeAPI(ctx, listener, services) }()
 		if _, err := fmt.Fprintf(client, "GET /api/v1/runs HTTP/1.1\r\nHost: private\r\nX-Peer-Identity: %s\r\nConnection: close\r\n\r\n", base64.RawStdEncoding.EncodeToString([]byte(asserted))); err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +212,7 @@ func TestLocalHTTPRefusesForeignVerifiedPeer(t *testing.T) {
 		t.Skip("Unix UID check")
 	}
 	foreign := *owner.UID + 1
-	peer := LocalPeerIdentity{GOOS: owner.GOOS, UID: &foreign}
+	peer := localhostwire.LocalPeerIdentity{GOOS: owner.GOOS, UID: &foreign}
 	listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 	client, server := net.Pipe()
 	defer client.Close()

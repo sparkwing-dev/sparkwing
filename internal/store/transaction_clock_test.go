@@ -77,12 +77,39 @@ func TestTransactionClockCancellationAfterAutomaticRollback(t *testing.T) {
 	}
 }
 
+func TestTransactionCommitCancellationAfterAutomaticRollback(t *testing.T) {
+	for _, read := range []bool{false, true} {
+		t.Run(fmt.Sprint(read), func(t *testing.T) {
+			db := sql.OpenDB(&clockFailureConnector{})
+			defer db.Close()
+			s := &Store{db: db, dialect: DialectSQLite}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			tx, err := s.beginStoreTx(ctx, read)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Complete database/sql's cancellation rollback before attempting commit.
+			if err := tx.tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			cancel()
+			if err := tx.Commit(); !errors.Is(err, context.Canceled) || errors.Is(err, sql.ErrTxDone) {
+				t.Fatalf("cancelled commit = %v", err)
+			}
+		})
+	}
+}
+
 func TestTransactionResultRequiresCommit(t *testing.T) {
-	for _, failure := range []string{"", "body", "clock", "commit"} {
+	for _, failure := range []string{"", "body", "clock", "commit", "done"} {
 		t.Run(failure, func(t *testing.T) {
 			refused := errors.New("transaction refused")
 			connector := &clockFailureConnector{}
-			if failure == "commit" {
+			if failure == "done" {
+				refused = sql.ErrTxDone
+			}
+			if failure == "commit" || failure == "done" {
 				connector.commitErr = refused
 			}
 			db := sql.OpenDB(connector)

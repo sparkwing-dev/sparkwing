@@ -11,16 +11,16 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 type processServiceRoutes struct {
-	endpoints map[string]controller.Endpoint
+	endpoints map[string]controllerwire.Endpoint
 }
 
-func (r *processServiceRoutes) Register(endpoint controller.Endpoint) error {
+func (r *processServiceRoutes) Register(endpoint controllerwire.Endpoint) error {
 	r.endpoints[endpoint.Pattern] = endpoint
 	return nil
 }
@@ -45,7 +45,7 @@ func TestHostServices(t *testing.T) {
 		return nil
 	}
 	auth := capability.Authorized{Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job"}}
-	routes := &processServiceRoutes{endpoints: map[string]controller.Endpoint{}}
+	routes := &processServiceRoutes{endpoints: map[string]controllerwire.Endpoint{}}
 	if err := RegisterProcessServices(routes, func(context.Context, capability.Authorized) (*ProcessServices, error) { return service, nil }); err != nil {
 		t.Fatal(err)
 	}

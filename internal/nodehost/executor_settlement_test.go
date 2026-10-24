@@ -8,11 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestNodeExecutorSendsCurrentAttemptSettlement(t *testing.T) {
@@ -86,9 +85,9 @@ func TestNodeExecutorSendsCurrentAttemptSettlement(t *testing.T) {
 			if err != nil {
 				t.Fatalf("mode=%s error=%v", mode, err)
 			}
-			wantOutcome := store.NodeSuccess
+			wantOutcome := runstate.NodeSuccess
 			if mode == "failed" {
-				wantOutcome = store.NodeFailed
+				wantOutcome = runstate.NodeFailed
 			}
 			if got := st.changes[len(st.changes)-1].To; got != wantOutcome {
 				t.Fatalf("outcome=%s, want %s", got, wantOutcome)

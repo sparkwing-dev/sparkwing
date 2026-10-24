@@ -5,10 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -32,7 +31,7 @@ func (s *EngineController) resolveRunSelector(ctx context.Context, principal cap
 		return target, engineLookupError(err)
 	}
 	if s.ResolveTenant == nil {
-		return target, missingEndpointPolicy()
+		return target, routepolicy.MissingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(ctx, store.Team(target.Team))
 	if err != nil {
@@ -58,13 +57,13 @@ func (s *EngineController) resolveExpansionTarget(ctx context.Context, principal
 	if err != nil {
 		return target, err
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)}
+	ref := runspec.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)}
 	node, err := tenant.ReadNode(ctx, ref)
 	if err != nil {
 		return target, engineLookupError(err)
 	}
 	if node.Ref != ref || node.Generation <= 0 {
-		return target, missingEndpointPolicy()
+		return target, routepolicy.MissingEndpointPolicy()
 	}
 	target.UnitSourceNodeID, target.UnitSourceGeneration = string(node.Ref.NodeID), int64(node.Generation)
 	target.SourceGeneration = int64(node.Generation)

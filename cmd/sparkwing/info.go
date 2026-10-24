@@ -13,12 +13,11 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -506,14 +505,14 @@ func gatherSDKPin(info Info) *InfoSDKPin {
 	if err != nil {
 		return &InfoSDKPin{Installed: info.Version.Installed, Refusal: err.Error()}
 	}
-	sdk := engine.GoSDK
+	sdk := engineid.GoSDK
 	if typescript {
-		sdk = engine.TypeScriptSDK
+		sdk = engineid.TypeScriptSDK
 	}
 	return gatherSDKPinWith(info, sdk, readEnginePin, enginePinVersion)
 }
 
-func gatherSDKPinWith(info Info, sdk engine.SDKKind, readPin func(string, engine.SDKKind) (engine.Pin, error), versionFor func(engine.Pin) (string, error)) *InfoSDKPin {
+func gatherSDKPinWith(info Info, sdk engineid.SDKKind, readPin func(string, engineid.SDKKind) (engineid.Pin, error), versionFor func(engineid.Pin) (string, error)) *InfoSDKPin {
 	if !info.Project.Found {
 		return nil
 	}

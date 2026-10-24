@@ -19,8 +19,8 @@ func (s *Server) concurrencyStore(ctx context.Context, team string) (Concurrency
 	return tenantPort[ConcurrencyStore](ctx, s, store.Team(team))
 }
 
-func (s *Server) concurrencyEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) concurrencyEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/queue/groups/{group}", Authentication: capability.AuthCapability, Decode: concurrencyTarget, ResolveTarget: resolveConcurrencyTarget, Handle: s.handleConcurrencyState},
 	}
 }

@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
@@ -46,20 +46,20 @@ func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
 		t.Fatalf("queue expiry: %+v, %v", reaped, err)
 	}
 	tenant := &Tenant{s: s, team: claim.Team}
-	old, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "old"})
-	if err != nil || old.Outcome != NodeFailed || old.ReadyAt != nil {
+	old, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "old"})
+	if err != nil || old.Outcome != runstate.NodeFailed || old.ReadyAt != nil {
 		t.Fatalf("expired row: %+v, %v", old, err)
 	}
 	var reason string
 	if err := s.db.QueryRow(`SELECT failure_reason FROM nodes WHERE team='a' AND run_id='run' AND node_id='old'`).Scan(&reason); err != nil || reason != "queue_timeout" {
 		t.Fatalf("failure reason: %s, %v", reason, err)
 	}
-	fresh, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "fresh"})
-	if err != nil || fresh.ReadyAt == nil || fresh.Status != StatusPending {
+	fresh, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "fresh"})
+	if err != nil || fresh.ReadyAt == nil || fresh.Status != runstate.StatusPending {
 		t.Fatalf("fresh release: %+v, %v", fresh, err)
 	}
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
-	if _, err := tenant.RenewNodeClaim(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"}, actor); err != nil {
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	if _, err := tenant.RenewNodeClaim(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"}, actor); err != nil {
 		t.Fatalf("live claim expired by queue wait: %v", err)
 	}
 }
@@ -85,7 +85,7 @@ func TestReaperUsesAcceptedPlanClaimWait(t *testing.T) {
 		t.Fatalf("accepted claim wait: %+v, %v", reaped, err)
 	}
 	run, err := tenant.ReadRun(t.Context(), request.RunID)
-	if err != nil || run.State != RunFailed {
+	if err != nil || run.State != runstate.RunFailed {
 		t.Fatalf("expired plan state: %s, %v", run.State, err)
 	}
 }
@@ -138,19 +138,19 @@ func TestReaperApprovalDeadlineAndCancellation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "approval"})
+			node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "approval"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := NodeFailed
+			want := runstate.NodeFailed
 			if policy == "approve" {
-				want = NodeSuccess
+				want = runstate.NodeSuccess
 			}
 			if policy == "cancel" {
-				want = NodeCancelled
+				want = runstate.NodeCancelled
 			}
 			if policy == "indefinite" {
-				if len(reaped) != 0 || node.Status != StatusApprovalPending {
+				if len(reaped) != 0 || node.Status != runstate.StatusApprovalPending {
 					t.Fatal("indefinite approval expired")
 				}
 			} else if len(reaped) != 1 || node.Outcome != want {
@@ -169,8 +169,8 @@ func TestReaperRetryQueueStartsAtNewRunCreation(t *testing.T) {
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=?,created_at=?,claim_wait_ns=?,status='pending',lineage_json=? WHERE id='run'`, raw, now.UnixNano(), int64(time.Minute), []byte(`{"retry_of":"earlier"}`))
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,started_at=NULL WHERE id='run'`)
-	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
-	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunFailed, Cause: RunQueueTimeout, Actor: actor}); err == nil {
+	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
+	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: "run", To: runstate.RunFailed, Cause: runstate.RunQueueTimeout, Actor: actor}); err == nil {
 		t.Fatal("old seal expired the new queue")
 	}
 	if got, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {

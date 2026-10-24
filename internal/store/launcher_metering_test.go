@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func launcherMeteredFence(t *testing.T, s *Store, demand UnitDemand, claim UnitClaim, kind capability.UnitKind) (capability.AuthorityRef, capability.LeaseRef) {
@@ -69,9 +70,9 @@ func TestCancelledUnstartedLauncherAwardEndsMetering(t *testing.T) {
 				t.Fatal(err)
 			}
 			operator := authorityMember(t, s, "operator", RoleOwner)
-			operator.Kind = ActorOperator
+			operator.Kind = runstate.ActorOperator
 			*now = now.Add(time.Second)
-			if _, err := (&Tenant{s: s, team: "a"}).TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunCancelled, Cause: RunCancel, Actor: operator, Reason: "user_cancelled"}); err != nil {
+			if _, err := (&Tenant{s: s, team: "a"}).TransitionRun(t.Context(), runstate.RunTransition{RunID: "run", To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: operator, Reason: "user_cancelled"}); err != nil {
 				t.Fatal(err)
 			}
 			unitBillingTotal(t, s, 0, true)
@@ -119,9 +120,9 @@ func TestUnstartedLauncherAwardRefundsItsReservation(t *testing.T) {
 				}
 				if path == "lapse_then_cancel" {
 					operator := authorityMember(t, s, "operator", RoleOwner)
-					operator.Kind = ActorOperator
+					operator.Kind = runstate.ActorOperator
 					*now = now.Add(time.Second)
-					if _, err := (&Tenant{s: s, team: "a"}).TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunCancelled, Cause: RunCancel, Actor: operator, Reason: "user_cancelled"}); err != nil {
+					if _, err := (&Tenant{s: s, team: "a"}).TransitionRun(t.Context(), runstate.RunTransition{RunID: "run", To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: operator, Reason: "user_cancelled"}); err != nil {
 						t.Fatal(err)
 					}
 				}

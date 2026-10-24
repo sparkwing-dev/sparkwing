@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -19,7 +21,7 @@ func FuzzReceiptSnapshotPrivateInputsHaveNoHash(f *testing.F) {
 			RequestedArgs: map[string]string{name: value},
 			SecretArgs:    runspec.Optional[[]string]{Set: classified, Value: []string{name}},
 		}}
-		snapshot := store.RunSnapshot{Run: store.RunRow{Request: request}}
+		snapshot := store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{Request: request}}}
 		if accepted {
 			snapshot.Run.Spec = &runspec.Spec{Request: request, Resolved: runspec.Resolved{
 				Args: map[string]string{name: value}, SecretArgs: []string{name},

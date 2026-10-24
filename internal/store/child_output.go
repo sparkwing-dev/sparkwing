@@ -3,11 +3,10 @@ package store
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // ReadChildOutput selects the child's committed output under its creating job's live authority.
@@ -55,11 +54,11 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 	if err != nil {
 		return blob.Blob{}, err
 	}
-	row, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(a.Target.NodeID)})
+	row, err := readNodeTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(a.Target.NodeID)})
 	if err != nil {
 		return blob.Blob{}, err
 	}
-	if row.Status != StatusDone || row.OutputRecord == nil {
+	if row.Status != runstate.StatusDone || row.OutputRecord == nil {
 		return blob.Blob{}, blob.ErrNotFound
 	}
 	key := *row.OutputRecord

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 const rankingSHA = "0123456789abcdef0123456789abcdef01234567"
@@ -17,7 +17,7 @@ const rankingSHA = "0123456789abcdef0123456789abcdef01234567"
 type RankingFixture struct {
 	Store                                             *Store
 	Self, Personal, Tablet, Actions, Launcher, Second string
-	Owner, Admin, Member                              Actor
+	Owner, Admin, Member                              runstate.Actor
 	ReadyAt                                           time.Time
 	now                                               time.Time
 }
@@ -65,16 +65,16 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	return f
 }
 
-func rankingMember(t *testing.T, s *Store, id string, role Role) Actor {
+func rankingMember(t *testing.T, s *Store, id string, role Role) runstate.Actor {
 	t.Helper()
 	s.testOnlyExec(t, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1)`, id, id+"@example.test")
 	s.testOnlyExec(t, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a',?,?,1)`, id, role)
 	s.testOnlyExec(t, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,'a',?)`, id, id, "runs.read,runs.write,runs.control,team.admin", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano(), id)
 	s.testOnlyExec(t, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'a',0)`, id)
-	return Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
+	return runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
 }
 
-func (f *RankingFixture) personalMachine(t *testing.T, owner Actor, name string) string {
+func (f *RankingFixture) personalMachine(t *testing.T, owner runstate.Actor, name string) string {
 	t.Helper()
 	issued, err := f.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &owner.Authority, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
@@ -128,7 +128,7 @@ func (f *RankingFixture) Claim(t *testing.T, prefix string, kind capability.Unit
 }
 
 // Rank changes the team's claim ranking as the given member.
-func (f *RankingFixture) Rank(t *testing.T, actor Actor, tiers ...string) error {
+func (f *RankingFixture) Rank(t *testing.T, actor runstate.Actor, tiers ...string) error {
 	t.Helper()
 	p, err := f.Store.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 	if err != nil {
@@ -139,7 +139,7 @@ func (f *RankingFixture) Rank(t *testing.T, actor Actor, tiers ...string) error 
 	if err != nil {
 		return err
 	}
-	return (&Tenant{s: f.Store, team: "a"}).SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{ClaimRanking: &tiers})
+	return (&Tenant{s: f.Store, team: "a"}).SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{ClaimRanking: &tiers})
 }
 
 // AddJob inserts another ready job of the fixture run.

@@ -5,6 +5,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -39,7 +40,7 @@ type DataBinding struct {
 // DataAuthority resolves live uploader identity and sealed data scope from persisted authority.
 func (s *DataController) DataAuthority(ctx context.Context, authorized capability.Authorized) (blob.Authority, error) {
 	if s == nil {
-		return blob.Authority{}, missingEndpointPolicy()
+		return blob.Authority{}, routepolicy.MissingEndpointPolicy()
 	}
 	if err := ctx.Err(); err != nil {
 		return blob.Authority{}, err
@@ -65,7 +66,7 @@ func (s *DataController) BindData(ctx context.Context, authorized capability.Aut
 		return DataBinding{}, err
 	}
 	if s.Access == nil {
-		return DataBinding{}, missingEndpointPolicy()
+		return DataBinding{}, routepolicy.MissingEndpointPolicy()
 	}
 	bound := &boundData{controller: s, authorized: authorized, authority: authority}
 	return DataBinding{Authority: authority, Signer: bound, Records: bound}, nil

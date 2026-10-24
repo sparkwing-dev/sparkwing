@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -23,11 +23,11 @@ type nativeHostState struct {
 	ClaimStore
 }
 
-func (s nativeHostState) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
-	return store.Applied{}, nil
+func (s nativeHostState) ReleaseEvaluation(context.Context, runspec.NodeRef, runstate.Actor) (runstate.Applied, error) {
+	return runstate.Applied{}, nil
 }
 
-func (s nativeHostState) RenewNodeClaim(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+func (s nativeHostState) RenewNodeClaim(ctx context.Context, ref runspec.NodeRef, actor runstate.Actor) (runstate.LeaseBeat, error) {
 	return s.ClaimStore.RenewNodeClaim(ctx, ref, actor)
 }
 
@@ -35,7 +35,7 @@ func (s nativeHostState) ReadSnapshot(ctx context.Context, runID string) (store.
 	return s.ClaimStore.ReadSnapshot(ctx, runID)
 }
 
-func (s nativeHostState) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
+func (s nativeHostState) TransitionNode(ctx context.Context, change store.NodeCommand) (runstate.Applied, error) {
 	return s.ClaimStore.TransitionNode(ctx, change)
 }
 
@@ -57,7 +57,7 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 		Processes: &NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
 
 		Executor: executionOperationsFixture(execution),
-		ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+		ReadOutput: func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error) {
 			return json.RawMessage("null"), nil
 		},
 		Evaluation: EvaluationOperations{
@@ -66,7 +66,9 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 			},
 		},
 		PlanningLog: func(context.Context, nodeproto.FrameLog) error { return nil },
-		Owner:       OwnerOperations{Renew: func(context.Context, store.Actor, bool) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil }, Wait: func(context.Context, store.RunSnapshot) error { return nil }},
+		Owner: OwnerOperations{Renew: func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error) {
+			return runstate.LeaseBeat{}, nil
+		}, Wait: func(context.Context, store.RunSnapshot) error { return nil }},
 	}
 	return config, input, state, claimed
 }
@@ -117,7 +119,7 @@ func TestNativeHostOpensApprovalThroughOwnerTransition(t *testing.T) {
 	})
 	state.executorStore = policyState
 	persistNativeAcceptance(t, state, input.Accepted)
-	config.Owner.Local = func(store.NodeRow) bool {
+	config.Owner.Local = func(runstate.NodeRow) bool {
 		t.Fatal("approval entered compute admission")
 		return false
 	}
@@ -126,7 +128,7 @@ func TestNativeHostOpensApprovalThroughOwnerTransition(t *testing.T) {
 		t.Fatal(err)
 	}
 	request, err := releasedRequest(owner, t.Context(), RunInput{GrantedRunner: input.GrantedRunner}, input.Accepted, input.Entry, state.row, store.DecisionApproval)
-	if err != nil || request != nil || len(state.changes) != 1 || state.changes[0].To != store.NodeApprovalPending || state.changes[0].Cause != store.CauseApprovalOpen {
+	if err != nil || request != nil || len(state.changes) != 1 || state.changes[0].To != runstate.NodeApprovalPending || state.changes[0].Cause != runstate.CauseApprovalOpen {
 		t.Fatalf("request=%+v changes=%+v error=%v", request, state.changes, err)
 	}
 }
@@ -143,7 +145,7 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 			state.executorStore = policyState
 			persistNativeAcceptance(t, state, input.Accepted)
 			if mode == "local" {
-				config.Owner.Local = func(store.NodeRow) bool { return true }
+				config.Owner.Local = func(runstate.NodeRow) bool { return true }
 				config.Admission = ComposeStartGate(nil, nil, true)
 			}
 			if mode == "concurrency" {
@@ -173,7 +175,7 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 			if (request != nil) != (mode == "local") || (err != nil) != (mode == "debug" || mode == "debug-after") {
 				t.Fatalf("request=%+v error=%v", request, err)
 			}
-			if (mode == "remote" || mode == "concurrency" || mode == "local") && (len(state.changes) != 1 || state.changes[0].To != store.NodeReady) || (mode == "debug" || mode == "debug-after") && len(state.changes) != 0 {
+			if (mode == "remote" || mode == "concurrency" || mode == "local") && (len(state.changes) != 1 || state.changes[0].To != runstate.NodeReady) || (mode == "debug" || mode == "debug-after") && len(state.changes) != 0 {
 				t.Fatalf("changes=%+v", state.changes)
 			}
 		})
@@ -193,7 +195,7 @@ func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 		return ProcessGrant{}, refused
 	}
 	var layers []string
-	setTestNativePolicies(&config.Owner, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ store.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
+	setTestNativePolicies(&config.Owner, func(_ context.Context, layer testPolicyName, _ EvaluationInput, _ runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 		layers = append(layers, layer.Name)
 		return ownerLayerResult{}, nil
 	})
@@ -203,7 +205,7 @@ func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 	}
 	run := RunInput{GrantedRunner: input.GrantedRunner}
 	request, err := releasedRequest(owner, t.Context(), run, input.Accepted, input.Entry, state.row, store.DecisionReady)
-	if err != nil || request != nil || len(layers) != 0 || len(state.changes) != 1 || state.changes[0].To != store.NodeFailed || state.changes[0].Extra.Result.MaskedError != refused.Error() {
+	if err != nil || request != nil || len(layers) != 0 || len(state.changes) != 1 || state.changes[0].To != runstate.NodeFailed || state.changes[0].Extra.Result.MaskedError != refused.Error() {
 		t.Fatalf("request=%+v layers=%v changes=%+v error=%v", request, layers, state.changes, err)
 	}
 }

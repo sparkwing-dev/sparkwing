@@ -6,26 +6,24 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // WithClient binds native services to the authenticated controller's common transports.
 func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 	if _, remote := cfg.Store.(*RemoteHostStore); remote {
-		cfg.ExpansionActor = func(ctx context.Context, input RunInput, row store.NodeRow) (store.Actor, error) {
+		cfg.ExpansionActor = func(ctx context.Context, input RunInput, row runstate.NodeRow) (runstate.Actor, error) {
 			principal, err := cfg.Refresh(ctx)
 			if err != nil {
-				return store.Actor{}, err
+				return runstate.Actor{}, err
 			}
 			binding := principal.Capability.Binding
 			if principal.Authority != cfg.Principal.Authority || input.Owner.Authority != principal.Authority || input.Owner.CapabilityPrefix != principal.Capability.Prefix || principal.Capability.Unit != capability.UnitTrigger || binding.Kind != capability.BindingTrigger || input.Owner.Owner.RunID != runspec.RunID(binding.RunID) || input.Owner.Owner.Holder != binding.Holder || input.Owner.Owner.Generation != runspec.ClaimGeneration(binding.Generation) || row.Ref.RunID != runspec.RunID(input.RunID) || row.Ref.NodeID == "" {
-				return store.Actor{}, errors.New("expansion source is outside the owner award")
+				return runstate.Actor{}, errors.New("expansion source is outside the owner award")
 			}
 			return input.Owner, nil
 		}

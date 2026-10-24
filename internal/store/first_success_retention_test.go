@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -53,21 +54,21 @@ func assertFirstSuccessfulRunSurvivesAuditRetention(t *testing.T, s *store.Store
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
 	if run.Spec == nil {
 		t.Fatal("first run has no accepted plan")
 	}
 	if _, err := tenant.AcceptPlan(ctx, store.PlanAcceptance{RunID: admitted.RunID, Actor: actor, Seal: runspec.SealInput{Request: admitted.Request, Declarations: run.Spec.Declarations, Resolved: run.Spec.Resolved, Plan: run.Plan}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(admitted.RunID), Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+	if _, err := tenant.TransitionRun(ctx, runstate.RunTransition{RunID: runspec.RunID(admitted.RunID), Actor: actor, To: runstate.RunRunning, Cause: runstate.RunStart}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: claim.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(admitted.RunID), Actor: actor, Cause: store.RunFinish}}); err != nil {
+	if _, err := tenant.FinishRunAndUnit(ctx, runstate.FinishRunRequest{Unit: claim.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(admitted.RunID), Actor: actor, Cause: runstate.RunFinish}}); err != nil {
 		t.Fatal(err)
 	}
 	second, err := tenant.ReadRun(ctx, admitted.RunID)
-	if err != nil || second.State != store.RunSuccess || second.FinishedAt == nil {
+	if err != nil || second.State != runstate.RunSuccess || second.FinishedAt == nil {
 		t.Fatalf("later run did not succeed: %+v, %v", second, err)
 	}
 	if events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded, 10, ""); err != nil || len(events) != 0 {

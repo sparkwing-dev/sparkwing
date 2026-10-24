@@ -1,28 +1,29 @@
-package runners
+package localcontroller
 
 import (
 	"context"
 	"errors"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 )
 
 // StoreRunnerConfig binds an embedded claimant and native hosts to the controller's store.
 type StoreRunnerConfig struct {
 	Bearer  func(context.Context) (string, error)
-	Loop    LoopConfig
+	Loop    runners.LoopConfig
 	Bind    func(context.Context, StoreBinding) (nodehost.NativeServices, error)
 	OnError func(error)
 }
 
 // NewStoreRunner constructs the shared queue without a transport or another store opener.
-func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) (*Loop, error) {
-	if engine == nil || engine.ResolveTenant == nil || engine.RunnerPolicy == nil || cfg.Bearer == nil || cfg.Bind == nil {
+func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) (*runners.Loop, error) {
+	if engine == nil || cfg.Bearer == nil || cfg.Bind == nil || engine.ResolveTenant == nil || engine.RunnerPolicy == nil {
 		return nil, errors.New("embedded runner requires the owned controller, claimant, signed policy and native services")
 	}
 	if cfg.Loop.Version == "" || cfg.Loop.MaxConcurrent < 1 {
@@ -35,7 +36,7 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 		return nil, err
 	}
 	client := storeController{Engine: engine, Bearer: cfg.Bearer, Router: router}
-	loop := &Loop{
+	loop := &runners.Loop{
 		Config: cfg.Loop, Controller: client,
 		Host:    StoreHosting{Controller: engine, Bind: cfg.Bind},
 		OnError: cfg.OnError,
@@ -48,7 +49,7 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 
 // storeController applies shared route policy to the embedded local queue.
 type storeController struct {
-	Router *controller.PolicyRouter
+	Router *routepolicy.Router
 	Engine *controller.EngineController
 	Bearer func(context.Context) (string, error)
 }

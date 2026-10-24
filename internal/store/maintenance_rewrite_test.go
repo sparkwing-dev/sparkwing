@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func maintenanceStore(t *testing.T) (*Store, *Tenant, *time.Time) {
@@ -18,10 +20,10 @@ func maintenanceStore(t *testing.T) (*Store, *Tenant, *time.Time) {
 	return s, &Tenant{s: s, team: "a"}, &now
 }
 
-func maintenanceRun(t *testing.T, s *Store, id string, number int, state RunState) {
+func maintenanceRun(t *testing.T, s *Store, id string, number int, state runstate.RunState) {
 	t.Helper()
 	var finished any
-	if state == RunSuccess || state == RunFailed || state == RunCancelled {
+	if state == runstate.RunSuccess || state == runstate.RunFailed || state == runstate.RunCancelled {
 		finished = s.now().UnixNano()
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,
@@ -60,7 +62,7 @@ func TestRewriteSingletonLeaseFencesExpiredOwners(t *testing.T) {
 	}
 }
 
-func maintenanceEffects(t *testing.T, s *Store, state RunState) {
+func maintenanceEffects(t *testing.T, s *Store, state runstate.RunState) {
 	t.Helper()
 	tx, err := s.beginTx(context.Background())
 	if err != nil {
@@ -82,18 +84,18 @@ func maintenanceEffects(t *testing.T, s *Store, state RunState) {
 func TestRewriteCompletionOldAcknowledgmentLeavesTerminalDue(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
 	ctx := context.Background()
-	maintenanceRun(t, s, "run", 1, RunPending)
+	maintenanceRun(t, s, "run", 1, runstate.RunPending)
 	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "completion", "worker", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	maintenanceEffects(t, s, RunPending)
+	maintenanceEffects(t, s, runstate.RunPending)
 	due, err := s.AsOperator().DueRunEffects(ctx, lease, 10)
 	if err != nil || len(due) != 1 || due[0].Phase != EffectPending {
 		t.Fatalf("pending: %+v %v", due, err)
 	}
 	old := EffectDelivery{RunID: "run", Effect: EffectGitHubCheck, Revision: due[0].DesiredRev, Lease: lease}
-	maintenanceEffects(t, s, RunSuccess)
+	maintenanceEffects(t, s, runstate.RunSuccess)
 	if err := tenant.AcknowledgeRunEffect(ctx, old); err != nil {
 		t.Fatal(err)
 	}

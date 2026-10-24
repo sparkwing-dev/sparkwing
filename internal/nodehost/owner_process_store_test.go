@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -59,7 +59,7 @@ func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
 	if grant.Binding.JobID != "build" || grant.Binding.RunID != f.Input.RunID {
 		t.Fatal("source identity lost")
 	}
-	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(registry), Bindings: registry})
+	router := routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(registry), Bindings: registry})
 	if err := RegisterProcessServices(router, registry.Resolve); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
 	if status := call("owner-mask"); status != http.StatusOK || masker.Mask("owner-mask") != "***" {
 		t.Fatal("owner process service unavailable")
 	}
-	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"})
+	row, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"})
 	if err != nil || row.Attempt != 0 || row.CapabilityPrefix != "" || row.ClaimedBy != "" {
 		t.Fatalf("evaluation created work: %+v %v", row, err)
 	}
@@ -85,7 +85,7 @@ func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: admin.Prefix}, CapabilityPrefix: admin.Prefix}
+	actor := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: admin.Prefix}, CapabilityPrefix: admin.Prefix}
 	if err := f.Tenant.RevokeAuthority(t.Context(), actor, ref); err != nil {
 		t.Fatal(err)
 	}

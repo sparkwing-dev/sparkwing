@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T) {
@@ -33,7 +34,7 @@ func testUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T, requireme
 		t.Fatal(err)
 	}
 	view, err := tenant.ReadRunView(t.Context(), result.RunID)
-	if err != nil || view.Snapshot.Run.State != RunFailed || view.Snapshot.Run.StartedAt != nil || view.Snapshot.Run.FinishedAt == nil || (len(view.Failures) != 1 || !strings.HasPrefix(view.Failures[0], "run did not start: out of credits:")) || result.OwnerUnit != nil {
+	if err != nil || view.Snapshot.Run.State != runstate.RunFailed || view.Snapshot.Run.StartedAt != nil || view.Snapshot.Run.FinishedAt == nil || (len(view.Failures) != 1 || !strings.HasPrefix(view.Failures[0], "run did not start: out of credits:")) || result.OwnerUnit != nil {
 		t.Fatalf("unfunded push must be terminal history: result=%+v view=%+v err=%v", result, view, err)
 	}
 	rows, err := tenant.ListRuns(t.Context(), RunFilter{Limit: 10})
@@ -74,7 +75,7 @@ func testUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T, requireme
 		t.Fatalf("funded run-now could not retry an unplanned run: %+v, %v", rerun, err)
 	}
 	view, err = tenant.ReadRunView(t.Context(), rerun.RunID)
-	if err != nil || view.Snapshot.Run.State != RunPending {
+	if err != nil || view.Snapshot.Run.State != runstate.RunPending {
 		t.Fatalf("run-now did not create pending work: %+v, %v", view, err)
 	}
 }
@@ -100,7 +101,7 @@ func TestUnfundedPushCanStillUseAnEligibleUnmeteredRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 	run, err := tenant.ReadRun(t.Context(), result.RunID)
-	if err != nil || run.State != RunPending || result.OwnerUnit == nil {
+	if err != nil || run.State != runstate.RunPending || result.OwnerUnit == nil {
 		t.Fatalf("unmetered push was blocked by credits: state=%s owner=%+v err=%v", run.State, result.OwnerUnit, err)
 	}
 }
@@ -172,9 +173,9 @@ func TestPushCreditAdmissionUsesSealedPlacementWithoutLaunchers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := RunPending
+			want := runstate.RunPending
 			if tc.failed {
-				want = RunFailed
+				want = runstate.RunFailed
 			}
 			if run.State != want || (result.OwnerUnit == nil) != tc.failed {
 				t.Fatalf("state=%s owner=%+v want %s", run.State, result.OwnerUnit, want)

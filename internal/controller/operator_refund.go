@@ -6,6 +6,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (s *Server) handleOperatorRefund(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -21,7 +22,7 @@ func (s *Server) handleOperatorRefund(w http.ResponseWriter, r *http.Request, a 
 	if key == "" {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "Idempotency-Key is required"}
 	}
-	result, err := writer.ConsoleRefund(r.Context(), a, req, key)
+	result, err := writer.ConsoleRefund(r.Context(), a, store.OperatorRefund(req), key)
 	if err != nil {
 		return engineLookupError(err)
 	}

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 func TestUpgradeResolvesQASDKPinsThroughTheQAProxyOnlyInQATrustBuilds(t *testing.T) {
@@ -19,7 +21,7 @@ func TestUpgradeResolvesQASDKPinsThroughTheQAProxyOnlyInQATrustBuilds(t *testing
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GOPROXY", "")
 	dir := t.TempDir()
-	if err := (&Resolver{}).nativeCommand(t.Context(), dir, Pin{SDK: GoSDK, Version: "v0.68.0-qa.5"}, "go", "mod", "tidy"); err == nil {
+	if err := (&Resolver{}).nativeCommand(t.Context(), dir, engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0-qa.5"}, "go", "mod", "tidy"); err == nil {
 		t.Fatal("fake go mod tidy succeeded")
 	}
 	seen, err := os.ReadFile(filepath.Join(dir, "seen"))

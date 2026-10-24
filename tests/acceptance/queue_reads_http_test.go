@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -73,10 +74,10 @@ func TestQueueReadProjectsTenantGroups(t *testing.T) {
 	f.states = []*store.ConcurrencyState{
 		{
 			Key: "deploy-prod", Capacity: 8, EffectiveCapacity: 3, UsedCost: 2,
-			Holders: []store.ConcurrencyHolder{{RunID: "run-a", NodeID: "job-a"}, {RunID: "old", Superseded: true}},
+			Holders: []store.ConcurrencyHolder{{ConcurrencyHolder: runstate.ConcurrencyHolder{RunID: "run-a", NodeID: "job-a"}}, {ConcurrencyHolder: runstate.ConcurrencyHolder{RunID: "old", Superseded: true}}},
 			Waiters: []store.ConcurrencyWaiter{{RunID: "run-b", NodeID: "job-b", Position: 0}},
 		},
-		{Key: "plan", Capacity: 1, Holders: []store.ConcurrencyHolder{{RunID: "run-c"}}},
+		{Key: "plan", Capacity: 1, Holders: []store.ConcurrencyHolder{{ConcurrencyHolder: runstate.ConcurrencyHolder{RunID: "run-c"}}}},
 	}
 	w := snapshotRequest(queueReadServer(t, b, f), b, "GET", "/api/v1/queue?team=foreign")
 	var got wingwire.QueueState

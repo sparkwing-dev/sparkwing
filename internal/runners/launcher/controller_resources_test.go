@@ -18,8 +18,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -47,7 +48,7 @@ func TestCloudAwardResourcesFromControllerThroughLauncher(t *testing.T) {
 			cloudResourceSQL(t, e.Store, `UPDATE runs SET dispatch='controller',request_json=?`, request)
 			cloudResourceSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
 			if kind != capability.UnitPlan {
-				sealed := runspec.Spec{Request: run.Request, Resolved: runspec.Resolved{Engine: engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}, Settings: runspec.ExecutionSettings{Options: runspec.Options{Requires: labels("sparkwing-2cpu")}}, Guards: runspec.Guards{Passed: true}}}
+				sealed := runspec.Spec{Request: run.Request, Resolved: runspec.Resolved{Engine: engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}, Settings: runspec.ExecutionSettings{Options: runspec.Options{Requires: labels("sparkwing-2cpu")}}, Guards: runspec.Guards{Passed: true}}}
 				spec, err := json.Marshal(sealed)
 				if err != nil {
 					t.Fatal(err)
@@ -57,7 +58,7 @@ func TestCloudAwardResourcesFromControllerThroughLauncher(t *testing.T) {
 					t.Fatal(err)
 				}
 				cloudResourceSQL(t, e.Store, `UPDATE runs SET sealed_at=1,spec_json=?,spec_hash='spec',plan_json=?,plan_hash='plan'`, spec, []byte(`{"jobs":[{"id":"job"}]}`))
-				if err := teststore.SeedTriggerClaim(e.Store, t.Context(), "a", "run", store.Actor{CapabilityPrefix: "owner", NodeFence: runspec.NodeFence{RunID: "run", Holder: "owner", Generation: 1}}, time.Now().Add(time.Hour), nil); err != nil {
+				if err := teststore.SeedTriggerClaim(e.Store, t.Context(), "a", "run", runstate.Actor{CapabilityPrefix: "owner", NodeFence: runspec.NodeFence{RunID: "run", Holder: "owner", Generation: 1}}, time.Now().Add(time.Hour), nil); err != nil {
 					t.Fatal(err)
 				}
 				cloudResourceSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), execution)

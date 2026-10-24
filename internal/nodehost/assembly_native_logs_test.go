@@ -13,8 +13,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -71,7 +71,7 @@ func TestCloudUnitPublishesLogsBeforeRetiringItsLease(t *testing.T) {
 }
 
 type nativeLogRecords struct {
-	view    store.LogSegments
+	view    runstate.LogSegments
 	objects map[string][]byte
 }
 
@@ -84,7 +84,7 @@ func (r *nativeLogRecords) PutSegment(_ context.Context, segment logseg.Segment,
 	for _, row := range r.view.Segments {
 		offset += row.Size
 	}
-	r.view.Segments = append(r.view.Segments, store.Segment{Index: int64(segment.N), Offset: offset, Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key})
+	r.view.Segments = append(r.view.Segments, runstate.Segment{Index: int64(segment.N), Offset: offset, Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key})
 	r.objects[key] = bytes.Clone(body)
 	return nil
 }
@@ -94,7 +94,7 @@ func (r *nativeLogRecords) PutManifest(_ context.Context, manifest logseg.Manife
 	return nil
 }
 
-func (r *nativeLogRecords) ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error) {
+func (r *nativeLogRecords) ReadLogSegments(context.Context, runstate.Actor, blob.LogReadRequest) (runstate.LogSegments, error) {
 	return r.view, nil
 }
 
@@ -140,7 +140,7 @@ func FuzzLocalNativeLogsPreserveAuthorityAndMasking(f *testing.F) {
 			t.Fatal(err)
 		}
 		var body bytes.Buffer
-		read, err := (logseg.CommittedReader{Records: records, Objects: records}).Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: records.view.Subject}, &body)
+		read, err := (logseg.CommittedReader{Records: records, Objects: records}).Read(t.Context(), runstate.Actor{}, blob.LogReadRequest{Subject: records.view.Subject}, &body)
 		if err != nil || !read.Complete || bytes.Contains(body.Bytes(), []byte(secret)) || !json.Valid(bytes.TrimSpace(body.Bytes())) {
 			t.Fatalf("shared read roundtrip exposed private or invalid output: %s %v", body.Bytes(), err)
 		}

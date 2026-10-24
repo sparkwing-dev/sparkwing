@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -21,7 +21,7 @@ import (
 type acquiredClaimStore struct {
 	*executorStore
 	run   store.RunRow
-	renew func(context.Context) (store.LeaseBeat, error)
+	renew func(context.Context) (runstate.LeaseBeat, error)
 }
 
 type refusedClaimSnapshot struct {
@@ -39,9 +39,9 @@ func TestClaimedNodeHostMasksReadFailuresBeforeRenewal(t *testing.T) {
 	failure := &apierr.Error{Code: apierr.Unavailable, Message: secret, Hint: secret, Details: map[string]any{"credential": secret}}
 	host.Store = refusedClaimSnapshot{ClaimStore: state, failure: failure}
 	host.Masker = testMasker(secret)
-	state.renew = func(context.Context) (store.LeaseBeat, error) {
+	state.renew = func(context.Context) (runstate.LeaseBeat, error) {
 		t.Error("renewed after the acceptance read failed")
-		return store.LeaseBeat{}, nil
+		return runstate.LeaseBeat{}, nil
 	}
 	err := host.Execute(t.Context(), input)
 	var rendered *apierr.Error
@@ -53,15 +53,15 @@ func TestClaimedNodeHostMasksReadFailuresBeforeRenewal(t *testing.T) {
 	}
 }
 
-func (s *acquiredClaimStore) RenewNodeClaim(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
-	if ref != s.row.Ref || actor.Kind != store.ActorHolder || actor.Holder != s.row.ClaimedBy || actor.Generation != s.row.Generation || actor.CapabilityPrefix != s.row.CapabilityPrefix {
-		return store.LeaseBeat{}, errors.New("renewal changed the award")
+func (s *acquiredClaimStore) RenewNodeClaim(ctx context.Context, ref runspec.NodeRef, actor runstate.Actor) (runstate.LeaseBeat, error) {
+	if ref != s.row.Ref || actor.Kind != runstate.ActorHolder || actor.Holder != s.row.ClaimedBy || actor.Generation != s.row.Generation || actor.CapabilityPrefix != s.row.CapabilityPrefix {
+		return runstate.LeaseBeat{}, errors.New("renewal changed the award")
 	}
 	return s.renew(ctx)
 }
 
 func (s *acquiredClaimStore) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
-	return store.RunSnapshot{Run: s.run, Nodes: []store.NodeRow{s.row}}, nil
+	return store.RunSnapshot{Run: s.run, Nodes: []runstate.NodeRow{s.row}}, nil
 }
 
 func claimedNodeFixture(t *testing.T, configure ...func(*NodeInput, *ExecutorDependencies)) (NodeInput, *acquiredClaimStore, ClaimedNodeHost, *[]*executorProcess) {
@@ -79,8 +79,8 @@ func claimedNodeFixture(t *testing.T, configure ...func(*NodeInput, *ExecutorDep
 	spec.Request.Request.Git.Repository.Key = "example.com/acme/repo"
 	input.Accepted.Spec, _ = json.Marshal(spec)
 	plan, _ := json.Marshal(input.Accepted.Plan)
-	s := &acquiredClaimStore{executorStore: st, run: store.RunRow{ID: input.Accepted.RunID, Spec: &spec, Plan: plan, PlanHash: input.Accepted.PlanHash}}
-	s.renew = func(context.Context) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil }
+	s := &acquiredClaimStore{executorStore: st, run: store.RunRow{Execution: runstate.Execution{ID: input.Accepted.RunID, Spec: &spec, Plan: plan, PlanHash: input.Accepted.PlanHash}}}
+	s.renew = func(context.Context) (runstate.LeaseBeat, error) { return runstate.LeaseBeat{}, nil }
 	deps.Store = s
 	executor, err := NewNodeExecutor(deps)
 	if err != nil {
@@ -104,9 +104,9 @@ func claimedNodeFixture(t *testing.T, configure ...func(*NodeInput, *ExecutorDep
 func TestClaimedNodeHostRenewsBeforeSourceAndJoinsExecution(t *testing.T) {
 	input, s, host, processes := claimedNodeFixture(t)
 	var trace []string
-	s.renew = func(context.Context) (store.LeaseBeat, error) {
+	s.renew = func(context.Context) (runstate.LeaseBeat, error) {
 		trace = append(trace, "renew")
-		return store.LeaseBeat{}, nil
+		return runstate.LeaseBeat{}, nil
 	}
 	acquire := host.Acquire
 	host.Acquire = func(ctx context.Context, spec source.Spec, opts source.Options) (*source.Entry, error) {
@@ -122,7 +122,7 @@ func TestClaimedNodeHostRenewsBeforeSourceAndJoinsExecution(t *testing.T) {
 	if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 {
 		t.Fatal("execution outlived host")
 	}
-	if len(s.changes) != 2 || s.changes[1].Extra.Result.Outcome != store.NodeSuccess {
+	if len(s.changes) != 2 || s.changes[1].Extra.Result.Outcome != runstate.NodeSuccess {
 		t.Fatalf("transitions = %+v", s.changes)
 	}
 }
@@ -131,7 +131,9 @@ func TestClaimedNodeHostRejectsLostAuthorityBeforeAcquisition(t *testing.T) {
 	for _, code := range []apierr.Code{apierr.LockHeld, apierr.Unauthenticated, apierr.Forbidden} {
 		t.Run(string(code), func(t *testing.T) {
 			input, s, host, processes := claimedNodeFixture(t)
-			s.renew = func(context.Context) (store.LeaseBeat, error) { return store.LeaseBeat{}, &apierr.Error{Code: code} }
+			s.renew = func(context.Context) (runstate.LeaseBeat, error) {
+				return runstate.LeaseBeat{}, &apierr.Error{Code: code}
+			}
 			host.Acquire = func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
 				t.Fatal("revoked claim acquired source")
 				return nil, nil
@@ -170,9 +172,9 @@ func TestClaimedNodeHostDoesNotRenewAChangedAward(t *testing.T) {
 			case "job_hash":
 				input.SpecHash = "other"
 			}
-			s.renew = func(context.Context) (store.LeaseBeat, error) {
+			s.renew = func(context.Context) (runstate.LeaseBeat, error) {
 				t.Fatal("changed award renewed")
-				return store.LeaseBeat{}, nil
+				return runstate.LeaseBeat{}, nil
 			}
 			if err := host.Execute(t.Context(), input); err == nil {
 				t.Fatal("accepted changed award")
@@ -206,7 +208,7 @@ func TestClaimedNodeHostReportsSetupFailuresThroughTheClaim(t *testing.T) {
 				return entry, err
 			}
 			if mode == "refused_report" {
-				s.fail = store.CauseReport
+				s.fail = runstate.CauseReport
 			}
 			err := host.Execute(t.Context(), input)
 			if err == nil || strings.Contains(err.Error(), "private") {
@@ -216,7 +218,7 @@ func TestClaimedNodeHostReportsSetupFailuresThroughTheClaim(t *testing.T) {
 				t.Fatalf("processes=%d changes=%+v", len(*processes), s.changes)
 			}
 			change := s.changes[0]
-			if change.Actor.Holder != input.Authority.Holder || change.Actor.Generation != input.Generation || change.Extra.Result.Outcome != store.NodeFailed || strings.Contains(change.Extra.Result.MaskedError, "private") {
+			if change.Actor.Holder != input.Authority.Holder || change.Actor.Generation != input.Generation || change.Extra.Result.Outcome != runstate.NodeFailed || strings.Contains(change.Extra.Result.MaskedError, "private") {
 				t.Fatalf("report = %+v", change)
 			}
 			failure := change.Extra.Result.Failure
@@ -231,12 +233,12 @@ func TestClaimedNodeHostLossDuringAcquisitionDiscardsEntry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		input, s, host, processes := claimedNodeFixture(t)
 		beats := 0
-		s.renew = func(context.Context) (store.LeaseBeat, error) {
+		s.renew = func(context.Context) (runstate.LeaseBeat, error) {
 			beats++
 			if beats == 1 {
-				return store.LeaseBeat{}, nil
+				return runstate.LeaseBeat{}, nil
 			}
-			return store.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
+			return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
 		}
 		acquire := host.Acquire
 		host.Acquire = func(ctx context.Context, spec source.Spec, opts source.Options) (*source.Entry, error) {

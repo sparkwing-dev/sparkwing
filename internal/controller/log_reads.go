@@ -10,10 +10,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -22,12 +22,12 @@ import (
 
 type segmentLogRecords interface {
 	ReadRunView(context.Context, string) (store.RunView, error)
-	ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error)
+	ReadLogSegments(context.Context, runstate.Actor, blob.LogReadRequest) (runstate.LogSegments, error)
 }
 
 type segmentLogs struct {
 	records segmentLogRecords
-	actor   store.Actor
+	actor   runstate.Actor
 	live    *liveLogs
 	objs    logseg.SegmentObjects
 }
@@ -131,7 +131,7 @@ func logIncompleteLine(reason string) []byte {
 func logNodeSettled(view store.RunView, nodeID string) (settled, found bool) {
 	for _, row := range view.Snapshot.Nodes {
 		if row.Ref.NodeID == runspec.NodeID(nodeID) {
-			return view.Snapshot.Run.FinishedAt != nil || row.Status == store.StatusDone && row.Outcome != store.NodeFailed, true
+			return view.Snapshot.Run.FinishedAt != nil || row.Status == runstate.StatusDone && row.Outcome != runstate.NodeFailed, true
 		}
 	}
 	return false, false

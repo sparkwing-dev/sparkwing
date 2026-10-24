@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func githubConnectFixture(t *testing.T) (*Store, *Tenant, capability.Authorized, *time.Time) {
@@ -20,7 +21,7 @@ func githubConnectFixture(t *testing.T) (*Store, *Tenant, capability.Authorized,
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := teamAuthorization(t, s, Actor{Authority: session.Principal.Authority}, team, "PUT", "/api/v1/team/github-app/extra-repos")
+	a := teamAuthorization(t, s, runstate.Actor{Authority: session.Principal.Authority}, team, "PUT", "/api/v1/team/github-app/extra-repos")
 	rewriteSchemaExec(t, s.db, `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('github','42',?,'member@example.test',1,1)`, a.Principal.Capability.Subject.ID)
 	return s, tenant, a, now
 }
@@ -120,7 +121,7 @@ func TestGitHubConnectRechecksBindingAndStoreClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	foreign := teamAuthorization(t, s, Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)}}, other.Team(), "PUT", "/api/v1/team/github-app/extra-repos")
+	foreign := teamAuthorization(t, s, runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)}}, other.Team(), "PUT", "/api/v1/team/github-app/extra-repos")
 	row.GitHubUserID = 99
 	if _, err := other.BindAuthorizedGitHubInstallation(t.Context(), foreign, row); err != ErrInstallationBoundElsewhere {
 		t.Fatalf("foreign takeover = %v", err)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -55,7 +56,7 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, deployment strin
 		path = "/internal/card-setup"
 		body["setup_id"], body["customer"], body["email"] = page.ReservationID, page.Customer, page.Email
 	default:
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	var out struct {
 		URL       string `json:"url"`

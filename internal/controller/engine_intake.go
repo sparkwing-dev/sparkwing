@@ -10,10 +10,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -22,28 +24,28 @@ import (
 // clocks, replay, and transactional authority rechecks on each mutation.
 type RunTransactions interface {
 	AuthorityRevoker
-	UpdateMembership(context.Context, store.Actor, store.MembershipUpdate) error
+	UpdateMembership(context.Context, runstate.Actor, store.MembershipUpdate) error
 	Members(context.Context) ([]store.Membership, error)
 	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
 	ReplayRun(context.Context, store.IntakeRequest) (store.AdmissionResult, bool, error)
 	ReadRun(context.Context, string) (store.RunRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadOwnerSnapshot(context.Context, capability.AuthorityRef, string) (store.RunSnapshot, error)
-	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
-	ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error)
-	ReadFailure(context.Context, controllerwire.NodeRef, int64, store.Actor) (*nodeproto.JobFailure, error)
+	ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
+	ReconcileNode(context.Context, store.ReconcileRequest) (runstate.ReconciledNode, error)
+	ReadFailure(context.Context, runspec.NodeRef, int64, runstate.Actor) (*nodeproto.JobFailure, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
-	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
-	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
-	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
+	TransitionNode(context.Context, store.NodeCommand) (runstate.Applied, error)
+	TransitionRun(context.Context, runstate.RunTransition) (runstate.Applied, error)
+	FinishRunAndUnit(context.Context, runstate.FinishRunRequest) (runstate.Applied, error)
 	WriteAnnotation(context.Context, store.AnnotationWrite) error
 	WriteSummary(context.Context, store.SummaryWrite) error
 	RecordStep(context.Context, store.StepReport) error
 }
 
 func (s *EngineController) runTransactions(ctx context.Context, team string) (RunTransactions, error) {
-	return ScopedTenantPort[RunTransactions](ctx, store.Team(team), s.ResolveTenant)
+	return scopedTenantPort[RunTransactions](ctx, store.Team(team), s.ResolveTenant)
 }
 
 // IntakeForStore preserves tagged authority and the idempotency key. API input
@@ -52,7 +54,7 @@ func (s *EngineController) runTransactions(ctx context.Context, team string) (Ru
 func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error) {
 	p := a.Principal
 	if p.Authority.ID == "" || a.Target.Team == "" || p.Capability.Team != a.Target.Team {
-		return store.IntakeRequest{}, missingEndpointPolicy()
+		return store.IntakeRequest{}, routepolicy.MissingEndpointPolicy()
 	}
 	if body.Request.Team != "" && body.Request.Team != a.Target.Team {
 		return store.IntakeRequest{}, apierr.Authorization(apierr.ReasonTeam, "intake team does not match authority")
@@ -107,10 +109,10 @@ func createRunResponse(admitted store.AdmissionResult) controllerwire.CreateRunR
 // and masked message enter the same transaction as a successful expansion.
 func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error) {
 	if a.Target.RunID == "" || a.Target.NodeID == "" || a.Target.UnitSourceGeneration <= 0 || a.Principal.Authority.ID == "" {
-		return store.ExpansionSubmission{}, missingEndpointPolicy()
+		return store.ExpansionSubmission{}, routepolicy.MissingEndpointPolicy()
 	}
 	if a.Binding.RunID != a.Target.RunID || a.Binding.NodeID != a.Target.NodeID {
-		return store.ExpansionSubmission{}, missingEndpointPolicy()
+		return store.ExpansionSubmission{}, routepolicy.MissingEndpointPolicy()
 	}
 	if body.SourceGeneration <= 0 {
 		return store.ExpansionSubmission{}, invalidEngineBody("source_generation must be positive")
@@ -126,7 +128,7 @@ func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSub
 		return store.ExpansionSubmission{}, err
 	}
 	request := store.ExpansionSubmission{
-		Source: controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, SourceGeneration: runspec.ClaimGeneration(body.SourceGeneration), Actor: actor,
+		Source: runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, SourceGeneration: runspec.ClaimGeneration(body.SourceGeneration), Actor: actor,
 	}
 	if body.Failure != nil {
 		if strings.TrimSpace(string(body.Failure.Code)) == "" || int64(len(body.Failure.Message)) > limits.ErrorBytes {
@@ -171,23 +173,23 @@ func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capab
 	return expansionResponse(accepted)
 }
 
-func expansionActor(a capability.Authorized) (store.Actor, error) {
+func expansionActor(a capability.Authorized) (runstate.Actor, error) {
 	lease := a.Binding.Expansion
 	if lease == nil || lease.ID == "" || lease.Holder == "" || lease.Generation <= 0 {
-		return store.Actor{}, missingEndpointPolicy()
+		return runstate.Actor{}, routepolicy.MissingEndpointPolicy()
 	}
-	kind := store.OwnerTrigger
+	kind := runstate.OwnerTrigger
 	switch lease.Kind {
 	case capability.UnitTrigger:
 	case capability.UnitEval:
-		kind = store.OwnerEval
+		kind = runstate.OwnerEval
 	default:
-		return store.Actor{}, missingEndpointPolicy()
+		return runstate.Actor{}, routepolicy.MissingEndpointPolicy()
 	}
-	return store.Actor{
-		Authority: a.Principal.Authority, Kind: store.ActorRunHost, CapabilityPrefix: a.Principal.Capability.Prefix,
+	return runstate.Actor{
+		Authority: a.Principal.Authority, Kind: runstate.ActorRunHost, CapabilityPrefix: a.Principal.Capability.Prefix,
 
-		Owner: store.OwnerLeaseRef{
+		Owner: runstate.OwnerLeaseRef{
 			Kind: kind, Name: lease.ID, EvalFence: runspec.EvalFence{RunID: runspec.RunID(a.Target.RunID), SourceNodeID: runspec.NodeID(a.Target.NodeID), SourceGeneration: runspec.ClaimGeneration(a.Target.UnitSourceGeneration), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
 		}, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
 	}, nil
@@ -221,7 +223,7 @@ func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authoriz
 		return controllerwire.PlanAccepted{}, engineLookupError(err)
 	}
 	if run.ID != a.Target.RunID || string(run.Team) != a.Target.Team || run.Request.RunID == "" {
-		return controllerwire.PlanAccepted{}, missingEndpointPolicy()
+		return controllerwire.PlanAccepted{}, routepolicy.MissingEndpointPolicy()
 	}
 	if run.Request.Request.Mode == runspec.IntakePublish {
 		var plan nodeproto.PlanDoc
@@ -242,30 +244,30 @@ func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authoriz
 		return controllerwire.PlanAccepted{}, engineLookupError(err)
 	}
 	return controllerwire.PlanAccepted{
-		Spec: accepted.Spec, Plan: accepted.Plan, PlanHash: runspec.Hash(accepted.PlanHash), Replayed: accepted.Replayed, Notices: []engine.Notice{},
+		Spec: accepted.Spec, Plan: accepted.Plan, PlanHash: runspec.Hash(accepted.PlanHash), Replayed: accepted.Replayed, Notices: []engineid.Notice{},
 	}, nil
 }
 
-func engineActor(a capability.Authorized) store.Actor {
+func engineActor(a capability.Authorized) runstate.Actor {
 	b := a.Binding
-	actor := store.Actor{
+	actor := runstate.Actor{
 		Result:    a.Result,
-		Authority: a.Principal.Authority, Kind: store.ActorRunHost,
+		Authority: a.Principal.Authority, Kind: runstate.ActorRunHost,
 		CapabilityPrefix: principalCapabilityPrefix(a.Principal), NodeFence: runspec.NodeFence{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)},
 	}
 	if a.Access.Credential == capability.CredentialPublisher {
-		actor.Kind = store.ActorOperator
+		actor.Kind = runstate.ActorOperator
 	}
 	if a.Principal.Capability.Unit == capability.UnitNode {
-		actor.Kind = store.ActorHolder
+		actor.Kind = runstate.ActorHolder
 	}
 	if a.Principal.Capability.Unit == capability.UnitTrigger || a.Principal.Capability.Unit == capability.UnitPlan {
-		actor.Owner = store.OwnerLeaseRef{
-			Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(a.Target.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)},
+		actor.Owner = runstate.OwnerLeaseRef{
+			Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(a.Target.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)},
 		}
 	}
 	if a.Principal.Capability.Unit == capability.UnitEval && b.Expansion != nil && b.Expansion.Kind == capability.UnitEval {
-		actor.Owner = store.OwnerLeaseRef{Kind: store.OwnerEval, EvalFence: runspec.EvalFence{RunID: runspec.RunID(b.RunID), SourceNodeID: runspec.NodeID(b.NodeID), SourceGeneration: runspec.ClaimGeneration(b.Generation), Holder: b.Expansion.Holder, Generation: runspec.ClaimGeneration(b.Expansion.Generation)}}
+		actor.Owner = runstate.OwnerLeaseRef{Kind: runstate.OwnerEval, EvalFence: runspec.EvalFence{RunID: runspec.RunID(b.RunID), SourceNodeID: runspec.NodeID(b.NodeID), SourceGeneration: runspec.ClaimGeneration(b.Generation), Holder: b.Expansion.Holder, Generation: runspec.ClaimGeneration(b.Expansion.Generation)}}
 	}
 	return actor
 }

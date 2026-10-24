@@ -996,9 +996,9 @@ opener. Missing or failed decryption refuses acceptance. The controller/store
 tests use the shared validator to refuse decrypted secret identifiers before
 insertion. Native host and generated-expansion evidence remain separate.
 
-C1's audited release methods return confirmed stored SSH/HTTPS credentials or
-a narrowly scoped GitHub App token. `SourceController.GitHub` supplies the existing
-client through C1's `GitHubSourceProvider` interface. The default server adapter
+The store confirms stored SSH/HTTPS credential release. The controller mints
+a narrowly scoped GitHub App token between the store’s prepare and commit checks. `SourceController.GitHub` supplies the existing
+client through [`controller.GitHubSourceProvider`](../../../internal/controller/source_controller.go). The default server adapter
 uses its configured App client. The App token is returned as `kind: github_app`,
 `host: github.com`, and `secret`. W3's source Access and W9's client consume that
 credential with the checkout facts already present in the seal.
@@ -1162,8 +1162,8 @@ All capability names below are in `internal/capability`.
 | `controller.NewCloudFrontDataBackend` | Wrap S3 downloads with CloudFront for public-ingress requests. Direct requests and uploads retain the backend signer. Physical operations and log deletion remain on S3. |
 | `controller.PaymentSettler`, `Server.WithPayments` | Supply C1 settlement to the signed Stripe callback. The server registers `/webhooks/stripe` through `PolicyRouter` and passes only verified events to the store. |
 | `controller.Server.WithAuthorization` | Configure the shared verifier, bindings, transport identity and CSRF adapters before constructing the server handler. Missing adapters fail closed. |
-| `controller.RouteAuthorization`, `controller.Endpoint`, `controller.PolicyRouter` | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
-| `controller.NewPolicyRouter`, `PolicyRouter.Register`, `PolicyRouter.Validate`, `PolicyRouter.Registrations` | Register handlers independently of the policy table and check their proof wiring. Combine controller and node-host registrations for the complete inventory check. |
+| [`routepolicy.Authorization`](../../../internal/routepolicy/policy.go), [`controllerwire.Endpoint`](../../../internal/controllerwire/endpoint.go), [`routepolicy.Router`](../../../internal/routepolicy/policy.go) | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
+| [`routepolicy.New`](../../../internal/routepolicy/router.go), [`routepolicy.Router.Register`](../../../internal/routepolicy/router.go), [`routepolicy.Router.Validate`](../../../internal/routepolicy/router.go), [`routepolicy.Router.Registrations`](../../../internal/routepolicy/router.go) | Register handlers independently of the policy table and check their proof wiring. Combine controller and node-host registrations for the complete inventory check. |
 | `controller.AuthorityRevoker`, `EngineController.ResolveOperator` | Reuse C1's existing RevokeAuthority transaction through the tenant or deployment scope. The optional resolver supports embedded controllers and fakes without another issuer or persistence owner. |
 | `controller.RunTransactions`, `EngineController.ResolveTenant`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
 | `controller.SizingReader`, `controller.SizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |

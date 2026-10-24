@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -40,7 +40,7 @@ func tenant(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	return tn
 }
 
-func membershipActor(t *testing.T, st *store.Store, id string, team store.Team) store.Actor {
+func membershipActor(t *testing.T, st *store.Store, id string, team store.Team) runstate.Actor {
 	t.Helper()
 	account, err := st.AsOperator().Account(t.Context(), id)
 	if err != nil {
@@ -51,7 +51,7 @@ func membershipActor(t *testing.T, st *store.Store, id string, team store.Team) 
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(raw))
-	return store.Actor{Kind: store.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}}
+	return runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}}
 }
 
 func rolePointer(role store.Role) *store.Role { return &role }

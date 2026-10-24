@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -144,20 +143,15 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	if err != nil || replay.Replayed {
 		return replay, err
 	}
-	if in.consent == "" && schedule.LockedRef != "" {
-		git, code, err := source.ResolveRevisions(ctx, input.Git, input.Source, "", nil)
-		if err != nil {
-			return AdmissionResult{}, err
-		}
-		input.Git, input.Source = git, code
+	policy, ok := t.s.intakePolicy.(ScheduleSourcePolicy)
+	if !ok {
+		return AdmissionResult{}, authorityError(apierr.Unavailable, "schedule source resolver is unavailable")
 	}
-	if policy, ok := t.s.intakePolicy.(ScheduleSourcePolicy); ok && (in.consent != "" || schedule.LockedRef == "") {
-		var err error
-		input, err = policy.ResolveScheduleSource(ctx, schedule, input)
-		if err != nil {
-			return AdmissionResult{}, err
-		}
+	input, err = policy.ResolveScheduleSource(ctx, schedule, input)
+	if err != nil {
+		return AdmissionResult{}, err
 	}
+
 	input.Team, input.Pipeline, input.Origin = string(t.team), schedule.Pipeline, runspec.OriginSchedule
 	input.RequestedArgs = schedule.Effective().Args
 	request := IntakeRequest{Authority: in.authority(), IdempotencyKey: key, Request: input, Intent: &intent}

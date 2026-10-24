@@ -13,11 +13,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
@@ -47,9 +46,9 @@ func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.expansions[1].BodyHash = string(hash)
-	state.nodes["failed"] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "failed"}, Status: store.StatusDone, Outcome: store.NodeFailed, Generation: 9, Spec: json.RawMessage(`{"id":"failed"}`)}
+	state.nodes["failed"] = runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "failed"}, Status: runstate.StatusDone, Outcome: runstate.NodeFailed, Generation: 9, Spec: json.RawMessage(`{"id":"failed"}`)}
 	failure := &nodeproto.JobFailure{Job: "failed", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded source failure"}}
-	deps.ReadFailure = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+	deps.ReadFailure = func(_ context.Context, ref runspec.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
 		if ref != state.nodes["failed"].Ref || generation != 9 {
 			t.Fatalf("failure source: %+v generation %d", ref, generation)
 		}
@@ -195,7 +194,7 @@ func TestNodeExecutorGeneratedReplayUsesAttemptTimeout(t *testing.T) {
 		}
 	}
 	last := state.changes[len(state.changes)-1]
-	if last.To != store.NodeFailed || last.Extra.Result == nil || last.Extra.Result.Reason != string(apierr.DeadlineExceeded) {
+	if last.To != runstate.NodeFailed || last.Extra.Result == nil || last.Extra.Result.Reason != string(apierr.DeadlineExceeded) {
 		t.Fatalf("timeout report: %+v", last)
 	}
 }
@@ -207,7 +206,7 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 	for i := range jobs {
 		jobs[i] = nodeproto.JobSpec{ID: fmt.Sprintf("n%d", i), Closures: nodeproto.ClosureSpec{Generate: []string{fmt.Sprintf("g%d", i)}}}
 	}
-	state.nodes = make(map[string]store.NodeRow)
+	state.nodes = make(map[string]runstate.NodeRow)
 	for i := range jobs[:depth] {
 		body, err := json.Marshal(jobs[i])
 		if err != nil {
@@ -217,7 +216,7 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		state.nodes[jobs[i].ID] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobs[i].ID)}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: runspec.ClaimGeneration(i + 1), Spec: body, SpecHash: string(hash)}
+		state.nodes[jobs[i].ID] = runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobs[i].ID)}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Generation: runspec.ClaimGeneration(i + 1), Spec: body, SpecHash: string(hash)}
 		expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{jobs[i+1]}}
 		body, err = json.Marshal(expansion)
 		if err != nil {
@@ -227,12 +226,12 @@ func TestNodeExecutorReconstructsLongRecordedGeneratorChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		state.expansions = append(state.expansions, store.AcceptedExpansionRow{Source: state.nodes[jobs[i].ID].Ref, SourceGeneration: int64(i + 1), Body: body, BodyHash: string(hash)})
+		state.expansions = append(state.expansions, runstate.AcceptedExpansionRow{Source: state.nodes[jobs[i].ID].Ref, SourceGeneration: int64(i + 1), Body: body, BodyHash: string(hash)})
 	}
 	input.NodeID = jobs[depth].ID
 	deps.Store = recordedReplayStore{state}
 	reads := 0
-	deps.ReadOutput = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
+	deps.ReadOutput = func(_ context.Context, ref runspec.NodeRef, generation int64) (json.RawMessage, error) {
 		if ref != state.nodes[jobs[reads].ID].Ref || generation != int64(reads+1) {
 			t.Fatalf("ancestor %d: %+v generation %d", reads, ref, generation)
 		}

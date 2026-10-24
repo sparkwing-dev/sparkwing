@@ -74,7 +74,7 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 			}
 			local := machine.Raw
 			engineClaimHTTP(t, h, local, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"two","labels":["team-4cpu"]}`, http.StatusOK)
-			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "two"})
+			node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "two"})
 			if err != nil || node.ClaimedBy != "own-machine" {
 				t.Fatalf("local continuation: %+v %v", node, err)
 			}

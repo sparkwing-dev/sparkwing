@@ -2,7 +2,7 @@
 
 ## Implemented
 
-`runners.NewStoreRunner` constructs the embedded queue over the existing
+`localcontroller.NewStoreRunner` constructs the embedded queue over the existing
 `EngineController` and its store. C2 authenticates and authorizes each claim.
 The shared controller owns enrollment, signed software admission, matching and
 issuance. The shared loop passes returned awards to `StoreHosting`, which builds

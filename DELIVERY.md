@@ -452,8 +452,9 @@ file. Other syntax and workflow checks remain active.
   listed in `.guards/`, and each list only shrinks:
   `GOWORK=off go run ./internal/guardcheck .` fails a finding missing from its
   list, a line no finding matches, and a line the merge base with origin/main
-  lacks. `pre-push` runs the depguard half (`-fast`, about two seconds over the
-  whole tree); `gate` runs all of it, about a minute cold.
+  lacks. `pre-push` runs depguard and the SDK production dependency closure
+  (`-fast`) for Linux, macOS and Windows on amd64 and arm64. `gate` also runs
+  the typed guards and unexport census.
   `.guards/README.md` says how to shrink each list.
 - **No sleeps or wall-clock waits in tests:** `internal/sleepcheck` fails any
   `_test.go` that calls `time.Sleep`, `time.After`, `time.Tick`,

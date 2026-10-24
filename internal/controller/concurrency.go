@@ -7,6 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -33,7 +34,7 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request, 
 		return concurrencyError(err)
 	}
 	if st == nil || st.Key != key {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	resp := controllerwire.QueueGroup{
 		Group: st.Key, Capacity: st.Capacity, EffectiveCapacity: st.EffectiveCapacity, UsedCost: st.UsedCost,

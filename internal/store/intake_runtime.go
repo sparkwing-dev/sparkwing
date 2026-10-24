@@ -12,8 +12,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -218,7 +218,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	}
 	input := snapshot.request.Request
 	if input.Mode == runspec.IntakeExecute {
-		result.OwnerUnit = &OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(id)}}
+		result.OwnerUnit = &runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(id)}}
 		if input.Options.Runner.Set && input.Options.Runner.Value.Kind == runspec.RunnerHere {
 			issued, err := tx.store.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: request.Authority, Unit: capability.UnitTrigger, UnitID: id, Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect, HereRunID: id}})
 			if err != nil {
@@ -246,7 +246,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if changed != 1 {
 		return AdmissionResult{}, authorityError(apierr.Conflict, "run number allocation changed")
 	}
-	if err = writeRunEffectsTx(ctx, tx, team, id, RunPending, now); err != nil {
+	if err = writeRunEffectsTx(ctx, tx, team, id, runstate.RunPending, now); err != nil {
 		return AdmissionResult{}, err
 	}
 	if request.VerifiedDeliveryID != "" || snapshot.execution.Retry != nil && snapshot.spec == nil && input.Origin == runspec.OriginApp {
@@ -262,7 +262,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 			if snapshot.execution.Retry != nil {
 				return AdmissionResult{}, authorityError(apierr.Conflict, creditRefusal)
 			}
-			if _, err := transitionRunTx(ctx, tx, team, RunTransition{RunID: runspec.RunID(id), To: RunFailed, Actor: Actor{Kind: ActorOperator, Authority: request.Authority}, Cause: runCreditRefused, Reason: FailureCreditsExhausted, MaskedError: "run did not start: " + creditRefusal}); err != nil {
+			if _, err := transitionRunTx(ctx, tx, team, runstate.RunTransition{RunID: runspec.RunID(id), To: runstate.RunFailed, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: request.Authority}, Cause: runCreditRefused, Reason: FailureCreditsExhausted, MaskedError: "run did not start: " + creditRefusal}); err != nil {
 				return AdmissionResult{}, err
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE triggers SET status='failed',finished_at=? WHERE team=? AND id=?`, now.UnixNano(), team, id); err != nil {
@@ -383,12 +383,12 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 		if err = lockStateRunTx(ctx, tx, team, c.Binding.RunID); err != nil {
 			return p, err
 		}
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
+		row, err := readNodeTx(ctx, tx, team, runspec.NodeRef{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
 		if err != nil {
 			return p, err
 		}
-		actor := Actor{Kind: ActorHolder, Authority: request.Authority, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}
-		if row.Status == StatusDone || row.CancelRequestedAt != nil {
+		actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: request.Authority, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}
+		if row.Status == runstate.StatusDone || row.CancelRequestedAt != nil {
 			return p, holderRefusal()
 		}
 
@@ -450,7 +450,7 @@ func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRe
 	if err != nil {
 		return admittedSnapshot{}, err
 	}
-	out := admittedSnapshot{request: carried.Request, plan: carried.Plan, execution: executionLineage{Lineage: carried.Lineage, Retry: &RetrySelection{Mode: mode}}}
+	out := admittedSnapshot{request: carried.Request, plan: carried.Plan, execution: executionLineage{Lineage: carried.Lineage, Retry: &runstate.RetrySelection{Mode: mode}}}
 	if carried.Spec.Set {
 		out.spec = &carried.Spec.Value
 	}

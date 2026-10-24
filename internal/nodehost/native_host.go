@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -36,7 +36,7 @@ type NativeHostConfig struct {
 	Owner       OwnerOperations
 	Executor    ExecutionOperations
 	Evaluation  EvaluationOperations
-	ReadOutput  func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	ReadOutput  func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error)
 	PlanningLog func(context.Context, nodeproto.FrameLog) error
 	Admission   StartGate
 }
@@ -102,7 +102,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner.executionAdmission = config.Admission
 
 	owner.Planning.Validation = validation
-	owner.DebugPolicy = func(ctx context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
+	owner.DebugPolicy = func(ctx context.Context, input EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 		var spec runspec.Spec
 		var job nodeproto.JobSpec
 		if json.Unmarshal(input.Accepted.Spec, &spec) != nil || json.Unmarshal(row.Spec, &job) != nil {
@@ -115,11 +115,11 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		}
 		return ownerLayerResult{}, errors.New("debug pause requires an authority-bearing boundary adapter")
 	}
-	owner.SkipPolicy = func(ctx context.Context, input EvaluationInput, row store.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
+	owner.SkipPolicy = func(ctx context.Context, input EvaluationInput, row runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 		return evaluator.skipLayer(ctx, input, row, processes.Log)
 	}
 	if owner.Expand == nil {
-		owner.Expand = func(ctx context.Context, input EvaluationInput, _ store.NodeRow, _ StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+		owner.Expand = func(ctx context.Context, input EvaluationInput, _ runstate.NodeRow, _ StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 			return evaluator.evaluateExpansion(ctx, input)
 		}
 	}
@@ -135,7 +135,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 
 // OwnerOperations supplies placement callbacks without shared host state.
 type OwnerOperations struct {
-	Renew          func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
+	Renew          func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error)
 	Acquire        func(context.Context, RunInput) (*source.Entry, error)
 	Prepare        func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
 	Project        func(store.RunSnapshot) (store.ScheduleSnapshot, error)
@@ -143,11 +143,11 @@ type OwnerOperations struct {
 	Wait           func(context.Context, store.RunSnapshot) error
 	WaitNode       WaitNodeChange
 	Debug          DebugBoundaryWaiter
-	Local          func(store.NodeRow) bool
-	AdoptClaim     func(context.Context, store.ReconciledNode) error
+	Local          func(runstate.NodeRow) bool
+	AdoptClaim     func(context.Context, runstate.ReconciledNode) error
 	Delegator      OwnerDelegator
-	ExpansionActor func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
-	Expand         func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error)
+	ExpansionActor func(context.Context, RunInput, runstate.NodeRow) (runstate.Actor, error)
+	Expand         func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error)
 }
 
 // ExecutionOperations supplies placement callbacks without shared host state.
@@ -160,7 +160,7 @@ type ExecutionOperations struct {
 	PrepareCaches    func(context.Context, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
 	PublishOutput    func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
 	Annotate         func(context.Context, NodeInput, nodeproto.AnnotationRequest) error
-	ReadFailure      func(context.Context, controllerwire.NodeRef, int64) (*nodeproto.JobFailure, error)
+	ReadFailure      func(context.Context, runspec.NodeRef, int64) (*nodeproto.JobFailure, error)
 }
 
 // EvaluationOperations supplies placement callbacks without shared host state.

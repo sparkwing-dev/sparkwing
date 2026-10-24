@@ -121,7 +121,7 @@ join. The shared build cache is retained.
 
 ## Scope and volume
 
-Production edits are entirely in W8's `internal/runners/store_host.go`.
+Production edits are entirely in W8's `internal/wingd/localcontroller/store_host.go`.
 There are **no `cmd/sparkwing` composition edits this session**, no other
 production caller migrations, and no edits in `internal/orchestrator`.
 Shared test edits are limited to:

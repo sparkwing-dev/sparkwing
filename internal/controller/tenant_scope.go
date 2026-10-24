@@ -11,5 +11,5 @@ func (s *Server) tenantForTeam(ctx context.Context, team store.Team) (*store.Ten
 }
 
 func (s *EngineController) tenantForTeam(ctx context.Context, team store.Team) (*store.Tenant, error) {
-	return ScopedTenantPort[*store.Tenant](ctx, team, s.ResolveTenant)
+	return scopedTenantPort[*store.Tenant](ctx, team, s.ResolveTenant)
 }

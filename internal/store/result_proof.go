@@ -5,13 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref controllerwire.NodeRef, attempt int64) error {
+func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, ref runspec.NodeRef, attempt int64) error {
 	proof := actor.Result
 	if proof == nil {
 		return nil
@@ -51,7 +50,7 @@ func persistPlanResultProofTx(ctx context.Context, tx *storeTx, team Team, reque
 	if request.Actor.Result == nil {
 		return nil
 	}
-	if err := validateResultProofTx(ctx, tx, team, request.Actor, controllerwire.NodeRef{RunID: runspec.RunID(request.RunID)}, 0); err != nil {
+	if err := validateResultProofTx(ctx, tx, team, request.Actor, runspec.NodeRef{RunID: runspec.RunID(request.RunID)}, 0); err != nil {
 		return err
 	}
 	if request.Actor.Result.Pattern != "/api/v1/runs/{run}/plan" {
@@ -85,7 +84,7 @@ func authenticationResultTx(ctx context.Context, tx *storeTx, c capability.Capab
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&raw); err != nil {
 		return err
 	}
-	var actor Actor
+	var actor runstate.Actor
 	if len(raw) != 0 {
 		if err := json.Unmarshal(raw, &actor); err != nil {
 			return err

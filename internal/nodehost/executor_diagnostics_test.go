@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -87,7 +88,7 @@ func TestNodeExecutorDiagnosticFailureJoinsWork(t *testing.T) {
 			if err := host.Execute(ctx, input); !errors.Is(err, refused) {
 				t.Fatalf("diagnostic failure disappeared: %v", err)
 			}
-			if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 || st.changes[len(st.changes)-1].To != store.NodeFailed {
+			if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 || st.changes[len(st.changes)-1].To != runstate.NodeFailed {
 				t.Fatal("diagnostic failure retried, succeeded or leaked its process")
 			}
 			if event == "step_start" {
@@ -183,7 +184,7 @@ func TestNodeExecutorRetryDiagnosticKeepsCommittedOrdinal(t *testing.T) {
 		if err := json.Unmarshal(log.Attrs, &attrs); err != nil {
 			t.Fatal(err)
 		}
-		if in.Attempt != 12 || attrs["ordinal"] != 12 || attrs["attempt"] != 3 || attrs["total"] != 3 || log.Message != "retry attempt 3/3" || st.changes[len(st.changes)-1].Cause != store.CauseRetry {
+		if in.Attempt != 12 || attrs["ordinal"] != 12 || attrs["attempt"] != 3 || attrs["total"] != 3 || log.Message != "retry attempt 3/3" || st.changes[len(st.changes)-1].Cause != runstate.CauseRetry {
 			t.Fatalf("retry differs from committed ordinal or application budget: %+v, %+v", in, log)
 		}
 		return nil
@@ -195,7 +196,7 @@ func TestNodeExecutorRetryDiagnosticKeepsCommittedOrdinal(t *testing.T) {
 	if err := host.Execute(t.Context(), input); err != nil {
 		t.Fatal(err)
 	}
-	if retries != 1 || st.changes[len(st.changes)-1].To != store.NodeSuccess {
+	if retries != 1 || st.changes[len(st.changes)-1].To != runstate.NodeSuccess {
 		t.Fatalf("retries=%d changes=%+v", retries, st.changes)
 	}
 }

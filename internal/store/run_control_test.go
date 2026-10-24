@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
@@ -47,7 +47,7 @@ func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
 		if selector%6 == 5 {
 			a.Target.NodeID = fmt.Sprint(suffix)
 		}
-		out, err := tenant.ResolveAuthorizedApproval(t.Context(), a, controllerwire.ApprovalDecision{Resolution: "approved", IdempotencyKey: "decision"})
+		out, err := tenant.ResolveAuthorizedApproval(t.Context(), a, ApprovalDecision{Resolution: "approved", IdempotencyKey: "decision"})
 		if (err == nil) != allowed {
 			t.Logf("selector=%d approval=%v", selector%6, err)
 			return false
@@ -85,7 +85,7 @@ func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *test
 			return false
 		}
 		a.Target.NodeID = string(ref.NodeID)
-		decision := controllerwire.ApprovalDecision{Resolution: "approved", Comment: text, IdempotencyKey: "approval"}
+		decision := ApprovalDecision{Resolution: "approved", Comment: text, IdempotencyKey: "approval"}
 		first, err := tenant.ResolveAuthorizedApproval(t.Context(), a, decision)
 		if err != nil {
 			t.Fatal(err)
@@ -145,7 +145,7 @@ func TestRunControlRollsBackStateEventsAndReplayTogether(t *testing.T) {
 			}
 			if approval {
 				rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER reject_receipt BEFORE UPDATE ON run_control_requests BEGIN SELECT RAISE(ABORT,'receipt rejected'); END`)
-				out, err := tenant.ResolveAuthorizedApproval(t.Context(), a, controllerwire.ApprovalDecision{Resolution: "approved", Comment: "go", IdempotencyKey: "request"})
+				out, err := tenant.ResolveAuthorizedApproval(t.Context(), a, ApprovalDecision{Resolution: "approved", Comment: "go", IdempotencyKey: "request"})
 				if err == nil || out.Approval.RunID != "" {
 					t.Fatalf("failed approval returned %+v %v", out, err)
 				}
@@ -159,7 +159,7 @@ func TestRunControlRollsBackStateEventsAndReplayTogether(t *testing.T) {
 			rewriteSchemaCount(t, tenant.s.db, "debug_pauses", 0)
 			rewriteSchemaCount(t, tenant.s.db, "events", events)
 			row, err := tenant.ReadNode(t.Context(), ref)
-			if err != nil || row.Status != StatusApprovalPending || row.StatusDetail != "" {
+			if err != nil || row.Status != runstate.StatusApprovalPending || row.StatusDetail != "" {
 				t.Fatalf("failed control changed job: %+v %v", row, err)
 			}
 			gate, err := tenant.GetApproval(t.Context(), string(ref.RunID), string(ref.NodeID))

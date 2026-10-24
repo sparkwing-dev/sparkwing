@@ -7,18 +7,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // PrivateHostState supplies award-bound execution state.
 type PrivateHostState interface {
-	CapacityStore
- ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error)
- RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error
-	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
-	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
-	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
-	TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
+	MayStart(context.Context, runstate.CapacityBinding, runstate.Actor) (runstate.AcquireSlotResponse, error)
+	ReleaseEvaluation(context.Context, runspec.NodeRef, runstate.Actor) (runstate.Applied, error)
+	RelinquishStart(context.Context, runstate.CapacityBinding, runstate.Actor) error
+	ReadSnapshot(context.Context, string) (runstate.RunSnapshot, error)
+	ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
+	TransitionRun(context.Context, runstate.RunTransition) (runstate.Applied, error)
+	TransitionNode(context.Context, runspec.NodeRef, runstate.Actor, runstate.NodeCommandPayload) (runstate.Applied, error)
 }
 
 // RemoteHostStore joins authenticated execution state with shared controller operations.
@@ -29,7 +30,7 @@ type RemoteHostStore struct {
 	unit         string
 	executing    func() bool
 	LocalSecrets map[string]string
-	Finish       func(context.Context, store.FinishRunRequest) (store.Applied, error)
+	Finish       func(context.Context, runstate.FinishRunRequest) (runstate.Applied, error)
 }
 
 // NewRemoteHostStore constructs an award-bound state adapter.
@@ -59,10 +60,10 @@ func (s *RemoteHostStore) AcceptPlan(ctx context.Context, request store.PlanAcce
 func (s *RemoteHostStore) RecordStep(ctx context.Context, report store.StepReport) error {
 	controller := s.controller
 	if nodes, ok := s.PrivateHostState.(interface {
-		NodeController(context.Context, controllerwire.NodeRef) (controllerwire.Controller, error)
+		NodeController(context.Context, runspec.NodeRef) (controllerwire.Controller, error)
 	}); ok {
 		var err error
-		controller, err = nodes.NodeController(ctx, controllerwire.NodeRef{RunID: runspec.RunID(report.Attempt.RunID), NodeID: runspec.NodeID(report.Attempt.NodeID)})
+		controller, err = nodes.NodeController(ctx, runspec.NodeRef{RunID: runspec.RunID(report.Attempt.RunID), NodeID: runspec.NodeID(report.Attempt.NodeID)})
 		if err != nil {
 			return err
 		}
@@ -73,16 +74,16 @@ func (s *RemoteHostStore) RecordStep(ctx context.Context, report store.StepRepor
 	})
 }
 
-func (s *RemoteHostStore) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
+func (s *RemoteHostStore) FinishRunAndUnit(ctx context.Context, request runstate.FinishRunRequest) (runstate.Applied, error) {
 	change := request.Transition
 	if request.Unit != change.Actor.Owner {
-		return store.Applied{}, errors.New("host finish requires its owner")
+		return runstate.Applied{}, errors.New("host finish requires its owner")
 	}
 	if s.Finish != nil {
 		return s.Finish(ctx, request)
 	}
-	if change.Cause != store.RunFinish {
-		return store.Applied{}, errors.New("host finish requires a supported terminal cause")
+	if change.Cause != runstate.RunFinish {
+		return runstate.Applied{}, errors.New("host finish requires a supported terminal cause")
 	}
 	body := controllerwire.FinishRequest{Reason: change.Reason}
 	if change.MaskedError != "" {
@@ -90,43 +91,57 @@ func (s *RemoteHostStore) FinishRunAndUnit(ctx context.Context, request store.Fi
 	}
 	response, err := s.controller.Finish(ctx, string(change.RunID), body)
 	if err != nil {
-		return store.Applied{}, err
+		return runstate.Applied{}, err
 	}
-	return store.Applied{
-		Outcome: store.RunState(response.Outcome), Reason: response.Reason,
+	return runstate.Applied{
+		Outcome: runstate.RunState(response.Outcome), Reason: response.Reason,
 		Replayed: response.Replayed, CancelRequested: response.CancelRequested, StateSeq: response.StateSeq,
 		Generation: runspec.ClaimGeneration(response.Generation), Attempt: runspec.AttemptOrdinal(response.Attempt),
 	}, nil
 }
 
-func (s *RemoteHostStore) RenewOwner(ctx context.Context, _ store.Actor, executing bool) (store.LeaseBeat, error) {
+func (s *RemoteHostStore) RenewOwner(ctx context.Context, _ runstate.Actor, executing bool) (runstate.LeaseBeat, error) {
 	return s.renew(ctx, executing)
 }
 
-func (s *RemoteHostStore) RenewNodeClaim(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+func (s *RemoteHostStore) RenewNodeClaim(ctx context.Context, ref runspec.NodeRef, actor runstate.Actor) (runstate.LeaseBeat, error) {
 	if nodes, ok := s.PrivateHostState.(interface {
-		RenewNode(context.Context, controllerwire.NodeRef, store.Actor, bool) (store.LeaseBeat, error)
+		RenewNode(context.Context, runspec.NodeRef, runstate.Actor, bool) (runstate.LeaseBeat, error)
 	}); ok {
 		// The owner can be computing while its node is still acquiring a source.
 		row, err := s.PrivateHostState.ReadNode(ctx, ref)
 		if err != nil {
-			return store.LeaseBeat{}, err
+			return runstate.LeaseBeat{}, err
 		}
-		return nodes.RenewNode(ctx, ref, actor, row.Status == store.StatusRunning)
+		return nodes.RenewNode(ctx, ref, actor, row.Status == runstate.StatusRunning)
 	}
 	return s.renew(ctx, s.executing())
 }
 
-func (s *RemoteHostStore) renew(ctx context.Context, executing bool) (store.LeaseBeat, error) {
+func (s *RemoteHostStore) renew(ctx context.Context, executing bool) (runstate.LeaseBeat, error) {
 	request := controllerwire.RenewalRequest{Executing: executing, LocalSecrets: s.LocalSecrets}
 	response, err := s.controller.Renew(ctx, s.unit, request)
 	if err != nil {
-		return store.LeaseBeat{}, err
+		return runstate.LeaseBeat{}, err
 	}
-	return store.LeaseBeat{
+	return runstate.LeaseBeat{
 		ExpiresAt: response.ExpiresAt, CancelRequested: response.CancelRequested, CancelReason: response.CancelReason,
 		Watched: response.Watched, WatchedNodes: response.WatchedJobs,
 	}, nil
 }
 
 var _ NativeHostStore = (*RemoteHostStore)(nil)
+
+func (s *RemoteHostStore) ReadSnapshot(ctx context.Context, run string) (store.RunSnapshot, error) {
+	snapshot, err := s.PrivateHostState.ReadSnapshot(ctx, run)
+	return store.RunSnapshot{Run: store.RunRow{Execution: snapshot.Run.Execution, Team: store.Team(snapshot.Run.Team)}, Nodes: snapshot.Nodes, Expansions: snapshot.Expansions, StoreNow: snapshot.StoreNow}, err
+}
+
+func (s *RemoteHostStore) TransitionNode(ctx context.Context, command store.NodeCommand) (runstate.Applied, error) {
+	ref, actor := store.NodeCommandAuthority(command)
+	payload, err := store.NodeCommandPayloadFor(command)
+	if err != nil {
+		return runstate.Applied{}, err
+	}
+	return s.PrivateHostState.TransitionNode(ctx, ref, actor, payload)
+}

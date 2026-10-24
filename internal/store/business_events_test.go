@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -137,9 +138,9 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 	if err != nil || owner.Capability.Parent == nil {
 		t.Fatalf("owner ancestry: %+v, %v", owner, err)
 	}
-	for i, status := range []store.RunState{store.RunCancelled, store.RunSuccess, store.RunSuccess} {
-		if status == store.RunCancelled {
-			cancel := store.RunTransition{RunID: finish.Unit.RunID, To: store.RunCancelled, Cause: store.RunCancel, Actor: store.Actor{Kind: store.ActorOperator, Authority: run.Request.AuthorityRef}}
+	for i, status := range []runstate.RunState{runstate.RunCancelled, runstate.RunSuccess, runstate.RunSuccess} {
+		if status == runstate.RunCancelled {
+			cancel := runstate.RunTransition{RunID: finish.Unit.RunID, To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: run.Request.AuthorityRef}}
 			if _, err := tenant.TransitionRun(ctx, cancel); err != nil {
 				t.Fatal(err)
 			}
@@ -159,11 +160,11 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		actor := store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-		if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(admitted.RunID), Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+		actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+		if _, err := tenant.TransitionRun(ctx, runstate.RunTransition{RunID: runspec.RunID(admitted.RunID), Actor: actor, To: runstate.RunRunning, Cause: runstate.RunStart}); err != nil {
 			t.Fatal(err)
 		}
-		finish = store.FinishRunRequest{Unit: claim.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(admitted.RunID), Actor: actor, Cause: store.RunFinish}}
+		finish = runstate.FinishRunRequest{Unit: claim.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(admitted.RunID), Actor: actor, Cause: runstate.RunFinish}}
 	}
 	events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded, 1000, "")
 	if err != nil {
@@ -177,7 +178,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 		t.Fatalf("first-success run = %v", events[0].Attrs["run_id"])
 	}
 	run, err = tenant.ReadRun(ctx, runID)
-	if err != nil || run.State != store.RunSuccess {
+	if err != nil || run.State != runstate.RunSuccess {
 		t.Fatalf("first-success run = %+v, %v", run, err)
 	}
 }

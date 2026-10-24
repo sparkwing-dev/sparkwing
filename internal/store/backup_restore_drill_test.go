@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -60,19 +62,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 	for i, pipeline := range []string{"build", "deploy", "nightly"} {
 		runID := fmt.Sprintf("drill-run-%d", i)
 		finished := start.Add(time.Duration(i+1) * time.Minute)
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
-			ID:            runID,
-			Pipeline:      pipeline,
-			Status:        "success",
-			DeclaredRepo:  "fictional-app",
-			GitBranch:     "main",
-			GitSHA:        fmt.Sprintf("%040d", i),
-			TriggerSource: "webhook",
-			Args:          map[string]string{"tier": pipeline},
-			CreatedAt:     start,
-			StartedAt:     start,
-			FinishedAt:    &finished,
-		}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: runID, Pipeline: pipeline, Status: "success", DeclaredRepo: "fictional-app", GitBranch: "main", GitSHA: fmt.Sprintf("%040d", i), TriggerSource: "webhook", Args: map[string]string{"tier": pipeline}, CreatedAt: start, StartedAt: start, FinishedAt: &finished}}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)
 		}
 		for n := range 2 {

@@ -7,6 +7,8 @@ import (
 	"net"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 func TestLocalAPIListenerRefusesUnverifiableConnection(t *testing.T) {
@@ -45,7 +47,7 @@ func (*apiIdentityListener) Addr() net.Addr {
 
 func TestLocalAPIConnectionCarriesVerifiedIdentity(t *testing.T) {
 	uid := uint32(1000)
-	for _, peer := range []LocalPeerIdentity{
+	for _, peer := range []localhostwire.LocalPeerIdentity{
 		{GOOS: "linux", UID: &uid},
 		{GOOS: "darwin", UID: &uid},
 		{GOOS: "windows", SID: "S-1-5-21-1000"},
@@ -72,7 +74,7 @@ func TestLocalAPIConnectionCarriesVerifiedIdentity(t *testing.T) {
 
 func TestLocalAPIConnectionOwnsIdentitySnapshot(t *testing.T) {
 	uid := uint32(1000)
-	owner := LocalPeerIdentity{GOOS: "linux", UID: &uid}
+	owner := localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid}
 	server, client := net.Pipe()
 	defer func() { _ = server.Close() }()
 	defer func() { _ = client.Close() }()
@@ -100,8 +102,8 @@ func FuzzLocalAPIConnectionIdentity(f *testing.F) {
 	f.Add(uint8(3), uint8(3), uint32(0), uint32(0), true, true, "same", "same")
 	f.Fuzz(func(t *testing.T, peerOS, ownerOS uint8, peerUID, ownerUID uint32, peerKnown, ownerKnown bool, peerSID, ownerSID string) {
 		platforms := []string{"linux", "darwin", "windows", "unknown"}
-		peer := LocalPeerIdentity{GOOS: platforms[int(peerOS)%len(platforms)], SID: peerSID}
-		owner := LocalPeerIdentity{GOOS: platforms[int(ownerOS)%len(platforms)], SID: ownerSID}
+		peer := localhostwire.LocalPeerIdentity{GOOS: platforms[int(peerOS)%len(platforms)], SID: peerSID}
+		owner := localhostwire.LocalPeerIdentity{GOOS: platforms[int(ownerOS)%len(platforms)], SID: ownerSID}
 		if peerKnown {
 			peer.UID = &peerUID
 		}

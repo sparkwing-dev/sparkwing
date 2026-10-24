@@ -7,9 +7,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func (r *blobRecords) AttachResultRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, row NodeRow, result NodeResult) error {
+func (r *blobRecords) AttachResultRecords(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, row runstate.NodeRow, result runstate.NodeResult) error {
 	attempt := runspec.AttemptIdentity{Team: string(team), RunID: string(row.Ref.RunID), NodeID: string(row.Ref.NodeID), Attempt: int64(row.Attempt), Generation: int64(row.Generation)}
 	if attempt.Attempt <= 0 || attempt.Generation <= 0 || actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: actor.CapabilityPrefix}) {
 		return blob.ErrDigestNotReadable
@@ -49,9 +50,9 @@ func (r *blobRecords) AttachResultRecords(ctx context.Context, tx *storeTx, team
 
 var _ nodeResultRecords = (*blobRecords)(nil)
 
-func persistNodeResultSelectorsTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, result *NodeResult) error {
+func persistNodeResultSelectorsTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, result *runstate.NodeResult) error {
 	var output, manifest []byte
-	if row.Status == StatusDone && result != nil {
+	if row.Status == runstate.StatusDone && result != nil {
 		for _, part := range []struct {
 			key *blob.RecordKey
 			raw *[]byte

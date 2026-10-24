@@ -12,11 +12,12 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -52,11 +53,11 @@ func serviceFixture(b Binding) Services {
 	b.Controller.RunnerPolicy = runnerPolicy(func(context.Context, string) error { return nil })
 	return Services{
 		State: &stateFixture{},
-		HTTP:  wingd.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
-		Runner: runners.StoreRunnerConfig{
+		HTTP:  localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
+		Runner: StoreRunnerConfig{
 			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
 			Bearer: func(ctx context.Context) (string, error) { <-ctx.Done(); return "", ctx.Err() },
-			Bind: func(context.Context, runners.StoreBinding) (nodehost.NativeServices, error) {
+			Bind: func(context.Context, StoreBinding) (nodehost.NativeServices, error) {
 				return nodehost.NativeServices{}, errors.New("unexpected host")
 			},
 		},
@@ -102,7 +103,7 @@ VALUES (?,?,'trigger',1,1,?,?)`, binding.Tenant.Team(), id, []byte(`[]`), []byte
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.SeedTriggerClaim(binding.Store, t.Context(), binding.Tenant.Team(), id, store.Actor{CapabilityPrefix: "owner-cap", NodeFence: runspec.NodeFence{RunID: runspec.RunID(id), Holder: "owner", Generation: 7}}, time.Unix(0, 1), start); err != nil {
+	if err := teststore.SeedTriggerClaim(binding.Store, t.Context(), binding.Tenant.Team(), id, runstate.Actor{CapabilityPrefix: "owner-cap", NodeFence: runspec.NodeFence{RunID: runspec.RunID(id), Holder: "owner", Generation: 7}}, time.Unix(0, 1), start); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -122,7 +123,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 				return wingd.LocalActivity{}, errors.New("projection did not receive the elected fence")
 			}
 			started, err := b.Tenant.ReadRun(ctx, "started")
-			if err != nil || started.State != store.RunFailed || started.FinishedAt == nil {
+			if err != nil || started.State != runstate.RunFailed || started.FinishedAt == nil {
 				return wingd.LocalActivity{}, fmt.Errorf("started orphan was not recovered: %+v: %w", started, err)
 			}
 			var status string
@@ -161,7 +162,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 		t.Fatal(err)
 	}
 	row, err := tenant.ReadRun(t.Context(), "started")
-	if err != nil || row.State != store.RunFailed {
+	if err != nil || row.State != runstate.RunFailed {
 		t.Fatalf("reopened orphan: %+v: %v", row, err)
 	}
 }

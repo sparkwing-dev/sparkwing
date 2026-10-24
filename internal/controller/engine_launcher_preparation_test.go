@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -37,12 +39,12 @@ func TestEngineLauncherSyncRenewsPreparationBeforeExchange(t *testing.T) {
 			t.Fatal(err)
 		}
 		if exchange == 0 {
-			malformed, err := json.Marshal(controllerwire.LauncherSyncRequest{Preparing: []capability.LeaseRef{fence}, Observed: []controllerwire.LauncherObservation{{}}})
+			malformed, err := json.Marshal(controllerwire.LauncherSyncRequest{Preparing: []capability.LeaseRef{fence}, Observed: []capability.LauncherObservation{{}}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			engineClaimHTTP(t, handler, raw, "POST", "/api/v1/launcher/sync", string(malformed), 400)
-			unchanged, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			unchanged, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil || unchanged.LeaseExpiresAt == nil || !unchanged.LeaseExpiresAt.Equal(original) {
 				t.Fatal("malformed observation mutated preparation lease")
 			}
@@ -52,7 +54,7 @@ func TestEngineLauncherSyncRenewsPreparationBeforeExchange(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &synced); err != nil {
 			t.Fatal(err)
 		}
-		node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+		node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 		if err != nil {
 			t.Fatal(err)
 		}

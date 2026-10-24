@@ -6,10 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestRecoveryDependencies(t *testing.T) {
@@ -189,15 +188,15 @@ func scheduleFixture(t *testing.T, jobs ...nodeproto.JobSpec) RunSnapshot {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := RunSnapshot{Run: RunRow{ID: "run", Plan: plan}}
+	snapshot := RunSnapshot{Run: RunRow{Execution: runstate.Execution{ID: "run", Plan: plan}}}
 	for _, job := range jobs {
 		spec, err := json.Marshal(job)
 		if err != nil {
 			t.Fatal(err)
 		}
-		row := NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(job.ID)}, Status: StatusPending, Spec: spec}
+		row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(job.ID)}, Status: runstate.StatusPending, Spec: spec}
 		if len(job.Closures.Generate) != 0 {
-			row.Expansion = ExpansionExpected
+			row.Expansion = runstate.ExpansionExpected
 		}
 		snapshot.Nodes = append(snapshot.Nodes, row)
 	}
@@ -209,11 +208,11 @@ func TestSchedulingProjectionRetainsDeclarations(t *testing.T) {
 		nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"empty", "members"}}},
 		nodeproto.JobSpec{ID: "after", NeedsGenerated: []string{"empty", "members"}},
 	)
-	snapshot.Nodes[0].Status, snapshot.Nodes[0].Outcome, snapshot.Nodes[0].Expansion = StatusDone, NodeSuccess, ExpansionAccepted
+	snapshot.Nodes[0].Status, snapshot.Nodes[0].Outcome, snapshot.Nodes[0].Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionAccepted
 	snapshot.Nodes[0].Generation = 7
 	child := scheduleFixture(t, nodeproto.JobSpec{ID: "child", Needs: []string{"source"}, Groups: []string{"members"}})
 	snapshot.Nodes = append(snapshot.Nodes, child.Nodes[0])
-	snapshot.Expansions = []AcceptedExpansionRow{{Source: snapshot.Nodes[0].Ref, SourceGeneration: 7, Body: child.Run.Plan}}
+	snapshot.Expansions = []runstate.AcceptedExpansionRow{{Source: snapshot.Nodes[0].Ref, SourceGeneration: 7, Body: child.Run.Plan}}
 	snapshot.Nodes[0], snapshot.Nodes[2] = snapshot.Nodes[2], snapshot.Nodes[0]
 	got, err := snapshot.Scheduling()
 	if err != nil {
@@ -237,17 +236,17 @@ func TestSchedulingProjectionRejectsInconsistentState(t *testing.T) {
 		{"unknown_plan_field", func(s *RunSnapshot) { s.Run.Plan = []byte(`{"jobs":[{"id":"one"}],"state":"running"}`) }},
 		{"missing_row", func(s *RunSnapshot) { s.Nodes = nil }},
 		{"undeclared_row", func(s *RunSnapshot) {
-			s.Nodes = append(s.Nodes, NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "extra"}})
+			s.Nodes = append(s.Nodes, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "extra"}})
 		}},
 		{"duplicate_row", func(s *RunSnapshot) { s.Nodes = append(s.Nodes, s.Nodes[0]) }},
 		{"foreign_run", func(s *RunSnapshot) { s.Nodes[0].Ref.RunID = "other" }},
 		{"missing_spec", func(s *RunSnapshot) { s.Nodes[0].Spec = nil }},
 		{"changed_spec", func(s *RunSnapshot) { s.Nodes[0].Spec = []byte(`{"id":"one","deps":["forged"]}`) }},
-		{"invalid_state", func(s *RunSnapshot) { s.Nodes[0].Outcome = NodeSuccess }},
+		{"invalid_state", func(s *RunSnapshot) { s.Nodes[0].Outcome = runstate.NodeSuccess }},
 		{"terminal_claim", func(s *RunSnapshot) {
-			s.Nodes[0].Status, s.Nodes[0].Outcome, s.Nodes[0].ClaimedBy = StatusDone, NodeSuccess, "holder"
+			s.Nodes[0].Status, s.Nodes[0].Outcome, s.Nodes[0].ClaimedBy = runstate.StatusDone, runstate.NodeSuccess, "holder"
 		}},
-		{"undeclared_generator", func(s *RunSnapshot) { s.Nodes[0].Expansion = ExpansionExpected }},
+		{"undeclared_generator", func(s *RunSnapshot) { s.Nodes[0].Expansion = runstate.ExpansionExpected }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			snapshot := scheduleFixture(t, nodeproto.JobSpec{ID: "one"})
@@ -284,14 +283,14 @@ func TestSchedulingProjectionRejectsInvalidExpansions(t *testing.T) {
 		{"duplicate_source", func(s *RunSnapshot) { s.Expansions = append(s.Expansions, s.Expansions[0]) }},
 		{"missing_jobs", func(s *RunSnapshot) { s.Expansions[0].Body = []byte(`{}`) }},
 		{"null_jobs", func(s *RunSnapshot) { s.Expansions[0].Body = []byte(`{"jobs":null}`) }},
-		{"source_pending", func(s *RunSnapshot) { s.Nodes[0].Status, s.Nodes[0].Outcome = StatusPending, "" }},
-		{"source_failed", func(s *RunSnapshot) { s.Nodes[0].Outcome = NodeFailed }},
+		{"source_pending", func(s *RunSnapshot) { s.Nodes[0].Status, s.Nodes[0].Outcome = runstate.StatusPending, "" }},
+		{"source_failed", func(s *RunSnapshot) { s.Nodes[0].Outcome = runstate.NodeFailed }},
 		{"undeclared_group", func(s *RunSnapshot) { s.Expansions[0].Body = []byte(`{"jobs":[{"id":"child","groups":["unknown"]}]}`) }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			snapshot := scheduleFixture(t, nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"group"}}})
-			snapshot.Nodes[0].Status, snapshot.Nodes[0].Outcome, snapshot.Nodes[0].Expansion = StatusDone, NodeSuccess, ExpansionAccepted
-			snapshot.Expansions = []AcceptedExpansionRow{{Source: snapshot.Nodes[0].Ref, Body: []byte(`{"jobs":[]}`)}}
+			snapshot.Nodes[0].Status, snapshot.Nodes[0].Outcome, snapshot.Nodes[0].Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionAccepted
+			snapshot.Expansions = []runstate.AcceptedExpansionRow{{Source: snapshot.Nodes[0].Ref, Body: []byte(`{"jobs":[]}`)}}
 			if _, err := snapshot.Scheduling(); err != nil {
 				t.Fatal(err)
 			}
@@ -343,10 +342,10 @@ func TestSchedulingProjectionNestedExpansion(t *testing.T) {
 	snapshot := scheduleFixture(t, nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"first"}}})
 	child := scheduleFixture(t, nodeproto.JobSpec{ID: "child", Groups: []string{"first"}, Needs: []string{"source"}, Closures: nodeproto.ClosureSpec{Generate: []string{"second"}}})
 	grandchild := scheduleFixture(t, nodeproto.JobSpec{ID: "grandchild", Groups: []string{"second"}, Needs: []string{"child"}})
-	snapshot.Nodes[0].Status, snapshot.Nodes[0].Outcome, snapshot.Nodes[0].Expansion = StatusDone, NodeSuccess, ExpansionAccepted
-	child.Nodes[0].Status, child.Nodes[0].Outcome, child.Nodes[0].Expansion = StatusDone, NodeMemoized, ExpansionAccepted
+	snapshot.Nodes[0].Status, snapshot.Nodes[0].Outcome, snapshot.Nodes[0].Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionAccepted
+	child.Nodes[0].Status, child.Nodes[0].Outcome, child.Nodes[0].Expansion = runstate.StatusDone, runstate.NodeMemoized, runstate.ExpansionAccepted
 	snapshot.Nodes = append(snapshot.Nodes, child.Nodes[0], grandchild.Nodes[0])
-	snapshot.Expansions = []AcceptedExpansionRow{{Source: snapshot.Nodes[0].Ref, Body: child.Run.Plan}, {Source: child.Nodes[0].Ref, Body: grandchild.Run.Plan}}
+	snapshot.Expansions = []runstate.AcceptedExpansionRow{{Source: snapshot.Nodes[0].Ref, Body: child.Run.Plan}, {Source: child.Nodes[0].Ref, Body: grandchild.Run.Plan}}
 	got, err := snapshot.Scheduling()
 	if err != nil {
 		t.Fatal(err)

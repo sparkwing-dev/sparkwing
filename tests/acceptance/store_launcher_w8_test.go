@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -17,11 +19,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-type storeLauncherSyncW8 func(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
+type storeLauncherSyncW8 func(context.Context, capability.AuthorityRef, []capability.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 
 func (f storeLauncherSyncW8) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
 	return f(ctx, ref, body.Observed)
@@ -112,7 +113,7 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 		providerFailure := errors.New("credential provider failed")
 		options := client.EngineOptions{URL: "https://controller.example", Launcher: true, Bearer: func(context.Context) (string, error) { return raw, nil }}
 		called := false
-		server.Launcher = storeLauncherSyncW8(func(_ context.Context, ref capability.AuthorityRef, _ []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
+		server.Launcher = storeLauncherSyncW8(func(_ context.Context, ref capability.AuthorityRef, _ []capability.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
 			called = true
 			if ref.ID != root.Capability.Prefix {
 				t.Fatal("sync accepted another root")
@@ -142,7 +143,7 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 				want = ""
 			}
 		case 4:
-			actor := store.Actor{Authority: server.Bootstrap}
+			actor := runstate.Actor{Authority: server.Bootstrap}
 			if err := server.Store.AsOperator().RevokeAuthority(t.Context(), actor, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}); err != nil {
 				t.Fatal(err)
 			}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 func TestLocalPublicationSnapshotRequiresVerifiedPeer(t *testing.T) {
@@ -28,7 +29,7 @@ func TestLocalPublicationSnapshotRequiresVerifiedPeer(t *testing.T) {
 	listener := &localControllerListener{connections: make(chan net.Conn), done: make(chan struct{})}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- services.ServeAPI(ctx, listener) }()
+	go func() { done <- wingd.ServeAPI(ctx, listener, services) }()
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		local, remote := net.Pipe()
 		select {

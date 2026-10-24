@@ -8,17 +8,18 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func holderRefusal() error { return &ErrIllegalTransition{Reason: ReasonHolderRights} }
 
-func checkPublisherTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string) error {
+func checkPublisherTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, runID string) error {
 	principal, err := tx.ResolveAuthority(ctx, actor.Authority)
 	if err != nil {
 		return err
 	}
 	c := principal.Capability
-	if actor.Kind != ActorOperator || c.Team != string(team) || c.Audience != capability.Controller || c.Prefix != actor.CapabilityPrefix || c.Binding.Kind != capability.BindingRun || c.Binding.RunID != runID || !slices.Contains(c.Grants, capability.DataWrite) || c.Data == nil || c.Data.Use != capability.DataPublish || c.Data.RunID != runID {
+	if actor.Kind != runstate.ActorOperator || c.Team != string(team) || c.Audience != capability.Controller || c.Prefix != actor.CapabilityPrefix || c.Binding.Kind != capability.BindingRun || c.Binding.RunID != runID || !slices.Contains(c.Grants, capability.DataWrite) || c.Data == nil || c.Data.Use != capability.DataPublish || c.Data.RunID != runID {
 		return holderRefusal()
 	}
 	var mode, repo string
@@ -31,8 +32,8 @@ func checkPublisherTx(ctx context.Context, tx *storeTx, team Team, actor Actor, 
 	return nil
 }
 
-func checkOwnerTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string) error {
-	if actor.Owner.Kind != OwnerController {
+func checkOwnerTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, runID string) error {
+	if actor.Owner.Kind != runstate.OwnerController {
 		principal, err := tx.ResolveAuthority(ctx, actor.Authority)
 		if err != nil {
 			return err
@@ -44,13 +45,13 @@ func checkOwnerTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runI
 	return checkOwnerLeaseTx(ctx, tx, team, actor, runID)
 }
 
-func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string) error {
+func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, runID string) error {
 	ref := actor.Owner
 	if ref.RunID != "" && ref.RunID != runspec.RunID(runID) {
 		return holderRefusal()
 	}
-	if ref.Kind == OwnerController {
-		if actor.Kind != ActorController || ref.Name != "controller.owner" {
+	if ref.Kind == runstate.OwnerController {
+		if actor.Kind != runstate.ActorController || ref.Name != "controller.owner" {
 			return holderRefusal()
 		}
 		scheduled, err := controllerOwnershipTx(ctx, tx, team, runID)
@@ -62,7 +63,7 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor Actor,
 		}
 		return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: int64(ref.Generation)}, "controller.owner")
 	}
-	if ref.Kind != OwnerTrigger || ref.RunID != runspec.RunID(runID) || ref.Holder == "" || ref.Generation <= 0 {
+	if ref.Kind != runstate.OwnerTrigger || ref.RunID != runspec.RunID(runID) || ref.Holder == "" || ref.Generation <= 0 {
 		return holderRefusal()
 	}
 	principal, err := tx.ResolveAuthority(ctx, actor.Authority)
@@ -96,22 +97,22 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor Actor,
 	return nil
 }
 
-func checkReaperTx(ctx context.Context, tx *storeTx, actor Actor) error {
+func checkReaperTx(ctx context.Context, tx *storeTx, actor runstate.Actor) error {
 	ref := actor.Owner
-	if actor.Kind != ActorReaper || ref.Kind != OwnerController || ref.Name != "controller.reaper" {
+	if actor.Kind != runstate.ActorReaper || ref.Kind != runstate.OwnerController || ref.Name != "controller.reaper" {
 		return holderRefusal()
 	}
 	return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: int64(ref.Generation)}, "controller.reaper")
 }
 
-func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, actor Actor) error {
+func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, actor runstate.Actor) error {
 	principal, err := tx.ResolveAuthority(ctx, actor.Authority)
 	if err != nil {
 		return err
 	}
 	now := tx.now(ctx)
 	claimed := runspec.NodeFence{RunID: row.Ref.RunID, NodeID: row.Ref.NodeID, Holder: row.ClaimedBy, Generation: row.Generation}
-	if actor.Kind != ActorHolder || actor.Holder == "" || actor.CapabilityPrefix == "" || claimed != actor.NodeFence || row.CapabilityPrefix != actor.CapabilityPrefix || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.After(now) {
+	if actor.Kind != runstate.ActorHolder || actor.Holder == "" || actor.CapabilityPrefix == "" || claimed != actor.NodeFence || row.CapabilityPrefix != actor.CapabilityPrefix || row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.After(now) {
 		return holderRefusal()
 	}
 	c := principal.Capability
@@ -121,16 +122,16 @@ func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, act
 	return nil
 }
 
-func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string) error {
+func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, runID string) error {
 	if storeCancelActor(tx, team, actor) {
 		return nil
 	}
 	switch actor.Kind {
-	case ActorController, ActorRunHost:
+	case runstate.ActorController, runstate.ActorRunHost:
 		return checkOwnerLeaseTx(ctx, tx, team, actor, runID)
-	case ActorReaper:
+	case runstate.ActorReaper:
 		return checkReaperTx(ctx, tx, actor)
-	case ActorOperator:
+	case runstate.ActorOperator:
 		principal, err := tx.ResolveAuthority(ctx, actor.Authority)
 		if err != nil {
 			return err
@@ -154,20 +155,20 @@ func lockStateRunTx(ctx context.Context, tx *storeTx, team Team, id string) erro
 	return err
 }
 
-func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor) error {
-	if actor.Kind == ActorLauncher {
+func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID string, actor runstate.Actor) error {
+	if actor.Kind == runstate.ActorLauncher {
 		_, err := checkLauncherActorTx(ctx, tx, team, runID, actor)
 		return err
 	}
 	if storeCancelActor(tx, team, actor) {
 		return nil
 	}
-	if actor.Kind == ActorReaper {
+	if actor.Kind == runstate.ActorReaper {
 		return checkReaperTx(ctx, tx, actor)
 	}
-	if actor.Kind == ActorController {
+	if actor.Kind == runstate.ActorController {
 		ref := actor.Owner
-		if ref.Kind != OwnerController || ref.Name != "controller.owner" || (ref.RunID != "" && ref.RunID != runspec.RunID(runID)) {
+		if ref.Kind != runstate.OwnerController || ref.Name != "controller.owner" || (ref.RunID != "" && ref.RunID != runspec.RunID(runID)) {
 			return holderRefusal()
 		}
 		return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: int64(ref.Generation)}, "controller.owner")
@@ -177,13 +178,13 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 		return err
 	}
 	c := principal.Capability
-	if c.Team != string(team) && !(actor.Kind == ActorClaimant && capability.CloudLauncher(c)) || (c.Binding.RunID != "" && c.Binding.RunID != runID) {
+	if c.Team != string(team) && !(actor.Kind == runstate.ActorClaimant && capability.CloudLauncher(c)) || (c.Binding.RunID != "" && c.Binding.RunID != runID) {
 		return holderRefusal()
 	}
 	if actor.CapabilityPrefix != "" && actor.CapabilityPrefix != c.Prefix {
 		return holderRefusal()
 	}
-	if actor.Kind == ActorRunHost {
+	if actor.Kind == runstate.ActorRunHost {
 		var id string
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), team, runID).Scan(&id); err != nil {
 			return err
@@ -193,8 +194,8 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 }
 
 // safety: the store's own cancellation of a team's work, for a team deletion or a funding stop, needs no credential.
-func storeCancelActor(tx *storeTx, team Team, actor Actor) bool {
-	return team != "" && tx.cancelingTeam == team && actor == (Actor{Kind: ActorOperator})
+func storeCancelActor(tx *storeTx, team Team, actor runstate.Actor) bool {
+	return team != "" && tx.cancelingTeam == team && actor == (runstate.Actor{Kind: runstate.ActorOperator})
 }
 
 func planAcceptedTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {

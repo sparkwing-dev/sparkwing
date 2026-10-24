@@ -10,6 +10,8 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -215,7 +217,7 @@ func TestSecrets_EveryResponseIsNoStore(t *testing.T) {
 
 func TestAuthenticatedResponsesAreNoStoreAndPublicOnesAreNot(t *testing.T) {
 	f := newBrowserFixture(t, nil)
-	if err := teststore.SeedRun(f.st, t.Context(), store.DefaultTeam, store.Run{ID: "run", Pipeline: "ci", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.st, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run", Pipeline: "ci", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.SeedNode(f.st, t.Context(), store.Node{RunID: "run", NodeID: "job", Status: "pending"}); err != nil {

@@ -6,6 +6,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -23,7 +26,7 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 	}
 	reader := s.Launcher
 	if reader == nil {
-		return controllerwire.LauncherSyncResponse{}, missingEndpointPolicy()
+		return controllerwire.LauncherSyncResponse{}, routepolicy.MissingEndpointPolicy()
 	}
 	response, err := reader.ReadLauncherSync(ctx, a.Principal.Authority, body)
 	if err != nil {
@@ -39,7 +42,7 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 
 type storeLauncherSync struct {
 	store interface {
-		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []controllerwire.LauncherActivation) ([]store.LauncherAward, []store.LauncherPreparation, error)
+		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LauncherActivation) ([]store.LauncherAward, []store.LauncherPreparation, error)
 	}
 }
 
@@ -82,7 +85,7 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 			response.Deferred = append(response.Deferred, observation.Award)
 			continue
 		}
-		unit := engineReconciledClaim(award.Capability, store.ReconciledNode{Node: award.Node, Claim: &award.Claim.Award}, award.Run)
+		unit := engineReconciledClaim(award.Capability, runstate.ReconciledNode{Node: award.Node, Claim: &award.Claim.Award}, award.Run)
 		unit.RunID, unit.JobID, unit.SourceGeneration = award.Claim.RunID, award.Claim.NodeID, award.Claim.SourceGeneration
 		unit.ParentCapabilityExpiry = award.ParentCapabilityExpiry
 		unit.Delivery = capability.DeliveryBootstrap
@@ -99,10 +102,10 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 	return response, nil
 }
 
-func validateLauncherSync(body controllerwire.LauncherSyncRequest) ([]controllerwire.LauncherObservation, error) {
+func validateLauncherSync(body controllerwire.LauncherSyncRequest) ([]capability.LauncherObservation, error) {
 	observed := slices.Clone(body.Observed)
 	for _, demand := range body.Capacity {
-		observed = append(observed, controllerwire.LauncherObservation{Award: demand.Award, Reservation: true})
+		observed = append(observed, capability.LauncherObservation{Award: demand.Award, Reservation: true})
 	}
 	activated := map[capability.LeaseRef]bool{}
 	for _, activation := range body.Activations {
@@ -113,7 +116,7 @@ func validateLauncherSync(body controllerwire.LauncherSyncRequest) ([]controller
 		if err := activation.Validate(); err != nil {
 			return nil, err
 		}
-		i := slices.IndexFunc(body.Observed, func(o controllerwire.LauncherObservation) bool {
+		i := slices.IndexFunc(body.Observed, func(o capability.LauncherObservation) bool {
 			return o.Award == activation.Award && !o.Reservation && !o.Rejected
 		})
 		if i < 0 {

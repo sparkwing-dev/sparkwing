@@ -6,7 +6,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -33,8 +34,8 @@ func TestBurstRequestsLogicalPermitBeforeNonblockingCompute(t *testing.T) {
 
 func TestBurstComputeIsUntouchedWhileLogicalCapacityWaits(t *testing.T) {
 	gate, probe, accepted, row := capacityFixture(t)
-	probe.admit = func(context.Context) (store.AcquireSlotResponse, error) {
-		return store.AcquireSlotResponse{Kind: store.AcquireSkipped}, nil
+	probe.admit = func(context.Context) (runstate.AcquireSlotResponse, error) {
+		return runstate.AcquireSlotResponse{Kind: runstate.AcquireSkipped}, nil
 	}
 	gate.compute = &LocalAdmission{Daemon: admissionAcquireFunc(func(context.Context, wingwire.AdmissionRequest, func(wingwire.Queued)) (Lease, error) {
 		t.Fatal("compute preceded admission")

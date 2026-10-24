@@ -4,10 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestStoreBillingStartAwardVersusStart(t *testing.T) {
@@ -41,9 +40,9 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 			*now = now.Add(5 * time.Second)
 			startedAt := *now
 			tenant := &Tenant{s: s, team: claim.Team}
-			ref := controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}
+			ref := runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}
 			admitExecution(t, tenant, actor)
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
 			if err := s.db.Close(); err != nil {
@@ -51,7 +50,7 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 			}
 			s.db = blobAccountingDB(t, path)
 			row, err := tenant.ReadNode(t.Context(), ref)
-			if err != nil || row.Status != StatusRunning || row.Attempt != 1 || row.CapabilityPrefix != actor.CapabilityPrefix || row.StartedAt == nil || !row.StartedAt.Equal(startedAt) {
+			if err != nil || row.Status != runstate.StatusRunning || row.Attempt != 1 || row.CapabilityPrefix != actor.CapabilityPrefix || row.StartedAt == nil || !row.StartedAt.Equal(startedAt) {
 				t.Fatalf("reopened execution: %+v, %v", row, err)
 			}
 			var award, began, price, reserved int64
@@ -66,7 +65,7 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 				t.Fatalf("reopened billing: award=%d start=%d price=%d reserved=%d: %v", award, began, price, reserved, err)
 			}
 			*now = now.Add(5 * time.Second)
-			change := nodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(row.Attempt)}
+			change := nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(row.Attempt)}
 			for replay := range 2 {
 				applied, err := tenant.TransitionNode(t.Context(), change)
 				if err != nil || applied.Replayed != (replay == 1) {

@@ -2,9 +2,15 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"testing/quick"
@@ -13,10 +19,46 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
+
+func newStoreForTick(t *testing.T) *store.Store {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
+		status, body := http.StatusOK, ""
+		switch r.Method + " " + r.URL.Path {
+		case "GET /repos/acme/widgets/installation":
+			body = `{"id":7,"app_id":1}`
+		case "POST /app/installations/7/access_tokens":
+			body = `{"token":"token","expires_at":"2100-01-01T00:00:00Z"}`
+		case "GET /installation/repositories":
+			body = `{"total_count":1,"repositories":[{"id":701,"full_name":"acme/widgets","owner":{"id":1,"login":"acme","type":"Organization"}}]}`
+		case "GET /repos/acme/widgets/contents/.sparkwing/sparkwing.yaml":
+			if r.URL.Query().Get("ref") != "0123456789abcdef0123456789abcdef01234567" {
+				return nil, fmt.Errorf("configuration read at unexpected ref: %s", r.URL)
+			}
+			status = http.StatusNotFound
+		default:
+			return nil, fmt.Errorf("unexpected GitHub request: %s %s", r.Method, r.URL)
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}}
+	fixture := &serverFixture{}
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, func(s *Server) { s.WithGitHubApp(cfg) }))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
 
 func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	t.Helper()
@@ -41,12 +83,7 @@ func armAppRowForTick(t *testing.T, tenant *store.Tenant, armedBy string) store.
 }
 
 func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
-	fixture := &serverFixture{}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, nil))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := newStoreForTick(t)
 	sched := armPushedForTick(t, st)
 
 	// safety: both evaluators read the same instant two minutes on, so one due
@@ -118,7 +155,7 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if run.State != store.RunPending || run.Request.Hash == "" || run.Request.Request.Origin != runspec.OriginSchedule || run.Request.Request.Actor.ID != sched.ArmedBy {
+	if run.State != runstate.RunPending || run.Request.Hash == "" || run.Request.Request.Origin != runspec.OriginSchedule || run.Request.Request.Actor.ID != sched.ArmedBy {
 		t.Errorf("scheduled run = %+v", run)
 	}
 	stored, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
@@ -139,12 +176,7 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 }
 
 func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
-	fixture := &serverFixture{}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, nil))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := newStoreForTick(t)
 	sched := armPushedForTick(t, st)
 
 	srv := New(st, nil)
@@ -167,20 +199,12 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 }
 
 func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
-	fixture := &serverFixture{}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, nil))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := newStoreForTick(t)
 
 	ctx := context.Background()
 	now := time.Now()
 
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-		ID: "run_old", Pipeline: "nightly", Status: "pending",
-		CreatedAt: now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour),
-	}); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run_old", Pipeline: "nightly", Status: "pending", CreatedAt: now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour)}}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	launcher := cronLauncher{server: New(st, nil)}
@@ -212,12 +236,7 @@ func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
 // The tick evaluates every team's schedules, and a schedule team B armed
 // launches its run, its trigger and its history in team B.
 func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
-	fixture := &serverFixture{}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, nil))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := newStoreForTick(t)
 	ctx := context.Background()
 	teststore.SeedTeam(t, st, "team-b")
 	tenantB, err := st.ForTeam(ctx, "team-b")
@@ -258,7 +277,7 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 }
 
 func TestCronLauncherRejectsChangedScheduleSnapshotsProperty(t *testing.T) {
-	st := newStoreForAuth(t)
+	st := newStoreForTick(t)
 	sched := armPushedForTick(t, st)
 	teststore.SeedTeam(t, st, "other")
 	srv := New(st, nil)
@@ -284,7 +303,7 @@ func TestCronLauncherRejectsChangedScheduleSnapshotsProperty(t *testing.T) {
 		}
 		row, err := teststore.ForTeam(t, st, sched.Team).ReadRun(t.Context(), runID)
 		request := row.Request.Request
-		if err != nil || request.Pipeline != sched.Pipeline || request.Actor.ID != sched.ArmedBy || request.Git.Ref != sched.GitBranch || request.Git.SHA != sched.LockedRef || request.Source.Location.RemoteURL != sched.RepoPath || request.RequestedArgs["forged"] != "" {
+		if err != nil || request.Pipeline != sched.Pipeline || request.Actor.ID != sched.ArmedBy || request.Git.Ref != "refs/heads/main" || request.Git.SHA != sched.LockedRef || request.Source.Location.RemoteURL != sched.RepoPath || request.RequestedArgs["forged"] != "" {
 			t.Errorf("forged launch changed the stored request: %+v: %v", request, err)
 			return false
 		}
@@ -311,7 +330,7 @@ func TestCronLauncherRejectsChangedScheduleSnapshotsProperty(t *testing.T) {
 }
 
 func TestCronLauncherRequiresTheTenantTransactionBackend(t *testing.T) {
-	st := newStoreForAuth(t)
+	st := newStoreForTick(t)
 	sched := armPushedForTick(t, st)
 	srv := New(st, nil)
 	testOnlyTenantPort[ScheduledRunWriter](srv, func(context.Context, store.Team) (ScheduledRunWriter, error) { return nil, nil })

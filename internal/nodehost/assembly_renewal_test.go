@@ -5,11 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func FuzzLocalOwnerRenewKeepsAuthenticatedFence(f *testing.F) {
@@ -20,11 +19,11 @@ func FuzzLocalOwnerRenewKeepsAuthenticatedFence(f *testing.F) {
 		principal := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "award"}, Capability: capability.Capability{
 			Prefix: "award", Unit: capability.UnitTrigger, Binding: capability.Binding{Kind: capability.BindingTrigger, RunID: "run", Holder: "holder", Generation: 2},
 		}}
-		actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: "award", Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "holder", Generation: 2}}}
+		actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: "award", Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "holder", Generation: 2}}}
 		field %= 9
 		switch field {
 		case 1:
-			actor.Kind = store.ActorHolder
+			actor.Kind = runstate.ActorHolder
 		case 2:
 			actor.Authority.ID += value + "!"
 		case 3:
@@ -36,17 +35,17 @@ func FuzzLocalOwnerRenewKeepsAuthenticatedFence(f *testing.F) {
 		case 6:
 			actor.Owner.Generation ^= runspec.ClaimGeneration(delta | 1)
 		case 7:
-			actor.Owner.Kind = store.OwnerController
+			actor.Owner.Kind = runstate.OwnerController
 		case 8:
 			principal.Capability.Unit = capability.UnitNode
 		}
 		called := false
-		renew := localOwnerRenew(func(context.Context) (capability.Principal, error) { return principal, nil }, func(_ context.Context, prefix string, activity bool) (store.LeaseBeat, error) {
+		renew := localOwnerRenew(func(context.Context) (capability.Principal, error) { return principal, nil }, func(_ context.Context, prefix string, activity bool) (runstate.LeaseBeat, error) {
 			called = true
 			if prefix != "award" || activity != computing {
 				t.Fatal("renewal changed the authenticated prefix or compute report")
 			}
-			return store.LeaseBeat{CancelRequested: true, CancelReason: "drain"}, nil
+			return runstate.LeaseBeat{CancelRequested: true, CancelReason: "drain"}, nil
 		})
 		beat, err := renew(t.Context(), actor, computing)
 		if field == 0 {
@@ -64,11 +63,11 @@ func FuzzLocalOwnerRenewKeepsAuthenticatedFence(f *testing.F) {
 
 func TestLocalOwnerRenewReturnsAuthenticationFailure(t *testing.T) {
 	lost := errors.New("owner no longer live")
-	renew := localOwnerRenew(func(context.Context) (capability.Principal, error) { return capability.Principal{}, lost }, func(context.Context, string, bool) (store.LeaseBeat, error) {
+	renew := localOwnerRenew(func(context.Context) (capability.Principal, error) { return capability.Principal{}, lost }, func(context.Context, string, bool) (runstate.LeaseBeat, error) {
 		t.Fatal("lost authority renewed")
-		return store.LeaseBeat{}, nil
+		return runstate.LeaseBeat{}, nil
 	})
-	if _, err := renew(t.Context(), store.Actor{}, false); !errors.Is(err, lost) {
+	if _, err := renew(t.Context(), runstate.Actor{}, false); !errors.Is(err, lost) {
 		t.Fatal(err)
 	}
 }

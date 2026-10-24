@@ -5,14 +5,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (s *EngineController) sourceExpansionAuthorization(ctx context.Context, a capability.Authorized, generation int64) (capability.Authorized, error) {
 	if s.authority == nil {
-		return a, missingEndpointPolicy()
+		return a, routepolicy.MissingEndpointPolicy()
 	}
 	parent, err := s.authority.ResolveAuthority(ctx, a.Principal.Authority)
 	if err != nil {
@@ -22,7 +22,7 @@ func (s *EngineController) sourceExpansionAuthorization(ctx context.Context, a c
 	if err != nil {
 		return a, err
 	}
-	source, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
+	source, err := tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
 	if err != nil {
 		return a, engineLookupError(err)
 	}

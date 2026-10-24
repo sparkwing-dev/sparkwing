@@ -8,15 +8,14 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 type memObjects struct {
 	mu   sync.Mutex
 	objs map[string][]byte
 	gets []string
-	view store.LogSegments
+	view runstate.LogSegments
 }
 
 func newMemObjects() *memObjects { return &memObjects{objs: map[string][]byte{}} }
@@ -32,11 +31,11 @@ func (m *memObjects) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
-func (m *memObjects) ReadLogSegments(_ context.Context, _ store.Actor, _ blob.LogReadRequest) (store.LogSegments, error) {
+func (m *memObjects) ReadLogSegments(_ context.Context, _ runstate.Actor, _ blob.LogReadRequest) (runstate.LogSegments, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	view := m.view
-	view.Segments = append([]store.Segment(nil), view.Segments...)
+	view.Segments = append([]runstate.Segment(nil), view.Segments...)
 	return view, nil
 }
 
@@ -93,7 +92,7 @@ func (u *memUploader) PutSegment(_ context.Context, seg Segment, body []byte) er
 	for _, prior := range u.objs.view.Segments {
 		offset += prior.Size
 	}
-	u.objs.view.Segments = append(u.objs.view.Segments, store.Segment{Index: int64(seg.N), Offset: offset, Size: seg.Bytes, StoredBytes: seg.StoredBytes, Digest: seg.SHA256, ObjectKey: key})
+	u.objs.view.Segments = append(u.objs.view.Segments, runstate.Segment{Index: int64(seg.N), Offset: offset, Size: seg.Bytes, StoredBytes: seg.StoredBytes, Digest: seg.SHA256, ObjectKey: key})
 	u.objs.mu.Unlock()
 	u.stored <- seg.N
 	return nil

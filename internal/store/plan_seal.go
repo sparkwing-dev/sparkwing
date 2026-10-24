@@ -10,9 +10,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
@@ -40,7 +40,7 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 		binding = capability.BindingRun
 	}
 	owner := request.Actor.Owner
-	if request.Actor.Kind != ActorRunHost || owner.Kind != OwnerTrigger || owner.RunID != runspec.RunID(request.RunID) || owner.Generation <= 0 || owner.Holder == "" || c.Unit != expected || c.UnitID != request.RunID || c.Binding.Kind != binding || !slices.Contains(c.Grants, capability.NodeResult) || runspec.ClaimGeneration(c.Binding.Generation) != owner.Generation || c.Binding.Holder != owner.Holder {
+	if request.Actor.Kind != runstate.ActorRunHost || owner.Kind != runstate.OwnerTrigger || owner.RunID != runspec.RunID(request.RunID) || owner.Generation <= 0 || owner.Holder == "" || c.Unit != expected || c.UnitID != request.RunID || c.Binding.Kind != binding || !slices.Contains(c.Grants, capability.NodeResult) || runspec.ClaimGeneration(c.Binding.Generation) != owner.Generation || c.Binding.Holder != owner.Holder {
 		return holderRefusal()
 	}
 	var holder, prefix, status string
@@ -62,7 +62,7 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 				if digest != proof.Digest {
 					return authorityError(apierr.IllegalTransition, "accepted plan payload differs")
 				}
-				return validateResultProofTx(ctx, tx, team, request.Actor, controllerwire.NodeRef{RunID: runspec.RunID(request.RunID)}, 0)
+				return validateResultProofTx(ctx, tx, team, request.Actor, runspec.NodeRef{RunID: runspec.RunID(request.RunID)}, 0)
 			}
 		}
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -29,10 +30,10 @@ type hostStateController struct {
 
 type nodeControllerState struct {
 	nodehost.PrivateHostState
-	node func(context.Context, controllerwire.NodeRef) (controllerwire.Controller, error)
+	node func(context.Context, runspec.NodeRef) (controllerwire.Controller, error)
 }
 
-func (s nodeControllerState) NodeController(ctx context.Context, ref controllerwire.NodeRef) (controllerwire.Controller, error) {
+func (s nodeControllerState) NodeController(ctx context.Context, ref runspec.NodeRef) (controllerwire.Controller, error) {
 	return s.node(ctx, ref)
 }
 
@@ -44,8 +45,8 @@ func TestCLIHostStepUsesIndependentNodeAuthorityProperty(t *testing.T) {
 		}}
 		called := false
 		failure := errors.New("node authority unavailable")
-		nodes := nodeControllerState{PrivateHostState: &cliOwnerStore{}, node: func(_ context.Context, ref controllerwire.NodeRef) (controllerwire.Controller, error) {
-			if ref != (controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}) {
+		nodes := nodeControllerState{PrivateHostState: &cliTransportState{}, node: func(_ context.Context, ref runspec.NodeRef) (controllerwire.Controller, error) {
+			if ref != (runspec.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)}) {
 				t.Fatal("step selected another node's authority")
 			}
 			if refuse {
@@ -98,7 +99,7 @@ func TestCLIHostStatePreservesStepAttemptProperty(t *testing.T) {
 			called = gotRun == run && gotJob == job && body.StepID == step && body.State == report.State && body.SourceAttempt == report.Attempt.Attempt && body.MaskedError == message
 			return failure
 		}}
-		state, err := nodehost.NewRemoteHostStore(client, &cliOwnerStore{}, "awarded-unit", func() bool { return false })
+		state, err := nodehost.NewRemoteHostStore(client, &cliTransportState{}, "awarded-unit", func() bool { return false })
 		return err == nil && errors.Is(state.RecordStep(t.Context(), report), failure) && called
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
@@ -108,7 +109,7 @@ func TestCLIHostStatePreservesStepAttemptProperty(t *testing.T) {
 
 func TestCLIHostStatePreservesPlanAndRenewal(t *testing.T) {
 	request := store.PlanAcceptance{
-		RunID: "current-run", Actor: store.Actor{Owner: store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "current-run", Holder: "owner", Generation: 7}}},
+		RunID: "current-run", Actor: runstate.Actor{Owner: runstate.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "current-run", Holder: "owner", Generation: 7}}},
 		Seal: runspec.SealInput{Plan: json.RawMessage(`{"jobs":[]}`)},
 	}
 	want := controllerwire.PlanAccepted{Plan: request.Seal.Plan, PlanHash: "plan-hash", Replayed: true}
@@ -127,7 +128,7 @@ func TestCLIHostStatePreservesPlanAndRenewal(t *testing.T) {
 			return beat, nil
 		},
 	}
-	state, err := nodehost.NewRemoteHostStore(client, &cliOwnerStore{}, "awarded-unit", func() bool { return false })
+	state, err := nodehost.NewRemoteHostStore(client, &cliTransportState{}, "awarded-unit", func() bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,10 +136,10 @@ func TestCLIHostStatePreservesPlanAndRenewal(t *testing.T) {
 	if err != nil || accepted.PlanHash != string(want.PlanHash) || !accepted.Replayed || !reflect.DeepEqual(accepted.Plan, want.Plan) || accepted.Owner != nil {
 		t.Fatalf("accepted = %+v, %v", accepted, err)
 	}
-	for _, renew := range []func() (store.LeaseBeat, error){
-		func() (store.LeaseBeat, error) { return state.RenewOwner(t.Context(), request.Actor, false) },
-		func() (store.LeaseBeat, error) {
-			return state.RenewNodeClaim(t.Context(), controllerwire.NodeRef{}, request.Actor)
+	for _, renew := range []func() (runstate.LeaseBeat, error){
+		func() (runstate.LeaseBeat, error) { return state.RenewOwner(t.Context(), request.Actor, false) },
+		func() (runstate.LeaseBeat, error) {
+			return state.RenewNodeClaim(t.Context(), runspec.NodeRef{}, request.Actor)
 		},
 	} {
 		got, err := renew()
@@ -154,9 +155,9 @@ func TestCLIHostStateRejectsIncompleteComposition(t *testing.T) {
 		private    nodehost.PrivateHostState
 		unit       string
 	}{
-		{nil, &cliOwnerStore{}, "unit"},
+		{nil, &cliTransportState{}, "unit"},
 		{hostStateController{}, nil, "unit"},
-		{hostStateController{}, &cliOwnerStore{}, ""},
+		{hostStateController{}, &cliTransportState{}, ""},
 	} {
 		if state, err := nodehost.NewRemoteHostStore(input.controller, input.private, input.unit, func() bool { return false }); err == nil || state != nil {
 			t.Fatalf("incomplete composition = %+v, %v", state, err)
@@ -168,9 +169,9 @@ func TestCLIHostStateRejectsIncompleteComposition(t *testing.T) {
 func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 	property := func(secret string, ordinal, generation uint16, executing bool) bool {
 		attempt := int64(ordinal) + 1
-		actor := store.Actor{
-			Kind: store.ActorRunHost, CapabilityPrefix: secret,
-			Owner: store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "run", Holder: secret, Generation: runspec.ClaimGeneration(int64(generation) + 1)}},
+		actor := runstate.Actor{
+			Kind: runstate.ActorRunHost, CapabilityPrefix: secret,
+			Owner: runstate.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "run", Holder: secret, Generation: runspec.ClaimGeneration(int64(generation) + 1)}},
 		}
 		calls := 0
 		wire, err := client.NewEngineClient(client.EngineOptions{
@@ -216,7 +217,7 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		state, err := nodehost.NewRemoteHostStore(wire, &cliOwnerStore{}, "awarded-unit", func() bool { return !executing })
+		state, err := nodehost.NewRemoteHostStore(wire, &cliTransportState{}, "awarded-unit", func() bool { return !executing })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -227,8 +228,8 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		applied, err := state.FinishRunAndUnit(t.Context(), store.FinishRunRequest{
-			Unit: actor.Owner, Transition: store.RunCompletion{RunID: "run", Actor: actor, Cause: store.RunFinish},
+		applied, err := state.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{
+			Unit: actor.Owner, Transition: runstate.RunCompletion{RunID: "run", Actor: actor, Cause: runstate.RunFinish},
 		})
 		if err != nil || !applied.Replayed || applied.StateSeq != 12 || int64(applied.Generation) != int64(generation)+1 || int64(applied.Attempt) != attempt {
 			return false
@@ -242,7 +243,7 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 }
 
 func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
-	owner := store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
+	owner := runstate.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
 	want := errors.New("completion not committed")
 	calls := 0
 	wire := hostStateController{finish: func(_ context.Context, run string, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
@@ -252,16 +253,16 @@ func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
 		}
 		return controllerwire.Applied{StateSeq: 10}, want
 	}}
-	state, err := nodehost.NewRemoteHostStore(wire, &cliOwnerStore{}, "awarded-unit", func() bool { return false })
+	state, err := nodehost.NewRemoteHostStore(wire, &cliTransportState{}, "awarded-unit", func() bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}
-	valid := store.FinishRunRequest{Unit: owner, Transition: store.RunCompletion{
-		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunFinish, Reason: "plan_failed", MaskedError: "safe failure",
+	valid := runstate.FinishRunRequest{Unit: owner, Transition: runstate.RunCompletion{
+		RunID: "run", Actor: runstate.Actor{Owner: owner}, Cause: runstate.RunFinish, Reason: "plan_failed", MaskedError: "safe failure",
 	}}
-	for _, mutate := range []func(*store.FinishRunRequest){
-		func(r *store.FinishRunRequest) { r.Unit.Generation++ },
-		func(r *store.FinishRunRequest) { r.Transition.Cause = store.RunPublish },
+	for _, mutate := range []func(*runstate.FinishRunRequest){
+		func(r *runstate.FinishRunRequest) { r.Unit.Generation++ },
+		func(r *runstate.FinishRunRequest) { r.Transition.Cause = runstate.RunPublish },
 	} {
 		request := valid
 		mutate(&request)
@@ -269,25 +270,25 @@ func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
 			t.Fatal("invalid finish reached the controller")
 		}
 	}
-	if applied, err := state.FinishRunAndUnit(t.Context(), valid); !errors.Is(err, want) || applied != (store.Applied{}) || calls != 1 {
+	if applied, err := state.FinishRunAndUnit(t.Context(), valid); !errors.Is(err, want) || applied != (runstate.Applied{}) || calls != 1 {
 		t.Fatalf("uncommitted completion = %+v, %v, calls=%d", applied, err, calls)
 	}
 }
 
 func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
-	state, err := nodehost.NewRemoteHostStore(hostStateController{}, &cliOwnerStore{}, "unit", func() bool { return false })
+	state, err := nodehost.NewRemoteHostStore(hostStateController{}, &cliTransportState{}, "unit", func() bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
-	request := store.FinishRunRequest{Unit: owner, Transition: store.RunCompletion{
-		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunPolicyRefused, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyAdmissionFail}, Reason: "resources_refused",
+	owner := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
+	request := runstate.FinishRunRequest{Unit: owner, Transition: runstate.RunCompletion{
+		RunID: "run", Actor: runstate.Actor{Owner: owner}, Cause: runstate.RunPolicyRefused, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyAdmissionFail}, Reason: "resources_refused",
 	}}
-	state.Finish = func(_ context.Context, got store.FinishRunRequest) (store.Applied, error) {
+	state.Finish = func(_ context.Context, got runstate.FinishRunRequest) (runstate.Applied, error) {
 		if !reflect.DeepEqual(got, request) {
 			t.Fatal("admission refusal changed its policy cause or owner unit")
 		}
-		return store.Applied{StateSeq: 3}, nil
+		return runstate.Applied{StateSeq: 3}, nil
 	}
 	applied, err := state.FinishRunAndUnit(t.Context(), request)
 	if err != nil || applied.StateSeq != 3 {
@@ -295,10 +296,30 @@ func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
 	}
 }
 
-func (*cliOwnerStore) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error {
+func (*cliOwnerStore) RelinquishStart(context.Context, runstate.CapacityBinding, runstate.Actor) error {
 	return errors.New("unexpected provisional award relinquishment")
 }
 
-func (*cliOwnerStore) ReleaseEvaluation(context.Context, controllerwire.NodeRef, store.Actor) (store.Applied, error) {
-	return store.Applied{}, errors.New("unexpected evaluation release")
+func (*cliOwnerStore) ReleaseEvaluation(context.Context, runspec.NodeRef, runstate.Actor) (runstate.Applied, error) {
+	return runstate.Applied{}, errors.New("unexpected evaluation release")
+}
+
+// cliTransportState supplies the wire projection when testing the remote host adapter.
+type cliTransportState struct {
+	nodehost.PrivateHostState
+	state *cliOwnerStore
+}
+
+func (s *cliTransportState) ReadSnapshot(ctx context.Context, run string) (runstate.RunSnapshot, error) {
+	source, err := s.state.ReadSnapshot(ctx, run)
+	if err != nil {
+		return runstate.RunSnapshot{}, err
+	}
+	body, err := json.Marshal(source)
+	if err != nil {
+		return runstate.RunSnapshot{}, err
+	}
+	var result runstate.RunSnapshot
+	err = json.Unmarshal(body, &result)
+	return result, err
 }

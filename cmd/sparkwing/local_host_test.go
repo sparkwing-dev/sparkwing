@@ -21,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
@@ -69,7 +68,7 @@ func TestLocalQueueReportsHostFailureWhileDraining(t *testing.T) {
 		}
 	})
 	services.Runner.Loop.MaxClaims = 1
-	loop, err := runners.NewStoreRunner(engine, services.Runner)
+	loop, err := localcontroller.NewStoreRunner(engine, services.Runner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +133,7 @@ func TestLocalQueueBindsAuthenticatedStorageBeforeOpeningProcessTransport(t *tes
 		}
 		return response.Result(), nil
 	})}}
-	binding := runners.StoreBinding{Tenant: tenant, Principal: p, Refresh: func(context.Context) (capability.Principal, error) { return p, nil }, Bearer: func(context.Context) (string, error) { return raw, nil }}
+	binding := localcontroller.StoreBinding{Tenant: tenant, Principal: p, Refresh: func(context.Context) (capability.Principal, error) { return p, nil }, Bearer: func(context.Context) (string, error) { return raw, nil }}
 	services, err := newLocalNativeServices(t.Context(), t.TempDir(), owned, binding, options)
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Message != "storage fence changed" || authenticated != 1 || storage != 1 || services.Close != nil {

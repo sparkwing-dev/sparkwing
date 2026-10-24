@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -34,7 +36,7 @@ func TestCycleDetect_RejectsSelfCycle(t *testing.T) {
 
 func TestCycleDetect_AllowsIndirectNonCycle(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
-	if err := teststore.SeedRun(e.Store, t.Context(), "a", store.Run{ID: "root", Pipeline: "root", Status: "success"}); err != nil {
+	if err := teststore.SeedRun(e.Store, t.Context(), "a", store.Run{RunSummary: runstate.RunSummary{ID: "root", Pipeline: "root", Status: "success"}}); err != nil {
 		t.Fatal(err)
 	}
 	setChildAncestor(t, e, "run", "root")
@@ -44,7 +46,7 @@ func TestCycleDetect_AllowsIndirectNonCycle(t *testing.T) {
 
 func TestCycleDetect_RejectsDeepCycle(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
-	for _, r := range []store.Run{{ID: "root", Pipeline: "root", Status: "success"}, {ID: "mid", Pipeline: "mid", Status: "running", ParentRunID: "root"}} {
+	for _, r := range []store.Run{{RunSummary: runstate.RunSummary{ID: "root", Pipeline: "root", Status: "success"}}, {RunSummary: runstate.RunSummary{ID: "mid", Pipeline: "mid", Status: "running", ParentRunID: "root"}}} {
 		if err := teststore.SeedRun(e.Store, t.Context(), "a", r); err != nil {
 			t.Fatal(err)
 		}
@@ -110,7 +112,7 @@ func TestCycleDetect_ParentNotFound(t *testing.T) {
 func TestChildCycleWalkStaysInsideItsTeam(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
 	teststore.SeedTeam(t, e.Store, "foreign")
-	if err := teststore.SeedRun(e.Store, t.Context(), "foreign", store.Run{ID: "private-root", Pipeline: "private-pipeline", Status: "success"}); err != nil {
+	if err := teststore.SeedRun(e.Store, t.Context(), "foreign", store.Run{RunSummary: runstate.RunSummary{ID: "private-root", Pipeline: "private-pipeline", Status: "success"}}); err != nil {
 		t.Fatal(err)
 	}
 	setChildAncestor(t, e, "run", "private-root")
@@ -203,7 +205,7 @@ func TestAuthorizedCrossRepositoryChildIsAsserted(t *testing.T) {
 
 func TestChildCycleWalkRefusesRepeatedAncestorIDs(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
-	if err := teststore.SeedRun(e.Store, t.Context(), "a", store.Run{ID: "root", Pipeline: "root", Status: "success"}); err != nil {
+	if err := teststore.SeedRun(e.Store, t.Context(), "a", store.Run{RunSummary: runstate.RunSummary{ID: "root", Pipeline: "root", Status: "success"}}); err != nil {
 		t.Fatal(err)
 	}
 	setChildAncestor(t, e, "root", "run")

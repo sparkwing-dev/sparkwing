@@ -2,13 +2,12 @@ package controller
 
 import (
 	"fmt"
-
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -188,7 +187,7 @@ func credentialBudgetKey(p capability.Principal) string {
 	return "authority:" + string(p.Authority.Kind) + ":" + p.Authority.ID
 }
 
-func (s *Server) budgetEndpoint(endpoint Endpoint) Endpoint {
+func (s *Server) budgetEndpoint(endpoint controllerwire.Endpoint) controllerwire.Endpoint {
 	if endpoint.Authentication != capability.AuthCapability {
 		return endpoint
 	}

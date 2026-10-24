@@ -6,11 +6,12 @@ import (
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func checkStoreCredentialMutations(ctx context.Context, s *store.Store, team store.Team, owner store.Actor) error {
+func checkStoreCredentialMutations(ctx context.Context, s *store.Store, team store.Team, owner runstate.Actor) error {
 	tenant, err := s.ForTeam(ctx, team)
 	if err != nil {
 		return err

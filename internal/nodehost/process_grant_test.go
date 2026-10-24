@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestNodeExecutorRevokesBindingBeforeJoinAndCleanup(t *testing.T) {
@@ -71,7 +71,7 @@ func TestNodeExecutorRevokesBindingBeforeJoinAndCleanup(t *testing.T) {
 				}
 			}
 			last := st.changes[len(st.changes)-1]
-			if mode == "revoke_error" && last.To != store.NodeFailed {
+			if mode == "revoke_error" && last.To != runstate.NodeFailed {
 				t.Fatal("failed revocation became a successful result")
 			}
 		})

@@ -8,13 +8,12 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -68,12 +67,12 @@ func TestClaimedHostReadsOnlyDeclaredProducerManifestSelectors(t *testing.T) {
 		if err != nil || len(snapshot.Nodes) != 1 || snapshot.Nodes[0].Ref.NodeID != "reader" || string(snapshot.Nodes[0].Spec) != string(spec) {
 			return false
 		}
-		row, err := host.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "producer"})
+		row, err := host.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "producer"})
 		if !declared || !terminal {
 			return err != nil
 		}
 		encoded, encodeErr := json.Marshal(row)
-		return err == nil && encodeErr == nil && row.ManifestRecord != nil && *row.ManifestRecord == key && row.Status == store.StatusDone && (len(row.Spec) == 0 || string(row.Spec) == "null") && row.CapabilityPrefix == "" && row.OwnerExecution == nil && !strings.Contains(string(encoded), "private-source-value")
+		return err == nil && encodeErr == nil && row.ManifestRecord != nil && *row.ManifestRecord == key && row.Status == runstate.StatusDone && (len(row.Spec) == 0 || string(row.Spec) == "null") && row.CapabilityPrefix == "" && row.OwnerExecution == nil && !strings.Contains(string(encoded), "private-source-value")
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)

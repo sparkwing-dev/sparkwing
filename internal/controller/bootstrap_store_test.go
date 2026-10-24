@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -41,7 +42,7 @@ func TestBootstrapSeedStoreOnceProperty(t *testing.T) {
 		if ready, err := e.Store.AsOperator().HasDeploymentAdministrator(t.Context()); err != nil || !ready {
 			t.Fatalf("administrator readiness: %v, %v", ready, err)
 		}
-		if err := e.Store.AsOperator().RevokeAuthority(t.Context(), store.Actor{Authority: p.Authority}, p.Authority); err != nil {
+		if err := e.Store.AsOperator().RevokeAuthority(t.Context(), runstate.Actor{Authority: p.Authority}, p.Authority); err != nil {
 			t.Fatal(err)
 		}
 	}

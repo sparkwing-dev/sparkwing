@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
 func TestFinalCredentialRouteDeclarations(t *testing.T) {
@@ -60,7 +61,7 @@ func servingRegistrations(t *testing.T, separateMetrics bool) []string {
 		t.Fatalf("local doctor registration: HTTP %d %s", local.Code, local.Body)
 	}
 	actual = append(actual, "POST /api/v1/local/doctor")
-	processes := controller.NewPolicyRouter(controller.RouteAuthorization{})
+	processes := routepolicy.New(routepolicy.Authorization{})
 	if err := nodehost.RegisterProcessServices(processes, func(context.Context, capability.Authorized) (*nodehost.ProcessServices, error) {
 		return nil, fmt.Errorf("route inventory must not resolve a process")
 	}); err != nil {

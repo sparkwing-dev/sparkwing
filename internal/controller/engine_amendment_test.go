@@ -15,6 +15,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -70,7 +72,7 @@ func TestEngineClaimUsesEnrollmentAndChecksRunnerPolicy(t *testing.T) {
 	if err != nil || got.Claim == nil || got.Claim.Capability == "" || got.Claim.Runner.Name != "runner" || got.Claim.Runner.Type != "runner" || got.Claim.RunID != "run" || got.Claim.JobID != "job" || got.Claim.Purpose != capability.PurposeWork || got.Claim.Delivery != capability.DeliveryDirect || got.Claim.Execution == nil {
 		t.Fatalf("registered claim: %+v, %v", got.Claim, err)
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 	if err != nil || row.ClaimedBy != "runner" || row.Attempt != 0 || row.Generation != 1 {
 		t.Fatalf("persisted award: %+v, %v", row, err)
 	}
@@ -138,7 +140,7 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 	if err != nil || !result.CancelRequested {
 		t.Fatalf("cancel job: %+v, %v", result, err)
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 	if err != nil || row.CapabilityPrefix != holder.Award.CapabilityPrefix || row.CancelRequestedAt == nil || row.CancelReason != "user_cancelled" || row.Outcome != "" {
 		t.Fatalf("held result rights: %+v, %v", row, err)
 	}
@@ -147,7 +149,7 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 	if err != nil || len(events) != 2 {
 		t.Fatalf("cancel events: %+v, %v", events, err)
 	}
-	var cancellation store.NodeResult
+	var cancellation runstate.NodeResult
 	if err := json.Unmarshal(events[1].Payload, &cancellation); err != nil || events[1].Kind != "job_cancel_requested" || cancellation.Reason != "user_cancelled" {
 		t.Fatalf("cancel reason: %+v, %v", cancellation, err)
 	}
@@ -178,7 +180,7 @@ func TestEngineReadFailureUsesAuthorizedSourceGeneration(t *testing.T) {
 }
 
 func TestEngineExpansionReplayReturnsPersistedState(t *testing.T) {
-	result := store.AcceptedExpansion{Replayed: true, Nodes: []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "generated"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: 3, Attempt: 2, StateSeq: 7, Spec: []byte(`{"id":"generated"}`), SpecHash: "hash"}}}
+	result := store.AcceptedExpansion{Replayed: true, Nodes: []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "generated"}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Generation: 3, Attempt: 2, StateSeq: 7, Spec: []byte(`{"id":"generated"}`), SpecHash: "hash"}}}
 	got, err := expansionResponse(result)
 	if err != nil || !got.Replayed || len(got.Jobs) != 1 || got.Jobs[0].Current.Status != "done" || got.Jobs[0].Current.Generation != 3 || got.Jobs[0].Current.Attempt != 2 || got.Jobs[0].Current.StateSeq != 7 || got.Jobs[0].Current.SpecHash != "hash" {
 		t.Fatalf("expansion replay: %+v, %v", got, err)
@@ -240,7 +242,7 @@ func TestEngineCancellationIntentPreservesHolderProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		before, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+		before, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -248,7 +250,7 @@ func TestEngineCancellationIntentPreservesHolderProperty(t *testing.T) {
 		if err != nil || !first.CancelRequested {
 			return false
 		}
-		row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+		row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 		if err != nil || row.Status != before.Status || row.Attempt != before.Attempt || row.CapabilityPrefix != holder.Award.CapabilityPrefix || row.ClaimedBy != holder.Award.Holder || row.Generation != holder.Award.Generation || row.CancelReason != reason || row.Outcome != "" || row.FinishedAt != nil {
 			return false
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
 // BootstrapAdminPrincipal identifies the first deployment administrator.
@@ -29,7 +30,7 @@ func EnsureBootstrapAdminToken(ctx context.Context, issuer BootstrapAdminIssuer,
 		return false, err
 	}
 	if issuer == nil {
-		return false, missingEndpointPolicy()
+		return false, routepolicy.MissingEndpointPolicy()
 	}
 	return issuer.EnsureBootstrapCapability(ctx, spec)
 }

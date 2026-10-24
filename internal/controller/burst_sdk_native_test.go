@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -68,7 +69,7 @@ func burstNativeSDKSecretAcceptance(t *testing.T, serve func(*testing.T, http.Ha
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity := engine.Identity{Version: "v1.2.3", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}}
+	identity := engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}}
 	for _, placement := range placements {
 		t.Run(placement, func(t *testing.T) {
 			proof := controller.BurstExecutionProof{

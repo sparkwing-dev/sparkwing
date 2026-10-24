@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -59,7 +60,7 @@ func TestCredentialSSHWritePinsHostAndKeepsKeyPrivate(t *testing.T) {
 				Capability: capability.Capability{Audience: capability.Controller, Team: "team", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TeamAdmin}},
 			}
 			writer := &credentialPutCapture{}
-			server := controller.BindTenantPortForTest[controller.CredentialWriter](controller.New(nil, nil).WithSecretsCipher(cipher).WithAuthorization(controller.RouteAuthorization{
+			server := controller.BindTenantPortForTest[controller.CredentialWriter](controller.New(nil, nil).WithSecretsCipher(cipher).WithAuthorization(routepolicy.Authorization{
 				Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
 			}), func(context.Context, store.Team) (controller.CredentialWriter, error) { return writer, nil })
 			port, scans := 22, 0

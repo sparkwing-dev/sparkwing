@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -26,7 +25,7 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 		{id: "mixed-run", pipeline: "alpha", outcomes: []string{"memoized", "success"}},
 		{id: "other-run", pipeline: "beta", outcomes: []string{"memoized"}},
 	} {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{ID: run.id, Pipeline: run.pipeline, Status: "running", StartedAt: now}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: run.id, Pipeline: run.pipeline, Status: "running", StartedAt: now}}); err != nil {
 			t.Fatal(err)
 		}
 		for i, outcome := range run.outcomes {
@@ -34,7 +33,7 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 			if err := teststore.SeedNode(st, ctx, store.Node{RunID: run.id, NodeID: nodeID, Status: "pending"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, controllerwire.NodeRef{RunID: runspec.RunID(run.id), NodeID: runspec.NodeID(nodeID)}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
+			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, runspec.NodeRef{RunID: runspec.RunID(run.id), NodeID: runspec.NodeID(nodeID)}, runstate.NodeResult{Outcome: runstate.NodeState(outcome), MaskedError: ""}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -42,7 +41,7 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{ID: "empty-run", Pipeline: "alpha", Status: "success", StartedAt: now}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: "empty-run", Pipeline: "alpha", Status: "success", StartedAt: now}}); err != nil {
 		t.Fatal(err)
 	}
 	tenant, err := st.ForTeam(ctx, store.DefaultTeam)

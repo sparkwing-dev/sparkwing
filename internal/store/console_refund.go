@@ -11,11 +11,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 // ConsoleRefund records a provider refund and its operator receipt in one transaction.
-func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, req controllerwire.OperatorRefund, key string) (CreditReversal, error) {
+func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, req OperatorRefund, key string) (CreditReversal, error) {
 	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (CreditReversal, error) {
 		req.PaymentID, req.RefundID = strings.TrimSpace(req.PaymentID), strings.TrimSpace(req.RefundID)
 		reason, err := consoleReason(req.Reason)
@@ -48,7 +47,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		subject := hex.EncodeToString(sum[:])
 		body, err := json.Marshal(struct {
 			Mode    capability.PaymentMode
-			Request controllerwire.OperatorRefund
+			Request OperatorRefund
 		}{mode, req})
 		if err != nil {
 			return CreditReversal{}, err

@@ -9,8 +9,9 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -25,14 +26,14 @@ func (p scheduleFixturePolicy) ResolveScheduleSource(_ context.Context, row Cron
 	return request, err
 }
 
-func consentedScheduleFixture(t *testing.T) (*Tenant, capability.Authorized, controllerwire.ScheduleRepoRequest, *time.Time) {
+func consentedScheduleFixture(t *testing.T) (*Tenant, capability.Authorized, ScheduleRepoRequest, *time.Time) {
 	tenant, _, now := intakeFixture(t)
 	tenant.s.intakePolicy = scheduleFixturePolicy{fakeIntakePolicy(func(_ context.Context, _ capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{Options: &in.Request.Options, SourceLocation: &in.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
 	})}
 	actor := authorityMember(t, tenant.s, "schedule-owner", RoleEditor)
 	a := teamAuthorization(t, tenant.s, actor, tenant.team, "PUT", "/api/v1/schedules/repos")
-	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: "https://gitlab.com/acme/repo.git", Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567", Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}}}
+	body := ScheduleRepoRequest{Mode: ScheduleReplace, RepoURL: "https://gitlab.com/acme/repo.git", Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567", Schedules: []runspec.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}}}
 	return tenant, a, body, now
 }
 
@@ -136,7 +137,7 @@ func TestScheduleReplacementCapsAndOverrideRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	cron := "*/5 * * * *"
-	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), a, paused, &controllerwire.ScheduleOverride{Cron: &cron}); err != nil {
+	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), a, paused, &cronspec.Override{Cron: &cron}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := tenant.GetCronSchedule(t.Context(), ids[0])
@@ -144,7 +145,7 @@ func TestScheduleReplacementCapsAndOverrideRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 20; i++ {
-		body.Schedules = append(body.Schedules, controllerwire.ScheduleDeclaration{Pipeline: fmt.Sprintf("extra-%d", i), Cron: "* * * * *"})
+		body.Schedules = append(body.Schedules, runspec.ScheduleDeclaration{Pipeline: fmt.Sprintf("extra-%d", i), Cron: "* * * * *"})
 	}
 	if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err == nil {
 		t.Fatal("schedule cap accepted")
@@ -301,7 +302,7 @@ func TestScheduleOverridePreservesExplicitEmptyValues(t *testing.T) {
 	}
 	empty, zero := "", "0s"
 	args := map[string]string{}
-	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), a, ids[0], &controllerwire.ScheduleOverride{TZ: &empty, CatchUp: &zero, Args: &args}); err != nil {
+	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), a, ids[0], &cronspec.Override{TZ: &empty, CatchUp: &zero, Args: &args}); err != nil {
 		t.Fatal(err)
 	}
 	row, err := tenant.GetCronSchedule(t.Context(), ids[0])

@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -53,7 +54,7 @@ type PreparedPlanning struct {
 // owner evaluates guards from the returned arguments before starting planning.
 type SDKPlanner struct {
 	Start        func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error)
-	EnsureEngine func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
+	EnsureEngine func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error)
 	Masker       *secrets.Masker
 	Masks        *MaskRegistry
 	Log          func(context.Context, nodeproto.FrameLog) error

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -44,12 +46,7 @@ func runTeam(ctx context.Context, t *testing.T, st *store.Store, runID string) *
 
 func seedTenantRun(t *testing.T, tn *store.Tenant, id, pipeline string) {
 	t.Helper()
-	if err := tn.TestOnlySeedRun(context.Background(), store.Run{
-		ID:        id,
-		Pipeline:  pipeline,
-		Status:    "running",
-		StartedAt: time.Now(),
-	}); err != nil {
+	if err := tn.TestOnlySeedRun(context.Background(), store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: pipeline, Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", id, err)
 	}
 }
@@ -189,9 +186,7 @@ func TestTenantWritesReportNotFoundForAnotherTeamsRun(t *testing.T) {
 func TestUnportedStoreWritesLandInTheDefaultTeam(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
-		ID: "run-legacy", Pipeline: "build", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: "run-legacy", Pipeline: "build", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	def, err := st.ForTeam(ctx, store.DefaultTeam)

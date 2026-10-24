@@ -10,8 +10,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestBootstrapSourceBundleReadStaysBoundBeforeExchange(t *testing.T) {
@@ -131,9 +131,9 @@ func checkBootstrapSourceBundle(t *testing.T, kind capability.UnitKind, attack u
 		}
 		if kind == capability.UnitNode {
 			previousAttempt := int64(offset)
-			actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}, CapabilityPrefix: exchanged.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(exchanged.Capability.Binding.RunID), NodeID: runspec.NodeID(exchanged.Capability.Binding.NodeID), Holder: exchanged.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(exchanged.Capability.Binding.Generation)}}
+			actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: exchanged.Capability.Prefix}, CapabilityPrefix: exchanged.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(exchanged.Capability.Binding.RunID), NodeID: runspec.NodeID(exchanged.Capability.Binding.NodeID), Holder: exchanged.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(exchanged.Capability.Binding.Generation)}}
 			admitExecution(t, tenant, actor)
-			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeRunning, Cause: CauseStart, SourceAttempt: (*runspec.AttemptOrdinal)(&previousAttempt), Actor: actor})
+			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: (*runspec.AttemptOrdinal)(&previousAttempt), Actor: actor})
 			if err != nil || int64(started.Attempt) != previousAttempt+1 {
 				t.Fatalf("retry execution start: %+v %v", started, err)
 			}

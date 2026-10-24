@@ -17,9 +17,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -39,7 +39,7 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 		engine, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithDataObjects(objects) })
 		authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 		actor := engineActor(authorized)
-		ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+		ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
 		ordinal := int64(0)
 		engineAdmitExecution(t, engine.Store, authorized.Principal)
 		started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal)})
@@ -95,13 +95,13 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 			return false
 		}
 		ordinal = int64(started.Attempt)
-		request := store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess, OutputRecord: &outputKey, ManifestRecord: &manifestKey}}
+		request := store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: (*runspec.AttemptOrdinal)(&ordinal), Outcome: runstate.NodeSuccess, Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess, OutputRecord: &outputKey, ManifestRecord: &manifestKey}}
 		if _, err := tenant.TransitionNode(t.Context(), request); !errors.Is(err, blob.ErrIntegrity) {
 			t.Logf("corrupt result: %v", err)
 			return false
 		}
-		row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-		if err != nil || row.Status != store.StatusRunning {
+		row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+		if err != nil || row.Status != runstate.StatusRunning {
 			t.Logf("refused result: %+v: %v", row, err)
 			return false
 		}
@@ -116,8 +116,8 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 				return false
 			}
 		}
-		row, err = tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-		return err == nil && row.Status == store.StatusDone && row.Outcome == store.NodeSuccess
+		row, err = tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+		return err == nil && row.Status == runstate.StatusDone && row.Outcome == runstate.NodeSuccess
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(71))}); err != nil {
 		t.Fatal(err)

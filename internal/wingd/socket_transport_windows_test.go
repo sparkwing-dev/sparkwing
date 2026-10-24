@@ -11,6 +11,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"golang.org/x/sys/windows"
 )
 
@@ -264,7 +265,7 @@ func FuzzWindowsLocalTransportIdentity(f *testing.F) {
 			connection, err := listener.Accept()
 			if err == nil {
 				defer connection.Close()
-				var identity LocalPeerIdentity
+				var identity localhostwire.LocalPeerIdentity
 				identity, err = acceptedPeerIdentity(connection)
 				if err == nil && (identity.GOOS != "windows" || identity.SID != owner.SID || identity.UID != nil) {
 					err = errors.New("request bytes replaced the kernel identity")

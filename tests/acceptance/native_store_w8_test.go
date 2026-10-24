@@ -12,23 +12,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 )
@@ -96,16 +99,16 @@ type finishingStoreW9 struct {
 	finished *bool
 }
 
-func (s finishingStoreW9) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
+func (s finishingStoreW9) FinishRunAndUnit(ctx context.Context, request runstate.FinishRunRequest) (runstate.Applied, error) {
 	*s.finished = true
 	return s.NativeHostStore.FinishRunAndUnit(ctx, request)
 }
 
-func (nativeStoreEnginesW8) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
+func (nativeStoreEnginesW8) Resolve(context.Context, engineid.Pin, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("unexpected engine resolution")
 }
 
-func (nativeStoreEnginesW8) Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+func (nativeStoreEnginesW8) Ensure(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("unexpected engine acquisition")
 }
 
@@ -137,7 +140,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	var renewals atomic.Int64
 	bound, acquired, closed, finishedThroughServices := false, false, false, false
 	done := make(chan struct{})
-	bind := func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
+	bind := func(ctx context.Context, binding localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 		bound = true
 		if binding.Tenant.Team() != store.DefaultTeam || binding.Principal.Capability.Binding.Holder == "" {
 			t.Fatal("native service binding lost authenticated tenant or holder")
@@ -146,7 +149,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
+		router := routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 		if direct {
 			unit.Runner.Labels[0] = "ambient"
 			unit.Accepted.Spec.Hash = "changed-by-binding"
@@ -161,7 +164,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			Executor: nodehost.ExecutionOperations{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 				return nodehost.ProcessGrant{}, errors.New("unexpected work")
 			}},
-			ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+			ReadOutput: func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error) {
 				return nil, errors.New("unexpected output read")
 			},
 			Evaluation: nodehost.EvaluationOperations{
@@ -170,7 +173,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 				},
 			},
 			Owner: nodehost.OwnerOperations{
-				Renew: func(ctx context.Context, actor store.Actor, computing bool) (store.LeaseBeat, error) {
+				Renew: func(ctx context.Context, actor runstate.Actor, computing bool) (runstate.LeaseBeat, error) {
 					beat, err := s.AsOperator().RenewUnit(ctx, actor.CapabilityPrefix, computing)
 					if mode == "remote_renewal" && err == nil && renewals.Add(1) == 2 {
 						close(renewed)
@@ -220,7 +223,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		if err != nil {
 			return nodehost.NativeServices{}, principal, err
 		}
-		services, err := bind(ctx, runners.StoreBinding{Tenant: tenant, Principal: principal})
+		services, err := bind(ctx, localcontroller.StoreBinding{Tenant: tenant, Principal: principal})
 		services.Config.Store = tenant
 		return services, principal, err
 	}}
@@ -242,9 +245,9 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		}
 		executionErr = runner.Run(ctx)
 	} else if direct {
-		executionErr = (runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: bind}).Host(ctx, unit)
+		executionErr = (localcontroller.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: bind}).Host(ctx, unit)
 	} else if mode == "embedded_queue" {
-		runner, err := runners.NewStoreRunner(server.EngineController, runners.StoreRunnerConfig{
+		runner, err := localcontroller.NewStoreRunner(server.EngineController, localcontroller.StoreRunnerConfig{
 			Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 			Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1},
 			Bind:   bind,
@@ -263,8 +266,8 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			return localcontroller.Services{
 				Policies: store.Policies{ClaimProfiles: runnerStorePolicyW8{}},
 				State:    &nativeLocalStateW8{done: done, stop: cancel},
-				HTTP:     wingd.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
-				Runner: runners.StoreRunnerConfig{
+				HTTP:     localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
+				Runner: localcontroller.StoreRunnerConfig{
 					Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 					Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1},
 					Bind:   bind,
@@ -311,12 +314,12 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	}
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if mode == "remote_cancel" {
-		if err != nil || !errors.Is(executionErr, context.Canceled) || run.Owner == nil || run.Owner.Holder != unit.Binding.Holder || run.Owner.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || run.State == store.RunSuccess || run.State == store.RunFailed || run.State == store.RunCancelled || !bound || !acquired || !closed {
+		if err != nil || !errors.Is(executionErr, context.Canceled) || run.Owner == nil || run.Owner.Holder != unit.Binding.Holder || run.Owner.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || run.State == runstate.RunSuccess || run.State == runstate.RunFailed || run.State == runstate.RunCancelled || !bound || !acquired || !closed {
 			t.Fatalf("cancelled acquisition finished or abandoned its claim: state=%s error=%v host error=%v", run.State, err, executionErr)
 		}
 		return
 	}
-	if err != nil || run.State != store.RunSuccess || !bound || !acquired || !closed {
+	if err != nil || run.State != runstate.RunSuccess || !bound || !acquired || !closed {
 		t.Fatalf("state=%s bound=%v acquired=%v closed=%v error=%v", run.State, bound, acquired, closed, err)
 	}
 }
@@ -392,7 +395,7 @@ func FuzzNativeStoreAwardW8(f *testing.F) {
 			}
 			unit.Capability = nativeStoreDelegateW8(t, s, unit.Capability, grants)
 		}
-		host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, runners.StoreBinding) (nodehost.NativeServices, error) {
+		host := localcontroller.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 			t.Fatal("changed award reached native service construction")
 			return nodehost.NativeServices{}, nil
 		}}
@@ -420,7 +423,7 @@ func TestNativeStoreRefusesDelegatedOwnerW8(t *testing.T) {
 	s, unit := nativeStoreAwardW8(t, capability.UnitTrigger)
 	unit.Capability = nativeStoreDelegateW8(t, s, unit.Capability, []capability.Grant{capability.TriggerHost})
 	bound := false
-	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, runners.StoreBinding) (nodehost.NativeServices, error) {
+	host := localcontroller.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 		bound = true
 		return nodehost.NativeServices{}, errors.New("delegated owner reached service construction")
 	}}
@@ -435,7 +438,7 @@ func TestNativeStorePartialBindingW8(t *testing.T) {
 			s, unit := nativeStoreAwardW8(t, kind)
 			failure, closeFailure := errors.New("service bind failed"), errors.New("service close failed")
 			closed := 0
-			host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, runners.StoreBinding) (nodehost.NativeServices, error) {
+			host := localcontroller.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(context.Context, localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 				return nodehost.NativeServices{Close: func() error { closed++; return closeFailure }}, failure
 			}}
 			if err := host.Host(t.Context(), unit); !errors.Is(err, failure) || !errors.Is(err, closeFailure) || closed != 1 {

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -21,8 +22,8 @@ func (s *Server) creditReader(ctx context.Context, team string) (CreditReader, e
 	return tenantPort[CreditReader](ctx, s, store.Team(team))
 }
 
-func (s *Server) creditEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) creditEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/credits/settings", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleCreditsSettingsShow)},
 		{Method: "GET", Pattern: "/api/v1/credits", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleCreditsShow)},
 		{Method: "GET", Pattern: "/api/v1/credits/history", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleCreditsHistory)},

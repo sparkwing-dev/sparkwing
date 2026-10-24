@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const (
@@ -77,7 +76,7 @@ func renderJSONL(src []byte, w io.Writer, f logFormat) {
 			fmt.Fprintln(w)
 			continue
 		}
-		var rec sparkwing.LogRecord
+		var rec logpretty.Record
 		if err := json.Unmarshal(line, &rec); err != nil {
 			if f == formatPlain {
 				_, _ = w.Write([]byte(logpretty.StripANSI(string(line))))
@@ -143,7 +142,7 @@ func streamPrettySSE(body io.Reader, w io.Writer, flush func() error, f logForma
 }
 
 func renderSSELogLine(payload []byte, f logFormat) []string {
-	var rec sparkwing.LogRecord
+	var rec logpretty.Record
 	if err := json.Unmarshal(payload, &rec); err != nil {
 		if f == formatPlain {
 			return []string{logpretty.StripANSI(string(payload))}

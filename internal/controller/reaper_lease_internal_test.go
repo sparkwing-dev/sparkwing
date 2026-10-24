@@ -6,7 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -41,12 +42,12 @@ func TestReaperRunsInOneOfTwoOverlappingControllers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || row.Status != store.StatusPending || row.Disruptions != 1 || row.Generation != 2 {
+	row, err := tenant.ReadNode(ctx, runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || row.Status != runstate.StatusPending || row.Disruptions != 1 || row.Generation != 2 {
 		t.Fatalf("recovered job = %+v, %v", row, err)
 	}
 	run, err := tenant.ReadRun(ctx, "run")
-	if err != nil || run.State != store.RunRunning {
+	if err != nil || run.State != runstate.RunRunning {
 		t.Fatalf("recovered run = %+v, %v", run, err)
 	}
 	loser := servers[0]
