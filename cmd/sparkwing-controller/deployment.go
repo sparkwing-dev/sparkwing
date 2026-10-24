@@ -65,8 +65,10 @@ func openControllerStore(ctx context.Context, cfg deployment.Config, sqlitePath 
 
 // deploymentRecord is what a serving controller leaves beside its state for
 // `admin`, which runs in the same pod and must act on the same store
-// without the operator repeating the controller's flags. It is written once
-// startup has succeeded, and it names where the controller's connection
+// without the operator repeating the controller's flags. It is published
+// before the settings transaction commits and restored to the previous record
+// if that fails, so its presence alone does not prove startup succeeded. It
+// names where the controller's connection
 // landed, so admin refuses a store reached at another target or created at
 // another time, such as one a rotated pg-url points at.
 type deploymentRecord struct {

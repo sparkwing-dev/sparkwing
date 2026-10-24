@@ -29,7 +29,8 @@ type identityConfig struct {
 	googleURIs []string
 }
 
-// safety: sign-in configuration must be checked before startup creates persistent state.
+// safety: fatal sign-in configuration is checked before startup creates persistent
+// state. GitHub App settings are checked later and only disable the App.
 func parseIdentity(f identityFlags) (identityConfig, error) {
 	gate, err := store.ParseSignUpMode(f.SignUpGate)
 	if err != nil {
