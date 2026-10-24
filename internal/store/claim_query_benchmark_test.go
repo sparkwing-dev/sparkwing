@@ -214,12 +214,12 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	wrapped.tx = tx
-	poll := func(ctx context.Context) (UnitRef, error) {
+	poll := func(ctx context.Context) (claimHead, error) {
 		query := template
 		var err error
 		query.overflow, err = wrapped.operator.claimOverflowAccountsTx(ctx, wrapped, "", facts[0], nil)
 		if err != nil {
-			return UnitRef{}, err
+			return claimHead{}, err
 		}
 		return searchClaimTx(ctx, wrapped, demand, &query)
 	}

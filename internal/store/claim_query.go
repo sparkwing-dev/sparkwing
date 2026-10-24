@@ -724,6 +724,9 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 		target := demand.Target
 		final += ` AND w.run_id=` + q.param(string(target.RunID)) + ` AND w.node_id=` + q.param(string(target.NodeID)) + ` AND w.kind=` + q.param(string(target.Kind)) + ` AND w.source_generation=` + q.param(target.SourceGeneration)
 	}
+	if q.ordinal != nil {
+		final += ` AND w.claim_award_ordinal=` + q.param(*q.ordinal)
+	}
 	final += ` ORDER BY w.claim_award_ordinal,w.arrived,w.team,w.run_id,w.kind,w.node_id,w.source_generation LIMIT 1`
 	return ctes + final, nil
 }
@@ -788,22 +791,6 @@ func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []c
 		return "", err
 	}
 	return q.query(q.facts, q.teams, q.rates, kinds, demand, q.now)
-}
-
-func queuedUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
-	q := claimSQL{}
-	err := claimInputsTx(ctx, tx, demand, kinds, &q)
-	if err != nil {
-		return UnitRef{}, err
-	}
-	if demand.Target == nil {
-		return searchClaimTx(ctx, tx, demand, &q)
-	}
-	query, err := q.query(q.facts, q.teams, q.rates, kinds, demand, q.now)
-	if err != nil {
-		return UnitRef{}, err
-	}
-	return queryClaimTx(ctx, tx, &q, query)
 }
 
 func queryClaimTx(ctx context.Context, tx *storeTx, q *claimSQL, query string) (UnitRef, error) {

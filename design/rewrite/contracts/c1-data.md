@@ -868,9 +868,12 @@ Candidate search uses a read snapshot without arbitration or row locks. It may
 visit multiple policies or ready sources. After search closes its snapshot, the
 award transaction takes queue arbitration and applies the same eligibility
 predicate to only the selected unit, with fresh authority, placement observers
-and funding. A stale candidate returns not-found for this poll. It does not restart
-the search under the lock. Backlog and retained contexts cannot increase the
-number of candidate rows checked while arbitration is held.
+and funding. A broad-search candidate keeps the team's award ordinal from the
+snapshot. Recheck requires that ordinal to remain unchanged because another
+award can move the team behind other eligible work. A stale candidate returns
+not-found for this poll. It does not restart the search under the lock. Backlog
+and retained contexts cannot increase the number of candidate rows checked while
+arbitration is held.
 
 Local foreground intake seals `Request.LocalForeground`. An omitted dispatch
 is resolved from the request before checking foreground authority. The shared predicate

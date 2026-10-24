@@ -229,14 +229,15 @@ func decodeClaimHead(head *claimHead, raw string) error {
 	return nil
 }
 
-func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL) (UnitRef, error) {
+func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL) (claimHead, error) {
 	current := template.facts[0]
 	if current.BindRun != "" || len(current.Pushes) > 0 {
 		query, err := template.query(template.facts, template.teams, template.rates, template.kinds, demand, template.now)
 		if err != nil {
-			return UnitRef{}, err
+			return claimHead{}, err
 		}
-		return queryClaimTx(ctx, tx, template, query)
+		unit, err := queryClaimTx(ctx, tx, template, query)
+		return claimHead{Unit: unit}, err
 	}
 	// Tied shares still compete by arrival in one indexed lookup.
 	for remaining := template.teams; len(remaining) > 0; {
@@ -260,7 +261,7 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 			overflow, err := claimOverflowUsageTx(ctx, tx, teamTemplate.overflow)
 			teamTemplate.overflow = overflow
 			if err != nil {
-				return UnitRef{}, err
+				return claimHead{}, err
 			}
 
 			scoped.teams = append(scoped.teams, team)
@@ -277,11 +278,11 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 			continue
 		}
 		if err != nil {
-			return UnitRef{}, err
+			return claimHead{}, err
 		}
-		return head.Unit, nil
+		return head, nil
 	}
-	return UnitRef{}, notFound("eligible work", "")
+	return claimHead{}, notFound("eligible work", "")
 }
 
 func searchClaimRoutesTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL) (claimHead, error) {

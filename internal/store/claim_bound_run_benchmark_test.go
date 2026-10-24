@@ -87,7 +87,7 @@ func BenchmarkClaimBoundRun4000(b *testing.B) {
 				b.Helper()
 				query := template
 				unit, err := searchClaimTx(ctx, wrapped, demand, &query)
-				if err != nil || string(unit.NodeID) != want {
+				if err != nil || string(unit.Unit.NodeID) != want {
 					b.Fatalf("selected %+v, error %v; want %s", unit, err, want)
 				}
 			}

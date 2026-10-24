@@ -17,12 +17,12 @@ import (
 
 func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
 	var out UnitClaim
-	unit := UnitRef{}
+	candidate := claimHead{}
 	var err error
 	if demand.Target != nil {
-		unit = *demand.Target
+		candidate.Unit = *demand.Target
 	} else {
-		unit, err = o.searchClaimUnit(ctx, demand)
+		candidate, err = o.searchClaimUnit(ctx, demand)
 		if err != nil {
 			return UnitClaim{}, err
 		}
@@ -42,7 +42,7 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		if demand.FreeSlots != nil && *demand.FreeSlots <= 0 {
 			return notFound("eligible work", "")
 		}
-		out, err = tx.operator.claimUnitTx(ctx, tx, demand, unit)
+		out, err = tx.operator.claimUnitTx(ctx, tx, demand, candidate)
 		return err
 	})
 	if err == errRankingHold && demand.Target == nil {
@@ -59,24 +59,28 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 }
 
 // Search holds a read snapshot only; award rechecks one candidate after arbitration.
-func (o *Operator) searchClaimUnit(ctx context.Context, demand UnitDemand) (UnitRef, error) {
+func (o *Operator) searchClaimUnit(ctx context.Context, demand UnitDemand) (claimHead, error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
-		return UnitRef{}, err
+		return claimHead{}, err
 	}
 	defer rollbackOrLog(tx)
 	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
 	if err != nil {
-		return UnitRef{}, err
+		return claimHead{}, err
 	}
 	kinds, err := claimKinds(p.Capability, demand)
 	if err != nil {
-		return UnitRef{}, err
+		return claimHead{}, err
 	}
 	if demand.FreeSlots != nil && *demand.FreeSlots <= 0 {
-		return UnitRef{}, notFound("eligible work", "")
+		return claimHead{}, notFound("eligible work", "")
 	}
-	return queuedUnitTx(ctx, tx, demand, kinds)
+	q := claimSQL{}
+	if err := claimInputsTx(ctx, tx, demand, kinds, &q); err != nil {
+		return claimHead{}, err
+	}
+	return searchClaimTx(ctx, tx, demand, &q)
 }
 
 var errRankingHold = authorityError(apierr.LockHeld, "work is waiting for a preferred runner")
@@ -131,7 +135,8 @@ func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKi
 	return kinds, nil
 }
 
-func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitRef) (_ UnitClaim, err error) {
+func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, candidate claimHead) (_ UnitClaim, err error) {
+	unit := candidate.Unit
 	defer func() {
 		var unpriced *UnpricedCPUClassError
 		if errors.As(err, &unpriced) {
@@ -165,6 +170,10 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	err = claimInputsTx(ctx, tx, named, []capability.UnitKind{unit.Kind}, &q)
 	if err != nil {
 		return UnitClaim{}, err
+	}
+	// Another award can move this team behind work seen during search.
+	if candidate.Team != "" {
+		q.ordinal = &candidate.Ordinal
 	}
 	q.facts[0].Named = boolInt(demand.Target != nil)
 	query, err := q.query(q.facts, q.teams, q.rates, q.kinds, named, q.now)
