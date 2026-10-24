@@ -112,7 +112,6 @@ func TestGitHubAppStartupAvailability(t *testing.T) {
 		args                                    []string
 	}{
 		{name: "missing redirects", want: "oauth-redirect-uris"},
-		{name: "bad redirects", redirect: "not-a-url", want: "oauth-redirect-uris"},
 		{name: "empty key", credential: credGitHubAppKey, want: "github-app-key"},
 		{name: "empty webhook", credential: credGitHubAppWebhookSecret, want: "github-app-webhook-secret"},
 		{name: "empty previous webhook", credential: credGitHubAppPreviousHook, want: "github-app-webhook-secret.previous"},

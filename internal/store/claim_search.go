@@ -151,6 +151,9 @@ func (q *claimSQL) requirementRoutes(current claimFacts) (string, error) {
 		} else if current.Cloud == 0 {
 			clause = `tm.name=` + q.param(current.Team)
 		}
+		if q.ordinal != nil {
+			clause += ` AND tm.claim_award_ordinal=` + q.param(*q.ordinal)
+		}
 		if len(current.Excluded) > 0 {
 			raw, _ := json.Marshal(current.Excluded)
 			clause += ` AND tm.name NOT IN (SELECT ` + q.text("excluded.value") + ` FROM ` + q.array(q.param(string(raw)), "excluded") + `)`
@@ -164,7 +167,7 @@ func (q *claimSQL) requirementRoutes(current claimFacts) (string, error) {
 }
 
 func (template *claimSQL) routesSQL() (string, []any, error) {
-	q := claimSQL{dialect: template.dialect, route: true, team: template.team}
+	q := claimSQL{dialect: template.dialect, route: true, team: template.team, ordinal: template.ordinal}
 	clock := q.param(template.now)
 	routes, err := q.requirementRoutes(template.facts[0])
 	if err != nil {
@@ -203,34 +206,60 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 		}
 		return queryClaimTx(ctx, tx, template, query)
 	}
-	scoped := *template
-	scoped.facts = slices.Clone(template.facts)
-	scoped.facts[0].Excluded = slices.Clone(current.Excluded)
-	allowed := map[string]bool{}
-	for _, team := range template.teams {
-		if current.Cloud == 0 && current.Team != team.Team || slices.Contains(current.Excluded, team.Team) {
+	// Tied shares still compete by arrival in one indexed lookup.
+	for remaining := template.teams; len(remaining) > 0; {
+		ordinal := remaining[0].Ordinal
+		end := 1
+		for end < len(remaining) && remaining[end].Ordinal == ordinal {
+			end++
+		}
+		group := remaining[:end]
+		remaining = remaining[end:]
+		scoped := *template
+		scoped.ordinal = &ordinal
+		scoped.teams = nil
+		scoped.facts = slices.Clone(template.facts)
+		scoped.facts[0].Excluded = slices.Clone(current.Excluded)
+		for _, team := range group {
+			if current.Cloud == 0 && current.Team != team.Team || slices.Contains(current.Excluded, team.Team) {
+				continue
+			}
+			runnable, err := claimTeamRunnableTx(ctx, tx, Team(team.Team), template)
+			if err != nil {
+				return UnitRef{}, err
+			}
+			if runnable {
+				scoped.teams = append(scoped.teams, team)
+			} else {
+				scoped.facts[0].Excluded = append(scoped.facts[0].Excluded, team.Team)
+			}
+		}
+		if len(scoped.teams) == 0 {
 			continue
 		}
-		runnable, err := claimTeamRunnableTx(ctx, tx, Team(team.Team), template)
+		if len(scoped.teams) == 1 {
+			scoped.team = scoped.teams[0].Team
+		}
+		head, err := searchClaimRoutesTx(ctx, tx, demand, &scoped)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			return UnitRef{}, err
 		}
-		if runnable {
-			allowed[team.Team] = true
-		} else {
-			scoped.facts[0].Excluded = append(scoped.facts[0].Excluded, team.Team)
-		}
+		return head.Unit, nil
 	}
-	if len(allowed) == 0 {
-		return UnitRef{}, notFound("eligible work", "")
-	}
-	heads, err := claimRouteHeadsTx(ctx, tx, &scoped)
+	return UnitRef{}, notFound("eligible work", "")
+}
+
+func searchClaimRoutesTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL) (claimHead, error) {
+	heads, err := claimRouteHeadsTx(ctx, tx, template)
 	if err != nil {
-		return UnitRef{}, err
+		return claimHead{}, err
 	}
-	held, err := rankingHeldContextsTx(ctx, tx, demand, &scoped, heads)
+	held, err := rankingHeldContextsTx(ctx, tx, demand, template, heads)
 	if err != nil {
-		return UnitRef{}, err
+		return claimHead{}, err
 	}
 	heldKeys := map[[2]string]bool{}
 	for _, h := range held {
@@ -243,25 +272,25 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 		if best != nil && compareClaimHeads(route, *best) >= 0 {
 			break
 		}
-		scoped.placementFree, scoped.preferencesFree, err = claimPlacementFreeTx(ctx, tx, route.Team, route.Unit, scoped.policy)
+		template.placementFree, template.preferencesFree, err = claimPlacementFreeTx(ctx, tx, route.Team, route.Unit, template.policy)
 		if err != nil {
-			return UnitRef{}, err
+			return claimHead{}, err
 		}
-		head, err := firstEligibleRouteTx(ctx, tx, demand, &scoped, route, []capability.UnitKind{route.Unit.Kind})
+		head, err := firstEligibleRouteTx(ctx, tx, demand, template, route, []capability.UnitKind{route.Unit.Kind})
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}
 		if err != nil {
-			return UnitRef{}, err
+			return claimHead{}, err
 		}
 		if best == nil || compareClaimHeads(head, *best) < 0 {
 			best = &head
 		}
 	}
 	if best == nil {
-		return UnitRef{}, notFound("eligible work", "")
+		return claimHead{}, notFound("eligible work", "")
 	}
-	return best.Unit, nil
+	return *best, nil
 }
 
 func claimRouteHeadsTx(ctx context.Context, tx *storeTx, template *claimSQL) ([]claimHead, error) {

@@ -209,6 +209,7 @@ type claimSQL struct {
 	projected       bool
 	target          *UnitRef
 	team            string
+	ordinal         *int64
 	route           bool
 	candidate       bool
 	search          bool
@@ -388,26 +389,27 @@ func (q *claimSQL) anyAlternative(selector string, test func(string) string) str
 
 type claimTeamFacts struct {
 	Team      string `json:"team"`
+	Ordinal   int64  `json:"-"`
 	Available int64  `json:"available"`
 	Balance   int64  `json:"balance"`
 	Held      int    `json:"held"`
 }
 
 func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]claimTeamFacts, error) {
-	query := liveTeamsSQL
+	query := `SELECT name,claim_award_ordinal FROM teams WHERE name IN (` + liveTeamsSQL + `)`
 	var args []any
 	if scopeTeam != "" {
 		query += ` AND name=?`
 		args = append(args, scopeTeam)
 	}
-	rows, err := tx.queryContext(ctx, query+` ORDER BY name`, args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY claim_award_ordinal,name`, args...)
 	if err != nil {
 		return nil, err
 	}
-	var teams []Team
+	var teams []claimTeamFacts
 	for rows.Next() {
-		var team Team
-		if err := rows.Scan(&team); err != nil {
+		var team claimTeamFacts
+		if err := rows.Scan(&team.Team, &team.Ordinal); err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
 		teams = append(teams, team)
@@ -415,8 +417,8 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]cla
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
-	out := make([]claimTeamFacts, 0, len(teams))
-	for _, team := range teams {
+	for i := range teams {
+		team := Team(teams[i].Team)
 		standing, err := trustStandingTx(ctx, tx, team, tx.now(ctx))
 		if err != nil {
 			return nil, err
@@ -429,9 +431,11 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]cla
 		if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(c.cpu_class),0) FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE a.team=? AND a.executor_class='cloud' AND a.settled_at IS NULL`, team).Scan(&active); err != nil {
 			return nil, err
 		}
-		out = append(out, claimTeamFacts{Team: string(team), Available: standing.CloudVCPU - active, Balance: balance, Held: boolInt(standing.HoldCause != "" || standing.Tier == "Held")})
+		teams[i].Available = standing.CloudVCPU - active
+		teams[i].Balance = balance
+		teams[i].Held = boolInt(standing.HoldCause != "" || standing.Tier == "Held")
 	}
-	return out, nil
+	return teams, nil
 }
 
 func (o *Operator) claimObserversTx(ctx context.Context, tx *storeTx, current claimFacts, scopeTeam string) ([]claimFacts, error) {
@@ -678,7 +682,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	}
 	fundingCTEs := `,sized AS MATERIALIZED (SELECT unfunded.*,` + class + ` AS cpu_class FROM unfunded),eligible AS MATERIALIZED (SELECT sized.*,rates.price FROM sized LEFT JOIN rates ON rates.cpu_class=sized.cpu_class JOIN team_facts tf ON tf.team=sized.team WHERE ` + funded + ` AND ` + overflowAllowed + `)`
 	if !fundingNeeded {
-		fundingCTEs = `,eligible AS ` + materialized + ` (SELECT sized.*,NULL AS cpu_class,NULL AS price FROM unfunded sized WHERE ` + overflowAllowed + `)`
+		fundingCTEs = `,eligible AS ` + materialized + ` (SELECT sized.*,CAST(NULL AS BIGINT) AS cpu_class,CAST(NULL AS BIGINT) AS price FROM unfunded sized WHERE ` + overflowAllowed + `)`
 	}
 	ctes := `WITH RECURSIVE clock(now) AS (SELECT ` + clock + `),` + currentCTE + `claimants(facts,team,is_cloud) AS ` + claimantMaterialized + ` (` + claimants + `),
  team_facts AS MATERIALIZED (SELECT ` + q.at("tf.value", "team") + ` AS team,` + q.number(q.at("tf.value", "available")) + ` AS available,` + q.number(q.at("tf.value", "balance")) + ` AS balance,` + q.number(q.at("tf.value", "held")) + ` AS held FROM ` + q.array(teamsParam, "tf") + `),

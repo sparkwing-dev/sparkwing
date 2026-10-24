@@ -1159,7 +1159,8 @@ All capability names below are in `internal/capability`.
 | `apierr.WriteHTTP` | Write the error envelope and Retry-After without plain-text fallbacks. |
 | `apierr.WriteJSON` | Write one JSON error line for CLI stderr. |
 | `blob.NewFilesystem`, `blob.NewS3` | Physical backends own object validation, transfer signing and byte verification. |
-| `controller.NewCloudFrontDataBackend` | Wrap S3 downloads with CloudFront for public-ingress requests. Direct requests and uploads retain the backend signer. Physical operations and log deletion remain on S3. |
+| `controller.ParseCloudFrontDataConfig` | Validate CloudFront download signing before opening object storage. |
+| `controller.CloudFrontDataConfig.Backend` | Wrap S3 downloads with CloudFront for public-ingress requests. Direct requests and uploads retain the backend signer. Physical operations and log deletion remain on S3. |
 | `controller.PaymentSettler`, `Server.WithPayments` | Supply C1 settlement to the signed Stripe callback. The server registers `/webhooks/stripe` through `PolicyRouter` and passes only verified events to the store. |
 | `controller.Server.WithAuthorization` | Configure the shared verifier, bindings, transport identity and CSRF adapters before constructing the server handler. Missing adapters fail closed. |
 | [`routepolicy.Authorization`](../../../internal/routepolicy/policy.go), [`controllerwire.Endpoint`](../../../internal/controllerwire/endpoint.go), [`routepolicy.Router`](../../../internal/routepolicy/policy.go) | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |

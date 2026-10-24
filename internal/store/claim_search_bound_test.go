@@ -167,6 +167,35 @@ func TestClaimSearchPreservesTeamFairShareBeforeArrival(t *testing.T) {
 	}
 }
 
+func TestClaimSearchDoesNotExamineLaterFairShareTeams(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE claim_awards SET ordinal=2`)
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET claim_award_ordinal=CASE name WHEN 'a' THEN 1 ELSE 2 END`)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET node_id='later-team' WHERE team='b'`)
+	var later atomic.Int64
+	countClaimNodeVisits(t, s, func(id string) {
+		if id == "later-team" {
+			later.Add(1)
+		}
+	})
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil || claim.Team != "a" {
+		t.Fatalf("claim=%+v error=%v; want team a", claim, err)
+	}
+	if got := later.Load(); got != 0 {
+		t.Fatalf("examined %d nodes from a later fair-share team", got)
+	}
+}
+
+func TestClaimSearchTiedTeamsKeepArrivalOrder(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=2 WHERE team='a'`)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil || claim.Team != "b" {
+		t.Fatalf("claim=%+v error=%v; want older work from tied team b", claim, err)
+	}
+}
+
 func TestClaimSearchRunHostDoesNotExamineOtherRuns(t *testing.T) {
 	s, demand := unitClaimFixture(t)
 	host, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: demand.CapabilityPrefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})

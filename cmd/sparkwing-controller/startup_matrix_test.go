@@ -105,6 +105,7 @@ func TestStartupConfigurationValidationPrecedesRuntime(t *testing.T) {
 		{"Google secret without client", map[string]string{credGoogleClientSecret: "secret"}, nil, "Google sign-in"},
 		{"Google without redirects", map[string]string{credGoogleClientSecret: "secret"}, []string{"--google-client-id=client"}, "--oauth-redirect-uris"},
 		{"invalid redirect without provider", nil, []string{"--oauth-redirect-uris=http://example.com/callback"}, "--oauth-redirect-uris"},
+		{"GitHub invalid redirect", nil, []string{"--github-client-id=client", "--oauth-redirect-uris=not-a-url"}, "--oauth-redirect-uris"},
 		{"invalid lifetime without key", nil, []string{"--oidc-token-ttl=2h"}, "token lifetime"},
 		{"Google invalid redirect", map[string]string{credGoogleClientSecret: "secret"}, []string{"--google-client-id=client", "--oauth-redirect-uris=http://example.com/callback"}, "--oauth-redirect-uris"},
 		{"OIDC without origin", map[string]string{credOIDCKey: key}, nil, "--external-url"},
