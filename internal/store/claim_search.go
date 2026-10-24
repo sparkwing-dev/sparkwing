@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // Each route is an indexed requirement set, not a remembered scan position.
@@ -79,17 +80,34 @@ func (q *claimSQL) sourceScope(alias string, kind capability.UnitKind) string {
 			conditions = append(conditions, alias+`.source_node_id=`+q.param(string(q.target.NodeID)), alias+`.source_generation=`+q.param(q.target.SourceGeneration))
 		}
 	}
-	if q.after != nil {
-		a := q.after
-		arrived, run, node, generation := alias+`.ready_at`, alias+`.run_id`, alias+`.node_id`, `0`
+	if q.candidate {
+		conditions = append(conditions, alias+`.team=candidate.team`)
+		column := `run_id`
 		if alias == "t" {
-			arrived, run, node = alias+`.available_at`, alias+`.id`, `''`
+			column = `id`
+		}
+		conditions = append(conditions, alias+`.`+column+`=candidate.run_id`)
+		if alias == "n" {
+			conditions = append(conditions, `n.node_id=candidate.node_id`)
 		}
 		if alias == "e" {
-			arrived, node, generation = q.evaluationArrivalSQL(), alias+`.source_node_id`, alias+`.source_generation`
+			conditions = append(conditions, `e.source_node_id=candidate.node_id`, `e.source_generation=candidate.source_generation`)
 		}
-		conditions = append(conditions, `(`+arrived+`,`+run+`,`+q.param(string(kind))+`,`+node+`,`+generation+`)>(`+q.param(a.Arrived)+`,`+q.param(string(a.Unit.RunID))+`,`+q.param(string(a.Unit.Kind))+`,`+q.param(string(a.Unit.NodeID))+`,`+q.param(a.Unit.SourceGeneration)+`)`)
 	}
+	if q.search && kind != capability.UnitEval {
+		conditions = append(conditions, alias+`.claim_requirements=`+q.param(q.requirement))
+		if q.context != "" {
+			conditions = append(conditions, alias+`.claim_context=`+q.param(q.context))
+		}
+	}
+	if q.runScope != "" {
+		run := alias + `.run_id`
+		if alias == "t" {
+			run = alias + `.id`
+		}
+		conditions = append(conditions, run+` IN (SELECT id FROM bound_runs)`)
+	}
+
 	if len(conditions) == 0 {
 		return `1=1`
 	}
@@ -146,7 +164,7 @@ func (q *claimSQL) requirementRoutes(current claimFacts) (string, error) {
 }
 
 func (template *claimSQL) routesSQL() (string, []any, error) {
-	q := claimSQL{dialect: template.dialect, route: true}
+	q := claimSQL{dialect: template.dialect, route: true, team: template.team}
 	clock := q.param(template.now)
 	routes, err := q.requirementRoutes(template.facts[0])
 	if err != nil {
@@ -177,101 +195,159 @@ func decodeClaimHead(head *claimHead, raw string) error {
 }
 
 func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL) (UnitRef, error) {
-	query, args, err := template.routesSQL()
+	current := template.facts[0]
+	if current.BindRun != "" || len(current.Pushes) > 0 {
+		query, err := template.query(template.facts, template.teams, template.rates, template.kinds, demand, template.now)
+		if err != nil {
+			return UnitRef{}, err
+		}
+		return queryClaimTx(ctx, tx, template, query)
+	}
+	scoped := *template
+	scoped.facts = slices.Clone(template.facts)
+	scoped.facts[0].Excluded = slices.Clone(current.Excluded)
+	allowed := map[string]bool{}
+	for _, team := range template.teams {
+		if current.Cloud == 0 && current.Team != team.Team || slices.Contains(current.Excluded, team.Team) {
+			continue
+		}
+		runnable, err := claimTeamRunnableTx(ctx, tx, Team(team.Team), template)
+		if err != nil {
+			return UnitRef{}, err
+		}
+		if runnable {
+			allowed[team.Team] = true
+		} else {
+			scoped.facts[0].Excluded = append(scoped.facts[0].Excluded, team.Team)
+		}
+	}
+	if len(allowed) == 0 {
+		return UnitRef{}, notFound("eligible work", "")
+	}
+	heads, err := claimRouteHeadsTx(ctx, tx, &scoped)
 	if err != nil {
 		return UnitRef{}, err
+	}
+	held, err := rankingHeldContextsTx(ctx, tx, demand, &scoped, heads)
+	if err != nil {
+		return UnitRef{}, err
+	}
+	heldKeys := map[[2]string]bool{}
+	for _, h := range held {
+		heldKeys[[2]string{string(h.Team), h.Context}] = true
+	}
+	heads = slices.DeleteFunc(heads, func(h claimHead) bool { return heldKeys[[2]string{string(h.Team), h.Context}] })
+	slices.SortFunc(heads, compareClaimHeads)
+	var best *claimHead
+	for _, route := range heads {
+		if best != nil && compareClaimHeads(route, *best) >= 0 {
+			break
+		}
+		scoped.placementFree, scoped.preferencesFree, err = claimPlacementFreeTx(ctx, tx, route.Team, route.Unit, scoped.policy)
+		if err != nil {
+			return UnitRef{}, err
+		}
+		head, err := firstEligibleRouteTx(ctx, tx, demand, &scoped, route, []capability.UnitKind{route.Unit.Kind})
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return UnitRef{}, err
+		}
+		if best == nil || compareClaimHeads(head, *best) < 0 {
+			best = &head
+		}
+	}
+	if best == nil {
+		return UnitRef{}, notFound("eligible work", "")
+	}
+	return best.Unit, nil
+}
+
+func claimRouteHeadsTx(ctx context.Context, tx *storeTx, template *claimSQL) ([]claimHead, error) {
+	query, args, err := template.routesSQL()
+	if err != nil {
+		return nil, err
 	}
 	rows, err := tx.queryContext(ctx, query, args...)
 	if err != nil {
-		return UnitRef{}, err
+		return nil, err
 	}
 	var heads []claimHead
 	for rows.Next() {
-		var head claimHead
+		var h claimHead
 		var raw sql.NullString
-		if err = rows.Scan(&head.Team, &head.Requirements, &head.Ordinal, &head.Context, &raw); err != nil {
-			return UnitRef{}, errors.Join(err, rows.Close())
+		if err = rows.Scan(&h.Team, &h.Requirements, &h.Ordinal, &h.Context, &raw); err != nil {
+			return nil, errors.Join(err, rows.Close())
 		}
 		if !raw.Valid {
 			continue
 		}
-		if err = decodeClaimHead(&head, raw.String); err != nil {
-			return UnitRef{}, errors.Join(err, rows.Close())
+		if err = decodeClaimHead(&h, raw.String); err != nil {
+			return nil, errors.Join(err, rows.Close())
 		}
-		heads = append(heads, head)
+		heads = append(heads, h)
 	}
-	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-		return UnitRef{}, err
+	return heads, errors.Join(rows.Err(), rows.Close())
+}
+
+func claimTeamRunnableTx(ctx context.Context, tx *storeTx, team Team, template *claimSQL) (bool, error) {
+	current := template.facts[0]
+	if current.Metered != 0 {
+		for _, facts := range template.teams {
+			if facts.Team != string(team) {
+				continue
+			}
+			if facts.Held != 0 {
+				return false, nil
+			}
+			var minPrice int64
+			minClass := match.CloudSizes()[0].CreditClass
+			for _, rate := range template.rates {
+				if minPrice == 0 || rate.MicroPerSecond < minPrice {
+					minPrice = rate.MicroPerSecond
+				}
+			}
+			if facts.Balance < minPrice*SliceSeconds || current.Cloud != 0 && facts.Available < minClass {
+				return false, nil
+			}
+		}
 	}
-	held, err := rankingHeldContextsTx(ctx, tx, demand, template, heads)
+	if len(current.Pools) > 0 && current.Launcher == 0 && current.Trust != "any" {
+		if current.Trust != "" {
+			return false, nil
+		}
+		q := claimSQL{dialect: template.dialect}
+		q.args = append(q.args, team)
+		pools, err := q.jsonParam(current.Pools)
+		if err != nil {
+			return false, err
+		}
+		var reserved bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM secrets s WHERE s.team=? AND `+q.contains(pools, "s.only_on")+`)`, q.args...).Scan(&reserved); err != nil {
+			return false, err
+		}
+		if reserved {
+			return false, nil
+		}
+	}
+	if current.Cloud == 0 || len(template.overflow) == 0 {
+		return true, nil
+	}
+	q := claimSQL{dialect: template.dialect}
+	overflow, err := q.jsonParam(template.overflow)
 	if err != nil {
-		return UnitRef{}, err
+		return false, err
 	}
-	if len(held) > 0 {
-		heldKeys := map[[2]string]bool{}
-		for _, head := range held {
-			heldKeys[[2]string{string(head.Team), head.Context}] = true
-		}
-		heads = slices.DeleteFunc(heads, func(head claimHead) bool {
-			return heldKeys[[2]string{string(head.Team), head.Context}]
-		})
+	q.args = append(q.args, team)
+	cloud := `0`
+	if current.Cloud != 0 {
+		cloud = `1`
 	}
-	const rejectedHeadLimit = 8
-	for rejected := 0; len(heads) > 0; rejected++ {
-		slices.SortFunc(heads, compareClaimHeads)
-		head := heads[0]
-		heads = heads[1:]
-		named := demand
-		named.Target = &head.Unit
-		q := claimSQL{dialect: template.dialect, policy: template.policy, overflow: template.overflow}
-		facts := claimFactsForTeams(template.facts, map[string]bool{string(head.Team): true})
-		q.placementFree, q.preferencesFree, err = claimPlacementFreeTx(ctx, tx, head.Team, head.Unit, template.policy)
-		if err != nil {
-			return UnitRef{}, err
-		}
-		teams := slices.DeleteFunc(slices.Clone(template.teams), func(f claimTeamFacts) bool { return f.Team != string(head.Team) })
-		query, err = q.query(facts, teams, template.rates, []capability.UnitKind{head.Unit.Kind}, named, template.now)
-		if err != nil {
-			return UnitRef{}, err
-		}
-		unit, err := queryClaimTx(ctx, tx, &q, query)
-		if err == nil {
-			return unit, nil
-		}
-		if !errors.Is(err, ErrNotFound) {
-			return UnitRef{}, err
-		}
-		if rejected+1 == rejectedHeadLimit {
-			// Other teams keep their turn without walking this route's backlog.
-			if len(heads) == 0 {
-				break
-			}
-			q := claimSQL{dialect: template.dialect, policy: template.policy, overflow: template.overflow, heads: heads}
-			query, err := q.query(template.facts, template.teams, template.rates, template.kinds, demand, template.now)
-			if err != nil {
-				return UnitRef{}, err
-			}
-			return queryClaimTx(ctx, tx, &q, query)
-		}
-		// Rejected heads advance only this transaction's merge of indexed routes.
-		next := claimSQL{dialect: template.dialect, route: true, after: &head}
-		clock := next.param(template.now)
-		team := next.param(string(head.Team))
-		requirements := next.param(head.Requirements)
-		context := next.param(head.Context)
-		query = `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),route(team,requirements,context) AS (SELECT ` + team + `,` + requirements + `,` + context + `) SELECT ` + next.headSQL(template.kinds) + ` FROM route CROSS JOIN clock`
-		var raw sql.NullString
-		if err = tx.QueryRowContext(ctx, query, next.args...).Scan(&raw); err != nil {
-			return UnitRef{}, err
-		}
-		if raw.Valid {
-			if err = decodeClaimHead(&head, raw.String); err != nil {
-				return UnitRef{}, err
-			}
-			heads = append(heads, head)
-		}
-	}
-	return UnitRef{}, notFound("eligible work", "")
+	query := `WITH overflow_facts AS (SELECT ` + q.at("of.value", "team") + ` AS team,` + q.at("of.value", "account") + ` AS account,` + q.number(q.at("of.value", "used_seconds")) + ` AS used_seconds,` + q.at("of.value", "monthly_minutes") + ` AS monthly_minutes FROM ` + q.array(overflow, "of") + `) SELECT EXISTS(SELECT 1 FROM (SELECT r.team,r.created_principal,` + q.blob("r.request_json") + ` AS request FROM runs r WHERE r.team=? AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute') sized WHERE ` + q.overflowAllowedSQL("sized", cloud) + `)`
+	var allowed bool
+	err = tx.QueryRowContext(ctx, query, q.args...).Scan(&allowed)
+	return allowed, err
 }
 
 // Placement-free work needs no ranking or preference relation in the SQL plan.
@@ -386,4 +462,34 @@ func claimProofFactsTx(ctx context.Context, tx *storeTx, heads []claimHead, fact
 		selected = append(selected, fact)
 	}
 	return selected, nil
+}
+
+func firstEligibleRouteTx(ctx context.Context, tx *storeTx, demand UnitDemand, template *claimSQL, route claimHead, kinds []capability.UnitKind) (claimHead, error) {
+	outer := claimSQL{dialect: template.dialect, team: string(route.Team), search: true, requirement: route.Requirements, context: route.Context}
+	clock := outer.param(template.now)
+	source := outer.source(kinds)
+	teams := slices.DeleteFunc(slices.Clone(template.teams), func(team claimTeamFacts) bool { return team.Team != string(route.Team) })
+	facts := claimFactsForTeams(template.facts, map[string]bool{string(route.Team): true})
+	inner := claimSQL{dialect: template.dialect, policy: template.policy, overflow: template.overflow, candidate: true, placementFree: template.placementFree, preferencesFree: template.preferencesFree}
+	queued := demand
+	queued.Target = nil
+	eligible, err := inner.query(facts, teams, template.rates, kinds, queued, template.now)
+	if err != nil {
+		return claimHead{}, err
+	}
+	order := `candidate.arrived,candidate.run_id`
+	if len(kinds) != 1 || kinds[0] == capability.UnitNode || kinds[0] == capability.UnitEval {
+		order += `,candidate.node_id`
+	}
+	if len(kinds) != 1 || kinds[0] == capability.UnitEval {
+		order += `,candidate.source_generation`
+	}
+	query := `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)) SELECT candidate.team,candidate.run_id,candidate.node_id,candidate.source_generation,candidate.kind,candidate.arrived FROM (` + source + `) candidate WHERE EXISTS (` + eligible + `) ORDER BY ` + order + ` LIMIT 1`
+	args := append(outer.args, inner.args...)
+	head := route
+	err = tx.QueryRowContext(ctx, query, args...).Scan(&head.Team, &head.Unit.RunID, &head.Unit.NodeID, &head.Unit.SourceGeneration, &head.Unit.Kind, &head.Arrived)
+	if errors.Is(err, sql.ErrNoRows) {
+		return claimHead{}, notFound("eligible work", "")
+	}
+	return head, err
 }

@@ -103,6 +103,10 @@ to exist, and it settles the answer once at startup.
 | `--external-url` | an `https` URL, an `http` URL on loopback or a Kubernetes Service (`*.svc`), or empty | The origin runners, OIDC tokens and GitHub Actions workflows name. Runners accept the same addresses. |
 | `--payment-mode` | `test`, `live` or empty | Which Stripe credentials settle payments. |
 
+Configuration is validated before startup creates the home directory, credential
+epoch or store. This includes sign-up mode, Google sign-in and callback URLs,
+OIDC keys, storage URLs and download signing configuration.
+
 Startup refuses, before it opens the store or writes any setting, when:
 
 - `--deployment=team` or `cloud` has no license, or the license does not verify,

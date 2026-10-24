@@ -62,6 +62,8 @@ CREATE TABLE runs (
     trigger_source TEXT NOT NULL DEFAULT '',
     git_branch TEXT NOT NULL DEFAULT '',
     git_sha TEXT NOT NULL DEFAULT '',
+    provenance_sha TEXT NOT NULL DEFAULT '',
+    provenance_ref TEXT NOT NULL DEFAULT '',
     repo_key TEXT NOT NULL,
     repo_display TEXT NOT NULL DEFAULT '',
     repo_identity TEXT NOT NULL DEFAULT '',
@@ -1831,3 +1833,5 @@ CREATE TABLE admission_work (
 
 CREATE INDEX idx_nodes_claim_context ON nodes(team,claim_requirements,claim_context,ready_at,run_id,node_id) WHERE status='pending' AND ready_at IS NOT NULL AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
 CREATE INDEX idx_triggers_claim_context ON triggers(team,claim_requirements,claim_context,unit_kind,available_at,id) WHERE status='pending' AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
+
+CREATE INDEX idx_runs_push_claim ON runs(team,repo_key,provenance_sha,provenance_ref,id);

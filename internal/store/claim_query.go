@@ -210,7 +210,11 @@ type claimSQL struct {
 	target          *UnitRef
 	team            string
 	route           bool
-	after           *claimHead
+	candidate       bool
+	search          bool
+	context         string
+	requirement     string
+	runScope        string
 	facts           []claimFacts
 	teams           []claimTeamFacts
 	rates           CreditRateTable
@@ -532,6 +536,7 @@ func (q *claimSQL) source(kinds []capability.UnitKind) string {
 
 func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates CreditRateTable, kinds []capability.UnitKind, demand UnitDemand, now int64) (string, error) {
 	q.facts = facts
+	q.runScope = ""
 	q.target = demand.Target
 	q.team = ""
 	if len(facts) > 0 && facts[0].Cloud == 0 {
@@ -583,6 +588,17 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 		}
 		headsCTE = `source_heads AS MATERIALIZED (SELECT ` + q.at("head.value", "Team") + ` AS team,` + q.at("head.value", "Unit", "RunID") + ` AS run_id,` + q.at("head.value", "Unit", "NodeID") + ` AS node_id,` + q.at("head.value", "Unit", "Kind") + ` AS kind,` + q.number(q.at("head.value", "Unit", "SourceGeneration")) + ` AS source_generation FROM ` + q.array(raw, "head") + `),`
 	}
+	runScopeCTE := ""
+	current := facts[0]
+	if current.BindRun != "" {
+		q.runScope = `SELECT br.id FROM runs br WHERE br.team=` + q.param(current.Team) + ` AND br.id=` + q.param(current.BindRun)
+	} else if len(current.Pushes) > 0 {
+		p := current.Pushes[0]
+		q.runScope = `SELECT br.id FROM runs br WHERE br.team=` + q.param(current.Team) + ` AND br.repo_key=` + q.param(p.RepositoryKey) + ` AND br.provenance_sha=` + q.param(p.SHA) + ` AND br.provenance_ref=` + q.param(p.Ref)
+	}
+	if q.runScope != "" {
+		runScopeCTE = `bound_runs AS MATERIALIZED (` + q.runScope + `),`
+	}
 	ready := q.source(kinds)
 	readyFilter := ""
 	if demand.Target != nil {
@@ -629,7 +645,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	ancestorParent := `CASE WHEN ` + ancestorOrigin + `='retry' THEN ar.retry_of WHEN ` + ancestorOrigin + `='child' THEN COALESCE(ar.parent_run_id,'') ELSE '' END`
 	funded := `(` + q.number(q.at("sized.facts", "metered")) + `=0 OR (sized.cpu_class IS NOT NULL AND ((rates.price IS NULL AND ` + q.number(q.at("sized.facts", "current")) + `=1) OR (tf.held=0 AND tf.balance>=rates.price*` + fmt.Sprint(SliceSeconds) + ` AND (` + q.number(q.at("sized.facts", "cloud")) + `=0 OR tf.available>=sized.cpu_class)))))`
 
-	overflowAllowed := `(` + q.number(q.at("sized.facts", "cloud")) + `=0 OR ` + q.at("sized.request", "request", "burst") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM overflow_facts of WHERE of.team=sized.team AND of.account=sized.created_principal AND ((of.monthly_minutes IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number("of.monthly_minutes") + `*60) OR (` + q.at("sized.request", "request", "burst", "overflow_minutes") + ` IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number(q.at("sized.request", "request", "burst", "overflow_minutes")) + `*60))))`
+	overflowAllowed := q.overflowAllowedSQL("sized", q.number(q.at("sized.facts", "cloud")))
 	cloudObservers := slices.ContainsFunc(sqlFacts, func(f claimFacts) bool { return f.Cloud != 0 })
 	if q.holdProof && !cloudObservers {
 		overflowAllowed = `1=1`
@@ -669,7 +685,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
  ` + claimantScopes + `,
  overflow_facts AS MATERIALIZED (SELECT ` + q.at("of.value", "team") + ` AS team,` + q.at("of.value", "account") + ` AS account,` + q.number(q.at("of.value", "used_seconds")) + ` AS used_seconds,` + q.at("of.value", "monthly_minutes") + ` AS monthly_minutes FROM ` + q.array(overflowParam, "of") + `),
  rates AS MATERIALIZED (SELECT ` + q.number(q.at("rate.value", "cores")) + ` AS cpu_class,` + q.number(q.at("rate.value", "micro_per_second")) + ` AS price FROM ` + q.array(rateParam, "rate") + `),
- ` + headsCTE + `source(team,run_id,node_id,source_generation,arrived,kind,execution,requirements) AS MATERIALIZED (` + ready + `),ready AS NOT MATERIALIZED (SELECT * FROM source ` + readyFilter + `),work_input AS MATERIALIZED (` + raw + `),work AS MATERIALIZED (SELECT base.*,CASE WHEN ` + q.anywhere("base.request") + ` THEN 1 ELSE 0 END AS run_anywhere,CASE WHEN ` + q.pinned("base.selectors") + ` THEN 1 ELSE 0 END AS pinned FROM work_input base),
+ ` + runScopeCTE + headsCTE + `source(team,run_id,node_id,source_generation,arrived,kind,execution,requirements) AS MATERIALIZED (` + ready + `),ready AS NOT MATERIALIZED (SELECT * FROM source ` + readyFilter + `),work_input AS MATERIALIZED (` + raw + `),work AS MATERIALIZED (SELECT base.*,CASE WHEN ` + q.anywhere("base.request") + ` THEN 1 ELSE 0 END AS run_anywhere,CASE WHEN ` + q.pinned("base.selectors") + ` THEN 1 ELSE 0 END AS pinned FROM work_input base),
  ancestors(team,child,id,origin,parent) AS (SELECT ar.team,ar.id,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM runs ar JOIN work aw ON aw.team=ar.team AND aw.run_id=ar.id UNION SELECT a.team,a.child,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM ancestors a JOIN runs ar ON ar.team=a.team AND ar.id=a.parent),
  unfunded AS ` + materialized + ` (SELECT ` + workProjection + `,c.facts FROM work w JOIN claimant_scopes c ON c.team=w.team,clock WHERE ` + eligibility + `)` + fundingCTEs
 	placement, err := q.placementCTEs(q.policy)
@@ -854,4 +870,8 @@ func firstPreferenceHold(policy ClaimPlacement) int64 {
 func (q *claimSQL) rankingHold() string {
 	better := `EXISTS (SELECT 1 FROM admissible b WHERE ` + unitIdentitySQL("b", "w") + ` AND b.claim_rank>=0 AND b.claim_rank<w.claim_rank)`
 	return `w.claim_rank>0 AND clock.now<w.arrived+` + fmt.Sprint(int64(limits.RankingWindow)) + ` AND ` + better
+}
+
+func (q *claimSQL) overflowAllowedSQL(alias, cloud string) string {
+	return `(` + cloud + `=0 OR ` + q.at(alias+".request", "request", "burst") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM overflow_facts of WHERE of.team=` + alias + `.team AND of.account=` + alias + `.created_principal AND ((of.monthly_minutes IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number("of.monthly_minutes") + `*60) OR (` + q.at(alias+".request", "request", "burst", "overflow_minutes") + ` IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number(q.at(alias+".request", "request", "burst", "overflow_minutes")) + `*60))))`
 }

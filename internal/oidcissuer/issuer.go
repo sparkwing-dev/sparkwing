@@ -76,8 +76,8 @@ func New(issuerURL string, activePEM, publishedPEM []byte, ttl time.Duration) (*
 	if ttl == 0 {
 		ttl = DefaultTTL
 	}
-	if ttl < minTTL || ttl > maxTTL {
-		return nil, fmt.Errorf("oidcissuer: token lifetime %s is outside %s to %s", ttl, minTTL, maxTTL)
+	if err := ValidateTTL(ttl); err != nil {
+		return nil, err
 	}
 	active, err := parsePrivateKey(activePEM)
 	if err != nil {
@@ -95,6 +95,14 @@ func New(issuerURL string, activePEM, publishedPEM []byte, ttl time.Duration) (*
 		}
 	}
 	return iss, nil
+}
+
+// ValidateTTL checks a token lifetime. Zero selects DefaultTTL.
+func ValidateTTL(ttl time.Duration) error {
+	if ttl != 0 && (ttl < minTTL || ttl > maxTTL) {
+		return fmt.Errorf("oidcissuer: token lifetime %s is outside %s to %s", ttl, minTTL, maxTTL)
+	}
+	return nil
 }
 
 // validateIssuerURL accepts an https origin with no path, query, fragment

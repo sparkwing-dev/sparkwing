@@ -57,7 +57,11 @@ func cloudFrontDecode(t *testing.T, raw string) []byte {
 
 func TestCloudFrontDataBackendSignedObjectProperty(t *testing.T) {
 	objects, key, encoded := cloudFrontFixture(t)
-	backend, err := NewCloudFrontDataBackend(objects, "cdn.example.test", "key-id", encoded)
+	cfg, err := ParseCloudFrontDataConfig("cdn.example.test", "key-id", encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, err := cfg.Backend(objects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +111,11 @@ func TestCloudFrontDataBackendSignedObjectProperty(t *testing.T) {
 
 func TestCloudFrontDataBackendKeepsUploadConstraints(t *testing.T) {
 	objects, _, encoded := cloudFrontFixture(t)
-	backend, err := NewCloudFrontDataBackend(objects, "cdn.example.test", "key-id", encoded)
+	cfg, err := ParseCloudFrontDataConfig("cdn.example.test", "key-id", encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, err := cfg.Backend(objects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,24 +174,28 @@ func TestCloudFrontDataBackendKeepsUploadConstraints(t *testing.T) {
 }
 
 func TestCloudFrontDataBackendConfigurationRefusals(t *testing.T) {
-	objects, _, encoded := cloudFrontFixture(t)
+	_, _, encoded := cloudFrontFixture(t)
 	for _, domain := range []string{"", "https://cdn.example.test", "cdn.example.test/path", "user@cdn.example.test", "cdn.example.test:443", "cdn.example.test?query", "cdn.example.test#fragment", "cdn.example.test\\elsewhere", "cdn.example.test\n"} {
-		if _, err := NewCloudFrontDataBackend(objects, domain, "key-id", encoded); err == nil {
+		if _, err := ParseCloudFrontDataConfig(domain, "key-id", encoded); err == nil {
 			t.Fatalf("invalid domain %q accepted", domain)
 		}
 	}
 	for _, keyID := range []string{"", "id&Policy=other", "id\n"} {
-		if _, err := NewCloudFrontDataBackend(objects, "cdn.example.test", keyID, encoded); err == nil {
+		if _, err := ParseCloudFrontDataConfig("cdn.example.test", keyID, encoded); err == nil {
 			t.Fatal("invalid key ID accepted")
 		}
 	}
 	for _, key := range []string{"", "private-invalid-key"} {
-		_, err := NewCloudFrontDataBackend(objects, "cdn.example.test", "key-id", key)
+		_, err := ParseCloudFrontDataConfig("cdn.example.test", "key-id", key)
 		if err == nil || strings.Contains(err.Error(), key) && key != "" {
 			t.Fatalf("invalid key response = %v", err)
 		}
 	}
-	if _, err := NewCloudFrontDataBackend(nil, "cdn.example.test", "key-id", encoded); err == nil {
+	cfg, err := ParseCloudFrontDataConfig("cdn.example.test", "key-id", encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.Backend(nil); err == nil {
 		t.Fatal("missing backend accepted")
 	}
 }

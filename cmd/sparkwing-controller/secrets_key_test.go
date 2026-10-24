@@ -54,10 +54,9 @@ func keyFileIn(t *testing.T) string {
 	return generatedKeyPath(filepath.Join(t.TempDir(), "state.db"))
 }
 
-func TestConfigureSecrets_MultiTeamRefusesToStartWithoutAKey(t *testing.T) {
+func TestParseSecretsCipherMultiTeamRefusesToStartWithoutAKey(t *testing.T) {
 	cfg := deploymenttest.Team(t)
-	srv, st := secretsTestServer(t, cfg)
-	err := configureSecrets(context.Background(), srv, st, cfg, keyFileIn(t))
+	_, err := parseSecretsCipher(cfg)
 	if err == nil {
 		t.Fatal("a multi-team controller started without a secrets key")
 	}
@@ -69,7 +68,7 @@ func TestConfigureSecrets_MultiTeamRefusesToStartWithoutAKey(t *testing.T) {
 func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testing.T) {
 	srv, st := secretsTestServer(t, deployment.Config{})
 	keyPath := keyFileIn(t)
-	if err := configureSecrets(context.Background(), srv, st, deployment.Config{}, keyPath); err != nil {
+	if err := configureSecrets(context.Background(), srv, st, nil, keyPath); err != nil {
 		t.Fatalf("a single-team controller refused to start without a key: %v", err)
 	}
 	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
@@ -88,7 +87,7 @@ func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testi
 	}
 
 	restarted := controller.New(st, nil)
-	if err := configureSecrets(context.Background(), restarted, st, deployment.Config{}, keyPath); err != nil {
+	if err := configureSecrets(context.Background(), restarted, st, nil, keyPath); err != nil {
 		t.Fatalf("restart with the generated key: %v", err)
 	}
 	if code, _ := postSecret(t, restarted, st, "OTHER", "second-value"); code != http.StatusOK {
@@ -99,7 +98,7 @@ func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testi
 func TestConfigureSecrets_SingleTeamSQLiteRefusesASecondKeyForSealedRows(t *testing.T) {
 	srv, st := secretsTestServer(t, deployment.Config{})
 	keyPath := keyFileIn(t)
-	if err := configureSecrets(context.Background(), srv, st, deployment.Config{}, keyPath); err != nil {
+	if err := configureSecrets(context.Background(), srv, st, nil, keyPath); err != nil {
 		t.Fatal(err)
 	}
 	if code, _ := postSecret(t, srv, st, "TOKEN", "private-value"); code != http.StatusOK {
@@ -108,7 +107,7 @@ func TestConfigureSecrets_SingleTeamSQLiteRefusesASecondKeyForSealedRows(t *test
 	if err := os.Remove(keyPath); err != nil {
 		t.Fatal(err)
 	}
-	err := configureSecrets(context.Background(), controller.New(st, nil), st, deployment.Config{}, keyPath)
+	err := configureSecrets(context.Background(), controller.New(st, nil), st, nil, keyPath)
 	if err == nil || !strings.Contains(err.Error(), keyPath) {
 		t.Fatalf("start after losing the key = %v, want a refusal naming %s", err, keyPath)
 	}

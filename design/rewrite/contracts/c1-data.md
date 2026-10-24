@@ -843,19 +843,24 @@ scope, allowed pools and creator. Seal identities, source revisions, timestamps 
 do not split otherwise equal contexts. The context row stores
 only its identity, requirement set and unit kind; it duplicates no run policy.
 
-Label lookups select matching requirement sets, then context routes. Ready
-source indexes use team, requirement set, context, arrival and identity. A
-transaction-local merge selects one head per unit kind from each route and
-compares those heads in the award order. Nodes and triggers carry explicit
-contexts; only evaluations use the context-free route. Indexed requirement
-alternatives narrow the proof's observers; the SQL predicate checks every term.
-The shared eligibility and ranking predicate proves holds in a batch. A proof supplied by an unbound shared
-claimant skips that context: its earliest ready job is inside the ranking
-window, so every later ready job is held too. Personal, bound and Actions
-claimants cannot supply that proof because they can distinguish runs within a
-context. Selected heads still pass
-the complete predicate and atomic award recheck. Rejected heads advance only
-that transaction's route. Named rechecks seek the complete team and unit key.
+Push-bound Actions claims seek runs by team, repository key and sealed provenance
+SHA/ref, then use the shared eligibility predicate. Run-bound and here claims seek
+the bound run directly. Intake writes the provenance index from the sealed identity.
+Named rechecks seek the complete team and unit key.
+
+Broad claimants examine teams by their last committed award ordinal. Funding,
+standing, pool trust and exclusions are checked before node lookups. Overflow uses
+the same predicate at the run-policy check and the award check. Label lookups select
+matching requirement sets, then immutable context routes. Indexed heads prove
+shared-claimant ranking holds. Each remaining route selects its first eligible
+source through a correlated application of the canonical predicate. There is no
+rejected-head probe cap, cursor advancement or fallback batch.
+
+This bounds node visits for repeated work sharing one policy route. Independent
+account/request overflow policies and distinct job preferences can still increase
+run-policy and context work under arbitration. An absolute bound by team count
+requires a separate policy or eligibility-index decision.
+
 Local foreground intake seals `Request.LocalForeground`. An omitted dispatch
 is resolved from the request before checking foreground authority. The shared predicate
 reserves the original intake's generation-zero trigger for a named claim by the

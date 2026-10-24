@@ -487,7 +487,11 @@ func TestDataReadHTTPChoosesCloudFrontOnlyForIngress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backend, err := controller.NewCloudFrontDataBackend(objects, "cdn.example.test", "key-id", private)
+	cfg, err := controller.ParseCloudFrontDataConfig("cdn.example.test", "key-id", private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, err := cfg.Backend(objects)
 	if err != nil {
 		t.Fatal(err)
 	}

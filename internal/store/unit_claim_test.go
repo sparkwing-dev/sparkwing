@@ -57,6 +57,17 @@ func unitClaimFixtureStore(t *testing.T, s *Store) (*Store, UnitDemand) {
 func indexFixtureUnit(t *testing.T, s *Store, team Team, unit UnitRef) {
 	t.Helper()
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		var request []byte
+		if err := tx.QueryRowContext(t.Context(), `SELECT request_json FROM runs WHERE team=? AND id=?`, team, unit.RunID).Scan(&request); err != nil {
+			return err
+		}
+		var sealed runspec.SealedRequest
+		if err := json.Unmarshal(request, &sealed); err != nil {
+			return err
+		}
+		if _, err := tx.execContext(t.Context(), `UPDATE runs SET provenance_sha=?,provenance_ref=? WHERE team=? AND id=?`, sealed.Provenance.SHA(), sealed.Provenance.Ref(), team, unit.RunID); err != nil {
+			return err
+		}
 		var raw, execution []byte
 		var terms []string
 		if unit.Kind == capability.UnitNode {
