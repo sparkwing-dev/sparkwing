@@ -30,11 +30,11 @@ func retryActionFixture(t *testing.T, value string, accepted bool) (*serverFixtu
 	s.WithEngineController(NewEngineController(s.store, EngineController{VersionPolicy: engineVersionPolicy(&engineVersionFake{})}))
 	engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.control'`)
 	input := runspec.Request{
-		Version: 1, Team: "a", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
+		Version: 1, Team: "a", Pipeline: "ci", Origin: runspec.OriginTrigger, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
 		Actor:         runspec.Actor{Kind: "account", ID: "original-author"},
 		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main"},
 		RequestedArgs: map[string]string{"public": "visible", "secret": value}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"secret"}},
-		Source: runspec.Source{Ref: strings.Repeat("a", 40), Location: runspec.SourceLocation{LocalCheckout: "/private/original-checkout", PipelineDir: ".sparkwing"}},
+		Source: runspec.Source{Ref: strings.Repeat("a", 40), Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
 	}
 	sealed, err := runspec.SealRequest(input, runspec.IntakeFacts{RunID: "run", AdmittedAt: time.Unix(1, 0).UTC(), Provenance: assertedProvenance(t, "ci", "refs/heads/main", strings.Repeat("a", 40))})
 	if err != nil {
