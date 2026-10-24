@@ -35,7 +35,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).discoverAccountDeletionLocks":   "deleting one deployment account discovers all affected memberships and ledger teams before taking the complete lock set",
 
 	"(*Operator).ListRuns":                  "the operator lists runs across all tenants",
-	"(*Operator).GetLatestRun":              "the operator locates the latest pipeline run across tenants",
+	"(*Operator).getLatestRun":              "the operator locates the latest pipeline run across tenants",
 	"(*Operator).ComputeUsage":              "deployment capacity sums metered awards from every tenant",
 	"(*Operator).ListWaitingNodes":          "deployment attention samples every tenant queue before updating individual tenant nodes",
 	"(*Operator).MarkBlobTombstones":        "leased garbage collection compares every tenant blob with the complete live reference graph",

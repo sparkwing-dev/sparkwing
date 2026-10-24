@@ -133,7 +133,7 @@ The integration amendment implements the lead's 2026-10-17 retry-selection decis
 
 Store.CreateOperatorTeam(ctx, Authorized, slug, displayName) returns one
 capability.Issued only after commit. It re-resolves the operator, creates a
-dedicated account and owner membership, and calls Store.Issue with the trusted
+dedicated account and owner membership, and calls Store.issue with the trusted
 ProvisionTeamAdmin origin. A transaction-local created-team record confines
 that origin to the exact new team and account. The complete owner grant table
 applies. Ordinary rotation rechecks current membership.
@@ -522,7 +522,7 @@ in the same transaction. Exact failure replay remains valid after closure.
 
 ## Seeded bootstrap and legacy execution retirement
 
-`ProvisionSpec.Seed` is validated by `Store.Issue` before any origin can issue.
+`ProvisionSpec.Seed` is validated by `Store.issue` before any origin can issue.
 Only the bootstrap origin accepts it. `Store.EnsureBootstrapCapability` supplies
 C2's startup adapter. The existing settings table retains the consumed
 `bootstrap_admin` gate independently of capability retention. Gate locking,
@@ -607,7 +607,7 @@ actor, count limit, size limit and default-team exemption remain unchanged.
 
 `Store.MintClaimToken`, its private launcher issuer and `MaxClaimTokenLifetime`
 are removed. The only production claim-token mint left is the legacy runner
-path pending its caller cutover. Current awards use `Store.Issue`. Legacy
+path pending its caller cutover. Current awards use `Store.issue`. Legacy
 transport tests seed presentation state without a production launcher issuer.
 The unused `Operator.TeamRunIDs` report is removed with its legacy per-run
 object-purge contract. Tenant purge keeps its scoped inventory checks.
@@ -681,7 +681,7 @@ capability-backed session retains its parent's team and ends with that parent.
 Revocation updates the envelope and authority generation. Descendants
 retain their ancestry check. Every effect rolls back after a failed write.
 
-`SchemaTables` is the single table inventory in `schema.go`. Runtime purge,
+`schemaTables` is the single table inventory in `schema.go`. Runtime purge,
 tenant SQL guards and shape tests use it. Operator-owned `audit_events`,
 `capabilities` and `sessions` may carry a nullable team. Audit rows are retained
 after team deletion and expire only by age. Human actors and account subjects use
@@ -925,7 +925,7 @@ The unused `Tenant.SetRepoDispatch`, `Store.SeedToken`,
 `Tenant.SourceClaimant` and `Tenant.GitCredentialMachines` are removed.
 The capability issuer, binding transactions, sealed intake and source release
 own their retained responsibilities. Seeded startup bootstrap uses the gated
-`Store.Issue` transaction described above.
+`Store.issue` transaction described above.
 
 Installation withdrawal and listing reconciliation share one targeted receipt.
 It commits the complete original repository set and aggregate result with the
@@ -979,7 +979,7 @@ deployment service and operator roots. Execution awards, push credentials,
 node-host credentials and private authority fields stay outside this inventory.
 
 Rotation locks the predecessor, rechecks current ownership and issues its
-replacement through Store.Issue. Delegated credentials keep their original
+replacement through Store.issue. Delegated credentials keep their original
 parent. Provisioned roots keep their origin and registration in CapabilityRecord.Origin.
 The committing transaction preserves scopes, owner, metering and source consent,
 checks current origin or parent ceilings, schedules the predecessor's grace
@@ -1607,7 +1607,7 @@ owner insertion. The policy checks credential-free remote identity, local-store
 authority and the checkout-relative pipeline directory before supplying it.
 Retry carries the original location with the original SHA.
 
-`Store.DelegateCapability` and `Store.ProvisionCapability` wrap `Store.Issue` in
+`Store.DelegateCapability` and `Store.ProvisionCapability` wrap `Store.issue` in
 the committing transaction. Ordinary delegation invokes C2's `ValidateDelegation`
 on current parent authority and retains that parent. All issuance adapters return
 the one-time bearer after commit and discard it on validation or storage errors.
@@ -1998,8 +1998,8 @@ rules, both run-input seals, attempt and repository identity, blob records and
 reference authority, concurrency continuity, completion revisions and retention.
 Internal Go and SQL identifiers use node; customer JSON uses job.
 
-- `internal/store/schema.sql` is the only baseline. `TranslateSchema` is a signature.
-  Neutral types are TEXT, BIGINT, DOUBLE PRECISION and BLOB. PostgreSQL maps
+- `internal/store/schema.sql` is the only baseline. The private `translateSchema`
+  maps neutral types for each dialect. Neutral types are TEXT, BIGINT, DOUBLE PRECISION and BLOB. PostgreSQL maps
   BLOB to BYTEA without changing checks, keys or predicates.
 - `internal/store` owns transactional enforcement. `Tenant` carries an explicit,
   registered team and cannot widen itself to the raw store. `OperatorStore`
@@ -2053,7 +2053,7 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
    when the increment reaches three. OOM is an ordinary job failure.
 7. Every pending or terminal transition clears claim columns. A cancellation
    of claimed/running work sets `cancel_requested_at` and emits
-   `job_cancel_requested`; it does not emit a terminal event. `NodeEvents`
+   `job_cancel_requested`; it does not emit a terminal event. `nodeEvents`
    selects by requested target plus `RequestOnly`. Cancellation wins when a
    lapsed claim is reaped. Claimed/running work drains before the run finishes.
 8. State, attempt closure, output references, manifest authority, lifecycle
@@ -2960,7 +2960,7 @@ hold no competing idempotency fields.
 
 ## Schema inventory
 
-The final baseline contains 83 tables and 101 explicit indexes. `SchemaTables`
+The final baseline contains 83 tables and 101 explicit indexes. `schemaTables`
 classifies 66 tenant and 17 operator tables. It retains accounts, identity,
 GitHub App/Actions, schedules, sizing, admission, approvals, logs, metrics,
 credits, cards, git credential audits and build trust. Obsolete token,
@@ -3229,7 +3229,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Operator.RenewSingletonLease` | RenewSingletonLease refuses an expired fence; owner recovery acquires a new lease instead of reviving one. |
 | `ReapedUnit` | ReapedUnit reports recovery in the same run; application retry budgets are never consumed by a lapse. |
 | `Operator.ReapUnits` | ReapUnits uses the store clock and cancellation precedence, settling billing and effects with each transition. |
-| `FinancialTables` | FinancialTables identifies records that never take a cascading run foreign key. |
 | `RetentionRequest` | RetentionRequest is executed only while the maintenance lease is live; settings are resolved inside the store. |
 | `RetentionResult` | RetentionResult reports committed removals and preserved pins; financial rows must always remain untouched. |
 | `Operator.MaintainRetention` | MaintainRetention is the single deployment pass for run, metric, object and credential expiration. |
@@ -3265,15 +3264,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.RecordSegments` | Commits immutable segments and seals under the current writer fence. |
 | `Tenant.ReadLogSegments` | Rechecks authority for the exact subject before selecting byte ranges. |
 
-### internal/store/schema.go
-
-| Export | Purpose |
-|---|---|
-| `TranslateSchema` | TranslateSchema preserves neutral constraints and maps BLOB to BYTEA for PostgreSQL. |
-| `SchemaOwner` | SchemaOwner distinguishes tenant tables from deployment authority. |
-| `SchemaTable` | SchemaTable records the owner of a baseline table. |
-| `SchemaTables` | SchemaTables classifies every table created by the neutral schema. |
-
 ### internal/store/source_release.go
 
 | Export | Purpose |
@@ -3300,8 +3290,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.ReconcileNode` | ReconcileNode decides and self-claims atomically; WaitHolder callers follow events and reconcile again after requeue. |
 | `Tenant.RenewOwner` | RenewOwner also renews self-claimed jobs and continuously live plan and job concurrency holders atomically. |
 | `Tenant.RenewNodeClaim` | RenewNodeClaim renews the exact live claim and its bound concurrency holders using the store clock. |
-| `StateEventRule` | StateEventRule makes every lifecycle event name store-owned on customer surfaces. |
-| `NodeEvents` | NodeEvents matches requested To and RequestOnly; an empty cause matches every cause for that terminal outcome. Cancellation requests emit job_cancel_requested while preserving claimed/running state until the holder drains. |
 
 ### internal/store/node_state.go
 
@@ -3317,9 +3305,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `runstate.NodeRow` | NodeRow contains the state facts consumed by the shared decision and reconciliation functions. |
 | `runstate.NodeAttempt` | NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal. |
 | `runstate.TransitionCause` | TransitionCause selects edge-specific validation rather than accepting arbitrary column updates. |
-| `EdgeGuard` | EdgeGuard names predicates that the transition re-checks after locking the row. |
-| `NodeEdge` | NodeEdge is a complete legal edge family; absence from the table means refusal. |
-| `NodeTransitions` | NodeTransitions returns fresh data so callers cannot mutate the store's legal transition table. Insertions start at pending with state_seq=0 through AcceptPlan or AcceptExpansion and are not edges. |
 | `runstate.NodeResult` | NodeResult references authorized records; raw digests alone never authorize output attachment. |
 | `runstate.MaterializeSource` | MaterializeSource preserves the read edge that permits copying another result. |
 | `runstate.ApprovalResolution` | ApprovalResolution records the resolver and policy result in the same transaction as the node edge. |
@@ -3337,8 +3322,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 |---|---|
 | `runstate.RunState` | RunState is both the persisted status and the logical state; terminal states never reopen. |
 | `runstate.RunCause` | RunCause distinguishes replay-safe lifecycle writes from trigger recovery that keeps the same run alive. |
-| `RunEdge` | RunEdge records all legal run-state families; a cancel of live work is initially request-only. |
-| `RunTransitions` | RunTransitions keeps publication, owner recovery and cooperative cancellation visible to implementers. |
 | `runstate.RunTransition` | RunTransition never accepts a client clock or effect payload; those derive from committed state. |
 | `runstate.FinishRunRequest` | FinishRunRequest binds the terminal verdict to the owner unit that must end in the same transaction. |
 | `Tenant.TransitionRun` | TransitionRun applies the run edge, its event and revisioned completion intents together. |

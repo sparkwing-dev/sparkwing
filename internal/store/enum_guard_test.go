@@ -45,11 +45,11 @@ var enumGroups = map[string]struct {
 			"CronOutcomeMissed", "CronOutcomeFailed",
 		},
 	},
-	"store.OnLimit": {
+	"store.onLimit": {
 		file: "internal/store/concurrency.go",
 		values: []string{
-			"OnLimitQueue", "OnLimitSkip",
-			"OnLimitFail", "OnLimitCancelOthers",
+			"onLimitQueue", "onLimitSkip",
+			"onLimitFail", "onLimitCancelOthers",
 		},
 	},
 }
