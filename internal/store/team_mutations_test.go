@@ -170,7 +170,7 @@ func TestTeamDeletionRetainsCheckoutAndHoldGuardsOnStoreClock(t *testing.T) {
 		t.Fatalf("open checkout: %v", err)
 	}
 	now = now.Add(time.Hour)
-	if _, err := tenant.hold(t.Context(), "dispute", "", "hold", ""); err != nil {
+	if _, err := tenant.hold(t.Context(), "dispute", "", "hold", "owner"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.DeleteAuthorizedTeam(t.Context(), a); !errors.Is(err, ErrTeamFrozen) {

@@ -37,7 +37,10 @@ func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
 		{"replay malformed after successful listing", `{"id":701}`, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s, session := credentialSessionServer(t)
+			clock := &testClock{}
+			s, session := credentialSessionServer(t, clock.option())
+			now := teststore.Now(s.store)
+			clock.pin(func() time.Time { return now })
 			engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE team='a' AND account_id='member'`)
 			unavailable := !tc.replay
 			s.WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook", HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
@@ -54,7 +57,6 @@ func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
 				engineSQL(t, s.store, `INSERT INTO cron_schedules(id,repo_path,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,team,repo_key,github_installation_id,github_repository_id) VALUES (?,?, 'build','* * * * *','UTC','skip',0,1,1,1,'a',?,7,?)`, fmt.Sprint(id), fmt.Sprintf("https://github.com/acme/r%d.git", id), fmt.Sprintf("gh:%d", id), id)
 				engineSQL(t, s.store, `INSERT INTO github_app_automation(team,repository_id,repository,installation_id,enabled_by,enabled_at,repo_key) VALUES ('a',?,?,7,'member',1,?)`, id, fmt.Sprintf("acme/r%d", id), fmt.Sprintf("gh:%d", id))
 			}
-			now := time.Now()
 			body := fmt.Sprintf(`{"action":"removed","installation":{"id":7},"repositories_removed":%s}`, tc.removed)
 			if err := s.operator.EnqueueGitHubDelivery(t.Context(), "removal", "installation_repositories", []byte(body), now); err != nil {
 				t.Fatal(err)
