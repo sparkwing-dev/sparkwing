@@ -32,14 +32,14 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 			return bindingRefusal()
 		}
 		if holdsFreeAllowance(t.team) {
-			if len(row.Value) > MaxSecretValueBytes {
+			if len(row.Value) > maxSecretValueBytes {
 				return ErrSecretLimit
 			}
 			var count, replacing int
 			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN name=? AND pipeline=? THEN 1 ELSE 0 END),0) FROM secrets WHERE team=?`, row.Name, row.Pipeline, t.team).Scan(&count, &replacing); err != nil {
 				return err
 			}
-			if replacing == 0 && count >= MaxSecretsPerTeam {
+			if replacing == 0 && count >= maxSecretsPerTeam {
 				return ErrSecretLimit
 			}
 		}
@@ -60,7 +60,7 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 // RemoveSecret deletes an exact secret scope under current administration authority.
 func (t *Tenant) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error {
 	return t.mutateCredentials(ctx, a, "RemoveSecret", pipeline+"/"+name, func(tx *storeTx, _ string) error {
-		result, err := tx.ExecContext(ctx, `DELETE FROM secrets WHERE team=? AND name=? AND pipeline=?`, t.team, name, pipeline)
+		result, err := tx.execContext(ctx, `DELETE FROM secrets WHERE team=? AND name=? AND pipeline=?`, t.team, name, pipeline)
 		return credentialRowChanged(result, err)
 	})
 }
@@ -120,7 +120,7 @@ func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Autho
 			return nil
 		}
 		at := tx.now(ctx)
-		result, err := tx.ExecContext(ctx, `UPDATE git_credentials SET confirmed_at=?,updated_at=? WHERE team=? AND id=? AND fingerprint=? AND confirmed_at IS NULL`, at.UnixNano(), at.UnixNano(), t.team, out.ID, fingerprint)
+		result, err := tx.execContext(ctx, `UPDATE git_credentials SET confirmed_at=?,updated_at=? WHERE team=? AND id=? AND fingerprint=? AND confirmed_at IS NULL`, at.UnixNano(), at.UnixNano(), t.team, out.ID, fingerprint)
 		if err := credentialRowChanged(result, err); err != nil {
 			return err
 		}
@@ -136,7 +136,7 @@ func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Autho
 // RemoveGitCredential deletes a host credential under current administration authority.
 func (t *Tenant) RemoveGitCredential(ctx context.Context, a capability.Authorized, host, repository string) error {
 	return t.mutateCredentials(ctx, a, "RemoveGitCredential", host+"/"+repository, func(tx *storeTx, _ string) error {
-		result, err := tx.ExecContext(ctx, `DELETE FROM git_credentials WHERE team=? AND host=? AND repository_key=?`, t.team, host, repository)
+		result, err := tx.execContext(ctx, `DELETE FROM git_credentials WHERE team=? AND host=? AND repository_key=?`, t.team, host, repository)
 		return credentialRowChanged(result, err)
 	})
 }

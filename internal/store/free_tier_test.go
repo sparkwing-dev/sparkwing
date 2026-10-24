@@ -95,12 +95,12 @@ func TestAFreeTeamsEventsStopAtTheirShare(t *testing.T) {
 	if err := appendBytes(acme, "r1", 60); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	if got := standing(t, st, "acme"); got.Tier != store.TeamTierFree || got.EventBytes != 60 {
+	if got := standing(t, st, "acme"); got.Tier != "free" || got.EventBytes != 60 {
 		t.Fatalf("after the first write = %+v, want a slot holding 60 bytes", got)
 	}
 	err := appendBytes(acme, "r1", 41)
 	var quota *store.StorageQuotaError
-	if !errors.As(err, &quota) || quota.Limit != store.StorageLimitFreeEvents || !errors.Is(err, store.ErrStorageQuota) {
+	if !errors.As(err, &quota) || quota.Limit != "free_event_share" || !errors.Is(err, store.ErrStorageQuota) {
 		t.Fatalf("a write past the share = %v, want a free event share refusal", err)
 	}
 	if !strings.Contains(err.Error(), "60 of 100 bytes") || !strings.Contains(err.Error(), "add credits") {

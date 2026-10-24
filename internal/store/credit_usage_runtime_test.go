@@ -25,10 +25,10 @@ func TestStoreDataCreditUsageStaysInTenantWithoutOperationalRows(t *testing.T) {
 			for row, run := range []string{"run_%'--", "run_雪", "run"} {
 				at := time.Unix(0, int64(row/2+1)).UTC()
 				usage := RunCreditUsage{RunID: run, LastChargedAt: at}
-				for k, kind := range []string{CreditChargeReservation, CreditChargeUsage, CreditChargeRefund} {
+				for k, kind := range []string{creditChargeReservation, creditChargeUsage, creditChargeRefund} {
 					seconds := int64((owner + 1) * (row + 1) * (k + 1))
 					value := int64(amount) + seconds
-					if kind == CreditChargeRefund {
+					if kind == creditChargeRefund {
 						seconds, value = -seconds/2, -value/2
 					}
 					id := fmt.Sprintf("%d_%d_%d_%d", iteration, owner, row, k)
@@ -39,9 +39,9 @@ func TestStoreDataCreditUsageStaysInTenantWithoutOperationalRows(t *testing.T) {
 				}
 				want = append(want, usage)
 			}
-			for row, kind := range []string{CreditChargeStorage, CreditChargeUsage} {
+			for row, kind := range []string{CreditChargeStorage, creditChargeUsage} {
 				run := "run"
-				if kind == CreditChargeUsage {
+				if kind == creditChargeUsage {
 					run = ""
 				}
 				id := fmt.Sprintf("excluded_%d_%d_%d", iteration, owner, row)

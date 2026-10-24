@@ -34,7 +34,7 @@ func TestStoreDataDownloadCapCrossingFundingAndMidnight(t *testing.T) {
 	request := DownloadCharge{ReplicaID: "first", Bytes: 60, FreeCapBytes: 100, FundedCapBytes: 1000}
 	for _, want := range []int64{60, 120} {
 		got, err := tenant.ChargeDownload(t.Context(), request)
-		if err != nil || got.DayBytes != want || got.CapBytes != 100 || got.Tier != TeamTierFree {
+		if err != nil || got.DayBytes != want || got.CapBytes != 100 || got.Tier != teamTierFree {
 			t.Fatalf("charge=%+v, want %d: %v", got, want, err)
 		}
 		request.ReplicaID = "second"
@@ -53,7 +53,7 @@ func TestStoreDataDownloadCapCrossingFundingAndMidnight(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Record, request.Bytes = false, 200
-	if got, err := tenant.ChargeDownload(t.Context(), request); err != nil || got.DayBytes != 820 || got.CapBytes != 1000 || got.Tier != TeamTierFunded {
+	if got, err := tenant.ChargeDownload(t.Context(), request); err != nil || got.DayBytes != 820 || got.CapBytes != 1000 || got.Tier != teamTierFunded {
 		t.Fatalf("funded charge=%+v: %v", got, err)
 	}
 	now = now.Add(3 * time.Hour)

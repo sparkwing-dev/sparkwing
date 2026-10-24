@@ -60,7 +60,7 @@ func TestLocalAPIConnectionCarriesVerifiedIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var api APIConn = connection
+			var api authenticatedAPIConn = connection
 			identity := api.PeerIdentity()
 			if identity.GOOS != peer.GOOS || identity.SID != peer.SID || (peer.UID != nil && (identity.UID == nil || *identity.UID != *peer.UID)) {
 				t.Fatalf("connection lost verified identity: %+v", identity)

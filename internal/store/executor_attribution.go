@@ -30,10 +30,10 @@ func attemptExecutorTx(ctx context.Context, tx *storeTx, actor runstate.Actor, o
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return "", "", "", err
 			}
-			return TierActions, name + " run " + push.WorkflowRunID, TierCloud, nil
+			return tierActions, name + " run " + push.WorkflowRunID, TierCloud, nil
 		}
 	}
-	if facts.ExecutorClass == "local" || facts.ExecutorClass == TierHere {
+	if facts.ExecutorClass == "local" || facts.ExecutorClass == tierHere {
 		kind = "local"
 	}
 	if leaf.Billing != nil && leaf.Billing.Metered {

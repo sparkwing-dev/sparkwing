@@ -114,18 +114,18 @@ func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (r
 	return t.reconcileNode(ctx, request)
 }
 
-// StateEventRule makes every lifecycle event name store-owned on customer surfaces.
-type StateEventRule struct {
+// stateEventRule makes every lifecycle event name store-owned on customer surfaces.
+type stateEventRule struct {
 	RequestOnly bool
 	Cause       runstate.TransitionCause
 	To          runstate.NodeState
 	Kind        string
 }
 
-// NodeEvents matches requested To and RequestOnly; an empty cause matches every cause for that terminal outcome.
+// nodeEvents matches requested To and RequestOnly; an empty cause matches every cause for that terminal outcome.
 // Cancellation requests emit job_cancel_requested while preserving claimed/running state until the holder drains.
-func NodeEvents() []StateEventRule {
-	return []StateEventRule{
+func nodeEvents() []stateEventRule {
+	return []stateEventRule{
 		{false, runstate.CausePublishAttempt, nodePending, "job_attempt_imported"},
 		{false, runstate.CauseRelease, runstate.NodeReady, "job_ready"},
 		{false, runstate.CauseRelease, nodePending, "job_requeued"},
@@ -151,7 +151,7 @@ func advisoryLockTx(ctx context.Context, tx *storeTx, name string) error {
 		return errors.New("empty lock name")
 	}
 	if tx.dialect == DialectPostgres {
-		_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(?,0))`, name)
+		_, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(?,0))`, name)
 		return err
 	}
 	return nil

@@ -24,8 +24,8 @@ type oidcState struct {
 	limit  *ratelimit.Limiter
 }
 
-// OIDCTokenRequest selects the relying party for the authenticated run.
-type OIDCTokenRequest struct {
+// oidcTokenRequest selects the relying party for the authenticated run.
+type oidcTokenRequest struct {
 	Audience string `json:"audience"`
 }
 
@@ -73,7 +73,7 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 	if s.oidc.issuer == nil {
 		return &apierr.Error{Code: apierr.NotFound, Message: errOIDCOff.Error()}
 	}
-	var body OIDCTokenRequest
+	var body oidcTokenRequest
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}

@@ -128,12 +128,12 @@ func (s *Server) handleListGitCredentialReleases(w http.ResponseWriter, r *http.
 	if err != nil {
 		return engineLookupError(err)
 	}
-	out := make([]GitCredentialReleaseJSON, 0, len(rows))
+	out := make([]gitCredentialReleaseJSON, 0, len(rows))
 	for _, row := range rows {
 		if row.Team != a.Target.Team {
 			return errors.New("invalid audit tenant")
 		}
-		out = append(out, GitCredentialReleaseJSON{
+		out = append(out, gitCredentialReleaseJSON{
 			Host: row.Host, Repository: row.RepositoryKey, RunID: row.RunID, JobID: row.NodeID, Generation: row.Generation,
 			Runner: row.MachineID, CapabilityPrefix: row.CapabilityPrefix, ReleasedAt: row.ReleasedAt.Unix(),
 		})

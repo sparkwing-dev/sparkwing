@@ -89,7 +89,7 @@ func TestPushAwardRefusesScopeEscape(t *testing.T) {
 	writePushRun(t, s, runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureOtherSHA})
 	seedTriggerClaim(t, s, "run", "actions", "actions", 1, s.now().Add(time.Hour))
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", Purpose: capability.PurposeTrigger, Delivery: capability.DeliveryDirect}})
+		_, err := s.issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", Purpose: capability.PurposeTrigger, Delivery: capability.DeliveryDirect}})
 		return err
 	})
 	if err == nil {

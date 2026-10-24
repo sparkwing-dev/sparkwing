@@ -3,7 +3,6 @@ package controller
 import (
 	"bytes"
 	"context"
-	"slices"
 	"sync"
 	"time"
 )
@@ -80,38 +79,23 @@ func newLiveLogs() *liveLogs {
 	}
 }
 
-// LiveLogWatchLease is how long one watch keeps a node watched. A
+// liveLogWatchLease is how long one watch keeps a node watched. A
 // viewer's open stream renews it well inside the lease.
-const LiveLogWatchLease = 30 * time.Second
+const liveLogWatchLease = 30 * time.Second
 
-// Watch marks a node watched for one lease: its writer pushes lines to
+// watch marks a node watched for one lease: its writer pushes lines to
 // the ring while any viewer holds a watch.
-func (l *liveLogs) Watch(runID, nodeID string) {
+func (l *liveLogs) watch(runID, nodeID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.watches[liveKey{runID, nodeID}] = l.clock().Add(LiveLogWatchLease)
+	l.watches[liveKey{runID, nodeID}] = l.clock().Add(liveLogWatchLease)
 }
 
-// Watched reports whether a viewer holds a live watch on the node.
-func (l *liveLogs) Watched(runID, nodeID string) bool {
+// watched reports whether a viewer holds a live watch on the node.
+func (l *liveLogs) watched(runID, nodeID string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.watchedLocked(liveKey{runID, nodeID}, l.clock())
-}
-
-// WatchedNodes lists the run's nodes a viewer holds a live watch on.
-func (l *liveLogs) WatchedNodes(runID string) []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	now := l.clock()
-	nodes := []string{}
-	for key := range l.watches {
-		if key.run == runID && l.watchedLocked(key, now) {
-			nodes = append(nodes, key.node)
-		}
-	}
-	slices.Sort(nodes)
-	return nodes
 }
 
 func (l *liveLogs) watchedLocked(key liveKey, now time.Time) bool {
@@ -130,9 +114,9 @@ func (l *liveLogs) clock() time.Time {
 	return time.Now()
 }
 
-// Append adds one batch of log bytes to a node's ring and wakes every
+// append adds one batch of log bytes to a node's ring and wakes every
 // reader waiting on it.
-func (l *liveLogs) Append(runID, nodeID string, data []byte) {
+func (l *liveLogs) append(runID, nodeID string, data []byte) {
 	if len(data) == 0 {
 		return
 	}
@@ -160,7 +144,7 @@ func (l *liveLogs) Append(runID, nodeID string, data []byte) {
 	l.broadcastLocked(r)
 }
 
-// AppendAt adds data that begins at byte offset off of the node's log.
+// appendAt adds data that begins at byte offset off of the node's log.
 // A writer that numbers its bytes this way lets a reader join the ring
 // to the log's durable segments by offset: bytes the ring already holds
 // are skipped, and an offset past the ring's end starts the ring over
@@ -168,7 +152,7 @@ func (l *liveLogs) Append(runID, nodeID string, data []byte) {
 //
 // attempt names the writer's attempt: bytes of another attempt than the
 // ring holds start the ring over, because each attempt counts from zero.
-func (l *liveLogs) AppendAt(runID, nodeID, attempt string, off int64, data []byte) {
+func (l *liveLogs) appendAt(runID, nodeID, attempt string, off int64, data []byte) {
 	if len(data) == 0 || off < 0 {
 		return
 	}
@@ -208,9 +192,9 @@ func (l *liveLogs) AppendAt(runID, nodeID, attempt string, off int64, data []byt
 	l.broadcastLocked(r)
 }
 
-// Finish marks a node's ring complete. Readers still draining it see
+// finish marks a node's ring complete. Readers still draining it see
 // the end of the stream, and the sweep releases it shortly after.
-func (l *liveLogs) Finish(runID, nodeID string) {
+func (l *liveLogs) finish(runID, nodeID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	r := l.nodes[liveKey{runID, nodeID}]
@@ -230,10 +214,10 @@ type liveChunk struct {
 	Done    bool
 }
 
-// Read returns everything buffered after since. The second result is
+// read returns everything buffered after since. The second result is
 // false when no ring exists for the node, which is what a caller reads
 // as "this node has no live log; use the durable copy".
-func (l *liveLogs) Read(runID, nodeID string, since int64) (liveChunk, bool) {
+func (l *liveLogs) read(runID, nodeID string, since int64) (liveChunk, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.sweepLocked(l.clock())
@@ -256,9 +240,9 @@ func (l *liveLogs) readLocked(key liveKey, since int64) (liveChunk, bool) {
 	return liveChunk{Attempt: r.attempt, Start: since, Next: end, Data: data, Done: r.done}, true
 }
 
-// Wait blocks until the node has bytes after since, has finished, or
+// wait blocks until the node has bytes after since, has finished, or
 // ctx ends. It is the read half of the SSE stream.
-func (l *liveLogs) Wait(ctx context.Context, runID, nodeID string, since int64) (liveChunk, bool) {
+func (l *liveLogs) wait(ctx context.Context, runID, nodeID string, since int64) (liveChunk, bool) {
 	key := liveKey{runID, nodeID}
 	for {
 		l.mu.Lock()
@@ -280,9 +264,9 @@ func (l *liveLogs) Wait(ctx context.Context, runID, nodeID string, since int64) 
 	}
 }
 
-// Stats reports the ring count and buffered bytes, which is what a
+// stats reports the ring count and buffered bytes, which is what a
 // memory-cap test asserts on.
-func (l *liveLogs) Stats() (nodes int, bytes int64) {
+func (l *liveLogs) stats() (nodes int, bytes int64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.nodes), l.total

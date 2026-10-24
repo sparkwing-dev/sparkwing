@@ -17,10 +17,10 @@ type Effect string
 
 // Completion effects replace every finish-handler side effect.
 const (
-	EffectGitHubCheck  Effect = "github_check"
-	EffectMetrics      Effect = "metrics"
+	effectGitHubCheck  Effect = "github_check"
+	effectMetrics      Effect = "metrics"
 	EffectProfileFold  Effect = "profile_fold"
-	EffectNotifyParent Effect = "notify_parent"
+	effectNotifyParent Effect = "notify_parent"
 )
 
 // EffectPhase is ranked independently of the terminal outcome so a late pending write cannot regress it.
@@ -28,9 +28,9 @@ type EffectPhase string
 
 // Effect phases only advance; terminal outcome changes are illegal run transitions.
 const (
-	EffectPending  EffectPhase = "pending"
-	EffectRunning  EffectPhase = "running"
-	EffectTerminal EffectPhase = "terminal"
+	effectPending  EffectPhase = "pending"
+	effectRunning  EffectPhase = "running"
+	effectTerminal EffectPhase = "terminal"
 )
 
 // DesiredRunEffect is a committed snapshot for delivery; Payload comes from the run, never an executor.
@@ -69,7 +69,7 @@ func (o *Operator) DueProfileFolds(ctx context.Context, lease SingletonLease, li
 
 // DueGitHubChecks selects GitHub work without starvation by other effect types.
 func (o *Operator) DueGitHubChecks(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error) {
-	return o.dueRunEffects(ctx, lease, EffectGitHubCheck, limit)
+	return o.dueRunEffects(ctx, lease, effectGitHubCheck, limit)
 }
 
 func (o *Operator) dueRunEffects(ctx context.Context, lease SingletonLease, effect Effect, limit int) ([]DesiredRunEffect, error) {
@@ -81,7 +81,7 @@ func (o *Operator) dueRunEffects(ctx context.Context, lease SingletonLease, effe
 			return nil, err
 		}
 		observedAt := tx.now(ctx)
-		rows, err := tx.QueryContext(ctx, `SELECT e.team,e.run_id,e.effect,e.desired_state,e.desired_rev,e.delivered_rev,e.attempts,e.next_at,
+		rows, err := tx.queryContext(ctx, `SELECT e.team,e.run_id,e.effect,e.desired_state,e.desired_rev,e.delivered_rev,e.attempts,e.next_at,
 r.pipeline,r.git_sha,r.git_branch,r.error,
 (SELECT v.payload FROM events v WHERE v.team=r.team AND v.run_id=r.id AND v.node_id='' AND v.state_seq=r.state_seq AND v.kind IN ('run_success','run_failed','run_cancelled') ORDER BY v.seq DESC LIMIT 1) FROM run_effects e JOIN runs r ON r.team = e.team AND r.id = e.run_id
 WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?) ORDER BY e.next_at,e.team,e.run_id,e.effect LIMIT ?`, observedAt.UnixNano(), effect, effect, limit)
@@ -139,7 +139,7 @@ func (t *Tenant) AcknowledgeRunEffect(ctx context.Context, delivery EffectDelive
 // RejectRunEffect records one failed attempt and consumes only the invalid revision.
 func (t *Tenant) RejectRunEffect(ctx context.Context, delivery EffectDelivery) error {
 	return t.deliverRunEffect(ctx, delivery, nil, func(tx *storeTx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE run_effects SET attempts=attempts+1 WHERE team=? AND run_id=? AND effect=?`, t.team, delivery.RunID, delivery.Effect)
+		_, err := tx.execContext(ctx, `UPDATE run_effects SET attempts=attempts+1 WHERE team=? AND run_id=? AND effect=?`, t.team, delivery.RunID, delivery.Effect)
 		return err
 	})
 }
@@ -175,14 +175,14 @@ func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, 
 			return nil
 		}
 		if retryAt != nil {
-			_, err = tx.ExecContext(ctx, `UPDATE run_effects SET attempts = attempts + 1, next_at = CASE WHEN desired_rev = ? THEN ? ELSE next_at END WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, retryAt.UnixNano(), t.team, delivery.RunID, delivery.Effect)
+			_, err = tx.execContext(ctx, `UPDATE run_effects SET attempts = attempts + 1, next_at = CASE WHEN desired_rev = ? THEN ? ELSE next_at END WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, retryAt.UnixNano(), t.team, delivery.RunID, delivery.Effect)
 		} else {
 			if apply != nil {
 				if err := apply(tx); err != nil {
 					return err
 				}
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE run_effects SET delivered_rev = ?, delivered_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, tx.now(ctx).UnixNano(), t.team, delivery.RunID, delivery.Effect)
+			_, err = tx.execContext(ctx, `UPDATE run_effects SET delivered_rev = ?, delivered_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, tx.now(ctx).UnixNano(), t.team, delivery.RunID, delivery.Effect)
 		}
 		if err != nil {
 			return err
@@ -198,11 +198,11 @@ func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, 
 func effectPhase(state runstate.RunState) EffectPhase {
 	switch state {
 	case runstate.RunPending:
-		return EffectPending
+		return effectPending
 	case runstate.RunRunning:
-		return EffectRunning
+		return effectRunning
 	default:
-		return EffectTerminal
+		return effectTerminal
 	}
 }
 
@@ -211,17 +211,17 @@ func writeRunEffectsTx(ctx context.Context, tx *storeTx, team Team, runID string
 		return fmt.Errorf("invalid effect state %q", state)
 	}
 	phase := effectPhase(state)
-	for _, effect := range []Effect{EffectGitHubCheck, EffectMetrics, EffectProfileFold, EffectNotifyParent} {
-		if effect != EffectGitHubCheck && phase != EffectTerminal {
+	for _, effect := range []Effect{effectGitHubCheck, effectMetrics, EffectProfileFold, effectNotifyParent} {
+		if effect != effectGitHubCheck && phase != effectTerminal {
 			continue
 		}
 		var prior runstate.RunState
 		err := tx.QueryRowContext(ctx, `SELECT desired_state FROM run_effects WHERE team = ? AND run_id = ? AND effect = ?`+tx.forUpdate(), team, runID, effect).Scan(&prior)
 		if errors.Is(err, sql.ErrNoRows) {
-			_, err = tx.ExecContext(ctx, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES (?,?,?,?,1,?)`, team, runID, effect, state, now.UnixNano())
-		} else if err == nil && phase != EffectPending && effectPhase(prior) != phase && effectPhase(prior) != EffectTerminal {
-			_, err = tx.ExecContext(ctx, `UPDATE run_effects SET desired_state = ?, desired_rev = desired_rev + 1, next_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, state, now.UnixNano(), team, runID, effect)
-		} else if err == nil && prior != state && effectPhase(prior) == EffectTerminal && phase == EffectTerminal {
+			_, err = tx.execContext(ctx, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES (?,?,?,?,1,?)`, team, runID, effect, state, now.UnixNano())
+		} else if err == nil && phase != effectPending && effectPhase(prior) != phase && effectPhase(prior) != effectTerminal {
+			_, err = tx.execContext(ctx, `UPDATE run_effects SET desired_state = ?, desired_rev = desired_rev + 1, next_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, state, now.UnixNano(), team, runID, effect)
+		} else if err == nil && prior != state && effectPhase(prior) == effectTerminal && phase == effectTerminal {
 			return fmt.Errorf("terminal completion outcome cannot change from %s to %s", prior, state)
 		}
 		if err != nil {
@@ -242,7 +242,7 @@ func (t *Tenant) ApplyProfileFold(ctx context.Context, delivery EffectDelivery, 
 		if err != nil {
 			return err
 		}
-		if effectPhase(run.State) != EffectTerminal {
+		if effectPhase(run.State) != effectTerminal {
 			return fmt.Errorf("profile fold requires a terminal run")
 		}
 		ids := make([]string, 0, len(observations))

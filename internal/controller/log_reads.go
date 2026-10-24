@@ -239,7 +239,7 @@ const segmentStreamPoll = 5 * time.Second
 func (l segmentLogs) streamSegments(ctx context.Context, subject blob.LogSubject, off int64, out io.Writer, id func(int64) string) error {
 	for {
 		if l.live != nil {
-			l.live.Watch(subject.RunID, subject.Attempt.NodeID)
+			l.live.watch(subject.RunID, subject.Attempt.NodeID)
 		}
 		var body bytes.Buffer
 		result, err := l.read(ctx, subject, off, &body)
@@ -273,7 +273,7 @@ func (l segmentLogs) tailLiveRing(ctx context.Context, subject blob.LogSubject, 
 		var chunk liveChunk
 		var ok bool
 		if l.live != nil {
-			chunk, ok = l.live.Wait(waitCtx, subject.RunID, subject.Attempt.NodeID, *off)
+			chunk, ok = l.live.wait(waitCtx, subject.RunID, subject.Attempt.NodeID, *off)
 		} else {
 			<-waitCtx.Done()
 		}

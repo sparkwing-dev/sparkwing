@@ -74,7 +74,7 @@ func (s *Server) registerPolicyEndpoints(mux *registeredMux, endpoints []control
 	paths := make(map[string]bool)
 	for _, endpoint := range endpoints {
 		if !paths[endpoint.Pattern] {
-			mux.HandleFunc(endpoint.Pattern, func(w http.ResponseWriter, r *http.Request) {
+			mux.handleFunc(endpoint.Pattern, func(w http.ResponseWriter, r *http.Request) {
 				routepolicy.WriteRouteMiss(w, router.AllowedMethods(r))
 			})
 			paths[endpoint.Pattern] = true

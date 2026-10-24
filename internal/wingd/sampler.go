@@ -59,7 +59,7 @@ type ProcSampler interface {
 	CPUUsage(pid int) (ProcUsage, bool)
 }
 
-type ProcBatchSampler interface {
+type procBatchSampler interface {
 	CPUUsages(pids []int) map[int]ProcUsage
 }
 

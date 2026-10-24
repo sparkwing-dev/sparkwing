@@ -340,7 +340,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 			t.Errorf("%s still names the deleted account (%d rows where %s)", table, n, where)
 		}
 	}
-	if n := countWhere(t, st, "runs", "id = 'run-l' AND created_principal = '"+store.DeletedUserLabel+"'"); n != 1 {
+	if n := countWhere(t, st, "runs", "id = 'run-l' AND created_principal = '"+"deleted user"+"'"); n != 1 {
 		t.Fatal("the run the account started left the team or kept no label")
 	}
 	if _, err := st.ForTeam(ctx, leaver.PersonalTeam); !errors.Is(err, store.ErrUnknownTeam) {

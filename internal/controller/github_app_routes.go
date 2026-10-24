@@ -11,8 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// GitHubAppWriter rechecks authority and installation ownership when committing App configuration.
-type GitHubAppWriter interface {
+// gitHubAppWriter rechecks authority and installation ownership when committing App configuration.
+type gitHubAppWriter interface {
 	Team() store.Team
 	ListFailedGitHubDeliveries(context.Context, capability.Authorized) ([]store.FailedGitHubDelivery, error)
 	ProcessGitHubDeliveryAgain(context.Context, capability.Authorized, string) error
@@ -24,10 +24,10 @@ type GitHubAppWriter interface {
 	SetAuthorizedGitHubExtraRepos(context.Context, capability.Authorized, string, []string, map[string]int64) ([]string, error)
 }
 
-var _ GitHubAppWriter = (*store.Tenant)(nil)
+var _ gitHubAppWriter = (*store.Tenant)(nil)
 
-func (s *Server) githubAppWriter(r *http.Request, a capability.Authorized) (GitHubAppWriter, error) {
-	return tenantPort[GitHubAppWriter](r.Context(), s, store.Team(a.Target.Team))
+func (s *Server) githubAppWriter(r *http.Request, a capability.Authorized) (gitHubAppWriter, error) {
+	return tenantPort[gitHubAppWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
 func (s *Server) githubAppEndpoints() []controllerwire.Endpoint {

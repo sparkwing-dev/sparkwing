@@ -70,7 +70,7 @@ func (o *Operator) ConsumeIdentityLink(ctx context.Context, claim capability.Ide
 		if err := identityLinkAuthorityTx(ctx, tx, claim); err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at,binding) VALUES ('identity_link',?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, claim.Nonce, claim.ExpiresAt.UnixNano(), identityLinkBinding(claim))
+		result, err := tx.execContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at,binding) VALUES ('identity_link',?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, claim.Nonce, claim.ExpiresAt.UnixNano(), identityLinkBinding(claim))
 		if err != nil {
 			return err
 		}
@@ -123,7 +123,7 @@ func linkAccountIdentityTx(ctx context.Context, tx *storeTx, claim capability.Id
 	if err != nil {
 		return Identity{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE flow_nonces SET completed_at=? WHERE kind='identity_link' AND nonce=?`, tx.now(ctx).UnixNano(), claim.Nonce); err != nil {
+	if _, err := tx.execContext(ctx, `UPDATE flow_nonces SET completed_at=? WHERE kind='identity_link' AND nonce=?`, tx.now(ctx).UnixNano(), claim.Nonce); err != nil {
 		return Identity{}, err
 	}
 	if err := identityLinkAuthorityTx(ctx, tx, claim); err != nil {
@@ -178,7 +178,7 @@ func identityLinkInvalid() error {
 }
 
 func linkIdentityTx(ctx context.Context, tx *storeTx, accountID string, p SignInProfile, now time.Time) (Identity, error) {
-	p.Email = NormalizeEmail(p.Email)
+	p.Email = normalizeEmail(p.Email)
 	if _, err := accountTx(ctx, tx, accountID); err != nil {
 		return Identity{}, err
 	}
@@ -202,13 +202,13 @@ func linkIdentityTx(ctx context.Context, tx *storeTx, accountID string, p SignIn
 		return Identity{}, ErrProviderAlreadyLinked
 	}
 	at := now.UTC().UnixNano()
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.execContext(ctx, `
 		INSERT INTO identities (provider, subject, account_id, email, email_verified, created_at, linked)
 		VALUES (?, ?, ?, ?, ?, ?, 1)`,
 		p.Provider, p.Subject, accountID, p.Email, boolInt(p.EmailVerified), at); err != nil {
 		return Identity{}, err
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.execContext(ctx,
 		`DELETE FROM identity_unlinks WHERE provider = ? AND subject = ? AND account_id = ?`,
 		p.Provider, p.Subject, accountID); err != nil {
 		return Identity{}, err
@@ -253,11 +253,11 @@ func (op *Operator) unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, ac
 			[]any{provider, subject, accountID, at},
 		},
 	} {
-		if _, err := tx.ExecContext(ctx, stmt.sql, stmt.args...); err != nil {
+		if _, err := tx.execContext(ctx, stmt.sql, stmt.args...); err != nil {
 			return IdentityUnlink{}, err
 		}
 	}
-	rows, err := tx.QueryContext(ctx, `DELETE FROM sessions WHERE account_id = ? AND hash <> ? RETURNING hash,account_id,COALESCE(team,'')`, accountID, keepHash)
+	rows, err := tx.queryContext(ctx, `DELETE FROM sessions WHERE account_id = ? AND hash <> ? RETURNING hash,account_id,COALESCE(team,'')`, accountID, keepHash)
 	if err != nil {
 		return IdentityUnlink{}, err
 	}
@@ -298,7 +298,7 @@ func consumeFlowNonceTx(ctx context.Context, tx *storeTx, kind, nonce string, ex
 	if nonce == "" || !expires.After(tx.now(ctx)) {
 		return false, nil
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES (?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, kind, nonce, expires.UnixNano())
+	result, err := tx.execContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES (?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, kind, nonce, expires.UnixNano())
 	if err != nil {
 		return false, err
 	}

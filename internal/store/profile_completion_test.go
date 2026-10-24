@@ -93,7 +93,7 @@ func TestProfileCompletionCannotOutliveLeaseOrCrossTenantProperty(t *testing.T) 
 		case 4:
 			forged.Revision += 1 + random.Int64N(1000)
 		case 5:
-			forged.Effect = store.EffectMetrics
+			forged.Effect = "metrics"
 		}
 		if applied, err := target.ApplyProfileFold(t.Context(), forged, map[string]store.ProfileObservation{"job": {CPUMeasured: true, PeakCores: 1}}); err == nil || applied {
 			t.Fatalf("forged fold %d=%v: %v", sample, applied, err)

@@ -60,7 +60,7 @@ func metricHTTPFixture(t *testing.T) (scheduleHTTPFixture, *metricWriterFake) {
 	f.facts.snapshot.Binding = capability.BindingState{Current: p.Capability.Binding, LeaseExpiresAt: f.facts.snapshot.Now.Add(time.Minute)}
 	f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
 	writer := &metricWriterFake{team: store.DefaultTeam}
-	testOnlyTenantPort[MetricWriter](f.s, func(context.Context, store.Team) (MetricWriter, error) { return writer, nil })
+	testOnlyTenantPort[metricWriter](f.s, func(context.Context, store.Team) (metricWriter, error) { return writer, nil })
 	return f, writer
 }
 
@@ -112,7 +112,7 @@ func TestMetricsHTTPAuthorityProperty(t *testing.T) {
 			property := func(input []byte, phase uint8) bool {
 				f.facts.snapshot.Authorities[0].Principal = base
 				writer.calls, writer.err, writer.team = 0, nil, store.DefaultTeam
-				testOnlyTenantPort[MetricWriter](f.s, func(context.Context, store.Team) (MetricWriter, error) { return writer, nil })
+				testOnlyTenantPort[metricWriter](f.s, func(context.Context, store.Team) (metricWriter, error) { return writer, nil })
 				want := 204
 				body := `{"cpu_time_nanos":2}`
 				if operation == "metrics" {
@@ -132,7 +132,7 @@ func TestMetricsHTTPAuthorityProperty(t *testing.T) {
 					writer.team = "foreign"
 					want = 500
 				case 5:
-					testOnlyTenantPort[MetricWriter](f.s, func(context.Context, store.Team) (MetricWriter, error) { return nil, nil })
+					testOnlyTenantPort[metricWriter](f.s, func(context.Context, store.Team) (metricWriter, error) { return nil, nil })
 					want = 500
 				case 6:
 					body = `{"cpu_time_nanos":-1}`

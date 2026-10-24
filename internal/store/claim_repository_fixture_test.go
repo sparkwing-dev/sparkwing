@@ -20,7 +20,7 @@ func projectFixtureClaimRepositories(t *testing.T, db rewriteSchemaExecer, diale
 	var err error
 	switch reader := db.(type) {
 	case *storeTx:
-		rows, err = reader.QueryContext(t.Context(), `SELECT id,repo_key,repo_display,request_json FROM runs`)
+		rows, err = reader.queryContext(t.Context(), `SELECT id,repo_key,repo_display,request_json FROM runs`)
 	case interface {
 		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	}:

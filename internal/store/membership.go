@@ -64,14 +64,14 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor runstate.Actor, cha
 			}
 		}
 		if change.Role == nil || !change.Role.AtLeast(current) {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO membership_epochs(team,account_id,epoch) VALUES (?,?,1) ON CONFLICT(team,account_id) DO UPDATE SET epoch=membership_epochs.epoch+1`, t.team, change.AccountID); err != nil {
+			if _, err := tx.execContext(ctx, `INSERT INTO membership_epochs(team,account_id,epoch) VALUES (?,?,1) ON CONFLICT(team,account_id) DO UPDATE SET epoch=membership_epochs.epoch+1`, t.team, change.AccountID); err != nil {
 				return err
 			}
 		}
 		if change.Role == nil {
-			_, err = tx.ExecContext(ctx, "DELETE FROM memberships WHERE team = ? AND account_id = ?", string(t.team), change.AccountID)
+			_, err = tx.execContext(ctx, "DELETE FROM memberships WHERE team = ? AND account_id = ?", string(t.team), change.AccountID)
 		} else {
-			_, err = tx.ExecContext(ctx, "UPDATE memberships SET role = ? WHERE team = ? AND account_id = ?", string(*change.Role), string(t.team), change.AccountID)
+			_, err = tx.execContext(ctx, "UPDATE memberships SET role = ? WHERE team = ? AND account_id = ?", string(*change.Role), string(t.team), change.AccountID)
 		}
 		if err != nil {
 			return err

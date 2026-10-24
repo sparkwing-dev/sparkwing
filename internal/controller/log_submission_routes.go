@@ -208,8 +208,8 @@ func (s *Server) handleLiveLogSubmission(w http.ResponseWriter, r *http.Request,
 	if subject.Attempt != nil {
 		attemptID = store.LiveLogAttempt(subject.Attempt.Attempt, subject.Attempt.Generation)
 	}
-	s.liveLogs.AppendAt(subject.RunID, node, attemptID, body.Offset, body.Data)
-	writeJSON(w, http.StatusOK, map[string]any{"watched": s.liveLogs.Watched(subject.RunID, node)})
+	s.liveLogs.appendAt(subject.RunID, node, attemptID, body.Offset, body.Data)
+	writeJSON(w, http.StatusOK, map[string]any{"watched": s.liveLogs.watched(subject.RunID, node)})
 	return nil
 }
 

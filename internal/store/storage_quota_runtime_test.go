@@ -18,11 +18,11 @@ func TestStoreDataQuotaConfigurationIsTenantScoped(t *testing.T) {
 	if _, err := a.SetStorageAllowance(ctx, 456); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SetStorageQuota(ctx, StorageQuota{Tier: StorageTierFree}); err != nil {
+	if err := a.SetStorageQuota(ctx, StorageQuota{Tier: storageTierFree}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := a.StorageQuota(ctx)
-	if err != nil || got.Team != "a" || got.AllowanceBytes != 456 || got.MaxBytesPerRun != FreeTierQuota.MaxBytesPerRun || got.MaxBytesPerMonth != FreeTierQuota.MaxBytesPerMonth {
+	if err != nil || got.Team != "a" || got.AllowanceBytes != 456 || got.MaxBytesPerRun != freeTierQuota.MaxBytesPerRun || got.MaxBytesPerMonth != freeTierQuota.MaxBytesPerMonth {
 		t.Fatalf("quota=%+v: %v", got, err)
 	}
 	if err := a.SetStorageQuota(ctx, StorageQuota{Team: "b", MaxBytesPerMonth: 1}); err == nil {

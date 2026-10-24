@@ -9,8 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// TeamWriter commits team administration under current authority and membership.
-type TeamWriter interface {
+// teamWriter commits team administration under current authority and membership.
+type teamWriter interface {
 	Team() store.Team
 	RenameAuthorizedTeam(context.Context, capability.Authorized, string) (store.TeamInfo, error)
 	DeleteAuthorizedTeam(context.Context, capability.Authorized) (store.TeamDeletion, error)
@@ -20,8 +20,8 @@ type TeamWriter interface {
 	DeleteAuthorizedRun(context.Context, capability.Authorized) error
 }
 
-func (s *Server) teamWriter(r *http.Request, a capability.Authorized) (TeamWriter, error) {
-	return tenantPort[TeamWriter](r.Context(), s, store.Team(a.Target.Team))
+func (s *Server) teamWriter(r *http.Request, a capability.Authorized) (teamWriter, error) {
+	return tenantPort[teamWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
 func (s *Server) teamWriteEndpoints() []controllerwire.Endpoint {
@@ -37,4 +37,4 @@ func (s *Server) teamWriteEndpoints() []controllerwire.Endpoint {
 	}
 }
 
-var _ TeamWriter = (*store.Tenant)(nil)
+var _ teamWriter = (*store.Tenant)(nil)

@@ -19,8 +19,8 @@ import (
 )
 
 // safety: shorter than a minute, so a wake the store's lease turns away is
-// followed by another inside the same minute. store.CronTickWindow, not this
-// interval, is what spaces the ticks that actually run.
+// followed by another inside the same minute. The store's cron tick window
+// spaces the ticks that actually run.
 const cronTickOffer = 20 * time.Second
 
 // safety: long enough that a tick which dies mid-flight does not hand the next
@@ -36,8 +36,8 @@ type cronLauncher struct {
 	server *Server
 }
 
-// ScheduledRunWriter admits a stored schedule through the sealed intake transaction.
-type ScheduledRunWriter interface {
+// scheduledRunWriter admits a stored schedule through the sealed intake transaction.
+type scheduledRunWriter interface {
 	Team() store.Team
 	AdmitScheduledRun(context.Context, store.CronSchedule, time.Time) (store.AdmissionResult, error)
 }
@@ -47,7 +47,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	if s.Team == "" || s.ID == "" || due.IsZero() {
 		return "", invalidEngineBody("schedule team, id and due instant are required")
 	}
-	writer, err := tenantPort[ScheduledRunWriter](ctx, l.server, s.Team)
+	writer, err := tenantPort[scheduledRunWriter](ctx, l.server, s.Team)
 	if err != nil {
 		return "", err
 	}

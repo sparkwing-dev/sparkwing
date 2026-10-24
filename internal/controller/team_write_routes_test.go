@@ -30,7 +30,7 @@ type teamWriteFake struct {
 	err   error
 }
 
-var _ GitHubAppWriter = (*teamWriteFake)(nil)
+var _ gitHubAppWriter = (*teamWriteFake)(nil)
 
 func (f *teamWriteFake) ListFailedGitHubDeliveries(_ context.Context, a capability.Authorized) ([]store.FailedGitHubDelivery, error) {
 	return nil, f.record(a, "list failed deliveries")
@@ -212,7 +212,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 	f.s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = append(f.facts.snapshot.Authorities[0].Principal.Capability.Grants, capability.TeamAdmin)
 	writer := &billingWriterFake{team: store.DefaultTeam}
-	testOnlyTenantPort[BillingWriter](f.s, func(context.Context, store.Team) (BillingWriter, error) { return writer, nil })
+	testOnlyTenantPort[billingWriter](f.s, func(context.Context, store.Team) (billingWriter, error) { return writer, nil })
 	calls := 0
 	mode := uint8(0)
 	f.s.checkout = &billingCheckout{url: "https://checkout.example", token: "private-service-key", http: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {

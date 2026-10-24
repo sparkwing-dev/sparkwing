@@ -79,13 +79,13 @@ SELECT team, id, ?, ?, ?, 1, 0 FROM runs WHERE team = ? AND id = ?`)
 	if err := f.tenant.WriteMetric(ctx, a, next(store.MaxNodeMetricSamples)); !errors.Is(err, store.ErrNodeMetricLimit) {
 		t.Fatalf("a sample past the cap = %v, want ErrNodeMetricLimit", err)
 	}
-	for i := range store.MaxNodeMetricMarkers {
+	for i := range 8 {
 		marker := store.MetricSample{Kind: store.MetricPartial, TS: base.Add(time.Duration(store.MaxNodeMetricSamples+1+i) * time.Second)}
 		if err := f.tenant.WriteMetric(ctx, a, marker); err != nil {
 			t.Fatalf("marker %d past the cap: %v", i, err)
 		}
 	}
-	overflow := store.MetricSample{Kind: store.MetricUnknown, TS: base.Add(time.Duration(store.MaxNodeMetricSamples+1+store.MaxNodeMetricMarkers) * time.Second)}
+	overflow := store.MetricSample{Kind: store.MetricUnknown, TS: base.Add(time.Duration(store.MaxNodeMetricSamples+1+8) * time.Second)}
 	if err := f.tenant.WriteMetric(ctx, a, overflow); !errors.Is(err, store.ErrNodeMetricLimit) {
 		t.Fatalf("a marker past the marker headroom = %v, want ErrNodeMetricLimit", err)
 	}
@@ -99,7 +99,7 @@ SELECT team, id, ?, ?, ?, 1, 0 FROM runs WHERE team = ? AND id = ?`)
 		t.Fatalf("second page = %+v, %v", second, err)
 	}
 	all, err := f.tenant.ListNodeMetrics(ctx, string(f.ref.RunID), string(f.ref.NodeID))
-	if err != nil || len(all) != store.MaxNodeMetricSamples+store.MaxNodeMetricMarkers {
+	if err != nil || len(all) != store.MaxNodeMetricSamples+8 {
 		t.Fatalf("every sample = %d, %v", len(all), err)
 	}
 }

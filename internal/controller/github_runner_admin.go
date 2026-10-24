@@ -50,7 +50,7 @@ func (s *Server) handleListGitHubRunnerBindings(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return err
 	}
-	out := githubBindingsResp{Bindings: []githubBindingJSON{}, Workflow: GitHubRunnerWorkflow(origin, a.Target.Team)}
+	out := githubBindingsResp{Bindings: []githubBindingJSON{}, Workflow: gitHubRunnerWorkflow(origin, a.Target.Team)}
 	for _, binding := range bindings {
 		if !validGitHubRunnerBinding(binding, a.Target.Team) {
 			return errors.New("invalid repository enrollment")
@@ -101,7 +101,7 @@ func (s *Server) handleAddGitHubRunnerBinding(w http.ResponseWriter, r *http.Req
 	if !validGitHubRunnerBinding(binding, a.Target.Team) || binding.RepositoryID != request.RepositoryID || binding.RepositoryOwnerID != request.RepositoryOwnerID {
 		return errors.New("invalid repository enrollment")
 	}
-	writeJSON(w, http.StatusCreated, githubBindingsResp{Bindings: []githubBindingJSON{githubBindingOut(binding)}, Workflow: GitHubRunnerWorkflow(origin, a.Target.Team)})
+	writeJSON(w, http.StatusCreated, githubBindingsResp{Bindings: []githubBindingJSON{githubBindingOut(binding)}, Workflow: gitHubRunnerWorkflow(origin, a.Target.Team)})
 	return nil
 }
 

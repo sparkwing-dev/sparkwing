@@ -29,25 +29,25 @@ var ErrNotElected = errors.New("wingd: another daemon is already elected")
 const FinalizeDrainWindow = 10 * time.Second
 
 const (
-	DefaultIdleTimeout = limits.LocalControllerIdleTimeout
+	defaultIdleTimeout = limits.LocalControllerIdleTimeout
 
 	DefaultGraceWindow = 2 * time.Minute
 
-	DefaultSampleInterval = 5 * time.Second
+	defaultSampleInterval = 5 * time.Second
 
-	DefaultHeadroomMaxAge = 30 * time.Second
+	defaultHeadroomMaxAge = 30 * time.Second
 
-	DefaultCapacityInterval = 60 * time.Second
+	defaultCapacityInterval = 60 * time.Second
 
-	DefaultHeadroomFraction = 0.20
+	defaultHeadroomFraction = 0.20
 
-	DefaultStallInterval = 10 * time.Second
+	defaultStallInterval = 10 * time.Second
 
-	DefaultStallWindow = 60 * time.Second
+	defaultStallWindow = 60 * time.Second
 
-	DefaultStallCPUFraction = 0.02
+	defaultStallCPUFraction = 0.02
 
-	DefaultStallProbeTimeout = 10 * time.Second
+	defaultStallProbeTimeout = 10 * time.Second
 )
 
 type Config struct {
@@ -114,7 +114,7 @@ func (c Config) idleTimeout() time.Duration {
 	if c.IdleTimeout > 0 {
 		return c.IdleTimeout
 	}
-	return DefaultIdleTimeout
+	return defaultIdleTimeout
 }
 
 func (c Config) graceWindow() time.Duration {
@@ -131,42 +131,42 @@ func (c Config) sampleInterval() time.Duration {
 	if c.SampleInterval > 0 {
 		return c.SampleInterval
 	}
-	return DefaultSampleInterval
+	return defaultSampleInterval
 }
 
 func (c Config) headroomMaxAge() time.Duration {
 	if c.HeadroomMaxAge > 0 {
 		return c.HeadroomMaxAge
 	}
-	return DefaultHeadroomMaxAge
+	return defaultHeadroomMaxAge
 }
 
 func (c Config) capacityInterval() time.Duration {
 	if c.CapacityInterval > 0 {
 		return c.CapacityInterval
 	}
-	return DefaultCapacityInterval
+	return defaultCapacityInterval
 }
 
 func (c Config) stallInterval() time.Duration {
 	if c.StallInterval > 0 {
 		return c.StallInterval
 	}
-	return DefaultStallInterval
+	return defaultStallInterval
 }
 
 func (c Config) stallWindow() time.Duration {
 	if c.StallWindow > 0 {
 		return c.StallWindow
 	}
-	return DefaultStallWindow
+	return defaultStallWindow
 }
 
 func (c Config) stallProbeTimeout() time.Duration {
 	if c.StallProbeTimeout > 0 {
 		return c.StallProbeTimeout
 	}
-	return DefaultStallProbeTimeout
+	return defaultStallProbeTimeout
 }
 
 func (c Config) stallCPUFraction() float64 {
@@ -174,7 +174,7 @@ func (c Config) stallCPUFraction() float64 {
 		return 0
 	}
 	if c.StallCPUFraction == 0 {
-		return DefaultStallCPUFraction
+		return defaultStallCPUFraction
 	}
 	return c.StallCPUFraction
 }
@@ -184,7 +184,7 @@ func (c Config) headroomFraction() float64 {
 		return 0
 	}
 	if c.HeadroomFraction == 0 {
-		return DefaultHeadroomFraction
+		return defaultHeadroomFraction
 	}
 	return c.HeadroomFraction
 }
@@ -490,5 +490,3 @@ func LogPath(home string) (string, error) {
 }
 
 const ProtocolMajor = wingwire.ProtocolMajor
-
-const MinProtocolMajor = wingwire.MinProtocolMajor

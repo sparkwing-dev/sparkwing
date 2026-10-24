@@ -30,11 +30,11 @@ func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authoriz
 		if exists != 0 {
 			return ErrAlreadyBound
 		}
-		if holdsFreeAllowance(t.team) && count >= MaxGitHubRunnerBindings {
+		if holdsFreeAllowance(t.team) && count >= maxGitHubRunnerBindings {
 			return ErrBindingLimit
 		}
 		out = GitHubRunnerBinding{Team: t.team, RepositoryID: row.RepositoryID, RepositoryOwnerID: row.RepositoryOwnerID, Repository: repo.Slug(), CreatedBy: actor, CreatedAt: tx.now(ctx)}
-		_, err := tx.ExecContext(ctx, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_by,created_at,repo_key) VALUES (?,?,?,?,?,?,?)`, t.team, out.RepositoryID, out.RepositoryOwnerID, out.Repository, actor, out.CreatedAt.UnixNano(), githubRepositoryKey(out.RepositoryID))
+		_, err := tx.execContext(ctx, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_by,created_at,repo_key) VALUES (?,?,?,?,?,?,?)`, t.team, out.RepositoryID, out.RepositoryOwnerID, out.Repository, actor, out.CreatedAt.UnixNano(), githubRepositoryKey(out.RepositoryID))
 		return err
 	})
 	if err != nil {
@@ -51,7 +51,7 @@ func (t *Tenant) RevokeGitHubRunner(ctx context.Context, a capability.Authorized
 	return t.s.inTx(ctx, func(tx *storeTx) error {
 		var prefixes []string
 		if err := acquireLockSet(ctx, tx, func() lockSet {
-			rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND bind_kind='push' AND repo_key=? AND parent_id IS NULL`, t.team, githubRepositoryKey(repositoryID))
+			rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND bind_kind='push' AND repo_key=? AND parent_id IS NULL`, t.team, githubRepositoryKey(repositoryID))
 			if err != nil {
 				return lockSet{err: err}
 			}
@@ -70,7 +70,7 @@ func (t *Tenant) RevokeGitHubRunner(ctx context.Context, a capability.Authorized
 			return err
 		}
 		return t.teamMutationInTx(ctx, tx, a, "RevokeGitHubRunner", string(t.team), func(tx *storeTx, _ capability.Principal) error {
-			result, err := tx.ExecContext(ctx, `DELETE FROM github_runner_bindings WHERE team=? AND repository_id=?`, t.team, repositoryID)
+			result, err := tx.execContext(ctx, `DELETE FROM github_runner_bindings WHERE team=? AND repository_id=?`, t.team, repositoryID)
 			if err := credentialRowChanged(result, err); err != nil {
 				return err
 			}
@@ -114,7 +114,7 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM capabilities WHERE team=? AND bind_kind='push' AND parent_id IS NULL AND `+liveCredentialSQL(""), spec.Team, now.UnixNano(), now.UnixNano()).Scan(&live); err != nil {
 		return err
 	}
-	if live >= MaxGitHubRunnerCredentials {
+	if live >= maxGitHubRunnerCredentials {
 		return ErrGitHubRunnerCredentialLimit
 	}
 	return nil
@@ -122,7 +122,7 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 
 func consumeActionsExchangeTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	push := spec.Binding.Push
-	result, err := tx.ExecContext(ctx, `INSERT INTO github_actions_exchanges(team,repository_key,run_id,run_attempt) VALUES (?,?,?,?) ON CONFLICT(team,repository_key,run_id,run_attempt) DO NOTHING`, spec.Team, push.RepositoryKey, push.WorkflowRunID, push.WorkflowRunAttempt)
+	result, err := tx.execContext(ctx, `INSERT INTO github_actions_exchanges(team,repository_key,run_id,run_attempt) VALUES (?,?,?,?) ON CONFLICT(team,repository_key,run_id,run_attempt) DO NOTHING`, spec.Team, push.RepositoryKey, push.WorkflowRunID, push.WorkflowRunAttempt)
 	if err != nil {
 		return err
 	}

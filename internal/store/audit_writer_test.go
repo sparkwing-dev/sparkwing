@@ -151,13 +151,13 @@ func TestAuditWriterRejectsSystemActorsForOtherKinds(t *testing.T) {
 		{"standing_decided", auditStandingRequest{State: "approved"}, []auditSystem{auditBreakGlass}},
 		{"admission", auditAdmission{AccountID: "account", Via: "signup"}, []auditSystem{auditController, auditBreakGlass}},
 		{"first_success", auditFirstSuccess{RunID: "run"}, []auditSystem{auditController}},
-		{"checkout_opened", auditCheckout{Outcome: BusinessEventCheckoutOpened}, []auditSystem{auditController}},
-		{"checkout_failed", auditCheckout{Outcome: BusinessEventCheckoutFailed}, []auditSystem{auditPaymentProvider}},
+		{"checkout_opened", auditCheckout{Outcome: businessEventCheckoutOpened}, []auditSystem{auditController}},
+		{"checkout_failed", auditCheckout{Outcome: businessEventCheckoutFailed}, []auditSystem{auditPaymentProvider}},
 		{"paid", auditGrant{Kind: CreditGrantPaid}, []auditSystem{auditPaymentProvider}},
 		{"free", auditGrant{Kind: CreditGrantFree}, []auditSystem{auditBreakGlass}},
-		{"reversal", auditGrant{Kind: CreditGrantReversal}, []auditSystem{auditPaymentProvider}},
+		{"reversal", auditGrant{Kind: creditGrantReversal}, []auditSystem{auditPaymentProvider}},
 		{"hold", auditHold{}, []auditSystem{auditController, auditPaymentProvider, auditBreakGlass}},
-		{"card", auditCard{Operation: BusinessEventCardBlocked}, []auditSystem{auditPaymentProvider}},
+		{"card", auditCard{Operation: businessEventCardBlocked}, []auditSystem{auditPaymentProvider}},
 		{"refill", auditRefill{}, []auditSystem{auditController}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

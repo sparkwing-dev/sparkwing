@@ -67,10 +67,10 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	var refundStatus string
-	if err := s.db.QueryRow(`SELECT status FROM payment_refunds WHERE payment_mode=? AND kind='refund' AND refund_id=?`, event.Mode, req.RefundID).Scan(&refundStatus); err != nil || refundStatus != CardRefundSucceeded {
+	if err := s.db.QueryRow(`SELECT status FROM payment_refunds WHERE payment_mode=? AND kind='refund' AND refund_id=?`, event.Mode, req.RefundID).Scan(&refundStatus); err != nil || refundStatus != cardRefundSucceeded {
 		t.Fatalf("console response regressed after pending callback: %s, %v", refundStatus, err)
 	}
-	provider.EventID, provider.Status = "refund-terminal-delivery", CardRefundSucceeded
+	provider.EventID, provider.Status = "refund-terminal-delivery", cardRefundSucceeded
 	if _, err := s.settlePaymentFacts(t.Context(), provider); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 		t.Fatalf("refund history: %+v, %v", grants, err)
 	}
 	for _, grant := range grants {
-		if grant.Kind == CreditGrantReversal && (grant.AmountMicro != -MicroCreditsPerCent || grant.Reverses != "payment:test:checkout") {
+		if grant.Kind == creditGrantReversal && (grant.AmountMicro != -MicroCreditsPerCent || grant.Reverses != "payment:test:checkout") {
 			t.Fatalf("refund lost its payment reference: %+v", grant)
 		}
 	}

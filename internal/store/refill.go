@@ -14,12 +14,12 @@ import (
 )
 
 const (
-	CheckoutKindCheckout = "checkout"
-	CheckoutKindRefill   = "refill"
+	checkoutKindCheckout = "checkout"
+	checkoutKindRefill   = "refill"
 
-	BusinessEventRefillOpened   = "billing.refill_opened"
-	BusinessEventRefillFailed   = "billing.refill_failed"
-	BusinessEventRefillSettings = "billing.refill_settings"
+	businessEventRefillOpened   = "billing.refill_opened"
+	businessEventRefillFailed   = "billing.refill_failed"
+	businessEventRefillSettings = "billing.refill_settings"
 
 	// MinRefillCents keeps a refill's card fee reasonable.
 	MinRefillCents = 1000
@@ -30,12 +30,12 @@ const (
 // Refill limits a refill can be stopped by. A team's own weekly and monthly limits come from its settings; the
 // standing limits are the decision 27 stolen-card caps its paid history earns.
 const (
-	RefillLimitPaymentSize    = "payment_size"
-	RefillLimitStandingSize   = "standing_size"
-	RefillLimitStandingDaily  = "standing_daily"
-	RefillLimitStandingWeekly = "standing_weekly"
-	RefillLimitTeamWeekly     = "team_weekly"
-	RefillLimitTeamMonthly    = "team_monthly"
+	refillLimitPaymentSize    = "payment_size"
+	refillLimitStandingSize   = "standing_size"
+	refillLimitStandingDaily  = "standing_daily"
+	refillLimitStandingWeekly = "standing_weekly"
+	refillLimitTeamWeekly     = "team_weekly"
+	refillLimitTeamMonthly    = "team_monthly"
 )
 
 // safety: Stripe keeps an idempotency key for 24 hours, so a refill still unbound after this is closed and the next
@@ -134,7 +134,7 @@ func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing Billin
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillMonth)+` THEN amount_minor ELSE 0 END), 0)
 	  FROM credit_checkouts WHERE team = ? AND kind = ? AND (COALESCE(closed_at, opened_at) >= ? OR closed_at IS NULL)
 	    AND NOT ((payment_id = '' OR failure = 'canceled') AND closed_at IS NOT NULL)`,
-		string(team), CheckoutKindRefill, now.Add(-refillMonth).UnixNano()).Scan(&open, &s.DayCount, &s.WeekCents, &s.MonthCents); err != nil {
+		string(team), checkoutKindRefill, now.Add(-refillMonth).UnixNano()).Scan(&open, &s.DayCount, &s.WeekCents, &s.MonthCents); err != nil {
 		return s, err
 	}
 	s.Open = open > 0
@@ -146,7 +146,7 @@ func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing Billin
 // a balance the card bought, or the capacity tier that balance backs, never loosens them.
 func refillCaps(b BillingStanding, now time.Time) RefillCaps {
 	row := billingPolicy[0]
-	if b.Trust == BillingTrustGranted {
+	if b.Trust == billingTrustGranted {
 		row = billingPolicy[len(billingPolicy)-1]
 	} else {
 		for _, candidate := range billingPolicy[1:] {
@@ -164,17 +164,17 @@ func (s RefillState) limit() string {
 	next := s.AmountCents
 	switch {
 	case next > MaxCardPaymentCents:
-		return RefillLimitPaymentSize
+		return refillLimitPaymentSize
 	case s.Caps.AmountCents > 0 && next > s.Caps.AmountCents:
-		return RefillLimitStandingSize
+		return refillLimitStandingSize
 	case s.Caps.PerDay > 0 && s.DayCount+1 > s.Caps.PerDay:
-		return RefillLimitStandingDaily
+		return refillLimitStandingDaily
 	case s.Caps.WeekCents > 0 && s.WeekCents+next > s.Caps.WeekCents:
-		return RefillLimitStandingWeekly
+		return refillLimitStandingWeekly
 	case s.WeekLimitCents > 0 && s.WeekCents+next > s.WeekLimitCents:
-		return RefillLimitTeamWeekly
+		return refillLimitTeamWeekly
 	case s.MonthLimitCents > 0 && s.MonthCents+next > s.MonthLimitCents:
-		return RefillLimitTeamMonthly
+		return refillLimitTeamMonthly
 	}
 	return ""
 }
@@ -200,7 +200,7 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 	if err := s.validate(); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE teams SET refill_enabled = ?, refill_threshold_cents = ?, refill_amount_cents = ?,
+	res, err := tx.execContext(ctx, `UPDATE teams SET refill_enabled = ?, refill_threshold_cents = ?, refill_amount_cents = ?,
 	    refill_week_limit_cents = ?, refill_month_limit_cents = ?
 	    WHERE name = ? AND (? = 0 OR card_payment_method <> '')`,
 		boolInt(s.Enabled), s.ThresholdCents, s.AmountCents, s.WeekLimitCents, s.MonthLimitCents, string(team), boolInt(s.Enabled))
@@ -222,8 +222,8 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 func (o *Operator) DueRefills(ctx context.Context) ([]Refill, error) {
 	var teams []Team
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT name FROM teams WHERE refill_enabled = 1
-		    UNION SELECT team FROM credit_checkouts WHERE kind = ? AND closed_at IS NULL ORDER BY 1`, CheckoutKindRefill)
+		rows, err := tx.queryContext(ctx, `SELECT name FROM teams WHERE refill_enabled = 1
+		    UNION SELECT team FROM credit_checkouts WHERE kind = ? AND closed_at IS NULL ORDER BY 1`, checkoutKindRefill)
 		if err != nil {
 			return err
 		}
@@ -270,7 +270,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	var closed string
 	err = tx.QueryRowContext(ctx, `SELECT id, amount_minor, payment_id, opened_at, customer_id, payment_method, receipt_email
 	    FROM credit_checkouts WHERE team = ? AND kind = ? AND closed_at IS NULL`+tx.forUpdate(), string(team),
-		CheckoutKindRefill).Scan(&r.ID, &r.AmountCents, &r.PaymentIntent, &opened, &r.Customer, &r.PaymentMethod, &r.ReceiptEmail)
+		checkoutKindRefill).Scan(&r.ID, &r.AmountCents, &r.PaymentIntent, &opened, &r.Customer, &r.PaymentMethod, &r.ReceiptEmail)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
@@ -298,7 +298,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 		}
 	}
 	if closed != "" {
-		if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?, refill_blocked = ?
+		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?, refill_blocked = ?
 		    WHERE team = ? AND id = ? AND payment_id = ''`, now.UnixNano(), closed,
 			boolInt(closed != refillExpired && closed != refillReplaced), string(team), r.ID); err != nil {
 			return nil, err
@@ -328,11 +328,11 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if _, err := l.ExecContext(ctx, `INSERT INTO credit_checkouts (id, team, session_id, payment_mode, currency, amount_minor,
+	if _, err := l.execContext(ctx, `INSERT INTO credit_checkouts (id, team, session_id, payment_mode, currency, amount_minor,
 	    amount_micro, opened_at, expires_at, kind, customer_id, payment_method, receipt_email)
 	    VALUES (?, ?, ?, ?, 'usd', ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, string(team), r.ID, mode, r.AmountCents, r.AmountCents*MicroCreditsPerCent, now.UnixNano(),
-		now.Add(refillKeyLife).UnixNano(), CheckoutKindRefill, r.Customer, r.PaymentMethod, r.ReceiptEmail); err != nil {
+		now.Add(refillKeyLife).UnixNano(), checkoutKindRefill, r.Customer, r.PaymentMethod, r.ReceiptEmail); err != nil {
 		return nil, err
 	}
 	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditController}, At: now}, auditRefill{RefillID: r.ID, AmountCents: r.AmountCents, BalanceMicro: st.BalanceMicro, ThresholdCents: refill.ThresholdCents}); err != nil {
@@ -357,8 +357,8 @@ func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, pa
 		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET payment_id = ? WHERE team = ? AND id = ? AND kind = ?
-		    AND payment_mode=? AND (closed_at IS NULL OR payment_id=?) AND payment_id IN ('', ?)`, paymentIntent, string(team), refill, CheckoutKindRefill, mode, paymentIntent, paymentIntent)
+		res, err := tx.execContext(ctx, `UPDATE credit_checkouts SET payment_id = ? WHERE team = ? AND id = ? AND kind = ?
+		    AND payment_mode=? AND (closed_at IS NULL OR payment_id=?) AND payment_id IN ('', ?)`, paymentIntent, string(team), refill, checkoutKindRefill, mode, paymentIntent, paymentIntent)
 		if err != nil {
 			return err
 		}
@@ -394,7 +394,7 @@ func (o *Operator) CanConfirmRefill(ctx context.Context, r Refill) (bool, error)
 		var customer, method string
 		err := tx.QueryRowContext(ctx, `SELECT opened_at, amount_minor, customer_id, payment_method FROM credit_checkouts
 		    WHERE team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
-			string(r.Team), r.ID, CheckoutKindRefill, r.PaymentIntent).Scan(&opened, &amount, &customer, &method)
+			string(r.Team), r.ID, checkoutKindRefill, r.PaymentIntent).Scan(&opened, &amount, &customer, &method)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -437,9 +437,9 @@ func (o *Operator) CanConfirmRefill(ctx context.Context, r Refill) (bool, error)
 // The record and payment binding remain available for reconciliation and audit.
 func (o *Operator) RecordRefillCanceled(ctx context.Context, r Refill) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = 'canceled'
+		_, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = 'canceled'
 		    WHERE team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
-			tx.now(ctx).UnixNano(), string(r.Team), r.ID, CheckoutKindRefill, r.PaymentIntent)
+			tx.now(ctx).UnixNano(), string(r.Team), r.ID, checkoutKindRefill, r.PaymentIntent)
 		return err
 	})
 }

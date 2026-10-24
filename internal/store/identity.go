@@ -36,13 +36,13 @@ func claimEmailTx(ctx context.Context, tx *storeTx, accountID, email string, at 
 	if err := releaseEmailTx(ctx, tx, email, accountID, at); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx,
+	_, err := tx.execContext(ctx,
 		`UPDATE accounts SET email = ?, email_verified = 1, updated_at = ? WHERE id = ?`, email, at, accountID)
 	return err
 }
 
 func releaseEmailTx(ctx context.Context, tx *storeTx, email, keepID string, at int64) error {
-	_, err := tx.ExecContext(ctx, `
+	_, err := tx.execContext(ctx, `
 		UPDATE accounts SET email_verified = 0, updated_at = ?
 		WHERE email = ? AND email_verified = 1 AND id <> ?`, at, email, keepID)
 	return err
@@ -99,16 +99,10 @@ func isReservedSlug(slug string) bool {
 // Team-wide ceilings. Every machine token multiplies each per-principal budget, and every invitation
 // may become a mail the deployment sends, so a team holds a bounded number of both.
 const (
-	MaxRunnerTokensPerTeam = 100
-	MaxInvitationsPerDay   = 100
-	MaxOpenInvitations     = 50
+	maxRunnerTokensPerTeam = 100
+	maxInvitationsPerDay   = 100
+	maxOpenInvitations     = 50
 )
-
-// RunnerTokenLifetime is how long a team's machine token lives unused. Each use
-// moves its expiry to this far past the use, so a machine that keeps working
-// keeps its token, and one a forgotten machine still holds stops working on
-// its own. The token reads the secrets of whatever run it claims.
-const RunnerTokenLifetime = 90 * 24 * time.Hour
 
 // MaxCreatedTeams bounds how many teams one user creates over the account's
 // life, their personal space included, because each team is a tenant the
@@ -232,15 +226,15 @@ func newIdentityID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// NormalizeEmail lowercases and trims an address so one human's address
+// normalizeEmail lowercases and trims an address so one human's address
 // compares equal however it was typed. The local part is otherwise left alone:
 // stripping dots or plus tags is one provider's rule, and applying it to every
 // domain would merge addresses that belong to different people.
-func NormalizeEmail(raw string) string { return strings.ToLower(strings.TrimSpace(raw)) }
+func normalizeEmail(raw string) string { return strings.ToLower(strings.TrimSpace(raw)) }
 
-// LooksLikeEmail rejects obvious nonsense before a row is written. Only
+// looksLikeEmail rejects obvious nonsense before a row is written. Only
 // sending to an address proves it receives mail.
-func LooksLikeEmail(email string) bool {
+func looksLikeEmail(email string) bool {
 	at := strings.LastIndex(email, "@")
 	if at <= 0 || at == len(email)-1 || strings.ContainsAny(email, " \t\r\n,") {
 		return false
@@ -369,11 +363,11 @@ var errSignInIdentityChanged = errors.New("store: sign-in identity changed durin
 // whether it is admitted or waitlisted. An account that already exists, or an
 // identity that links to one, is never gated.
 func (o *Operator) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions) (SignInResult, error) {
-	p.Email = NormalizeEmail(p.Email)
+	p.Email = normalizeEmail(p.Email)
 	switch {
 	case p.Provider == "" || p.Subject == "":
 		return SignInResult{}, errors.New("store: sign-in names no provider or subject")
-	case !p.EmailVerified || !LooksLikeEmail(p.Email):
+	case !p.EmailVerified || !looksLikeEmail(p.Email):
 		return SignInResult{}, ErrUnverifiedEmail
 	}
 	// safety: the retry re-reads email claims, personal slugs, and identities
@@ -425,7 +419,7 @@ func (op *Operator) resolveSignInTx(ctx context.Context, tx *storeTx, p SignInPr
 		if err != nil {
 			return SignInResult{}, err
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.execContext(ctx,
 			`UPDATE identities SET email = ?, email_verified = ? WHERE provider = ? AND subject = ?`,
 			p.Email, boolInt(p.EmailVerified), p.Provider, p.Subject); err != nil {
 			return SignInResult{}, fmt.Errorf("identity: refresh: %w", err)
@@ -476,7 +470,7 @@ func (op *Operator) resolveSignInTx(ctx context.Context, tx *storeTx, p SignInPr
 			if decision.reason != "" {
 				waitlistedAt = now.UnixNano()
 			}
-			if _, err := tx.ExecContext(ctx, `
+			if _, err := tx.execContext(ctx, `
 				INSERT INTO accounts (id, email, email_verified, name, active_team, created_at, updated_at,
 					waitlisted_at, waitlist_reason)
 				VALUES (?, ?, ?, ?, '', ?, ?, ?, ?)`,
@@ -494,7 +488,7 @@ func (op *Operator) resolveSignInTx(ctx context.Context, tx *storeTx, p SignInPr
 		default:
 			return SignInResult{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.execContext(ctx, `
 			INSERT INTO identities (provider, subject, account_id, email, email_verified, created_at)
 			VALUES (?, ?, ?, ?, ?, ?)`,
 			p.Provider, p.Subject, accountID, p.Email, boolInt(p.EmailVerified), at); err != nil {
@@ -554,7 +548,7 @@ func (op *Operator) settleActiveTeamTx(ctx context.Context, tx *storeTx, account
 	} else if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx,
+	_, err = tx.execContext(ctx,
 		`UPDATE accounts SET active_team = ?, updated_at = ? WHERE id = ?`, first, at, accountID)
 	return err
 }
@@ -631,7 +625,7 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 	if deleted > 0 {
 		return ErrSlugTaken
 	}
-	res, err := tx.ExecContext(ctx, `
+	res, err := tx.execContext(ctx, `
 		INSERT INTO teams (name, display_name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (name) DO NOTHING`,
 		string(slug), displayName, accountID, now.UnixNano(), now.UnixNano())
@@ -641,7 +635,7 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return ErrSlugTaken
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.execContext(ctx,
 		`INSERT INTO memberships (team, account_id, role, created_at) VALUES (?, ?, ?, ?)`,
 		string(slug), accountID, string(RoleOwner), now.UTC().UnixNano()); err != nil {
 		return fmt.Errorf("identity: add owner: %w", err)
@@ -649,7 +643,7 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 	if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: slug, Actor: actor}, auditTeamCreation{AccountID: accountID}); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET teams_created = teams_created + 1 WHERE id = ?`, accountID)
+	_, err = tx.execContext(ctx, `UPDATE accounts SET teams_created = teams_created + 1 WHERE id = ?`, accountID)
 	return err
 }
 
@@ -696,9 +690,9 @@ func (o *Operator) OpenInvitationsForEmail(ctx context.Context, email string) (o
 	}
 	defer rollbackOrLog(tx)
 
-	rows, err := tx.QueryContext(ctx, invitationSelect+`
+	rows, err := tx.queryContext(ctx, invitationSelect+`
 		WHERE i.email = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, NormalizeEmail(email), tx.now(ctx).UTC().UnixNano())
+		ORDER BY i.created_at`, normalizeEmail(email), tx.now(ctx).UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -781,13 +775,13 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	} else if err != nil {
 		return none, err
 	}
-	if !slices.Contains(ScopesForRole(inviterRole), ScopeTeamAdmin) {
+	if !slices.Contains(ScopesForRole(inviterRole), scopeTeamAdmin) {
 		return none, ErrInvitationClosed
 	}
 	// safety: the update repeats the unaccepted predicate and counts what it
 	// changed, because two callers that both read it open would otherwise both
 	// take it.
-	res, err := tx.ExecContext(ctx, `
+	res, err := tx.execContext(ctx, `
 		UPDATE invitations SET accepted_at = ?, accepted_by = ?
 		WHERE id = ? AND team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL AND expires_at>?`, now.UnixNano(), accountID, invitationID, team, now.UnixNano())
 	if err != nil {
@@ -796,7 +790,7 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return none, ErrInvitationClosed
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.execContext(ctx,
 		`INSERT INTO memberships (team, account_id, role, created_at) VALUES (?, ?, ?, ?)`,
 		team, accountID, role, at); err != nil {
 		if isUniqueViolation(err) {
@@ -829,7 +823,7 @@ func checkTeamRoomTx(ctx context.Context, tx *storeTx, team Team, limit int) err
 	if err := tx.QueryRowContext(ctx, `
 		SELECT (SELECT COUNT(*) FROM memberships WHERE team = ?),
 		       COALESCE((SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind IN (?, ?)), 0)`,
-		string(team), string(team), CreditGrantPaid, CreditGrantReversal).Scan(&members, &paid); err != nil {
+		string(team), string(team), CreditGrantPaid, creditGrantReversal).Scan(&members, &paid); err != nil {
 		return err
 	}
 	if members < limit {
@@ -919,7 +913,7 @@ func (o *Operator) createAccountSession(ctx context.Context, acct Account, team 
 		}
 		now := tx.now(ctx)
 		expires := now.Add(ttl)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(credential_epoch,hash,team,principal,scopes,account_id,created_at,expires_at)
+		if _, err := tx.execContext(ctx, `INSERT INTO sessions(credential_epoch,hash,team,principal,scopes,account_id,created_at,expires_at)
  VALUES (?,?,?,?, '',?,?,?)`, tx.store.credentialEpoch, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
 			return err
 		}
@@ -986,7 +980,7 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 	if active == "" {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT hash FROM sessions WHERE account_id=? AND team=? AND capability_prefix=''`, accountID, t.team)
+	rows, err := tx.queryContext(ctx, `SELECT hash FROM sessions WHERE account_id=? AND team=? AND capability_prefix=''`, accountID, t.team)
 	if err != nil {
 		return err
 	}
@@ -999,7 +993,7 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx,
+	_, err = tx.execContext(ctx,
 		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ? AND capability_prefix = ''`,
 		active, accountID, string(t.team))
 	return err
@@ -1075,7 +1069,7 @@ func (t *Tenant) createInvitationTx(ctx context.Context, tx *storeTx, actorID, e
 		string(t.team), now.Add(-24*time.Hour).UnixNano()).Scan(&today); err != nil {
 		return Invitation{}, err
 	}
-	if open >= MaxOpenInvitations || today >= MaxInvitationsPerDay {
+	if open >= maxOpenInvitations || today >= maxInvitationsPerDay {
 		return Invitation{}, ErrInvitationLimit
 	}
 	var already int
@@ -1089,7 +1083,7 @@ func (t *Tenant) createInvitationTx(ctx context.Context, tx *storeTx, actorID, e
 	}
 	// safety: an expired invitation still holds the open-invitation index, so it is withdrawn before a
 	// fresh one to the same address is written; rows are kept, so the daily count stays honest.
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.execContext(ctx, `
 		UPDATE invitations SET withdrawn_at = ?
 		WHERE team = ? AND email = ? AND accepted_at IS NULL AND withdrawn_at IS NULL AND expires_at <= ?`,
 		at, string(t.team), email, at); err != nil {
@@ -1099,7 +1093,7 @@ func (t *Tenant) createInvitationTx(ctx context.Context, tx *storeTx, actorID, e
 		ID: id, Team: t.team, Email: email, Role: role, InvitedBy: actorID,
 		CreatedAt: now.UTC(), ExpiresAt: now.UTC().Add(invitationTTL),
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.execContext(ctx, `
 		INSERT INTO invitations (id, team, email, role, invited_by, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		inv.ID, string(t.team), inv.Email, string(inv.Role), actorID, at, inv.ExpiresAt.UnixNano()); err != nil {
@@ -1119,7 +1113,7 @@ func (t *Tenant) Invitations(ctx context.Context) (out []Invitation, err error) 
 	}
 	defer rollbackOrLog(tx)
 
-	rows, err := tx.QueryContext(ctx, invitationSelect+`
+	rows, err := tx.queryContext(ctx, invitationSelect+`
 		WHERE i.team = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
 		ORDER BY i.created_at`, string(t.team), tx.now(ctx).UTC().UnixNano())
 	if err != nil {

@@ -23,9 +23,9 @@ const (
 	TeamDeletionDone    = "done"
 )
 
-// DeletedUserLabel replaces a deleted account's address wherever a row that
+// deletedUserLabel replaces a deleted account's address wherever a row that
 // outlives the account names who acted.
-const DeletedUserLabel = "deleted user"
+const deletedUserLabel = "deleted user"
 
 // Deletion errors. Callers map these onto status codes.
 var (
@@ -91,7 +91,7 @@ type AccountDeletion struct {
 
 // Deletion closes existing authority without requiring its former membership to remain live.
 func (op *Operator) discoverDeletionAuthorityLocks(ctx context.Context, tx *storeTx, set lockSet, where string, args ...any) lockSet {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix,COALESCE(team,'') FROM capabilities WHERE `+where, args...)
+	rows, err := tx.queryContext(ctx, `SELECT prefix,COALESCE(team,'') FROM capabilities WHERE `+where, args...)
 	if err != nil {
 		set.err = err
 		return set
@@ -124,7 +124,7 @@ func (op *Operator) discoverDeletionAccountLocks(ctx context.Context, tx *storeT
 	if set.err != nil {
 		return set
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT team FROM memberships WHERE account_id=?`, account)
+	rows, err := tx.queryContext(ctx, `SELECT team FROM memberships WHERE account_id=?`, account)
 	if err != nil {
 		set.err = err
 		return set
@@ -155,7 +155,7 @@ func discoverTeamDeletionLocks(ctx context.Context, tx *storeTx, set lockSet, te
 		set = tx.operator.discoverDeletionAccountLocks(ctx, tx, set, account)
 		set.rows = append(set.rows, rowLock{key: storeLockKey{tier: lockMembership, keys: [3]string{string(team), account}}, write: true, optional: true})
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT hash FROM sessions WHERE team=?`, team)
+	rows, err := tx.queryContext(ctx, `SELECT hash FROM sessions WHERE team=?`, team)
 	if err != nil {
 		set.err = err
 		return set
@@ -182,7 +182,7 @@ func (op *Operator) discoverAccountDeletionLocks(ctx context.Context, tx *storeT
 	}
 	set = tx.operator.discoverDeletionAccountLocks(ctx, tx, set, account)
 	set.add(lockAccount, true, account)
-	rows, err := tx.QueryContext(ctx, `SELECT team FROM memberships WHERE account_id=?`, account)
+	rows, err := tx.queryContext(ctx, `SELECT team FROM memberships WHERE account_id=?`, account)
 	if err != nil {
 		set.err = err
 		return set
@@ -272,7 +272,7 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 		return nil, err
 	}
 	at := now.UTC().UnixNano()
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.execContext(ctx, `
 		INSERT INTO team_deletions (slug, requested_by, requested_at, state, attempts, last_error, finished_at)
 		VALUES (?, ?, ?, ?, 0, '', NULL)
 		ON CONFLICT (slug) DO UPDATE SET
@@ -286,7 +286,7 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE team = ?`, string(t.team)); err != nil {
+	if _, err := tx.execContext(ctx, `DELETE FROM memberships WHERE team = ?`, string(t.team)); err != nil {
 		return nil, err
 	}
 	for _, id := range members {
@@ -296,14 +296,14 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 	}
 	// safety: a session still here belongs to an account with no other team or
 	// predates accounts; either would authenticate into a team being emptied.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE team = ?`, string(t.team)); err != nil {
+	if _, err := tx.execContext(ctx, `DELETE FROM sessions WHERE team = ?`, string(t.team)); err != nil {
 		return nil, err
 	}
 	revoked, err := tx.operator.revokeSelectedCapabilitiesTx(ctx, tx, `team=?`, t.team)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.execContext(ctx, `
 		UPDATE invitations SET withdrawn_at = ?
 		WHERE team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, now.UnixNano(), string(t.team)); err != nil {
 		return nil, err
@@ -312,7 +312,7 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 		return nil, err
 	}
 	for _, table := range []string{"cron_schedules", "run_effects"} {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE team = ?`, t.team); err != nil {
+		if _, err := tx.execContext(ctx, `DELETE FROM `+table+` WHERE team = ?`, t.team); err != nil {
 			return nil, err
 		}
 	}
@@ -326,7 +326,7 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 }
 
 func (t *Tenant) memberIDsTx(ctx context.Context, tx *storeTx) (_ []string, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT account_id FROM memberships WHERE team = ?`, string(t.team))
+	rows, err := tx.queryContext(ctx, `SELECT account_id FROM memberships WHERE team = ?`, string(t.team))
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +343,7 @@ func (t *Tenant) memberIDsTx(ctx context.Context, tx *storeTx) (_ []string, err 
 }
 
 func (op *Operator) revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeTx, where string, args ...any) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE (`+where+`) AND (revoked_at IS NULL OR revoked_at>?) ORDER BY prefix`, append(args, tx.now(ctx).UnixNano())...)
+	rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE (`+where+`) AND (revoked_at IS NULL OR revoked_at>?) ORDER BY prefix`, append(args, tx.now(ctx).UnixNano())...)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +360,7 @@ func (op *Operator) revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeT
 }
 
 func (t *Tenant) cancelActiveRunsTx(ctx context.Context, tx *storeTx, now time.Time) error {
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM runs WHERE team=? AND finished_at IS NULL ORDER BY id`, t.team)
+	rows, err := tx.queryContext(ctx, `SELECT id FROM runs WHERE team=? AND finished_at IS NULL ORDER BY id`, t.team)
 	if err != nil {
 		return err
 	}
@@ -457,7 +457,7 @@ func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder stri
 			return errors.New("store: a deletion lease needs a holder")
 		}
 		at := tx.now(ctx).UTC().UnixNano()
-		res, err := tx.ExecContext(ctx, `
+		res, err := tx.execContext(ctx, `
 			UPDATE team_deletions SET lease_holder = ?, lease_until = ?
 			WHERE slug = ?
 			  AND (state = ? OR (state = ? AND recheck_at IS NOT NULL AND recheck_at <= ?))
@@ -528,7 +528,7 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, rech
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		at := tx.now(ctx).UTC().UnixNano()
-		res, err := tx.ExecContext(ctx, `
+		res, err := tx.execContext(ctx, `
 			UPDATE team_deletions SET state = ?, finished_at = ?, recheck_at = ?, last_error = '',
 			    lease_holder = '', lease_until = NULL
 			WHERE slug = ? AND state = ? AND lease_holder = ?`,
@@ -539,10 +539,10 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, rech
 		if n, err := res.RowsAffected(); err != nil || n != 1 {
 			return errors.Join(fmt.Errorf("%w: %s", ErrDeletionLeaseLost, team), err)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM teams WHERE name = ?`, string(team)); err != nil {
+		if _, err := tx.execContext(ctx, `DELETE FROM teams WHERE name = ?`, string(team)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.execContext(ctx,
 			`UPDATE accounts SET active_team = '', updated_at = ? WHERE active_team = ?`, at, string(team)); err != nil {
 			return err
 		}
@@ -599,7 +599,7 @@ func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, er
 // identities, memberships, sessions and account row. Tokens it minted in any
 // team are revoked. Teams it was the only member of are queued for deletion
 // with all their data. Rows that belong to a team and name the account, such
-// as the runs it started, stay with the team and name [DeletedUserLabel]
+// as the runs it started, stay with the team and name [deletedUserLabel]
 // instead.
 //
 // It refuses with a [*LastOwnerError] while the account is the last owner of
@@ -647,7 +647,7 @@ func (o *Operator) deleteAccountTx(ctx context.Context, tx *storeTx, accountID s
 	// safety: a mint reads its minter's role under the membership row's lock,
 	// so dropping the memberships before sweeping the account's tokens makes
 	// a mint in flight either finish before the sweep reads or find no role.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE account_id = ?`, accountID); err != nil {
+	if _, err := tx.execContext(ctx, `DELETE FROM memberships WHERE account_id = ?`, accountID); err != nil {
 		return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
 	}
 	minted, err := tx.operator.revokeSelectedCapabilitiesTx(ctx, tx, `created_by=? OR (subject_kind='account' AND subject_id=?)`, accountID, accountID)
@@ -680,7 +680,7 @@ func (o *Operator) deleteAccountTx(ctx context.Context, tx *storeTx, accountID s
 		{`UPDATE standing_requests SET decided_by = '' WHERE decided_by = ?`, []any{accountID}},
 		{`DELETE FROM accounts WHERE id = ?`, []any{accountID}},
 	} {
-		if _, err := tx.ExecContext(ctx, stmt.sql, stmt.args...); err != nil {
+		if _, err := tx.execContext(ctx, stmt.sql, stmt.args...); err != nil {
 			return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
 		}
 	}
@@ -688,7 +688,7 @@ func (o *Operator) deleteAccountTx(ctx context.Context, tx *storeTx, accountID s
 }
 
 func (op *Operator) ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Team, blocked []TeamInfo, err error) {
-	rows, err := tx.QueryContext(ctx, `
+	rows, err := tx.queryContext(ctx, `
 		SELECT m.team, t.display_name,
 		       (SELECT COUNT(*) FROM memberships o WHERE o.team = m.team AND o.account_id <> m.account_id AND o.role = ?),
 		       (SELECT COUNT(*) FROM memberships o WHERE o.team = m.team AND o.account_id <> m.account_id)
@@ -724,12 +724,12 @@ type principalName struct {
 func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ []principalName, err error) {
 	names := []principalName{{name: acct.Email}, {name: acct.ID}}
 	add := func(n principalName) {
-		if n.name != "" && n.name != DeletedUserLabel && !slices.Contains(names, n) &&
+		if n.name != "" && n.name != deletedUserLabel && !slices.Contains(names, n) &&
 			!slices.Contains(names, principalName{name: n.name}) {
 			names = append(names, n)
 		}
 	}
-	rows, err := tx.QueryContext(ctx, `
+	rows, err := tx.queryContext(ctx, `
 		SELECT email, '' FROM identities WHERE account_id = ? AND linked = 0`, acct.ID)
 	if err != nil {
 		return nil, err
@@ -746,7 +746,7 @@ func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ 
 }
 
 func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error {
-	label := DeletedUserLabel
+	label := deletedUserLabel
 	scope, args := "", []any{label, n.name}
 	if n.team != "" {
 		scope, args = ` AND team = ?`, append(args, n.team)
@@ -760,7 +760,7 @@ func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, n princ
 		{"nodes", "claim_principal"},
 		{"secrets", "principal"},
 	} {
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.execContext(ctx,
 			`UPDATE `+col.table+` SET `+col.column+` = ? WHERE `+col.column+` = ?`+scope, args...); err != nil {
 			return fmt.Errorf("relabel %s.%s: %w", col.table, col.column, err)
 		}
@@ -779,7 +779,7 @@ func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, n princ
 		eventsSQL += ` AND team = ?`
 		eventArgs = append(eventArgs, n.team)
 	}
-	if _, err := tx.ExecContext(ctx, eventsSQL, eventArgs...); err != nil {
+	if _, err := tx.execContext(ctx, eventsSQL, eventArgs...); err != nil {
 		return fmt.Errorf("relabel event payloads: %w", err)
 	}
 	return nil
@@ -809,7 +809,7 @@ func (op *Operator) grantCreatorTeamsTx(ctx context.Context, tx *storeTx, n prin
 	if n.team != "" {
 		query, args = query+` AND team=?`, append(args, n.team)
 	}
-	rows, err := tx.QueryContext(ctx, query+` ORDER BY team`, args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY team`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -844,13 +844,13 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 	// serializes every writer.
 	address := invitationEmailKey(email)
 	if tx.dialect == DialectPostgres {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/invitation-email/"+address); err != nil {
+		if _, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/invitation-email/"+address); err != nil {
 			return false, err
 		}
 	}
 	at := tx.now(ctx).UTC().UnixNano()
 	since := tx.now(ctx).Add(-24 * time.Hour).UnixNano()
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.execContext(ctx,
 		`DELETE FROM invitation_email_log WHERE address = ? AND sent_at <= ?`, address, since); err != nil {
 		return false, err
 	}
@@ -862,7 +862,7 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 	if sent >= MaxInvitationEmailsPerDay {
 		return false, nil
 	}
-	res, err := tx.ExecContext(ctx,
+	res, err := tx.execContext(ctx,
 		`UPDATE invitations SET emailed_at = ? WHERE id = ? AND emailed_at IS NULL`, at, invitationID)
 	if err != nil {
 		return false, err
@@ -870,7 +870,7 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.execContext(ctx,
 		`INSERT INTO invitation_email_log (address, sent_at) VALUES (?, ?)`, address, at); err != nil {
 		return false, err
 	}
@@ -882,12 +882,12 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 // counts one inbox however its case was typed, because the address is
 // normalized before it is hashed.
 func invitationEmailKey(email string) string {
-	sum := sha256.Sum256([]byte(NormalizeEmail(email)))
+	sum := sha256.Sum256([]byte(normalizeEmail(email)))
 	return hex.EncodeToString(sum[:])
 }
 
 func accountByEmailTx(ctx context.Context, tx *storeTx, email string) (_ Account, err error) {
-	rows, err := tx.QueryContext(ctx, accountSelect+` WHERE email = ? ORDER BY email_verified DESC, created_at`, NormalizeEmail(email))
+	rows, err := tx.queryContext(ctx, accountSelect+` WHERE email = ? ORDER BY email_verified DESC, created_at`, normalizeEmail(email))
 	if err != nil {
 		return Account{}, err
 	}

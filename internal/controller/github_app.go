@@ -394,7 +394,7 @@ func (s *Server) githubAppSelect(ctx context.Context, p capability.Authorized, f
 	return s.bindGitHubAppInstallation(ctx, writer, p, inst, proof.UserID)
 }
 
-func (s *Server) bindGitHubAppInstallation(ctx context.Context, writer GitHubConnectWriter, p capability.Authorized, inst githubapp.Installation, githubUser int64) (store.GitHubAppInstallation, error) {
+func (s *Server) bindGitHubAppInstallation(ctx context.Context, writer gitHubConnectWriter, p capability.Authorized, inst githubapp.Installation, githubUser int64) (store.GitHubAppInstallation, error) {
 	bound, err := writer.BindAuthorizedGitHubInstallation(ctx, p, store.GitHubAppInstallation{
 		InstallationID: inst.ID, AccountID: inst.Account.ID, AccountLogin: inst.Account.Login,
 		AccountType: inst.Account.Type, Suspended: inst.SuspendedAt != nil,

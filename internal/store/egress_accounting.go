@@ -72,8 +72,8 @@ func (o *Operator) EgressUsageAcrossTeams(ctx context.Context, period string) (_
 	return out, rows.Err()
 }
 
-// EgressUsageRetentionMonths preserves thirteen months of egress reports.
-const EgressUsageRetentionMonths = 13
+// egressUsageRetentionMonths preserves thirteen months of egress reports.
+const egressUsageRetentionMonths = 13
 
 // PruneEgressUsage expires old reports under the maintenance fence and store clock.
 func (o *Operator) PruneEgressUsage(ctx context.Context, lease SingletonLease) (int64, error) {
@@ -83,8 +83,8 @@ func (o *Operator) PruneEgressUsage(ctx context.Context, lease SingletonLease) (
 			return err
 		}
 		now := tx.now(ctx).UTC()
-		cutoff := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -EgressUsageRetentionMonths, 0).Format("2006-01")
-		result, err := tx.ExecContext(ctx, "DELETE FROM egress_usage WHERE period<?", cutoff)
+		cutoff := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -egressUsageRetentionMonths, 0).Format("2006-01")
+		result, err := tx.execContext(ctx, "DELETE FROM egress_usage WHERE period<?", cutoff)
 		if err != nil {
 			return err
 		}

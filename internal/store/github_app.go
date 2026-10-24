@@ -112,7 +112,7 @@ func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in G
 	}
 	// safety: the conflict guard compares teams, so a second team's connect
 	// updates nothing and cannot take the installation over.
-	res, err := tx.ExecContext(ctx, `
+	res, err := tx.execContext(ctx, `
 		INSERT INTO github_app_installations (`+githubAppInstallationCols+`, connection_generation)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (installation_id) DO UPDATE SET
@@ -222,7 +222,7 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
+		if _, err := tx.execContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
 			WHERE team = ? AND installation_id = ?`, flag, tx.now(ctx).UTC().UnixNano(), team, installation); err != nil {
 			return err
 		}
@@ -230,7 +230,7 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 			return err
 		}
 		if suspended {
-			if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+			if _, err := tx.execContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
 				tx.now(ctx).UnixNano(), team, installation); err != nil {
 				return err
@@ -358,7 +358,7 @@ func (t *Tenant) putGitHubAppTriggerTx(ctx context.Context, tx *storeTx, tr GitH
 	if err != nil {
 		return GitHubAppTrigger{}, fmt.Errorf("encode pull request base branches: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.execContext(ctx, `
 		INSERT INTO github_app_triggers (team, repo_key, `+githubAppTriggerCols+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (team, repository_id, pipeline) DO UPDATE SET
@@ -553,7 +553,7 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 	if err := invalidateGitHubInstallationPublicationsTx(ctx, tx, t.team, installation); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM github_app_installations WHERE team = ? AND installation_id = ?`,
+	res, err := tx.execContext(ctx, `DELETE FROM github_app_installations WHERE team = ? AND installation_id = ?`,
 		string(t.team), installation)
 	if err != nil {
 		return err
@@ -561,11 +561,11 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_triggers WHERE team = ? AND installation_id = ?`,
+	if _, err := tx.execContext(ctx, `DELETE FROM github_app_triggers WHERE team = ? AND installation_id = ?`,
 		string(t.team), installation); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+	if _, err := tx.execContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
 		tx.now(ctx).UnixNano(), string(t.team), installation); err != nil {
 		return err

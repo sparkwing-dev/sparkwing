@@ -16,10 +16,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// TeamDeletionInterval is how often the controller finishes pending team
+// teamDeletionInterval is how often the controller finishes pending team
 // deletions. A request closes the team at once; this pass removes its rows
 // and stored objects.
-const TeamDeletionInterval = time.Minute
+const teamDeletionInterval = time.Minute
 
 type teamDeletionJSON struct {
 	Slug        string `json:"slug"`

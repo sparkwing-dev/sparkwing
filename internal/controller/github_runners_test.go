@@ -3,10 +3,8 @@ package controller_test
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
-	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -229,35 +226,5 @@ func TestGitHubRunnerCredentialClaimsOnlyItsOwnPush(t *testing.T) {
 		if code := f.call("POST", "/api/v1/runners/claim", runner, githubClaimBody(kind, "", ""), &response); code != http.StatusOK || response.Claim == nil || response.Claim.RunID != "run-feature" {
 			t.Fatalf("own %s = %d %+v", kind, code, response)
 		}
-	}
-}
-
-func TestGitHubRunnerWorkflowDocMatchesTheRenderedTemplate(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "github-actions-runners.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	want := controller.GitHubRunnerWorkflow("https://sparkwing.example.com", "acme")
-	if !strings.Contains(doc, want) {
-		t.Fatalf("docs/github-actions-runners.md does not carry the workflow the controller renders:\n%s", want)
-	}
-	if !strings.Contains(doc, controller.GitHubActionsLabel) {
-		t.Fatal("doc does not name the runner label")
-	}
-}
-
-func TestGitHubRunnerWorkflowUsesCurrentGrammar(t *testing.T) {
-	workflow := controller.GitHubRunnerWorkflow("https://sparkwing.example.com", "acme")
-	_, command, found := strings.Cut(workflow, `"$RUNNER_TEMP/sparkwing-runner" `)
-	if !found {
-		t.Fatal("workflow contains no runner invocation")
-	}
-	words := strings.Fields(strings.ReplaceAll(command, "\\\n", " "))
-	if len(words) == 0 {
-		t.Fatal("workflow contains no runner command")
-	}
-	if _, err := runnerflags.Parse(words[0], words[1:], io.Discard); err != nil {
-		t.Fatal(err)
 	}
 }

@@ -183,7 +183,7 @@ func checkRecoveryUnstarted(t *testing.T) error {
 		if err := f.expireHolder(ctx); err != nil {
 			return err
 		}
-		checkStoreQueueCounts(t, f.s, map[string]int{store.QueueStateClaimed: 1})
+		checkStoreQueueCounts(t, f.s, map[string]int{"claimed": 1})
 		units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
 		if err != nil {
 			return err
@@ -195,7 +195,7 @@ func checkRecoveryUnstarted(t *testing.T) error {
 		if err := f.reopen(ctx); err != nil {
 			return err
 		}
-		checkStoreQueueCounts(t, f.s, map[string]int{store.QueueStateWaiting: 1})
+		checkStoreQueueCounts(t, f.s, map[string]int{"waiting": 1})
 		pending, err := f.tenant.ReadNode(ctx, ref)
 		if err != nil {
 			return err

@@ -15,37 +15,37 @@ import (
 // slot when the operator has set no other number.
 const DefaultFreeTeamSlots = 200
 
-// DefaultFreeAllowanceBytes is a free team's allowance across every store
+// defaultFreeAllowanceBytes is a free team's allowance across every store
 // when the operator has not written storage_free_allowance_bytes.
-const DefaultFreeAllowanceBytes int64 = 1 << 30
+const defaultFreeAllowanceBytes int64 = 1 << 30
 
 // TeamStorageTier is what a team may store.
 type TeamStorageTier string
 
 const (
-	// TeamTierFunded stores without a byte limit: a team with credits,
+	// teamTierFunded stores without a byte limit: a team with credits,
 	// or the operator's own team.
-	TeamTierFunded TeamStorageTier = "funded"
-	// TeamTierFree holds a free-tier slot and stores up to its shares.
-	TeamTierFree TeamStorageTier = "free"
-	// TeamTierNone has neither credits nor a slot and stores nothing.
-	TeamTierNone TeamStorageTier = "none"
+	teamTierFunded TeamStorageTier = "funded"
+	// teamTierFree holds a free-tier slot and stores up to its shares.
+	teamTierFree TeamStorageTier = "free"
+	// teamTierNone has neither credits nor a slot and stores nothing.
+	teamTierNone TeamStorageTier = "none"
 )
 
 // FreeEventShare is the part of allowance a free team's run events are held
 // to, one sixteenth; the cache and the node logs hold the rest.
 func FreeEventShare(allowance int64) int64 { return allowance / 16 }
 
-// StorageLimitFreeEvents names a free team's event share in a
+// storageLimitFreeEvents names a free team's event share in a
 // [StorageQuotaError].
-const StorageLimitFreeEvents = "free_event_share"
+const storageLimitFreeEvents = "free_event_share"
 
 const metaKeyFreeTeamSlots = "free_team_slots"
 
 const freeSlotIdlePeriod = 30 * 24 * time.Hour
 
 func markFreeSlotActiveTx(ctx context.Context, tx *storeTx, team Team) error {
-	_, err := tx.ExecContext(ctx, `UPDATE free_slots SET empty_since=0 WHERE team=? AND empty_since<>0`, team)
+	_, err := tx.execContext(ctx, `UPDATE free_slots SET empty_since=0 WHERE team=? AND empty_since<>0`, team)
 	return err
 }
 
@@ -53,7 +53,7 @@ func (op *Operator) releaseIdleFreeSlotsTx(ctx context.Context, tx *storeTx) (in
 	if err := lockFreeTierTx(ctx, tx); err != nil {
 		return 0, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT team,empty_since FROM free_slots ORDER BY team`+tx.forUpdate())
+	rows, err := tx.queryContext(ctx, `SELECT team,empty_since FROM free_slots ORDER BY team`+tx.forUpdate())
 	if err != nil {
 		return 0, err
 	}
@@ -89,12 +89,12 @@ func (op *Operator) releaseIdleFreeSlotsTx(ctx context.Context, tx *storeTx) (in
 		}
 		switch {
 		case occupied != 0 && slot.emptySince != 0:
-			_, err = tx.ExecContext(ctx, `UPDATE free_slots SET empty_since=0 WHERE team=?`, slot.team)
+			_, err = tx.execContext(ctx, `UPDATE free_slots SET empty_since=0 WHERE team=?`, slot.team)
 		case occupied == 0 && slot.emptySince == 0:
-			_, err = tx.ExecContext(ctx, `UPDATE free_slots SET empty_since=? WHERE team=?`, now, slot.team)
+			_, err = tx.execContext(ctx, `UPDATE free_slots SET empty_since=? WHERE team=?`, now, slot.team)
 		case occupied == 0 && slot.emptySince <= cutoff:
 			var result sql.Result
-			result, err = tx.ExecContext(ctx, `DELETE FROM free_slots WHERE team=?`, slot.team)
+			result, err = tx.execContext(ctx, `DELETE FROM free_slots WHERE team=?`, slot.team)
 			if err == nil {
 				var n int64
 				n, err = result.RowsAffected()
@@ -132,7 +132,7 @@ func holdsFreeAllowance(team Team) bool {
 }
 
 func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStanding, error) {
-	out := StorageStanding{Tier: TeamTierFunded}
+	out := StorageStanding{Tier: teamTierFunded}
 	var err error
 	out.EventBytes, err = retainedEventBytesTx(ctx, tx, team)
 	if err != nil {
@@ -141,7 +141,7 @@ func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStan
 	if tx.store.creditMeteringOff.Load() {
 		return out, nil
 	}
-	allowance, err := creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, DefaultFreeAllowanceBytes)
+	allowance, err := creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, defaultFreeAllowanceBytes)
 	if err != nil {
 		return StorageStanding{}, err
 	}
@@ -160,9 +160,9 @@ func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStan
 	switch {
 	case funded:
 	case slotted:
-		out.Tier = TeamTierFree
+		out.Tier = teamTierFree
 	default:
-		out.Tier = TeamTierNone
+		out.Tier = teamTierNone
 	}
 	return out, nil
 }
@@ -185,7 +185,7 @@ func lockFreeTierTx(ctx context.Context, tx *storeTx) error {
 	if tx.dialect != DialectPostgres {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/free-tier")
+	_, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/free-tier")
 	return err
 }
 
@@ -197,7 +197,7 @@ func takeFreeSlotTx(ctx context.Context, tx *storeTx, team Team, now time.Time) 
 	if !open {
 		return rowPresentTx(ctx, tx, `SELECT 1 FROM free_slots WHERE team = ?`, string(team))
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.execContext(ctx, `
 INSERT INTO free_slots (team, taken_at)
 SELECT ?, ?
  WHERE NOT EXISTS (SELECT 1 FROM free_slots WHERE team = ?)`,
@@ -260,14 +260,14 @@ func admitFreeEventsTx(ctx context.Context, tx *storeTx, team Team, principal st
 	if err != nil {
 		return err
 	}
-	allowance, err := creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, DefaultFreeAllowanceBytes)
+	allowance, err := creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, defaultFreeAllowanceBytes)
 	if err != nil {
 		return err
 	}
 	share := FreeEventShare(max(allowance, 0))
 	if used+bytes > share {
 		return &StorageQuotaError{
-			Principal: principal, Limit: StorageLimitFreeEvents, Unit: "bytes",
+			Principal: principal, Limit: storageLimitFreeEvents, Unit: "bytes",
 			Used: used, Allowed: share, Requested: bytes,
 			Remedy: "the team has no credits, so its run events keep at most their share of the free allowance; " +
 				"add credits to store more, and runs past the retention window release theirs",
@@ -293,7 +293,7 @@ func (s *Store) GrantFreeSlot(ctx context.Context, team Team) error {
 		if !exists {
 			return fmt.Errorf("%w: team %s", ErrNotFound, team)
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.execContext(ctx, `
 INSERT INTO free_slots (team, taken_at) VALUES (?,?)
 ON CONFLICT (team) DO NOTHING`, string(team), tx.now(ctx).UnixNano()); err != nil {
 			return err

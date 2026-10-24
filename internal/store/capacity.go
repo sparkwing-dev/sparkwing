@@ -231,7 +231,7 @@ func (t *Tenant) recordProfileObservationTx(ctx context.Context, tx *storeTx, pi
 	if !obs.CPUMeasured {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO pipeline_profiles
+	if _, err := tx.execContext(ctx, `INSERT INTO pipeline_profiles
  (team,pipeline,node_id,p50_duration_ms,p99_duration_ms,peak_cores,peak_memory_bytes,sample_count,updated_at)
  VALUES (?,?,?,0,0,0,0,0,?) ON CONFLICT (team,pipeline,node_id) DO NOTHING`,
 		string(t.team), pipeline, nodeID, tx.now(ctx).UnixNano()); err != nil {
@@ -292,7 +292,7 @@ func (t *Tenant) recordProfileObservationTx(ctx context.Context, tx *storeTx, pi
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.execContext(ctx, `
 INSERT INTO pipeline_profiles
     (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json,
      plan_hash, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores)
@@ -434,16 +434,6 @@ func (t *Tenant) loadWaitWindow(ctx context.Context, pipeline string) ([]int64, 
 	return doc.Samples, nil
 }
 
-// RecordContention increments this tenant's contention tally for an existing pipeline rollup.
-func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error {
-	return retryOnBusy(func() error {
-		_, err := t.s.exec(ctx,
-			`UPDATE pipeline_profiles SET contended_count = contended_count + 1
-			  WHERE team = ? AND pipeline = ? AND node_id = ''`, string(t.team), pipeline)
-		return err
-	})
-}
-
 // SetProfilePin updates the resource pin on this tenant's existing profile row.
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
 	return retryOnBusy(func() error {
@@ -489,16 +479,6 @@ type ProfileResetSummary struct {
 	RowsCleared    int      `json:"rows_cleared"`
 	SamplesDropped int      `json:"samples_dropped"`
 	FloorsDropped  int      `json:"floors_dropped"`
-}
-
-// ResetPipelineProfile clears one tenant pipeline's learned observations and floors while preserving resource pins.
-func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
-	return t.resetProfiles(ctx, pipeline)
-}
-
-// ResetAllProfiles clears this tenant's learned observations and floors while preserving resource pins.
-func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error) {
-	return t.resetProfiles(ctx, "")
 }
 
 func (t *Tenant) resetProfiles(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
@@ -870,4 +850,24 @@ func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([
 		})
 	}
 	return out, nil
+}
+
+// RecordContention increments this tenant's contention tally for an existing pipeline rollup.
+func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error {
+	return retryOnBusy(func() error {
+		_, err := t.s.exec(ctx,
+			`UPDATE pipeline_profiles SET contended_count = contended_count + 1
+			  WHERE team = ? AND pipeline = ? AND node_id = ''`, string(t.team), pipeline)
+		return err
+	})
+}
+
+// ResetPipelineProfile clears one tenant pipeline's learned observations and floors while preserving resource pins.
+func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
+	return t.resetProfiles(ctx, pipeline)
+}
+
+// ResetAllProfiles clears this tenant's learned observations and floors while preserving resource pins.
+func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error) {
+	return t.resetProfiles(ctx, "")
 }

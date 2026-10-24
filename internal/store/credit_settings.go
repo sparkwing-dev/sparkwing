@@ -60,7 +60,7 @@ func setCreditSettingTx(ctx context.Context, tx *storeTx, key, value string) err
 	if !json.Valid([]byte(value)) {
 		return fmt.Errorf("%w: %s must hold JSON", ErrInvalidCreditSetting, key)
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?)
+	result, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE settings.sealed=0`, key, []byte(value))
 	if err != nil {
 		return err

@@ -36,9 +36,9 @@ func TestHandshakeServesOlderClientOnItsOwnProtocolMajor(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home})
 
-	_, ack := dialAtMajor(t, home, wingd.MinProtocolMajor)
-	if ack.ProtocolMajor != wingd.MinProtocolMajor {
-		t.Errorf("served major = %d, want the client's %d", ack.ProtocolMajor, wingd.MinProtocolMajor)
+	_, ack := dialAtMajor(t, home, wingwire.MinProtocolMajor)
+	if ack.ProtocolMajor != wingwire.MinProtocolMajor {
+		t.Errorf("served major = %d, want the client's %d", ack.ProtocolMajor, wingwire.MinProtocolMajor)
 	}
 	if ack.NativeProtocolMajor != wingd.ProtocolMajor {
 		t.Errorf("native major = %d, want the daemon's %d", ack.NativeProtocolMajor, wingd.ProtocolMajor)
@@ -59,7 +59,7 @@ func TestHandshakeAnswersBelowFloorClientWithItsOwnMajor(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home})
 
-	_, ack := dialAtMajor(t, home, wingd.MinProtocolMajor-1)
+	_, ack := dialAtMajor(t, home, wingwire.MinProtocolMajor-1)
 	if ack.ProtocolMajor != wingd.ProtocolMajor {
 		t.Errorf("served major = %d, want the daemon's %d so the client refuses", ack.ProtocolMajor, wingd.ProtocolMajor)
 	}
@@ -69,9 +69,9 @@ func TestOlderProtocolClientIsGrantedAdmission(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home})
 
-	nc, ack := dialAtMajor(t, home, wingd.MinProtocolMajor)
-	if ack.ProtocolMajor != wingd.MinProtocolMajor {
-		t.Fatalf("served major = %d, want %d", ack.ProtocolMajor, wingd.MinProtocolMajor)
+	nc, ack := dialAtMajor(t, home, wingwire.MinProtocolMajor)
+	if ack.ProtocolMajor != wingwire.MinProtocolMajor {
+		t.Fatalf("served major = %d, want %d", ack.ProtocolMajor, wingwire.MinProtocolMajor)
 	}
 	req := wingwire.AdmissionRequest{
 		RunID:     "run-old-pin",
@@ -101,9 +101,9 @@ func TestOlderProtocolSemaphoresOnlyLeaseDoesNotFinalizeRun(t *testing.T) {
 		Runs: &wingd.FuncRunStore{Finalize: func(runID string) { finalized <- runID }},
 	})
 
-	nc, ack := dialAtMajor(t, home, wingd.MinProtocolMajor)
-	if ack.ProtocolMajor != wingd.MinProtocolMajor {
-		t.Fatalf("served major = %d, want %d", ack.ProtocolMajor, wingd.MinProtocolMajor)
+	nc, ack := dialAtMajor(t, home, wingwire.MinProtocolMajor)
+	if ack.ProtocolMajor != wingwire.MinProtocolMajor {
+		t.Fatalf("served major = %d, want %d", ack.ProtocolMajor, wingwire.MinProtocolMajor)
 	}
 	req := wingwire.AdmissionRequest{
 		RunID:          "run-old-pin/node",

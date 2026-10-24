@@ -49,8 +49,8 @@ func (s *EngineController) Finish(ctx context.Context, a capability.Authorized, 
 	return appliedResponse(applied), engineLookupError(err)
 }
 
-// Cancel requests cooperative cancellation under the caller's tagged authority.
-func (s *EngineController) Cancel(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error) {
+// cancel requests cooperative cancellation under the caller's tagged authority.
+func (s *EngineController) cancel(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error) {
 	tenant, err := s.runTransactions(ctx, a.Target.Team)
 	if err != nil {
 		return controllerwire.Applied{}, err
@@ -62,9 +62,9 @@ func (s *EngineController) Cancel(ctx context.Context, a capability.Authorized, 
 	return appliedResponse(applied), engineLookupError(err)
 }
 
-// Retry delegates source-seal loading to AdmitRun. The new requester is recorded
+// retry delegates source-seal loading to AdmitRun. The new requester is recorded
 // as retrier lineage without reconstructing or changing the source's request.
-func (s *EngineController) Retry(ctx context.Context, a capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
+func (s *EngineController) retry(ctx context.Context, a capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
 	if err := body.Validate(); err != nil {
 		return controllerwire.CreateRunResponse{}, err
 	}

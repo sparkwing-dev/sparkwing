@@ -84,6 +84,6 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 	if err != nil {
 		return "", err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO claim_contexts(team,id,requirements,unit_kind) VALUES (?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, team, id, requirements, kind)
+	_, err = tx.execContext(ctx, `INSERT INTO claim_contexts(team,id,requirements,unit_kind) VALUES (?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, team, id, requirements, kind)
 	return id, err
 }

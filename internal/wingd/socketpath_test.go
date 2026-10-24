@@ -103,7 +103,7 @@ func TestDaemon_BindsUnderDeepHome(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("daemon did not stop after cancel")
 	}
-	if _, err := os.Stat(filepath.Dir(d.SocketPath())); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Dir(d.layout.sock)); !os.IsNotExist(err) {
 		t.Errorf("socket directory remains after clean daemon exit: %v", err)
 	}
 }

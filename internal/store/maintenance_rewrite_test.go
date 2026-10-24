@@ -91,10 +91,10 @@ func TestRewriteCompletionOldAcknowledgmentLeavesTerminalDue(t *testing.T) {
 	}
 	maintenanceEffects(t, s, runstate.RunPending)
 	due, err := s.AsOperator().DueRunEffects(ctx, lease, 10)
-	if err != nil || len(due) != 1 || due[0].Phase != EffectPending {
+	if err != nil || len(due) != 1 || due[0].Phase != effectPending {
 		t.Fatalf("pending: %+v %v", due, err)
 	}
-	old := EffectDelivery{RunID: "run", Effect: EffectGitHubCheck, Revision: due[0].DesiredRev, Lease: lease}
+	old := EffectDelivery{RunID: "run", Effect: effectGitHubCheck, Revision: due[0].DesiredRev, Lease: lease}
 	maintenanceEffects(t, s, runstate.RunSuccess)
 	if err := tenant.AcknowledgeRunEffect(ctx, old); err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestRewriteCompletionOldAcknowledgmentLeavesTerminalDue(t *testing.T) {
 		t.Fatalf("terminal still due: %+v %v", due, err)
 	}
 	for _, effect := range due {
-		if effect.Phase != EffectTerminal {
+		if effect.Phase != effectTerminal {
 			t.Fatalf("regressed phase: %+v", effect)
 		}
 		if err := tenant.AcknowledgeRunEffect(ctx, EffectDelivery{RunID: "run", Effect: effect.Effect, Revision: effect.DesiredRev, Lease: lease}); err != nil {
@@ -194,7 +194,7 @@ func TestRewriteReplicasRaceQuotaAndSingletonLease(t *testing.T) {
 		})
 		stores[i] = &Store{db: db, clock: func() time.Time { return now }}
 	}
-	schema, err := TranslateSchema(schemaNeutral, DialectSQLite)
+	schema, err := translateSchema(schemaNeutral, DialectSQLite)
 	if err != nil {
 		t.Fatal(err)
 	}

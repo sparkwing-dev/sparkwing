@@ -34,10 +34,10 @@ func declaredCapacityFloorTerm(declared int) int {
 
 // OnLimit policies control admission when capacity is exhausted.
 const (
-	OnLimitQueue        = "queue"
-	OnLimitSkip         = "skip"
-	OnLimitFail         = "fail"
-	OnLimitCancelOthers = "cancel_others"
+	onLimitQueue        = "queue"
+	onLimitSkip         = "skip"
+	onLimitFail         = "fail"
+	onLimitCancelOthers = "cancel_others"
 )
 
 // defaultConcurrencyLease bounds logical capacity between renewals. Claim or
@@ -140,7 +140,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		return runstate.AcquireSlotResponse{}, errors.New("concurrency: empty holder_id")
 	}
 	if req.Policy == "" {
-		req.Policy = OnLimitQueue
+		req.Policy = onLimitQueue
 	}
 	if req.Capacity <= 0 {
 		req.Capacity = 1
@@ -153,7 +153,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	}
 
 	if req.Cost > req.Capacity {
-		if req.Policy == OnLimitSkip {
+		if req.Policy == onLimitSkip {
 			return runstate.AcquireSlotResponse{Kind: runstate.AcquireSkipped}, nil
 		}
 		return runstate.AcquireSlotResponse{Kind: runstate.AcquireFailed}, nil
@@ -181,7 +181,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	).Scan(&existingCap)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if _, err := tx.ExecContext(
+		if _, err := tx.execContext(
 			ctx,
 			`INSERT INTO concurrency_entries
 			   (team, key, capacity, previous_capacity, last_write_run_id, last_write_node_id, updated_at)
@@ -209,7 +209,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 				"concurrency key %q capacity changed %d -> %d (latest-wins; previous writer was preserved in previous_capacity)",
 				req.Key, existingCap, req.Capacity,
 			)
-			if _, err := tx.ExecContext(
+			if _, err := tx.execContext(
 				ctx,
 				`UPDATE concurrency_entries
 				    SET capacity = ?, previous_capacity = ?, last_write_run_id = ?, last_write_node_id = ?, updated_at = ?
@@ -219,7 +219,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 				return runstate.AcquireSlotResponse{}, err
 			}
 		} else {
-			if _, err := tx.ExecContext(
+			if _, err := tx.execContext(
 				ctx,
 				`UPDATE concurrency_entries
 				    SET last_write_run_id = ?, last_write_node_id = ?, updated_at = ?
@@ -258,7 +258,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		if err != nil {
 			return runstate.AcquireSlotResponse{}, err
 		}
-		if _, err := tx.ExecContext(
+		if _, err := tx.execContext(
 			ctx,
 			`UPDATE concurrency_holders SET lease_expires_at = ? WHERE team = ? AND key = ? AND holder_id = ?`,
 			newExpires, string(t.team), req.Key, req.HolderID,
@@ -287,7 +287,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	policy := req.Policy
 
 	queueBlocked := false
-	if policy == OnLimitQueue {
+	if policy == onLimitQueue {
 		blocked, err := txEarlierRunnableQueueWaiter(ctx, tx, t.team, req.Key, req.RunID, req.NodeID, nowNS, acct)
 		if err != nil {
 			return runstate.AcquireSlotResponse{}, err
@@ -312,13 +312,13 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	}
 
 	switch policy {
-	case OnLimitSkip:
+	case onLimitSkip:
 		return runstate.AcquireSlotResponse{Kind: runstate.AcquireSkipped, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
 
-	case OnLimitFail:
+	case onLimitFail:
 		return runstate.AcquireSlotResponse{Kind: runstate.AcquireFailed, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
 
-	case OnLimitCancelOthers:
+	case onLimitCancelOthers:
 		var supersededIDs []string
 		freed := 0
 		for _, h := range acct.holders {
@@ -354,7 +354,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 			DriftNote:        driftNote,
 		}, nil
 
-	case OnLimitQueue:
+	case onLimitQueue:
 		fallthrough
 	default:
 		arrivedNS := nowNS
@@ -367,7 +367,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		}
 		if err := txPark(ctx, tx, t.team, ConcurrencyWaiter{
 			Key: req.Key, RunID: req.RunID, NodeID: req.NodeID, HolderID: req.HolderID,
-			Policy: OnLimitQueue,
+			Policy: onLimitQueue,
 			Cost:   req.Cost, DeclaredCapacity: req.Capacity,
 		}, arrivedNS, now.Add(req.Lease).UnixNano()); err != nil {
 			return runstate.AcquireSlotResponse{}, err
@@ -376,14 +376,14 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 		if err := tx.QueryRowContext(
 			ctx,
 			`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy = ? AND arrived_at < ?`,
-			string(t.team), req.Key, OnLimitQueue, arrivedNS,
+			string(t.team), req.Key, onLimitQueue, arrivedNS,
 		).Scan(&position); err != nil {
 			return runstate.AcquireSlotResponse{}, err
 		}
 		if err := tx.QueryRowContext(
 			ctx,
 			`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy = ?`,
-			string(t.team), req.Key, OnLimitQueue,
+			string(t.team), req.Key, onLimitQueue,
 		).Scan(&queueLen); err != nil {
 			return runstate.AcquireSlotResponse{}, err
 		}
@@ -399,7 +399,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 }
 
 func txActiveHolders(ctx context.Context, tx *storeTx, team Team, key string, nowNS int64) ([]ConcurrencyHolder, error) {
-	rows, err := tx.QueryContext(
+	rows, err := tx.queryContext(
 		ctx,
 		`SELECT `+holderColumns+`
 		   FROM concurrency_holders
@@ -468,13 +468,13 @@ func txEarlierRunnableQueueWaiter(ctx context.Context, tx *storeTx, team Team, k
 		return false, err
 	}
 
-	rows, err := tx.QueryContext(
+	rows, err := tx.queryContext(
 		ctx,
 		`SELECT `+waiterColumns+`
 		   FROM concurrency_waiters
 		  WHERE team = ? AND key = ? AND policy = ? AND (run_id != ? OR node_id != ?) AND lease_expires_at > ?
 		  ORDER BY arrived_at ASC`,
-		string(team), key, OnLimitQueue, runID, nodeID, nowNS,
+		string(team), key, onLimitQueue, runID, nodeID, nowNS,
 	)
 	if err != nil {
 		return false, err
@@ -550,7 +550,7 @@ func txQueueWaiterArrivedAt(ctx context.Context, tx *storeTx, team Team, key, ru
 		ctx,
 		`SELECT arrived_at FROM concurrency_waiters
 		  WHERE team = ? AND key = ? AND run_id = ? AND node_id = ? AND policy = ? AND lease_expires_at > ?`,
-		string(team), key, runID, nodeID, OnLimitQueue, tx.now(ctx).UnixNano(),
+		string(team), key, runID, nodeID, onLimitQueue, tx.now(ctx).UnixNano(),
 	).Scan(&arrivedNS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
@@ -637,7 +637,7 @@ func txCheckConcurrencyInvariants(ctx context.Context, tx *storeTx, team Team, k
 			violations = append(violations, fmt.Sprintf("holder %q cost %d exceeds its declared capacity %d", h.HolderID, h.Cost, h.DeclaredCapacity))
 		}
 	}
-	rows, err := tx.QueryContext(
+	rows, err := tx.queryContext(
 		ctx,
 		`SELECT `+waiterColumns+` FROM concurrency_waiters WHERE team = ? AND key = ?`, string(team), key,
 	)
@@ -659,7 +659,7 @@ func txCheckConcurrencyInvariants(ctx context.Context, tx *storeTx, team Team, k
 	}
 	for _, w := range waiters {
 		switch w.Policy {
-		case OnLimitQueue, OnLimitCancelOthers:
+		case onLimitQueue, onLimitCancelOthers:
 		default:
 			violations = append(violations, fmt.Sprintf("waiter %s/%s has unknown policy %q", w.RunID, w.NodeID, w.Policy))
 		}
@@ -731,7 +731,7 @@ func txInsertHolder(ctx context.Context, tx *storeTx, h holderRow, nowNS, expire
 	if _, err := txDeleteWaiter(ctx, tx, h.team, h.key, h.runID, h.nodeID); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(
+	res, err := tx.execContext(
 		ctx,
 		`INSERT INTO concurrency_holders
 		   (team, key, holder_id, run_id, node_id, claimed_at, queue_arrived_at, lease_expires_at, superseded, cost, declared_capacity, generation)
@@ -771,7 +771,7 @@ func txPark(ctx context.Context, tx *storeTx, team Team, w ConcurrencyWaiter, ar
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(
+	_, err = tx.execContext(
 		ctx,
 		`INSERT INTO concurrency_waiters
 		   (team, key, run_id, node_id, holder_id, arrived_at, policy, cost, declared_capacity, generation, lease_expires_at)
@@ -799,18 +799,18 @@ func txSupersede(ctx context.Context, tx *storeTx, team Team, key, holderID stri
 		return err
 	}
 	if owned {
-		if _, err := tx.ExecContext(ctx, `UPDATE admission_work SET granted=0 WHERE team=? AND run_id=? AND node_id=?`, team, run, node); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE admission_work SET granted=0 WHERE team=? AND run_id=? AND node_id=?`, team, run, node); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE concurrency_holders SET superseded=1 WHERE team=? AND run_id=? AND node_id=?`, team, run, node)
+		_, err := tx.execContext(ctx, `UPDATE concurrency_holders SET superseded=1 WHERE team=? AND run_id=? AND node_id=?`, team, run, node)
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE concurrency_holders SET superseded=1 WHERE team=? AND key=? AND holder_id=?`, team, key, holderID)
+	_, err := tx.execContext(ctx, `UPDATE concurrency_holders SET superseded=1 WHERE team=? AND key=? AND holder_id=?`, team, key, holderID)
 	return err
 }
 
 func txDeleteWaiter(ctx context.Context, tx *storeTx, team Team, key, runID, nodeID string) (bool, error) {
-	res, err := tx.ExecContext(
+	res, err := tx.execContext(
 		ctx,
 		`DELETE FROM concurrency_waiters WHERE team = ? AND key = ? AND run_id = ? AND node_id = ?`,
 		string(team), key, runID, nodeID,
@@ -855,7 +855,7 @@ func (t *Tenant) concurrencyStateTx(ctx context.Context, tx *storeTx, key string
 	state := &ConcurrencyState{Key: key, Capacity: capacity, EffectiveCapacity: capacity}
 
 	nowNS := tx.now(ctx).UnixNano()
-	hrows, err := tx.QueryContext(
+	hrows, err := tx.queryContext(
 		ctx,
 		`SELECT `+holderColumns+`
 		   FROM concurrency_holders WHERE team = ? AND key = ? ORDER BY claimed_at ASC`, string(t.team), key,
@@ -883,7 +883,7 @@ func (t *Tenant) concurrencyStateTx(ctx context.Context, tx *storeTx, key string
 		return nil, err
 	}
 
-	wrows, err := tx.QueryContext(
+	wrows, err := tx.queryContext(
 		ctx,
 		`SELECT `+waiterColumns+`
 		   FROM concurrency_waiters WHERE team = ? AND key = ? ORDER BY arrived_at ASC`, string(t.team), key,
@@ -915,7 +915,7 @@ func (t *Tenant) concurrencyStateTx(ctx context.Context, tx *storeTx, key string
 				w.BlockingReason = "waiting to reacquire " + group
 			}
 		}
-		if state.Waiters[i].Policy == OnLimitQueue {
+		if state.Waiters[i].Policy == onLimitQueue {
 			state.Waiters[i].Position = qrank
 			qrank++
 		}
@@ -927,7 +927,7 @@ func (t *Tenant) concurrencyStateTx(ctx context.Context, tx *storeTx, key string
 }
 
 func reapStaleConcurrencyHoldersTx(ctx context.Context, tx *storeTx, team Team, key string) ([]ConcurrencyHolder, error) {
-	rows, err := tx.QueryContext(
+	rows, err := tx.queryContext(
 		ctx,
 		`SELECT `+holderColumns+`
 		   FROM concurrency_holders WHERE team=? AND key=?`+tx.forUpdate(), team, key,
@@ -964,7 +964,7 @@ func reapStaleConcurrencyHoldersTx(ctx context.Context, tx *storeTx, team Team, 
 }
 
 func reapStaleConcurrencyWaitersTx(ctx context.Context, tx *storeTx, team Team, key string) ([]ConcurrencyWaiter, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT `+waiterColumns+` FROM concurrency_waiters WHERE team=? AND key=?`, team, key)
+	rows, err := tx.queryContext(ctx, `SELECT `+waiterColumns+` FROM concurrency_waiters WHERE team=? AND key=?`, team, key)
 	if err != nil {
 		return nil, err
 	}

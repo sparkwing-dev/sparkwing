@@ -67,7 +67,7 @@ func (s *Store) listCapabilities(ctx context.Context, team Team, a capability.Au
 		now := tx.now(ctx)
 		args = append(args, now.UnixNano(), now.UnixNano())
 	}
-	rows, err := tx.QueryContext(ctx, query+` ORDER BY created_at DESC,prefix`, args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY created_at DESC,prefix`, args...)
 	if err != nil {
 		return nil, err
 	}

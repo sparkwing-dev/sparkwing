@@ -37,9 +37,9 @@ func TestDaemonMovesOffASquattedSocketDirectory(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_ = ln.Close()
-		_ = os.RemoveAll(filepath.Dir(d.SocketPath()))
+		_ = os.RemoveAll(filepath.Dir(d.layout.sock))
 	})
-	moved := d.SocketPath()
+	moved := d.layout.sock
 	if moved == squatted || ln.Addr().String() != moved {
 		t.Fatalf("daemon serves %s, socket path %s, squatted %s", ln.Addr(), moved, squatted)
 	}

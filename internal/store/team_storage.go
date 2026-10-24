@@ -18,9 +18,6 @@ const (
 	StorageLogs StorageKind = "logs"
 )
 
-// Valid reports whether k names a store the controller counts.
-func (k StorageKind) Valid() bool { return k == StorageCache || k == StorageLogs }
-
 // FreeCacheShare is the part of allowance the cache holds a free team to,
 // three quarters.
 func FreeCacheShare(allowance int64) int64 { return allowance / 4 * 3 }
@@ -35,7 +32,7 @@ func execStatements(ctx context.Context, tx *storeTx, script string) error {
 		return err
 	}
 	for _, stmt := range statements {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+		if _, err := tx.execContext(ctx, stmt); err != nil {
 			return err
 		}
 	}

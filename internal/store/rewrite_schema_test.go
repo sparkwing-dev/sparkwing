@@ -14,7 +14,7 @@ func rewriteSchemaDB(t *testing.T) *sql.DB {
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	rewriteSchemaExec(t, db, "PRAGMA foreign_keys = ON")
-	schema, err := TranslateSchema(schemaNeutral, DialectSQLite)
+	schema, err := translateSchema(schemaNeutral, DialectSQLite)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,15 +70,15 @@ func TestRewriteSchemaClassifiesEveryCreatedTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = rows.Close()
-	for _, table := range SchemaTables {
+	for _, table := range schemaTables {
 		if !actual[table.Name] {
 			t.Fatalf("missing or duplicate registered table %q", table.Name)
 		}
 		delete(actual, table.Name)
-		if table.Owner == SchemaOperator {
+		if table.Owner == schemaOperator {
 			continue
 		}
-		if table.Owner != SchemaTenant {
+		if table.Owner != schemaTenant {
 			t.Fatalf("unrecognized ownership for %s: %q", table.Name, table.Owner)
 		}
 		var required int

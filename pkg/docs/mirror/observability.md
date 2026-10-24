@@ -427,8 +427,8 @@ It also shows what admission is doing with the machine:
   Distinct credentials with the same display name stay separate. `last_seen`
   records an accepted poll or renewal, never a future lease deadline. A busy
   runner's heartbeat does not advertise a free slot or refresh headroom.
-  Runner and queue views share the same snapshot. Embedded controllers supply
-  `WithRunnerInventory`; missing adapters refuse the read with `policy_missing`.
+  Runner and queue views share the same snapshot from the request's tenant
+  handle. Missing adapters refuse the read with `policy_missing`.
   Home reads recently failed pipelines from the caller's team-scoped runs.
   Database, object-store, auth and slow-response problems still degrade their
   service. The controller health API keeps its own status.

@@ -148,7 +148,7 @@ type selectedSecretRow struct {
 }
 
 func selectedSecretsTx(ctx context.Context, tx *storeTx, team Team, name string, selection secretSelection) ([]selectedSecretRow, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT name,value,principal,pipeline,masked,shared,created_at,updated_at,only_on FROM secrets WHERE team=? AND (?='' OR name=?) AND ((?=1 AND pipeline<>'' AND pipeline=?) OR (?=1 AND pipeline='' AND (shared=1 OR ?=1))) ORDER BY name,CASE WHEN pipeline='' THEN 1 ELSE 0 END`+tx.forShare(), team, name, name, boolInt(selection.scope == secretPipelineScope), selection.pipeline, boolInt(selection.scope != secretNone), boolInt(selection.includeUnshared))
+	rows, err := tx.queryContext(ctx, `SELECT name,value,principal,pipeline,masked,shared,created_at,updated_at,only_on FROM secrets WHERE team=? AND (?='' OR name=?) AND ((?=1 AND pipeline<>'' AND pipeline=?) OR (?=1 AND pipeline='' AND (shared=1 OR ?=1))) ORDER BY name,CASE WHEN pipeline='' THEN 1 ELSE 0 END`+tx.forShare(), team, name, name, boolInt(selection.scope == secretPipelineScope), selection.pipeline, boolInt(selection.scope != secretNone), boolInt(selection.includeUnshared))
 	if err != nil {
 		return nil, err
 	}

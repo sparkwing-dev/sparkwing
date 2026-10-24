@@ -17,7 +17,7 @@ func TestStoreDataStoragePolicyDefaultsValidationAndAtomicity(t *testing.T) {
 	if got, err := o.StorageSettings(ctx); err != nil || got != want {
 		t.Fatalf("default=%+v: %v", got, err)
 	}
-	want = StorageSettings{AuditRetentionDays: 400, RunRetentionDays: 0, NodeMetricRetentionDays: 7, DatabaseAlarmBytes: 123, DefaultTier: StorageTierPaid}
+	want = StorageSettings{AuditRetentionDays: 400, RunRetentionDays: 0, NodeMetricRetentionDays: 7, DatabaseAlarmBytes: 123, DefaultTier: storageTierPaid}
 	if err := o.SetStorageSettings(ctx, want); err != nil {
 		t.Fatal(err)
 	}
@@ -67,22 +67,22 @@ func TestStoreDataStoragePolicyCorruptAndSealedValuesFail(t *testing.T) {
 
 func TestStoreDataStoragePolicyDefaultTierAndAllowance(t *testing.T) {
 	s := authorityStore(t)
-	if err := s.AsOperator().SetStorageSettings(t.Context(), StorageSettings{DefaultTier: StorageTierPaid}); err != nil {
+	if err := s.AsOperator().SetStorageSettings(t.Context(), StorageSettings{DefaultTier: storageTierPaid}); err != nil {
 		t.Fatal(err)
 	}
 	a := &Tenant{s: s, team: "a"}
 	q, err := a.StorageQuota(t.Context())
-	if err != nil || q.Team != "a" || q.Tier != StorageTierPaid || q.MaxBytesPerMonth != PaidTierQuota.MaxBytesPerMonth {
+	if err != nil || q.Team != "a" || q.Tier != storageTierPaid || q.MaxBytesPerMonth != paidTierQuota.MaxBytesPerMonth {
 		t.Fatalf("default quota=%+v: %v", q, err)
 	}
-	if q, err = a.SetStorageAllowance(t.Context(), 456); err != nil || q.Tier != StorageTierPaid || q.MaxBytesPerMonth != PaidTierQuota.MaxBytesPerMonth {
+	if q, err = a.SetStorageAllowance(t.Context(), 456); err != nil || q.Tier != storageTierPaid || q.MaxBytesPerMonth != paidTierQuota.MaxBytesPerMonth {
 		t.Fatalf("allowance removed default limits=%+v: %v", q, err)
 	}
 	if err := a.SetStorageQuota(t.Context(), StorageQuota{}); err != nil {
 		t.Fatal(err)
 	}
 	q, err = a.StorageQuota(t.Context())
-	if err != nil || !q.Unlimited() || q.Tier != "" || q.AllowanceBytes != 456 {
+	if err != nil || !q.unlimited() || q.Tier != "" || q.AllowanceBytes != 456 {
 		t.Fatalf("explicit unlimited=%+v: %v", q, err)
 	}
 }

@@ -81,11 +81,11 @@ func TestStandingCapIncidentRestartsHighCleanAge(t *testing.T) {
 
 func TestStandingCapGrantAndHoldOverrideTheCap(t *testing.T) {
 	_, tenant, now := standingCapFixture(t)
-	if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "operator", Reason: "reviewed"}, *now); err != nil {
+	if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: billingTrustGranted, Actor: "operator", Reason: "reviewed"}, *now); err != nil {
 		t.Fatal(err)
 	}
 	standingCapWant(t, tenant, *now, "High", "New", "Established")
-	if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustRevoked, Actor: "operator", Reason: "fraud"}, *now); err != nil {
+	if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: billingTrustRevoked, Actor: "operator", Reason: "fraud"}, *now); err != nil {
 		t.Fatal(err)
 	}
 	standingCapWant(t, tenant, *now, "Held", "New", "Established")
@@ -160,7 +160,7 @@ func TestStandingCapPaidCheckoutRecordsThreeDSecure(t *testing.T) {
 			if err := s.db.QueryRow(`SELECT three_d_secure FROM credit_checkouts WHERE id=?`, checkout).Scan(&recorded); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.db.QueryRow(`SELECT attrs FROM audit_events WHERE team='a' AND kind=?`, BusinessEventCheckoutPaid).Scan(&attrs); err != nil {
+			if err := s.db.QueryRow(`SELECT attrs FROM audit_events WHERE team='a' AND kind=?`, businessEventCheckoutPaid).Scan(&attrs); err != nil {
 				t.Fatal(err)
 			}
 			if recorded != outcome.provider || !strings.Contains(attrs, `"three_d_secure":"`+outcome.audit+`"`) || strings.Contains(attrs, "Jane Doe") {
@@ -185,10 +185,10 @@ func TestStandingCapNoFaultOperatorReleaseKeepsCleanDays(t *testing.T) {
 	_, tenant, now := standingCapFixture(t)
 	standingCapPay(t, tenant, "pi_nofault", 50000)
 	s := tenant.s
-	standingCapOperatorHold(t, s, OperatorHoldPrefix+"nofault", now.Add(10*24*time.Hour), now.Add(12*24*time.Hour), true)
+	standingCapOperatorHold(t, s, operatorHoldPrefix+"nofault", now.Add(10*24*time.Hour), now.Add(12*24*time.Hour), true)
 	standingCapWant(t, tenant, now.Add(30*24*time.Hour-time.Nanosecond), "Trusted", "Established", "Trusted")
 	standingCapWant(t, tenant, now.Add(30*24*time.Hour), "High", "High", "High")
-	standingCapOperatorHold(t, s, OperatorHoldPrefix+"fault", now.Add(10*24*time.Hour), now.Add(12*24*time.Hour), false)
+	standingCapOperatorHold(t, s, operatorHoldPrefix+"fault", now.Add(10*24*time.Hour), now.Add(12*24*time.Hour), false)
 	standingCapWant(t, tenant, now.Add(42*24*time.Hour-time.Nanosecond), "Trusted", "Established", "Trusted")
 	standingCapWant(t, tenant, now.Add(42*24*time.Hour), "High", "High", "High")
 	var noFault int
@@ -216,10 +216,10 @@ func TestHeldAdmissionNamesTheBlockingHoldAndItsRemedy(t *testing.T) {
 		cause  string
 		remedy string
 	}{
-		{[][2]string{{"dp_1", HoldCauseDispute}}, HoldCauseDispute, "payment dispute"},
+		{[][2]string{{"dp_1", holdCauseDispute}}, holdCauseDispute, "payment dispute"},
 		{[][2]string{{"efw_1", HoldCauseWarning}}, HoldCauseWarning, "possible fraud"},
-		{[][2]string{{OperatorHoldPrefix + "x", HoldCauseOperator}}, HoldCauseOperator, "Sparkwing support"},
-		{[][2]string{{"dp_1", HoldCauseDispute}, {"efw_1", HoldCauseWarning}}, HoldCauseDispute, "payment dispute"},
+		{[][2]string{{operatorHoldPrefix + "x", HoldCauseOperator}}, HoldCauseOperator, "Sparkwing support"},
+		{[][2]string{{"dp_1", holdCauseDispute}, {"efw_1", HoldCauseWarning}}, holdCauseDispute, "payment dispute"},
 	} {
 		s, tenant, now := standingCapFixture(t)
 		for _, h := range tc.holds {

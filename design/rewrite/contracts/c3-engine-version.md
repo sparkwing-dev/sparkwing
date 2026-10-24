@@ -163,7 +163,7 @@ needs no credential preload.
 
 ## Machine caching
 
-`DefaultCacheDirectory` owns the default `os.UserCacheDir()/sparkwing/engines`
+`defaultCacheDirectory` owns the default `os.UserCacheDir()/sparkwing/engines`
 path on each OS. `NewResolver` uses it when `CacheDirectory` is empty, so all
 placements share one machine cache without user configuration. An explicit
 directory is a host/test override. No new environment variable selects the path.
@@ -178,7 +178,7 @@ on Unix, is also a cache miss. Auto mode restores the verified executable. Local
 mode reports the missing executable without fetching.
 
 Every start checks the current verified policy, even for a cached executable.
-`Cached` alone grants no execution permission. `Resolve` and `Ensure` enforce the
+The private `Resolver.cached` lookup alone grants no execution permission. `Resolve` and `Ensure` enforce the
 policy and recheck cached bytes before use. The existing `auto` mode may fetch a
 missing release. `local` requires the exact verified cached executable.
 
@@ -327,12 +327,9 @@ release resolver and need an explicit development workflow during implementation
 | [`VerifyRelease`](../../../internal/engine/release.go) | checks explicit trusted keys through releaseasset.VerifyForVersion. |
 | [`Config`](../../../internal/engine/engine.go) | supplies machine-owned storage and transport, never repository-selected trust roots or URLs. |
 | [`Resolver`](../../../internal/engine/engine.go) | owns the version-index cache and verified executable cache for one machine. |
-| [`DefaultCacheDirectory`](../../../internal/engine/resolver.go) | Returns the shared OS-native machine cache path. |
 | [`NewResolver`](../../../internal/engine/resolver.go) | Copies machine-owned trust keys at construction, defaulting to releaseauth.PublicKeys. Uses the shared cache unless the host supplies a private directory. |
 | [`Resolver.Resolve`](../../../internal/engine/resolver.go) | checks the current verified version policy, fetches the exact release only from GitHub Releases when absent, verifies it, and atomically publishes a reusable machine-cache entry. |
 | [`Resolver.Ensure`](../../../internal/engine/resolver.go) | resolves a sealed identity on another executor and requires the same release manifest. |
-| [`Resolver.Cached`](../../../internal/engine/resolver.go) | returns only an integrity-checked cache entry; absence or damage is a miss. |
-| [`Resolver.StoreVerified`](../../../internal/engine/resolver.go) | publishes only verified bytes and retains signatures for future integrity checks. |
 | [`engineid.VersionInfo`](../../../internal/engineid/identity.go) | retains every published release, including releases beyond their support window. |
 | [`Restriction`](../../../internal/engine/engine.go) | carries signed notice and enforcement dates; an empty Version means no restriction. |
 | [`VersionIndex`](../../../internal/engine/engine.go) | is signed as the exact JSON body bytes. |
@@ -364,7 +361,7 @@ release resolver and need an explicit development workflow during implementation
 | [`VerifiedRelease.Target`](../../../internal/engine/release.go) | returns the exact platform and binary verified against the closed release matrix. |
 | [`VerifiedRelease.Asset`](../../../internal/engine/release.go) | supplies immutable verified bytes to the native installer without bypassing verification. |
 
-The constants `GoSDK`, `TypeScriptSDK`, `GoModule`, `TypeScriptPackage`,
+The constants `GoSDK`, `TypeScriptSDK`, `GoModule`, private `typeScriptPackage`,
 `ReleaseBase`, `VersionIndexURL`, `VersionIndexSignatureURL` and
 `UpgradeCommand` define the pin vocabulary and fixed publication origins.
 A build with the `qatrust` tag replaces those origins with

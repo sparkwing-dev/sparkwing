@@ -91,7 +91,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if request.Provision != nil {
 			tx.rotatingRoot = &c
 		}
-		issued, err := s.Issue(ctx, tx, request)
+		issued, err := s.issue(ctx, tx, request)
 		tx.rotatingRoot = nil
 		if err != nil {
 			return err
@@ -109,7 +109,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if err := scheduleRotationTx(ctx, tx, c, deadline); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET created_by=? WHERE prefix=? AND COALESCE(team,'')=?`, previous.CreatedBy, issued.Capability.Prefix, team); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE capabilities SET created_by=? WHERE prefix=? AND COALESCE(team,'')=?`, previous.CreatedBy, issued.Capability.Prefix, team); err != nil {
 			return err
 		}
 		out = capability.Rotation{Issued: issued, Previous: previous, RevokesAt: deadline}
@@ -182,7 +182,7 @@ func scheduleRotationTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE capabilities SET authority_json=?,revoked_at=? WHERE prefix=? AND COALESCE(team,'')=? AND revoked_at IS NULL`, body, deadline.UnixNano(), c.Prefix, c.Team)
+	result, err := tx.execContext(ctx, `UPDATE capabilities SET authority_json=?,revoked_at=? WHERE prefix=? AND COALESCE(team,'')=? AND revoked_at IS NULL`, body, deadline.UnixNano(), c.Prefix, c.Team)
 	if err := credentialRowChanged(result, err); err != nil {
 		return err
 	}

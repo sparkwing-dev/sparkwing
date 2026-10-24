@@ -104,7 +104,7 @@ func clampRunLeasesTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID
 		if table != "triggers" {
 			nodeColumn = "leased." + nodeColumn
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE `+table+` AS leased SET lease_expires_at=(
+		_, err := tx.execContext(ctx, `UPDATE `+table+` AS leased SET lease_expires_at=(
  SELECT MIN(deadline) FROM (
  SELECT leased.lease_expires_at AS deadline
  UNION ALL `+cancelDrainSources+nodeColumn+`

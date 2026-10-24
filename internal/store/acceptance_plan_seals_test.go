@@ -206,7 +206,7 @@ func TestStorePlanInsertionLimitUsesCanonicalRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalNodesPerRun: 1}); err != nil {
+	if _, err := s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{"max_global_nodes_per_run": 1}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = tenant.AcceptPlan(t.Context(), request)
@@ -218,13 +218,13 @@ func TestStorePlanInsertionLimitUsesCanonicalRefusal(t *testing.T) {
 	if err != nil || before.Run.Spec != nil || len(before.Nodes) != 0 {
 		t.Fatalf("failed acceptance left partial state: %+v %v", before, err)
 	}
-	if _, err := s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalNodesPerRun: 2}); err != nil {
+	if _, err := s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{"max_global_nodes_per_run": 2}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalNodesPerRun: 1}); err != nil {
+	if _, err := s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{"max_global_nodes_per_run": 1}); err != nil {
 		t.Fatal(err)
 	}
 	replay, err := tenant.AcceptPlan(t.Context(), request)

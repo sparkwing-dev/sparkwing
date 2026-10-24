@@ -175,8 +175,6 @@ func New(cfg Config) (*Daemon, error) {
 
 func (d *Daemon) Ready() <-chan struct{} { return d.ready }
 
-func (d *Daemon) SocketPath() string { return d.layout.sock }
-
 func (d *Daemon) Run(ctx context.Context) error {
 	won, err := d.elect()
 	if err != nil {
@@ -328,7 +326,7 @@ func (d *Daemon) finalShutdown() {
 	if err := d.persistState(); err != nil {
 		d.cfg.logf("final persist: %v", err)
 	}
-	d.awaitAPI(APIDrainWindow)
+	d.awaitAPI(apiDrainWindow)
 	d.awaitFinalizers(FinalizeDrainWindow)
 }
 

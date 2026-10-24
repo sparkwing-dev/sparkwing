@@ -414,7 +414,7 @@ func TestCardBilling_OwnerSetsARefill(t *testing.T) {
 			} `json:"details"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(call("PUT", on, 409).Body.Bytes(), &refused); err != nil || refused.Error.Details.Reason != NoCardCode {
+	if err := json.Unmarshal(call("PUT", on, 409).Body.Bytes(), &refused); err != nil || refused.Error.Details.Reason != noCardCode {
 		t.Fatalf("refill without a card: %+v: %v", refused, err)
 	}
 	if enabled, _, _ := settings("a"); enabled {

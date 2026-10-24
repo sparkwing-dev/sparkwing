@@ -125,14 +125,14 @@ func TestLocalDashboardExchangeUnresponsiveHandshake(t *testing.T) {
 		peer, server := net.Pipe()
 		defer peer.Close()
 		defer server.Close()
-		if err := exchangeLocalDashboard(t.Context(), peer, "fixture", "127.0.0.1:0"); !errors.Is(err, ErrDaemonWedged) {
+		if err := exchangeLocalDashboard(t.Context(), peer, "fixture", "127.0.0.1:0"); !errors.Is(err, errDaemonWedged) {
 			t.Fatalf("unresponsive owner: %v", err)
 		}
 	})
 }
 
 func TestLocalDashboardRequiresAddressBeforeDial(t *testing.T) {
-	if err := StartLocalDashboard(t.Context(), t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), "address is required") {
+	if err := startLocalDashboard(t.Context(), t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), "address is required") {
 		t.Fatalf("missing dashboard address: %v", err)
 	}
 }

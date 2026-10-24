@@ -31,12 +31,12 @@ func (t *Tenant) openCreditCheckoutTx(ctx context.Context, tx *storeTx, amountMi
 		return "", ErrTeamBeingDeleted
 	}
 	nowNS := now.UnixNano()
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.execContext(ctx, `
 		INSERT INTO credit_checkouts (id, team, session_id, payment_mode, currency, amount_minor, amount_micro, opened_at, expires_at)
 		VALUES (?, ?, ?, ?, 'usd', ?, ?, ?, ?)`, id, string(t.team), id, string(mode), amountMicro/MicroCreditsPerCent, amountMicro, nowNS, now.Add(hold).UnixNano()); err != nil {
 		return "", fmt.Errorf("credits: record the checkout: %w", err)
 	}
-	if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: t.team, Actor: auditActor{system: auditController}}, auditCheckout{CheckoutID: id, Outcome: BusinessEventCheckoutOpened, AmountMicro: amountMicro}); err != nil {
+	if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: t.team, Actor: auditActor{system: auditController}}, auditCheckout{CheckoutID: id, Outcome: businessEventCheckoutOpened, AmountMicro: amountMicro}); err != nil {
 		return "", err
 	}
 	return id, nil

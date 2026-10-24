@@ -128,7 +128,7 @@ func publishLocalJob(ctx context.Context, controller controllerwire.Controller, 
 		if _, err := controller.TransitionJob(ctx, attempt.RunID, string(id), controllerwire.JobTransitionRequest{To: "pending", Cause: "publish_attempt", Publication: &imported}); err != nil {
 			return err
 		}
-		bytes, records, authority, err := publisher.PublicationStorage(attempt)
+		bytes, records, authority, err := publisher.publicationStorage(attempt)
 		if err != nil {
 			return err
 		}
@@ -187,7 +187,7 @@ func publishLocalRecord(ctx context.Context, bytes blob.Store, records blob.Reco
 }
 
 func publishLocalLogs(ctx context.Context, publisher ProfileData, reader controllerwire.LogReader, ref runspec.NodeRef, attempt runspec.AttemptIdentity) (resultErr error) {
-	uploader, err := publisher.PublicationLogs(attempt)
+	uploader, err := publisher.publicationLogs(attempt)
 	if err != nil {
 		return err
 	}

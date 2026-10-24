@@ -66,6 +66,6 @@ func persistNodeResultSelectorsTx(ctx context.Context, tx *storeTx, team Team, r
 			}
 		}
 	}
-	_, err := tx.ExecContext(ctx, "UPDATE nodes SET output_record=?,manifest_record=? WHERE team=? AND run_id=? AND node_id=?", output, manifest, team, row.Ref.RunID, row.Ref.NodeID)
+	_, err := tx.execContext(ctx, "UPDATE nodes SET output_record=?,manifest_record=? WHERE team=? AND run_id=? AND node_id=?", output, manifest, team, row.Ref.RunID, row.Ref.NodeID)
 	return err
 }

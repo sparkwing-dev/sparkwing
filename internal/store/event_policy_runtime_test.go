@@ -10,13 +10,13 @@ import (
 
 func TestStoreDataEventsCapsCountKindAndUnchargedEvents(t *testing.T) {
 	s, tenant, _, _ := resultFixture(t)
-	if got, err := s.EventLimits(t.Context()); err != nil || got != DefaultEventLimits() {
+	if got, err := s.eventLimits(t.Context()); err != nil || got != defaultEventLimits() {
 		t.Fatalf("default caps=%+v: %v", got, err)
 	}
-	if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", "k", make([]byte, DefaultEventLimits().MaxBytesPerEvent)); !errors.Is(err, ErrStorageQuota) {
+	if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", "k", make([]byte, defaultEventLimits().MaxBytesPerEvent)); !errors.Is(err, ErrStorageQuota) {
 		t.Fatalf("event kind escaped cap: %v", err)
 	}
-	if err := s.SetEventLimits(t.Context(), EventLimits{MaxBytesPerEvent: 5, MaxBytesPerRun: 10, MaxEventsPerRun: 3}); err != nil {
+	if err := s.setEventLimits(t.Context(), eventLimits{MaxBytesPerEvent: 5, MaxBytesPerRun: 10, MaxEventsPerRun: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
@@ -34,13 +34,13 @@ func TestStoreDataEventsCapsCountKindAndUnchargedEvents(t *testing.T) {
 }
 
 func TestStoreDataEventsConcurrentCapsAndKindValidation(t *testing.T) {
-	for _, caps := range []EventLimits{{MaxBytesPerEvent: 2, MaxBytesPerRun: 6}, {MaxEventsPerRun: 3}} {
+	for _, caps := range []eventLimits{{MaxBytesPerEvent: 2, MaxBytesPerRun: 6}, {MaxEventsPerRun: 3}} {
 		s, tenant, _, _ := resultFixture(t)
-		if err := s.SetEventLimits(t.Context(), caps); err != nil {
+		if err := s.setEventLimits(t.Context(), caps); err != nil {
 			t.Fatal(err)
 		}
-		for _, kind := range []string{"", strings.Repeat("k", MaxEventKindBytes+1), "node started", "kind\n", "kind\x00"} {
-			if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", kind, nil); !errors.Is(err, ErrInvalidEventKind) {
+		for _, kind := range []string{"", strings.Repeat("k", maxEventKindBytes+1), "node started", "kind\n", "kind\x00"} {
+			if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", kind, nil); !errors.Is(err, errInvalidEventKind) {
 				t.Fatalf("invalid kind=%q: %v", kind, err)
 			}
 		}
@@ -65,10 +65,10 @@ func TestStoreDataEventsConcurrentCapsAndKindValidation(t *testing.T) {
 		if written != 3 {
 			t.Fatalf("concurrent appends admitted %d, want three", written)
 		}
-		if err := s.SetEventLimits(t.Context(), EventLimits{}); err != nil {
+		if err := s.setEventLimits(t.Context(), eventLimits{}); err != nil {
 			t.Fatal(err)
 		}
-		for _, kind := range []string{strings.Repeat("k", MaxEventKindBytes), "node_started", "sparkwing.step:log-1"} {
+		for _, kind := range []string{strings.Repeat("k", maxEventKindBytes), "node_started", "sparkwing.step:log-1"} {
 			if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", kind, nil); err != nil {
 				t.Fatalf("valid kind=%q: %v", kind, err)
 			}
@@ -136,14 +136,14 @@ func TestStoreDataEventsPricedStorageRequiresCreditWithOrWithoutQuota(t *testing
 }
 
 func TestEventDefaultsAreValuesAndPoliciesAreStoreLocal(t *testing.T) {
-	defaults := DefaultEventLimits()
+	defaults := defaultEventLimits()
 	defaults.MaxBytesPerEvent = 1
 	s, _, _, _ := resultFixture(t)
 	other, _, _, _ := resultFixture(t)
-	if err := s.SetEventLimits(t.Context(), defaults); err != nil {
+	if err := s.setEventLimits(t.Context(), defaults); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := other.EventLimits(t.Context()); err != nil || got != DefaultEventLimits() || got.MaxBytesPerEvent == 1 {
+	if got, err := other.eventLimits(t.Context()); err != nil || got != defaultEventLimits() || got.MaxBytesPerEvent == 1 {
 		t.Fatalf("another store inherited event policy: %+v, %v", got, err)
 	}
 }

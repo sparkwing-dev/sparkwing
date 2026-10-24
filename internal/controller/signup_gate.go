@@ -17,13 +17,13 @@ import (
 // out: open, throttled, or closed once it is spent.
 type FreeTierState string
 
-// The free-tier states. FreeTierUnreadable is what the gate reports when the
+// The free-tier states. freeTierUnreadable is what the gate reports when the
 // source failed; it waitlists new accounts as closed does.
 const (
-	FreeTierOpen       FreeTierState = "open"
-	FreeTierThrottled  FreeTierState = "throttled"
-	FreeTierClosed     FreeTierState = "closed"
-	FreeTierUnreadable FreeTierState = "unreadable"
+	freeTierOpen       FreeTierState = "open"
+	freeTierThrottled  FreeTierState = "throttled"
+	freeTierClosed     FreeTierState = "closed"
+	freeTierUnreadable FreeTierState = "unreadable"
 )
 
 // FreeTierSource reports how much of the deployment's free storage is left.
@@ -38,19 +38,13 @@ type FreeTierSource interface {
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error) {
 	taken, limit, err := s.operator.FreeSlots(ctx)
 	if err != nil {
-		return FreeTierUnreadable, fmt.Errorf("read free-team slots: %w", err)
+		return freeTierUnreadable, fmt.Errorf("read free-team slots: %w", err)
 	}
 	if taken >= limit {
-		return FreeTierClosed, nil
+		return freeTierClosed, nil
 	}
-	return FreeTierOpen, nil
+	return freeTierOpen, nil
 }
-
-// FreeTierFunc adapts a function to [FreeTierSource].
-type FreeTierFunc func(ctx context.Context) (FreeTierState, error)
-
-// SignUpFreeTier calls f.
-func (f FreeTierFunc) SignUpFreeTier(ctx context.Context) (FreeTierState, error) { return f(ctx) }
 
 type signUpConfig struct {
 	forceWaitlist bool
@@ -92,25 +86,17 @@ func (s *Server) CheckFreeTierSource() {
 		"detail", "no free-tier source is configured, so the sign-up gate treats the free tier as open")
 }
 
-// WithSignUpApprovalNotifier runs fn for each account an operator admits from
-// the waitlist, such as to email the person that they are in. A failure is
-// logged and does not undo the admission.
-func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server {
-	s.identity.signup.onApproved = fn
-	return s
-}
-
 // safety: a report that fails reads as unreadable, which waitlists new accounts as closed does: an
 // account held back is one approval away, while one admitted keeps a free allowance for good.
 func (s *Server) freeTierState(ctx context.Context) FreeTierState {
 	src := s.identity.signup.freeTier
 	if src == nil {
-		return FreeTierOpen
+		return freeTierOpen
 	}
 	state, err := src.SignUpFreeTier(ctx)
 	if err != nil {
 		s.logger.Warn("signup.free_tier_unreadable", "error", err.Error())
-		return FreeTierUnreadable
+		return freeTierUnreadable
 	}
 	return state
 }
@@ -119,8 +105,8 @@ func (s *Server) signUpConditions(ctx context.Context) store.SignUpConditions {
 	free := s.freeTierState(ctx)
 	return store.SignUpConditions{
 		ForceWaitlist:      s.identity.signup.forceWaitlist,
-		FreeTierClosed:     free == FreeTierClosed,
-		FreeTierUnreadable: free == FreeTierUnreadable,
+		FreeTierClosed:     free == freeTierClosed,
+		FreeTierUnreadable: free == freeTierUnreadable,
 	}
 }
 
@@ -228,9 +214,9 @@ func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJ
 		out.Reasons = append(out.Reasons, g.Source)
 	}
 	switch free {
-	case FreeTierClosed:
+	case freeTierClosed:
 		out.Reasons = append(out.Reasons, store.WaitlistReasonFreeTier)
-	case FreeTierUnreadable:
+	case freeTierUnreadable:
 		out.Reasons = append(out.Reasons, store.WaitlistReasonFreeTierUnreadable)
 	}
 	if len(out.Reasons) > 0 {

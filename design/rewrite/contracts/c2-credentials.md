@@ -56,7 +56,7 @@ Store.CreateOperatorTeam without an optional production adapter.
 
 The store re-resolves operator authority in its transaction, generates a
 dedicated account without an OAuth identity and creates its owner membership.
-It calls Store.Issue with the trusted ProvisionTeamAdmin (`operator_team_admin`)
+It calls Store.issue with the trusted ProvisionTeamAdmin (`operator_team_admin`)
 origin. That origin requires the exact team and account just created in the
 same transaction, the current operator and the complete owner grant table.
 Caller-selected subjects, grants, metering, scope and expiry are refused.
@@ -133,7 +133,7 @@ operator.tokens, operator.limits and operator.object_store. It forwards no
 caller clock and never calls the legacy token table. Empty input is a no-op.
 Missing BootstrapAdminIssuer returns policy_missing before any issuance.
 
-Store implements the interface as one gated Store.Issue transaction. It locks
+Store implements the interface as one gated Store.issue transaction. It locks
 the deployment bootstrap gate and commits the settings marker with the seeded
 root. Only the presentation digest and indexed prefix persist. Reusing a seed
 is a no-op, including after revocation. Native SQLite issuance, readiness and
@@ -495,7 +495,7 @@ remain separate obligations.
 `POST /api/v1/tokens` uses `PolicyRouter` and accepts `grants` plus optional
 absolute `expires_at`. A session creates its own member root through
 `Store.ProvisionCapability`. A member bearer uses `Store.DelegateCapability`.
-Both wrappers commit through the sole `Store.Issue` path. The request carries
+Both wrappers commit through the sole `Store.issue` path. The request carries
 no issuer, subject, team, registration, pools, metering or binding.
 
 Creation uses the member `runs.read` rule with `BindNone`. The prior
@@ -573,14 +573,14 @@ Responses use no-store and canonical errors. Failed origin verification exposes
 no bearer. Header and query team hints supply no authority.
 
 These are local C2 transport declarations over ProvisionSpec and the sole
-Store.Issue path. Store transactions enforce registration identity, current
+Store.issue path. Store transactions enforce registration identity, current
 team administration, permitted pools and repositories, issuance limits, and
 service enrollment. They persist origin and registration facts needed by claim
 identity and later root rotation. The controller supplies verified console
 session proof to the same transaction.
 
 Real SQLite HTTP tests prove machine and service root round trips and
-refusal rollback through Store.Issue. The Go client
+refusal rollback through Store.issue. The Go client
 uses separate member, machine and service requests and never replays issuance.
 CLI/dashboard callers consume the same final response. The dashboard constructs
 its runner setup from the one-time capability and returned grant set. Its
@@ -708,7 +708,7 @@ root/delegated credentials, never unit awards or node-host credentials. The
 store clock decides whether a scheduled revocation has ended a row. The HTTP
 projection preserves that committed selection and its grace deadline.
 Deployment inventories select unbound service/operator roots. Rotation issues
-through Store.Issue, preserves the original origin/parent, registration, owner,
+through Store.issue, preserves the original origin/parent, registration, owner,
 repository/data scope, pools, metering and source consent, and cannot widen
 grants or escape its current issuance expiry ceilings. Its replacement must not parent to the old credential that
 the rotation ends. The replacement and bounded old revocation deadline commit
@@ -1030,9 +1030,10 @@ ConsumeIdentityLink(context.Context, capability.IdentityLink) error
 LinkAccountIdentity(context.Context, capability.IdentityLink, store.SignInProfile) (store.Identity, error)
 ```
 
-WithIdentityLinkWriter supplies them. The default requires Store to implement
-the interface. Missing adapters return policy_missing. C1 must use its store
-clock and recheck direct session ancestry, account, provider, recent sign-in, expiry and authority inside both transactions.
+`NewDeployment` binds the store operator as the `IdentityLinkWriter`. Missing
+writers return `policy_missing`. The operator uses its store clock and rechecks
+direct session ancestry, account, provider, recent sign-in, expiry and authority
+inside both transactions.
 Consumption atomically records the unique nonce and its complete binding.
 Attachment locks that consumed binding, rejects completed or mismatched claims,
 requires the matching verified provider profile and preserves account email.
@@ -1149,7 +1150,6 @@ All capability names below are in `internal/capability`.
 
 | Other package API | Purpose |
 | --- | --- |
-| `store.(*Store).Issue` | Mint in the locked intake, claim, provision or exchange transaction. |
 | `apierr.Code`, `apierr.Definition` | Define one wire discriminator and its status/documentation metadata. |
 | `apierr.Reason` | Name stable forbidden details instead of adding auth envelopes. |
 | `apierr.Error`, `(*Error).Error` | Carry safe code, message, hint and details through Go error paths. |
@@ -1166,7 +1166,7 @@ All capability names below are in `internal/capability`.
 | [`routepolicy.New`](../../../internal/routepolicy/router.go), [`routepolicy.Router.Register`](../../../internal/routepolicy/router.go), [`routepolicy.Router.Validate`](../../../internal/routepolicy/router.go), [`routepolicy.Router.Registrations`](../../../internal/routepolicy/router.go) | Register handlers independently of the policy table and check their proof wiring. Combine controller and node-host registrations for the complete inventory check. |
 | `controller.AuthorityRevoker`, `EngineController.ResolveOperator` | Reuse C1's existing RevokeAuthority transaction through the tenant or deployment scope. The optional resolver supports embedded controllers and fakes without another issuer or persistence owner. |
 | `controller.RunTransactions`, `EngineController.ResolveTenant`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
-| `controller.SizingReader`, `controller.SizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
+| `controller.SizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
 | `controller.CredentialInventoryReader` | Supply the existing tenant secret/git inventory reads with an authenticated-team check. |
 | `controller.CredentialRotator` | Supply one tenant's authority-bearing atomic secret/git rotation. |
 | `capability.OIDCFacts`, `controller.OIDCReader` | Supply authority-rechecked sealed OIDC identity and its complete ancestry expiry ceiling. |
@@ -1692,7 +1692,7 @@ the ordinary subset checks. Unit tests refuse foreign leases, sources, refs,
 repositories, writes, reporting grants and widened time/reservation bounds.
 The HTTP owner case validates that narrowing and retains its full ancestry.
 No C1 signature changes are needed. C1 must apply this same validator in
-`Store.Issue` and derive the selected source facts from its records.
+`Store.issue` and derive the selected source facts from its records.
 
 `TestEngineExpansionHTTP` covers 27 real-server cases with fake committed
 authentication, resource reads and transaction results. Its successful cases
@@ -2044,7 +2044,7 @@ reference and OpenAPI do not silently lose their authorization labels.
 
 Contract changes needed in C1:
 
-- `Store.Issue` takes the private `*storeTx` and can only participate inside
+- `Store.issue` takes the private `*storeTx` and can only participate inside
   persistence. No exported tenant/operator provisioning, delegation or
   bootstrap-exchange transaction is declared. HTTP handlers cannot create,
   commit or recheck that transaction, and may not return Raw before commit.
@@ -2162,8 +2162,8 @@ A red HTTP case demonstrated that bootstrap `source.read` reached sizing.
 The shared `pipelineOfBoundRun` shape check now excludes bootstrap delivery.
 Source acquisition retains its separate binding. No route table grant changed.
 
-The local C2 extension is `SizingReader` and `SizingStore`, injected by
-`Server.WithSizingStore`. The reader matches C1's existing tenant read.
+The local C2 extension is the private `sizingReader` port and `SizingStore`,
+injected by `Server.WithSizingStore`. The reader matches C1's existing tenant read.
 The writer carries the complete `Authorized` decision to each operation.
 Selections come from `Authorized.Target`; callers cannot pass a second pipeline
 or job alongside it. Pin zero clears and positive values set the pin through
@@ -2404,7 +2404,7 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
    does not define how the first operator, member/machine/service roots or
    Actions exchange enter them. Here awards may parent to a session, so C1 persists tagged ancestry rather
    than a capability-only parent FK. Chosen reading: keep one
-   `Store.Issue`, represent trusted provisioning as the root-only Delegate
+   `Store.issue`, represent trusted provisioning as the root-only Delegate
    case (`ProvisionSpec`), and use `AuthorityRef` for capability/session
    ancestry. No new issuance kind or detached here root is added. C1 must
    match both ancestry forms and root provisioning checks. Amendment 1 ratifies this root-only exception. Provisioned roots have no
@@ -2427,7 +2427,7 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
    authority resolution through its existing `AuthorityResolver`. It must
    also supply `BindingChecker`, `DataAccessChecker` and the source-release
    audit transaction. C2 supplies no alternate SQL implementation. Persistent
-   root, delegation, claim and exchange entry points must reach `Store.Issue`.
+   root, delegation, claim and exchange entry points must reach `Store.issue`.
 5. **Controller cutover.** The running `Server` uses `PolicyRouter` for the
    Stripe callback and migrated engine, ledger-read and operator endpoints. All business routes now register through PolicyRouter. The legacy token-table verifier, caches, route fences and private mux are removed. Wire final handlers and decoders to `PolicyRouter`, provide
    account/console/verified-local identity and CSRF adapters, then delete the
@@ -2464,10 +2464,10 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
 
 | Other area | Types it must match |
 | --- | --- |
-| C1 data | `Capability`, `AuthorityRef`, `AuthorityResolver`, `VerifiedPaymentEvent`, `UnitKind`, `AwardPurpose`, `DeliveryPurpose`, `Binding`, `LeaseRef`, `IssueRequest`, `BillingProvenance`, `BillableInterval`, `BillingSettlement`, `DataScope`, `DataTarget`, `SourceReleaseAudit`; implement `BindingChecker` and `DataAccessChecker`, use the existing transaction wrapper in `Store.Issue`. |
+| C1 data | `Capability`, `AuthorityRef`, `AuthorityResolver`, `VerifiedPaymentEvent`, `UnitKind`, `AwardPurpose`, `DeliveryPurpose`, `Binding`, `LeaseRef`, `IssueRequest`, `BillingProvenance`, `BillableInterval`, `BillingSettlement`, `DataScope`, `DataTarget`, `SourceReleaseAudit`; implement `BindingChecker` and `DataAccessChecker`, use the existing transaction wrapper in `Store.issue`. |
 | C3 protocol and SDK | `apierr.Code`, `apierr.Error`, `apierr.Envelope`, `Audience`, `Binding`, `DelegateSpec`, `Authenticated`, `Authorized`, `Routes`; node-host admission and hello use the same fence and grant rules. |
 | C4 surface and config | `Routes`, `Grant`, `CredentialRule`, `ProvisionSpec`, `DataSigner`, `ObjectToSign`, `BillingRules`, `PaymentConfig`; own the TTLs, billing minimum constants, local peer identity, private files and profile options. |
-| T1 acceptance | `Routes`, `AwardPolicies`, `LivenessPolicies`, `apierr.Codes`, `Store.Issue`, `Authenticator`, `Authorize`, `AuthorizeData`, `AuthorizeSourceRelease`; runtime tests need the persistent adapters and final controller cutover. |
+| T1 acceptance | `Routes`, `AwardPolicies`, `LivenessPolicies`, `apierr.Codes`, `Store.issue`, `Authenticator`, `Authorize`, `AuthorizeData`, `AuthorizeSourceRelease`; runtime tests need the persistent adapters and final controller cutover. |
 
 C1's schema stores node identifiers internally while wire JSON uses job_id.
 Public node-host output paths likewise use `/node/v1/jobs/{job}/output`.
@@ -2600,7 +2600,7 @@ and ScheduleDeletion are the transport types. List reads honor all and next;
 detail reads honor fires and next, including explicit zero. Override pointers
 preserve empty zones, zero catch-up and empty arguments.
 
-C2 declares ScheduleWriter with these exact methods:
+C2 declares scheduleWriter with these exact methods:
 
 - Team() store.Team
 - ReplaceAuthorizedSchedules(context.Context, capability.Authorized, controllerwire.ScheduleRepoRequest) ([]string, []string, error)
@@ -2627,7 +2627,7 @@ intake, immutable original source facts, current admission/billing guards and
 transactional idempotency. The HTTP adapter never calls legacy admitTrigger,
 ArmPushed, Pause, RunNow or the old unguarded write methods.
 
-C2 declares RunControlWriter with these exact methods:
+C2 declares runControlWriter with these exact methods:
 
 - Team() store.Team
 - CreateAuthorizedDebugPause(context.Context, capability.Authorized, string, string, time.Time, string) error
@@ -2671,11 +2671,9 @@ the persisted team and requires runs.control. Billing availability is checked
 after authentication. Invitation creation and all three billing-page POSTs
 require exactly one nonempty Idempotency-Key. Unknown body fields are refused.
 
-C2 declares TeamWriter, GitHubAppWriter and BillingWriter in their real route
-files. WithTeamWriter, WithGitHubAppWriter and WithBillingWriter resolve them
-for the selected team. Their Team must match Authorized.Target.Team. The
-default requires Tenant to implement the corresponding interface and refuses
-missing adapters. There is no call to an unfenced legacy method.
+C2 declares private `teamWriter`, `gitHubAppWriter` and `billingWriter` ports in
+their route files. Routes use the resolved tenant, which must implement the
+corresponding interface. Missing adapters are refused. There is no call to an unfenced legacy method.
 
 Every mutation below must recheck complete live authority and membership using
 the store clock in its committing transaction, deriving the team and audit
@@ -2683,7 +2681,7 @@ actor. Keep current product limits and refusal semantics. The exact interfaces
 are:
 
 ```go
-type TeamWriter interface {
+type teamWriter interface {
 	Team() store.Team
 	RenameAuthorizedTeam(context.Context, capability.Authorized, string) (store.TeamInfo, error)
 	DeleteAuthorizedTeam(context.Context, capability.Authorized) (store.TeamDeletion, error)
@@ -2695,7 +2693,7 @@ type TeamWriter interface {
 ```
 
 ```go
-type GitHubAppWriter interface {
+type gitHubAppWriter interface {
 	Team() store.Team
 	UnbindAuthorizedGitHubInstallation(context.Context, capability.Authorized, int64) error
 	PutAuthorizedGitHubTrigger(context.Context, capability.Authorized, store.GitHubAppTrigger) (store.GitHubAppTrigger, error)
@@ -2707,7 +2705,7 @@ type GitHubAppWriter interface {
 ```
 
 ```go
-type BillingWriter interface {
+type billingWriter interface {
 	Team() store.Team
 	PrepareAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPageKind, int64, string) (capability.BillingPage, error)
 	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
@@ -2772,7 +2770,7 @@ The retired browser Principal lookup and standalone form middleware are deleted.
 C2 declares the following local interface in browser_github_app_routes.go.
 
 ```go
-type GitHubConnectWriter interface {
+type gitHubConnectWriter interface {
     Team() store.Team
     LinkedGitHubSubject(context.Context, capability.Authorized) (string, error)
     ConsumeGitHubConnect(context.Context, capability.Authorized, string, time.Time) error
@@ -2848,7 +2846,7 @@ explicitly. Live-log append/read HTTP handlers and LiveLogRead are deleted.
 Dashboard log streaming retains its in-memory reader.
 
 The final metrics GET and POST routes and usage POST route are registered.
-MetricWriter declares Team, WriteMetric(ctx, Authorized, MetricSample) and
+metricWriter declares Team, WriteMetric(ctx, Authorized, MetricSample) and
 WriteUsage(ctx, Authorized, NodeUsage). W1 implements it on Tenant. Each write
 rechecks ancestry, current membership, exact tenant/job and the selected route
 alternative inside its transaction. Claim and owner reports must retain their
@@ -2962,7 +2960,7 @@ changed. W1 data-authority, metadata and charging composition remains required.
 
 ## Runner observation cutover
 
-`Server.WithRunnerInventory` supplies the tenant-scoped `RunnerInventoryReader`:
+The resolved tenant supplies the private `runnerInventoryReader`:
 `Team() store.Team` and `ReadRunners(context.Context) (capability.RunnerSnapshot, error)`.
 The snapshot types live in `internal/capability/runners.go` so persistence can
 implement the reader without importing the controller.
@@ -2992,7 +2990,7 @@ an observation older than the existing two-minute window yields `offline`.
 Headroom older than the existing one-hour window is omitted. Foreign readers,
 foreign rows, absent snapshot clocks and corrupt numeric/timestamp facts refuse
 before any partial response. The default uses Store.ForTeam only when Tenant
-implements RunnerInventoryReader. Missing adapters return `policy_missing`.
+implements runnerInventoryReader. Missing adapters return `policy_missing`.
 There is no ListAgentClaims or process-local observation fallback.
 
 Operational runner gauges use the same tenant snapshots through the existing
@@ -3053,7 +3051,7 @@ transaction behind that existing interface. GitHub metadata transport is also
 fake, while installation ownership is stored in SQLite.
 
 `POST /api/v1/runs/{run}/jobs/{job}/resume` requires one JSON object with no actor
-fields. `DebugPauseResumer` declares `Team()` and
+fields. `debugPauseResumer` declares `Team()` and
 `ResumeAuthorizedDebugPause(context.Context, capability.Authorized) error`.
 `Tenant` implements it. The committing transaction reloads current ancestry and
 membership, repeats native route authorization, locks the run and verifies the
@@ -3076,7 +3074,7 @@ still need their C1 committing adapters and public diagnostic masking.
 ## Native bootstrap, data and controller attempt snapshots
 
 Store.EnsureBootstrapCapability sends the configured bootstrap seed through
-Store.Issue in a locked transaction. The settings marker commits with the root
+Store.issue in a locked transaction. The settings marker commits with the root
 and survives revocation. Only the fixed bootstrap subject and administration
 grants accept a seed. Store.HasDeploymentAdministrator resolves complete live
 ancestry. A future rotation deadline stays live until that deadline in both
@@ -3124,7 +3122,7 @@ with a deterministic primary key preserving kind/subject deduplication.
 
 PUT /api/v1/queue/groups/{group}/priority is registered under its existing policy.
 It validates controllerwire.QueuePriorityWrite, preserves explicit zero and
-passes the Idempotency-Key through controller.QueuePriorityWriter. That local
+passes the Idempotency-Key through controller.queuePriorityWriter. That local
 interface declares Team() and SetAuthorizedGroupPriority(context.Context,
 capability.Authorized, string, controllerwire.QueuePriorityWrite)
 (controllerwire.QueuePriorityResult, error). WithQueuePriorityWriter supplies a
@@ -3193,7 +3191,7 @@ method returns method_not_allowed and Allow before signature validation.
 
 ## Decision 112 billing composition amendment
 
-C1's `Tenant` now implements `BillingWriter`. `Server.New` reaches it through
+C1's `Tenant` now implements `billingWriter`. `Server.New` reaches it through
 its native tenant resolver. The controller asserts conformance at compile time.
 `WithBillingWriter` remains the contract test seam. No extra runtime resolver
 configuration is needed for checkout, card, pay-now or owner budgets.
@@ -3471,7 +3469,7 @@ and App-origin intake still requires a verified delivery in the transaction.
 
 ### W1b scheduled-intake boundary (integration reconciliation)
 
-`ScheduledRunWriter` is the controller tick's tenant transaction interface:
+`scheduledRunWriter` is the controller tick's tenant transaction interface:
 
 - `Team() store.Team`
 - `AdmitScheduledRun(context.Context, store.CronSchedule, time.Time) (store.AdmissionResult, error)`

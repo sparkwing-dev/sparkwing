@@ -74,7 +74,7 @@ func (s *Store) commitIssuance(ctx context.Context, request capability.IssueRequ
 	var issued capability.Issued
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		issued, err = s.Issue(ctx, tx, request)
+		issued, err = s.issue(ctx, tx, request)
 		return err
 	})
 	if err != nil {

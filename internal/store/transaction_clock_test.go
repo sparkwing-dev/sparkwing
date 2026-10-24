@@ -167,10 +167,10 @@ func TestTransactionFenceClockFailure(t *testing.T) {
 			queries := connector.queries
 			for name, call := range map[string]func() error{
 				"exec":          func() error { _, err := tx.Exec(`SELECT 1`); return err },
-				"exec context":  func() error { _, err := tx.ExecContext(t.Context(), `SELECT 1`); return err },
-				"query":         func() error { _, err := tx.Query(`SELECT 1`); return err },
-				"query context": func() error { _, err := tx.QueryContext(t.Context(), `SELECT 1`); return err },
-				"row":           func() error { var n int; return tx.QueryRow(`SELECT 1`).Scan(&n) },
+				"exec context":  func() error { _, err := tx.execContext(t.Context(), `SELECT 1`); return err },
+				"query":         func() error { _, err := tx.query(`SELECT 1`); return err },
+				"query context": func() error { _, err := tx.queryContext(t.Context(), `SELECT 1`); return err },
+				"row":           func() error { var n int; return tx.queryRow(`SELECT 1`).Scan(&n) },
 				"row context":   func() error { var n int; return tx.QueryRowContext(t.Context(), `SELECT 1`).Scan(&n) },
 				"ledger": func() error {
 					_, err := (&ledgerTx{storeTx: tx}).exec(t.Context(), `INSERT INTO credit_grants VALUES (1)`)
@@ -230,7 +230,7 @@ func TestTransactionClockFailureRollsBackWrites(t *testing.T) {
 				}
 			}
 			err := s.inTx(t.Context(), func(tx *storeTx) error {
-				if _, err := tx.ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('before clock failure',1,1)`); err != nil {
+				if _, err := tx.execContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('before clock failure',1,1)`); err != nil {
 					return err
 				}
 				s.pinnedClock = nil
@@ -243,7 +243,7 @@ func TestTransactionClockFailureRollsBackWrites(t *testing.T) {
 				tx.now(t.Context())
 				// safety: a recovered clock cannot unpoison this transaction.
 				connection.beforeQuery = nil
-				if _, err := tx.ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('after clock failure',1,1)`); !errors.Is(err, clockErr) {
+				if _, err := tx.execContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('after clock failure',1,1)`); !errors.Is(err, clockErr) {
 					t.Errorf("write after clock failure = %v", err)
 				}
 				return bodyError
@@ -327,7 +327,7 @@ func TestTransactionRejectsStatementsWithOpenCursor(t *testing.T) {
 				defer db.Close()
 				s := &Store{db: db, dialect: dialect}
 				err := s.inTx(t.Context(), func(tx *storeTx) error {
-					rows, err := tx.QueryContext(t.Context(), `SELECT 1`)
+					rows, err := tx.queryContext(t.Context(), `SELECT 1`)
 					if err != nil {
 						return err
 					}
@@ -341,9 +341,9 @@ func TestTransactionRejectsStatementsWithOpenCursor(t *testing.T) {
 						tx.now(t.Context())
 						err = tx.err
 					case "exec":
-						_, err = tx.ExecContext(t.Context(), `SELECT 2`)
+						_, err = tx.execContext(t.Context(), `SELECT 2`)
 					case "query":
-						_, err = tx.QueryContext(t.Context(), `SELECT 2`)
+						_, err = tx.queryContext(t.Context(), `SELECT 2`)
 					case "row":
 						var n int
 						err = tx.QueryRowContext(t.Context(), `SELECT 2`).Scan(&n)
@@ -368,10 +368,10 @@ func TestTransactionCursorClosureAndPoisonRollback(t *testing.T) {
 		t.Run(finish, func(t *testing.T) {
 			s := authorityStore(t)
 			err := s.inTx(t.Context(), func(tx *storeTx) error {
-				if _, err := tx.ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('rolled-back',1,1)`); err != nil {
+				if _, err := tx.execContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('rolled-back',1,1)`); err != nil {
 					return err
 				}
-				rows, err := tx.QueryContext(t.Context(), `SELECT 1`)
+				rows, err := tx.queryContext(t.Context(), `SELECT 1`)
 				if err != nil {
 					return err
 				}
@@ -393,7 +393,7 @@ func TestTransactionCursorClosureAndPoisonRollback(t *testing.T) {
 						t.Fatalf("poisoned row = %v", err)
 					}
 				} else {
-					next, err := tx.QueryContext(t.Context(), `SELECT 2`)
+					next, err := tx.queryContext(t.Context(), `SELECT 2`)
 					if err != nil {
 						return err
 					}

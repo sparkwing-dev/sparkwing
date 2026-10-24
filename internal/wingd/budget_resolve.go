@@ -16,8 +16,6 @@ type ResolvedBudget struct {
 	Origin string
 }
 
-func (r ResolvedBudget) IsSet() bool { return r.Source != "" && r.Source != wingwire.BudgetSourceUnset }
-
 func ResolveBudget(flagValue string) (ResolvedBudget, error) {
 	if v := strings.TrimSpace(flagValue); v != "" {
 		return parseBudgetFrom(v, wingwire.BudgetSourceFlag, "--budget")

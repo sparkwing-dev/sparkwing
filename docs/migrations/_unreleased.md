@@ -399,7 +399,7 @@ restrictions. Trusted exact-row inspection still uses `GetSecretRow`.
 Tenant's raw `UnbindGitHubAppInstallation`, `PutGitHubAppTrigger`,
 `DeleteGitHubAppTrigger`, `PutGitHubAppAutomation`, `DeleteGitHubAppAutomation`,
 `SetGitHubAppExtraRepos` and `SetGitHubAppExtraRepoIDs` are removed.
-Use the six authority-bearing methods in `GitHubAppWriter`. Tenant supplies the
+Use the six authority-bearing methods in `gitHubAppWriter`. Tenant supplies the
 production adapter. Supply slugs and verified numeric IDs together when setting
 extra repositories. Actors and timestamps come from the store transaction.
 
@@ -473,8 +473,8 @@ retries and refuses conflicting readings without changing the stored sample.
 
 `AcknowledgeNodeExecutionStart`, `FinishNodeExecutionAttempt`, `ExecutionStart`
 and `ExecutionAttemptFinish` are removed. Use `Tenant.TransitionNode` with the
-current award and source attempt ordinal. Select a tenant before calling
-`ListNodeExecutionAttempts`. It reads the current run's committed attempts.
+current award and source attempt ordinal. Tenant-scoped job reads include the
+committed attempts. The standalone `ListNodeExecutionAttempts` reader is private.
 The unused coordinator ID API and GitHub runner scope APIs are removed.
 Capability push bindings and the shared matcher own repository restrictions.
 
@@ -756,15 +756,15 @@ removed.
 
 ## Runner observation snapshots
 
-Embedded controllers supply `Server.WithRunnerInventory` with a tenant-scoped
-`RunnerInventoryReader`. Runner lists and queue headroom use the same committed
+The controller resolves a tenant-scoped `runnerInventoryReader` from its
+request tenant handle. Runner lists and queue headroom use the same committed
 snapshot. The old process-local presence, heartbeat and headroom registries and
 holder-name parser are removed. A missing snapshot adapter returns `policy_missing`.
 The `/api/v1/runners` response retains `agents`. Equal display names can appear in
 separate rows because they do not merge credentials. Last-seen and headroom
 observation times remain separate. Runner metrics read the same snapshots.
 
-`RunnerInventoryReader.ReadRunners` returns `capability.RunnerSnapshot`.
+`runnerInventoryReader.ReadRunners` returns `capability.RunnerSnapshot`.
 The snapshot, observation and headroom types live in `internal/capability`,
 so the store adapter can implement the reader without a controller import.
 
@@ -814,8 +814,9 @@ Link start and completion use the shared browser proof policy. Use the account's
 direct provider session and the matching session-bound CSRF form. Account-token
 sessions and Authorization headers cannot link identities. Failures return the
 canonical JSON error envelope instead of a settings-page refusal redirect.
-Embedded controllers supply `WithIdentityLinkWriter` to recheck the session and
-commit one-use nonce consumption and identity attachment.
+Controller construction binds the store operator as the identity-link writer
+to recheck the session and commit one-use nonce consumption and identity
+attachment.
 
 Nonlocal dashboard pages always require a live session. `Dashboard.Local`
 selects local pages. Elected local controllers obtain the API and dashboard
@@ -2568,9 +2569,9 @@ the server derives the approver. Its response is an `approval` envelope with
 `job_id` and omit lifecycle/release fields. The raw approval-request route is
 removed; execution owns gate creation.
 
-Embedded controllers must supply authority-bearing `ScheduleWriter` and
-`RunControlWriter` adapters. Legacy schedule, approval and debug-pause writes
-are not substitutes. The default refuses a missing adapter. Team invitation,
+Controller routes use the resolved tenant for the private `scheduleWriter` and
+`runControlWriter` ports. Legacy schedule, approval and debug-pause writes are
+not substitutes. The default refuses a missing adapter. Team invitation,
 trust, GitHub App, billing and storage reads now require the shared capability
 policy; API metrics requires `operator.limits` or console authority.
 

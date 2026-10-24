@@ -14,13 +14,13 @@ type AdmissionPolicy struct {
 	Scheduling admission.SchedulingPolicy
 }
 
-func DefaultAdmissionPolicy() AdmissionPolicy {
+func defaultAdmissionPolicy() AdmissionPolicy {
 	return AdmissionPolicy{Mode: admission.ModeClassic}
 }
 
 func (c Config) admissionPolicy() AdmissionPolicy {
 	if c.AdmissionPolicy == nil {
-		return DefaultAdmissionPolicy()
+		return defaultAdmissionPolicy()
 	}
 	return *c.AdmissionPolicy
 }

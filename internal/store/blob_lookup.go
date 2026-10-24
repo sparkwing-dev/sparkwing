@@ -181,7 +181,7 @@ func (r *blobRecords) readMembers(ctx context.Context, tx *storeTx, record blob.
 		}
 		expected[m.Digest] = true
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT member_digest FROM blob_members WHERE team=? AND manifest_digest=?", r.tenant.team, manifest.Value)
+	rows, err := tx.queryContext(ctx, "SELECT member_digest FROM blob_members WHERE team=? AND manifest_digest=?", r.tenant.team, manifest.Value)
 	if err != nil {
 		return nil, err
 	}

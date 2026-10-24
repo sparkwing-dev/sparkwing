@@ -80,13 +80,13 @@ func seedPurgeScope(t *testing.T, s *Store, team Team, index int) {
 func purgeRows(t *testing.T, s *Store, team Team, target bool) []string {
 	t.Helper()
 	var out []string
-	for _, table := range SchemaTables {
+	for _, table := range schemaTables {
 		if table.Name == "teams" || table.Name == "audit_events" {
 			continue
 		}
 		predicate := ""
 		var args []any
-		if table.Owner == SchemaTenant || slices.Contains([]string{"audit_events", "capabilities", "sessions", "payment_events"}, table.Name) {
+		if table.Owner == schemaTenant || slices.Contains([]string{"audit_events", "capabilities", "sessions", "payment_events"}, table.Name) {
 			predicate, args = " WHERE team IS NOT ?", []any{team}
 			if target {
 				predicate = " WHERE team = ?"
@@ -135,7 +135,7 @@ func TestAccountDeletionRelabelsGrantsAcrossTeamsWithoutChangingBalances(t *test
 	if _, err := s.DeleteAccount(t.Context(), "leaver"); err != nil {
 		t.Fatal(err)
 	}
-	for i, want := range []string{DeletedUserLabel, DeletedUserLabel, "someone-else"} {
+	for i, want := range []string{deletedUserLabel, deletedUserLabel, "someone-else"} {
 		var creator string
 		if err := s.queryRow(t.Context(), `SELECT created_by FROM credit_grants WHERE id=?`, fmt.Sprint(i)).Scan(&creator); err != nil || creator != want {
 			t.Fatalf("grant %d creator = %q, %v; want %q", i, creator, err, want)

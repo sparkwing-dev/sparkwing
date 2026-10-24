@@ -263,7 +263,7 @@ func memberScheduleReference(t *testing.T, s *Store, role Role) (*Tenant, string
 	tenant := referenceWorld(t, s, "gh:701")
 	armer := referenceMember(t, s, "armer", role)
 	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), teamAuthorization(t, s, armer, "a", "PUT", "/api/v1/schedules/repos"), ScheduleRepoRequest{
-		Mode: ScheduleReplace, RepoURL: "https://github.com/acme/app.git", Branch: "main", Follow: true,
+		Mode: scheduleReplace, RepoURL: "https://github.com/acme/app.git", Branch: "main", Follow: true,
 		Schedules: []runspec.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}},
 	})
 	if err != nil {

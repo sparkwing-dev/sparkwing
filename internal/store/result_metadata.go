@@ -148,7 +148,7 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeR
 	if exists && sourceStarted != sourceStart {
 		return authorityError(apierr.Conflict, "step start time is immutable")
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO node_steps(team,run_id,node_id,attempt,generation,step_id,status,error,started_at,finished_at,source_started_at,source_finished_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,run_id,node_id,attempt,step_id) DO UPDATE SET status = excluded.status,error = excluded.error,finished_at = excluded.finished_at,source_finished_at = excluded.source_finished_at`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, report.StepID, report.State, report.MaskedError, start, end, sourceStart, sourceEnd)
+	_, err = tx.execContext(ctx, `INSERT INTO node_steps(team,run_id,node_id,attempt,generation,step_id,status,error,started_at,finished_at,source_started_at,source_finished_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,run_id,node_id,attempt,step_id) DO UPDATE SET status = excluded.status,error = excluded.error,finished_at = excluded.finished_at,source_finished_at = excluded.source_finished_at`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, report.StepID, report.State, report.MaskedError, start, end, sourceStart, sourceEnd)
 	if err != nil {
 		return err
 	}
@@ -208,10 +208,10 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE "+table+" SET annotations_json = ? WHERE "+where, append([]any{body}, args...)...); err != nil {
+		if _, err := tx.execContext(ctx, "UPDATE "+table+" SET annotations_json = ? WHERE "+where, append([]any{body}, args...)...); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?", annotation.Message, t.team, row.Ref.RunID); err != nil {
+		if _, err := tx.execContext(ctx, "UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?", annotation.Message, t.team, row.Ref.RunID); err != nil {
 			return err
 		}
 		return nil
@@ -230,7 +230,7 @@ func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
 		}
 		query, args := resultTarget(row, t.team, summary.StepID)
 		table, where, _ := strings.Cut(query, " WHERE ")
-		result, err := tx.ExecContext(ctx, "UPDATE "+table+" SET summary = ? WHERE "+where, append([]any{summary.Markdown}, args...)...)
+		result, err := tx.execContext(ctx, "UPDATE "+table+" SET summary = ? WHERE "+where, append([]any{summary.Markdown}, args...)...)
 		if err != nil {
 			return err
 		}

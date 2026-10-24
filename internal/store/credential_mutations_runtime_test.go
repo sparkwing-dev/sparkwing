@@ -163,7 +163,7 @@ func TestCredentialMutationsRecheckAuthorityAfterWriting(t *testing.T) {
 
 func TestCredentialMutationsSerializeExistingSecretLimit(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
-	for i := range MaxSecretsPerTeam - 1 {
+	for i := range maxSecretsPerTeam - 1 {
 		if _, err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, Secret{Name: fmt.Sprintf("KEY_%d", i), Value: "sealed"})); err != nil {
 			t.Fatal(err)
 		}
@@ -204,26 +204,26 @@ func TestCredentialMutationsSecretLimitsPreserveExistingValues(t *testing.T) {
 				a.Principal.Authority = owner.Authority
 				tenant.team, a.Target.Team = team, string(team)
 			}
-			for i := range MaxSecretsPerTeam {
+			for i := range maxSecretsPerTeam {
 				if _, err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, Secret{Name: fmt.Sprintf("KEY_%d", i), Value: "original"})); err != nil {
 					t.Fatal(err)
 				}
 			}
-			for _, row := range []Secret{{Name: "EXTRA", Value: "extra"}, {Name: "KEY_0", Value: strings.Repeat("x", MaxSecretValueBytes+1)}} {
+			for _, row := range []Secret{{Name: "EXTRA", Value: "extra"}, {Name: "KEY_0", Value: strings.Repeat("x", maxSecretValueBytes+1)}} {
 				_, err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, row))
 				if team == DefaultTeam && err != nil || team != DefaultTeam && !errors.Is(err, ErrSecretLimit) {
 					t.Fatalf("secret %s: %v", row.Name, err)
 				}
 			}
 			row, err := tenant.GetSecretRow("KEY_0", "")
-			if err != nil || team != DefaultTeam && openSecretFixture(t, tenant, row) != "original" || team == DefaultTeam && len(openSecretFixture(t, tenant, row)) != MaxSecretValueBytes+1 {
+			if err != nil || team != DefaultTeam && openSecretFixture(t, tenant, row) != "original" || team == DefaultTeam && len(openSecretFixture(t, tenant, row)) != maxSecretValueBytes+1 {
 				t.Fatalf("size refusal: %+v, %v", row, err)
 			}
 			if _, err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, Secret{Name: "KEY_0", Value: "replacement"})); err != nil {
 				t.Fatal(err)
 			}
 			rows, err := tenant.ListSecrets()
-			want := MaxSecretsPerTeam
+			want := maxSecretsPerTeam
 			if team == DefaultTeam {
 				want++
 			}

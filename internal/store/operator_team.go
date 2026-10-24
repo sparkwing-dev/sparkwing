@@ -35,7 +35,7 @@ func (o *Operator) CreateOperatorTeam(ctx context.Context, a capability.Authoriz
 			return err
 		}
 		now := tx.now(ctx).UnixNano()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO accounts(id,email,name,active_team,created_at,updated_at) VALUES (?,'',?,?,?,?)`, account, displayName, slug, now, now); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO accounts(id,email,name,active_team,created_at,updated_at) VALUES (?,'',?,?,?,?)`, account, displayName, slug, now, now); err != nil {
 			return err
 		}
 		if err := createTeamTx(ctx, tx, account, Team(slug), displayName, auditPrincipalActor(p), tx.now(ctx)); err != nil {
@@ -46,7 +46,7 @@ func (o *Operator) CreateOperatorTeam(ctx context.Context, a capability.Authoriz
 		for _, scope := range ScopesForRole(RoleOwner) {
 			grants = append(grants, capability.Grant(scope))
 		}
-		issued, err = o.s.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &capability.ProvisionSpec{
+		issued, err = o.s.issue(ctx, tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &capability.ProvisionSpec{
 			Kind: capability.ProvisionTeamAdmin, Authority: &p.Authority, ConsoleProof: capability.ProofForConsole(p),
 			Team: slug, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: account},
 			Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},

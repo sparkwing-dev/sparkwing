@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
-var ErrLocalStoreIncompatible = errors.New("wingd: incompatible local store")
+var errLocalStoreIncompatible = errors.New("wingd: incompatible local store")
 
 type localRun struct {
 	cancel context.CancelFunc
@@ -254,7 +254,7 @@ func (l *localLifecycle) Status(ctx context.Context) (LocalStatus, error) {
 
 func (l *localLifecycle) Doctor(ctx context.Context, version string) ([]localhostwire.LocalDoctorFinding, error) {
 	status, err := l.Status(ctx)
-	if errors.Is(err, ErrLocalStoreIncompatible) {
+	if errors.Is(err, errLocalStoreIncompatible) {
 		return []localhostwire.LocalDoctorFinding{{Code: "incompatible_store", Message: err.Error(), Hint: "Use the controller version that created this store, or select a fresh home."}}, nil
 	}
 	if err != nil {

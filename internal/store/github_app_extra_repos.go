@@ -56,7 +56,7 @@ func (t *Tenant) setGitHubExtraReposTx(ctx context.Context, tx *storeTx, reposit
 	if canonical[source] <= 0 {
 		return nil, ErrInvalidInput
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_extra_repos WHERE team = ? AND repository_id = ?`,
+	if _, err := tx.execContext(ctx, `DELETE FROM github_app_extra_repos WHERE team = ? AND repository_id = ?`,
 		string(t.team), canonical[source]); err != nil {
 		return nil, err
 	}
@@ -64,33 +64,13 @@ func (t *Tenant) setGitHubExtraReposTx(ctx context.Context, tx *storeTx, reposit
 		if canonical[x] <= 0 {
 			return nil, ErrInvalidInput
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.execContext(ctx, `
 			INSERT INTO github_app_extra_repos (team, repository, repository_id, extra_repo, extra_repo_id, created_by, created_at)
    VALUES (?, ?, ?, ?, ?, ?, ?)`, string(t.team), source, canonical[source], x, canonical[x], by, tx.now(ctx).UnixNano()); err != nil {
 			return nil, err
 		}
 	}
 	return list, nil
-}
-
-// GitHubAppExtraRepos returns approved extras for a numeric source repository ID.
-func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repositoryID int64) (_ []string, err error) {
-	rows, err := t.s.query(ctx, `
-		SELECT extra_repo FROM github_app_extra_repos WHERE team = ? AND repository_id = ? ORDER BY extra_repo`,
-		string(t.team), repositoryID)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := []string{}
-	for rows.Next() {
-		var x string
-		if err := rows.Scan(&x); err != nil {
-			return nil, err
-		}
-		out = append(out, x)
-	}
-	return out, rows.Err()
 }
 
 // AllGitHubAppExtraRepos maps each of the team's source repositories to the
@@ -110,6 +90,26 @@ func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]str
 			return nil, err
 		}
 		out[repo] = append(out[repo], x)
+	}
+	return out, rows.Err()
+}
+
+// GitHubAppExtraRepos returns approved extras for a numeric source repository ID.
+func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repositoryID int64) (_ []string, err error) {
+	rows, err := t.s.query(ctx, `
+		SELECT extra_repo FROM github_app_extra_repos WHERE team = ? AND repository_id = ? ORDER BY extra_repo`,
+		string(t.team), repositoryID)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	out := []string{}
+	for rows.Next() {
+		var x string
+		if err := rows.Scan(&x); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
 	}
 	return out, rows.Err()
 }

@@ -89,7 +89,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				if err := invalidateGitHubInstallationPublicationsTx(ctx, tx, previous, row.InstallationID); err != nil {
 					return err
 				}
-				if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=?`, previous, row.InstallationID); err != nil {
+				if _, err := tx.execContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=?`, previous, row.InstallationID); err != nil {
 					return err
 				}
 			}
@@ -111,7 +111,7 @@ func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capabil
 				}
 			}
 			// Resolve recipients inside the transfer; the request is scoped to the new team.
-			emails, err := (&Tenant{s: t.s, team: previousTeam}).teamOwnerEmails(ctx, tx.QueryContext)
+			emails, err := (&Tenant{s: t.s, team: previousTeam}).teamOwnerEmails(ctx, tx.queryContext)
 			if err != nil {
 				return err
 			}

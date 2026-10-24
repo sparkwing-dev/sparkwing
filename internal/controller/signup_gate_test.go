@@ -237,9 +237,9 @@ func TestApprovingTheOldestRunsTheNotifier(t *testing.T) {
 
 func TestAClosedFreeTierWaitlistsNewAccounts(t *testing.T) {
 	var mu sync.Mutex
-	state := controller.FreeTierClosed
+	state := controller.FreeTierState("closed")
 	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
-		s.WithFreeTier(controller.FreeTierFunc(func(context.Context) (controller.FreeTierState, error) {
+		s.WithFreeTier(freeTierFunc(func(context.Context) (controller.FreeTierState, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			return state, nil
@@ -252,7 +252,7 @@ func TestAClosedFreeTierWaitlistsNewAccounts(t *testing.T) {
 		t.Fatalf("status = %+v", st)
 	}
 	mu.Lock()
-	state = controller.FreeTierThrottled
+	state = controller.FreeTierState("throttled")
 	mu.Unlock()
 	if out := f.signIn(person("g-2", "two@example.com", "Two")); out.Waitlisted || out.ActiveTeam == nil {
 		t.Fatalf("a throttled free tier waitlisted a new account: %+v", out)
@@ -374,13 +374,13 @@ func TestAnUnreadableFreeTierWaitlistsNewAccounts(t *testing.T) {
 	var mu sync.Mutex
 	fail := true
 	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
-		s.WithFreeTier(controller.FreeTierFunc(func(context.Context) (controller.FreeTierState, error) {
+		s.WithFreeTier(freeTierFunc(func(context.Context) (controller.FreeTierState, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			if fail {
 				return "", errors.New("storage pass unreadable")
 			}
-			return controller.FreeTierOpen, nil
+			return controller.FreeTierState("open"), nil
 		}))
 	}})
 	if out := f.signIn(person("g-u1", "u1@example.com", "U")); !out.Waitlisted {
@@ -419,8 +419,8 @@ func TestAnUnwiredFreeTierLogsOnceAtStartup(t *testing.T) {
 	newIdentityFixtureWith(t, fixtureOpts{
 		logger: slog.New(slog.NewJSONHandler(&wired, nil)),
 		configure: func(s *controller.Server) {
-			s.WithFreeTier(controller.FreeTierFunc(func(context.Context) (controller.FreeTierState, error) {
-				return controller.FreeTierOpen, nil
+			s.WithFreeTier(freeTierFunc(func(context.Context) (controller.FreeTierState, error) {
+				return controller.FreeTierState("open"), nil
 			}))
 			s.CheckFreeTierSource()
 		},
@@ -446,4 +446,10 @@ func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+type freeTierFunc func(context.Context) (controller.FreeTierState, error)
+
+func (f freeTierFunc) SignUpFreeTier(ctx context.Context) (controller.FreeTierState, error) {
+	return f(ctx)
 }

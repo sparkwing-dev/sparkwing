@@ -60,7 +60,7 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 		if run < 2 && row.Status != runstate.StatusDone {
 			key := string(state)
 			if state == nodePending {
-				key = QueueStateWaiting
+				key = queueStateWaiting
 			}
 			want[key]++
 		}
@@ -115,7 +115,7 @@ func TestTenantPendingTriggersIgnoreForeignQueueProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := tenant.CountPendingTriggers(t.Context())
+			got, err := tenant.countPendingTriggers(t.Context())
 			if err != nil || got != want[team] {
 				t.Fatalf("%s backlog: %d, %v; want %d", team, got, err, want[team])
 			}

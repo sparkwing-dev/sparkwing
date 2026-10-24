@@ -145,7 +145,7 @@ func lockLedgerTx(ctx context.Context, tx *storeTx, team Team) (*ledgerTx, error
 		return nil, errors.New("ledger: a ledger lock names its team")
 	}
 	if tx.dialect == DialectPostgres {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/ledger/"+string(team)); err != nil {
+		if _, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/ledger/"+string(team)); err != nil {
 			return nil, err
 		}
 	}

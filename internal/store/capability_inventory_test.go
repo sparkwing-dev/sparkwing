@@ -462,7 +462,7 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					_, err = tx.ExecContext(t.Context(), `UPDATE capabilities SET authority_json=? WHERE prefix=?`, body, old.Capability.Prefix)
+					_, err = tx.execContext(t.Context(), `UPDATE capabilities SET authority_json=? WHERE prefix=?`, body, old.Capability.Prefix)
 					return err
 				}); err != nil {
 					t.Fatal(err)

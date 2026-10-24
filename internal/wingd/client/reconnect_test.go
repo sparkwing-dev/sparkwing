@@ -16,8 +16,8 @@ func TestReconnectClassifiesHostErrorsFromSpawn(t *testing.T) {
 		cause        error
 		wantAttempts int
 	}{
-		{"missing host", ErrNoDaemonHost, 1},
-		{"failed host", ErrDaemonHostFailed, 3},
+		{"missing host", errNoDaemonHost, 1},
+		{"failed host", errDaemonHostFailed, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := shortHome(t)
@@ -49,13 +49,13 @@ func TestReconnectRetriesOnlyTransientErrors(t *testing.T) {
 			case 1:
 				return ErrNoDaemon
 			case 2:
-				return ErrDaemonUnreachable
+				return errDaemonUnreachable
 			default:
-				return ErrNoDaemonHost
+				return errNoDaemonHost
 			}
 		}}
 		err := cl.reconnect(t.Context(), time.Minute)
-		if !errors.Is(err, ErrNoDaemonHost) || attempts != 3 {
+		if !errors.Is(err, errNoDaemonHost) || attempts != 3 {
 			t.Fatalf("reconnect = %v after %d attempts; want missing host after three", err, attempts)
 		}
 	})

@@ -30,15 +30,15 @@ type Secret struct {
 // A signed-up team's secrets are rows the operator stores for free, so they
 // are bounded in count and size; the operator's own team is not.
 const (
-	// MaxSecretsPerTeam bounds the secret rows one signed-up team holds.
-	MaxSecretsPerTeam = 100
-	// MaxSecretValueBytes bounds one stored secret value of a signed-up
+	// maxSecretsPerTeam bounds the secret rows one signed-up team holds.
+	maxSecretsPerTeam = 100
+	// maxSecretValueBytes bounds one stored secret value of a signed-up
 	// team, as stored, sealed envelope included.
-	MaxSecretValueBytes = 128 << 10
+	maxSecretValueBytes = 128 << 10
 )
 
-// ErrSecretLimit refuses a signed-up team's secret past [MaxSecretsPerTeam]
-// or [MaxSecretValueBytes].
+// ErrSecretLimit refuses a signed-up team's secret past [maxSecretsPerTeam]
+// or [maxSecretValueBytes].
 var ErrSecretLimit = errors.New("store: secret limit reached")
 
 func boolInt(b bool) int {

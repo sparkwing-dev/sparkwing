@@ -161,7 +161,7 @@ func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView
 		if s.VersionPolicy == nil {
 			return RunStatusFacts{}, versionPolicyUnavailable()
 		}
-		notices, err := s.VersionPolicy.Notices(ctx, view.Snapshot.Run.Spec.Resolved.Engine.Version)
+		notices, err := s.VersionPolicy.notices(ctx, view.Snapshot.Run.Spec.Resolved.Engine.Version)
 		if err != nil {
 			return RunStatusFacts{}, err
 		}

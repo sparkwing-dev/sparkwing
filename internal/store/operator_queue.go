@@ -3,23 +3,23 @@ package store
 import "context"
 
 const (
-	// QueueStateWaiting is an unclaimed job that is not ready.
-	QueueStateWaiting = "waiting"
+	// queueStateWaiting is an unclaimed job that is not ready.
+	queueStateWaiting = "waiting"
 	// QueueStateReady is a node any eligible runner may claim.
 	QueueStateReady = "ready"
-	// QueueStateClaimed is a node a runner holds but has not started.
-	QueueStateClaimed = "claimed"
-	// QueueStateRunning is a node a runner is executing.
-	QueueStateRunning = "running"
-	// QueueStateApprovalPending is a node waiting on a human decision.
-	QueueStateApprovalPending = "approval_pending"
+	// queueStateClaimed is a node a runner holds but has not started.
+	queueStateClaimed = "claimed"
+	// queueStateRunning is a node a runner is executing.
+	queueStateRunning = "running"
+	// queueStateApprovalPending is a node waiting on a human decision.
+	queueStateApprovalPending = "approval_pending"
 )
 
 // QueueStates lists the persisted outstanding-job metric labels.
 func QueueStates() []string {
 	return []string{
-		QueueStateWaiting, QueueStateReady, QueueStateClaimed,
-		QueueStateRunning, QueueStateApprovalPending,
+		queueStateWaiting, QueueStateReady, queueStateClaimed,
+		queueStateRunning, queueStateApprovalPending,
 	}
 }
 
@@ -38,16 +38,16 @@ func (o *Operator) CountNodesByQueueState(ctx context.Context) (map[string]int, 
                    FROM nodes
                   WHERE `+nodeNotDone+` AND `+o.nodeRunActiveSQL("nodes."),
 		nodeStatusPending, nodeStatusPending, nodeStatusPending,
-		nodeStatusRunning, NodeStatusApprovalPending,
+		nodeStatusRunning, nodeStatusApprovalPending,
 	).Scan(&waiting, &ready, &claimed, &running, &approval)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]int{
-		QueueStateWaiting:         waiting,
+		queueStateWaiting:         waiting,
 		QueueStateReady:           ready,
-		QueueStateClaimed:         claimed,
-		QueueStateRunning:         running,
-		QueueStateApprovalPending: approval,
+		queueStateClaimed:         claimed,
+		queueStateRunning:         running,
+		queueStateApprovalPending: approval,
 	}, nil
 }

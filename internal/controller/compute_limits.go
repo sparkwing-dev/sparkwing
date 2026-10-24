@@ -14,9 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// ComputeLimitRefusedCode is details.reason on the rate_limited refusal of work
-// a compute guard refused.
-const ComputeLimitRefusedCode = "compute_limit"
+const computeLimitRefusedCode = "compute_limit"
 
 type computeLimitsJSON struct {
 	Limits  map[string]int64   `json:"limits"`
@@ -121,10 +119,10 @@ func (s *Server) computeLimitsViewWith(r *http.Request, limits store.ComputeLimi
 	return out, nil
 }
 
-// ComputeLimitRetryAfterSeconds is the Retry-After a guard refusal carries. A
+// computeLimitRetryAfterSeconds is the Retry-After a guard refusal carries. A
 // guard clears when work finishes rather than on a schedule, so it names how
 // often a caller should ask again.
-const ComputeLimitRetryAfterSeconds = 5
+const computeLimitRetryAfterSeconds = 5
 
 // safety: a refusal with no run of its own reaches the operator through the
 // log, because there is no run to record it against.
@@ -144,8 +142,8 @@ func (s *Server) writeComputeLimitRefusal(
 		"limit", refused.Limit, "cap", refused.Cap,
 		"observed", refused.Observed, "scope", refused.Scope)
 	details := map[string]any{
-		"reason": ComputeLimitRefusedCode, "limit": refused.Limit, "cap": refused.Cap, "observed": refused.Observed,
-		"retry_after_ms": ComputeLimitRetryAfterSeconds * 1000,
+		"reason": computeLimitRefusedCode, "limit": refused.Limit, "cap": refused.Cap, "observed": refused.Observed,
+		"retry_after_ms": computeLimitRetryAfterSeconds * 1000,
 	}
 	if refused.Scope != "" {
 		details["scope"] = refused.Scope

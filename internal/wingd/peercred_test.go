@@ -220,5 +220,5 @@ func startLoggingDaemon(t *testing.T, logf func(format string, args ...any)) str
 			t.Error("daemon did not stop after cancel")
 		}
 	})
-	return d.SocketPath()
+	return d.layout.sock
 }

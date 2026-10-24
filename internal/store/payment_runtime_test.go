@@ -123,7 +123,7 @@ func TestPaymentSettlementAuditsTransitionsAndResumesFundedTeam(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for kind, want := range map[string]int{BusinessEventCheckoutExpired: 1, BusinessEventCheckoutFailed: 0, BusinessEventCheckoutPaid: 1} {
+	for kind, want := range map[string]int{businessEventCheckoutExpired: 1, businessEventCheckoutFailed: 0, businessEventCheckoutPaid: 1} {
 		var count int
 		if err := s.db.QueryRow("SELECT COUNT(*) FROM audit_events WHERE team='a' AND kind=?", kind).Scan(&count); err != nil || count != want {
 			t.Fatalf("%s events=%d, want %d: %v", kind, count, want, err)

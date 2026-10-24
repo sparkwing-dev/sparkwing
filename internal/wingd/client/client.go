@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-var ErrProtocolTooOld = errors.New("wingd/client: daemon no longer serves this client's protocol")
+var errProtocolTooOld = errors.New("wingd/client: daemon no longer serves this client's protocol")
 
 func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	self := selfVersion
@@ -42,12 +42,12 @@ func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 		"%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
 			"%s and re-run, or set SPARKWING_HOME to run against a daemon of your own; "+
 			"upgrading the sparkwing CLI does not affect this handshake",
-		ErrProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)
+		errProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)
 }
 
-var ErrDaemonTooOld = errors.New("wingd/client: daemon protocol is older than this client")
+var errDaemonTooOld = errors.New("wingd/client: daemon protocol is older than this client")
 
-var ErrBuildMismatch = errors.New("wingd/client: daemon build differs from this client")
+var errBuildMismatch = errors.New("wingd/client: daemon build differs from this client")
 
 func buildMismatch(selfVersion string, ack wingwire.HelloAck) error {
 	self := strings.TrimSpace(selfVersion)
@@ -62,7 +62,7 @@ func buildMismatch(selfVersion string, ack wingwire.HelloAck) error {
 		daemon = "(unknown)"
 	}
 	return fmt.Errorf("%w: this build is %s and the daemon is %s; the same protocol major does not prove same-build compatibility. Restart the daemon with this build or use a separate SPARKWING_HOME",
-		ErrBuildMismatch, self, daemon)
+		errBuildMismatch, self, daemon)
 }
 
 func sameVersionBuildReplacement(selfVersion string, ack wingwire.HelloAck) bool {
@@ -70,17 +70,17 @@ func sameVersionBuildReplacement(selfVersion string, ack wingwire.HelloAck) bool
 		strings.TrimSpace(selfVersion) == strings.TrimSpace(ack.BinaryVersion)
 }
 
-const FirstHostingRelease = "v0.27.0"
+const firstHostingRelease = "v0.27.0"
 
 func minHostingRelease() string {
 	floor, known := wingwire.ReleasedProtocolFloors().MinVersionSpeaking(wingd.ProtocolMajor)
 	if !known {
-		return FirstHostingRelease
+		return firstHostingRelease
 	}
-	if semver.Compare(floor, FirstHostingRelease) > 0 {
+	if semver.Compare(floor, firstHostingRelease) > 0 {
 		return floor
 	}
-	return FirstHostingRelease
+	return firstHostingRelease
 }
 
 func daemonTooOld(selfVersion string, ack wingwire.HelloAck) error {
@@ -95,7 +95,7 @@ func daemonTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	return fmt.Errorf(
 		"%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
 			"Install sparkwing %s or newer on this host, then run `sparkwing daemon restart`",
-		ErrDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minHostingRelease())
+		errDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minHostingRelease())
 }
 
 func servedDownLevel(ack wingwire.HelloAck) bool {
@@ -157,7 +157,7 @@ func (o Options) spawn(home, version string) error {
 	}
 	// safety: a non-hosting client cannot start wingd by re-executing itself.
 	if o.NoTakeover {
-		return ErrNoDaemonHost
+		return errNoDaemonHost
 	}
 	return defaultSpawn(home, version)
 }
@@ -222,11 +222,11 @@ func (cl *Client) versionSkewHint() string {
 	return fmt.Sprintf("admission request rejected as invalid by daemon %s while this sparkwing is %s; a version skew can leave a running daemon unable to admit a newer client. Stop the daemon so the next run brings up a matching one, or run in an isolated SPARKWING_HOME", daemon, self)
 }
 
-type CancelledError struct {
+type cancelledError struct {
 	Reason string
 }
 
-func (e *CancelledError) Error() string {
+func (e *cancelledError) Error() string {
 	if e.Reason == "" {
 		return "wingd: run cancelled while queued"
 	}
@@ -287,10 +287,10 @@ func spawnFailed(home, sock string, serr, dialErr error) error {
 	if u := unreachable(sock, dialErr); u != nil {
 		return u
 	}
-	if errors.Is(serr, ErrNoDaemon) || errors.Is(serr, ErrNoDaemonHost) {
+	if errors.Is(serr, ErrNoDaemon) || errors.Is(serr, errNoDaemonHost) {
 		return serr
 	}
-	if errors.Is(serr, ErrDaemonHostFailed) {
+	if errors.Is(serr, errDaemonHostFailed) {
 		return serr
 	}
 	if tail := daemonLogTail(home); tail != "" {
@@ -309,15 +309,15 @@ func daemonUnreachable(home, sock string, spawns int, cause, dialErr error) erro
 				attempt = "attempt"
 			}
 			return fmt.Errorf("%w: daemon did not become reachable after %d start %s: %w; daemon log %s:\n%s",
-				ErrDaemonUnreachable, spawns, attempt, cause, path, tail)
+				errDaemonUnreachable, spawns, attempt, cause, path, tail)
 		}
 		return fmt.Errorf("%w: no daemon answered after %d start attempts; see %s: %w",
-			ErrDaemonUnreachable, spawns, path, cause)
+			errDaemonUnreachable, spawns, path, cause)
 	}
 	if u := unreachable(sock, dialErr); u != nil {
 		return errors.Join(u, cause)
 	}
-	return fmt.Errorf("%w: %w", ErrDaemonUnreachable, cause)
+	return fmt.Errorf("%w: %w", errDaemonUnreachable, cause)
 }
 
 func describeHome(home string) string {
@@ -535,12 +535,12 @@ func (cl *Client) reconnect(ctx context.Context, within time.Duration) error {
 			return nil
 		}
 		switch {
-		case errors.Is(err, ErrDaemonHostFailed):
+		case errors.Is(err, errDaemonHostFailed):
 			hostFailures++
 			if hostFailures >= 3 {
 				return fmt.Errorf("wingd/client: admission daemon host failed after %d attempts: %w", hostFailures, err)
 			}
-		case errors.Is(err, ErrDaemonUnreachable), errors.Is(err, ErrNoDaemon):
+		case errors.Is(err, errDaemonUnreachable), errors.Is(err, ErrNoDaemon):
 		default:
 			return fmt.Errorf("wingd/client: admission daemon restart failed: %w", err)
 		}
@@ -579,7 +579,7 @@ func (cl *Client) takeover(ctx context.Context, opts Options) error {
 	_, _ = cl.dec.read()
 	cl.Close()
 	if err := opts.spawn(opts.Home, opts.Version); err != nil {
-		if errors.Is(err, ErrDaemonHostFailed) {
+		if errors.Is(err, errDaemonHostFailed) {
 			return err
 		}
 		opts.logf("spawn successor: %v", err)

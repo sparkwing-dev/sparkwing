@@ -11,9 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// TrendPoint matches web/src/lib/api.ts:TrendPoint. One bucket of
+// trendPoint matches web/src/lib/api.ts:TrendPoint. One bucket of
 // runs grouped by hour (or larger when the window is wide).
-type TrendPoint struct {
+type trendPoint struct {
 	Bucket    string `json:"bucket"` // RFC3339 at the bucket boundary
 	Total     int    `json:"total"`
 	Passed    int    `json:"passed"`
@@ -97,7 +97,7 @@ func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request, authorized
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 
-	out := make([]TrendPoint, 0, len(keys))
+	out := make([]trendPoint, 0, len(keys))
 	for _, k := range keys {
 		b := buckets[k]
 		sort.Slice(b.durationsMs, func(i, j int) bool { return b.durationsMs[i] < b.durationsMs[j] })
@@ -118,7 +118,7 @@ func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request, authorized
 		if b.waitCount > 0 {
 			avgWait = b.waitSumNs / int64(b.waitCount) / int64(time.Millisecond)
 		}
-		out = append(out, TrendPoint{
+		out = append(out, trendPoint{
 			Bucket:    time.Unix(0, k).UTC().Format(time.RFC3339),
 			Total:     b.total,
 			Passed:    b.passed,

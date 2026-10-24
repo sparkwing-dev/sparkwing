@@ -9,30 +9,30 @@ import (
 
 // Storage tiers a team's quota can be drawn from.
 const (
-	StorageTierFree = "free"
-	StorageTierPaid = "paid"
+	storageTierFree = "free"
+	storageTierPaid = "paid"
 )
 
 // Quota limits, named so a refusal says which one it hit.
 const (
-	StorageLimitBytesPerRun   = "bytes_per_run"
-	StorageLimitBytesPerMonth = "bytes_per_month"
-	StorageLimitObjectsPerRun = "objects_per_run"
+	storageLimitBytesPerRun   = "bytes_per_run"
+	storageLimitBytesPerMonth = "bytes_per_month"
+	storageLimitObjectsPerRun = "objects_per_run"
 )
 
-// FreeTierQuota is the free tier's storage allowance: ten megabytes per run,
+// freeTierQuota is the free tier's storage allowance: ten megabytes per run,
 // which keeps an active five-person team under a gigabyte without a lifetime
 // cap.
-var FreeTierQuota = StorageQuota{
-	Tier:             StorageTierFree,
+var freeTierQuota = StorageQuota{
+	Tier:             storageTierFree,
 	MaxBytesPerRun:   10 << 20,
 	MaxBytesPerMonth: 1 << 30,
 	MaxObjectsPerRun: 1000,
 }
 
-// PaidTierQuota is the paid tier's storage allowance.
-var PaidTierQuota = StorageQuota{
-	Tier:             StorageTierPaid,
+// paidTierQuota is the paid tier's storage allowance.
+var paidTierQuota = StorageQuota{
+	Tier:             storageTierPaid,
 	MaxBytesPerRun:   1 << 30,
 	MaxBytesPerMonth: 100 << 30,
 	MaxObjectsPerRun: 100_000,
@@ -99,8 +99,8 @@ type StorageQuota struct {
 	AllowanceBytes int64
 }
 
-// Unlimited reports whether this quota refuses nothing.
-func (q StorageQuota) Unlimited() bool {
+// unlimited reports whether this quota refuses nothing.
+func (q StorageQuota) unlimited() bool {
 	return q.MaxBytesPerRun <= 0 && q.MaxBytesPerMonth <= 0 && q.MaxObjectsPerRun <= 0
 }
 
@@ -202,10 +202,10 @@ SELECT c.relname, pg_total_relation_size(c.oid)
 // this build does not know.
 func TierQuota(tier string) (StorageQuota, bool) {
 	switch tier {
-	case StorageTierFree:
-		return FreeTierQuota, true
-	case StorageTierPaid:
-		return PaidTierQuota, true
+	case storageTierFree:
+		return freeTierQuota, true
+	case storageTierPaid:
+		return paidTierQuota, true
 	default:
 		return StorageQuota{}, false
 	}

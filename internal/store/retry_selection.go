@@ -13,7 +13,7 @@ func selectRetryTx(ctx context.Context, tx *storeTx, team Team, source string, s
 	if selection.Mode == "all" {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT node_id,state_seq FROM nodes WHERE team=? AND run_id=? AND status='done' AND outcome IN ('success','memoized')`, team, source)
+	rows, err := tx.queryContext(ctx, `SELECT node_id,state_seq FROM nodes WHERE team=? AND run_id=? AND status='done' AND outcome IN ('success','memoized')`, team, source)
 	if err != nil {
 		return err
 	}

@@ -15,7 +15,7 @@ import (
 // Standing request states.
 const (
 	StandingRequestOpen     = "open"
-	StandingRequestApproved = "approved"
+	standingRequestApproved = "approved"
 	StandingRequestDeclined = "declined"
 )
 
@@ -25,8 +25,8 @@ const (
 	BusinessEventStandingRequestDecided = "billing.standing_request_decided"
 )
 
-// StandingRequestMessageLimit is the longest message a standing request carries.
-const StandingRequestMessageLimit = 1000
+// standingRequestMessageLimit is the longest message a standing request carries.
+const standingRequestMessageLimit = 1000
 
 // ErrStandingRequestOpen refuses a second request while the team's earlier one is open.
 var ErrStandingRequestOpen = errors.New("the team already has an open standing request")
@@ -67,8 +67,8 @@ func scanStandingRequest(row rowScanner) (StandingRequest, error) {
 // RequestAuthorizedStanding records a request for High standing, higher limits or larger payments under current team administration.
 func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Authorized, tier, message string) (StandingRequest, error) {
 	message = strings.TrimSpace(message)
-	if tier != "High" || message == "" || utf8.RuneCountInString(message) > StandingRequestMessageLimit {
-		return StandingRequest{}, fmt.Errorf("%w: a standing request names the High tier and a message of up to %d characters", ErrInvalidInput, StandingRequestMessageLimit)
+	if tier != "High" || message == "" || utf8.RuneCountInString(message) > standingRequestMessageLimit {
+		return StandingRequest{}, fmt.Errorf("%w: a standing request names the High tier and a message of up to %d characters", ErrInvalidInput, standingRequestMessageLimit)
 	}
 	var out StandingRequest
 	err := t.billingMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
@@ -89,7 +89,7 @@ func (t *Tenant) RequestAuthorizedStanding(ctx context.Context, a capability.Aut
 			return err
 		}
 		now := tx.now(ctx)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO standing_requests(id,team,tier,message,requested_by,requested_at,state) VALUES (?,?,?,?,?,?,?)`, id, t.team, tier, message, actor, now.UnixNano(), StandingRequestOpen); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO standing_requests(id,team,tier,message,requested_by,requested_at,state) VALUES (?,?,?,?,?,?,?)`, id, t.team, tier, message, actor, now.UnixNano(), StandingRequestOpen); err != nil {
 			return err
 		}
 		if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: t.team, Actor: auditPrincipalActor(p), At: now}, auditStandingRequest{RequestID: id, State: StandingRequestOpen, Tier: auditStanding(tier), Standing: auditStanding(standing.Tier), HistoryTier: auditStanding(standing.History.Tier)}); err != nil {
@@ -137,7 +137,7 @@ func decideStandingRequestTx(ctx context.Context, tx *storeTx, team Team, id, st
 		return r, err
 	}
 	now := tx.now(ctx)
-	if _, err := tx.ExecContext(ctx, `UPDATE standing_requests SET state=?,decided_by=?,decided_at=?,decision_reason=? WHERE team=? AND id=? AND state=?`, state, actor, now.UnixNano(), reason, team, id, StandingRequestOpen); err != nil {
+	if _, err := tx.execContext(ctx, `UPDATE standing_requests SET state=?,decided_by=?,decided_at=?,decision_reason=? WHERE team=? AND id=? AND state=?`, state, actor, now.UnixNano(), reason, team, id, StandingRequestOpen); err != nil {
 		return r, err
 	}
 	r.State, r.DecidedBy, r.DecidedAt, r.DecisionReason = state, actor, now, reason

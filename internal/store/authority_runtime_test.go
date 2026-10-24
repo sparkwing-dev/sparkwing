@@ -239,7 +239,7 @@ func TestAuthorityBootstrapExchangeIsAtomicAndSingleUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(tx)
-	exchanged, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Exchange, Exchange: &capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix}})
+	exchanged, err := s.issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Exchange, Exchange: &capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestAuthorityBootstrapExchangeIsAtomicAndSingleUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(tx)
-	if _, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Exchange, Exchange: &capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix}}); err == nil {
+	if _, err := s.issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Exchange, Exchange: &capability.ExchangeSpec{BootstrapPrefix: bootstrap.Capability.Prefix}}); err == nil {
 		t.Fatal("bootstrap exchanged twice")
 	}
 	if err := tx.Rollback(); err != nil {
@@ -334,7 +334,7 @@ func issueFixtureAward(t *testing.T, s *Store, tx *storeTx, spec capability.Awar
 		return capability.Issued{}, err
 	}
 	if spec.Unit == capability.UnitNode {
-		_, err = tx.ExecContext(t.Context(), `UPDATE nodes SET status='running',claimed_by='machine',capability_prefix=?,lease_expires_at=?,generation=7,attempt=2,started_at=1 WHERE run_id=? AND node_id=?`, issued.Capability.Prefix, expiry, unit.RunID, unit.NodeID)
+		_, err = tx.execContext(t.Context(), `UPDATE nodes SET status='running',claimed_by='machine',capability_prefix=?,lease_expires_at=?,generation=7,attempt=2,started_at=1 WHERE run_id=? AND node_id=?`, issued.Capability.Prefix, expiry, unit.RunID, unit.NodeID)
 	} else {
 		err = writeOwnerClaimTx(t.Context(), tx, UnitClaim{Team: "a", Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: runstate.ClaimAward{Holder: "machine", CapabilityPrefix: issued.Capability.Prefix, Generation: 7, LeaseExpiresAt: time.Unix(0, expiry)}})
 	}

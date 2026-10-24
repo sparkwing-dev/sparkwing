@@ -38,7 +38,7 @@ func (mux *registeredMux) Handle(pattern string, handler http.Handler) {
 	}
 }
 
-func (mux *registeredMux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+func (mux *registeredMux) handleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	mux.Handle(pattern, http.HandlerFunc(handler))
 }
 

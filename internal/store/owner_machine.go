@@ -62,7 +62,7 @@ func runRequesterAccountTx(ctx context.Context, tx *storeTx, team Team, run stri
 }
 
 func personalMachineOwnerTx(ctx context.Context, tx *storeTx, team Team, machine string) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix,created_by FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND bind_kind='none' AND parent_id IS NULL`, team, machine)
+	rows, err := tx.queryContext(ctx, `SELECT prefix,created_by FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND bind_kind='none' AND parent_id IS NULL`, team, machine)
 	if err != nil {
 		return "", err
 	}

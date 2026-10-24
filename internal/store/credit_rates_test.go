@@ -85,10 +85,10 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rate table after the single rate moved: %v", err)
 	}
-	if got := table.RateFor(store.CreditRateBaseClassCores); got != 50_000 {
+	if got := table[1].MicroPerSecond; got != 50_000 {
 		t.Fatalf("four-core class = %d, want the single rate 50000", got)
 	}
-	if got := table.RateFor(8); got != 33_000 {
+	if got := table[2].MicroPerSecond; got != 33_000 {
 		t.Fatalf("eight-core class = %d, want the ladder's 33000", got)
 	}
 	settings, err := s.AsOperator().CreditSettings(ctx)
@@ -120,10 +120,10 @@ func TestSetRateTableWritesTheFourCorePriceToTheSingleRate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rate table: %v", err)
 	}
-	if got := table.RateFor(4); got != 20_000 {
+	if got := table[1].MicroPerSecond; got != 20_000 {
 		t.Fatalf("four-core class = %d, want the installed table price 20000", got)
 	}
-	if got := table.RateFor(8); got != 36_667 {
+	if got := table[2].MicroPerSecond; got != 36_667 {
 		t.Fatalf("eight-core class = %d, want the table's 36667", got)
 	}
 }
@@ -135,11 +135,11 @@ func TestRateTableRefusesARateThatWouldOverflowAReservation(t *testing.T) {
 	if err := table.Validate(); err == nil {
 		t.Fatal("Validate accepted a rate of 2e17 micro-credits a second")
 	}
-	if err := (store.CreditRateTable{{Cores: 2, MicroPerSecond: store.MaxCreditRateMicro}}).Validate(); err != nil {
+	if err := (store.CreditRateTable{{Cores: 2, MicroPerSecond: 1000000000000}}).Validate(); err != nil {
 		t.Fatalf("Validate refused the ceiling itself: %v", err)
 	}
 	s := storetest.Open(t)
-	past := int64(store.MaxCreditRateMicro) + 1
+	past := int64(1000000000000) + 1
 	if _, err := s.AsOperator().SetCreditSettings(context.Background(),
 		store.CreditSettingsUpdate{RateMicroPerSecond: &past}); err == nil {
 		t.Fatal("the single rate accepted a value above the ceiling")

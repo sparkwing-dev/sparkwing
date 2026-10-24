@@ -16,8 +16,8 @@ import (
 
 func TestCloudSizePreferenceIsRecordedOnAward(t *testing.T) {
 	for _, tc := range []struct{ prefers, want string }{
-		{"sparkwing-4cpu", PlacementFallback},
-		{"sparkwing-16cpu", PlacementPreferred},
+		{"sparkwing-4cpu", placementFallback},
+		{"sparkwing-16cpu", placementPreferred},
 	} {
 		t.Run(tc.prefers, func(t *testing.T) {
 			s, demand, _ := meteredUnitFixture(t, true)
@@ -144,9 +144,9 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 				if err := s.db.QueryRow(`SELECT placement_reason FROM nodes`).Scan(&reason); err != nil {
 					t.Fatal(err)
 				}
-				want := PlacementFallback
+				want := placementFallback
 				if problem == "preferred_claimant" {
-					want = PlacementPreferred
+					want = placementPreferred
 				}
 				if reason != want {
 					t.Fatalf("placement reason=%q, want %q", reason, want)

@@ -140,7 +140,7 @@ func TestLocalLifecycleRefusesStandaloneAndForeignHome(t *testing.T) {
 }
 
 func TestLocalLifecyclePreservesOwnerAndCancellationFailures(t *testing.T) {
-	for _, failure := range []error{ErrDaemonUnreachable, ErrDaemonWedged, errors.New("unsupported local control"), context.Canceled} {
+	for _, failure := range []error{errDaemonUnreachable, errDaemonWedged, errors.New("unsupported local control"), context.Canceled} {
 		home := t.TempDir()
 		local := &localRuntimeFixture{}
 		owner := &lifecycleOwner{err: failure}

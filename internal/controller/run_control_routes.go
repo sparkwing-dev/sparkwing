@@ -12,21 +12,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// RunControlWriter rechecks authority, masks public text and commits control events and replay together.
-type RunControlWriter interface {
+// runControlWriter rechecks authority, masks public text and commits control events and replay together.
+type runControlWriter interface {
 	Team() store.Team
 	CreateAuthorizedDebugPause(context.Context, capability.Authorized, string, string, time.Time, string) error
 	ResolveAuthorizedApproval(context.Context, capability.Authorized, store.ApprovalDecision) (store.ApprovalResult, error)
 }
 
-// DebugPauseResumer closes an authorized job pause in its committing transaction.
-type DebugPauseResumer interface {
+// debugPauseResumer closes an authorized job pause in its committing transaction.
+type debugPauseResumer interface {
 	Team() store.Team
 	ResumeAuthorizedDebugPause(context.Context, capability.Authorized) error
 }
 
-func (s *Server) runControlWriter(r *http.Request, a capability.Authorized) (RunControlWriter, error) {
-	return tenantPort[RunControlWriter](r.Context(), s, store.Team(a.Target.Team))
+func (s *Server) runControlWriter(r *http.Request, a capability.Authorized) (runControlWriter, error) {
+	return tenantPort[runControlWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
 func (s *Server) runControlEndpoints() []controllerwire.Endpoint {
@@ -42,7 +42,7 @@ func (s *Server) handleResumeDebugPause(w http.ResponseWriter, r *http.Request, 
 	if err := decodeEngineRequest(r, &struct{}{}); err != nil {
 		return err
 	}
-	writer, err := tenantPort[DebugPauseResumer](r.Context(), s, store.Team(a.Target.Team))
+	writer, err := tenantPort[debugPauseResumer](r.Context(), s, store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}
@@ -54,8 +54,8 @@ func (s *Server) handleResumeDebugPause(w http.ResponseWriter, r *http.Request, 
 }
 
 var (
-	_ DebugPauseResumer = (*store.Tenant)(nil)
-	_ RunControlWriter  = (*store.Tenant)(nil)
+	_ debugPauseResumer = (*store.Tenant)(nil)
+	_ runControlWriter  = (*store.Tenant)(nil)
 )
 
 func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

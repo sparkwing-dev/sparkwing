@@ -35,7 +35,7 @@ func TestDarwinFreeMemory_VMCounters(t *testing.T) {
 				t.Fatalf("free=%d, measured=%v; want %d measured bytes", free, measured, want)
 			}
 			stat := HostStat{TotalMemoryBytes: 16 << 30, FreeMemoryBytes: free, MemoryMeasured: measured}
-			reserve, external := memReserveAndExternal(stat, 0, DefaultHeadroomFraction)
+			reserve, external := memReserveAndExternal(stat, 0, defaultHeadroomFraction)
 			available := headroomFromReserveExternal(stat.TotalMemoryBytes, reserve, external)
 			var wantAvailable uint64
 			if free > reserve {
@@ -126,7 +126,7 @@ func BenchmarkDarwinHostSample(b *testing.B) {
 }
 
 func TestDarwinMemorySample_QueuesUntilRecovery(t *testing.T) {
-	d := newHeadroomDaemon(t, 8, DefaultHeadroomFraction)
+	d := newHeadroomDaemon(t, 8, defaultHeadroomFraction)
 	inactive := uint64(245760)
 	var readErr error
 	d.sampler = hostSamplerFunc(func() (HostStat, error) {

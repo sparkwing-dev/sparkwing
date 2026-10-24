@@ -269,9 +269,9 @@ func TestGitHubEnrollmentAndIssuanceLimitsSerialize(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			want := MaxGitHubRunnerBindings - 1
+			want := maxGitHubRunnerBindings - 1
 			if issuance {
-				want = MaxGitHubRunnerCredentials
+				want = maxGitHubRunnerCredentials
 			}
 			if accepted != want {
 				t.Fatalf("accepted %d, want %d", accepted, want)
@@ -288,10 +288,10 @@ func TestGitHubEnrollmentLimitsIgnoreFundingAndExemptDefaultTeam(t *testing.T) {
 	owner := authorityMember(t, tenant.s, "operator-owner", RoleOwner, DefaultTeam)
 	op := a
 	op.Principal.Authority, op.Target.Team = owner.Authority, string(DefaultTeam)
-	for i := range MaxGitHubRunnerBindings + 1 {
+	for i := range maxGitHubRunnerBindings + 1 {
 		row := GitHubRunnerBinding{RepositoryID: int64(i + 1), RepositoryOwnerID: 7, Repository: "acme/repo"}
 		_, err := tenant.RegisterGitHubRunner(t.Context(), a, row)
-		if i < MaxGitHubRunnerBindings && err != nil || i == MaxGitHubRunnerBindings && !errors.Is(err, ErrBindingLimit) {
+		if i < maxGitHubRunnerBindings && err != nil || i == maxGitHubRunnerBindings && !errors.Is(err, ErrBindingLimit) {
 			t.Fatalf("funded registration %d: %v", i, err)
 		}
 		if _, err := operator.RegisterGitHubRunner(t.Context(), op, row); err != nil {
@@ -304,7 +304,7 @@ func TestGitHubActionsExpiredAndRevokedRootsReleaseIssuanceCapacity(t *testing.T
 	tenant, a, row := actionsEnrollment(t)
 	now := tenant.s.now()
 	tenant.s.clock = func() time.Time { return now }
-	for i := range MaxGitHubRunnerCredentials {
+	for i := range maxGitHubRunnerCredentials {
 		if _, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, fmt.Sprint(i))); err != nil {
 			t.Fatal(err)
 		}
@@ -366,7 +366,7 @@ func TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit(t *testing.T) {
 	now := s.now()
 	s.clock = func() time.Time { return now }
 	var first capability.Issued
-	for i := range MaxGitHubRunnerCredentials {
+	for i := range maxGitHubRunnerCredentials {
 		issued, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, fmt.Sprint(i)))
 		if err != nil {
 			t.Fatal(err)
@@ -386,5 +386,5 @@ func TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit(t *testing.T) {
 	if err != nil || issued.Raw == "" {
 		t.Fatalf("quota after expiry: %+v, %v", issued.Capability, err)
 	}
-	rewriteSchemaCount(t, s.db, "capabilities", MaxGitHubRunnerCredentials+1)
+	rewriteSchemaCount(t, s.db, "capabilities", maxGitHubRunnerCredentials+1)
 }

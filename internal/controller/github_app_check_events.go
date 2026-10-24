@@ -162,7 +162,7 @@ func githubAppRunEventSubscribed(run *store.RunRow, sub store.GitHubAppTrigger) 
 func githubAppRerunIntake(anchor *store.RunRow, user string) githubAppIntake {
 	request := anchor.Request.Request
 	app := request.Git.App.Value
-	env := map[string]string{"GITHUB_EVENT_NAME": app.Event, "GITHUB_ACTION": app.Action, "GITHUB_REF": request.Git.Ref, EnvDefaultBranch: app.DefaultBranch}
+	env := map[string]string{"GITHUB_EVENT_NAME": app.Event, "GITHUB_ACTION": app.Action, "GITHUB_REF": request.Git.Ref, envDefaultBranch: app.DefaultBranch}
 	branch := strings.TrimPrefix(request.Git.Ref, "refs/heads/")
 	if strings.HasPrefix(request.Git.Ref, "refs/tags/") {
 		env["GITHUB_REF_TYPE"], branch = "tag", ""

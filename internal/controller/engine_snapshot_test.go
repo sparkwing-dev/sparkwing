@@ -30,7 +30,7 @@ func TestEngineSnapshotRetainsEmptyExpansionAndPersistedState(t *testing.T) {
 	engineSQL(t, server.Store, `UPDATE runs SET plan_json=?,plan_hash='plan',sealed_at=1,spec_json=?,spec_hash='spec'`, plan, []byte(`{}`))
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,seq,status,outcome,finished_at,generation,attempt,state_seq,spec_json,execution_json,expansion,expansion_body,expansion_registration,expansion_digest) VALUES ('a','run','source',0,'done','success',1,3,2,7,?,?,'accepted',?,?,?)`, []byte(`{"id":"source","closures":{"generate":["empty"]}}`), []byte(`{}`), expansion, registrationJSON, digest)
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,seq,status,spec_json,execution_json) VALUES ('a','run','consumer',1,'pending',?,?)`, []byte(`{"id":"consumer","needs_generated":["empty"]}`), []byte(`{}`))
-	got, err := server.Snapshot(t.Context(), owner)
+	got, err := server.snapshot(t.Context(), owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestEngineSnapshotRetainsEmptyExpansionAndPersistedState(t *testing.T) {
 		t.Fatalf("persisted snapshot: %+v", got)
 	}
 	engineSQL(t, server.Store, `UPDATE runs SET cancel_requested_at=1`)
-	got, err = server.Snapshot(t.Context(), owner)
+	got, err = server.snapshot(t.Context(), owner)
 	if err != nil || !got.CancelRequested {
 		t.Fatalf("cancelled snapshot: %+v, %v", got, err)
 	}
@@ -66,7 +66,7 @@ func TestEngineSnapshotRefusesCorruptionAndStaleAuthority(t *testing.T) {
 			case "lease_expired":
 				engineSQL(t, server.Store, `UPDATE triggers SET lease_expires_at=1`)
 			}
-			got, err := server.Snapshot(t.Context(), owner)
+			got, err := server.snapshot(t.Context(), owner)
 			if err == nil || got.RunID != "" || len(got.Jobs) != 0 {
 				t.Fatalf("invalid snapshot returned data: %+v, %v", got, err)
 			}
@@ -81,7 +81,7 @@ func TestEngineSnapshotRefusesEveryReplacementOwnerFence(t *testing.T) {
 	property := func(value []byte, generation uint16) bool {
 		holder := "replacement-" + base64.RawURLEncoding.EncodeToString(value)
 		engineSQL(t, server.Store, `UPDATE triggers SET claimed_by=?,generation=? WHERE id='run'`, holder, int64(generation)+owner.Binding.Generation+1)
-		snapshot, err := server.Snapshot(t.Context(), owner)
+		snapshot, err := server.snapshot(t.Context(), owner)
 		return err != nil && snapshot.RunID == "" && len(snapshot.Jobs) == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
@@ -97,12 +97,12 @@ func TestEngineSnapshotRetainsSealedGuardRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineSQL(t, server.Store, `UPDATE runs SET plan_json=?,plan_hash='plan',sealed_at=1,spec_json=?,spec_hash='spec'`, []byte(`{"jobs":[]}`), spec)
-	got, err := server.Snapshot(t.Context(), owner)
+	got, err := server.snapshot(t.Context(), owner)
 	if err != nil || got.GuardRefusal != "guard refused" || got.CancelRequested {
 		t.Fatalf("sealed guard: %+v, %v", got, err)
 	}
 	engineSQL(t, server.Store, `UPDATE runs SET cancel_requested_at=1`)
-	got, err = server.Snapshot(t.Context(), owner)
+	got, err = server.snapshot(t.Context(), owner)
 	if err != nil || !got.CancelRequested || got.GuardRefusal != "guard refused" {
 		t.Fatalf("cancelled guard: %+v, %v", got, err)
 	}

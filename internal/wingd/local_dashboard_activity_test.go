@@ -81,7 +81,7 @@ func TestLocalRuntimeDashboardConnectionsHoldIdle(t *testing.T) {
 					t.Fatalf("dashboard connection missing from activity: %+v, %v", status, err)
 				}
 				for _, activity := range []LocalActivity{{Runs: 1}, {}} {
-					if err := r.run.daemon.SetLocalActivity(activity); err != nil {
+					if err := r.run.daemon.setLocalActivity(activity); err != nil {
 						t.Fatal(err)
 					}
 					status, err = r.Status(t.Context())

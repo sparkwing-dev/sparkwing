@@ -67,7 +67,7 @@ func createLogStreamTx(ctx context.Context, tx *storeTx, subject blob.LogSubject
 		return err
 	}
 	now := tx.now(ctx).UnixNano()
-	_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at)
+	_, err = tx.execContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at)
 		SELECT team,id,?,?,?,?,?,?,?,?,?,log_retention_class,?,? FROM runs WHERE team=? AND id=?`, identity.id, string(subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, now, now, subject.Team, subject.RunID)
 	return err
 }
@@ -148,7 +148,7 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 			completeness = "incomplete"
 		}
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE log_streams SET completeness = ?, incomplete_reason = ?, sealed_at = ?, final_commit_digest = ?, updated_at = ? WHERE team = ? AND run_id = ? AND id = ?", completeness, commit.IncompleteReason, seal, finalDigest, tx.now(ctx).UnixNano(), t.team, commit.Subject.RunID, identity.id)
+	_, err = tx.execContext(ctx, "UPDATE log_streams SET completeness = ?, incomplete_reason = ?, sealed_at = ?, final_commit_digest = ?, updated_at = ? WHERE team = ? AND run_id = ? AND id = ?", completeness, commit.IncompleteReason, seal, finalDigest, tx.now(ctx).UnixNano(), t.team, commit.Subject.RunID, identity.id)
 	if err != nil {
 		return err
 	}
@@ -185,7 +185,7 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 		if stored < 0 || stored > math.MaxInt64-segment.StoredBytes {
 			return authorityError(apierr.IntegrityFailure, "log inventory byte total is out of range")
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO log_segments(team,run_id,stream_id,generation,n,stored_bytes,sha256,object_key,start_offset,end_offset) VALUES (?,?,?,?,?,?,?,?,?,?)`, team, run, identity.id, identity.generation, segment.Index, segment.StoredBytes, segment.Digest, segment.ObjectKey, segment.Offset, segment.Offset+segment.Size)
+		_, err = tx.execContext(ctx, `INSERT INTO log_segments(team,run_id,stream_id,generation,n,stored_bytes,sha256,object_key,start_offset,end_offset) VALUES (?,?,?,?,?,?,?,?,?,?)`, team, run, identity.id, identity.generation, segment.Index, segment.StoredBytes, segment.Digest, segment.ObjectKey, segment.Offset, segment.Offset+segment.Size)
 		if err != nil {
 			return err
 		}
@@ -198,7 +198,7 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 			return err
 		}
 	}
-	_, err := tx.ExecContext(ctx, "UPDATE log_streams SET uploaded_through = ?, stored_bytes = ? WHERE team = ? AND run_id = ? AND id = ?", offset, stored, team, run, identity.id)
+	_, err := tx.execContext(ctx, "UPDATE log_streams SET uploaded_through = ?, stored_bytes = ? WHERE team = ? AND run_id = ? AND id = ?", offset, stored, team, run, identity.id)
 	return err
 }
 
@@ -353,7 +353,7 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor runstate.Actor, requ
 			return result, err
 		}
 		result.Complete = completeness == "complete"
-		rows, err := tx.QueryContext(ctx, "SELECT n,start_offset,end_offset-start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND generation = ? AND end_offset > ? ORDER BY n", t.team, request.Subject.RunID, identity.id, identity.generation, request.Offset)
+		rows, err := tx.queryContext(ctx, "SELECT n,start_offset,end_offset-start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND generation = ? AND end_offset > ? ORDER BY n", t.team, request.Subject.RunID, identity.id, identity.generation, request.Offset)
 		if err != nil {
 			return result, err
 		}

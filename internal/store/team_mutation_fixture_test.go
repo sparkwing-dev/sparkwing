@@ -84,10 +84,10 @@ func (t *Tenant) RemoveRunForTest(ctx context.Context, id string) error {
 		if err := assertRunBelongsToTeamTx(ctx, tx, t.team, id); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM pipeline_success_pins WHERE team=? AND run_id=?`, t.team, id); err != nil {
+		if _, err := tx.execContext(ctx, `DELETE FROM pipeline_success_pins WHERE team=? AND run_id=?`, t.team, id); err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE team=? AND id=?`, t.team, id)
+		result, err := tx.execContext(ctx, `DELETE FROM runs WHERE team=? AND id=?`, t.team, id)
 		return credentialRowChanged(result, err)
 	})
 }

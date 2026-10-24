@@ -75,7 +75,7 @@ func (s *Store) sealLauncherHost(ctx context.Context, authority capability.Autho
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET authority_json=? WHERE team=? AND prefix=?`, body, award.Capability.Team, row.prefix)
+		_, err = tx.execContext(ctx, `UPDATE capabilities SET authority_json=? WHERE team=? AND prefix=?`, body, award.Capability.Team, row.prefix)
 		return err
 	})
 }

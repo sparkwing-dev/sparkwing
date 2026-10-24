@@ -145,7 +145,7 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE eval_units SET lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=? AND capability_prefix=?`, expiry.UnixNano(), team, unit.RunID, unit.NodeID, unit.SourceGeneration, actor.Generation, actor.CapabilityPrefix)
+	_, err = tx.execContext(ctx, `UPDATE eval_units SET lease_expires_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=? AND capability_prefix=?`, expiry.UnixNano(), team, unit.RunID, unit.NodeID, unit.SourceGeneration, actor.Generation, actor.CapabilityPrefix)
 	if err != nil {
 		return err
 	}

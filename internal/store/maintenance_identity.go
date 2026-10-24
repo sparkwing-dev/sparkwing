@@ -17,7 +17,7 @@ func (op *Operator) deleteRetentionIdentityTx(ctx context.Context, tx *storeTx, 
 		{`DELETE FROM flow_nonces WHERE (kind,nonce) IN (SELECT kind,nonce FROM flow_nonces WHERE expires_at <= ? ORDER BY expires_at,kind,nonce LIMIT ?)`, []any{now.UnixNano(), limit}, nil},
 		{`DELETE FROM github_app_deliveries WHERE digest IN (SELECT digest FROM github_app_deliveries WHERE state IN ('done','failed') AND received_at <= ? ORDER BY received_at,digest LIMIT ?)`, []any{now.Add(-GitHubAppDeliveryRetention).UnixNano(), limit}, nil},
 	} {
-		removed, err := tx.ExecContext(ctx, step.query, step.args...)
+		removed, err := tx.execContext(ctx, step.query, step.args...)
 		if err != nil {
 			return err
 		}

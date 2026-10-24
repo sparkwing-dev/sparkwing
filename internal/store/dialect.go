@@ -94,7 +94,7 @@ func (s *Store) sqlRunner() sqlRunner {
 func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
 	var result sql.Result
 	err := s.inTx(ctx, func(tx *storeTx) (err error) {
-		result, err = tx.ExecContext(ctx, q, args...)
+		result, err = tx.execContext(ctx, q, args...)
 		return err
 	})
 	return result, err
@@ -311,21 +311,21 @@ func (t *storeTx) checkSQL(q string) error {
 }
 
 func (t *storeTx) Exec(q string, args ...any) (sql.Result, error) {
-	return t.ExecContext(context.Background(), q, args...)
+	return t.execContext(context.Background(), q, args...)
 }
 
-func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+func (t *storeTx) execContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
 	if err := t.checkSQL(q); err != nil {
 		return nil, err
 	}
 	return t.tx.ExecContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
-func (t *storeTx) Query(q string, args ...any) (rowCursor, error) {
-	return t.QueryContext(context.Background(), q, args...)
+func (t *storeTx) query(q string, args ...any) (rowCursor, error) {
+	return t.queryContext(context.Background(), q, args...)
 }
 
-func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (rowCursor, error) {
+func (t *storeTx) queryContext(ctx context.Context, q string, args ...any) (rowCursor, error) {
 	if err := t.checkSQL(q); err != nil {
 		return nil, err
 	}
@@ -337,7 +337,7 @@ func (t *storeTx) QueryContext(ctx context.Context, q string, args ...any) (rowC
 	return &storeRows{Rows: rows, tx: t}, nil
 }
 
-func (t *storeTx) QueryRow(q string, args ...any) rowScanner {
+func (t *storeTx) queryRow(q string, args ...any) rowScanner {
 	return t.QueryRowContext(context.Background(), q, args...)
 }
 

@@ -82,7 +82,7 @@ func TestStorageSettingsRefuseValuesOutsideTheirBounds(t *testing.T) {
 	ctx := context.Background()
 	for _, up := range []store.CreditSettingsUpdate{
 		{StorageRateMicroPerGBDay: ptrInt64(-1)},
-		{StorageRateMicroPerGBDay: ptrInt64(store.MaxStorageRateMicroPerGBDay + 1)},
+		{StorageRateMicroPerGBDay: ptrInt64(1000000000000 + 1)},
 		{StorageFreeAllowanceBytes: ptrInt64(-1)},
 	} {
 		if _, err := st.AsOperator().SetCreditSettings(ctx, up); !errors.Is(err, store.ErrInvalidCreditSetting) {

@@ -17,7 +17,7 @@ import (
 // safety: a node whose plan pins no cpu resolves to one core, which the
 // smallest class of the default rate table covers, so that is the price these
 // fixtures are billed at.
-var unpinnedNodeRateMicro = store.DefaultCreditRateTable(store.DefaultCreditRateMicro).RateFor(1)
+var unpinnedNodeRateMicro = int64(9_000)
 
 func seedClaimedNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	t.Helper()
@@ -63,7 +63,7 @@ func TestCreditSettingsBoundTheRateSoTheLedgerCannotOverflow(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	highest := int64(store.MaxCreditRateMicro)
+	highest := int64(1000000000000)
 	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &highest}); err != nil {
 		t.Fatalf("the highest allowed rate was refused: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestCreditSettingsBoundTheRateSoTheLedgerCannotOverflow(t *testing.T) {
 	}
 
 	for name, rate := range map[string]int64{
-		"one past the ceiling": store.MaxCreditRateMicro + 1,
+		"one past the ceiling": 1000000000000 + 1,
 		"the int64 maximum":    math.MaxInt64,
 		"zero":                 0,
 		"negative":             -1,
@@ -86,7 +86,7 @@ func TestCreditSettingsBoundTheRateSoTheLedgerCannotOverflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read rate: %v", err)
 	}
-	if settings.RateMicroPerSecond != store.MaxCreditRateMicro {
+	if settings.RateMicroPerSecond != 1000000000000 {
 		t.Fatalf("rate = %d; a refused write moved it", settings.RateMicroPerSecond)
 	}
 }

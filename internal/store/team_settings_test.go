@@ -69,14 +69,14 @@ func TestChildCeilingTeamSetting(t *testing.T) {
 func TestChildCeilingDatabaseRange(t *testing.T) {
 	s, _ := machineEnrollment(t)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := tx.ExecContext(t.Context(), `UPDATE teams SET max_children_per_root=1000 WHERE name='a'`)
+		_, err := tx.execContext(t.Context(), `UPDATE teams SET max_children_per_root=1000 WHERE name='a'`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	for _, ceiling := range []int64{-1, 0, 1001, 9223372036854775807} {
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
-			_, err := tx.ExecContext(t.Context(), `UPDATE teams SET max_children_per_root=? WHERE name='a'`, ceiling)
+			_, err := tx.execContext(t.Context(), `UPDATE teams SET max_children_per_root=? WHERE name='a'`, ceiling)
 			return err
 		}); err == nil {
 			t.Fatalf("database accepted child ceiling %d", ceiling)

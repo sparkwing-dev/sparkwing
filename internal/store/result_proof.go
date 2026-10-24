@@ -56,7 +56,7 @@ func persistPlanResultProofTx(ctx context.Context, tx *storeTx, team Team, reque
 	if request.Actor.Result.Pattern != "/api/v1/runs/{run}/plan" {
 		return holderRefusal()
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE capabilities SET result_digest=? WHERE team=? AND prefix=? AND result_digest=''`, request.Actor.Result.Digest, team, request.Actor.CapabilityPrefix)
+	_, err := tx.execContext(ctx, `UPDATE capabilities SET result_digest=? WHERE team=? AND prefix=? AND result_digest=''`, request.Actor.Result.Digest, team, request.Actor.CapabilityPrefix)
 	return err
 }
 

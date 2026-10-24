@@ -118,7 +118,7 @@ func TestLocalProcessLifecycleKeepsStandaloneInProcess(t *testing.T) {
 }
 
 func TestLocalProcessLifecycleRefusesUnknownOwnerAndFailedStartup(t *testing.T) {
-	for _, failure := range []error{ErrDaemonUnreachable, ErrDaemonWedged, context.Canceled} {
+	for _, failure := range []error{errDaemonUnreachable, errDaemonWedged, context.Canceled} {
 		t.Run(failure.Error(), func(t *testing.T) {
 			local := &localRuntimeFixture{}
 			owner := &lifecycleOwner{err: failure}

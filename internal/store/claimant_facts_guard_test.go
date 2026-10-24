@@ -45,8 +45,8 @@ func claimantRuleOutsideOwner(name string, node ast.Node) bool {
 	}
 	value, _ := strconv.Unquote(literal.Value)
 	switch value {
-	case TierHere, TierPersonal, TierActions, TierSelfHosted, TierCloud:
-		return name != "identity.go" || value != TierPersonal
+	case tierHere, tierPersonal, tierActions, tierSelfHosted, TierCloud:
+		return name != "identity.go" || value != tierPersonal
 	}
 	return false
 }

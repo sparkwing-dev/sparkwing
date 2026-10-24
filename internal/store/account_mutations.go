@@ -48,11 +48,11 @@ func selectAccountTeamTx(ctx context.Context, tx *storeTx, p capability.Principa
 	if err := authenticateSessionTeamTx(ctx, tx, p.Authority.ID, team, p.Capability.Subject.ID); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE sessions SET team=? WHERE hash=? AND account_id=? AND COALESCE(team,'')=? AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?`, team, p.Authority.ID, p.Capability.Subject.ID, p.Capability.Team, tx.now(ctx).UnixNano())
+	result, err := tx.execContext(ctx, `UPDATE sessions SET team=? WHERE hash=? AND account_id=? AND COALESCE(team,'')=? AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?`, team, p.Authority.ID, p.Capability.Subject.ID, p.Capability.Team, tx.now(ctx).UnixNano())
 	if err := credentialRowChanged(result, err); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET active_team=?,updated_at=? WHERE id=?`, team, tx.now(ctx).UnixNano(), p.Capability.Subject.ID)
+	_, err = tx.execContext(ctx, `UPDATE accounts SET active_team=?,updated_at=? WHERE id=?`, team, tx.now(ctx).UnixNano(), p.Capability.Subject.ID)
 	return err
 }
 

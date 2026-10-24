@@ -21,20 +21,20 @@ The admission wire's stats-reset operation clears its persisted event window.
 `TestStatsReset_ClearsTheEventWindow` exercises that operation over in-memory
 connections and checks that the granted holder survives the reset.
 
-`ListenSocket` yields `APIConn` only after checking the kernel identity against
+`ListenSocket` yields `authenticatedAPIConn` only after checking the kernel identity against
 the controller account. Unix supplies the socket peer UID. Windows reads one
 transport preamble byte, obtains the pipe client's identification token and
 checks its SID. Anonymous tokens, malformed preambles and missing credentials
 fail closed. Successful authentication consumes and acknowledges the preamble
-before application traffic starts. `APIConn.PeerIdentity` returns a snapshot.
+before application traffic starts. `authenticatedAPIConn.PeerIdentity` returns a snapshot.
 
 `LocalController.HTTP` returns the shared API and dashboard handlers. The local
-runtime serves them through `LocalHTTP`, which carries `APIConn` identity in
+runtime serves them through `LocalHTTP`, which carries `authenticatedAPIConn` identity in
 each API request context. The route authorizer reads `LocalPeer(request.Context())`.
 Request headers and remote addresses cannot replace that identity. Dashboard
 handlers retain their browser authentication. Every HTTP serving exit cancels
 its request contexts, including listener failure with hijacked handlers. Shutdown
-uses `APIDrainWindow` for graceful drain, closes remaining HTTP connections and
+uses `apiDrainWindow` for graceful drain, closes remaining HTTP connections and
 joins handlers before the runtime closes its store. Listener failures remain
 observable after handler cleanup and store close. `TestLocalHTTP` and
 `FuzzLocalHTTPIdentity` cover this composition with in-memory connections.

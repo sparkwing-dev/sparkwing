@@ -75,15 +75,15 @@ func (s *EngineController) Exchange(ctx context.Context, authorized capability.A
 	return s.exchange(ctx, authorized)
 }
 
-// Compatibility resolves controller API support from verified engine release metadata.
-func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error) {
+// compatibility resolves controller API support from verified engine release metadata.
+func (s *EngineController) compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error) {
 	if engineVersion == "" {
 		return controllerwire.Compatibility{}, invalidEngineBody("engine_version is required")
 	}
 	if s.VersionPolicy == nil {
 		return controllerwire.Compatibility{}, versionPolicyUnavailable()
 	}
-	return s.VersionPolicy.Compatibility(ctx, engineVersion)
+	return s.VersionPolicy.compatibility(ctx, engineVersion)
 }
 
 // Cross-team claims and credential exchange resolve authority before tenant selection.

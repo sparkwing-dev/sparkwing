@@ -58,8 +58,8 @@ type ApprovalDecision struct {
 
 // Schedule write modes preserve unselected declarations during upserts.
 const (
-	ScheduleReplace ScheduleWriteMode = "replace"
-	ScheduleUpsert  ScheduleWriteMode = "upsert"
+	scheduleReplace ScheduleWriteMode = "replace"
+	scheduleUpsert  ScheduleWriteMode = "upsert"
 )
 
 // ApprovalResult records the persisted decision and its replay status.

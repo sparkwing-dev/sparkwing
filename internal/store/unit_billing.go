@@ -206,7 +206,7 @@ func stopHeldAwardsTx(ctx context.Context, tx *storeTx, team Team) error {
 	if err != nil || cause == "" {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT reservation_id FROM billing_awards WHERE team=? AND metered=1 AND settled_at IS NULL AND stop_reason='' ORDER BY run_id,reservation_id`, team)
+	rows, err := tx.queryContext(ctx, `SELECT reservation_id FROM billing_awards WHERE team=? AND metered=1 AND settled_at IS NULL AND stop_reason='' ORDER BY run_id,reservation_id`, team)
 	if err != nil {
 		return err
 	}
@@ -240,7 +240,7 @@ func stopHeldAwardsTx(ctx context.Context, tx *storeTx, team Team) error {
 }
 
 func stopAwardTx(ctx context.Context, tx *storeTx, team Team, a billingAward, reason string, drain time.Time) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE billing_awards SET stop_reason=?,drain_deadline_at=? WHERE team=? AND reservation_id=? AND stop_reason=''`, reason, drain.UnixNano(), team, a.provenance.ReservationID); err != nil {
+	if _, err := tx.execContext(ctx, `UPDATE billing_awards SET stop_reason=?,drain_deadline_at=? WHERE team=? AND reservation_id=? AND stop_reason=''`, reason, drain.UnixNano(), team, a.provenance.ReservationID); err != nil {
 		return err
 	}
 	previous := tx.cancelingTeam
@@ -278,7 +278,7 @@ func stopAwardTx(ctx context.Context, tx *storeTx, team Team, a billingAward, re
 	return err
 }
 
-func transitionNodeBillingTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, change nodeTransition, edge NodeEdge, now time.Time) error {
+func transitionNodeBillingTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, change nodeTransition, edge nodeEdge, now time.Time) error {
 	if row.ClaimedBy == "" {
 		return nil
 	}
@@ -313,7 +313,7 @@ func endUnstartedBillingTx(ctx context.Context, tx *storeTx, team Team, run stri
 		query += ` AND node_id=? AND unit_kind=?`
 		args = append(args, *node, capability.UnitNode)
 	}
-	rows, err := tx.QueryContext(ctx, query+` ORDER BY reservation_id`, args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY reservation_id`, args...)
 	if err != nil {
 		return err
 	}
@@ -378,7 +378,7 @@ func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor
 	if actor.CapabilityPrefix == "" {
 		return nil, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation,lease_expires_at,capability_prefix FROM nodes WHERE team=? AND run_id=? AND owner_capability_prefix=? AND claimed_by=? AND status<>'done' AND cancel_requested_at IS NULL ORDER BY node_id`, team, actor.Owner.RunID, actor.CapabilityPrefix, actor.Owner.Holder)
+	rows, err := tx.queryContext(ctx, `SELECT node_id,generation,lease_expires_at,capability_prefix FROM nodes WHERE team=? AND run_id=? AND owner_capability_prefix=? AND claimed_by=? AND status<>'done' AND cancel_requested_at IS NULL ORDER BY node_id`, team, actor.Owner.RunID, actor.CapabilityPrefix, actor.Owner.Holder)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +418,7 @@ func renewOwnedNodesBillingTx(ctx context.Context, tx *storeTx, team Team, actor
 			return nil, err
 		}
 		if beat.CancelRequested {
-			if _, err := tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=? AND generation=?`, bound.UnixNano(), team, actor.Owner.RunID, award.node, award.generation); err != nil {
+			if _, err := tx.execContext(ctx, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=? AND generation=?`, bound.UnixNano(), team, actor.Owner.RunID, award.node, award.generation); err != nil {
 				return nil, err
 			}
 			continue

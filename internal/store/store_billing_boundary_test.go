@@ -38,7 +38,7 @@ func TestStoreBillingRetention(t *testing.T) {
 		t.Fatalf("storage charge: %+v: %v", billed, err)
 	}
 	charge := billed.Charges[0]
-	if charge.Team != tenant.Team() || charge.StorageBytes != StorageBytesPerGB || charge.RunID != "" || charge.Seconds != StorageChargeDaySeconds || charge.AmountMicro != rate {
+	if charge.Team != tenant.Team() || charge.StorageBytes != StorageBytesPerGB || charge.RunID != "" || charge.Seconds != storageChargeDaySeconds || charge.AmountMicro != rate {
 		t.Fatalf("storage oracle: %+v", charge)
 	}
 	before, err := billingFinancialSnapshot(t.Context(), s.db)
@@ -119,7 +119,7 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	}
 	for _, team := range []Team{"a", "neighbor_%'--"} {
 		payer := &Tenant{s: s, team: team}
-		if _, _, err := payer.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "fixture"}, *now); err != nil {
+		if _, _, err := payer.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: billingTrustGranted, Actor: "console", Reason: "fixture"}, *now); err != nil {
 			t.Fatal(err)
 		}
 		checkout, err := payer.TestOnlyOpenCreditCheckout(t.Context(), 10000*MicroCreditsPerCent, *now, time.Hour)
@@ -196,7 +196,7 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := op.TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: payment}, *now); err != nil {
+	if _, err := op.TestOnlyRecordPaymentWarning(t.Context(), paymentWarning{WarningID: "warning", PaymentIntent: payment}, *now); err != nil {
 		t.Fatal(err)
 	}
 	s.SetTestClock(t, func() time.Time { return *now })
@@ -225,7 +225,7 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 }
 
 func billingFinancialSnapshot(ctx context.Context, db *sql.DB) (map[string][]string, error) {
-	tables := append(FinancialTables(), "payment_events")
+	tables := append(financialTables(), "payment_events")
 	snapshot := make(map[string][]string, len(tables))
 	for _, table := range tables {
 		rows, err := db.QueryContext(ctx, "SELECT * FROM "+table)

@@ -16,7 +16,7 @@ func cardFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 	now := time.Date(2026, 10, 15, 12, 0, 0, 123, time.UTC)
 	s.clock = func() time.Time { return now }
 	tenant := &Tenant{s: s, team: "a"}
-	if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "customer"}, now); err != nil {
+	if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: billingTrustGranted, Actor: "console", Reason: "customer"}, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_1", PaymentMethod: "pm_1", Fingerprint: "fp_1", Brand: "visa", Last4: "4242"}, "billing", now); err != nil {
@@ -203,9 +203,9 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 			if err := s.db.QueryRow("SELECT status,attempts FROM card_refunds WHERE team='a' AND payment_intent='payment'").Scan(&state, &attempts); err != nil {
 				t.Fatal(err)
 			}
-			wantState, wantAttempts := CardRefundDue, 1
+			wantState, wantAttempts := cardRefundDue, 1
 			if status == "succeeded" {
-				wantState, wantAttempts = CardRefundSucceeded, 0
+				wantState, wantAttempts = cardRefundSucceeded, 0
 			}
 			if state != wantState || attempts != wantAttempts {
 				t.Fatalf("bound refund lost its recorded outcome: status=%s attempts=%d, want %s/%d", state, attempts, wantState, wantAttempts)
@@ -215,7 +215,7 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if wantState == CardRefundSucceeded && len(due) != 0 || wantState == CardRefundDue && (len(due) != 1 || due[0].Key != fmt.Sprintf("payment-%d", wantAttempts)) {
+			if wantState == cardRefundSucceeded && len(due) != 0 || wantState == cardRefundDue && (len(due) != 1 || due[0].Key != fmt.Sprintf("payment-%d", wantAttempts)) {
 				t.Fatalf("refund after recorded %s: %+v", status, due)
 			}
 		})
@@ -257,14 +257,14 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		switch {
-		case event.Status == CardRefundSucceeded:
-			return status == CardRefundSucceeded
+		case event.Status == cardRefundSucceeded:
+			return status == cardRefundSucceeded
 		case seed%4 == 1 || seed%4 == 2:
-			return status == CardRefundDue && id == "" && attempts == 0
+			return status == cardRefundDue && id == "" && attempts == 0
 		case seed%4 == 3:
-			return status == CardRefundDue && id == "bound-refund" && attempts == 1
+			return status == cardRefundDue && id == "bound-refund" && attempts == 1
 		}
-		return status == CardRefundPending && id == "bound-refund" && attempts == 0
+		return status == cardRefundPending && id == "bound-refund" && attempts == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(42))}); err != nil {
 		t.Fatal(err)
@@ -326,7 +326,7 @@ func TestRecordedRefundBindingRollsBackWithItsOutcome(t *testing.T) {
 	if err := s.db.QueryRow("SELECT status,refund_id,attempts FROM card_refunds WHERE team='a' AND payment_intent='payment'").Scan(&status, &id, &attempts); err != nil {
 		t.Fatal(err)
 	}
-	if status != CardRefundDue || id != "" || attempts != 0 {
+	if status != cardRefundDue || id != "" || attempts != 0 {
 		t.Fatalf("partial refund binding survived rollback: %s/%s/%d", status, id, attempts)
 	}
 	rewriteSchemaExec(t, s.db, "DROP TRIGGER refuse_refund_outcome")

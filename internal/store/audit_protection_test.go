@@ -30,7 +30,7 @@ func TestAuditEventsRejectMutationAndSurviveRunRemoval(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT OR REPLACE INTO audit_events(id,ts,team,kind,subject_id,run_id,actor) SELECT id,ts,team,kind,subject_id,run_id,'forged' FROM audit_events`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "a", Actor: auditActor{system: auditController}}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: "fact"})
+		return tx.operator.recordAudit(t.Context(), tx, auditContext{Team: "a", Actor: auditActor{system: auditController}}, auditCheckout{Outcome: businessEventCheckoutOpened, CheckoutID: "fact"})
 	}); err != nil {
 		t.Fatal(err)
 	}

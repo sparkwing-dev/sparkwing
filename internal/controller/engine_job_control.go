@@ -13,8 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// CancelJob records cancellation intent while preserving held jobs and their result rights.
-func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error) {
+// cancelJob records cancellation intent while preserving held jobs and their result rights.
+func (s *EngineController) cancelJob(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error) {
 	tenant, err := s.runTransactions(ctx, a.Target.Team)
 	if err != nil {
 		return controllerwire.Applied{}, err
@@ -27,9 +27,9 @@ func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorize
 	return appliedResponse(applied), engineLookupError(err)
 }
 
-// ReadFailure checks the declared recovery edge and immutable source generation
+// readFailure checks the declared recovery edge and immutable source generation
 // transactionally. An absent recorded failure remains absent.
-func (s *EngineController) ReadFailure(ctx context.Context, a capability.Authorized) (*nodeproto.JobFailure, error) {
+func (s *EngineController) readFailure(ctx context.Context, a capability.Authorized) (*nodeproto.JobFailure, error) {
 	if a.Target.SourceGeneration <= 0 {
 		return nil, invalidEngineBody("generation must be positive")
 	}
@@ -60,7 +60,7 @@ func (s *EngineController) handleCancelJob(w http.ResponseWriter, r *http.Reques
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
-	response, err := s.CancelJob(r.Context(), a, body)
+	response, err := s.cancelJob(r.Context(), a, body)
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func (s *EngineController) handleCancelJob(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *EngineController) handleFailure(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	failure, err := s.ReadFailure(r.Context(), a)
+	failure, err := s.readFailure(r.Context(), a)
 	if err != nil {
 		return err
 	}

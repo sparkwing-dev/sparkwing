@@ -47,7 +47,7 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 }
 
 func (op *Operator) lockMaintenanceCapacityTx(ctx context.Context, tx *storeTx) ([]concurrencyKey, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT team,key FROM concurrency_entries e
+	rows, err := tx.queryContext(ctx, `SELECT team,key FROM concurrency_entries e
 WHERE EXISTS (SELECT 1 FROM concurrency_waiters w WHERE w.team=e.team AND w.key=e.key)
 OR EXISTS (SELECT 1 FROM concurrency_holders h WHERE h.team=e.team AND h.key=e.key)
 ORDER BY team,key`)

@@ -84,7 +84,7 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 				return UploadReservation{}, err
 			}
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO uploads(id,team,run_id,store,size,provenance,expires_at,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,node_id,attempt,generation,uploader_principal,capability_prefix,repo_key,ref_scope) VALUES (?,?,?,'blob',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, u.ID, t.team, u.Identity.RunID, u.Blob.Size, u.Provenance, u.ExpiresAt.UnixNano(), u.Identity.Kind, unitKind, unitID, unitGeneration, unitSource, u.Blob.Digest, node, attempt, generation, u.Identity.Principal, u.Identity.CapabilityRef, a.authority.Repo, u.RefFacts.Scope.CapabilityScope())
+		_, err = tx.execContext(ctx, `INSERT INTO uploads(id,team,run_id,store,size,provenance,expires_at,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,node_id,attempt,generation,uploader_principal,capability_prefix,repo_key,ref_scope) VALUES (?,?,?,'blob',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, u.ID, t.team, u.Identity.RunID, u.Blob.Size, u.Provenance, u.ExpiresAt.UnixNano(), u.Identity.Kind, unitKind, unitID, unitGeneration, unitSource, u.Blob.Digest, node, attempt, generation, u.Identity.Principal, u.Identity.CapabilityRef, a.authority.Repo, u.RefFacts.Scope.CapabilityScope())
 		if err != nil {
 			return UploadReservation{}, err
 		}
@@ -164,7 +164,7 @@ func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCom
 			return blob.Receipt{}, err
 		}
 		if u.CommittedAt == nil {
-			result, err := tx.ExecContext(ctx, "UPDATE uploads SET committed_at=? WHERE team=? AND id=? AND committed_at=0", tx.now(ctx).UnixNano(), t.team, u.ID)
+			result, err := tx.execContext(ctx, "UPDATE uploads SET committed_at=? WHERE team=? AND id=? AND committed_at=0", tx.now(ctx).UnixNano(), t.team, u.ID)
 			if err != nil {
 				return blob.Receipt{}, err
 			}
@@ -299,7 +299,7 @@ func abandonBlobUploadTx(ctx context.Context, tx *storeTx, team Team, id string)
 	if err := advisoryLockTx(ctx, tx, "blob:"+string(team)+":"+string(u.Blob.Digest)); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, "UPDATE uploads SET abandoned_at=? WHERE team=? AND id=? AND abandoned_at IS NULL", tx.now(ctx).UnixNano(), team, id)
+	result, err := tx.execContext(ctx, "UPDATE uploads SET abandoned_at=? WHERE team=? AND id=? AND abandoned_at IS NULL", tx.now(ctx).UnixNano(), team, id)
 	if err != nil {
 		return err
 	}
@@ -308,10 +308,10 @@ func abandonBlobUploadTx(ctx context.Context, tx *storeTx, team Team, id string)
 		return err
 	}
 	if n != 0 {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, u.Blob.Digest, u.Blob.Size, tx.now(ctx).UnixNano()); err != nil {
+		if _, err := tx.execContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, u.Blob.Digest, u.Blob.Size, tx.now(ctx).UnixNano()); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, u.Blob.Digest, tx.now(ctx).UnixNano()); err != nil {
+		if _, err := tx.execContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, u.Blob.Digest, tx.now(ctx).UnixNano()); err != nil {
 			return err
 		}
 	}
@@ -347,7 +347,7 @@ func releaseBlobQuotaReservationTx(ctx context.Context, tx *storeTx, team Team, 
 		return nil
 	}
 	if period == current {
-		result, err := tx.ExecContext(ctx, "UPDATE quota_admission SET reserved=reserved-?,updated_at=? WHERE team=? AND quota=? AND reserved>=?", amount, tx.now(ctx).UnixNano(), team, quota, amount)
+		result, err := tx.execContext(ctx, "UPDATE quota_admission SET reserved=reserved-?,updated_at=? WHERE team=? AND quota=? AND reserved>=?", amount, tx.now(ctx).UnixNano(), team, quota, amount)
 		if err != nil {
 			return err
 		}
@@ -355,6 +355,6 @@ func releaseBlobQuotaReservationTx(ctx context.Context, tx *storeTx, team Team, 
 			return err
 		}
 	}
-	_, err := tx.ExecContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND id=?", team, reservation)
+	_, err := tx.execContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND id=?", team, reservation)
 	return err
 }

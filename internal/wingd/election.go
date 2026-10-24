@@ -114,7 +114,7 @@ func (d *Daemon) bind(path string) (net.Listener, error) {
 type SocketPreparation uint8
 
 const (
-	SocketPreparationUnknown SocketPreparation = iota
+	socketPreparationUnknown SocketPreparation = iota
 	SocketPreparationElectionHeld
 	SocketPreparationReady
 	SocketPreparationCleanupFailed
@@ -147,19 +147,19 @@ func ClaimDaemonStart(home string) (release func(), claimed bool, err error) {
 func PrepareDaemonSocket(home string) (SocketPreparation, error) {
 	l, err := daemonLayout(home)
 	if err != nil {
-		return SocketPreparationUnknown, err
+		return socketPreparationUnknown, err
 	}
 	if err := l.ensureDir(); err != nil {
-		return SocketPreparationUnknown, err
+		return socketPreparationUnknown, err
 	}
 	f, err := fssecure.OpenFile(l.lock, os.O_CREATE|os.O_RDWR)
 	if err != nil {
-		return SocketPreparationUnknown, err
+		return socketPreparationUnknown, err
 	}
 	defer func() { _ = f.Close() }()
 	ok, err := flockTry(f)
 	if err != nil {
-		return SocketPreparationUnknown, err
+		return socketPreparationUnknown, err
 	}
 	if !ok {
 		return SocketPreparationElectionHeld, nil

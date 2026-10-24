@@ -116,7 +116,7 @@ func TestRetentionRemovesOnlyUnreferencedClaimRequirements(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claim_requirements) VALUES ('a',?,?,'pending',?,?,?)`, row.run, row.node, []byte(`{}`), []byte(`{}`), id); err != nil {
+			if _, err := tx.execContext(t.Context(), `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claim_requirements) VALUES ('a',?,?,'pending',?,?,?)`, row.run, row.node, []byte(`{}`), []byte(`{}`), id); err != nil {
 				return err
 			}
 		}
@@ -124,7 +124,7 @@ func TestRetentionRemovesOnlyUnreferencedClaimRequirements(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(t.Context(), `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,finished_at,needs_labels,prefers_labels,claim_requirements) VALUES ('a','retained','done','trigger',1,1,1,?,?,?)`, []byte(`[]`), []byte(`[]`), id); err != nil {
+		if _, err := tx.execContext(t.Context(), `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,finished_at,needs_labels,prefers_labels,claim_requirements) VALUES ('a','retained','done','trigger',1,1,1,?,?,?)`, []byte(`[]`), []byte(`[]`), id); err != nil {
 			return err
 		}
 		_, err = persistClaimRequirementsTx(t.Context(), tx, "b", []string{"foreign"})
@@ -182,7 +182,7 @@ func TestClaimRequirementReferencesProtectLiveWork(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				_, err = tx.ExecContext(t.Context(), `UPDATE `+table+` SET claim_requirements=?`, id)
+				_, err = tx.execContext(t.Context(), `UPDATE `+table+` SET claim_requirements=?`, id)
 				return err
 			}); err != nil {
 				t.Fatal(err)

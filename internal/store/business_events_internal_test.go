@@ -24,14 +24,14 @@ func TestBusinessEventsReadTiesInIDOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, subject := range []string{"a", "b", "c", "d", "e"} {
-		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: at, Team: DefaultTeam, Actor: auditActor{system: auditController}}, auditCheckout{Outcome: BusinessEventCheckoutOpened, CheckoutID: subject}); err != nil {
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: at, Team: DefaultTeam, Actor: auditActor{system: auditController}}, auditCheckout{Outcome: businessEventCheckoutOpened, CheckoutID: subject}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	events, err := st.defaultTenant().BusinessEvents(ctx, BusinessEventCheckoutOpened, 1000, "")
+	events, err := st.defaultTenant().BusinessEvents(ctx, businessEventCheckoutOpened, 1000, "")
 	if err != nil || len(events) != 5 {
 		t.Fatalf("events = %+v, %v", events, err)
 	}

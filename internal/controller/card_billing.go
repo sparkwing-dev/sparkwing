@@ -12,12 +12,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// BillingInterval is how often the payment worker opens due refills, makes their Stripe calls and makes queued refunds.
-const BillingInterval = 30 * time.Second
+// billingInterval is how often the payment worker opens due refills, makes their Stripe calls and makes queued refunds.
+const billingInterval = 30 * time.Second
 
 // Machine-readable codes on a refused billing request.
 const (
-	NoCardCode = "no_card"
+	noCardCode = "no_card"
 )
 
 const refillCreated = "created"

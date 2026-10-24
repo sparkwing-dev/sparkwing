@@ -24,7 +24,7 @@ func capacityGroupsTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID
 	if released {
 		// Released work must finish even if plan continuity has lapsed.
 		for i := range groups {
-			groups[i].OnLimit, groups[i].QueueTimeoutMS = OnLimitQueue, nil
+			groups[i].OnLimit, groups[i].QueueTimeoutMS = onLimitQueue, nil
 		}
 	}
 	return groups, nil

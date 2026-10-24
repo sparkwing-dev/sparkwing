@@ -23,7 +23,7 @@ func TestPlanSecretPreflightNamesUnreadableScopes(t *testing.T) {
 	}
 	request.Seal.Resolved.SecretNames = []string{"OWN", "SHARED", "ABSENT", "TEAM_ONLY", "ELSEWHERE"}
 	_, err := tenant.AcceptPlan(t.Context(), request)
-	var refused *SecretPreflightError
+	var refused *secretPreflightError
 	if !errors.As(err, &refused) {
 		t.Fatalf("preflight: %v", err)
 	}
@@ -32,12 +32,12 @@ func TestPlanSecretPreflightNamesUnreadableScopes(t *testing.T) {
 		t.Fatalf("preflight lacks canonical plan_invalid: %v", err)
 	}
 	for _, want := range []string{"ABSENT is not set", "TEAM_ONLY is set team-wide but not shared", `ELSEWHERE is set only for pipeline "release"`, "sparkwing secrets set", "--pipeline p", "--shared"} {
-		if !strings.Contains(refused.Detail(), want) {
-			t.Errorf("preflight detail lacks %q: %s", want, refused.Detail())
+		if !strings.Contains(refused.detail(), want) {
+			t.Errorf("preflight detail lacks %q: %s", want, refused.detail())
 		}
 	}
 	for _, readable := range []string{"- OWN", "- SHARED", "- MAYBE"} {
-		if strings.Contains(refused.Detail(), readable) {
+		if strings.Contains(refused.detail(), readable) {
 			t.Errorf("preflight names readable or optional secret %s", readable)
 		}
 	}
@@ -52,7 +52,7 @@ func TestPlanSecretPreflightNamesUnreadableScopes(t *testing.T) {
 		t.Fatalf("preflight used another clock: %s, want %s", events[0].At, *now)
 	}
 	var diagnostic struct{ Message string }
-	if err := json.Unmarshal(events[0].Payload, &diagnostic); err != nil || diagnostic.Message != refused.Detail() {
+	if err := json.Unmarshal(events[0].Payload, &diagnostic); err != nil || diagnostic.Message != refused.detail() {
 		t.Fatalf("preflight detail: %q, %v", diagnostic.Message, err)
 	}
 	run, err := tenant.ReadRun(t.Context(), request.RunID)

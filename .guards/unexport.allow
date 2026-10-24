@@ -8,11 +8,17 @@
 internal/bincache	1
 # UsageError.Error: implements error; callers use the error interface.
 internal/clisurface	1
-internal/controller	67
-internal/controller/client	2
+# RequestIDHeader: audit.go belongs to the concurrent audit/logging lane.
+# IdleClaimPollJitterFactor: poll_advice.go belongs to the concurrent audit/logging lane.
+# MaxHonoredIdleClaimPoll: poll_advice.go belongs to the concurrent audit/logging lane.
+# Server.ProcessTeamDeletions: external tests exercise the deletion worker lifecycle.
+# Server.Registrations: external tests inspect the serving route inventory.
+# Server.WithPeerIdentity: production transport wiring and external SDK fixtures share peer identity setup.
+# flowRefusal.Error: implements error; callers use the error interface.
+# intakeRunToken.Error: implements error; callers use the error interface.
+internal/controller	8
 # ConcurrencyError.Error: implements error; callers use the error interface.
 internal/egress	1
-internal/engine	4
 # apiError.Error: implements error; callers use the error interface.
 internal/githubapp	1
 # Error.Error: implements error; callers use the error interface.
@@ -41,10 +47,46 @@ internal/procenv	1
 internal/runners/launcher	2
 # Error.Error: implements error; callers use the error interface.
 internal/settings	1
-internal/store	239
-internal/store/internal/storetest	1
-internal/store/teststore	4
+# CreditRateTable.ClassForLabels: external rate-table tests exercise Cloud size pricing.
+# CreditRateTable.Validate: external rate-table tests exercise stored-price validation.
+# DefaultSignUpLimits: external signup tests inspect the default policy.
+# DownloadCapError.Error: implements error; callers use the error interface.
+# ErrComputeLimit: external guard tests match this sentinel with errors.Is.
+# ErrCreditGrantConflict: external payment tests distinguish conflicting grants.
+# ErrDeletionLeaseLost: external deletion tests verify stale-owner fencing.
+# ErrIllegalTransition.Error: implements error; callers use the error interface.
+# ErrInsufficientCredits: external accounting tests match this sentinel with errors.Is.
+# ErrTeamBeingDeleted: external deletion tests verify write refusal during deletion.
+# ErrUnpricedCPUClass: external pricing tests distinguish unpriced sizes.
+# ErrUnverifiedEmail: external signup tests match this sentinel with errors.Is.
+# FormatCredits: external credits tests exercise credit rendering.
+# LastOwnerError.Error: implements error; callers use the error interface.
+# Operator.CreditRateTable: external pricing tests read persisted deployment prices.
+# Operator.WarmCPUClassCores: external pricing tests inspect the persisted warm-runner class.
+# ParseRunFilter: external filter tests exercise query parsing.
+# RevokeNode: external state-transition tests construct revocation requests.
+# Role.AtLeast: external identity tests exercise role ordering.
+# StorageQuotaError: external quota tests inspect structured refusals with errors.As.
+# StorageQuotaError.Error: implements error; callers use the error interface.
+# Store.ApproveOldestWaitlisted: external signup tests exercise FIFO approval and reservations.
+# Store.SetSignUpMode: external signup tests configure the signup gate.
+# Store.WaitlistedAccounts: external signup tests inspect durable waitlist state.
+# Tenant.AppendEventCharged: external accounting tests exercise event authority and quota transactions.
+# Tenant.GitHubAppExtraRepos: external GitHub tests inspect persisted repository permissions.
+# Tenant.ReadBlob: external blob tests exercise metadata authority checks.
+# Tenant.RecordContention: external profile tests exercise tenant-scoped contention updates.
+# Tenant.RecordGitHubCheckRun: external GitHub tests exercise check-run bindings and receipts.
+# Tenant.RenewOwner: external owner tests exercise lease and authority fencing.
+# Tenant.ReserveQuota: external quota tests exercise reservation transactions.
+# Tenant.ResetAllProfiles: external profile tests exercise tenant-wide reset isolation.
+# Tenant.ResetPipelineProfile: external profile tests exercise pipeline-scoped reset isolation.
+# Tenant.SettleQuota: external quota tests exercise settlement transactions.
+# secretPreflightError.Error: implements error; callers use the error interface.
+internal/store	35
+# SeedUpload: external fixture tests share this upload setup implementation.
+internal/store/teststore	1
 # FieldError.Error: implements error; callers use the error interface.
 internal/userconfig	1
-internal/wingd	21
-internal/wingd/client	15
+# AdmissionError.Error: implements error; callers use the error interface.
+# cancelledError.Error: implements error; callers use the error interface.
+internal/wingd/client	2

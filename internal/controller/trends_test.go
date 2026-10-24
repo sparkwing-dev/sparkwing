@@ -59,7 +59,7 @@ func TestTrends_BucketsRuns(t *testing.T) {
 
 	resp := readReport(t, f, "/api/v1/trends?hours=24")
 	var body struct {
-		Points []controller.TrendPoint `json:"points"`
+		Points []trendPointResponse `json:"points"`
 	}
 	if err := json.Unmarshal(resp, &body); err != nil {
 		t.Fatalf("decode: %v; body=%s", err, resp)
@@ -100,7 +100,7 @@ func TestTrends_AvgWaitMs(t *testing.T) {
 
 	resp := readReport(t, f, "/api/v1/trends?hours=24")
 	var body struct {
-		Points []controller.TrendPoint `json:"points"`
+		Points []trendPointResponse `json:"points"`
 	}
 	if err := json.Unmarshal(resp, &body); err != nil {
 		t.Fatalf("decode: %v; body=%s", err, resp)
@@ -142,7 +142,7 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 
 	resp := readReport(t, f, "/api/v1/trends?hours=24")
 	var body struct {
-		Points []controller.TrendPoint `json:"points"`
+		Points []trendPointResponse `json:"points"`
 	}
 	if err := json.Unmarshal(resp, &body); err != nil {
 		t.Fatalf("decode trends: %v; body=%s", err, resp)
@@ -176,8 +176,8 @@ func TestTrends_PipelineFilter(t *testing.T) {
 
 	resp := readReport(t, f, "/api/v1/trends?hours=24&pipeline=alpha")
 	var body struct {
-		Points   []controller.TrendPoint `json:"points"`
-		Pipeline string                  `json:"pipeline"`
+		Points   []trendPointResponse `json:"points"`
+		Pipeline string               `json:"pipeline"`
 	}
 	if err := json.Unmarshal(resp, &body); err != nil {
 		t.Fatalf("decode trends: %v; body=%s", err, resp)
@@ -251,4 +251,15 @@ SELECT team, id, pipeline, status, created_at, started_at, 'not-an-integer' AS f
 			}
 		})
 	}
+}
+
+type trendPointResponse struct {
+	Bucket    string `json:"bucket"` // RFC3339 at the bucket boundary
+	Total     int    `json:"total"`
+	Passed    int    `json:"passed"`
+	Failed    int    `json:"failed"`
+	Cached    int    `json:"cached"`
+	AvgDurMs  int64  `json:"avg_dur_ms"`
+	P95DurMs  int64  `json:"p95_dur_ms"`
+	AvgWaitMs int64  `json:"avg_wait_ms"`
 }

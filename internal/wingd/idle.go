@@ -66,8 +66,8 @@ func hasLocalActivity(activity LocalActivity) bool {
 	return activity.Runs != 0 || activity.QueuedTriggers != 0 || activity.HeldLeases != 0 || activity.DashboardConnections != 0
 }
 
-// SetLocalActivity supplies the controller's live activity independently of API probes.
-func (d *Daemon) SetLocalActivity(activity LocalActivity) error {
+// setLocalActivity supplies the controller's live activity independently of API probes.
+func (d *Daemon) setLocalActivity(activity LocalActivity) error {
 	if activity.Runs < 0 || activity.QueuedTriggers < 0 || activity.HeldLeases < 0 || activity.DashboardConnections < 0 {
 		return fmt.Errorf("wingd: local activity counts must be nonnegative")
 	}
@@ -81,9 +81,9 @@ func (d *Daemon) SetLocalActivity(activity LocalActivity) error {
 	return nil
 }
 
-// SetStay pins the controller until it is drained or stay mode is removed.
+// setStay pins the controller until it is drained or stay mode is removed.
 // A controller that has committed to shutdown refuses the change.
-func (d *Daemon) SetStay(stay bool) error {
+func (d *Daemon) setStay(stay bool) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.shuttingDown || d.draining {

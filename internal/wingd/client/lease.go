@@ -77,7 +77,7 @@ func (cl *Client) readGrant(onQueued func(wingwire.Queued)) (lease *Lease, termi
 		case *wingwire.Evicted:
 			return nil, cl.admissionError(m), nil
 		case *wingwire.Cancel:
-			return nil, &CancelledError{Reason: m.Reason}, nil
+			return nil, &cancelledError{Reason: m.Reason}, nil
 		case *wingwire.Unsupported:
 			return nil, daemonLacksOperation(m.Type, cl.ack.BinaryVersion), nil
 		default:

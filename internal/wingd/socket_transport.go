@@ -28,7 +28,7 @@ func DialSocket(ctx context.Context, path string, timeout time.Duration) (net.Co
 	return dialSocket(ctx, path)
 }
 
-// ListenSocket binds the private transport and yields authenticated APIConn connections.
+// ListenSocket binds the private transport and yields connections with verified peer identities.
 func ListenSocket(path string) (net.Listener, error) {
 	listener, err := bindSocket(path)
 	if err != nil {

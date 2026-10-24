@@ -28,7 +28,7 @@ func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if metered {
 				var refused *InsufficientCreditsError
-				if !errors.As(err, &refused) || refused.Hold != HoldCauseDispute {
+				if !errors.As(err, &refused) || refused.Hold != holdCauseDispute {
 					t.Fatalf("frozen metered award=%+v: %v", claim, err)
 				}
 				rewriteSchemaCount(t, s.db, "billing_awards", 0)
@@ -72,10 +72,10 @@ func TestADisputeIsBoundToOnePayment(t *testing.T) {
 		if err != nil || !created {
 			t.Fatalf("hold=%t: %v", created, err)
 		}
-		if _, err := stranger.TestOnlyHoldForDispute(t.Context(), dispute, foreignPayment, "forged", now); !errors.Is(err, ErrDisputeConflict) {
+		if _, err := stranger.TestOnlyHoldForDispute(t.Context(), dispute, foreignPayment, "forged", now); !errors.Is(err, errDisputeConflict) {
 			return false
 		}
-		if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), foreignPayment, dispute, "console", 0); !errors.Is(err, ErrDisputeConflict) {
+		if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), foreignPayment, dispute, "console", 0); !errors.Is(err, errDisputeConflict) {
 			return false
 		}
 		s.SetTestClock(t, func() time.Time { return now })
@@ -97,7 +97,7 @@ func TestADisputeIsBoundToOnePayment(t *testing.T) {
 		if replay, err := owner.TestOnlyHoldForDispute(t.Context(), dispute, payment, "replayed", now); err != nil || replay {
 			return false
 		}
-		if _, err := stranger.TestOnlyHoldForDispute(t.Context(), dispute, foreignPayment, "replayed", now); !errors.Is(err, ErrDisputeConflict) {
+		if _, err := stranger.TestOnlyHoldForDispute(t.Context(), dispute, foreignPayment, "replayed", now); !errors.Is(err, errDisputeConflict) {
 			return false
 		}
 		for _, tenant := range []*Tenant{owner, stranger} {

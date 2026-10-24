@@ -71,7 +71,7 @@ func checkCapacityMutationTx(ctx context.Context, tx *storeTx, team Team, key, i
 	}
 	b := fence.binding
 	for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
-		rows, err := tx.QueryContext(ctx, `SELECT run_id,node_id,generation FROM `+table+` WHERE team=? AND key=? AND ((run_id=? AND node_id=?) OR holder_id=?)`, team, key, b.RunID, b.NodeID, id)
+		rows, err := tx.queryContext(ctx, `SELECT run_id,node_id,generation FROM `+table+` WHERE team=? AND key=? AND ((run_id=? AND node_id=?) OR holder_id=?)`, team, key, b.RunID, b.NodeID, id)
 		if err != nil {
 			return err
 		}
@@ -158,7 +158,7 @@ func cancelSupersededCapacityTx(ctx context.Context, tx *storeTx, team Team, key
 	if run.FinishedAt != nil || run.CancelRequestedAt != nil {
 		return nil
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE runs SET cancel_requested_at=?,cancel_reason='concurrency superseded',state_seq=state_seq+1 WHERE team=? AND id=? AND state_seq=? AND finished_at IS NULL`, now.UnixNano(), team, b.RunID, run.StateSeq)
+	result, err := tx.execContext(ctx, `UPDATE runs SET cancel_requested_at=?,cancel_reason='concurrency superseded',state_seq=state_seq+1 WHERE team=? AND id=? AND state_seq=? AND finished_at IS NULL`, now.UnixNano(), team, b.RunID, run.StateSeq)
 	if err != nil {
 		return err
 	}
@@ -268,7 +268,7 @@ func lockCapacityWorkTx(ctx context.Context, tx *storeTx, team Team, keys []stri
 		}
 	}
 	args = append(args, ref.RunID, ref.NodeID)
-	rows, err := tx.QueryContext(ctx, `SELECT run_id,node_id FROM concurrency_holders WHERE team=? AND key IN (`+predicate+`)
+	rows, err := tx.queryContext(ctx, `SELECT run_id,node_id FROM concurrency_holders WHERE team=? AND key IN (`+predicate+`)
 UNION SELECT run_id,node_id FROM concurrency_waiters WHERE team=? AND key IN (`+predicate+`)
 UNION SELECT ?,? ORDER BY run_id,node_id`, args...)
 	if err != nil {

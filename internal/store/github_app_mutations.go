@@ -45,7 +45,7 @@ func (t *Tenant) PutAuthorizedGitHubTrigger(ctx context.Context, a capability.Au
 // DeleteAuthorizedGitHubTrigger removes only this tenant's exact subscription.
 func (t *Tenant) DeleteAuthorizedGitHubTrigger(ctx context.Context, a capability.Authorized, repository int64, pipeline string) error {
 	return t.teamMutationTx(ctx, a, "DeleteAuthorizedGitHubTrigger", string(t.team), func(tx *storeTx, _ capability.Principal) error {
-		result, err := tx.ExecContext(ctx, `DELETE FROM github_app_triggers WHERE team=? AND repository_id=? AND pipeline=?`, t.team, repository, pipeline)
+		result, err := tx.execContext(ctx, `DELETE FROM github_app_triggers WHERE team=? AND repository_id=? AND pipeline=?`, t.team, repository, pipeline)
 		return credentialRowChanged(result, err)
 	})
 }
@@ -70,7 +70,7 @@ func (t *Tenant) DeleteAuthorizedGitHubAutomation(ctx context.Context, a capabil
 		if err := bumpGitHubPublicationTx(ctx, tx, t.team, repository); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND repository_id=?`, t.team, repository)
+		_, err := tx.execContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND repository_id=?`, t.team, repository)
 		return err
 	})
 }

@@ -34,10 +34,10 @@ func assertFirstSuccessfulRunSurvivesAuditRetention(t *testing.T, s *store.Store
 	if _, err := tenant.FinishRunAndUnit(ctx, first); err != nil {
 		t.Fatal(err)
 	}
-	if events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded, 10, ""); err != nil || len(events) != 1 {
+	if events, err := tenant.BusinessEvents(ctx, "run.first_succeeded", 10, ""); err != nil || len(events) != 1 {
 		t.Fatalf("first-success events before retention: %+v, %v", events, err)
 	}
-	ageAuditEvents(t, s, store.BusinessEventFirstRunSucceeded, time.Now().Add(-401*24*time.Hour))
+	ageAuditEvents(t, s, "run.first_succeeded", time.Now().Add(-401*24*time.Hour))
 	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "maintenance", "first-success-retention", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func assertFirstSuccessfulRunSurvivesAuditRetention(t *testing.T, s *store.Store
 	if err != nil || second.State != runstate.RunSuccess || second.FinishedAt == nil {
 		t.Fatalf("later run did not succeed: %+v, %v", second, err)
 	}
-	if events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded, 10, ""); err != nil || len(events) != 0 {
+	if events, err := tenant.BusinessEvents(ctx, "run.first_succeeded", 10, ""); err != nil || len(events) != 0 {
 		t.Fatalf("later success became first after audit expiry: %+v, %v", events, err)
 	}
 }

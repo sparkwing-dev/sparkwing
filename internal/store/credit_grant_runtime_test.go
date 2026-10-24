@@ -73,7 +73,7 @@ func TestFreeGrantCannotCreatePaymentMovementsProperty(t *testing.T) {
 	tenant := &Tenant{s: s, team: "a"}
 	before := paymentMutationSnapshot(t, s)
 	property := func(seed uint32, kind uint8) bool {
-		request := CreditGrantRequest{Kind: CreditGrantReversal, AmountMicro: -int64(seed%999999 + 1), Reference: fmt.Sprintf("refund-%x", seed), Reverses: "payment:test:checkout", CreatedBy: "operator"}
+		request := CreditGrantRequest{Kind: creditGrantReversal, AmountMicro: -int64(seed%999999 + 1), Reference: fmt.Sprintf("refund-%x", seed), Reverses: "payment:test:checkout", CreatedBy: "operator"}
 		switch kind % 3 {
 		case 1:
 			request.Kind, request.AmountMicro = CreditGrantPaid, -request.AmountMicro

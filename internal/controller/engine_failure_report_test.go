@@ -62,7 +62,7 @@ func TestEngineReportedFailureReachesRecovery(t *testing.T) {
 		t.Fatalf("replay: %+v, %v", replayed, err)
 	}
 	owner.Target.SourceGeneration = claim.Claim.Binding.Generation
-	failure, err := server.ReadFailure(t.Context(), owner)
+	failure, err := server.readFailure(t.Context(), owner)
 	want := &nodeproto.JobFailure{Job: "job", Stage: "step:verify", Error: &apierr.Error{Code: "future_failure", Message: "masked failure", Hint: "retry verification", Details: map[string]any{"exit_code": float64(7)}}}
 	if err != nil || !reflect.DeepEqual(failure, want) {
 		t.Fatalf("recovery failure: %+v, %v", failure, err)

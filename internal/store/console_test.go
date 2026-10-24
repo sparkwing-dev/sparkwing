@@ -43,7 +43,7 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 			return err
 		},
 		func(a capability.Authorized) error {
-			_, err := c.ConsoleSetBillingTrust(t.Context(), a, BillingTrustChange{Trust: BillingTrustGranted, Reason: "test"})
+			_, err := c.ConsoleSetBillingTrust(t.Context(), a, BillingTrustChange{Trust: billingTrustGranted, Reason: "test"})
 			return err
 		},
 		func(a capability.Authorized) error { _, err := c.ConsoleFreeze(t.Context(), a, "test"); return err },
@@ -147,7 +147,7 @@ func TestConsoleNativeFinanceAndStableWaitlistBatch(t *testing.T) {
 	if err != nil || replay.Created || replay.Grant.ID != grant.Grant.ID {
 		t.Fatalf("grant replay: %+v %v", replay, err)
 	}
-	if _, err := c.ConsoleSetBillingTrust(ctx, a, BillingTrustChange{Trust: BillingTrustGranted, Reason: "review", Actor: "spoof"}); err != nil {
+	if _, err := c.ConsoleSetBillingTrust(ctx, a, BillingTrustChange{Trust: billingTrustGranted, Reason: "review", Actor: "spoof"}); err != nil {
 		t.Fatal(err)
 	}
 	freeze, err := c.ConsoleFreeze(ctx, a, "review")

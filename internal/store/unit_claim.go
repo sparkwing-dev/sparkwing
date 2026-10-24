@@ -180,8 +180,8 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err = checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
-	policy, _ := ClaimPlacementFromContext(ctx)
-	placement := PlacementNone
+	policy, _ := claimPlacementFromContext(ctx)
+	placement := placementNone
 	if unit.Kind == capability.UnitNode {
 		var body []byte
 		if err := tx.QueryRowContext(ctx, `SELECT execution_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&body); err != nil {
@@ -193,9 +193,9 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		}
 		preferences := policy.preferencesFor(execution.Prefers.Value)
 		if len(preferences) > 0 && len(preferences[0].Prefers) > 0 {
-			placement = PlacementFallback
+			placement = placementFallback
 			if placementRank(profile, requirements, preferences) == 0 {
-				placement = PlacementPreferred
+				placement = placementPreferred
 			}
 		}
 	}
@@ -253,7 +253,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: unit.RunID, NodeID: unit.NodeID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
 		_, err = transitionNodeTx(ctx, tx, team, nodeTransition{Ref: runspec.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, To: runstate.NodeClaimed, Cause: runstate.CauseAward, Actor: actor, Extra: transitionExtra{Claim: &claim.Award}})
 		if err == nil {
-			_, err = tx.ExecContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement, team, unit.RunID, unit.NodeID)
+			_, err = tx.execContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement, team, unit.RunID, unit.NodeID)
 		}
 	} else {
 		err = writeOwnerClaimTx(ctx, tx, claim)
@@ -290,7 +290,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		if err != nil {
 			return UnitClaim{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.now(ctx).UnixNano(), team, observation.CapabilityPrefix); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.now(ctx).UnixNano(), team, observation.CapabilityPrefix); err != nil {
 			return UnitClaim{}, err
 		}
 	}

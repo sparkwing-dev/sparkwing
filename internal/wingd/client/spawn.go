@@ -29,9 +29,9 @@ const hostStartGrace = 2 * time.Second
 
 const hostStartPoll = 20 * time.Millisecond
 
-var ErrNoDaemonHost = errors.New("wingd/client: no admission daemon is running and no sparkwing binary is available to host one")
+var errNoDaemonHost = errors.New("wingd/client: no admission daemon is running and no sparkwing binary is available to host one")
 
-var ErrDaemonHostFailed = errors.New("wingd/client: the daemon host binary exited without serving")
+var errDaemonHostFailed = errors.New("wingd/client: the daemon host binary exited without serving")
 
 func spawnDetached(bin, home, version string) error {
 	if _, err := wingd.EnsureSocketPath(home); err != nil {
@@ -102,9 +102,9 @@ func hostExitedEarly(bin, home string, exit *exec.ExitError) error {
 	if tail := daemonLogTail(home); tail != "" {
 		path, _ := wingd.LogPath(home)
 		return fmt.Errorf("%w: %s %s (exit %d); %s:\n%s",
-			ErrDaemonHostFailed, bin, exit.String(), exit.ExitCode(), path, tail)
+			errDaemonHostFailed, bin, exit.String(), exit.ExitCode(), path, tail)
 	}
-	return fmt.Errorf("%w: %s %s (exit %d)", ErrDaemonHostFailed, bin, exit.String(), exit.ExitCode())
+	return fmt.Errorf("%w: %s %s (exit %d)", errDaemonHostFailed, bin, exit.String(), exit.ExitCode())
 }
 
 func discardUnusedDaemonLog(logF *os.File, home string, existed bool) {

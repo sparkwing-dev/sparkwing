@@ -1,32 +1,8 @@
 package store
 
-import "context"
-
-// AppendEventCharged commits an event and its tenant usage under the controller's trusted replica identity.
-func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID, kind string, payload []byte) (int64, error) {
-	if replica == "" {
-		return 0, ErrInvalidInput
-	}
-	if err := ValidateEventKind(kind); err != nil {
-		return 0, err
-	}
-	return inTxResult(ctx, t.s, func(tx *storeTx) (int64, error) {
-		if err := lockStateRunTx(ctx, tx, t.team, runID); err != nil {
-			return 0, err
-		}
-		size := eventBytes(kind, payload)
-		if err := refuseEventOverLimitsTx(ctx, tx, t.team, runID, size); err != nil {
-			return 0, err
-		}
-		if err := admitEventStorageTx(ctx, tx, t.team, size); err != nil {
-			return 0, err
-		}
-		if err := chargeEventStorageTx(ctx, tx, t.team, replica, runID, size); err != nil {
-			return 0, err
-		}
-		return appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now(ctx))
-	})
-}
+import (
+	"context"
+)
 
 func admitEventStorageTx(ctx context.Context, tx *storeTx, team Team, size int64) error {
 	if tx.store.creditMeteringOff.Load() {
@@ -65,4 +41,30 @@ func chargeEventStorageTx(ctx context.Context, tx *storeTx, team Team, replica, 
 		}
 	}
 	return recordStorageUsageTx(ctx, tx, team, run, replica, period, size, 0)
+}
+
+// AppendEventCharged commits an event and its tenant usage under the controller's trusted replica identity.
+func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID, kind string, payload []byte) (int64, error) {
+	if replica == "" {
+		return 0, ErrInvalidInput
+	}
+	if err := validateEventKind(kind); err != nil {
+		return 0, err
+	}
+	return inTxResult(ctx, t.s, func(tx *storeTx) (int64, error) {
+		if err := lockStateRunTx(ctx, tx, t.team, runID); err != nil {
+			return 0, err
+		}
+		size := eventBytes(kind, payload)
+		if err := refuseEventOverLimitsTx(ctx, tx, t.team, runID, size); err != nil {
+			return 0, err
+		}
+		if err := admitEventStorageTx(ctx, tx, t.team, size); err != nil {
+			return 0, err
+		}
+		if err := chargeEventStorageTx(ctx, tx, t.team, replica, runID, size); err != nil {
+			return 0, err
+		}
+		return appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now(ctx))
+	})
 }

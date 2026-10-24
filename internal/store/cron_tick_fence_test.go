@@ -33,7 +33,7 @@ func TestCronTickUsesStoreClockAndFencesStaleCompletionProperty(t *testing.T) {
 		if string(stamp) != strconv.FormatInt(now.UnixNano(), 10) {
 			t.Fatalf("stamp = %s, want store clock %d", stamp, now.UnixNano())
 		}
-		*now = now.Add(CronTickWindow - time.Nanosecond)
+		*now = now.Add(cronTickWindow - time.Nanosecond)
 		suppressed, err := op.RunCronTickLeased(t.Context(), "third", time.Minute, func(context.Context) error { t.Fatal("early tick ran"); return nil })
 		if err != nil || suppressed {
 			t.Fatalf("held window = %v, %v", suppressed, err)

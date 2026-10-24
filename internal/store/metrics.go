@@ -15,17 +15,13 @@ import (
 // sampler's two-second tick, about five and a half hours of a node.
 const MaxNodeMetricSamples = limits.MaxMetricSamples
 
-// MaxNodeMetricMarkers is how many marker samples a node may hold past
+// maxNodeMetricMarkers is how many marker samples a node may hold past
 // [MaxNodeMetricSamples], so a measurement that filled the cap can still be
 // labeled partial or excluded.
-const MaxNodeMetricMarkers = 8
+const maxNodeMetricMarkers = 8
 
 // ErrNodeMetricLimit refuses a sample past [MaxNodeMetricSamples].
 var ErrNodeMetricLimit = fmt.Errorf("store: a node holds at most %d metric samples", limits.MaxMetricSamples)
-
-// EventKindMetricsStopped records that a node's sampler stopped at
-// [MaxNodeMetricSamples], so its resource charts end there.
-const EventKindMetricsStopped = "metrics_stopped"
 
 // MetricKind identifies the interval over which a resource reading was collected.
 type MetricKind string
@@ -72,7 +68,7 @@ func (sample MetricSample) ValidateResourceValues() error {
 
 func insertMetricTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, sample MetricSample) error {
 	runID, nodeID := ref.RunID, ref.NodeID
-	result, err := tx.ExecContext(ctx, `
+	result, err := tx.execContext(ctx, `
 INSERT INTO node_metrics (team, run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos, kind)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (team, run_id, node_id, ts) DO NOTHING`,
@@ -103,7 +99,7 @@ SELECT cpu_millicores, memory_bytes, cpu_time_nanos, kind
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM node_metrics WHERE team=? AND run_id=? AND node_id=?`, team, runID, nodeID).Scan(&held); err != nil {
 			return err
 		}
-		if held > MaxNodeMetricSamples && (!sample.Marker() || held > MaxNodeMetricSamples+MaxNodeMetricMarkers) {
+		if held > MaxNodeMetricSamples && (!sample.Marker() || held > MaxNodeMetricSamples+maxNodeMetricMarkers) {
 			return ErrNodeMetricLimit
 		}
 	}

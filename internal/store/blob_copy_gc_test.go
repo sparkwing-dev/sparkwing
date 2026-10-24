@@ -38,10 +38,10 @@ func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {
 		}
 		retireSource := func() {
 			retireErr = s.inTx(t.Context(), func(tx *storeTx) error {
-				if _, err := tx.ExecContext(t.Context(), "DELETE FROM blob_records WHERE team='a' AND kind='memo'"); err != nil {
+				if _, err := tx.execContext(t.Context(), "DELETE FROM blob_records WHERE team='a' AND kind='memo'"); err != nil {
 					return err
 				}
-				_, err := tx.ExecContext(t.Context(), "DELETE FROM blob_receipts WHERE team='a'")
+				_, err := tx.execContext(t.Context(), "DELETE FROM blob_receipts WHERE team='a'")
 				return err
 			})
 			if retireErr == nil {

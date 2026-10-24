@@ -16,9 +16,9 @@ func TestLiveLogs_PerNodeCapDropsTheOldestLines(t *testing.T) {
 	l.perNodeBytes = 40
 
 	for i := range 50 {
-		l.Append("run-1", "build", liveLine(i))
+		l.append("run-1", "build", liveLine(i))
 	}
-	chunk, ok := l.Read("run-1", "build", 0)
+	chunk, ok := l.read("run-1", "build", 0)
 	if !ok {
 		t.Fatal("no ring for a node that wrote")
 	}
@@ -46,17 +46,17 @@ func TestLiveLogs_TotalCapBoundsEveryRingTogether(t *testing.T) {
 
 	for node := range 8 {
 		for i := range 100 {
-			l.Append("run-1", fmt.Sprintf("node-%d", node), liveLine(i))
+			l.append("run-1", fmt.Sprintf("node-%d", node), liveLine(i))
 		}
 	}
-	nodes, buffered := l.Stats()
+	nodes, buffered := l.stats()
 	if nodes != 8 {
 		t.Fatalf("rings = %d, want 8", nodes)
 	}
 	if buffered > l.totalBytes {
 		t.Fatalf("buffered %d bytes across rings, want at most %d", buffered, l.totalBytes)
 	}
-	chunk, ok := l.Read("run-1", "node-7", 0)
+	chunk, ok := l.read("run-1", "node-7", 0)
 	if !ok || !bytes.Contains(chunk.Data, []byte("line 0099")) {
 		t.Fatalf("the newest writer lost its last line: %q", chunk.Data)
 	}
@@ -67,18 +67,18 @@ func TestLiveLogs_FinishedRingIsReleasedAfterTheDrainGrace(t *testing.T) {
 	l := newLiveLogs()
 	l.now = func() time.Time { return now }
 
-	l.Append("run-1", "build", liveLine(1))
-	l.Finish("run-1", "build")
-	if _, ok := l.Read("run-1", "build", 0); !ok {
+	l.append("run-1", "build", liveLine(1))
+	l.finish("run-1", "build")
+	if _, ok := l.read("run-1", "build", 0); !ok {
 		t.Fatal("ring released before the drain grace, so a late reader sees nothing")
 	}
 
 	now = now.Add(liveLogDrainGrace + time.Second)
-	l.Append("run-1", "other", liveLine(1))
-	if _, ok := l.Read("run-1", "build", 0); ok {
+	l.append("run-1", "other", liveLine(1))
+	if _, ok := l.read("run-1", "build", 0); ok {
 		t.Fatal("finished ring survived the drain grace")
 	}
-	if nodes, _ := l.Stats(); nodes != 1 {
+	if nodes, _ := l.stats(); nodes != 1 {
 		t.Fatalf("rings = %d, want only the still-running node", nodes)
 	}
 }
@@ -89,26 +89,26 @@ func TestLiveLogs_IdleRingIsReleased(t *testing.T) {
 	l.idle = time.Minute
 	l.now = func() time.Time { return now }
 
-	l.Append("run-1", "build", liveLine(1))
+	l.append("run-1", "build", liveLine(1))
 	now = now.Add(2 * time.Minute)
-	l.Append("run-1", "other", liveLine(1))
-	if _, ok := l.Read("run-1", "build", 0); ok {
+	l.append("run-1", "other", liveLine(1))
+	if _, ok := l.read("run-1", "build", 0); ok {
 		t.Fatal("a node that stopped writing without finishing held its ring past the idle timeout")
 	}
 }
 
 func TestLiveLogs_WaitWakesOnTheNextAppend(t *testing.T) {
 	l := newLiveLogs()
-	l.Append("run-1", "build", liveLine(1))
-	chunk, _ := l.Read("run-1", "build", 0)
+	l.append("run-1", "build", liveLine(1))
+	chunk, _ := l.read("run-1", "build", 0)
 
 	done := make(chan liveChunk, 1)
 	go func() {
-		next, _ := l.Wait(context.Background(), "run-1", "build", chunk.Next)
+		next, _ := l.wait(context.Background(), "run-1", "build", chunk.Next)
 		done <- next
 	}()
 
-	l.Append("run-1", "build", liveLine(2))
+	l.append("run-1", "build", liveLine(2))
 	select {
 	case got := <-done:
 		if !bytes.Contains(got.Data, []byte("line 0002")) {
@@ -121,16 +121,16 @@ func TestLiveLogs_WaitWakesOnTheNextAppend(t *testing.T) {
 
 func TestLiveLogs_WaitReturnsWhenTheNodeFinishes(t *testing.T) {
 	l := newLiveLogs()
-	l.Append("run-1", "build", liveLine(1))
-	chunk, _ := l.Read("run-1", "build", 0)
+	l.append("run-1", "build", liveLine(1))
+	chunk, _ := l.read("run-1", "build", 0)
 
 	done := make(chan liveChunk, 1)
 	go func() {
-		next, _ := l.Wait(context.Background(), "run-1", "build", chunk.Next)
+		next, _ := l.wait(context.Background(), "run-1", "build", chunk.Next)
 		done <- next
 	}()
 
-	l.Finish("run-1", "build")
+	l.finish("run-1", "build")
 	select {
 	case got := <-done:
 		if !got.Done {
@@ -149,23 +149,23 @@ func TestLiveLogs_NodeCapReleasesTheLeastRecentlyWrittenRing(t *testing.T) {
 
 	for i := range 3 {
 		now = now.Add(time.Millisecond)
-		l.Append("run-1", fmt.Sprintf("node-%d", i), liveLine(i))
+		l.append("run-1", fmt.Sprintf("node-%d", i), liveLine(i))
 	}
 	now = now.Add(time.Millisecond)
-	l.Append("run-1", "node-1", liveLine(99))
+	l.append("run-1", "node-1", liveLine(99))
 
 	now = now.Add(time.Millisecond)
-	l.Append("run-1", "node-new", liveLine(1))
+	l.append("run-1", "node-new", liveLine(1))
 
-	nodes, _ := l.Stats()
+	nodes, _ := l.stats()
 	if nodes != 3 {
 		t.Fatalf("rings = %d, want the cap of 3", nodes)
 	}
-	if _, ok := l.Read("run-1", "node-0", 0); ok {
+	if _, ok := l.read("run-1", "node-0", 0); ok {
 		t.Error("the least recently written ring survived the cap")
 	}
 	for _, keep := range []string{"node-1", "node-2", "node-new"} {
-		if _, ok := l.Read("run-1", keep, 0); !ok {
+		if _, ok := l.read("run-1", keep, 0); !ok {
 			t.Errorf("%s lost its ring to the cap", keep)
 		}
 	}
@@ -175,18 +175,18 @@ func TestLiveLogs_WaitReturnsNotFoundOnceTheRingIsReleased(t *testing.T) {
 	now := time.Now()
 	l := newLiveLogs()
 	l.now = func() time.Time { return now }
-	l.Append("run-1", "build", liveLine(1))
-	chunk, _ := l.Read("run-1", "build", 0)
+	l.append("run-1", "build", liveLine(1))
+	chunk, _ := l.read("run-1", "build", 0)
 
 	done := make(chan bool, 1)
 	go func() {
-		_, ok := l.Wait(context.Background(), "run-1", "build", chunk.Next)
+		_, ok := l.wait(context.Background(), "run-1", "build", chunk.Next)
 		done <- ok
 	}()
 
-	l.Finish("run-1", "build")
+	l.finish("run-1", "build")
 	now = now.Add(liveLogDrainGrace + liveLogSweepInterval + time.Second)
-	l.Append("run-1", "other", liveLine(1))
+	l.append("run-1", "other", liveLine(1))
 
 	select {
 	case ok := <-done:
@@ -194,7 +194,7 @@ func TestLiveLogs_WaitReturnsNotFoundOnceTheRingIsReleased(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the waiter never woke after its ring was released")
 	}
-	if _, ok := l.Read("run-1", "build", 0); ok {
+	if _, ok := l.read("run-1", "build", 0); ok {
 		t.Fatal("the released ring is still readable")
 	}
 }

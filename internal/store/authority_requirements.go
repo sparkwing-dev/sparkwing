@@ -76,7 +76,7 @@ func checkAuthorityRequirementTx(ctx context.Context, tx *storeTx, team string, 
 		if err := tx.QueryRowContext(ctx, `SELECT members_can_add_machines FROM teams WHERE name=?`, team).Scan(&allowed); err != nil {
 			return err
 		}
-		if !allowed && !slices.Contains(ScopesForRole(role), ScopeTeamAdmin) {
+		if !allowed && !slices.Contains(ScopesForRole(role), scopeTeamAdmin) {
 			return authorityError(apierr.Unauthenticated, "credential enrollment setting has ended")
 		}
 	}

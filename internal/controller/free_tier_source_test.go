@@ -32,20 +32,20 @@ func TestSignUpFreeTierClosesWithTheLastSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := New(s, nil)
-	if got, err := server.SignUpFreeTier(t.Context()); err != nil || got != FreeTierOpen {
+	if got, err := server.SignUpFreeTier(t.Context()); err != nil || got != freeTierOpen {
 		t.Fatalf("with a free slot: %s, %v", got, err)
 	}
 	teststore.SeedTeam(t, s, "first")
 	if err := s.GrantFreeSlot(t.Context(), "first"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := server.SignUpFreeTier(t.Context()); err != nil || got != FreeTierClosed {
+	if got, err := server.SignUpFreeTier(t.Context()); err != nil || got != freeTierClosed {
 		t.Fatalf("with every slot taken: %s, %v", got, err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := server.SignUpFreeTier(t.Context()); err == nil || got != FreeTierUnreadable {
+	if got, err := server.SignUpFreeTier(t.Context()); err == nil || got != freeTierUnreadable {
 		t.Fatalf("with an unreadable store: %s, %v", got, err)
 	}
 }

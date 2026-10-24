@@ -268,7 +268,7 @@ func engineLookupError(err error) error {
 	}
 	var unpriced *store.UnpricedCPUClassError
 	if errors.As(err, &unpriced) {
-		return &apierr.Error{Code: apierr.Conflict, Message: unpriced.Error(), Details: map[string]any{"reason": UnpricedCPUClassCode}}
+		return &apierr.Error{Code: apierr.Conflict, Message: unpriced.Error(), Details: map[string]any{"reason": unpricedCPUClassCode}}
 	}
 	var sqlErr interface{ SQLState() string }
 	if errors.As(err, &sqlErr) {

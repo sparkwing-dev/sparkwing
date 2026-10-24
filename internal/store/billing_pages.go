@@ -94,7 +94,7 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO billing_pages(id,team,account_id,request_key,payment_mode,page_json) VALUES (?,?,?,?,?,?)`, page.ReservationID, t.team, p.Capability.Subject.ID, key, mode, data)
+		_, err = tx.execContext(ctx, `INSERT INTO billing_pages(id,team,account_id,request_key,payment_mode,page_json) VALUES (?,?,?,?,?,?)`, page.ReservationID, t.team, p.Capability.Subject.ID, key, mode, data)
 		return err
 	})
 	if err != nil {
@@ -146,7 +146,7 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 				return ErrInvalidInput
 			}
 			var result sql.Result
-			result, err = tx.ExecContext(ctx, `UPDATE credit_checkouts SET session_id=?,expires_at=? WHERE team=? AND id=? AND session_id=id AND paid_at IS NULL AND closed_at IS NULL`, page.ProviderID, page.ExpiresAt.UnixNano(), t.team, page.ReservationID)
+			result, err = tx.execContext(ctx, `UPDATE credit_checkouts SET session_id=?,expires_at=? WHERE team=? AND id=? AND session_id=id AND paid_at IS NULL AND closed_at IS NULL`, page.ProviderID, page.ExpiresAt.UnixNano(), t.team, page.ReservationID)
 			if err == nil {
 				err = requireOneRow(result, "checkout page binding")
 			}
@@ -154,7 +154,7 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 			if page.Customer == "" {
 				return ErrInvalidInput
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES (?,?,'setup_session',?,?)`, mode, page.ProviderID, t.team, page.Customer)
+			_, err = tx.execContext(ctx, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES (?,?,'setup_session',?,?)`, mode, page.ProviderID, t.team, page.Customer)
 		default:
 			return ErrInvalidInput
 		}
@@ -165,7 +165,7 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE billing_pages SET page_json=?,failed_at=NULL WHERE team=? AND id=?`, data, t.team, page.ReservationID)
+		_, err = tx.execContext(ctx, `UPDATE billing_pages SET page_json=?,failed_at=NULL WHERE team=? AND id=?`, data, t.team, page.ReservationID)
 		return err
 	})
 }
@@ -180,7 +180,7 @@ func (t *Tenant) RecordAuthorizedBillingPageFailure(ctx context.Context, a capab
 		if prior.Kind != page.Kind || prior.Team != page.Team || prior.AmountCents != page.AmountCents {
 			return ErrInvalidInput
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE billing_pages SET failed_at=? WHERE team=? AND id=?`, tx.now(ctx).UnixNano(), t.team, page.ReservationID)
+		_, err = tx.execContext(ctx, `UPDATE billing_pages SET failed_at=? WHERE team=? AND id=?`, tx.now(ctx).UnixNano(), t.team, page.ReservationID)
 		return err
 	})
 }

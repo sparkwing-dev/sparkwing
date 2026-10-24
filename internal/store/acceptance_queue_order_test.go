@@ -93,7 +93,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 			t.Fatalf("job order wants %s, got %s/%s: %v", id, claim.RunID, claim.NodeID, err)
 		}
 	}
-	checkStoreQueueCounts(t, s, map[string]int{store.QueueStateReady: 1, store.QueueStateClaimed: 2})
+	checkStoreQueueCounts(t, s, map[string]int{store.QueueStateReady: 1, "claimed": 2})
 	for range 2 {
 		if _, err := s.AsOperator().ClaimUnit(ctx, demand); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("ineligible queue: %v", err)
@@ -111,7 +111,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	if err != nil || claim.NodeID != "a-blocked" {
 		t.Fatalf("later eligible claimant: %s/%s, %v", claim.RunID, claim.NodeID, err)
 	}
-	checkStoreQueueCounts(t, s, map[string]int{store.QueueStateClaimed: 3})
+	checkStoreQueueCounts(t, s, map[string]int{"claimed": 3})
 }
 
 func checkStoreQueueCounts(t *testing.T, s *store.Store, want map[string]int) {

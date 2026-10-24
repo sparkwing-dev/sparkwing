@@ -22,7 +22,7 @@ func burstPreferencesTx(ctx context.Context, tx *storeTx, team Team, run string,
 	for _, step := range b.Preferences {
 		target := step.Target
 		switch target {
-		case TierHere:
+		case tierHere:
 			target = "class=coordinator"
 		case "machines":
 			target = "name="
@@ -50,7 +50,7 @@ func requesterMachineNamesTx(ctx context.Context, tx *storeTx, team Team, run st
 		return nil, err
 	}
 	now := tx.now(ctx)
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT prefix,subject_id FROM capabilities WHERE team=? AND created_by=? AND subject_kind='machine' AND bind_kind='none' AND `+liveCredentialSQL("")+``, team, account, now.UnixNano(), now.UnixNano())
+	rows, err := tx.queryContext(ctx, `SELECT DISTINCT prefix,subject_id FROM capabilities WHERE team=? AND created_by=? AND subject_kind='machine' AND bind_kind='none' AND `+liveCredentialSQL("")+``, team, account, now.UnixNano(), now.UnixNano())
 	if err != nil {
 		return nil, err
 	}

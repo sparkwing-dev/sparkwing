@@ -39,10 +39,10 @@ func TestClaimRoutesSeekBoundedHeadsInALargeQueue(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(t.Context(), `UPDATE nodes SET claim_requirements=?,claim_context=? WHERE team='a'`, requirements, claimContext); err != nil {
+		if _, err := tx.execContext(t.Context(), `UPDATE nodes SET claim_requirements=?,claim_context=? WHERE team='a'`, requirements, claimContext); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(t.Context(), `WITH RECURSIVE sequence(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM sequence WHERE i<50000) INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT 'a','run','old-'||i,'pending',1,spec_json,execution_json,claim_requirements,claim_context FROM sequence,nodes WHERE team='a' AND node_id='job'`); err != nil {
+		if _, err := tx.execContext(t.Context(), `WITH RECURSIVE sequence(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM sequence WHERE i<50000) INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT 'a','run','old-'||i,'pending',1,spec_json,execution_json,claim_requirements,claim_context FROM sequence,nodes WHERE team='a' AND node_id='job'`); err != nil {
 			return err
 		}
 		q := claimSQL{}
@@ -54,7 +54,7 @@ func TestClaimRoutesSeekBoundedHeadsInALargeQueue(t *testing.T) {
 			return err
 		}
 		query = strings.ReplaceAll(query, `n.status='pending'`, probe+`(n.node_id)=1 AND n.status='pending'`)
-		rows, err := tx.QueryContext(t.Context(), query, args...)
+		rows, err := tx.queryContext(t.Context(), query, args...)
 		if err != nil {
 			return err
 		}
@@ -85,7 +85,7 @@ func TestCloudNamedRecheckSeeksTheTenantUnitKey(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+query, q.args...)
+		rows, err := tx.queryContext(t.Context(), `EXPLAIN QUERY PLAN `+query, q.args...)
 		if err != nil {
 			return err
 		}

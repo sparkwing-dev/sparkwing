@@ -38,7 +38,7 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 	}
 	reset := update.ClaimRanking != nil && slices.Equal(*update.ClaimRanking, []string{ClaimRankingDefault})
 	if update.ClaimRanking != nil && !reset {
-		if err := ValidateClaimRanking(*update.ClaimRanking); err != nil {
+		if err := validateClaimRanking(*update.ClaimRanking); err != nil {
 			return err
 		}
 	}
@@ -69,12 +69,12 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 		case update.ClaimRanking == nil:
 			ranking = []byte(stored)
 		case reset:
-			next.ClaimRanking, ranking = append([]string{}, DefaultClaimRanking...), nil
+			next.ClaimRanking, ranking = append([]string{}, defaultClaimRanking...), nil
 		}
 		if next.MembersCanAddMachines == previous.MembersCanAddMachines && next.MaxChildrenPerRoot == previous.MaxChildrenPerRoot && string(ranking) == stored {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET members_can_add_machines=?,claim_ranking=?,max_children_per_root=?,updated_at=? WHERE name=?`, boolInt(next.MembersCanAddMachines), string(ranking), next.MaxChildrenPerRoot, tx.now(ctx).UnixNano(), t.team); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE teams SET members_can_add_machines=?,claim_ranking=?,max_children_per_root=?,updated_at=? WHERE name=?`, boolInt(next.MembersCanAddMachines), string(ranking), next.MaxChildrenPerRoot, tx.now(ctx).UnixNano(), t.team); err != nil {
 			return err
 		}
 		id, err := newIdentityID()

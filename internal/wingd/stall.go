@@ -61,7 +61,7 @@ func (d *Daemon) stallTick() {
 
 	readings := make(map[*conn]ProcUsage, len(holders))
 	sampled := make(map[*conn]bool, len(holders))
-	if batch, ok := d.procSampler.(ProcBatchSampler); ok {
+	if batch, ok := d.procSampler.(procBatchSampler); ok {
 		for pid, usage := range batch.CPUUsages(holderPIDs) {
 			for _, c := range holderByPID[pid] {
 				readings[c] = usage

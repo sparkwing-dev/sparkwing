@@ -30,8 +30,8 @@ const (
 	webhookMemoryLimit = 1 << 20
 )
 
-// EnvDefaultBranch carries the verified GitHub repository default branch.
-const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
+// envDefaultBranch carries the verified GitHub repository default branch.
+const envDefaultBranch = "GITHUB_DEFAULT_BRANCH"
 
 var defaultPullRequestActions = map[string]struct{}{
 	"opened":      {},
@@ -364,7 +364,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		"GITHUB_EVENT_NAME":      event,
 		"GITHUB_ACTION":          env.Action,
 		envGitHubAppInstallation: strconv.FormatInt(env.Installation.ID, 10),
-		EnvDefaultBranch:         env.Repository.DefaultBranch,
+		envDefaultBranch:         env.Repository.DefaultBranch,
 	}
 	if event == "push" {
 		var p githubAppPushPayload
@@ -520,12 +520,12 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	}
 	return githubAppIntake{
 		user: pr.User.Login, branch: pr.Head.Ref, sha: sha, env: base, at: updated,
-		prInfo: PullRequestForTrigger(base), headRepo: pr.Head.Repo.ID,
+		prInfo: pullRequestForTrigger(base), headRepo: pr.Head.Repo.ID,
 	}, "", nil
 }
 
-// PullRequestForTrigger projects authenticated trigger metadata into the SDK run context.
-func PullRequestForTrigger(env map[string]string) *nodeproto.PullRequest {
+// pullRequestForTrigger projects authenticated trigger metadata into the SDK run context.
+func pullRequestForTrigger(env map[string]string) *nodeproto.PullRequest {
 	if env["GITHUB_EVENT_NAME"] != "pull_request" {
 		return nil
 	}
@@ -993,7 +993,7 @@ func (s *Server) startGitHubAppRun(
 	now := time.Now()
 	ref := in.env["GITHUB_REF"]
 	key := runspec.RepoKey(fmt.Sprintf("gh:%d", repo.ID))
-	defaultBranch := in.env[EnvDefaultBranch]
+	defaultBranch := in.env[envDefaultBranch]
 	request := runspec.Request{
 		Version: 1, Team: string(tenant.Team()), Pipeline: plan.pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginApp,
 		Actor: runspec.Actor{Kind: "github", ID: in.user, Display: in.user},

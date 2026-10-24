@@ -13,8 +13,8 @@ const (
 	// CardRefusedPinned refuses a card whose first successful payment funded another team.
 	CardRefusedPinned = "card_pinned"
 
-	BusinessEventCardRefused = "card.refused"
-	BusinessEventCardBlocked = "card.blocked"
+	businessEventCardRefused = "card.refused"
+	businessEventCardBlocked = "card.blocked"
 )
 
 type cardRefusal struct {
@@ -55,7 +55,7 @@ func claimCardPinTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, 
 	if fingerprint == "" {
 		return cardRefusal{}, nil
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO payment_cards (fingerprint, first_team, payment_intent, pinned_at)
+	if _, err := tx.execContext(ctx, `INSERT INTO payment_cards (fingerprint, first_team, payment_intent, pinned_at)
 	    VALUES (?, ?, ?, ?) ON CONFLICT (fingerprint) DO NOTHING`, fingerprint, string(team), paymentIntent, now.UnixNano()); err != nil {
 		return cardRefusal{}, err
 	}
@@ -75,7 +75,7 @@ func forgetCardTx(ctx context.Context, tx *storeTx, fingerprint, reason string, 
 	if fingerprint == "" {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT name FROM teams WHERE card_fingerprint = ? ORDER BY name`, fingerprint)
+	rows, err := tx.queryContext(ctx, `SELECT name FROM teams WHERE card_fingerprint = ? ORDER BY name`, fingerprint)
 	if err != nil {
 		return err
 	}
@@ -107,9 +107,9 @@ func forgetTeamCardTx(ctx context.Context, tx *storeTx, team Team, fingerprint, 
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = '', card_payment_method = '', card_fingerprint = '',
+	if _, err := tx.execContext(ctx, `UPDATE teams SET card_customer = '', card_payment_method = '', card_fingerprint = '',
 	    card_brand = '', card_last4 = '', refill_enabled = 0 WHERE name = ? AND card_fingerprint = ?`, string(team), fingerprint); err != nil {
 		return err
 	}
-	return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(method), Operation: BusinessEventCardBlocked})
+	return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(method), Operation: businessEventCardBlocked})
 }

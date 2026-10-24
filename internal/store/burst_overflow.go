@@ -46,10 +46,10 @@ func (t *Tenant) SetOverflowLimit(ctx context.Context, authority capability.Auth
 			return err
 		}
 		if minutes == nil {
-			_, err = tx.ExecContext(ctx, `DELETE FROM overflow_controls WHERE team=? AND account_id=?`, t.team, account)
+			_, err = tx.execContext(ctx, `DELETE FROM overflow_controls WHERE team=? AND account_id=?`, t.team, account)
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO overflow_controls(team,account_id,monthly_minutes) VALUES (?,?,?) ON CONFLICT(team,account_id) DO UPDATE SET monthly_minutes=excluded.monthly_minutes`, t.team, account, *minutes)
+		_, err = tx.execContext(ctx, `INSERT INTO overflow_controls(team,account_id,monthly_minutes) VALUES (?,?,?) ON CONFLICT(team,account_id) DO UPDATE SET monthly_minutes=excluded.monthly_minutes`, t.team, account, *minutes)
 		return err
 	})
 }
@@ -79,7 +79,7 @@ func overflowControlTx(ctx context.Context, tx *storeTx, team Team, account stri
 	if err == nil {
 		out.MonthlyMinutes = &limit
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT a.capability_prefix,COALESCE((SELECT SUM(c.seconds) FROM credit_charges c WHERE c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind IN ('reservation','slice','usage','refund')),0),i.started_at,i.finished_at,a.settled_at,a.awarded_at FROM billing_awards a LEFT JOIN billable_intervals i ON i.team=a.team AND i.reservation_id=a.reservation_id WHERE a.team=? AND a.requester_account=? AND a.executor_class='cloud' AND a.metered=1 AND (a.awarded_at>=? OR a.settled_at IS NULL OR a.settled_at>=?)`, team, account, out.PeriodStart.UnixNano(), out.PeriodStart.UnixNano())
+	rows, err := tx.queryContext(ctx, `SELECT a.capability_prefix,COALESCE((SELECT SUM(c.seconds) FROM credit_charges c WHERE c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind IN ('reservation','slice','usage','refund')),0),i.started_at,i.finished_at,a.settled_at,a.awarded_at FROM billing_awards a LEFT JOIN billable_intervals i ON i.team=a.team AND i.reservation_id=a.reservation_id WHERE a.team=? AND a.requester_account=? AND a.executor_class='cloud' AND a.metered=1 AND (a.awarded_at>=? OR a.settled_at IS NULL OR a.settled_at>=?)`, team, account, out.PeriodStart.UnixNano(), out.PeriodStart.UnixNano())
 	if err != nil {
 		return out, err
 	}

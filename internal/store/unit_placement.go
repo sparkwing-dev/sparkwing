@@ -48,7 +48,7 @@ func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, liveness ti
 		args = append(args, "")
 	}
 	args = append(args, cutoff.UnixNano(), limits.RankingObservations)
-	rows, err := tx.QueryContext(ctx, query+` ORDER BY last_used_at DESC,prefix LIMIT ?`, args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY last_used_at DESC,prefix LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}

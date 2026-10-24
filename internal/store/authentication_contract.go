@@ -64,7 +64,7 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 			return capability.AuthenticationSnapshot{}, err
 		}
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability}
-		rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind=? AND subject_id=? AND parent_id IS NULL ORDER BY created_at,prefix`, team, lookup.Peer.Kind, lookup.Peer.ID)
+		rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind=? AND subject_id=? AND parent_id IS NULL ORDER BY created_at,prefix`, team, lookup.Peer.Kind, lookup.Peer.ID)
 		if err != nil {
 			return capability.AuthenticationSnapshot{}, err
 		}

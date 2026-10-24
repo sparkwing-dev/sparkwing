@@ -18,7 +18,7 @@ func usageSeconds(t *testing.T, s *store.Store, runID, nodeID string) int64 {
 	if err := s.DB().QueryRow(fmt.Sprintf(
 		`SELECT COALESCE(SUM(seconds), 0) FROM credit_charges
 		  WHERE run_id = '%s' AND node_id = '%s' AND kind = '%s'`,
-		runID, nodeID, store.CreditChargeUsage)).Scan(&seconds); err != nil {
+		runID, nodeID, "usage")).Scan(&seconds); err != nil {
 		t.Fatalf("read usage: %v", err)
 	}
 	return seconds

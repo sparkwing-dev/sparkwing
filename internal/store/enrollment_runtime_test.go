@@ -93,7 +93,7 @@ func TestMachineEnrollmentSerializesNamesAndLimits(t *testing.T) {
 		t.Run(fmt.Sprint(limit), func(t *testing.T) {
 			s, base := machineEnrollment(t)
 			if limit {
-				for i := range MaxRunnerTokensPerTeam - 1 {
+				for i := range maxRunnerTokensPerTeam - 1 {
 					spec := base
 					spec.Subject.ID = fmt.Sprintf("registered-%d", i)
 					spec.RegistrationID = "runner:a:" + spec.Subject.ID

@@ -232,7 +232,7 @@ func insertBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadIde
 		return blob.Receipt{}, err
 	}
 	now := tx.now(ctx)
-	_, err = tx.ExecContext(ctx, `INSERT INTO blob_receipts(team,id,run_id,node_id,attempt,generation,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,uploader_principal,capability_prefix,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, source.Team, id, source.RunID, node, attempt, generation, source.Kind, unitKind, unitID, unitGeneration, unitSource, digest, source.Principal, source.CapabilityRef, now.UnixNano())
+	_, err = tx.execContext(ctx, `INSERT INTO blob_receipts(team,id,run_id,node_id,attempt,generation,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,uploader_principal,capability_prefix,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, source.Team, id, source.RunID, node, attempt, generation, source.Kind, unitKind, unitID, unitGeneration, unitSource, digest, source.Principal, source.CapabilityRef, now.UnixNano())
 	if err != nil {
 		return blob.Receipt{}, err
 	}
@@ -291,7 +291,7 @@ func commitBlobBytesTx(ctx context.Context, tx *storeTx, team Team, object blob.
 		}
 	}
 	now := tx.now(ctx)
-	inserted, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, object.Digest, object.Size, now.UnixNano())
+	inserted, err := tx.execContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, object.Digest, object.Size, now.UnixNano())
 	if err != nil {
 		return 0, err
 	}

@@ -64,10 +64,10 @@ func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Au
 		if err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO debug_pauses(team,run_id,node_id,reason,paused_at,expires_at) VALUES (?,?,?,?,?,?) ON CONFLICT(team,run_id,node_id,reason) DO UPDATE SET paused_at=excluded.paused_at,expires_at=excluded.expires_at,released_at=NULL,released_by='',release_kind=''`, t.team, target.RunID, job, reason, now.UnixNano(), expires.UnixNano()); err != nil {
+		if _, err = tx.execContext(ctx, `INSERT INTO debug_pauses(team,run_id,node_id,reason,paused_at,expires_at) VALUES (?,?,?,?,?,?) ON CONFLICT(team,run_id,node_id,reason) DO UPDATE SET paused_at=excluded.paused_at,expires_at=excluded.expires_at,released_at=NULL,released_by='',release_kind=''`, t.team, target.RunID, job, reason, now.UnixNano(), expires.UnixNano()); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE nodes SET status_detail='paused' WHERE team=? AND run_id=? AND node_id=?`, t.team, target.RunID, job); err != nil {
+		if _, err = tx.execContext(ctx, `UPDATE nodes SET status_detail='paused' WHERE team=? AND run_id=? AND node_id=?`, t.team, target.RunID, job); err != nil {
 			return err
 		}
 		if _, err = appendEventTx(ctx, tx, t.team, target.RunID, job, "debug.paused", map[string]any{"reason": reason, "expires_at": expires}, now); err != nil {
@@ -134,7 +134,7 @@ func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Aut
 		if err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE run_control_requests SET result_json=? WHERE team=? AND run_id=? AND subject_kind=? AND subject_id=? AND operation='approval' AND request_key=?`, encoded, t.team, a.Target.RunID, p.Capability.Subject.Kind, p.Capability.Subject.ID, decision.IdempotencyKey); err != nil {
+		if _, err = tx.execContext(ctx, `UPDATE run_control_requests SET result_json=? WHERE team=? AND run_id=? AND subject_kind=? AND subject_id=? AND operation='approval' AND request_key=?`, encoded, t.team, a.Target.RunID, p.Capability.Subject.Kind, p.Capability.Subject.ID, decision.IdempotencyKey); err != nil {
 			return err
 		}
 		_, err = t.runControlAuthorityTx(ctx, tx, a, "/api/v1/runs/{run}/approvals/{job}")
@@ -188,7 +188,7 @@ func runControlReplayTx(ctx context.Context, tx *storeTx, team Team, run string,
 	if !errors.Is(err, sql.ErrNoRows) {
 		return false, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO run_control_requests(team,run_id,subject_kind,subject_id,operation,request_key,request_hash,result_json) VALUES (?,?,?,?,?,?,?,?)`, team, run, p.Capability.Subject.Kind, p.Capability.Subject.ID, operation, key, digest, []byte(`{}`))
+	_, err = tx.execContext(ctx, `INSERT INTO run_control_requests(team,run_id,subject_kind,subject_id,operation,request_key,request_hash,result_json) VALUES (?,?,?,?,?,?,?,?)`, team, run, p.Capability.Subject.Kind, p.Capability.Subject.ID, operation, key, digest, []byte(`{}`))
 	return false, err
 }
 

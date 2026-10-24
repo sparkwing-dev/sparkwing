@@ -12,7 +12,7 @@ import (
 )
 
 func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
-	for _, cause := range []string{HoldCauseOperator, HoldCauseDispute, HoldCauseWarning, HoldCauseRevoked} {
+	for _, cause := range []string{HoldCauseOperator, holdCauseDispute, HoldCauseWarning, holdCauseRevoked} {
 		t.Run(cause, func(t *testing.T) {
 			s, demand, now := billingModelFixture(t)
 			if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
@@ -28,8 +28,8 @@ func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
 				if cause == HoldCauseWarning {
 					return holdForWarningTx(t.Context(), tx, "a", "warning-probe", "pi_probe", now.Add(-time.Hour))
 				}
-				if cause == HoldCauseRevoked {
-					_, _, err := tenant.setBillingTrustTx(t.Context(), tx, BillingTrustChange{Trust: BillingTrustRevoked, Actor: "console", Reason: "probe"}, now.Add(-time.Hour), auditActor{system: auditBreakGlass})
+				if cause == holdCauseRevoked {
+					_, _, err := tenant.setBillingTrustTx(t.Context(), tx, BillingTrustChange{Trust: billingTrustRevoked, Actor: "console", Reason: "probe"}, now.Add(-time.Hour), auditActor{system: auditBreakGlass})
 					return err
 				}
 				actor := ""
@@ -68,7 +68,7 @@ func TestHoldCommitDurablyStopsRunningAward(t *testing.T) {
 				t.Fatalf("second hold changed drain from %d to %d: %v", drain, repeated, err)
 			}
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
-				if cause == HoldCauseRevoked {
+				if cause == holdCauseRevoked {
 					_, _, err := tenant.setBillingTrustTx(t.Context(), tx, BillingTrustChange{Trust: BillingTrustAutomatic, Actor: "console", Reason: "release"}, *now, auditActor{system: auditBreakGlass})
 					if err != nil {
 						return err

@@ -62,7 +62,7 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref runspec.
 	if err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at=?,last_heartbeat=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND claimed_by=?`, expiry.UnixNano(), now.UnixNano(), t.team, ref.RunID, ref.NodeID, actor.Generation, actor.Holder); err != nil {
+	if _, err = tx.execContext(ctx, `UPDATE nodes SET lease_expires_at=?,last_heartbeat=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND claimed_by=?`, expiry.UnixNano(), now.UnixNano(), t.team, ref.RunID, ref.NodeID, actor.Generation, actor.Holder); err != nil {
 		return err
 	}
 	if err = renewCapacityTx(ctx, tx, t.team, string(ref.RunID), string(ref.NodeID), expiry); err != nil {
@@ -70,18 +70,6 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref runspec.
 	}
 	beat.ExpiresAt = expiry
 	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
-}
-
-// RenewOwner renews owner-bound jobs and capacity within the owner lease transaction.
-func (t *Tenant) RenewOwner(ctx context.Context, actor runstate.Actor) (runstate.LeaseBeat, error) {
-	var beat runstate.LeaseBeat
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockActorTx(ctx, tx, actor); err != nil {
-			return err
-		}
-		return t.renewOwnerTx(ctx, tx, actor, &beat)
-	})
-	return beat, err
 }
 
 func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor runstate.Actor, beat *runstate.LeaseBeat) error {
@@ -153,12 +141,12 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor runstate.A
 		return err
 	}
 	if actor.Owner.Kind != runstate.OwnerController {
-		if _, err = tx.ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=? AND generation=? AND claimed_by=?`, expiry.UnixNano(), t.team, runID, actor.Owner.Generation, actor.Owner.Holder); err != nil {
+		if _, err = tx.execContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=? AND generation=? AND claimed_by=?`, expiry.UnixNano(), t.team, runID, actor.Owner.Generation, actor.Owner.Holder); err != nil {
 			return err
 		}
 	}
 	// safety: awards parent to the claimant root; only the persisted self-claim fence identifies jobs this owner may renew.
-	_, err = tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at=?,last_heartbeat=?
+	_, err = tx.execContext(ctx, `UPDATE nodes SET lease_expires_at=?,last_heartbeat=?
  WHERE team=? AND run_id=? AND status<>'done' AND cancel_requested_at IS NULL AND claimed_by=? AND lease_expires_at>? AND owner_capability_prefix=?
  AND capability_prefix IN (SELECT prefix FROM capabilities WHERE team=? AND `+liveCredentialSQL("")+`)`, expiry.UnixNano(), now.UnixNano(), t.team, runID, actor.Owner.Holder, now.UnixNano(), actor.CapabilityPrefix, t.team, now.UnixNano(), now.UnixNano())
 	if err != nil {
@@ -179,4 +167,16 @@ func lockActorTx(ctx context.Context, tx *storeTx, actor runstate.Actor) error {
 		return nil
 	}
 	return tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority}, actor.CapabilityPrefix)
+}
+
+// RenewOwner renews owner-bound jobs and capacity within the owner lease transaction.
+func (t *Tenant) RenewOwner(ctx context.Context, actor runstate.Actor) (runstate.LeaseBeat, error) {
+	var beat runstate.LeaseBeat
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockActorTx(ctx, tx, actor); err != nil {
+			return err
+		}
+		return t.renewOwnerTx(ctx, tx, actor, &beat)
+	})
+	return beat, err
 }

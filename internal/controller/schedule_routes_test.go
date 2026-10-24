@@ -204,13 +204,13 @@ func TestScheduleHTTPInvalidInputAndBackend(t *testing.T) {
 		f.call(t, "PUT", "/api/v1/schedules/repos", body, "", 400, nil)
 	}
 	f.writer.failure = &apierr.Error{Code: apierr.Forbidden, Message: "authority changed"}
-	testOnlyTenantPort[ScheduleWriter](f.s, func(context.Context, store.Team) (ScheduleWriter, error) { return f.writer, nil })
+	testOnlyTenantPort[scheduleWriter](f.s, func(context.Context, store.Team) (scheduleWriter, error) { return f.writer, nil })
 	f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 403, nil)
 	rows, err := f.writer.ListCronSchedules(t.Context())
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("failed transaction leaked schedules: %+v %v", rows, err)
 	}
-	testOnlyTenantPort[ScheduleWriter](f.s, func(context.Context, store.Team) (ScheduleWriter, error) { return nil, nil })
+	testOnlyTenantPort[scheduleWriter](f.s, func(context.Context, store.Team) (scheduleWriter, error) { return nil, nil })
 	w := f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 500, nil)
 	if !strings.Contains(w.Body.String(), "policy_missing") {
 		t.Fatal(w.Body.String())

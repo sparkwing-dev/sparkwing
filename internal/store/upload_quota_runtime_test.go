@@ -21,7 +21,7 @@ func TestBlobUploadRunByteLimitIncludesPendingTransfers(t *testing.T) {
 	request.ID = "second"
 	request.Intent.Digest = blob.Digest(strings.Repeat("b", 64))
 	var refusal *StorageQuotaError
-	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.As(err, &refusal) || refusal.Limit != StorageLimitBytesPerRun || refusal.Used != 3 || refusal.Requested != 3 {
+	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.As(err, &refusal) || refusal.Limit != storageLimitBytesPerRun || refusal.Used != 3 || refusal.Requested != 3 {
 		t.Fatalf("pending transfer did not spend the run's byte capacity: %v", err)
 	}
 	if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(first, request.Intent.Authority)); err != nil {
@@ -49,7 +49,7 @@ func TestBlobUploadRunObjectLimitCountsEmptyBlobsAndReleasesAborts(t *testing.T)
 	request.ID = "second"
 	request.Intent.Digest = blob.Digest(strings.Repeat("b", 64))
 	var refusal *StorageQuotaError
-	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.As(err, &refusal) || refusal.Limit != StorageLimitObjectsPerRun || refusal.Used != 1 || refusal.Requested != 1 {
+	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.As(err, &refusal) || refusal.Limit != storageLimitObjectsPerRun || refusal.Used != 1 || refusal.Requested != 1 {
 		t.Fatalf("empty upload did not reserve an object: %v", err)
 	}
 	for range 2 {
@@ -100,7 +100,7 @@ func TestBlobUploadRunLimitsSurviveMonthChangeAndRestart(t *testing.T) {
 	request.ID = "february"
 	request.Intent.Digest = blob.Digest(strings.Repeat("b", 64))
 	var refusal *StorageQuotaError
-	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.As(err, &refusal) || refusal.Limit != StorageLimitBytesPerRun {
+	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.As(err, &refusal) || refusal.Limit != storageLimitBytesPerRun {
 		t.Fatalf("month change forgot the previous month's pending bytes: %v", err)
 	}
 	request.Intent.Size = 1
@@ -136,16 +136,16 @@ func TestBlobUploadUsesEffectivePolicyWithoutCreatingQuotaOverrides(t *testing.T
 	if err := tenant.AbortBlobUpload(t.Context(), request.Intent.Authority, first.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AsOperator().SetStorageSettings(t.Context(), StorageSettings{DefaultTier: StorageTierFree}); err != nil {
+	if err := s.AsOperator().SetStorageSettings(t.Context(), StorageSettings{DefaultTier: storageTierFree}); err != nil {
 		t.Fatal(err)
 	}
 	request.ID = "default_tier"
-	request.Intent.Size = FreeTierQuota.MaxBytesPerRun + 1
+	request.Intent.Size = freeTierQuota.MaxBytesPerRun + 1
 	var refusal *StorageQuotaError
-	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.As(err, &refusal) || refusal.Limit != StorageLimitBytesPerRun {
+	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.As(err, &refusal) || refusal.Limit != storageLimitBytesPerRun {
 		t.Fatalf("deployment default did not apply to upload: %v", err)
 	}
-	if err := s.AsOperator().SetStorageSettings(t.Context(), StorageSettings{DefaultTier: StorageTierPaid}); err != nil {
+	if err := s.AsOperator().SetStorageSettings(t.Context(), StorageSettings{DefaultTier: storageTierPaid}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.ReserveBlobUpload(t.Context(), request); err != nil {

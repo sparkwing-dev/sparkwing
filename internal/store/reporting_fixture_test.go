@@ -47,7 +47,7 @@ func (t *Tenant) TestOnlySeedRun(ctx context.Context, r Run) error {
 		finish = now.UnixNano()
 	}
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,started_at,finished_at,trigger_source,git_branch,git_sha,parent_run_id,retry_of,replay_of_run_id,replay_of_node_id,log_retention_class,log_retention_days)
+		_, err := tx.execContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,started_at,finished_at,trigger_source,git_branch,git_sha,parent_run_id,retry_of,replay_of_run_id,replay_of_node_id,log_retention_class,log_retention_days)
 SELECT ?,?,COALESCE(MAX(number),0)+1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'r30',30 FROM runs WHERE team=?
 ON CONFLICT(id) DO NOTHING`, t.team, r.ID, r.Pipeline, r.Status, body, "fixture", now.UnixNano(), request.Request.Git.Repository.Key, r.DeclaredRepo, "host", "execute", []byte(`[]`), creatingPrincipal(ctx), now.UnixNano(), start, finish, r.TriggerSource, r.GitBranch, r.GitSHA, sql.NullString{String: r.ParentRunID, Valid: r.ParentRunID != ""}, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, t.team)
 		return err
@@ -71,7 +71,7 @@ func (t *Tenant) TestOnlySeedTrigger(ctx context.Context, v Trigger) error {
 		return err
 	}
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key) VALUES (?,?,?,'trigger',?,?,?,?,?,?)`, t.team, v.ID, status, now.UnixNano(), now.UnixNano(), []byte(`[]`), []byte(`[]`), v.WebhookDelivery, v.WebhookReplayKey)
+		_, err := tx.execContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key) VALUES (?,?,?,'trigger',?,?,?,?,?,?)`, t.team, v.ID, status, now.UnixNano(), now.UnixNano(), []byte(`[]`), []byte(`[]`), v.WebhookDelivery, v.WebhookReplayKey)
 		return err
 	})
 }
@@ -84,10 +84,10 @@ func (t *Tenant) TestOnlySettlePaidCredit(ctx context.Context, req CreditGrantRe
 	now := t.s.now()
 	checkout := "fixture-checkout:" + req.Reference
 	if err := t.s.inTx(ctx, func(tx *storeTx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES (?,?,?,'test','usd',?,?,?,?) ON CONFLICT(id) DO NOTHING`, "fixture-row:"+req.Reference, t.team, checkout, req.AmountMicro/MicroCreditsPerCent, req.AmountMicro, now.UnixNano(), now.Add(time.Hour).UnixNano())
+		_, err := tx.execContext(ctx, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES (?,?,?,'test','usd',?,?,?,?) ON CONFLICT(id) DO NOTHING`, "fixture-row:"+req.Reference, t.team, checkout, req.AmountMicro/MicroCreditsPerCent, req.AmountMicro, now.UnixNano(), now.Add(time.Hour).UnixNano())
 		return err
 	}); err != nil {
 		return CreditGrantResult{}, err
@@ -105,7 +105,7 @@ func (t *Tenant) TestOnlySettlePaidCredit(ctx context.Context, req CreditGrantRe
 		var err error
 		grant, found, err = tx.operator.paidGrantForPaymentTx(ctx, tx, req.Reference)
 		if err == nil && !found {
-			return ErrUnknownPayment
+			return errUnknownPayment
 		}
 		return err
 	})

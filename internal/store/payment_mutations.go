@@ -25,7 +25,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference str
 		return CreditReversal{}, err
 	}
 	if !found {
-		return CreditReversal{}, fmt.Errorf("%w: %q", ErrUnknownPayment, paymentID)
+		return CreditReversal{}, fmt.Errorf("%w: %q", errUnknownPayment, paymentID)
 	}
 	l, err := lockLedgerTx(ctx, tx, paid.Team)
 	if err != nil {
@@ -35,7 +35,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference str
 		return CreditReversal{}, err
 	}
 	out := CreditReversal{Team: paid.Team, PaidMicro: paid.AmountMicro}
-	existing, found, err := creditGrantByReferenceTx(ctx, tx, paid.Team, CreditGrantReversal, reference)
+	existing, found, err := creditGrantByReferenceTx(ctx, tx, paid.Team, creditGrantReversal, reference)
 	if err != nil {
 		return CreditReversal{}, err
 	}
@@ -60,7 +60,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference str
 			take = amountMicro
 		}
 		grant := CreditGrant{
-			ID: id, Team: paid.Team, Kind: CreditGrantReversal, AmountMicro: -take,
+			ID: id, Team: paid.Team, Kind: creditGrantReversal, AmountMicro: -take,
 			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: tx.now(ctx),
 		}
 		if err := l.insertGrant(ctx, grant); err != nil {
@@ -101,9 +101,9 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	}
 	stored, cause := reason, HoldCauseOperator
 	if actor == "" {
-		stored, cause = truncate(reason, 500), HoldCauseDispute
+		stored, cause = truncate(reason, 500), holdCauseDispute
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.execContext(ctx, `
 		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, placed_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		disputeID, string(team), paymentID, stored, cause, actor, now.UnixNano()); err != nil {
 		return false, err
@@ -172,13 +172,13 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor audit
 		return err
 	}
 	if refusal.reason != "" {
-		return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: BusinessEventCardRefused})
+		return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: businessEventCardRefused})
 	}
 	addedAt := now.UnixNano()
 	if !c.AddedAt.IsZero() {
 		addedAt = c.AddedAt.UnixNano()
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
+	res, err := tx.execContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
 	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ?
 	    WHERE name = ? AND card_added_at <= ?`,
 		c.Customer, c.PaymentMethod, c.Fingerprint, c.Brand, c.Last4, addedAt, string(team), addedAt)
@@ -190,13 +190,13 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor audit
 		return err
 	}
 	if saved == 0 {
-		return ErrStaleCardSetup
+		return errStaleCardSetup
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0
+	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0
 	    WHERE team = ? AND refill_blocked = 1 AND payment_method <> ?`, string(team), c.PaymentMethod); err != nil {
 		return err
 	}
-	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: BusinessEventCardAdded}); err != nil {
+	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: businessEventCardAdded}); err != nil {
 		return err
 	}
 	return nil
@@ -219,17 +219,17 @@ func applyCardRefundTx(ctx context.Context, tx *storeTx, team Team, paymentInten
 	if attempts < 0 {
 		return false, fmt.Errorf("%w: refund attempts must be nonnegative", ErrInvalidInput)
 	}
-	set, args := `refund_id = ?, status = ?`, []any{refundID, CardRefundPending}
+	set, args := `refund_id = ?, status = ?`, []any{refundID, cardRefundPending}
 	switch status {
-	case CardRefundSucceeded:
-		args[1] = CardRefundSucceeded
+	case cardRefundSucceeded:
+		args[1] = cardRefundSucceeded
 	case "failed", "canceled":
 		set = `refund_id = ?, status = ?, attempts = attempts + 1, next_attempt_at = ?`
 		delay := cardRefundRetryAfter[min(attempts, int64(len(cardRefundRetryAfter)-1))]
-		args = []any{refundID, CardRefundDue, now.Add(delay).UnixNano()}
+		args = []any{refundID, cardRefundDue, now.Add(delay).UnixNano()}
 	}
 	args = append(append(args, mode, string(team), paymentIntent), whenArgs...)
-	res, err := tx.ExecContext(ctx, `UPDATE card_refunds SET `+set+` WHERE payment_mode=? AND team = ? AND payment_intent = ? AND `+when, args...)
+	res, err := tx.execContext(ctx, `UPDATE card_refunds SET `+set+` WHERE payment_mode=? AND team = ? AND payment_intent = ? AND `+when, args...)
 	if err != nil {
 		return false, err
 	}

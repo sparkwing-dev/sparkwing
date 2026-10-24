@@ -126,7 +126,7 @@ func TestClaimContextHoldsDoNotHideYoungerDifferentPolicies(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					if _, err := tx.ExecContext(t.Context(), `UPDATE nodes SET claim_requirements=?,claim_context=? WHERE team='a' AND run_id=?`, req, cc, run); err != nil {
+					if _, err := tx.execContext(t.Context(), `UPDATE nodes SET claim_requirements=?,claim_context=? WHERE team='a' AND run_id=?`, req, cc, run); err != nil {
 						return err
 					}
 				}

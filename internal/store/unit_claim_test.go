@@ -85,9 +85,9 @@ func indexFixtureUnit(t *testing.T, s *Store, team Team, unit UnitRef) {
 			return err
 		}
 		if unit.Kind == capability.UnitNode {
-			_, err = tx.ExecContext(t.Context(), `UPDATE nodes SET claim_requirements=?,claim_context=? WHERE team=? AND run_id=? AND node_id=?`, requirements, claimContext, team, unit.RunID, unit.NodeID)
+			_, err = tx.execContext(t.Context(), `UPDATE nodes SET claim_requirements=?,claim_context=? WHERE team=? AND run_id=? AND node_id=?`, requirements, claimContext, team, unit.RunID, unit.NodeID)
 		} else {
-			_, err = tx.ExecContext(t.Context(), `UPDATE triggers SET claim_requirements=?,claim_context=? WHERE team=? AND id=?`, requirements, claimContext, team, unit.RunID)
+			_, err = tx.execContext(t.Context(), `UPDATE triggers SET claim_requirements=?,claim_context=? WHERE team=? AND id=?`, requirements, claimContext, team, unit.RunID)
 		}
 		return err
 	}); err != nil {
@@ -470,7 +470,7 @@ func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 			var here capability.Issued
 			err := s.inTx(t.Context(), func(tx *storeTx) error {
 				var err error
-				here, err = s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", HereRunID: "run", Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect}})
+				here, err = s.issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", HereRunID: "run", Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect}})
 				return err
 			})
 			if err != nil {

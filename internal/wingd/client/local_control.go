@@ -17,9 +17,9 @@ func QueryLocalController(ctx context.Context, home string) (wingd.LocalStatus, 
 	return localControl(ctx, home, nil)
 }
 
-// SetLocalStay changes the elected controller's lifetime policy. The reply must
+// setLocalStay changes the elected controller's lifetime policy. The reply must
 // confirm a ready owner and the requested value. This never spawns a controller.
-func SetLocalStay(ctx context.Context, home string, stay bool) (wingd.LocalStatus, error) {
+func setLocalStay(ctx context.Context, home string, stay bool) (wingd.LocalStatus, error) {
 	return localControl(ctx, home, &stay)
 }
 

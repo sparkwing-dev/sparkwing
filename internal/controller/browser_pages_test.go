@@ -246,15 +246,8 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 }
 
 type browserRunDeleter struct {
-	controller.TeamWriter
-	controller.RunTransactions
-	tenant *store.Tenant
-	seen   capability.Authorized
-}
-
-func (d *browserRunDeleter) Team() store.Team { return d.tenant.Team() }
-func (d *browserRunDeleter) ReadRun(ctx context.Context, id string) (store.RunRow, error) {
-	return d.tenant.ReadRun(ctx, id)
+	*store.Tenant
+	seen capability.Authorized
 }
 
 func (d *browserRunDeleter) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized) error {
@@ -270,8 +263,8 @@ func TestDeleteRunOnALocalDashboardRemovesTheRunDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer := &browserRunDeleter{tenant: tenant}
-	controller.BindTenantPortForTest[controller.TeamWriter](f.srv, func(context.Context, store.Team) (controller.TeamWriter, error) { return writer, nil })
+	writer := &browserRunDeleter{Tenant: tenant}
+	f.srv.WithTenantResolver(func(context.Context, store.Team) (controller.TenantHandle, error) { return writer, nil })
 	f.h = f.srv.Handler()
 	for i, id := range []string{"r1", "r2", `a\b`} {
 		if _, err := teststore.SQL(t, f.st).ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default',?,?,'demo','success',?,'request',1,'github.com/acme/app','host','execute',?,'alice',1,2,'r30',30)`, id, i+1, []byte(`{}`), []byte(`[]`)); err != nil {

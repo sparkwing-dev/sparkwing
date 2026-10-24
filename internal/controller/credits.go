@@ -354,21 +354,21 @@ func creditGrantToJSON(g store.CreditGrant) creditGrantJSON {
 	}
 }
 
-// CreditsRefusedCode identifies a claim refused because the balance cannot pay its first slice.
-const CreditsRefusedCode = "insufficient_credits"
+// creditsRefusedCode identifies a claim refused because the balance cannot pay its first slice.
+const creditsRefusedCode = "insufficient_credits"
 
-// CreditsFrozenCode identifies a claim refused by a billing hold.
-const CreditsFrozenCode = "credits_frozen"
+// creditsFrozenCode identifies a claim refused by a billing hold.
+const creditsFrozenCode = "credits_frozen"
 
 // safety: a runner tells an unfunded or held team apart from a transport failure and keeps polling rather than
 // retrying the request.
 func creditsRefusal(refused *store.InsufficientCreditsError) *apierr.Error {
-	reason := CreditsRefusedCode
+	reason := creditsRefusedCode
 	if refused.Hold != "" {
-		reason = CreditsFrozenCode
+		reason = creditsFrozenCode
 	}
 	return &apierr.Error{Code: apierr.InsufficientCredit, Message: refused.Error(), Details: map[string]any{"reason": reason, "hold": refused.Hold}}
 }
 
-// UnpricedCPUClassCode identifies a claim whose CPU class has no rate.
-const UnpricedCPUClassCode = "unpriced_cpu_class"
+// unpricedCPUClassCode identifies a claim whose CPU class has no rate.
+const unpricedCPUClassCode = "unpriced_cpu_class"

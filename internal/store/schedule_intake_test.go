@@ -109,7 +109,7 @@ func TestScheduleAdmissionRequiresCurrentTenantAndDeclarationProperty(t *testing
 					rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET declared=0`)
 				case 10:
 					tenant.s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
-						_, err := r.(*storeTx).ExecContext(ctx, `UPDATE cron_schedules SET git_branch='changed'`)
+						_, err := r.(*storeTx).execContext(ctx, `UPDATE cron_schedules SET git_branch='changed'`)
 						location := in.Request.Source.Location
 						return IntakePolicyFacts{SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 					})
@@ -117,7 +117,7 @@ func TestScheduleAdmissionRequiresCurrentTenantAndDeclarationProperty(t *testing
 					rewriteSchemaExec(t, tenant.s.db, `INSERT INTO team_deletions(slug,requested_at,state) VALUES ('a',1,'pending')`)
 				case 12:
 					tenant.s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
-						_, err := r.(*storeTx).ExecContext(ctx, `INSERT INTO team_deletions(slug,requested_at,state) VALUES ('a',1,'pending')`)
+						_, err := r.(*storeTx).execContext(ctx, `INSERT INTO team_deletions(slug,requested_at,state) VALUES ('a',1,'pending')`)
 						location := in.Request.Source.Location
 						return IntakePolicyFacts{SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 					})
@@ -174,7 +174,7 @@ func TestScheduleAdmissionRechecksAppConsentProperty(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, `DELETE FROM github_app_automation`)
 			case 3:
 				tenant.s.intakePolicy = fakeIntakePolicy(func(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
-					_, err := r.(*storeTx).ExecContext(ctx, `DELETE FROM github_app_automation`)
+					_, err := r.(*storeTx).execContext(ctx, `DELETE FROM github_app_automation`)
 					location := in.Request.Source.Location
 					return IntakePolicyFacts{SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 				})

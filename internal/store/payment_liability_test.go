@@ -27,7 +27,7 @@ func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 	}
 	retainedBlob(t, s, "a", "a", StorageBytesPerGB, now)
 	retainedBill(t, s, lease)
-	warning := PaymentWarning{WarningID: "protected", PaymentIntent: event.PaymentID, Fingerprint: event.Fingerprint, Actionable: true}
+	warning := paymentWarning{WarningID: "protected", PaymentIntent: event.PaymentID, Fingerprint: event.Fingerprint, Actionable: true}
 	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, now); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestProtectedWarningCannotMoveACardToAnotherTeam(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('other','b','other-session','test','usd',100,1000000,1,2)`)
 	other := event
 	other.EventID, other.CheckoutID, other.PaymentID = "other-event", "other-session", "other-payment"
-	warning := PaymentWarning{WarningID: "other-warning", PaymentIntent: other.PaymentID, Fingerprint: other.Fingerprint, Actionable: true}
+	warning := paymentWarning{WarningID: "other-warning", PaymentIntent: other.PaymentID, Fingerprint: other.Fingerprint, Actionable: true}
 	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); err != nil {
 		t.Fatal(err)
 	}

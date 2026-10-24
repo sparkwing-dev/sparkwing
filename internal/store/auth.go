@@ -31,8 +31,8 @@ type Session struct {
 	LastUsedAt       *time.Time
 }
 
-// SessionIDLen is the raw byte length before base64.
-const SessionIDLen = 32
+// sessionIDLen is the raw byte length before base64.
+const sessionIDLen = 32
 
 const metaKeySessionCSRFKey = "session_csrf_key"
 
@@ -99,7 +99,7 @@ func (o *Operator) CreateCapabilitySession(ctx context.Context, prefix string, t
 		}
 		now := tx.now(ctx)
 		expires := now.Add(ttl)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(credential_epoch,hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at)
+		if _, err := tx.execContext(ctx, `INSERT INTO sessions(credential_epoch,hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at)
  VALUES (?,?,?,?, '',?,?,?,?)`, tx.store.credentialEpoch, sessionDigest(raw), c.Team, email, c.Subject.ID, prefix, now.UnixNano(), expires.UnixNano()); err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ func checkCapabilitySession(c capability.Capability) error {
 }
 
 func newSessionID() (string, error) {
-	b := make([]byte, SessionIDLen)
+	b := make([]byte, sessionIDLen)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
@@ -213,7 +213,7 @@ func (op *Operator) lookupSessionTx(ctx context.Context, tx *storeTx, rawSession
 			sess.ExpiresAt = renewed
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE sessions SET last_used_at=?,expires_at=? WHERE hash=? AND revoked_at IS NULL AND expires_at>?`, last.UnixNano(), sess.ExpiresAt.UnixNano(), digest, now.UnixNano())
+	result, err := tx.execContext(ctx, `UPDATE sessions SET last_used_at=?,expires_at=? WHERE hash=? AND revoked_at IS NULL AND expires_at>?`, last.UnixNano(), sess.ExpiresAt.UnixNano(), digest, now.UnixNano())
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}

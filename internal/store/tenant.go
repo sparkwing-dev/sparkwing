@@ -96,13 +96,13 @@ func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error) {
 }
 
 var (
-	tenantTables   = schemaTableNames(SchemaTenant)
-	operatorTables = schemaTableNames(SchemaOperator)
+	tenantTables   = schemaTableNames(schemaTenant)
+	operatorTables = schemaTableNames(schemaOperator)
 )
 
-func schemaTableNames(owner SchemaOwner) []string {
+func schemaTableNames(owner schemaOwner) []string {
 	var names []string
-	for _, table := range SchemaTables {
+	for _, table := range schemaTables {
 		if table.Owner == owner {
 			names = append(names, table.Name)
 		}
@@ -117,14 +117,14 @@ func recordDefaultTeamTx(ctx context.Context, tx *storeTx) error {
 
 func registerTeamTx(ctx context.Context, tx *storeTx, team Team) error {
 	now := tx.now(ctx).UnixNano()
-	_, err := tx.ExecContext(ctx,
+	_, err := tx.execContext(ctx,
 		`INSERT INTO teams (name, created_at, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT (name) DO NOTHING`,
 		string(team), now, now)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
+	_, err = tx.execContext(ctx, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
 	return err
 }
 

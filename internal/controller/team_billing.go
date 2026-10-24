@@ -188,8 +188,7 @@ type teamCheckoutReq struct {
 
 // Machine-readable codes on a refused credit purchase.
 const (
-	CheckoutAmountCode      = "amount_out_of_range"
-	CheckoutUnavailableCode = "checkout_unavailable"
+	checkoutUnavailableCode = "checkout_unavailable"
 )
 
 func (s *Server) handleTeamBillingCheckout(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

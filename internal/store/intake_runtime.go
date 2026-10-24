@@ -220,7 +220,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if input.Mode == runspec.IntakeExecute {
 		result.OwnerUnit = &runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(id)}}
 		if input.Options.Runner.Set && input.Options.Runner.Value.Kind == runspec.RunnerHere {
-			issued, err := tx.store.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: request.Authority, Unit: capability.UnitTrigger, UnitID: id, Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect, HereRunID: id}})
+			issued, err := tx.store.issue(ctx, tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: request.Authority, Unit: capability.UnitTrigger, UnitID: id, Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect, HereRunID: id}})
 			if err != nil {
 				return AdmissionResult{}, err
 			}
@@ -235,7 +235,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if _, err = intakeAuthorityTx(ctx, tx, team, request); err != nil {
 		return AdmissionResult{}, err
 	}
-	counter, err := tx.ExecContext(ctx, `UPDATE teams SET next_run_number=next_run_number+1 WHERE name=? AND next_run_number=?`, team, number)
+	counter, err := tx.execContext(ctx, `UPDATE teams SET next_run_number=next_run_number+1 WHERE name=? AND next_run_number=?`, team, number)
 	if err != nil {
 		return AdmissionResult{}, err
 	}
@@ -262,10 +262,10 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 			if snapshot.execution.Retry != nil {
 				return AdmissionResult{}, authorityError(apierr.Conflict, creditRefusal)
 			}
-			if _, err := transitionRunTx(ctx, tx, team, runstate.RunTransition{RunID: runspec.RunID(id), To: runstate.RunFailed, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: request.Authority}, Cause: runCreditRefused, Reason: FailureCreditsExhausted, MaskedError: "run did not start: " + creditRefusal}); err != nil {
+			if _, err := transitionRunTx(ctx, tx, team, runstate.RunTransition{RunID: runspec.RunID(id), To: runstate.RunFailed, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: request.Authority}, Cause: runCreditRefused, Reason: failureCreditsExhausted, MaskedError: "run did not start: " + creditRefusal}); err != nil {
 				return AdmissionResult{}, err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE triggers SET status='failed',finished_at=? WHERE team=? AND id=?`, now.UnixNano(), team, id); err != nil {
+			if _, err := tx.execContext(ctx, `UPDATE triggers SET status='failed',finished_at=? WHERE team=? AND id=?`, now.UnixNano(), team, id); err != nil {
 				return AdmissionResult{}, err
 			}
 			result.OwnerUnit = nil
@@ -515,7 +515,7 @@ func intakePoolsTx(ctx context.Context, tx *storeTx, team Team, input *runspec.R
 	if !provenance.Verified() && !provenance.TrustedDefault() {
 		return pools, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT pool,branch,source,route FROM pool_access_rules WHERE team=? AND repo_key=? ORDER BY pool,id`+tx.forShare(), team, fmt.Sprintf("gh:%d", provenance.RepositoryID()))
+	rows, err := tx.queryContext(ctx, `SELECT pool,branch,source,route FROM pool_access_rules WHERE team=? AND repo_key=? ORDER BY pool,id`+tx.forShare(), team, fmt.Sprintf("gh:%d", provenance.RepositoryID()))
 	if err != nil {
 		return nil, err
 	}

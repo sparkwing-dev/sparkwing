@@ -13,8 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// BillingWriter commits hosted-page reservations, refill settings and standing requests under current team authority.
-type BillingWriter interface {
+// billingWriter commits hosted-page reservations, refill settings and standing requests under current team authority.
+type billingWriter interface {
 	Team() store.Team
 	PrepareAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPageKind, int64, string) (capability.BillingPage, error)
 	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
@@ -23,10 +23,10 @@ type BillingWriter interface {
 	RequestAuthorizedStanding(context.Context, capability.Authorized, string, string) (store.StandingRequest, error)
 }
 
-var _ BillingWriter = (*store.Tenant)(nil)
+var _ billingWriter = (*store.Tenant)(nil)
 
-func (s *Server) billingWriter(r *http.Request, a capability.Authorized) (BillingWriter, error) {
-	return tenantPort[BillingWriter](r.Context(), s, store.Team(a.Target.Team))
+func (s *Server) billingWriter(r *http.Request, a capability.Authorized) (billingWriter, error) {
+	return tenantPort[billingWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
 func (s *Server) billingEndpoints() []controllerwire.Endpoint {
@@ -40,7 +40,7 @@ func (s *Server) billingEndpoints() []controllerwire.Endpoint {
 
 func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capability.Authorized, kind capability.BillingPageKind, amount int64) error {
 	if s.checkout == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "this controller opens no payment pages", Details: map[string]any{"reason": CheckoutUnavailableCode}}
+		return &apierr.Error{Code: apierr.Unavailable, Message: "this controller opens no payment pages", Details: map[string]any{"reason": checkoutUnavailableCode}}
 	}
 	key, err := controlIdempotencyKey(r)
 	if err != nil {
@@ -78,7 +78,7 @@ func billingMutationError(err error) error {
 	case errors.Is(err, store.ErrInvalidInput):
 		return invalidEngineBody(err.Error())
 	case errors.Is(err, store.ErrNoCard):
-		return &apierr.Error{Code: apierr.Conflict, Message: err.Error(), Details: map[string]any{"reason": NoCardCode}}
+		return &apierr.Error{Code: apierr.Conflict, Message: err.Error(), Details: map[string]any{"reason": noCardCode}}
 	case moneyInFlight(err):
 		return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
 	default:

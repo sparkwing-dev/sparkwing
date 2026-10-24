@@ -471,7 +471,7 @@ removed timer verbs. Windows supports stay and daemon schedules; install is
 refused. Kernel UID or client SID establishes local identity; absent evidence
 refuses access. Private files use fssecure on every supported OS.
 
-`wingd.APIConn.PeerIdentity()` carries `LocalPeerIdentity` from the verified
+`wingd.authenticatedAPIConn.PeerIdentity()` carries `LocalPeerIdentity` from the verified
 transport to the shared controller. The connection retains its own snapshot
 and returns a caller-owned UID copy. `LocalSubject` checks the peer against
 the controller account before the API listener yields the connection.
@@ -775,7 +775,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | Export | Purpose |
 | --- | --- |
 | [`DialSocket`](../../../internal/wingd/socket_transport.go) | Connects to the platform's private controller transport under the caller's context and timeout. |
-| [`ListenSocket`](../../../internal/wingd/socket_transport.go) | Binds that transport and yields only authenticated APIConn connections. |
+| [`ListenSocket`](../../../internal/wingd/socket_transport.go) | Binds that transport and yields only connections implementing `authenticatedAPIConn`. |
 | [`LocalActivity`](../../../internal/wingd/lifecycle.go) | LocalActivity counts live state, not historical runs or configured schedules. |
 | [`localhostwire.LocalPeerIdentity`](../../../internal/localhostwire/transport.go) | LocalPeerIdentity comes from the transport's kernel credentials, never request input. |
 | [`LocalSubject`](../../../internal/wingd/lifecycle.go) | LocalSubject checks the peer against the controller's OS account before minting local authority. |

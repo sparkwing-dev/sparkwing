@@ -43,7 +43,7 @@ func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonL
 		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 			return 0, err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT l.team,l.run_id,l.id FROM log_streams l WHERE `+abandonedLogStreamSQL+` ORDER BY l.team,l.run_id,l.id LIMIT ?`, append(abandonedLogStreamArgs(tx.now(ctx)), limit)...)
+		rows, err := tx.queryContext(ctx, `SELECT l.team,l.run_id,l.id FROM log_streams l WHERE `+abandonedLogStreamSQL+` ORDER BY l.team,l.run_id,l.id LIMIT ?`, append(abandonedLogStreamArgs(tx.now(ctx)), limit)...)
 		if err != nil {
 			return 0, err
 		}
@@ -87,7 +87,7 @@ func sealAbandonedLogStreamTx(ctx context.Context, tx *storeTx, lease SingletonL
 	}
 	now := tx.now(ctx)
 	args := append([]any{now.UnixNano(), now.UnixNano(), stream.team, stream.run, stream.id}, abandonedLogStreamArgs(now)...)
-	result, err := tx.ExecContext(ctx, `UPDATE log_streams AS l SET sealed_at=?,updated_at=?,completeness='incomplete',incomplete_reason='writer_lost' WHERE l.team=? AND l.run_id=? AND l.id=? AND `+abandonedLogStreamSQL, args...)
+	result, err := tx.execContext(ctx, `UPDATE log_streams AS l SET sealed_at=?,updated_at=?,completeness='incomplete',incomplete_reason='writer_lost' WHERE l.team=? AND l.run_id=? AND l.id=? AND `+abandonedLogStreamSQL, args...)
 	if err != nil {
 		return 0, err
 	}

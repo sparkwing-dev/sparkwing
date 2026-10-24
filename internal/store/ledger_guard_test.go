@@ -103,11 +103,11 @@ func TestAssembledLedgerWritesAreRefusedAtRunTime(t *testing.T) {
 					if err := s.inTx(t.Context(), func(tx *storeTx) error {
 						_, err := tx.Exec(q)
 						assertRefused(t, err)
-						_, err = tx.ExecContext(t.Context(), q)
+						_, err = tx.execContext(t.Context(), q)
 						assertRefused(t, err)
-						assertRefused(t, queryError(tx.Query(q)))
-						assertRefused(t, queryError(tx.QueryContext(t.Context(), q)))
-						assertRefused(t, tx.QueryRow(q).Scan(&team))
+						assertRefused(t, queryError(tx.query(q)))
+						assertRefused(t, queryError(tx.queryContext(t.Context(), q)))
+						assertRefused(t, tx.queryRow(q).Scan(&team))
 						assertRefused(t, tx.QueryRowContext(t.Context(), q).Scan(&team))
 						return nil
 					}); err != nil {

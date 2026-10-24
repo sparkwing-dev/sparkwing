@@ -57,18 +57,18 @@ func (s *Store) ensureCredentialEpoch(ctx context.Context, epoch string, prepare
 				return err
 			}
 			if string(previous) != epoch {
-				if _, err := tx.ExecContext(ctx, `UPDATE settings SET value=? WHERE key=?`, []byte(""), bootstrapUsedKey); err != nil {
+				if _, err := tx.execContext(ctx, `UPDATE settings SET value=? WHERE key=?`, []byte(""), bootstrapUsedKey); err != nil {
 					return err
 				}
 			}
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('credential_epoch',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, []byte(epoch))
+		_, err = tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('credential_epoch',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, []byte(epoch))
 		return err
 	})
 }
 
 func (o *Operator) cancelRestoredSchedulesTx(ctx context.Context, tx *storeTx) error {
-	rows, err := tx.QueryContext(ctx, `SELECT team,id FROM runs WHERE trigger_source=? AND finished_at IS NULL ORDER BY team,id`, runspec.OriginSchedule)
+	rows, err := tx.queryContext(ctx, `SELECT team,id FROM runs WHERE trigger_source=? AND finished_at IS NULL ORDER BY team,id`, runspec.OriginSchedule)
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func writeRestoreStateTx(ctx context.Context, tx *storeTx, state RestoreState) e
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, restoreStateKey, body)
+	_, err = tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, restoreStateKey, body)
 	return err
 }
 
@@ -144,7 +144,7 @@ func (o *Operator) AcknowledgeRestore(ctx context.Context) error {
 			return err
 		}
 		now := tx.now(ctx).UnixNano()
-		if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET cursor_at=`+o.s.greatest()+`(cursor_at,?),next_due_at=NULL,updated_at=?`, now, now); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE cron_schedules SET cursor_at=`+o.s.greatest()+`(cursor_at,?),next_due_at=NULL,updated_at=?`, now, now); err != nil {
 			return err
 		}
 		state.Pending, state.AcknowledgedAt = false, now

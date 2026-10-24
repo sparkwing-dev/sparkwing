@@ -278,7 +278,7 @@ func (op *Operator) discoverAccountTeams(ctx context.Context, tx *storeTx, set l
 		return set
 	}
 	set.add(lockAccount, true, account)
-	teams, err := tx.QueryContext(ctx, `SELECT team FROM memberships WHERE account_id=?`, account)
+	teams, err := tx.queryContext(ctx, `SELECT team FROM memberships WHERE account_id=?`, account)
 	if err != nil {
 		set.err = err
 		return set
@@ -303,7 +303,7 @@ func (op *Operator) discoverAccountSessionLocks(ctx context.Context, tx *storeTx
 	if set.err != nil {
 		return set
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT hash,COALESCE(team,'') FROM sessions WHERE account_id=?`, account)
+	rows, err := tx.queryContext(ctx, `SELECT hash,COALESCE(team,'') FROM sessions WHERE account_id=?`, account)
 	if err != nil {
 		set.err = err
 		return set

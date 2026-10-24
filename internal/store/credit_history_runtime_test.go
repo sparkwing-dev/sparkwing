@@ -21,11 +21,11 @@ func TestStoreDataCreditHistoryPreservesTenantAndAwardIdentity(t *testing.T) {
 			rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)", team)
 			var wantGrants []CreditGrant
 			var wantCharges []CreditCharge
-			for row, kind := range []string{CreditChargeReservation, CreditChargeUsage, CreditChargeRefund, CreditChargeStorage} {
+			for row, kind := range []string{creditChargeReservation, creditChargeUsage, creditChargeRefund, CreditChargeStorage} {
 				id := fmt.Sprintf("%04d_%d_%d", iteration, owner, row)
 				at := time.Unix(0, int64(row/2+1)).UTC()
 				charge := CreditCharge{ID: id, Team: team, RunID: "retained-run", NodeID: "job", TokenPrefix: "award_" + id, Principal: string(team), Kind: kind, Seconds: int64(row + 1), AmountMicro: int64(amount) + int64(row+1), CPUClassCores: 4, RateMicroPerSecond: 17, ChargedAt: at}
-				if kind == CreditChargeRefund {
+				if kind == creditChargeRefund {
 					charge.AmountMicro, charge.Seconds = -charge.AmountMicro, -charge.Seconds
 				}
 				if kind == CreditChargeStorage {
@@ -36,8 +36,8 @@ func TestStoreDataCreditHistoryPreservesTenantAndAwardIdentity(t *testing.T) {
 				if row == 3 {
 					continue
 				}
-				grant := CreditGrant{ID: "grant_" + id, Team: team, Kind: []string{CreditGrantFree, CreditGrantPaid, CreditGrantReversal}[row], AmountMicro: charge.AmountMicro, Reference: "ref_" + id, CreatedBy: "console", CreatedAt: at}
-				if grant.Kind == CreditGrantReversal {
+				grant := CreditGrant{ID: "grant_" + id, Team: team, Kind: []string{CreditGrantFree, CreditGrantPaid, creditGrantReversal}[row], AmountMicro: charge.AmountMicro, Reference: "ref_" + id, CreatedBy: "console", CreatedAt: at}
+				if grant.Kind == creditGrantReversal {
 					grant.Reverses = wantGrants[1].Reference
 				}
 				rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,reference,reverses,created_by,created_at) VALUES (?,?,?,?,?,?,?,?)`, grant.ID, grant.Team, grant.Kind, grant.AmountMicro, grant.Reference, grant.Reverses, grant.CreatedBy, at.UnixNano())

@@ -90,7 +90,7 @@ func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease,
 
 func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team, rate, free int64) (*CreditCharge, error) {
 	if rate == 0 {
-		_, err := tx.ExecContext(ctx, "UPDATE team_storage SET storage_charged_through=0 WHERE team=? AND store IN ('cache','logs') AND storage_charged_through<>0", team)
+		_, err := tx.execContext(ctx, "UPDATE team_storage SET storage_charged_through=0 WHERE team=? AND store IN ('cache','logs') AND storage_charged_through<>0", team)
 		if err != nil {
 			return nil, err
 		}
@@ -143,7 +143,7 @@ func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team, rate, fre
 func lockRetainedWatermarksTx(ctx context.Context, tx *storeTx, team Team) (int64, error) {
 	var through int64
 	for i, kind := range []StorageKind{StorageCache, StorageLogs} {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO team_storage(team,store,updated_at) VALUES (?,?,?) ON CONFLICT(team,store) DO NOTHING", team, kind, tx.now(ctx).UnixNano()); err != nil {
+		if _, err := tx.execContext(ctx, "INSERT INTO team_storage(team,store,updated_at) VALUES (?,?,?) ON CONFLICT(team,store) DO NOTHING", team, kind, tx.now(ctx).UnixNano()); err != nil {
 			return 0, err
 		}
 		var stamp int64
@@ -160,7 +160,7 @@ func lockRetainedWatermarksTx(ctx context.Context, tx *storeTx, team Team) (int6
 
 func stampRetainedWatermarksTx(ctx context.Context, tx *storeTx, team Team, through int64) error {
 	for _, kind := range []StorageKind{StorageCache, StorageLogs} {
-		result, err := tx.ExecContext(ctx, "UPDATE team_storage SET storage_charged_through=? WHERE team=? AND store=?", through, team, kind)
+		result, err := tx.execContext(ctx, "UPDATE team_storage SET storage_charged_through=? WHERE team=? AND store=?", through, team, kind)
 		if err != nil {
 			return err
 		}
@@ -177,7 +177,7 @@ type retainedStorageInventory struct {
 
 func retainedStorageSampleTx(ctx context.Context, tx *storeTx, team Team) (out retainedStorageInventory, err error) {
 	out.oldest = tx.now(ctx).UnixNano()
-	rows, err := tx.QueryContext(ctx, "SELECT size,created_at,0 FROM blobs WHERE team=? UNION ALL SELECT stored_bytes,created_at,1 FROM log_streams WHERE team=?", team, team)
+	rows, err := tx.queryContext(ctx, "SELECT size,created_at,0 FROM blobs WHERE team=? UNION ALL SELECT stored_bytes,created_at,1 FROM log_streams WHERE team=?", team, team)
 	if err != nil {
 		return out, err
 	}

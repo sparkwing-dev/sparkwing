@@ -24,7 +24,7 @@ var ErrGitHubAppAutomationRevoked = errors.New("store: repository automation con
 
 func (t *Tenant) checkGitHubAppAutomationTx(ctx context.Context, tx *storeTx, grant GitHubAppAutomation) error {
 	// safety: writing both authority rows serializes admission with suspension, unbinding and consent deletion.
-	res, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET updated_at = updated_at
+	res, err := tx.execContext(ctx, `UPDATE github_app_installations SET updated_at = updated_at
 	    WHERE team = ? AND installation_id = ? AND suspended = 0`, string(t.team), grant.InstallationID)
 	if err != nil {
 		return err
@@ -34,7 +34,7 @@ func (t *Tenant) checkGitHubAppAutomationTx(ctx context.Context, tx *storeTx, gr
 	} else if n != 1 {
 		return ErrGitHubAppAutomationRevoked
 	}
-	res, err = tx.ExecContext(ctx, `UPDATE github_app_automation SET enabled_at = enabled_at
+	res, err = tx.execContext(ctx, `UPDATE github_app_automation SET enabled_at = enabled_at
 	    WHERE team = ? AND installation_id = ? AND repository_id = ? AND enabled_at = ?`,
 		string(t.team), grant.InstallationID, grant.RepositoryID, grant.EnabledAt.UnixNano())
 	if err != nil {
@@ -57,7 +57,7 @@ func (t *Tenant) putGitHubAppAutomationTx(ctx context.Context, tx *storeTx, a Gi
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO github_app_automation
+	result, err := tx.execContext(ctx, `INSERT INTO github_app_automation
 	    (team, repo_key, repository_id, repository, installation_id, enabled_by, enabled_at, runner)
 	    SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS
 	    (SELECT 1 FROM github_app_installations WHERE team = ? AND installation_id = ? AND suspended = 0)
@@ -123,7 +123,7 @@ func (t *Tenant) withdrawGitHubAppAutomationTx(ctx context.Context, tx *storeTx,
 		if err := bumpGitHubPublicationTx(ctx, tx, t.team, repository); err != nil {
 			return struct{}{}, err
 		}
-		_, err := tx.ExecContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=? AND repository_id=?`, t.team, installation, repository)
+		_, err := tx.execContext(ctx, `DELETE FROM github_app_automation WHERE team=? AND installation_id=? AND repository_id=?`, t.team, installation, repository)
 		return struct{}{}, err
 	})
 	return err

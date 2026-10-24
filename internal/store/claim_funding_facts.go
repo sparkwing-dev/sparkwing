@@ -18,7 +18,7 @@ func (o *Operator) claimOverflowFactsTx(ctx context.Context, tx *storeTx, team s
 	if !cloud {
 		query += ` AND team=` + q.param(team)
 	}
-	rows, err := tx.QueryContext(ctx, query+` ORDER BY team,created_principal`, q.args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY team,created_principal`, q.args...)
 	if err != nil {
 		return nil, err
 	}

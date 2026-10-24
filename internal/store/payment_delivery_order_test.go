@@ -58,7 +58,7 @@ func TestPaymentConsequencesSurviveEveryDeliveryOrder(t *testing.T) {
 						t.Fatal(err)
 					}
 					refund := providerPaymentEvent(f.now, capability.PaymentRefund)
-					refund.Status, refund.AmountMinor = CardRefundSucceeded, f.pay.AmountMinor
+					refund.Status, refund.AmountMinor = cardRefundSucceeded, f.pay.AmountMinor
 					warning := providerPaymentEvent(f.now, capability.PaymentWarningEvent)
 					warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
 					events := map[string]capability.PaymentEvent{"pay": f.pay, "refund": refund, "warning": warning}
@@ -100,7 +100,7 @@ func TestAWarningReplaysAfterItsRefundCompleted(t *testing.T) {
 	warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
 	warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
 	refund := providerPaymentEvent(now, capability.PaymentRefund)
-	refund.Status, refund.AmountMinor = CardRefundSucceeded, pay.AmountMinor
+	refund.Status, refund.AmountMinor = cardRefundSucceeded, pay.AmountMinor
 	for _, e := range []capability.PaymentEvent{pay, warning, refund} {
 		if _, err := s.settlePaymentFacts(t.Context(), e); err != nil {
 			t.Fatal(err)

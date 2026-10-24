@@ -59,7 +59,7 @@ func unavailableRunner(err error) bool {
 
 func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]string, error) {
 	now := tx.now(ctx)
-	rows, err := tx.QueryContext(ctx, `SELECT c.prefix FROM capabilities c JOIN runs r ON r.team=c.team AND r.id=c.bind_run
+	rows, err := tx.queryContext(ctx, `SELECT c.prefix FROM capabilities c JOIN runs r ON r.team=c.team AND r.id=c.bind_run
 	WHERE c.team=? AND c.audience='controller' AND c.issuance IN ('award','exchange') AND r.finished_at IS NULL AND r.status IN ('pending','running')
  AND `+liveCredentialSQL("c.")+` AND (
  EXISTS (SELECT 1 FROM nodes n WHERE c.unit_kind='node' AND n.team=c.team AND n.run_id=c.bind_run AND n.node_id=c.bind_node
@@ -97,7 +97,7 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 			key = parent.Prefix
 			break
 		}
-		if c.Billing.ExecutorClass == TierHere && parent.Purpose == capability.PurposeHere && parent.Billing != nil {
+		if c.Billing.ExecutorClass == tierHere && parent.Purpose == capability.PurposeHere && parent.Billing != nil {
 			key = parent.Billing.ReservationID
 			break
 		}
@@ -144,7 +144,7 @@ func observeUnitTx(ctx context.Context, tx *storeTx, prefix string) error {
 			continue
 		}
 		c := ancestor.principal.Capability
-		result, err := tx.ExecContext(ctx, `UPDATE capabilities SET last_used_at=? WHERE prefix=? AND COALESCE(team,'')=?`, tx.now(ctx).UnixNano(), c.Prefix, c.Team)
+		result, err := tx.execContext(ctx, `UPDATE capabilities SET last_used_at=? WHERE prefix=? AND COALESCE(team,'')=?`, tx.now(ctx).UnixNano(), c.Prefix, c.Team)
 		if err != nil {
 			return err
 		}
