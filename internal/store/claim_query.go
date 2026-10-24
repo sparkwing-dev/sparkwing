@@ -594,11 +594,8 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	}
 	runScopeCTE := ""
 	current := facts[0]
-	if current.BindRun != "" {
-		q.runScope = `SELECT br.id FROM runs br WHERE br.team=` + q.param(current.Team) + ` AND br.id=` + q.param(current.BindRun)
-	} else if len(current.Pushes) > 0 {
-		p := current.Pushes[0]
-		q.runScope = `SELECT br.id FROM runs br WHERE br.team=` + q.param(current.Team) + ` AND br.repo_key=` + q.param(p.RepositoryKey) + ` AND br.provenance_sha=` + q.param(p.SHA) + ` AND br.provenance_ref=` + q.param(p.Ref)
+	if scope := q.boundRunScope(current, demand.Target); scope != "" {
+		q.runScope = `SELECT br.id FROM runs br WHERE ` + scope
 	}
 	if q.runScope != "" {
 		runScopeCTE = `bound_runs AS MATERIALIZED (` + q.runScope + `),`
@@ -751,7 +748,7 @@ func claimInputsTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []
 	if err != nil {
 		return err
 	}
-	q.overflow, err = tx.operator.claimOverflowFactsTx(ctx, tx, scopeTeam, scopeTeam == "")
+	q.overflow, err = tx.operator.claimOverflowFactsTx(ctx, tx, scopeTeam, current, demand.Target)
 	if err != nil {
 		return err
 	}

@@ -462,6 +462,11 @@ trigger request. The unused reservation expires at its original claim_by.
 Target.ClaimKinds carries the requested set to BindClaimSelection, and ClaimUnit
 repeats every kind/grant check in its transaction.
 
+Named, here and run-bound claims read overflow funding inputs only for their run.
+Push-bound Actions claims use the repository, sealed SHA and ref index for both
+selection and funding inputs. These lookups share one scope builder, so funding
+preparation cannot scan unrelated runs.
+
 Mask registration first checks the accepted job/step/group/approval identifiers
 and subsequent generated declarations. A collision returns secret_in_identifier
 with the field path, never the identifier or value, before acknowledging success.

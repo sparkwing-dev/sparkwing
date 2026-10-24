@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func countClaimNodeVisits(t *testing.T, s *Store, visit func(string)) {
+func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string)) {
 	t.Helper()
 	if s.dialect != DialectSQLite {
 		t.Skip("readiness predicate instrumentation requires SQLite")
@@ -26,12 +26,22 @@ func countClaimNodeVisits(t *testing.T, s *Store, visit func(string)) {
 	rewriteSchemaExec(t, s.db, `VACUUM INTO ?`, path)
 	probe := fmt.Sprintf("claim_search_probe_%x", time.Now().UnixNano())
 	if err := sqlite.RegisterScalarFunction(probe, 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
-		visit(args[0].(string))
+		nodeVisit(args[0].(string))
 		return int64(1), nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sql.Register(probe, &claimBenchmarkDriver{Driver: s.db.Driver(), probe: probe, trace: &claimBenchmarkTrace{examine: true}})
+	var runProbe string
+	if runVisit != nil {
+		runProbe = probe + "_run"
+		if err := sqlite.RegisterScalarFunction(runProbe, 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+			runVisit(args[0].(string))
+			return int64(1), nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql.Register(probe, &claimBenchmarkDriver{Driver: s.db.Driver(), probe: probe, runProbe: runProbe, trace: &claimBenchmarkTrace{examine: true}})
 	db, err := sql.Open(probe, sqliteDSN(path))
 	if err != nil {
 		t.Fatal(err)
@@ -68,12 +78,12 @@ func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
 			}
 			rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT team,run_id,'next','pending',2,?,execution_json,claim_requirements,claim_context FROM nodes WHERE team='b' AND node_id='job'`, []byte(`{"id":"next"}`))
 			var capped, total atomic.Int64
-			countClaimNodeVisits(t, s, func(id string) {
+			countClaimVisits(t, s, func(id string) {
 				total.Add(1)
 				if strings.HasPrefix(id, "capped-") {
 					capped.Add(1)
 				}
-			})
+			}, nil)
 			for poll := range 2 {
 				capped.Store(0)
 				total.Store(0)
@@ -123,11 +133,15 @@ func TestClaimSearchActionsFindsBoundPushBehindOlderRuns(t *testing.T) {
 		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,?,?,'pending',?,spec_json,execution_json FROM nodes WHERE run_id='run'`, run, node, i+1)
 		indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)})
 	}
-	var older, total atomic.Int64
-	countClaimNodeVisits(t, s, func(id string) {
+	var older, total, unrelatedRuns atomic.Int64
+	countClaimVisits(t, s, func(id string) {
 		total.Add(1)
 		if strings.HasPrefix(id, "older-") {
 			older.Add(1)
+		}
+	}, func(id string) {
+		if id != "push-8" {
+			unrelatedRuns.Add(1)
 		}
 	})
 	demand.CapabilityPrefix, demand.Target = actions.Prefix, nil
@@ -142,6 +156,9 @@ func TestClaimSearchActionsFindsBoundPushBehindOlderRuns(t *testing.T) {
 	if got := total.Load(); got > 2 {
 		t.Errorf("examined %d nodes; want at most the selected indexed node and award recheck", got)
 	}
+	if got := unrelatedRuns.Load(); got != 0 {
+		t.Errorf("examined %d unrelated runs preparing funding; want only the bound push", got)
+	}
 }
 
 func TestClaimSearchPreservesTeamFairShareBeforeArrival(t *testing.T) {
@@ -149,7 +166,7 @@ func TestClaimSearchPreservesTeamFairShareBeforeArrival(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=100 WHERE team='b'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT team,run_id,'next','pending',ready_at+1,?,execution_json,claim_requirements,claim_context FROM nodes`, []byte(`{"id":"next"}`))
 	var examined atomic.Int64
-	countClaimNodeVisits(t, s, func(string) { examined.Add(1) })
+	countClaimVisits(t, s, func(string) { examined.Add(1) }, nil)
 	var visits [4]int64
 	for poll, team := range []Team{"a", "b", "a", "b"} {
 		examined.Store(0)
@@ -173,11 +190,11 @@ func TestClaimSearchDoesNotExamineLaterFairShareTeams(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `UPDATE teams SET claim_award_ordinal=CASE name WHEN 'a' THEN 1 ELSE 2 END`)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET node_id='later-team' WHERE team='b'`)
 	var later atomic.Int64
-	countClaimNodeVisits(t, s, func(id string) {
+	countClaimVisits(t, s, func(id string) {
 		if id == "later-team" {
 			later.Add(1)
 		}
-	})
+	}, nil)
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil || claim.Team != "a" {
 		t.Fatalf("claim=%+v error=%v; want team a", claim, err)
@@ -196,36 +213,69 @@ func TestClaimSearchTiedTeamsKeepArrivalOrder(t *testing.T) {
 	}
 }
 
-func TestClaimSearchRunHostDoesNotExamineOtherRuns(t *testing.T) {
-	s, demand := unitClaimFixture(t)
-	host, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: demand.CapabilityPrefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=100`)
-	for i := range 8 {
-		run, node := fmt.Sprintf("older-run-%d", i), fmt.Sprintf("older-%d", i)
-		rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,repo_identity,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,?,?,pipeline,status,request_json,'request',1,repo_key,repo_display,repo_identity,dispatch,intake_mode,allowed_pools,created_principal,?,log_retention_class,log_retention_days FROM runs WHERE id='run'`, run, i+2, i+1)
-		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,?,?,'pending',?,spec_json,execution_json FROM nodes WHERE run_id='run'`, run, node, i+1)
-		indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)})
-	}
-	var older, total atomic.Int64
-	countClaimNodeVisits(t, s, func(id string) {
-		total.Add(1)
-		if strings.HasPrefix(id, "older-") {
-			older.Add(1)
-		}
-	})
-	demand.CapabilityPrefix, demand.Target = host.Award.CapabilityPrefix, nil
-	demand.Kinds = []capability.UnitKind{capability.UnitNode}
-	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
-	if err != nil || claim.RunID != "run" || claim.NodeID != "job" {
-		t.Errorf("first poll did not reach the host's run behind eight older runs: %+v %v", claim, err)
-	}
-	if got := older.Load(); got != 0 {
-		t.Errorf("examined %d nodes from other runs; want direct bound-run lookup", got)
-	}
-	if got := total.Load(); got > 2 {
-		t.Errorf("examined %d nodes; want at most the selected indexed node and award recheck", got)
+func TestClaimSearchNarrowRunDoesNotExamineOtherRuns(t *testing.T) {
+	for _, claimant := range []string{"host", "named", "here"} {
+		t.Run(claimant, func(t *testing.T) {
+			s, demand := unitClaimFixture(t)
+			switch claimant {
+			case "host":
+				host, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: demand.CapabilityPrefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				demand.CapabilityPrefix, demand.Target = host.Award.CapabilityPrefix, nil
+			case "here":
+				root := authorityRoot("requester", "a")
+				root.Grants = []capability.Grant{capability.RunsWrite, capability.TriggersClaim}
+				authorityPersist(t, s, root)
+				rewriteSchemaExec(t, s.db, `UPDATE triggers SET created_at=?`, s.now().UnixNano())
+				var here capability.Issued
+				if err := s.inTx(t.Context(), func(tx *storeTx) error {
+					var err error
+					here, err = s.issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", HereRunID: "run", Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect}})
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				demand.CapabilityPrefix = here.Capability.Prefix
+				demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=100`)
+			for i := range 8 {
+				run, node := fmt.Sprintf("older-run-%d", i), fmt.Sprintf("older-%d", i)
+				rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,repo_identity,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,?,?,pipeline,status,request_json,'request',1,repo_key,repo_display,repo_identity,dispatch,intake_mode,allowed_pools,created_principal,?,log_retention_class,log_retention_days FROM runs WHERE id='run'`, run, i+2, i+1)
+				rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,?,?,'pending',?,spec_json,execution_json FROM nodes WHERE run_id='run'`, run, node, i+1)
+				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)})
+			}
+			var older, total, unrelatedRuns atomic.Int64
+			countClaimVisits(t, s, func(id string) {
+				total.Add(1)
+				if strings.HasPrefix(id, "older-") {
+					older.Add(1)
+				}
+			}, func(id string) {
+				if id != "run" {
+					unrelatedRuns.Add(1)
+				}
+			})
+			demand.Kinds = []capability.UnitKind{capability.UnitNode}
+			wantNode := "job"
+			if claimant == "here" {
+				demand.Kinds, wantNode = []capability.UnitKind{capability.UnitTrigger}, ""
+			}
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			if err != nil || claim.RunID != "run" || claim.NodeID != wantNode {
+				t.Errorf("first poll did not reach the selected run behind eight older runs: %+v %v", claim, err)
+			}
+			if got := older.Load(); got != 0 {
+				t.Errorf("examined %d nodes from other runs; want direct bound-run lookup", got)
+			}
+			if got := total.Load(); got > 2 {
+				t.Errorf("examined %d nodes; want at most the selected indexed node and award recheck", got)
+			}
+			if got := unrelatedRuns.Load(); got != 0 {
+				t.Errorf("examined %d unrelated runs preparing funding; want only the bound run", got)
+			}
+		})
 	}
 }

@@ -49,6 +49,25 @@ func compareInt64(a, b int64) int {
 	return 0
 }
 
+func (q *claimSQL) boundRunScope(current claimFacts, target *UnitRef) string {
+	run := current.BindRun
+	if target != nil {
+		run = string(target.RunID)
+	}
+	if run != "" {
+		query := `br.id=` + q.param(run)
+		if current.Cloud == 0 {
+			query += ` AND br.team=` + q.param(current.Team)
+		}
+		return query
+	}
+	if len(current.Pushes) > 0 {
+		p := current.Pushes[0]
+		return `br.team=` + q.param(current.Team) + ` AND br.repo_key=` + q.param(p.RepositoryKey) + ` AND br.provenance_sha=` + q.param(p.SHA) + ` AND br.provenance_ref=` + q.param(p.Ref)
+	}
+	return ""
+}
+
 func (q *claimSQL) sourceScope(alias string, kind capability.UnitKind) string {
 	var conditions []string
 	if q.heads != nil {
