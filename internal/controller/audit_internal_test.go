@@ -118,6 +118,11 @@ func TestAuditFormatsCredentialsInEveryField(t *testing.T) {
 	for _, prefix := range capability.CredentialPrefixes() {
 		credential := prefix + strings.Repeat("x", 43)
 		value := strings.Repeat("a", 110) + credential + "/" + strings.Repeat("z", 1<<20)
+		// Synthetic routes must not leave oversized series in the shared registry.
+		t.Cleanup(func() {
+			httpRequestsTotal.DeleteLabelValues(value, http.MethodDelete, "200")
+			httpRequestDurationSeconds.DeleteLabelValues(value, http.MethodDelete)
+		})
 		h, logs := auditHarness(t, value, func(w http.ResponseWriter, r *http.Request) {
 			notePolicyPrincipal(r.Context(), capability.Principal{Capability: capability.Capability{Team: value, Subject: capability.Subject{Kind: capability.SubjectKind(value), ID: value}}})
 			noteAuditTarget(r.Context(), "machine_id", value)
