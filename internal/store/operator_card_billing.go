@@ -54,6 +54,9 @@ func (o *Operator) MarkCardRefundMade(ctx context.Context, team Team, key, refun
 		if err := lockPaymentTx(ctx, tx, mode, paymentIntent); err != nil {
 			return err
 		}
+		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
+			return err
+		}
 		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 			return err
 		}

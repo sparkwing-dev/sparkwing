@@ -185,6 +185,9 @@ func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capa
 		return PaymentSettlement{}, err
 	}
 	if team != "" {
+		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
+			return PaymentSettlement{}, err
+		}
 		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 			return PaymentSettlement{}, err
 		}
@@ -252,6 +255,25 @@ func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capa
 		}
 	}
 	return result, nil
+}
+
+func lockPaymentTeamTx(ctx context.Context, tx *storeTx, team Team) error {
+	lockErr := acquireLockSet(ctx, tx, func() lockSet {
+		var set lockSet
+		set.add(lockTeam, false, string(team))
+		return set
+	})
+	if lockErr != nil && !errors.Is(lockErr, ErrUnknownTeam) {
+		return lockErr
+	}
+	var deleting int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug=?`, string(team)).Scan(&deleting); err != nil {
+		return err
+	}
+	if deleting != 0 {
+		return ErrTeamBeingDeleted
+	}
+	return lockErr
 }
 
 func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
@@ -343,7 +365,7 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 
 func (op *Operator) bindCompletedPageTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
 	var team, customer string
-	err := tx.QueryRowContext(ctx, `SELECT team,customer_id FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='setup_session'`+tx.forShare(), e.Mode, e.ObjectID).Scan(&team, &customer)
+	err := tx.QueryRowContext(ctx, `SELECT team,customer_id FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='setup_session'`, e.Mode, e.ObjectID).Scan(&team, &customer)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PaymentSettlement{}, authorityError(apierr.NotFound, "committed payment page is unavailable")
 	}
@@ -352,6 +374,12 @@ func (op *Operator) bindCompletedPageTx(ctx context.Context, tx *storeTx, e capa
 	}
 	if customer != e.CustomerID {
 		return PaymentSettlement{}, authorityError(apierr.Conflict, "completed page names another customer")
+	}
+	if err := (&Tenant{s: tx.store, team: Team(team)}).lockTeamTx(ctx, tx); err != nil {
+		return PaymentSettlement{}, err
+	}
+	if err := lockPaymentTeamTx(ctx, tx, Team(team)); err != nil {
+		return PaymentSettlement{}, err
 	}
 	result := PaymentSettlement{Team: Team(team)}
 	var bound string

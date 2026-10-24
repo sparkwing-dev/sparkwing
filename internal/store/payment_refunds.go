@@ -145,6 +145,9 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 	if err != nil {
 		return err
 	}
+	if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
+		return err
+	}
 	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 		return err
 	}

@@ -17,7 +17,7 @@ func TestTenantPurgeRemovesLabeledWorkBeforeItsRequirements(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AsOperator().deleteTenantRows(t.Context(), "a"); err != nil {
+	if err := s.inTx(t.Context(), func(tx *storeTx) error { return deleteTenantRowsTx(t.Context(), tx, "a") }); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"runs", "nodes", "triggers", "claim_requirements", "claim_requirement_terms"} {

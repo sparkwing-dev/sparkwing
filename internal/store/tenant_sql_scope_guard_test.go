@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).SetPaymentMode":                 "the store-wide activity check fixes one payment mode for every tenant ledger",
 	"(*Operator).claimObserversTx":               "claim placement discovers live claimant observations across teams, then checks every pair against authenticated scope",
 	"(*Operator).claimOverflowFactsTx":           "deployment claims gather each live team's overflow policy before the shared eligibility predicate filters pairs",
 	"(*Operator).claimTargetTeamTx":              "only the Cloud launcher resolves a globally named run; other claimants query their authenticated team before kind or trust diagnostics",

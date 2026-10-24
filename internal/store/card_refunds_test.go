@@ -239,12 +239,17 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 		case 1:
 			rewriteSchemaExec(t, s.db, "UPDATE payment_refunds SET payment_intent=?", foreign)
 		case 2:
-			if err := s.AsOperator().SetPaymentMode(ctx, capability.PaymentLive); err != nil {
-				t.Fatal(err)
+			if err := s.AsOperator().SetPaymentMode(ctx, capability.PaymentLive); err == nil {
+				t.Fatal("changed payment mode after refund activity")
 			}
+			event.Mode = capability.PaymentLive
+			if _, err := s.settlePaymentFacts(ctx, event); err == nil {
+				t.Fatal("accepted another mode's refund")
+			}
+			event.Mode = capability.PaymentTest
 		}
 		err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "bound-refund")
-		if seed%4 == 1 || seed%4 == 2 {
+		if seed%4 == 1 {
 			if err == nil {
 				t.Fatal("refund response accepted another payment association or provider mode")
 			}
@@ -259,9 +264,9 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 		switch {
 		case event.Status == cardRefundSucceeded:
 			return status == cardRefundSucceeded
-		case seed%4 == 1 || seed%4 == 2:
+		case seed%4 == 1:
 			return status == cardRefundDue && id == "" && attempts == 0
-		case seed%4 == 3:
+		case seed%4 == 2 || seed%4 == 3:
 			return status == cardRefundDue && id == "bound-refund" && attempts == 1
 		}
 		return status == cardRefundPending && id == "bound-refund" && attempts == 0

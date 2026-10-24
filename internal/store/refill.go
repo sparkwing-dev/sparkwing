@@ -106,10 +106,6 @@ type Refill struct {
 
 func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing BillingStanding, now time.Time) (RefillState, error) {
 	var s RefillState
-	mode, err := ledgerPaymentModeTx(ctx, q)
-	if err != nil {
-		return s, err
-	}
 	var enabled int64
 	if err := q.QueryRowContext(ctx, `SELECT refill_enabled, refill_threshold_cents, refill_amount_cents,
 	    refill_week_limit_cents, refill_month_limit_cents FROM teams WHERE name = ?`,
@@ -119,8 +115,8 @@ func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing Billin
 	s.Enabled = enabled == 1
 	s.Caps = refillCaps(standing, now)
 	var failedAt int64
-	err = q.QueryRowContext(ctx, `SELECT closed_at, failure FROM credit_checkouts
-	    WHERE team = ? AND payment_mode = ? AND refill_blocked = 1 ORDER BY closed_at DESC LIMIT 1`, string(team), mode).Scan(&failedAt, &s.Failure)
+	err := q.QueryRowContext(ctx, `SELECT closed_at, failure FROM credit_checkouts
+	    WHERE team = ? AND refill_blocked = 1 ORDER BY closed_at DESC LIMIT 1`, string(team)).Scan(&failedAt, &s.Failure)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return s, err
 	}
@@ -136,9 +132,9 @@ func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing Billin
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillDay)+` THEN 1 ELSE 0 END), 0),
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillWeek)+` THEN amount_minor ELSE 0 END), 0),
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillMonth)+` THEN amount_minor ELSE 0 END), 0)
-	  FROM credit_checkouts WHERE team = ? AND payment_mode = ? AND kind = ? AND (COALESCE(closed_at, opened_at) >= ? OR closed_at IS NULL)
+	  FROM credit_checkouts WHERE team = ? AND kind = ? AND (COALESCE(closed_at, opened_at) >= ? OR closed_at IS NULL)
 	    AND NOT ((payment_id = '' OR failure = 'canceled') AND closed_at IS NOT NULL)`,
-		string(team), mode, checkoutKindRefill, now.Add(-refillMonth).UnixNano()).Scan(&open, &s.DayCount, &s.WeekCents, &s.MonthCents); err != nil {
+		string(team), checkoutKindRefill, now.Add(-refillMonth).UnixNano()).Scan(&open, &s.DayCount, &s.WeekCents, &s.MonthCents); err != nil {
 		return s, err
 	}
 	s.Open = open > 0
@@ -356,6 +352,9 @@ func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, pa
 			return err
 		}
 		if err := lockPaymentTx(ctx, tx, mode, paymentIntent); err != nil {
+			return err
+		}
+		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
 			return err
 		}
 		if _, err := lockLedgerTx(ctx, tx, team); err != nil {

@@ -13,17 +13,39 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// SetPaymentMode configures the provider mode used for new reservations and settlement.
+// SetPaymentMode configures the provider mode. Switching modes requires a store without ledger activity.
 func (o *Operator) SetPaymentMode(ctx context.Context, mode capability.PaymentMode) error {
 	if mode != capability.PaymentTest && mode != capability.PaymentLive {
 		return ErrInvalidInput
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
+		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
+			return err
+		}
+		var encoded []byte
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='payment_mode'`+tx.forUpdate()).Scan(&encoded); err != nil {
+			return err
+		}
+		var current capability.PaymentMode
+		if err := json.Unmarshal(encoded, &current); err != nil {
+			return err
+		}
+		if current == mode {
+			return nil
+		}
+		var activity bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM credit_grants)
+            OR EXISTS(SELECT 1 FROM credit_charges) OR EXISTS(SELECT 1 FROM credit_checkouts)`).Scan(&activity); err != nil {
+			return err
+		}
+		if activity {
+			return authorityError(apierr.Conflict, "payment mode cannot change after ledger activity; start a fresh store to switch modes")
+		}
 		data, err := json.Marshal(mode)
 		if err != nil {
 			return err
 		}
-		_, err = tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, data)
+		_, err = tx.execContext(ctx, `UPDATE settings SET value=? WHERE key='payment_mode'`, data)
 		return err
 	})
 }

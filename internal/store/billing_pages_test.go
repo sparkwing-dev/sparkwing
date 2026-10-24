@@ -141,11 +141,8 @@ func TestBillingPagesFailureRetainsReservationAndProviderBinding(t *testing.T) {
 	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, replay); err == nil {
 		t.Fatal("replaced provider")
 	}
-	if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentLive); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 2000, "key"); err == nil {
-		t.Fatal("mode changed")
+	if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentLive); err == nil {
+		t.Fatal("changed mode after checkout activity")
 	}
 }
 
@@ -183,7 +180,7 @@ func TestBillingPagesAccountRemovalAndTenantPurge(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `DELETE FROM sessions WHERE account_id='owner'`)
 	rewriteSchemaExec(t, s.db, `DELETE FROM memberships WHERE account_id='owner'`)
 	rewriteSchemaExec(t, s.db, `DELETE FROM accounts WHERE id='owner'`)
-	if err := s.AsOperator().deleteTenantRows(t.Context(), "a"); err != nil {
+	if err := s.inTx(t.Context(), func(tx *storeTx) error { return deleteTenantRowsTx(t.Context(), tx, "a") }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM teams WHERE name='a'`); err != nil {

@@ -145,7 +145,9 @@ func TestStandingCapPaidCheckoutRecordsThreeDSecure(t *testing.T) {
 	} {
 		t.Run(outcome.audit+"_"+outcome.provider, func(t *testing.T) {
 			s, tenant, now := standingCapFixture(t)
-			rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
+			if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+				t.Fatal(err)
+			}
 			checkout, err := tenant.TestOnlyOpenCreditCheckout(t.Context(), 2000*MicroCreditsPerCent, *now, time.Hour)
 			if err != nil {
 				t.Fatal(err)

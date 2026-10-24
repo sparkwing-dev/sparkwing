@@ -818,16 +818,12 @@ func checkTeamRoomTx(ctx context.Context, tx *storeTx, team Team, limit int) err
 	if limit <= 0 {
 		return nil
 	}
-	mode, err := ledgerPaymentModeTx(ctx, tx)
-	if err != nil {
-		return err
-	}
 	var members int
 	var paid int64
 	if err := tx.QueryRowContext(ctx, `
 		SELECT (SELECT COUNT(*) FROM memberships WHERE team = ?),
-		       COALESCE((SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ? AND (kind = ? OR (kind = ? AND reverses_kind = 'paid'))), 0)`,
-		string(team), string(team), mode, CreditGrantPaid, creditGrantReversal).Scan(&members, &paid); err != nil {
+		       COALESCE((SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND (kind = ? OR (kind = ? AND reverses_kind = 'paid'))), 0)`,
+		string(team), string(team), CreditGrantPaid, creditGrantReversal).Scan(&members, &paid); err != nil {
 		return err
 	}
 	if members < limit {

@@ -127,12 +127,8 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 	}
 	disputeID = strings.TrimSpace(disputeID)
 	operatorOnly = operatorOnly || noFault
-	mode, err := ledgerPaymentModeTx(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
-	query := `UPDATE credit_freezes SET released_at = ?, no_fault = ? WHERE team = ? AND payment_mode = ? AND released_at IS NULL`
-	args := []any{now.UnixNano(), boolInt(noFault), string(team), mode}
+	query := `UPDATE credit_freezes SET released_at = ?, no_fault = ? WHERE team = ? AND released_at IS NULL`
+	args := []any{now.UnixNano(), boolInt(noFault), string(team)}
 	if disputeID != "" {
 		query, args = query+` AND dispute_id = ?`, append(args, disputeID)
 	}
@@ -145,8 +141,8 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 	if noFault {
 		var operator, others int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN placed_by <> ? THEN 1 ELSE 0 END), 0)
-		    FROM credit_freezes WHERE team = ? AND payment_mode = ? AND released_at IS NULL AND cause = ? AND (? = '' OR dispute_id = ?)`,
-			actor, string(team), mode, HoldCauseOperator, disputeID, disputeID).Scan(&operator, &others); err != nil {
+		    FROM credit_freezes WHERE team = ? AND released_at IS NULL AND cause = ? AND (? = '' OR dispute_id = ?)`,
+			actor, string(team), HoldCauseOperator, disputeID, disputeID).Scan(&operator, &others); err != nil {
 			return 0, err
 		}
 		if disputeID != "" && operator == 0 {
@@ -173,6 +169,9 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor audit
 		return fmt.Errorf("%w: a card names its customer, payment method and fingerprint", ErrInvalidInput)
 	}
 	if err := (&Tenant{s: tx.store, team: team}).lockTeamTx(ctx, tx); err != nil {
+		return err
+	}
+	if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
 		return err
 	}
 	refusal, err := cardRefusalTx(ctx, tx, team, "", c.Fingerprint)

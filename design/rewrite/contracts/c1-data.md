@@ -1049,6 +1049,11 @@ precision, or receipt time when completion time is absent. Older timestamps
 cannot replace the saved card. The subsecond migration marker is removed.
 Collection amounts must fit the credit ledger's integer representation.
 Refund retry state is read and updated under one transaction and ledger lock.
+Payment settlement and refund reconciliation first share-lock the team row and
+refuse a team whose deletion has started. Purge takes the exclusive team lock,
+rechecks unfinished refunds, open checkouts and unfinished bound payments, then
+removes the team's SQL rows in that transaction. A refund's checkout survives
+until its refund finishes.
 
 `TestPaymentMutationsRollBackWithReceipt` exercises eight mutations against a
 failing receipt boundary and checks their financial state after reopening.
@@ -2487,11 +2492,16 @@ Console HTTP and break-glass callers retain their authenticated tenant selection
 
 The raw `paid` grant path and `POST /api/v1/credits/grants` are removed.
 `Tenant.GrantCredits` is removed. `Tenant.RecordCreditGrant` owns free grant requests
-and refuses paid credit and reversals before writing the ledger. Payment reversals
-use verified provider settlement or the authorized console refund transaction. Checkout
+and requires an explicit idempotency key. A correction reverses a named free grant,
+up to its remaining amount. Paid credit and payment reversals use verified provider
+settlement or the authorized console refund transaction. Checkout
 settlement checks actionable fraud warnings in the same transaction as the
 grant and event receipt. A refusal leaves the checkout and ledger unchanged.
 The verified-event implementation and HTTP adapter remain W2 integrations.
+
+`Operator.SetPaymentMode` refuses a mode change while any grant, charge, checkout
+or refill exists. Startup uses the same owner. Switching between test and live
+requires a fresh store. Ledger reports read that store's single mode.
 
 `Operator.CreditLedgerTotals` owns deployment-wide ledger reports. Its raw Store
 method is removed. Reports use the same billing calculator as unit renewal and

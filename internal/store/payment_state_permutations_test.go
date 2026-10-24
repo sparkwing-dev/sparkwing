@@ -211,58 +211,6 @@ func TestPaymentStateEveryRefillAssociationPermutation(t *testing.T) {
 	}
 }
 
-func TestPaymentStateProviderModesKeepIndependentConsequences(t *testing.T) {
-	for _, kind := range []capability.PaymentEventKind{capability.PaymentRefund, capability.PaymentDisputeClosed, capability.PaymentWarningEvent} {
-		t.Run(string(kind), func(t *testing.T) {
-			s, tenant, now := providerPaymentFixture(t)
-			paid := capability.PaymentEvent{EventID: "paid", CheckoutID: "provider-session", PaymentID: "payment", Currency: "usd", AmountMinor: 100, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid}
-			consequence := providerPaymentEvent(now, kind)
-			consequence.ObjectID, consequence.Status = "same-provider-object", cardRefundSucceeded
-			if kind == capability.PaymentDisputeClosed {
-				consequence.Status = "lost"
-			}
-			if kind == capability.PaymentWarningEvent {
-				consequence.AmountMinor, consequence.Currency, consequence.Actionable = 0, "", true
-			}
-			for _, mode := range []capability.PaymentMode{capability.PaymentTest, capability.PaymentLive} {
-				if mode == capability.PaymentLive {
-					if err := s.AsOperator().SetPaymentMode(t.Context(), mode); err != nil {
-						t.Fatal(err)
-					}
-					rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('live','a','live-session','live','usd',100,100000000,1,2)`)
-					paid.CheckoutID = "live-session"
-				}
-				paid.Mode, consequence.Mode = mode, mode
-				if _, err := s.settlePaymentFacts(t.Context(), paid); err != nil {
-					t.Fatal(err)
-				}
-				if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 100*MicroCreditsPerCent {
-					t.Fatalf("%s payment consumed another mode's consequence: %d: %v", mode, balance, err)
-				}
-				if freeze, err := tenant.CreditFreeze(t.Context()); err != nil || freeze.Frozen {
-					t.Fatalf("%s payment revived another mode's hold: %+v: %v", mode, freeze, err)
-				}
-				if _, err := s.settlePaymentFacts(t.Context(), consequence); err != nil {
-					t.Fatal(err)
-				}
-				if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 0 {
-					t.Fatalf("%s consequence did not reverse its own payment: %d: %v", mode, balance, err)
-				}
-				if kind != capability.PaymentRefund {
-					freeze, err := tenant.CreditFreeze(t.Context())
-					if err != nil || !freeze.Frozen || len(freeze.Disputes) != 1 {
-						t.Fatalf("%s consequence reused a released hold: %+v: %v", mode, freeze, err)
-					}
-					tenant.s.SetTestClock(t, func() time.Time { return now })
-					if _, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "reviewed"); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-		})
-	}
-}
-
 func assertPaymentStateFinancialResult(t *testing.T, s *Store, tenant *Tenant, now time.Time, refundDue bool) {
 	t.Helper()
 	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 0 {

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -274,13 +273,9 @@ func recordGrantEventTx(ctx context.Context, tx *storeTx, g CreditGrant, actor a
 	return tx.operator.recordAudit(ctx, tx, auditContext{At: g.CreatedAt, Team: g.Team, Actor: actor}, payload)
 }
 
-// safety: a webhook replay carries the terms it carried the first time, so
-// different terms under one reference are a caller mistake rather than a
-// retry, and answering with the stored row would swallow the difference.
+// safety: operator references are scoped by team and kind. Changed terms under the same key must fail
+// rather than hide a mistaken grant or correction.
 func sameGrantTerms(stored CreditGrant, team Team, req CreditGrantRequest) error {
-	// safety: the reference is the deployment's idempotency key, a payment id
-	// rather than a name a team chose, so one seen under a second team is a
-	// caller mistake and must not grant that team the first team's credits.
 	if stored.Team != team {
 		return fmt.Errorf("%w: %q belongs to team %s, not %s",
 			ErrCreditGrantConflict, req.Reference, stored.Team, team)
@@ -297,29 +292,21 @@ func sameGrantTerms(stored CreditGrant, team Team, req CreditGrantRequest) error
 }
 
 func reversedMicroTx(ctx context.Context, tx *storeTx, team Team, kind, payment string) (int64, error) {
-	mode, err := ledgerPaymentModeTx(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
 	var sum sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
-	  WHERE team = ? AND payment_mode = ? AND kind = ? AND reverses_kind = ? AND reverses = ?`, string(team), mode, creditGrantReversal, kind, payment).Scan(&sum)
+	err := tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
+	  WHERE team = ? AND kind = ? AND reverses_kind = ? AND reverses = ?`, string(team), creditGrantReversal, kind, payment).Scan(&sum)
 	return -sum.Int64, err
 }
 
 func creditGrantByReferenceTx(
 	ctx context.Context, tx *storeTx, team Team, kind, reference string,
 ) (CreditGrant, bool, error) {
-	mode, err := ledgerPaymentModeTx(ctx, tx)
-	if err != nil {
-		return CreditGrant{}, false, err
-	}
 	var g CreditGrant
 	var created int64
 	var owner string
-	err = tx.QueryRowContext(ctx, `SELECT team, id, kind, amount_micro, reference, reverses, reverses_kind, created_by, created_at
-	  FROM credit_grants WHERE team = ? AND payment_mode = ? AND kind = ? AND reference = ?
-	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), mode, kind, reference).
+	err := tx.QueryRowContext(ctx, `SELECT team, id, kind, amount_micro, reference, reverses, reverses_kind, created_by, created_at
+	  FROM credit_grants WHERE team = ? AND kind = ? AND reference = ?
+	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), kind, reference).
 		Scan(&owner, &g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.ReversesKind, &g.CreatedBy, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CreditGrant{}, false, nil
@@ -332,44 +319,35 @@ func creditGrantByReferenceTx(
 	return g, true, nil
 }
 
-func ledgerPaymentModeTx(ctx context.Context, q rowQuerier) (capability.PaymentMode, error) {
-	var encoded []byte
-	err := q.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='payment_mode'").Scan(&encoded)
-	// Local stores without a provider still have a ledger.
+// safety: even a provider-free ledger fixes the store's mode before its first row is written.
+// The shared setting lock serializes writers against SetPaymentMode's activity check.
+func ledgerPaymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMode, error) {
+	var exists int
+	err := tx.QueryRowContext(ctx, "SELECT 1 FROM settings WHERE key='payment_mode'").Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
-		return capability.PaymentTest, nil
-	}
-	if err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
+			return "", err
+		}
+	} else if err != nil {
 		return "", err
 	}
-	var mode capability.PaymentMode
-	if err := json.Unmarshal(encoded, &mode); err != nil {
-		return "", err
-	}
-	if mode != capability.PaymentTest && mode != capability.PaymentLive {
-		return "", ErrInvalidInput
-	}
-	return mode, nil
+	return paymentModeTx(ctx, tx)
 }
 
-const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ?),
-        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND payment_mode = ?)`
+const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?),
+        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`
 
 // safety: a reversal is a grant row with a negative amount, so a reader that
 // wants the two apart asks for them apart; the balance is the same either way.
 const creditGrantSplitSQL = `SELECT
-        (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ? AND kind != ?),
-        (SELECT -SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ? AND kind = ?),
-        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND payment_mode = ?)`
+        (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind != ?),
+        (SELECT -SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind = ?),
+        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`
 
 func creditBalanceTx(ctx context.Context, tx rowQuerier, team Team) (int64, error) {
-	mode, err := ledgerPaymentModeTx(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
 	var granted, charged sql.NullInt64
 	if err := tx.QueryRowContext(ctx, creditBalanceSQL,
-		string(team), mode, string(team), mode).Scan(&granted, &charged); err != nil {
+		string(team), string(team)).Scan(&granted, &charged); err != nil {
 		return 0, err
 	}
 	return granted.Int64 - charged.Int64, nil

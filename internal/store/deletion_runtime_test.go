@@ -33,7 +33,7 @@ func TestTeamPurgeIsolationProperty(t *testing.T) {
 				t.Fatal("purge target has no rows")
 			}
 			for range 2 {
-				if err := s.AsOperator().deleteTenantRows(t.Context(), target); err != nil {
+				if err := s.inTx(t.Context(), func(tx *storeTx) error { return deleteTenantRowsTx(t.Context(), tx, target) }); err != nil {
 					t.Fatal(err)
 				}
 				if rows := purgeRows(t, s, target, true); len(rows) != 0 {

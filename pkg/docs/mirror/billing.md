@@ -16,9 +16,9 @@ A GitHub App push requiring a Cloud size needs credits at intake. An unfunded
 push records a terminal run that did not start. Adding credits later does not
 start that delivery's run. Use Run now after funding.
 
-Balances, standing history, holds and grant/charge history use the configured
-payment mode. Test funds never pay for live usage. Switching back to a mode
-shows its retained ledger again.
+A store uses one payment mode for balances, standing and history. Once any grant,
+charge, checkout or refill exists, changing the mode is refused. Start a fresh store
+to switch between test and live, including when changing `--payment-mode` at startup.
 
 Operator free grants require an explicit idempotency key. A mistaken free grant
 can be corrected with a negative reversal naming its reference. Corrections
@@ -233,8 +233,8 @@ clawback takes the credits back even when that leaves the balance negative, and
 a negative balance blocks new Cloud work until the team adds funds.
 
 The controller's `--payment-mode` configures both provider verification and the
-ledger mode for new reservations. Test and live provider records retain separate
-mode tags. Empty mode disables settlement.
+store's ledger mode. Provider events must match that mode. Empty mode disables
+settlement.
 
 Each controller store holds a random payment deployment id, created once at
 first start and never changed by configuration, so renaming the controller's
@@ -305,4 +305,7 @@ terminal refund outcome survives a later pending delivery, and a conflicting
 terminal outcome is refused.
 
 Team deletion waits for every card refund to succeed, even after its checkout
-expires. An unfinished refund is retained through deletion and purge.
+expires. Its checkout is retained until the refund finishes. Settlement and refund
+reconciliation refuse a team whose deletion has started. Purge checks unfinished
+refunds, open checkouts and unfinished bound payments before deleting any SQL rows,
+in one transaction under an exclusive team lock.

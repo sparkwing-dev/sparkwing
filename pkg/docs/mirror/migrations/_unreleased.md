@@ -24,9 +24,14 @@ Existing stores are refused rather than opened under the new schema.
 
 ## Payment ledgers and operator grants
 
-Grants, charges and holds record their payment mode. Reads and standing history
-use that mode. Reversals require an existing grant in the same team and mode.
+The store's payment mode is fixed once any grant, charge, checkout or refill exists.
+Start a fresh store to switch between test and live. Grants, charges and holds retain
+mode tags. Reversals require an existing grant in the same team and mode.
 The schema baseline includes these columns and the reversal foreign key.
+Settlement and refund reconciliation refuse a team whose deletion has started.
+Purge rechecks unfinished refunds, open checkouts and unfinished bound payments
+under an exclusive team lock in the transaction that deletes SQL rows. A refund's
+checkout is retained until the refund finishes.
 Operator grants require an explicit idempotency key. Use `admin grant --reverses`
 to correct a free grant, naming its full reference and using a fresh key.
 

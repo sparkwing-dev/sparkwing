@@ -19,27 +19,23 @@ func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditS
 		return out, err
 	}
 	defer rollbackOrLog(tx)
-	mode, err := ledgerPaymentModeTx(ctx, tx)
-	if err != nil {
-		return out, err
-	}
 	var granted, reversed, charged sql.NullInt64
 	if err := tx.QueryRowContext(ctx, creditGrantSplitSQL,
-		t.team, mode, creditGrantReversal, t.team, mode, creditGrantReversal,
-		t.team, mode).Scan(&granted, &reversed, &charged); err != nil {
+		t.team, creditGrantReversal, t.team, creditGrantReversal,
+		t.team).Scan(&granted, &reversed, &charged); err != nil {
 		return out, err
 	}
 	out.GrantedMicro, out.ReversedMicro, out.ChargedMicro = granted.Int64, reversed.Int64, charged.Int64
 	out.BalanceMicro = out.GrantedMicro - out.ReversedMicro - out.ChargedMicro
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges WHERE team=? AND payment_mode=? AND kind=?`,
-		t.team, mode, CreditChargeStorage).Scan(&out.StorageChargedMicro); err != nil {
+		`SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges WHERE team=? AND kind=?`,
+		t.team, CreditChargeStorage).Scan(&out.StorageChargedMicro); err != nil {
 		return out, err
 	}
 	if window > 0 {
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges WHERE team=? AND payment_mode=? AND charged_at>=?`,
-			t.team, mode, tx.now(ctx).Add(-window).UnixNano()).Scan(&out.BurnMicro); err != nil {
+			`SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges WHERE team=? AND charged_at>=?`,
+			t.team, tx.now(ctx).Add(-window).UnixNano()).Scan(&out.BurnMicro); err != nil {
 			return out, err
 		}
 	}

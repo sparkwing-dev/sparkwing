@@ -259,6 +259,16 @@ func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock
 	return err
 }
 
+// Purge removes the team key itself, so it needs UPDATE rather than NO KEY UPDATE.
+func lockTeamForPurgeTx(ctx context.Context, tx *storeTx, team Team) error {
+	var name string
+	err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=?`+tx.forUpdate(), string(team)).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrUnknownTeam
+	}
+	return err
+}
+
 func (op *Operator) discoverInstallationLocks(ctx context.Context, tx *storeTx, set lockSet, installation int64) lockSet {
 	if set.err != nil {
 		return set
