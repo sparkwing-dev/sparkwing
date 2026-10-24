@@ -111,7 +111,7 @@ var routes = []RoutePolicy{
 	route("GET", "/api/v1/team/github-app/automation", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("GET", "/api/v1/team/github-app/extra-repos", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("GET", "/api/v1/team/members", OwnerTeam, RetrySafe, member(RunsRead)),
-	route("POST", "/api/v1/runners", OwnerTeam, RetryNever, member(RunsRead)),
+	route("POST", "/api/v1/runners", OwnerTeam, RetryNever, AccessRule{CredentialAccount, []Grant{RunsWrite}, BindNone, LiveCredential}, AccessRule{CredentialAccount, []Grant{TeamAdmin}, BindNone, LiveCredential}),
 	route("GET", "/api/v1/team/settings", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("PUT", "/api/v1/team/settings", OwnerTeam, RetrySafe, member(TeamAdmin)),
 	route("DELETE", "/api/v1/runners/{runner}", OwnerTeam, RetrySafe, member(TeamAdmin)),

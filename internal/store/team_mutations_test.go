@@ -225,3 +225,36 @@ func TestTeamInvitationRefusalRollsBackAndConcurrentReplayHasOneRow(t *testing.T
 	}
 	rewriteSchemaCount(t, s.db, "invitations", 1)
 }
+
+func TestRunDeletionUsesCredentialGrantsForOtherMembersRuns(t *testing.T) {
+	s := authorityStore(t)
+	owner := authorityMember(t, s, "owner", RoleOwner)
+	tenant := &Tenant{s: s, team: "a"}
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
+		Kind: capability.ProvisionMember, Authority: &owner.Authority, Team: "a",
+		Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "owner"},
+		Grants:  []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl},
+		Binding: capability.Binding{Kind: capability.BindingNone},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}}
+	for i, creator := range []string{"other", "owner"} {
+		rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_subject_kind,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a',?,?,'p','success',?,'request',1,'gh:1','host','execute',?,?, 'account',1,2,'r30',30)`, creator, i+1, []byte(`{"version":1}`), []byte(`[]`), creator)
+	}
+	a := teamAuthorization(t, s, token, "a", "DELETE", "/api/v1/runs/{run}")
+	a.Target.RunID = "other"
+	if err := tenant.DeleteAuthorizedRun(t.Context(), a); err == nil {
+		t.Fatal("owner token without team.admin deleted another member's run")
+	}
+	a.Target.RunID = "owner"
+	if err := tenant.DeleteAuthorizedRun(t.Context(), a); err != nil {
+		t.Fatalf("owner token deleting its own run: %v", err)
+	}
+	a = teamAuthorization(t, s, owner, "a", "DELETE", "/api/v1/runs/{run}")
+	a.Target.RunID = "other"
+	if err := tenant.DeleteAuthorizedRun(t.Context(), a); err != nil {
+		t.Fatalf("admin deleting another member's run: %v", err)
+	}
+}

@@ -178,3 +178,33 @@ func assertProcessPermitSnapshot(t *testing.T, f *storeRecoveryFixture, want boo
 		t.Fatalf("authentication start permit=%t want %t: %v", snapshot.Binding.StartPermitted, want, err)
 	}
 }
+
+func TestPlanAdmissionPolicyCommitsTerminalOutcome(t *testing.T) {
+	for _, dialect := range []struct {
+		name   string
+		target func(*testing.T) *storetest.Target
+	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
+		t.Run(dialect.name, func(t *testing.T) {
+			for _, policy := range []string{"skip", "fail"} {
+				t.Run(policy, func(t *testing.T) {
+					f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(doc *nodeproto.PlanDoc) {
+						doc.Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new(policy)}}
+					})
+					plan, owner := admissionAcceptedPlan(t, f)
+					result, err := f.tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: plan.RunID, Generation: int64(owner.Owner.Generation)}, owner)
+					wantKind, wantRun, wantNode := runstate.AcquireSkipped, runstate.RunSuccess, runstate.NodeSkipped
+					if policy == "fail" {
+						wantKind, wantRun, wantNode = runstate.AcquireFailed, runstate.RunFailed, runstate.NodeFailed
+					}
+					if err != nil || result.Kind != wantKind {
+						t.Fatalf("plan admission: %+v %v", result, err)
+					}
+					snapshot, err := f.tenant.ReadSnapshot(t.Context(), plan.RunID)
+					if err != nil || snapshot.Run.State != wantRun || snapshot.Run.FinishedAt == nil || len(snapshot.Nodes) != 1 || snapshot.Nodes[0].Outcome != wantNode || snapshot.Nodes[0].Attempt != 0 {
+						t.Fatalf("store admission did not settle pending plan: %+v %v", snapshot, err)
+					}
+				})
+			}
+		})
+	}
+}

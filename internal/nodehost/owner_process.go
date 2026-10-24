@@ -21,6 +21,9 @@ func (h *OwnerEvaluator) evaluateProcess(ctx context.Context, input EvaluationIn
 			closeErr := process.Close()
 			err = errors.Join(err, closeErr, process.Cleanup(lease.ExecutionContext(ctx)))
 		}
+		if grant.masks != nil {
+			err = maskHostError(err, grant.masks.masker)
+		}
 	}()
 	resolved, err := h.deps.EnsureEngine(ctx, spec.Resolved.Engine, input.Engine.Target)
 	if err != nil {
@@ -50,7 +53,7 @@ func (h *OwnerEvaluator) evaluateProcess(ctx context.Context, input EvaluationIn
 	if process == nil {
 		return errors.New("SDK evaluator returned no process")
 	}
-	session := &executorSession{process: process}
+	session := &executorSession{process: process, masks: grant.masks}
 	code := NodeInput{Storage: input.Storage, Engine: input.Engine, Accepted: input.Accepted, NodeID: input.NodeID, SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner, RouteBinding: input.RouteBinding, Replay: input.Replay}
 	if err = h.hello(ctx, session, code); err != nil {
 		return err

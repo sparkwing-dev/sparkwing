@@ -116,7 +116,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"GET", "/api/v1/team/github-app/automation", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"GET", "/api/v1/team/github-app/extra-repos", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"GET", "/api/v1/team/members", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
-		{"POST", "/api/v1/runners", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
+		{"POST", "/api/v1/runners", "controller", "team", "capability", []string{"account_session|runs.write|none|credential", "account_session|team.admin|none|credential"}},
 		{"GET", "/api/v1/team/settings", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"PUT", "/api/v1/team/settings", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"DELETE", "/api/v1/runners/{runner}", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},

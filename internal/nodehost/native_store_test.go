@@ -123,7 +123,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		request.Header.Set("Authorization", "Bearer "+grant.Binding.Routes.Bearer)
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, request)
-		if response.Code != http.StatusOK || processes.Masks.mask("native-route-secret") != "***" {
+		if response.Code != http.StatusOK || grant.masks.mask("native-route-secret") != "***" || processes.Masks.mask("native-route-secret") != "native-route-secret" {
 			return grant, errors.New("native process could not register its mask through persisted authorization")
 		}
 		return grant, nil

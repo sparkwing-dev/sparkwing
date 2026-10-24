@@ -192,7 +192,7 @@ func project(s Spec) projections {
 	return projections{RepoKey: r.Git.Repository.Key, RepoDisplay: r.Git.Repository.Display, Pipeline: r.Pipeline, SHA: r.Git.SHA, Ref: r.Git.Ref, DefaultBranch: branch, Dispatch: r.Dispatch, AllowedPools: append([]string(nil), s.Request.AllowedPools...), RequestHash: s.Request.Hash, SpecHash: s.Hash, PlanHash: s.PlanHash}
 }
 
-// CarryRetry keeps the source envelope immutable; destination lineage is separate.
+// CarryRetry preserves the sealed code, writer and inputs, recording the retrier separately.
 func CarryRetry(input RetryInput) (RetrySnapshot, error) {
 	if err := verifyRequest(input.Request); err != nil {
 		return RetrySnapshot{}, err

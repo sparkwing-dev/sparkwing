@@ -404,15 +404,15 @@ A runner's credential fixes which runs it accepts:
 - A team admin sets a runner's trust class when registering it:
   `sparkwing runners add --profile prod --runner deploy-1 --trust=verified-default` applies the restriction to a
   runner without reserved secrets, and `--trust=any` lifts it from a pool with
-  reserved secrets. The class is stored with the runner's credential, so the
+  reserved secrets. Pools holding reserved secrets still require a launcher
+  with `--trust=any`. The class is stored with the runner's credential, so the
   runner, or anyone holding its token, cannot change it.
 
 For a verified-default pool, enroll a launcher-only credential with
 `--reserved-for deploy --trust verified-default --launcher` on `runners add`.
 On Kubernetes, set `launcher.enabled=true` and reference that credential in
-`launcher.tokenSecret` in the runner bundle chart. The server refuses verified
-pool work to persistent runner credentials, including when reserved secrets
-select verified-default by default. Pool and trust settings live on the
+`launcher.tokenSecret` in the runner bundle chart. The server requires launcher credentials for verified-default pools and for
+every pool holding reserved secrets, including with `--trust=any`. Pool and trust settings live on the
 credential. A run-level `--requires pool=deploy` uses controller dispatch so
 its plan and jobs can be claimed by the launcher.
 The launcher runs each plan, evaluation and job claim in a fresh pod through the

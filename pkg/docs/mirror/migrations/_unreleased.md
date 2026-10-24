@@ -199,8 +199,8 @@ supplied no longer reach it unchecked.
   Remove `runner.trustClass` and `runner.reservedPools`; the credential supplies
   both facts. Enabling the launcher replaces the persistent runner and cache
   PVC. A run-level pool pin now uses controller dispatch. A team admin can
-  register a persistent pool with `--trust=any`, which retains the same-uid
-  credential and cross-claim state exposure described in the self-hosting guide.
+  use `--trust=any` to admit other runs, but a pool holding reserved secrets
+  still requires a launcher.
 - **Submitted environment.** A run's `run.submit_env_allow` values reach a
   shared runner only under names the runner's operator also lists, in the
   runner's own machine file `run.submit_env_allow`, `--submit-env-allow`, or the

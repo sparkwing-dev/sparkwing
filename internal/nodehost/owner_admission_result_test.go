@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -137,12 +138,57 @@ func TestOwnerExecutionCancellationKeepsIndependentFailure(t *testing.T) {
 	}
 }
 
+func TestOwnerCannotAssertAdmissionOutcomes(t *testing.T) {
+	for _, kind := range []string{"admission_skip", "admission_fail", "admission_queue_timeout"} {
+		for _, level := range []string{"job", "run"} {
+			t.Run(kind+"/"+level, func(t *testing.T) {
+				fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+				row := capacityRow(t, fixture, "job")
+				before, err := fixture.Tenant.ReadSnapshot(t.Context(), fixture.Input.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				outcome, reason := runstate.NodeFailed, ""
+				if kind == "admission_skip" {
+					outcome = runstate.NodeSkipped
+				}
+				if kind == "admission_queue_timeout" {
+					reason = store.FailureQueueTimeout
+				}
+				policy := &runstate.OwnerPolicyResult{Kind: runstate.OwnerPolicyKind(kind), Generation: row.Generation}
+				if level == "job" {
+					_, err = fixture.Tenant.TransitionNode(t.Context(), store.OwnerPolicyNode{Ref: row.Ref, Actor: fixture.Actor, Outcome: outcome, OwnerPolicy: policy, Result: &runstate.NodeResult{Outcome: outcome, Reason: reason}})
+				} else {
+					policy.Generation = fixture.Actor.Owner.Generation
+					payload, marshalErr := json.Marshal(map[string]any{"OwnerPolicy": policy, "Cause": "policy_refused", "Reason": reason})
+					if marshalErr != nil {
+						t.Fatal(marshalErr)
+					}
+					var completion runstate.RunCompletion
+					if err := json.Unmarshal(payload, &completion); err != nil {
+						t.Fatal(err)
+					}
+					completion.RunID, completion.Actor = runspec.RunID(fixture.Input.RunID), fixture.Actor
+					_, err = fixture.Tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Transition: completion, Unit: fixture.Actor.Owner})
+				}
+				if err == nil {
+					t.Fatal("owner asserted an admission outcome")
+				}
+				after, err := fixture.Tenant.ReadSnapshot(t.Context(), fixture.Input.RunID)
+				if err != nil || after.Run.State != before.Run.State || after.Run.FinishedAt != nil || after.Nodes[0].Status != row.Status || after.Nodes[0].Outcome != row.Outcome || after.Nodes[0].StateSeq != row.StateSeq {
+					t.Fatalf("refused admission assertion changed pending work: %+v %v", after, err)
+				}
+			})
+		}
+	}
+}
+
 func FuzzOwnerPolicyAuthorityAndBinding(f *testing.F) {
-	f.Add(int64(0), int64(0), string(runstate.PolicyAdmissionFail), false)
-	f.Add(int64(1), int64(0), string(runstate.PolicyAdmissionSkip), false)
-	f.Add(int64(0), int64(1), string(runstate.PolicyAdmissionFail), false)
+	f.Add(int64(0), int64(0), "admission_fail", false)
+	f.Add(int64(1), int64(0), "admission_skip", false)
+	f.Add(int64(0), int64(1), "admission_fail", false)
 	f.Add(int64(0), int64(0), string(runstate.PolicyApprovalBypass), false)
-	f.Add(int64(0), int64(0), string(runstate.PolicyAdmissionFail), true)
+	f.Add(int64(0), int64(0), "admission_fail", true)
 	f.Fuzz(func(t *testing.T, ownerDelta, generation int64, kind string, released bool) {
 		fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
 		row := capacityRow(t, fixture, "job")
@@ -158,29 +204,26 @@ func FuzzOwnerPolicyAuthorityAndBinding(f *testing.F) {
 		actor := fixture.Actor
 		actor.Owner.Generation += runspec.ClaimGeneration(ownerDelta)
 		outcome, reason := runstate.NodeFailed, ""
-		if kind == string(runstate.PolicyAdmissionSkip) {
+		if kind == "admission_skip" {
 			outcome = runstate.NodeSkipped
 		}
 		if kind == string(runstate.PolicyApprovalBypass) {
 			outcome, reason = runstate.NodeSuccess, "skip_if"
 		}
-		if kind == string(runstate.PolicyQueueTimeout) {
+		if kind == "admission_queue_timeout" {
 			reason = store.FailureQueueTimeout
 		}
 		_, err = fixture.Tenant.TransitionNode(t.Context(), store.OwnerPolicyNode{Ref: row.Ref, Actor: actor, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.OwnerPolicyKind(kind), Generation: runspec.ClaimGeneration(generation)}, Result: &runstate.NodeResult{Outcome: outcome, Reason: reason}, Outcome: outcome})
-		valid := ownerDelta == 0 && runspec.ClaimGeneration(generation) == row.Generation && !released && (kind == string(runstate.PolicyAdmissionFail) || kind == string(runstate.PolicyAdmissionSkip) || kind == string(runstate.PolicyQueueTimeout))
-		if (err == nil) != valid {
+		if err == nil {
 			t.Fatalf("owner delta=%d generation=%d kind=%q released=%v error=%v", ownerDelta, generation, kind, released, err)
 		}
-		if !valid {
-			after, readErr := fixture.Tenant.ReadStateEvents(t.Context(), fixture.Input.RunID, 0, 100)
-			if readErr != nil || len(after) != len(before) {
-				t.Fatalf("refused policy appended events: %d -> %d %v", len(before), len(after), readErr)
-			}
-			current := capacityRow(t, fixture, "job")
-			if current.Status != runstate.StatusPending || current.Outcome != "" {
-				t.Fatalf("refused policy changed state: %s/%s", current.Status, current.Outcome)
-			}
+		after, readErr := fixture.Tenant.ReadStateEvents(t.Context(), fixture.Input.RunID, 0, 100)
+		if readErr != nil || len(after) != len(before) {
+			t.Fatalf("refused policy appended events: %d -> %d %v", len(before), len(after), readErr)
+		}
+		current := capacityRow(t, fixture, "job")
+		if current.Status != runstate.StatusPending || current.Outcome != "" {
+			t.Fatalf("refused policy changed state: %s/%s", current.Status, current.Outcome)
 		}
 	})
 }

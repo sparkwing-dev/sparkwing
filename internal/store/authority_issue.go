@@ -60,6 +60,21 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	if err != nil {
 		return capability.Issued{}, err
 	}
+	// Setup may revoke its authorizer before the audit is recorded.
+	actor := auditActor{system: auditController}
+	if request.Provision != nil && request.Provision.Authority != nil {
+		p, err := resolveProvisionAuthorityTx(ctx, tx, *request.Provision.Authority, request.Provision.ConsoleProof)
+		if err != nil {
+			return capability.Issued{}, err
+		}
+		actor = auditPrincipalActor(p)
+	} else if request.Delegate != nil {
+		p, err := tx.ResolveAuthority(ctx, request.Delegate.Parent)
+		if err != nil {
+			return capability.Issued{}, err
+		}
+		actor = auditPrincipalActor(p)
+	}
 	seed := ""
 	if request.Provision != nil {
 		seed = request.Provision.Seed
@@ -101,6 +116,19 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 		}
 		if err := observeUnitTx(ctx, tx, c.Prefix); err != nil {
 			return capability.Issued{}, err
+		}
+	}
+	if request.Provision != nil || request.Delegate != nil {
+		context := auditContext{At: tx.now(ctx), Team: Team(c.Team), Actor: actor}
+		payload := auditCredential{Operation: "token.minted", Credential: digestAudit(c.Prefix)}
+		if err := tx.operator.recordAudit(ctx, tx, context, payload); err != nil {
+			return capability.Issued{}, err
+		}
+		if request.Provision != nil && tx.rotatingRoot == nil && auditOneOf(request.Provision.Kind, string(capability.ProvisionMachine), string(capability.ProvisionService), string(capability.ProvisionActions)) {
+			payload.Operation = "runner.enrolled"
+			if err := tx.operator.recordAudit(ctx, tx, context, payload); err != nil {
+				return capability.Issued{}, err
+			}
 		}
 	}
 	return issued, nil
@@ -272,7 +300,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if err := checkRepositoryClaimScope(chain, capability.RepositoryIdentity{Key: row.repo, Display: row.display}); err != nil {
 		return capability.Capability{}, err
 	}
-	if err := checkPushClaimScope(chain, row.repo, sealed.Provenance.Ref(), sealed.Provenance.SHA()); err != nil {
+	if err := checkPushClaimScope(ctx, tx, chain, row.repo, sealed.Provenance); err != nil {
 		return capability.Capability{}, err
 	}
 	if prospective != nil {

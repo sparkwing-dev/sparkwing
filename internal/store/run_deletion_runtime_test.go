@@ -96,6 +96,9 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 				if _, err := s.DB().Exec(`UPDATE memberships SET role='owner' WHERE team=? AND account_id='other-editor'`, tenant.Team()); err != nil {
 					t.Fatal(err)
 				}
+				if _, err := s.DB().Exec(`UPDATE sessions SET scopes='runs.read,runs.write,runs.control,team.admin' WHERE hash='other-editor'`); err != nil {
+					t.Fatal(err)
+				}
 				a = forbidden
 			} else {
 				if _, err := s.DB().Exec(`UPDATE memberships SET role='editor' WHERE team=? AND account_id=?`, tenant.Team(), p.Capability.Subject.ID); err != nil {

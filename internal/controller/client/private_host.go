@@ -161,7 +161,7 @@ func (c *LocalHostClient) TransitionRun(ctx context.Context, change runstate.Run
 	if c.node != "" || change.RunID != runspec.RunID(c.run) {
 		return result, localHostClientRefusal()
 	}
-	body := localhostwire.LocalRunTransition{To: change.To, Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError, OwnerPolicy: change.OwnerPolicy}
+	body := localhostwire.LocalRunTransition{To: change.To, Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError}
 	err := c.request(ctx, "POST", "/transition", "", body, &result)
 	return result, err
 }
@@ -173,7 +173,7 @@ func (c *LocalHostClient) FinishRunAndUnit(ctx context.Context, finish runstate.
 	if c.node != "" || change.RunID != runspec.RunID(c.run) || finish.Unit != change.Actor.Owner {
 		return result, localHostClientRefusal()
 	}
-	body := localhostwire.LocalRunCompletion{Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError, OwnerPolicy: change.OwnerPolicy}
+	body := localhostwire.LocalRunCompletion{Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError}
 	err := c.request(ctx, "POST", "/finish", "", body, &result)
 	return result, err
 }

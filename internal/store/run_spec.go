@@ -102,7 +102,8 @@ type AcceptedExpansion struct {
 // a changed body conflicts. An empty key requests a distinct invocation.
 // Verified App redeliveries return the original run for that delivery and pipeline,
 // including when the caller supplies no idempotency key.
-// Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them.
+// Retry intake loads Lineage.RetryOf from this Tenant, preserves code and inputs,
+// and reseals asserted writes for the retrier. The new execution ID stays outside the source envelope.
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error) {
 	var result AdmissionResult
 	var installed *localRunSecrets

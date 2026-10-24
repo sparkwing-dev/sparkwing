@@ -149,24 +149,24 @@ func (s *Server) localHostRunEdge(w http.ResponseWriter, r *http.Request, a capa
 		if err := decodeEngineRequest(r, &complete); err != nil {
 			return err
 		}
-		body = localhostwire.LocalRunTransition{Cause: complete.Cause, Reason: complete.Reason, MaskedError: complete.MaskedError, OwnerPolicy: complete.OwnerPolicy}
+		body = localhostwire.LocalRunTransition{Cause: complete.Cause, Reason: complete.Reason, MaskedError: complete.MaskedError}
 	} else if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
 	if !finish && (body.Cause != runstate.RunStart || body.To != runstate.RunRunning) {
 		return invalidEngineBody("run transition requires start; terminal verdicts require atomic owner completion")
 	}
-	if a.Principal.Capability.Unit == capability.UnitPlan && (!finish || body.Cause != runstate.RunFinish || body.OwnerPolicy != nil) {
+	if a.Principal.Capability.Unit == capability.UnitPlan && (!finish || body.Cause != runstate.RunFinish) {
 		return invalidEngineBody("plan completion requires a preparation failure or cancellation")
 	}
 	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}
-	change := runstate.RunTransition{RunID: runspec.RunID(a.Target.RunID), Actor: engineActor(a), To: body.To, Cause: body.Cause, Reason: body.Reason, MaskedError: body.MaskedError, OwnerPolicy: body.OwnerPolicy}
+	change := runstate.RunTransition{RunID: runspec.RunID(a.Target.RunID), Actor: engineActor(a), To: body.To, Cause: body.Cause, Reason: body.Reason, MaskedError: body.MaskedError}
 	var applied runstate.Applied
 	if finish {
-		applied, err = tenant.FinishRunAndUnit(r.Context(), runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, OwnerPolicy: change.OwnerPolicy, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: change.Actor.Owner})
+		applied, err = tenant.FinishRunAndUnit(r.Context(), runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: change.Actor.Owner})
 	} else {
 		applied, err = tenant.TransitionRun(r.Context(), change)
 	}

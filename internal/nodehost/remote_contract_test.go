@@ -32,7 +32,7 @@ func (f ownerWireFixture) ReadSnapshot(context.Context, string) (controllerwire.
 
 func TestRemoteOwnerSchedulePreservesRecoveryAndEmptyGroups(t *testing.T) {
 	wire := ownerWireFixture{snapshot: controllerwire.ScheduleSnapshot{
-		RunID: "run", CancelRequested: true,
+		RunID: "run", CancelRequested: true, SelectionSkips: map[string]string{"outside": `outside --only="rollback"`},
 		Jobs: []controllerwire.ScheduleJob{{
 			JobDetail:   controllerwire.JobDetail{ID: "rollback", Status: "pending", Generation: 7, Expansion: "expected"},
 			Declaration: nodeproto.JobSpec{ID: "rollback", Needs: []string{"source", "prepare"}, NeedsIfPresent: []string{"optional"}, NeedsGenerated: []string{"empty"}, OnFailureOf: "source", ContinueOnError: true, Optional: true},
@@ -44,7 +44,7 @@ func TestRemoteOwnerSchedulePreservesRecoveryAndEmptyGroups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := store.ScheduleSnapshot{CancelRequested: true, Nodes: []store.ScheduleNode{{
+	want := store.ScheduleSnapshot{CancelRequested: true, SelectionSkips: map[string]string{"outside": `outside --only="rollback"`}, Nodes: []store.ScheduleNode{{
 		ID: "rollback", Kind: "work", Status: "pending", Generation: 7, Ready: true, Claimed: true,
 		Deps: []string{"source", "prepare"}, DepsIfPresent: []string{"optional"}, NeedsGenerated: []string{"empty"},
 		OnFailureOf: "source", ContinueOnError: true, Optional: true, Expansion: "expected",
@@ -53,7 +53,8 @@ func TestRemoteOwnerSchedulePreservesRecoveryAndEmptyGroups(t *testing.T) {
 		t.Fatalf("schedule = %#v; want %#v", got, want)
 	}
 	got.Nodes[0].Deps[0] = "changed"
-	if wire.snapshot.Jobs[0].Declaration.Needs[0] != "source" {
+	got.SelectionSkips["outside"] = "changed"
+	if wire.snapshot.Jobs[0].Declaration.Needs[0] != "source" || wire.snapshot.SelectionSkips["outside"] == "changed" {
 		t.Fatal("projection aliases transport data")
 	}
 }
@@ -66,6 +67,21 @@ func TestRemoteOwnerScheduleRejectsMismatchedIdentity(t *testing.T) {
 		if _, err := (&RemoteOwnerStore{Controller: ownerWireFixture{snapshot: snapshot}}).schedule(t.Context(), "run"); err == nil {
 			t.Fatal("accepted mismatched snapshot")
 		}
+	}
+}
+
+func TestRemoteOwnerSchedulePreservesEmptySelectionAcrossWire(t *testing.T) {
+	encoded, err := json.Marshal(controllerwire.ScheduleSnapshot{RunID: "run", SelectionSkips: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire ownerWireFixture
+	if err := json.Unmarshal(encoded, &wire.snapshot); err != nil {
+		t.Fatal(err)
+	}
+	graph, err := (&RemoteOwnerStore{Controller: wire}).schedule(t.Context(), "run")
+	if err != nil || graph.SelectionSkips == nil || len(graph.SelectionSkips) != 0 {
+		t.Fatalf("empty selection lost across wire: %+v %v", graph, err)
 	}
 }
 

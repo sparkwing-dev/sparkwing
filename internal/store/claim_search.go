@@ -410,10 +410,12 @@ func claimTeamOverflowRunnableTx(ctx context.Context, tx *storeTx, team Team, te
 		}
 		return `cc.unit_kind IN (` + strings.Join(kinds, ",") + `)`
 	}
-	projection := `SELECT cc.team,cc.requirements,cc.id AS context FROM claim_contexts cc WHERE `
-	contexts := projection + eligibleKinds() + ` AND team=` + q.param(team) + ` AND overflow_account IS NULL`
+	projection := `SELECT cc.team,cc.requirements,cc.id AS context FROM claim_contexts cc WHERE cc.team=? AND `
+	q.args = append(q.args, team)
+	contexts := projection + eligibleKinds() + ` AND overflow_account IS NULL`
 	for _, budget := range []string{`overflow_minutes IS NULL`, `overflow_minutes>=` + minimum} {
-		contexts += ` UNION ALL SELECT cc.team,cc.requirements,cc.id AS context FROM overflow_facts of JOIN claim_contexts cc ON cc.team=of.team AND cc.overflow_account=of.account WHERE ` + eligibleKinds() + ` AND cc.team=` + q.param(team) + ` AND (of.monthly_minutes IS NULL OR ` + q.number("of.monthly_minutes") + `>=` + minimum + `) AND ` + budget
+		q.args = append(q.args, team)
+		contexts += ` UNION ALL SELECT cc.team,cc.requirements,cc.id AS context FROM overflow_facts of JOIN claim_contexts cc ON cc.team=of.team AND cc.overflow_account=of.account WHERE cc.team=? AND ` + eligibleKinds() + ` AND (of.monthly_minutes IS NULL OR ` + q.number("of.monthly_minutes") + `>=` + minimum + `) AND ` + budget
 	}
 	// Retained policies without ready work must not keep a capped team runnable.
 	query := `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + overflow + ` SELECT EXISTS (SELECT 1 FROM (` + contexts + `) route CROSS JOIN clock WHERE ` + q.headSQL(template.kinds) + ` IS NOT NULL)`
