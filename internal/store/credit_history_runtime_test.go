@@ -36,7 +36,7 @@ func TestStoreDataCreditHistoryPreservesTenantAndAwardIdentity(t *testing.T) {
 				if row == 3 {
 					continue
 				}
-				grant := CreditGrant{ID: "grant_" + id, Team: team, Kind: []string{CreditGrantFree, CreditGrantPaid, creditGrantReversal}[row], AmountMicro: charge.AmountMicro, Reference: "ref_" + id, CreatedBy: "console", CreatedAt: at}
+				grant := CreditGrant{ID: "grant_" + id, Team: team, Kind: []string{CreditGrantFree, CreditGrantPaid, creditGrantReversal}[row], AmountMicro: charge.AmountMicro, Reference: "ref_" + id, CreatedBy: "console", CreatedAt: at, ReversesKind: "paid"}
 				if grant.Kind == creditGrantReversal {
 					grant.Reverses = wantGrants[1].Reference
 				}

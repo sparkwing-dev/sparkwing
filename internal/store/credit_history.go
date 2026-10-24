@@ -11,7 +11,7 @@ func (t *Tenant) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGra
 	if err != nil {
 		return nil, err
 	}
-	rows, err := t.s.query(ctx, `SELECT id, kind, amount_micro, reference, reverses, created_by, created_at
+	rows, err := t.s.query(ctx, `SELECT id, kind, amount_micro, reference, reverses, reverses_kind, created_by, created_at
 	  FROM credit_grants WHERE team = ? AND payment_mode = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
 		string(t.team), mode, creditLimit(limit))
 	if err != nil {
@@ -22,7 +22,7 @@ func (t *Tenant) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGra
 	for rows.Next() {
 		g := CreditGrant{Team: t.team}
 		var created int64
-		if err := rows.Scan(&g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses,
+		if err := rows.Scan(&g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.ReversesKind,
 			&g.CreatedBy, &created); err != nil {
 			return nil, err
 		}

@@ -24,7 +24,7 @@ func TestPaymentRefundFollowsCheckoutGrantAndReplaysAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !first.Created || first.Team != paid.Team || first.PaidMicro != 1000000 || first.ReversedMicro != 300000 || first.BalanceMicro != 700000 || first.Grant == nil || first.Grant.AmountMicro != -300000 || first.Grant.Reverses != "payment:test:checkout" || !first.Grant.CreatedAt.Equal(now) {
+	if !first.Created || first.Team != paid.Team || first.PaidMicro != 1000000 || first.ReversedMicro != 300000 || first.BalanceMicro != 700000 || first.Grant == nil || first.Grant.AmountMicro != -300000 || first.Grant.Reverses != "payment:test:checkout" || first.Grant.ReversesKind != "paid" || !first.Grant.CreatedAt.Equal(now) {
 		t.Fatalf("partial refund=%+v, grant=%+v", first, first.Grant)
 	}
 	if err := s.db.Close(); err != nil {

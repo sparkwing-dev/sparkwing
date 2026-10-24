@@ -210,8 +210,8 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 	}
 	f.advance(time.Second)
 	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"hold": "dp_1", "reason": "dispute won"}, &team); code != http.StatusOK ||
-		team.Frozen || len(team.Holds) != 0 {
-		t.Errorf("releasing the dispute hold = %d %+v, want the team released", code, team)
+		!team.Frozen || len(team.Holds) != 0 || team.Billing.Standing != "Held" {
+		t.Errorf("releasing the dispute hold = %d %+v, want revoked standing to keep the team held", code, team)
 	}
 	if f.call("GET", base, operator.auth, nil, &team); team.Events[0].Kind != store.BusinessEventTeamUnfrozen ||
 		team.Events[0].Actor != operator.id || team.Events[0].Attrs["reason"] != nil || team.Billing.Trust != "revoked" {

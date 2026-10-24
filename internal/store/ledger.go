@@ -166,7 +166,7 @@ func (l *ledgerTx) insertGrant(ctx context.Context, g CreditGrant) error {
 	}
 	_, err = l.exec(ctx, `INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses, created_by,
 	    created_at, payment_mode, reverses_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(g.Team), g.ID, g.Kind, g.AmountMicro, g.Reference, g.Reverses, g.CreatedBy, g.CreatedAt.UnixNano(), mode, cmp.Or(g.reversesKind, CreditGrantPaid))
+		string(g.Team), g.ID, g.Kind, g.AmountMicro, g.Reference, g.Reverses, g.CreatedBy, g.CreatedAt.UnixNano(), mode, cmp.Or(g.ReversesKind, CreditGrantPaid))
 	if err != nil {
 		return fmt.Errorf("credits: insert %s grant: %w", g.Kind, err)
 	}

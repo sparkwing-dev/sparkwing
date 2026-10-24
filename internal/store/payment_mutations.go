@@ -40,7 +40,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference str
 		return CreditReversal{}, err
 	}
 	if found {
-		if existing.Reverses != paid.Reference || existing.reversesKind != CreditGrantPaid {
+		if existing.Reverses != paid.Reference || existing.ReversesKind != CreditGrantPaid {
 			return CreditReversal{}, fmt.Errorf("%w: %q reverses %q, not %q",
 				ErrCreditGrantConflict, reference, existing.Reverses, paid.Reference)
 		}
@@ -61,7 +61,7 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference str
 		}
 		grant := CreditGrant{
 			ID: id, Team: paid.Team, Kind: creditGrantReversal, AmountMicro: -take,
-			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: tx.now(ctx),
+			Reference: reference, Reverses: paid.Reference, ReversesKind: CreditGrantPaid, CreatedBy: createdBy, CreatedAt: tx.now(ctx),
 		}
 		if err := l.insertGrant(ctx, grant); err != nil {
 			return CreditReversal{}, err

@@ -62,7 +62,7 @@ func TestAnEmptyBalanceRefusesAWriteThatGrowsRetainedBytes(t *testing.T) {
 		t.Fatalf("events = %d, want the refused write stored nothing", got)
 	}
 
-	if _, err := tenant(t, st, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 10 * store.MicroCreditsPerCent, Reference: "", CreatedBy: "operator"}); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 10 * store.MicroCreditsPerCent, Reference: "storage-funding", CreatedBy: "operator"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := storageTestTenant(t, st).AppendEventCharged(ctx, "replica", "r1", "n1", "log", []byte("more bytes")); err != nil {

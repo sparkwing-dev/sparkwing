@@ -102,11 +102,17 @@ func TestPaymentWarningUsesConfiguredModeWhenTeamHasBothModes(t *testing.T) {
 	if _, err := s.settlePaymentFacts(t.Context(), warning); err != nil {
 		t.Fatal(err)
 	}
-	if balance, err := (&Tenant{s: s, team: "a"}).CreditBalanceMicro(t.Context()); err != nil || balance != 1000000 {
-		t.Fatalf("live warning reversed wrong mode: balance=%d: %v", balance, err)
+	if balance, err := (&Tenant{s: s, team: "a"}).CreditBalanceMicro(t.Context()); err != nil || balance != 0 {
+		t.Fatalf("live warning did not reverse live credit: balance=%d: %v", balance, err)
 	}
 	refunds, err := s.AsOperator().DueCardRefunds(t.Context())
 	if err != nil || len(refunds) != 1 || refunds[0].PaymentIntent != paid.PaymentID {
 		t.Fatalf("live warning refund=%+v: %v", refunds, err)
+	}
+	if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+		t.Fatal(err)
+	}
+	if balance, err := (&Tenant{s: s, team: "a"}).CreditBalanceMicro(t.Context()); err != nil || balance != 1000000 {
+		t.Fatalf("live warning changed test credit: balance=%d: %v", balance, err)
 	}
 }

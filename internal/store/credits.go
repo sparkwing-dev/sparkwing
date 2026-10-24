@@ -107,8 +107,9 @@ type CreditGrant struct {
 	AmountMicro int64
 	Reference   string
 	// Reverses names the reference of the grant a reversal takes back, and is empty on every other kind.
-	Reverses     string
-	reversesKind string
+	Reverses string
+	// ReversesKind distinguishes corrections of free grants from payment refunds.
+	ReversesKind string
 	CreatedBy    string
 	CreatedAt    time.Time
 }
@@ -222,7 +223,7 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 	grant := CreditGrant{
 		ID: id, Team: team, Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses,
-		CreatedBy: req.CreatedBy, CreatedAt: tx.now(ctx), reversesKind: CreditGrantFree,
+		CreatedBy: req.CreatedBy, CreatedAt: tx.now(ctx), ReversesKind: CreditGrantFree,
 	}
 	// safety: the lock is what makes the reference check and the insert one
 	// step, so two deliveries of the same grant cannot both find nothing.
@@ -288,7 +289,7 @@ func sameGrantTerms(stored CreditGrant, team Team, req CreditGrantRequest) error
 		return fmt.Errorf("%w: %q holds %d micro-credits, not %d",
 			ErrCreditGrantConflict, req.Reference, stored.AmountMicro, req.AmountMicro)
 	}
-	if stored.Reverses != req.Reverses || req.Kind == creditGrantReversal && stored.reversesKind != CreditGrantFree {
+	if stored.Reverses != req.Reverses || req.Kind == creditGrantReversal && stored.ReversesKind != CreditGrantFree {
 		return fmt.Errorf("%w: %q reverses %q, not %q",
 			ErrCreditGrantConflict, req.Reference, stored.Reverses, req.Reverses)
 	}
@@ -319,7 +320,7 @@ func creditGrantByReferenceTx(
 	err = tx.QueryRowContext(ctx, `SELECT team, id, kind, amount_micro, reference, reverses, reverses_kind, created_by, created_at
 	  FROM credit_grants WHERE team = ? AND payment_mode = ? AND kind = ? AND reference = ?
 	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), mode, kind, reference).
-		Scan(&owner, &g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.reversesKind, &g.CreatedBy, &created)
+		Scan(&owner, &g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.ReversesKind, &g.CreatedBy, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CreditGrant{}, false, nil
 	}
