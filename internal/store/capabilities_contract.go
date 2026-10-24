@@ -29,6 +29,7 @@ type CapabilityOrigin struct {
 	Personal       bool                     `json:"personal,omitempty"`
 	Requirement    *authorityRequirement    `json:"requirement,omitempty"`
 	Kind           capability.ProvisionKind `json:"kind"`
+	Platform       string                   `json:"platform,omitempty"`
 	RegistrationID string                   `json:"registration_id,omitempty"`
 }
 

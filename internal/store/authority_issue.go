@@ -307,7 +307,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if err != nil {
 		return capability.Capability{}, err
 	}
-	if reason, err := claimantTrustRefusalTx(ctx, tx, Team(row.team), row.run, chain[len(chain)-1].principal.Capability, facts.Launcher, facts.SingleUse); err != nil {
+	if reason, err := claimantTrustRefusalTx(ctx, tx, Team(row.team), row.run, chain[len(chain)-1].principal.Capability, facts.Launcher, facts.PersistentKubernetes); err != nil {
 		return capability.Capability{}, err
 	} else if reason != "" {
 		return capability.Capability{}, authorityError(apierr.Forbidden, reason)
@@ -602,7 +602,7 @@ func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Ca
 	c.CredentialEpoch = tx.store.credentialEpoch
 	var origin *CapabilityOrigin
 	if len(provision) > 0 && provision[0] != nil {
-		origin = &CapabilityOrigin{Kind: provision[0].Kind, RegistrationID: provision[0].RegistrationID, Personal: provision[0].Personal}
+		origin = &CapabilityOrigin{Kind: provision[0].Kind, RegistrationID: provision[0].RegistrationID, Personal: provision[0].Personal, Platform: provision[0].Platform}
 		var err error
 		origin.Requirement, err = provisionRequirementTx(ctx, tx, *provision[0])
 		if err != nil {

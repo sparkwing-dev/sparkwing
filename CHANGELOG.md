@@ -20,7 +20,7 @@ unlock.
 
 ## [Unreleased]
 
-- **runners:** Verified default-branch work requires fresh launcher pods, Cloud pods or Actions job runners; teams with only persistent runners see a waiting notice explaining how to add fresh capacity
+- **runners:** Verified default-branch work on Kubernetes requires fresh pods; teams with only persistent Kubernetes runners see a waiting notice explaining how to add fresh capacity. Plain-machine runners keep serving verified work
 
 - **cache:** Retries preserve the source writer's memo and dependency-cache scope in full and failed modes. Personal placement reads the same sealed writer. Only that writer's principal can retry `--runner here` and other local runs. Other members must start a new run
 - **runtime:** Owners refuse `--only` when the controller omits the selection projection, with an error asking for a controller update

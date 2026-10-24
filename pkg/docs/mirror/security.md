@@ -177,10 +177,14 @@ only pools whose rules allow the default branch. A typed repository grants no
 pool. Owner-approved extra repositories join the source token only for a
 verified push to the default branch.
 
-Verified default-branch work runs only on fresh, single-use capacity: launcher-created
-pool pods, Sparkwing Cloud pods or GitHub Actions job runners. Persistent runners
-serve other work. With only persistent runners, this work waits; add a launcher
-pool or use Sparkwing Cloud.
+On Kubernetes, verified default-branch work runs only on fresh, single-use pods.
+Persistent Kubernetes runners serve other work. With only persistent Kubernetes
+runners, verified work waits; add a launcher pool or use Sparkwing Cloud. The
+controller reads the platform from the admin-issued enrollment, never from job
+claims. Plain-machine runners (VMs and bare metal) keep serving verified work
+under the same OS user, so job code can read runner credentials and leave host
+state for later jobs. Launcher pods, Cloud pods and Actions job runners are
+unaffected.
 
 Child runs nest at most 10 levels deep counting the root, and one root run
 uses the team-set descendant ceiling, from 1 to 1000, default 50 at every depth, retries excluded.

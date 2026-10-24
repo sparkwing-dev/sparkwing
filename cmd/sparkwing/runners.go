@@ -48,6 +48,7 @@ type runnerEnrollment struct {
 	profileName  string
 	format       string
 	pools        []string
+	platform     string
 	trust        string
 	personal     bool
 	launcher     bool
@@ -121,6 +122,7 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 	}
 	enrollment.pools = inv.Flags["reserved-for"]
 	enrollment.trust = inv.Value("trust")
+	enrollment.platform = inv.Value("platform")
 	if enrollment.trust != "" && inv.Bool("personal") {
 		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--trust applies to shared runners only"}
 	}
@@ -152,7 +154,7 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 }
 
 func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enrollment runnerEnrollment) error {
-	request := controllerwire.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Trust: enrollment.trust, Personal: enrollment.personal}
+	request := controllerwire.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Trust: enrollment.trust, Personal: enrollment.personal, Platform: enrollment.platform}
 	if enrollment.launcher {
 		request.Grants = []string{string(capability.ClaimsLaunch)}
 	}

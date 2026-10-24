@@ -188,6 +188,7 @@ type ProvisionSpec struct {
 	Kind           ProvisionKind
 	ConsoleProof   *ConsoleProof
 	Authority      *AuthorityRef
+	Platform       string
 	RegistrationID string
 	Subject        Subject
 	Team           string

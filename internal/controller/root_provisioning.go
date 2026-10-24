@@ -17,6 +17,7 @@ import (
 
 type runnerEnrollmentRequest struct {
 	Personal      bool             `json:"personal,omitempty"`
+	Platform      string           `json:"platform,omitempty"`
 	Name          string           `json:"name"`
 	Repos         []string         `json:"repos"`
 	ReservedPools []string         `json:"reserved_pools,omitempty"`
@@ -75,7 +76,7 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 		}
 	}
 	return s.provisionRoot(w, r, capability.ProvisionSpec{
-		Kind: capability.ProvisionMachine, Personal: request.Personal, Authority: &a.Principal.Authority,
+		Kind: capability.ProvisionMachine, Personal: request.Personal, Platform: request.Platform, Authority: &a.Principal.Authority,
 		RegistrationID: "runner:" + a.Target.Team + ":" + request.Name,
 		Subject:        capability.Subject{Kind: capability.SubjectMachine, ID: request.Name}, Team: a.Target.Team,
 		Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},

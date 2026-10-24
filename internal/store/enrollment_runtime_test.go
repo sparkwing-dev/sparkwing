@@ -242,9 +242,9 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 	}
 }
 
-func TestRotationKeepsTheRunnerTrustClass(t *testing.T) {
+func TestRotationKeepsRunnerTrustAndPlatform(t *testing.T) {
 	s, spec := machineEnrollment(t)
-	spec.Trust = capability.TrustAny
+	spec.Trust, spec.Platform = capability.TrustAny, "kubernetes"
 	issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
@@ -258,9 +258,37 @@ func TestRotationKeepsTheRunnerTrustClass(t *testing.T) {
 	if err != nil || successor.Capability.Trust != capability.TrustAny {
 		t.Fatalf("successor trust = %q, %v", successor.Capability.Trust, err)
 	}
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		chain, err := authorityChainTx(t.Context(), tx, successor.Authority, false)
+		if err != nil {
+			return err
+		}
+		facts, err := claimantFactsTx(t.Context(), tx, chain, runspec.Request{})
+		if err == nil && !facts.PersistentKubernetes {
+			t.Error("rotation lost the enrolled Kubernetes platform")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	changed := issued.Capability
 	changed.Trust = capability.TrustVerifiedDefault
 	if sameRotationScope(issued.Capability, changed) {
 		t.Fatal("a successor with another trust class counts as the same rotation scope")
+	}
+}
+
+func TestRunnerPlatformAllowsOnlySharedKubernetesEnrollment(t *testing.T) {
+	for _, platform := range []string{"kubernetes", "other"} {
+		for _, personal := range []bool{false, true} {
+			t.Run(fmt.Sprint(platform, personal), func(t *testing.T) {
+				s, spec := machineEnrollment(t)
+				spec.Platform, spec.Personal = platform, personal
+				_, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
+				if (err == nil) != (platform == "kubernetes" && !personal) {
+					t.Fatalf("platform=%q personal=%v enrollment: %v", platform, personal, err)
+				}
+			})
+		}
 	}
 }

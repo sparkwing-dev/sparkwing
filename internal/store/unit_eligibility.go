@@ -66,7 +66,7 @@ func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit Un
 	if err != nil {
 		return e, err
 	}
-	if reason, err := claimantTrustRefusalTx(ctx, tx, team, string(unit.RunID), chain[len(chain)-1].principal.Capability, e.launcher, facts.SingleUse); err != nil || reason != "" {
+	if reason, err := claimantTrustRefusalTx(ctx, tx, team, string(unit.RunID), chain[len(chain)-1].principal.Capability, e.launcher, facts.PersistentKubernetes); err != nil || reason != "" {
 		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, reason)
 		if reason == freshPodReason {
 			e.failed = stepFreshPod
@@ -131,9 +131,12 @@ func localClaimant(c capability.Capability) bool {
 	return c.Subject.Kind == capability.SubjectLocal && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone && (slices.Contains(c.Grants, capability.NodesClaim) || slices.Contains(c.Grants, capability.TriggersClaim))
 }
 
-const freshPodReason = "verified default-branch work runs only on fresh pods; add a launcher pool or use Sparkwing Cloud"
+const freshPodReason = "verified default-branch work on Kubernetes runs only on fresh pods; add a launcher pool or use Sparkwing Cloud"
 
-func claimantTrustRefusalTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability, launcher, singleUse bool) (string, error) {
+// safety: a claimant that runs one job after another shares host state between them,
+// so work from a run anyone can push must not reach a host that later holds a pool's
+// reserved secrets.
+func claimantTrustRefusalTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability, launcher, persistentKubernetes bool) (string, error) {
 	q := claimSQL{dialect: tx.dialect}
 	reasonParam := q.param(freshPodReason)
 	pools, err := q.jsonParam(root.ReservedPools)
@@ -142,7 +145,7 @@ func claimantTrustRefusalTx(ctx context.Context, tx *storeTx, team Team, run str
 	}
 	provenance := q.at(q.blob("r.request_json"), "provenance")
 	// A relation names each argument once even when the rule references it twice.
-	query := `SELECT CASE WHEN NOT ` + q.freshPod("c.single_use", provenance) + ` THEN ` + reasonParam + ` WHEN NOT ` + q.poolTrust("r.team", "c.pools", "c.trust", "c.launcher", provenance) + ` THEN 'claimant trust requires verified default-branch work and launcher mode for reserved pools' ELSE '' END FROM runs r CROSS JOIN (SELECT ` + pools + ` AS pools,` + q.param(string(root.Trust)) + ` AS trust,CAST(` + q.param(boolInt(launcher)) + ` AS BIGINT) AS launcher,CAST(` + q.param(boolInt(singleUse)) + ` AS BIGINT) AS single_use) c WHERE r.team=? AND r.id=?`
+	query := `SELECT CASE WHEN NOT ` + q.freshPod("c.persistent_kubernetes", provenance) + ` THEN ` + reasonParam + ` WHEN NOT ` + q.poolTrust("r.team", "c.pools", "c.trust", "c.launcher", provenance) + ` THEN 'claimant trust requires verified default-branch work and launcher mode for reserved pools' ELSE '' END FROM runs r CROSS JOIN (SELECT ` + pools + ` AS pools,` + q.param(string(root.Trust)) + ` AS trust,CAST(` + q.param(boolInt(launcher)) + ` AS BIGINT) AS launcher,CAST(` + q.param(boolInt(persistentKubernetes)) + ` AS BIGINT) AS persistent_kubernetes) c WHERE r.team=? AND r.id=?`
 	var reason string
 	err = tx.QueryRowContext(ctx, query, append(q.args, team, run)...).Scan(&reason)
 	return reason, err

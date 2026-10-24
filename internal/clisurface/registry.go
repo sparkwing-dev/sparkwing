@@ -432,6 +432,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 			{Name: "reserved-for", Argument: "POOL", Repeatable: true, CommaList: true},
 			{Name: "trust", Argument: "CLASS", Values: []string{"verified-default", "any"}},
+			{Name: "platform", Argument: "PLATFORM", Values: []string{"kubernetes"}, Meaning: "Record a shared Kubernetes runner at admin enrollment; required for the runner chart."},
 			{Name: "launcher", Meaning: "Enroll only claims.launch for a shared reserved pool and skip the persistent runner service."},
 		}},
 		{Path: "sparkwing runners list", Authority: teamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{

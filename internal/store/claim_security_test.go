@@ -86,7 +86,7 @@ func reservedPoolTrustClaimAndExplanationParity(t *testing.T, open func(*testing
 							s.testOnlyExec(t, `UPDATE runs SET request_json=?`, body)
 						}
 						indexFixtureUnit(t, s, "a", *demand.Target)
-						want := (!verified || launcher) && (!secret || launcher) && (trust == capability.TrustAny || trust == "" && !secret || verified && launcher)
+						want := (!secret || launcher) && (trust == capability.TrustAny || trust == "" && !secret || verified && launcher)
 						err := s.inTx(t.Context(), func(tx *storeTx) error {
 							explained, err := explainUnitPlacementTx(t.Context(), tx, "a", *demand.Target, demand)
 							if err != nil {
@@ -163,9 +163,9 @@ func pushClaimProvenanceParity(t *testing.T, open func(*testing.T) *Store) {
 }
 
 func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store) {
-	const why = "verified default-branch work runs only on fresh pods; add a launcher pool or use Sparkwing Cloud"
+	const why = "verified default-branch work on Kubernetes runs only on fresh pods; add a launcher pool or use Sparkwing Cloud"
 	for _, source := range []string{"verified-default", "verified-main", "verified-feature", "asserted-main"} {
-		for _, runner := range []string{"persistent", "launcher", "cloud", "actions"} {
+		for _, runner := range []string{"plain-machine", "persistent", "launcher", "cloud", "actions"} {
 			for _, named := range []bool{false, true} {
 				t.Run(fmt.Sprint(source, "/", runner, "/", named), func(t *testing.T) {
 					s, demand := unitClaimFixtureStore(t, open(t))
@@ -205,7 +205,20 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					if runner == "actions" {
 						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/" + branch, SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/" + branch}}
 					}
-					authorityPersist(t, s, root)
+					if runner == "persistent" || runner == "plain-machine" || runner == "launcher" {
+						owner := referenceMember(t, s, "owner", RoleOwner)
+						platform := "kubernetes"
+						if runner == "plain-machine" {
+							platform = ""
+						}
+						issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:" + runner, Team: "a", Subject: root.Subject, Grants: root.Grants, Binding: root.Binding, Repositories: []string{"github.com/acme/*"}, ReservedPools: root.ReservedPools, Trust: root.Trust, Platform: platform})
+						if err != nil {
+							t.Fatal(err)
+						}
+						root = issued.Capability
+					} else {
+						authorityPersist(t, s, root)
+					}
 					demand.CapabilityPrefix = root.Prefix
 					// Advertisements cannot turn a persistent enrollment into a fresh pod.
 					demand.Labels = append(demand.Labels, "single-use", "launcher", "class=cloud")
