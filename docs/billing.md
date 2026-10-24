@@ -16,6 +16,14 @@ A GitHub App push requiring a Cloud size needs credits at intake. An unfunded
 push records a terminal run that did not start. Adding credits later does not
 start that delivery's run. Use Run now after funding.
 
+Balances, standing history, holds and grant/charge history use the configured
+payment mode. Test funds never pay for live usage. Switching back to a mode
+shows its retained ledger again.
+
+Operator free grants require an explicit idempotency key. A mistaken free grant
+can be corrected with a negative reversal naming its reference. Corrections
+cannot take back more than that grant, and cannot reverse paid credits.
+
 ## Standing
 
 Standing caps how much Cloud capacity a team can use at once and how long one
@@ -149,6 +157,8 @@ that would exceed a team limit or a cap is not made. The credits run down and Cl
 billing page names the limit that stopped the refill (`refill.limit` in
 `GET /api/v1/team/billing`).
 
+A refill that returns `requires_action` closes as failed with `authentication_required`,
+whether the status arrives from reconciliation, confirmation or a signed webhook.
 A refill the card declines, or that asks for authentication, is recorded with
 its decline code, and the team's owners receive an email asking them to update
 the card. A refill paid with a card pinned to another team is refused, refunded
@@ -293,3 +303,6 @@ when an earlier partial refund leaves less than the original payment to return.
 A failed or canceled refund becomes retryable under a new attempt key. A
 terminal refund outcome survives a later pending delivery, and a conflicting
 terminal outcome is refused.
+
+Team deletion waits for every card refund to succeed, even after its checkout
+expires. An unfinished refund is retained through deletion and purge.

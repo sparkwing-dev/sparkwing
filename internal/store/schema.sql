@@ -487,6 +487,7 @@ CREATE TABLE cron_fires (
 );
 
 CREATE TABLE credit_grants (
+    payment_mode TEXT NOT NULL DEFAULT 'test' CHECK(payment_mode IN ('test','live')),
     id TEXT NOT NULL PRIMARY KEY,
     kind TEXT NOT NULL CHECK(kind IN ('free','paid','reversal')),
     amount_micro BIGINT NOT NULL,
@@ -495,12 +496,18 @@ CREATE TABLE credit_grants (
     created_at BIGINT NOT NULL,
     reverses TEXT NOT NULL DEFAULT '',
     team TEXT NOT NULL REFERENCES teams(name),
+    grant_reference TEXT GENERATED ALWAYS AS (NULLIF(reference,'')) STORED,
+    reversal_reference TEXT GENERATED ALWAYS AS (NULLIF(reverses,'')) STORED,
+    reverses_kind TEXT NOT NULL DEFAULT 'paid' CHECK(reverses_kind IN ('free','paid')),
     UNIQUE(team,id),
+    UNIQUE(team,payment_mode,kind,grant_reference),
+    FOREIGN KEY(team,payment_mode,reverses_kind,reversal_reference) REFERENCES credit_grants(team,payment_mode,kind,grant_reference),
     CHECK((kind IN ('free','paid') AND amount_micro > 0 AND reverses = '')
        OR (kind = 'reversal' AND amount_micro < 0 AND reverses <> ''))
 );
 
 CREATE TABLE credit_charges (
+    payment_mode TEXT NOT NULL DEFAULT 'test' CHECK(payment_mode IN ('test','live')),
     id TEXT NOT NULL PRIMARY KEY,
     run_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
@@ -963,6 +970,7 @@ CREATE TABLE payment_correlations (
 );
 
 CREATE TABLE credit_freezes (
+    payment_mode TEXT NOT NULL DEFAULT 'test' CHECK(payment_mode IN ('test','live')),
     dispute_id TEXT NOT NULL PRIMARY KEY,
     team TEXT NOT NULL REFERENCES teams(name),
     payment_id TEXT NOT NULL DEFAULT '',
@@ -1675,7 +1683,6 @@ CREATE UNIQUE INDEX idx_cron_schedules_repo_pipeline_name ON cron_schedules(team
 
 CREATE UNIQUE INDEX idx_triggers_webhook_replay_key ON triggers(team, webhook_replay_key) WHERE webhook_replay_key != '';
 
-CREATE UNIQUE INDEX idx_credit_grants_team_reference ON credit_grants(team, kind, reference) WHERE reference != '';
 
 CREATE INDEX idx_github_app_installations_team ON github_app_installations(team);
 
@@ -1811,7 +1818,7 @@ CREATE TABLE source_uploads (
 
 CREATE INDEX idx_source_uploads_expiry ON source_uploads(expires_at,team,id);
 CREATE UNIQUE INDEX idx_credit_charges_one_reservation ON credit_charges(team,capability_prefix) WHERE kind = 'reservation';
-CREATE UNIQUE INDEX idx_credit_checkouts_one_open_refill ON credit_checkouts(team) WHERE kind = 'refill' AND closed_at IS NULL;
+CREATE UNIQUE INDEX idx_credit_checkouts_one_open_refill ON credit_checkouts(team,payment_mode) WHERE kind = 'refill' AND closed_at IS NULL;
 
 CREATE TABLE admission_work (
     team TEXT NOT NULL REFERENCES teams(name),

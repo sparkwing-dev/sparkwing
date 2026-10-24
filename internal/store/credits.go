@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 const (
@@ -103,10 +106,11 @@ type CreditGrant struct {
 	Kind        string
 	AmountMicro int64
 	Reference   string
-	// Reverses names the reference of the paid grant a reversal takes back, and is empty on every other kind.
-	Reverses  string
-	CreatedBy string
-	CreatedAt time.Time
+	// Reverses names the reference of the grant a reversal takes back, and is empty on every other kind.
+	Reverses     string
+	reversesKind string
+	CreatedBy    string
+	CreatedAt    time.Time
 }
 
 // CreditCharge is one persisted reservation, usage debit or refund.
@@ -155,7 +159,7 @@ type CreditState struct {
 	BurnMicro                 int64
 }
 
-// CreditGrantRequest carries an operator free grant and its idempotency reference.
+// CreditGrantRequest carries an operator free grant or its correction and the idempotency reference.
 type CreditGrantRequest struct {
 	Kind        string
 	AmountMicro int64
@@ -173,16 +177,19 @@ type CreditGrantResult struct {
 }
 
 func (req CreditGrantRequest) validate() error {
-	if req.Kind != CreditGrantFree || req.Reverses != "" {
-		return fmt.Errorf("%w: paid credits and reversals require verified payment settlement or an authorized refund", ErrInvalidInput)
+	if strings.TrimSpace(req.Reference) == "" {
+		return fmt.Errorf("%w: a grant requires an idempotency reference", ErrInvalidInput)
 	}
-	if req.AmountMicro <= 0 || req.AmountMicro > MaxCreditGrantMicro {
-		return fmt.Errorf("%w: grant amount must be between 1 and %d micro-credits", ErrInvalidInput, MaxCreditGrantMicro)
+	switch {
+	case req.Kind == CreditGrantFree && req.Reverses == "" && req.AmountMicro > 0 && req.AmountMicro <= MaxCreditGrantMicro:
+	case req.Kind == creditGrantReversal && req.Reverses != "" && req.AmountMicro < 0 && req.AmountMicro >= -MaxCreditGrantMicro:
+	default:
+		return fmt.Errorf("%w: grant a positive free amount or reverse an existing free grant with a negative amount", ErrInvalidInput)
 	}
 	return nil
 }
 
-// RecordCreditGrant writes an operator free grant and reports whether it was created.
+// RecordCreditGrant writes a free grant or a bounded negative correction of a free grant and reports whether it was created.
 func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error) {
@@ -215,7 +222,7 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 	grant := CreditGrant{
 		ID: id, Team: team, Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses,
-		CreatedBy: req.CreatedBy, CreatedAt: tx.now(ctx),
+		CreatedBy: req.CreatedBy, CreatedAt: tx.now(ctx), reversesKind: CreditGrantFree,
 	}
 	// safety: the lock is what makes the reference check and the insert one
 	// step, so two deliveries of the same grant cannot both find nothing.
@@ -223,16 +230,30 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 	if err != nil {
 		return CreditGrantResult{}, err
 	}
-	if req.Reference != "" {
-		existing, found, err := creditGrantByReferenceTx(ctx, tx, team, req.Kind, req.Reference)
+	existing, found, err := creditGrantByReferenceTx(ctx, tx, team, req.Kind, req.Reference)
+	if err != nil {
+		return CreditGrantResult{}, err
+	}
+	if found {
+		if err := sameGrantTerms(existing, team, req); err != nil {
+			return CreditGrantResult{}, err
+		}
+		return CreditGrantResult{Grant: existing}, nil
+	}
+	if req.Kind == creditGrantReversal {
+		original, found, err := creditGrantByReferenceTx(ctx, tx, team, CreditGrantFree, req.Reverses)
 		if err != nil {
 			return CreditGrantResult{}, err
 		}
-		if found {
-			if err := sameGrantTerms(existing, team, req); err != nil {
-				return CreditGrantResult{}, err
-			}
-			return CreditGrantResult{Grant: existing}, nil
+		if !found {
+			return CreditGrantResult{}, fmt.Errorf("%w: reversal must name a free grant", ErrInvalidInput)
+		}
+		reversed, err := reversedMicroTx(ctx, tx, team, CreditGrantFree, req.Reverses)
+		if err != nil {
+			return CreditGrantResult{}, err
+		}
+		if -req.AmountMicro > original.AmountMicro-reversed {
+			return CreditGrantResult{}, fmt.Errorf("%w: reversal exceeds the remaining free grant", ErrInvalidInput)
 		}
 	}
 	if err := l.insertGrant(ctx, grant); err != nil {
@@ -267,30 +288,38 @@ func sameGrantTerms(stored CreditGrant, team Team, req CreditGrantRequest) error
 		return fmt.Errorf("%w: %q holds %d micro-credits, not %d",
 			ErrCreditGrantConflict, req.Reference, stored.AmountMicro, req.AmountMicro)
 	}
-	if stored.Reverses != req.Reverses {
+	if stored.Reverses != req.Reverses || req.Kind == creditGrantReversal && stored.reversesKind != CreditGrantFree {
 		return fmt.Errorf("%w: %q reverses %q, not %q",
 			ErrCreditGrantConflict, req.Reference, stored.Reverses, req.Reverses)
 	}
 	return nil
 }
 
-func reversedMicroTx(ctx context.Context, tx *storeTx, team Team, payment string) (int64, error) {
+func reversedMicroTx(ctx context.Context, tx *storeTx, team Team, kind, payment string) (int64, error) {
+	mode, err := ledgerPaymentModeTx(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
 	var sum sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
-	  WHERE team = ? AND kind = ? AND reverses = ?`, string(team), creditGrantReversal, payment).Scan(&sum)
+	err = tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
+	  WHERE team = ? AND payment_mode = ? AND kind = ? AND reverses_kind = ? AND reverses = ?`, string(team), mode, creditGrantReversal, kind, payment).Scan(&sum)
 	return -sum.Int64, err
 }
 
 func creditGrantByReferenceTx(
 	ctx context.Context, tx *storeTx, team Team, kind, reference string,
 ) (CreditGrant, bool, error) {
+	mode, err := ledgerPaymentModeTx(ctx, tx)
+	if err != nil {
+		return CreditGrant{}, false, err
+	}
 	var g CreditGrant
 	var created int64
 	var owner string
-	err := tx.QueryRowContext(ctx, `SELECT team, id, kind, amount_micro, reference, reverses, created_by, created_at
-	  FROM credit_grants WHERE team = ? AND kind = ? AND reference = ?
-	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), kind, reference).
-		Scan(&owner, &g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.CreatedBy, &created)
+	err = tx.QueryRowContext(ctx, `SELECT team, id, kind, amount_micro, reference, reverses, reverses_kind, created_by, created_at
+	  FROM credit_grants WHERE team = ? AND payment_mode = ? AND kind = ? AND reference = ?
+	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), mode, kind, reference).
+		Scan(&owner, &g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.reversesKind, &g.CreatedBy, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CreditGrant{}, false, nil
 	}
@@ -302,20 +331,44 @@ func creditGrantByReferenceTx(
 	return g, true, nil
 }
 
-const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?),
-        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`
+func ledgerPaymentModeTx(ctx context.Context, q rowQuerier) (capability.PaymentMode, error) {
+	var encoded []byte
+	err := q.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='payment_mode'").Scan(&encoded)
+	// Local stores without a provider still have a ledger.
+	if errors.Is(err, sql.ErrNoRows) {
+		return capability.PaymentTest, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var mode capability.PaymentMode
+	if err := json.Unmarshal(encoded, &mode); err != nil {
+		return "", err
+	}
+	if mode != capability.PaymentTest && mode != capability.PaymentLive {
+		return "", ErrInvalidInput
+	}
+	return mode, nil
+}
+
+const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ?),
+        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND payment_mode = ?)`
 
 // safety: a reversal is a grant row with a negative amount, so a reader that
 // wants the two apart asks for them apart; the balance is the same either way.
 const creditGrantSplitSQL = `SELECT
-        (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind != ?),
-        (SELECT -SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind = ?),
-        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`
+        (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ? AND kind != ?),
+        (SELECT -SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ? AND kind = ?),
+        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND payment_mode = ?)`
 
 func creditBalanceTx(ctx context.Context, tx rowQuerier, team Team) (int64, error) {
+	mode, err := ledgerPaymentModeTx(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
 	var granted, charged sql.NullInt64
 	if err := tx.QueryRowContext(ctx, creditBalanceSQL,
-		string(team), string(team)).Scan(&granted, &charged); err != nil {
+		string(team), mode, string(team), mode).Scan(&granted, &charged); err != nil {
 		return 0, err
 	}
 	return granted.Int64 - charged.Int64, nil
@@ -328,7 +381,7 @@ type CreditLedgerTotals struct {
 	// GrantedFreeMicro and GrantedPaidMicro sum the grants of each kind.
 	GrantedFreeMicro int64
 	GrantedPaidMicro int64
-	// ReversedMicro is what refunds took back out of the paid grants, reported as a positive amount.
+	// ReversedMicro is what reversals took back, reported as a positive amount.
 	ReversedMicro int64
 	// ReservedMicro is the runway claims took up front, refunds included, so it is the gross reservation rather than the part never returned.
 	ReservedMicro int64

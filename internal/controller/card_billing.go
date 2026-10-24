@@ -140,7 +140,7 @@ func (s *Server) refillPass(ctx context.Context) {
 		default:
 			continue
 		}
-		if res.Status != "canceled" {
+		if res.Status != "canceled" && res.Status != "requires_action" {
 			allowed, err := operator.CanConfirmRefill(ctx, r)
 			if err != nil {
 				s.logger.Error("checking refill confirmation failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
@@ -156,6 +156,14 @@ func (s *Server) refillPass(ctx context.Context) {
 			if err != nil {
 				s.logger.Error("updating a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "action", action, "err", err)
 				continue
+			}
+		}
+		if res.Status == "requires_action" {
+			settled, err := operator.RecordRefillAuthenticationRequired(ctx, r)
+			if err != nil {
+				s.logger.Error("recording refill authentication failure", "team", string(r.Team), "err", err)
+			} else {
+				s.reportPaymentSettlement(ctx, settled)
 			}
 		}
 		if res.Status == "canceled" {

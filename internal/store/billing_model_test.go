@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -24,7 +25,13 @@ func billingModelFixture(t *testing.T) (*Store, UnitDemand, *time.Time) {
 
 func billingModelJob(t *testing.T, s *Store, id string) {
 	t.Helper()
-	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,'pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`, id)
+	spec, err := json.Marshal(struct {
+		ID string `json:"id"`
+	}{id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,'pending',1,?,execution_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`, id, spec)
 }
 
 func TestBillingModelNewCloudAdmissionsShareEightVCPU(t *testing.T) {

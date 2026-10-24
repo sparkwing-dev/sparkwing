@@ -40,13 +40,13 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference str
 		return CreditReversal{}, err
 	}
 	if found {
-		if existing.Reverses != paid.Reference {
+		if existing.Reverses != paid.Reference || existing.reversesKind != CreditGrantPaid {
 			return CreditReversal{}, fmt.Errorf("%w: %q reverses %q, not %q",
 				ErrCreditGrantConflict, reference, existing.Reverses, paid.Reference)
 		}
 		out.Grant = &existing
 	}
-	already, err := reversedMicroTx(ctx, tx, paid.Team, paid.Reference)
+	already, err := reversedMicroTx(ctx, tx, paid.Team, CreditGrantPaid, paid.Reference)
 	if err != nil {
 		return CreditReversal{}, err
 	}
@@ -103,9 +103,13 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	if actor == "" {
 		stored, cause = truncate(reason, 500), holdCauseDispute
 	}
+	mode, err := ledgerPaymentModeTx(ctx, tx)
+	if err != nil {
+		return false, err
+	}
 	if _, err := tx.execContext(ctx, `
-		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, placed_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		disputeID, string(team), paymentID, stored, cause, actor, now.UnixNano()); err != nil {
+		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, placed_by, created_at, payment_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		disputeID, string(team), paymentID, stored, cause, actor, now.UnixNano(), mode); err != nil {
 		return false, err
 	}
 	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
@@ -123,8 +127,12 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 	}
 	disputeID = strings.TrimSpace(disputeID)
 	operatorOnly = operatorOnly || noFault
-	query := `UPDATE credit_freezes SET released_at = ?, no_fault = ? WHERE team = ? AND released_at IS NULL`
-	args := []any{now.UnixNano(), boolInt(noFault), string(team)}
+	mode, err := ledgerPaymentModeTx(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	query := `UPDATE credit_freezes SET released_at = ?, no_fault = ? WHERE team = ? AND payment_mode = ? AND released_at IS NULL`
+	args := []any{now.UnixNano(), boolInt(noFault), string(team), mode}
 	if disputeID != "" {
 		query, args = query+` AND dispute_id = ?`, append(args, disputeID)
 	}
@@ -137,8 +145,8 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 	if noFault {
 		var operator, others int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN placed_by <> ? THEN 1 ELSE 0 END), 0)
-		    FROM credit_freezes WHERE team = ? AND released_at IS NULL AND cause = ? AND (? = '' OR dispute_id = ?)`,
-			actor, string(team), HoldCauseOperator, disputeID, disputeID).Scan(&operator, &others); err != nil {
+		    FROM credit_freezes WHERE team = ? AND payment_mode = ? AND released_at IS NULL AND cause = ? AND (? = '' OR dispute_id = ?)`,
+			actor, string(team), mode, HoldCauseOperator, disputeID, disputeID).Scan(&operator, &others); err != nil {
 			return 0, err
 		}
 		if disputeID != "" && operator == 0 {

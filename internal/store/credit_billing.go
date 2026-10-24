@@ -15,10 +15,14 @@ type RunCreditUsage struct {
 
 // CreditUsageByRun returns the team's runner spend grouped by run, the most recently charged run first, at most limit runs.
 func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCreditUsage, err error) {
+	mode, err := ledgerPaymentModeTx(ctx, storeRowQuerier{t.s})
+	if err != nil {
+		return nil, err
+	}
 	rows, err := t.s.query(ctx, `SELECT run_id, SUM(seconds), SUM(amount_micro), MAX(charged_at)
-	  FROM credit_charges WHERE team = ? AND kind != ? AND run_id != ''
+	  FROM credit_charges WHERE team = ? AND payment_mode = ? AND kind != ? AND run_id != ''
 	 GROUP BY run_id ORDER BY MAX(charged_at) DESC, run_id DESC LIMIT ?`,
-		string(t.team), CreditChargeStorage, creditLimit(limit))
+		string(t.team), mode, CreditChargeStorage, creditLimit(limit))
 	if err != nil {
 		return nil, err
 	}

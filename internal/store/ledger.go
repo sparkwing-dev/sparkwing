@@ -1,12 +1,15 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 var ledgerDollarQuote = regexp.MustCompile(`(?i)^\$(?:[a-z_][a-z_0-9]*)?\$`)
@@ -157,9 +160,13 @@ func (l *ledgerTx) insertGrant(ctx context.Context, g CreditGrant) error {
 	if g.Team != l.team {
 		return fmt.Errorf("ledger: grant for %q under %q's lock", g.Team, l.team)
 	}
-	_, err := l.exec(ctx, `INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses, created_by,
-	    created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(g.Team), g.ID, g.Kind, g.AmountMicro, g.Reference, g.Reverses, g.CreatedBy, g.CreatedAt.UnixNano())
+	mode, err := ledgerPaymentModeTx(ctx, l.storeTx)
+	if err != nil {
+		return err
+	}
+	_, err = l.exec(ctx, `INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses, created_by,
+	    created_at, payment_mode, reverses_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(g.Team), g.ID, g.Kind, g.AmountMicro, g.Reference, g.Reverses, g.CreatedBy, g.CreatedAt.UnixNano(), mode, cmp.Or(g.reversesKind, CreditGrantPaid))
 	if err != nil {
 		return fmt.Errorf("credits: insert %s grant: %w", g.Kind, err)
 	}
@@ -170,11 +177,28 @@ func (l *ledgerTx) insertCharge(ctx context.Context, c CreditCharge) error {
 	if c.Team != l.team {
 		return fmt.Errorf("ledger: charge for %q under %q's lock", c.Team, l.team)
 	}
-	_, err := l.exec(ctx, `INSERT INTO credit_charges (team, id, run_id, node_id, capability_prefix, principal,
-	    kind, seconds, amount_micro, storage_bytes, cpu_class, rate_micro_per_second, charged_at)
-	    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	mode, err := ledgerPaymentModeTx(ctx, l.storeTx)
+	if err != nil {
+		return err
+	}
+	if c.Kind != creditChargeReservation && c.TokenPrefix != "" {
+		var reservedMode string
+		err := l.QueryRowContext(ctx, `SELECT payment_mode FROM credit_charges WHERE team=? AND capability_prefix=? AND kind='reservation'`, l.team, c.TokenPrefix).Scan(&reservedMode)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil {
+			if c.Kind == creditChargeSlice && reservedMode != string(mode) {
+				return ErrInsufficientCredits
+			}
+			mode = capability.PaymentMode(reservedMode)
+		}
+	}
+	_, err = l.exec(ctx, `INSERT INTO credit_charges (team, id, run_id, node_id, capability_prefix, principal,
+	    kind, seconds, amount_micro, storage_bytes, cpu_class, rate_micro_per_second, charged_at, payment_mode)
+	    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(c.Team), c.ID, c.RunID, c.NodeID, c.TokenPrefix, c.Principal, c.Kind, c.Seconds, c.AmountMicro,
-		c.StorageBytes, c.CPUClassCores, c.RateMicroPerSecond, c.ChargedAt.UnixNano())
+		c.StorageBytes, c.CPUClassCores, c.RateMicroPerSecond, c.ChargedAt.UnixNano(), mode)
 	if err != nil {
 		return fmt.Errorf("credits: insert %s charge: %w", c.Kind, err)
 	}

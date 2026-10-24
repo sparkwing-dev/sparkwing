@@ -36,6 +36,7 @@ func TestAdminNeedsATeamAndAReason(t *testing.T) {
 		{"grant", "--team", "default", "--cents", "500"},
 		{"grant", "--team", "default", "--reason", "QA", "--cents", "500", "--hold", "dp_1"},
 		{"grant", "--team", "default", "--reason", "QA", "--cents", "500", "--key", "  "},
+		{"grant", "--team", "default", "--reason", "QA", "--cents", "500", "--key", "correct", "--reverses", " "},
 		{"grant", "--team", "no-such-team", "--reason", "QA", "--cents", "500"},
 		{"freeze", "--team", "default", "--reason", "abuse", "--cents", "500"},
 		{"unfreeze", "--team", "default", "--reason", "abuse", "--key", "k"},
@@ -181,8 +182,8 @@ func TestAdminGrantsCreditsOnceWithTheConsolesRecord(t *testing.T) {
 		t.Fatalf("flagged large grant = %+v", large)
 	}
 	t.Setenv("SPARKWING_ADMIN_GRANT_ALLOW_LARGE", "")
-	if fresh, _ := grant(); !fresh.Created || !strings.HasPrefix(fresh.Reference, "admin:") || fresh.BalanceMicro != 11001*store.MicroCreditsPerCent {
-		t.Fatalf("keyless grant = %+v", fresh)
+	if err := runAdmin([]string{"grant", "--team", "default", "--cents", "500", "--reason", "QA"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("keyless grant succeeded")
 	}
 	st = openState(t)
 	defer func() { _ = st.Close() }()
@@ -191,7 +192,7 @@ func TestAdminGrantsCreditsOnceWithTheConsolesRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	events, err := tn.BusinessEvents(context.Background(), store.BusinessEventCreditGranted, 1000, "")
-	if err != nil || len(events) != 3 {
+	if err != nil || len(events) != 2 {
 		t.Fatalf("grant events = %+v, %v", events, err)
 	}
 	for _, ev := range events {
@@ -350,5 +351,44 @@ func TestSQLiteControllerRefusesAnOwnedStore(t *testing.T) {
 	}
 	if _, err := os.Stat(home + "/state.db"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("second controller opened the store: %v", err)
+	}
+}
+
+func TestAdminGrantRefusesMissingIdempotencyKey(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	st := openState(t)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err := runAdmin([]string{"grant", "--team", "default", "--cents", "100", "--reason", "correction"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "key") {
+		t.Fatalf("missing grant key: %v", err)
+	}
+}
+
+func TestAdminCorrectsFreeGrantWithIdempotentReversal(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	st := openState(t)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"--key", "mistake"},
+		{"--key", "correct", "--reverses", "admin:mistake"},
+		{"--key", "correct", "--reverses", "admin:mistake"},
+	} {
+		if err := runAdmin(append([]string{"grant", "--team", "default", "--cents", "100", "--reason", "correct a free grant"}, args...), &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st = openState(t)
+	defer func() { _ = st.Close() }()
+	tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	balance, err := tenant.CreditBalanceMicro(t.Context())
+	if err != nil || balance != 0 {
+		t.Fatalf("corrected balance=%d: %v", balance, err)
 	}
 }

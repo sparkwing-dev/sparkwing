@@ -70,6 +70,7 @@ var paymentEventPolicies = []paymentEventPolicy{
 	{"setup_intent.succeeded", PaymentCardSetup, false},
 	{"payment_intent.succeeded", PaymentCardPaid, false},
 	{"payment_intent.payment_failed", PaymentCardFailed, false},
+	{"payment_intent.requires_action", PaymentCardFailed, false},
 	{"refund.created", PaymentRefund, false},
 	{"refund.updated", PaymentRefund, false},
 	{"refund.failed", PaymentRefund, false},

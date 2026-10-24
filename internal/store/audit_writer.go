@@ -310,7 +310,7 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 			actorAllowed = c.Actor.system == auditPaymentProvider
 			ev.Kind = businessEventCheckoutPaid
 		case creditGrantReversal:
-			actorAllowed = actorAllowed || c.Actor.system == auditPaymentProvider
+			actorAllowed = actorAllowed || auditOneOf(c.Actor.system, string(auditPaymentProvider), string(auditBreakGlass))
 			ev.Kind = businessEventCreditReversed
 		case CreditGrantFree:
 			actorAllowed = actorAllowed || c.Actor.system == auditBreakGlass

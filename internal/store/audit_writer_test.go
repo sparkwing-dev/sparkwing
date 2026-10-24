@@ -155,7 +155,7 @@ func TestAuditWriterRejectsSystemActorsForOtherKinds(t *testing.T) {
 		{"checkout_failed", auditCheckout{Outcome: businessEventCheckoutFailed}, []auditSystem{auditPaymentProvider}},
 		{"paid", auditGrant{Kind: CreditGrantPaid}, []auditSystem{auditPaymentProvider}},
 		{"free", auditGrant{Kind: CreditGrantFree}, []auditSystem{auditBreakGlass}},
-		{"reversal", auditGrant{Kind: creditGrantReversal}, []auditSystem{auditPaymentProvider}},
+		{"reversal", auditGrant{Kind: creditGrantReversal}, []auditSystem{auditPaymentProvider, auditBreakGlass}},
 		{"hold", auditHold{}, []auditSystem{auditController, auditPaymentProvider, auditBreakGlass}},
 		{"card", auditCard{Operation: businessEventCardBlocked}, []auditSystem{auditPaymentProvider}},
 		{"refill", auditRefill{}, []auditSystem{auditController}},

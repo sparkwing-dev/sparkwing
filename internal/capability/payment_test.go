@@ -275,3 +275,17 @@ func TestARecordedObjectStampedElsewhereIsAnIntegrityFault(t *testing.T) {
 		}
 	}
 }
+
+func TestRequiresActionProducesRefillFailureProof(t *testing.T) {
+	now := time.Now()
+	secret := "whsec_fixture_only"
+	v := &paymentAuthenticator{mode: PaymentTest, secret: []byte(secret), now: func() time.Time { return now }, provider: newPaymentProvider("sk_test_fixture")}
+	body := verifiedProviderBody(PaymentTest, "payment_intent.requires_action", `{"id":"pi_fixture","object":"payment_intent","status":"requires_action","amount":1200,"currency":"usd","customer":"cus_fixture","livemode":false,"metadata":{"purpose":"card_refill"}}`)
+	proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, secret, now)}, testPaymentScope)
+	if err != nil || proof == nil {
+		t.Fatalf("authentication-required proof=%+v: %v", proof, err)
+	}
+	if proof.Event().Kind != PaymentCardFailed || proof.Event().DeclineCode != "authentication_required" {
+		t.Fatalf("outcome=%+v", proof.Event())
+	}
+}

@@ -721,8 +721,11 @@ before it acts. It never creates a store, and it refuses when there is no
 record or when the store it reaches differs, for example after `pg-url` was
 pointed at a restored copy.
 
-A grant with a `--key` it has seen reports the first grant instead of granting
-again. One grant is capped at 10,000 cents ($100); set
+Every grant requires `--key`. Reusing it reports the first grant instead of
+granting again. To correct a mistaken free grant, use `--reverses` with its full
+reference, for example `--key qa-correction --reverses admin:qa-1`. Keep `--cents`
+positive. The command records a negative reversal bounded by the grant's remaining
+amount. Paid credits use the payment refund path. One grant is capped at 10,000 cents ($100); set
 `SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1` in the controller pod to allow more. Each
 action writes the console's business event with `sparkwing-controller admin` as
 the fixed system actor. Audit rows exclude free-form reasons and store grant

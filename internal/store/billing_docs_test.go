@@ -18,7 +18,7 @@ func TestBillingModelDocumentationTracksPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := strings.ReplaceAll(string(raw), ",", "")
-	for _, term := range []string{fmt.Sprintf("at most $%d", MaxCardPaymentCents/100), "including High", "larger payments", "operator console queue", "authenticated", "attempt_acknowledged", "three_d_secure", "liability_shift", "unprotected", "frozen", "cancels the metered job", "owner keeps orchestrating", "independent unmetered jobs continue", "whole run stops", "customer-owned runners", "dependency settlement", "lost disputes", "obligation", "refused", "refund response binds only", "Verified callbacks supply", "partial refund", "new attempt key"} {
+	for _, term := range []string{fmt.Sprintf("at most $%d", MaxCardPaymentCents/100), "including High", "larger payments", "operator console queue", "authenticated", "attempt_acknowledged", "three_d_secure", "liability_shift", "unprotected", "frozen", "cancels the metered job", "owner keeps orchestrating", "independent unmetered jobs continue", "whole run stops", "customer-owned runners", "dependency settlement", "lost disputes", "obligation", "refused", "refund response binds only", "Verified callbacks supply", "partial refund", "new attempt key", "payment mode", "idempotency key", "negative reversal", "authentication_required", "Team deletion waits"} {
 		if !strings.Contains(body, term) {
 			t.Errorf("billing documentation omits %q", term)
 		}

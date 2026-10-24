@@ -191,6 +191,8 @@ func refillFixture(t *testing.T) (*engineFixture, *store.Tenant) {
 
 func refillIntent(id, status string) string {
 	switch status {
+	case "requires_action":
+		return fmt.Sprintf(`{"id":%q,"object":"payment_intent","livemode":false,"metadata":{"purpose":"card_refill"},"status":"requires_action","amount":2000,"currency":"usd","customer":"cus_refill"}`, id)
 	case "succeeded":
 		return fmt.Sprintf(`{"id":%q,"object":"payment_intent","livemode":false,"metadata":{"purpose":"card_refill"},"status":"succeeded","amount":2000,"amount_received":2000,"currency":"usd","customer":"cus_refill","latest_charge":"ch_%s"}`, id, strings.TrimPrefix(id, "pi_"))
 	default:
@@ -559,6 +561,55 @@ func TestRefillRestartReconcilesBeforeConfirmingABlockedCard(t *testing.T) {
 			var closed bool
 			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT payment_id,closed_at IS NOT NULL FROM credit_checkouts WHERE id=?`, id).Scan(&payment, &closed); err != nil || payment != "pi_bound" || closed != (status == "requires_confirmation") {
 				t.Fatalf("reservation after restart: payment=%q closed=%v, %v", payment, closed, err)
+			}
+		})
+	}
+}
+
+func TestRefillAuthenticationRequiredClosesAndAlerts(t *testing.T) {
+	for _, source := range []string{"reconcile", "confirm", "webhook"} {
+		t.Run(source, func(t *testing.T) {
+			e, tenant := refillFixture(t)
+			var logs bytes.Buffer
+			worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
+			worker.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			if source == "webhook" {
+				due, err := e.Store.AsOperator().DueRefills(t.Context())
+				if err != nil || len(due) != 1 {
+					t.Fatalf("due=%+v: %v", due, err)
+				}
+				if err := e.Store.AsOperator().RecordRefillIntent(t.Context(), "a", due[0].ID, "pi_auth"); err != nil {
+					t.Fatal(err)
+				}
+				_, deliver := billingModelProviderDelivery(t, e, paymenttest.Provider{}, func(s *Server) *Server { s.logger = worker.logger; return s })
+				if w := deliver("evt_auth", "payment_intent.requires_action", refillIntent("pi_auth", "requires_action")); w.Code != http.StatusNoContent {
+					t.Fatalf("requires_action=%d %s", w.Code, w.Body)
+				}
+			} else {
+				worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+					status := "created"
+					if r.URL.Path == "/internal/refill/reconcile" {
+						status = "requires_action"
+						if source == "confirm" {
+							status = "requires_confirmation"
+						}
+					}
+					if r.URL.Path == "/internal/refill/confirm" {
+						status = "requires_action"
+					}
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"payment_intent":"pi_auth","status":%q}`, status)))}, nil
+				})
+				worker.refillPass(t.Context())
+			}
+			standing, err := tenant.SpendStanding(t.Context())
+			if err != nil || standing.Refill.Open || standing.Refill.Failure != "authentication_required" {
+				t.Fatalf("authentication-required refill=%+v: %v", standing.Refill, err)
+			}
+			if !strings.Contains(logs.String(), `"alert":"refill_failed"`) || !strings.Contains(logs.String(), "authentication_required") {
+				t.Fatalf("missing failure notice: %s", logs.String())
+			}
+			if due, err := e.Store.AsOperator().DueRefills(t.Context()); err != nil || len(due) != 0 {
+				t.Fatalf("failed refill retried: %+v: %v", due, err)
 			}
 		})
 	}

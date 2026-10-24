@@ -91,7 +91,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 			result.Grant = &grant
 			result.Created = !existed
 		}
-		result.ReversedMicro, err = reversedMicroTx(ctx, tx, paid.Team, paid.Reference)
+		result.ReversedMicro, err = reversedMicroTx(ctx, tx, paid.Team, CreditGrantPaid, paid.Reference)
 		if err != nil {
 			return CreditReversal{}, err
 		}

@@ -125,6 +125,10 @@ func (a *paymentAuthenticator) cardPayment(ctx context.Context, object paymentOb
 	event.PaymentID, event.AmountMinor, event.Currency = object.ID, *object.Amount, object.Currency
 	event.ChargeID, event.DeclineCode = string(object.LatestCharge), object.LastPaymentError.DeclineCode
 	if event.Kind == PaymentCardFailed {
+		if object.Status == "requires_action" {
+			event.DeclineCode = "authentication_required"
+			return nil
+		}
 		if object.Status != "requires_payment_method" {
 			return invalidPaymentEvent()
 		}

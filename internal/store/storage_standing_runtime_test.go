@@ -88,7 +88,7 @@ func TestStoreDataStandingPreservesFundingAndSlotPolicy(t *testing.T) {
 	check(teamTierNone)
 	rewriteSchemaExec(t, s.db, "INSERT INTO free_slots(team,taken_at) VALUES ('a',?)", s.now().UnixNano())
 	check(teamTierFree)
-	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, CreatedBy: "operator"}); err != nil {
+	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, Reference: "funding-fixture", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
 	check(teamTierFunded)

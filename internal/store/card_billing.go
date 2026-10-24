@@ -151,9 +151,9 @@ func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paym
 		string(team), freezeID); err != nil || held {
 		return err
 	}
-	if _, err := tx.execContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at)
-	    VALUES (?, ?, ?, ?, ?, ?)`,
-		freezeID, string(team), paymentIntent, "early fraud warning "+warning, HoldCauseWarning, now.UnixNano()); err != nil {
+	if _, err := tx.execContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at, payment_mode)
+	    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		freezeID, string(team), paymentIntent, "early fraud warning "+warning, HoldCauseWarning, now.UnixNano(), mode); err != nil {
 		return err
 	}
 	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {

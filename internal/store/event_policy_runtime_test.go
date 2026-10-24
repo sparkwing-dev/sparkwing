@@ -92,7 +92,7 @@ func TestStoreDataEventsPreserveFundingAndFreeShare(t *testing.T) {
 	if err := appendBytes(1); !errors.Is(err, ErrStorageQuota) {
 		t.Fatalf("free share exceeded: %v", err)
 	}
-	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, CreatedBy: "operator"}); err != nil {
+	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, Reference: "funding-fixture", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := appendBytes(500); err != nil {
@@ -126,7 +126,7 @@ func TestStoreDataEventsPricedStorageRequiresCreditWithOrWithoutQuota(t *testing
 		if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "job", "k", nil); !errors.Is(err, ErrInsufficientCredits) || eventAccountingSnapshot(t, s) != before {
 			t.Fatalf("priced storage admitted without credit: %v", err)
 		}
-		if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, CreatedBy: "operator"}); err != nil {
+		if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, Reference: "funding-fixture", CreatedBy: "operator"}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "job", "k", nil); err != nil {

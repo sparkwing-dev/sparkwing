@@ -238,10 +238,24 @@ func (t *Tenant) requestTeamDeletionTx(ctx context.Context, tx *storeTx, now tim
 	return del, revoked, nil
 }
 
+func refuseUnfinishedRefundsTx(ctx context.Context, q rowQuerier, team Team) error {
+	var refunds int
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM card_refunds WHERE team=? AND status<>?`, team, cardRefundSucceeded).Scan(&refunds); err != nil {
+		return err
+	}
+	if refunds > 0 {
+		return fmt.Errorf("%w: the team has an unfinished card refund; wait for it to complete", ErrInvalidInput)
+	}
+	return nil
+}
+
 // safety: a payment that completes after the purge finds no team to credit,
 // and a hold's rows are the dispute's record, so either keeps the team until
 // it clears.
 func refuseDeletionWithMoneyInFlightTx(ctx context.Context, tx *storeTx, team Team, now time.Time) error {
+	if err := refuseUnfinishedRefundsTx(ctx, tx, team); err != nil {
+		return err
+	}
 	var open int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM credit_checkouts WHERE team = ? AND paid_at IS NULL AND expires_at > ?`,
@@ -498,7 +512,11 @@ func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
 	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool {
 		return t == "runs" || t == "quota_admission" || t == "claim_requirements" || t == "claim_contexts"
 	}), "quota_admission", "runs", "claim_contexts", "claim_requirements") {
-		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
+		query := `DELETE FROM ` + table + ` WHERE team = ?`
+		if table == "card_refunds" {
+			query += ` AND status = 'succeeded'`
+		}
+		if _, err := o.s.exec(ctx, query, string(team)); err != nil {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}
 	}
@@ -521,6 +539,9 @@ func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
 func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, recheckAfter time.Duration) error {
 	team = NormalizeTeam(team)
 	if err := o.requireLease(ctx, team, holder, TeamDeletionPending); err != nil {
+		return err
+	}
+	if err := refuseUnfinishedRefundsTx(ctx, storeRowQuerier{o.s}, team); err != nil {
 		return err
 	}
 	if err := o.deleteTenantRows(ctx, team); err != nil {
@@ -554,6 +575,9 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, rech
 func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string) error {
 	team = NormalizeTeam(team)
 	if err := o.requireLease(ctx, team, holder, TeamDeletionDone); err != nil {
+		return err
+	}
+	if err := refuseUnfinishedRefundsTx(ctx, storeRowQuerier{o.s}, team); err != nil {
 		return err
 	}
 	if err := o.deleteTenantRows(ctx, team); err != nil {
