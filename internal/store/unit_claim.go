@@ -17,59 +17,36 @@ import (
 
 func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
 	var out UnitClaim
-	var waiting error
-	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		out, waiting = UnitClaim{}, nil
+	unit := UnitRef{}
+	var err error
+	if demand.Target != nil {
+		unit = *demand.Target
+	} else {
+		unit, err = o.searchClaimUnit(ctx, demand)
+		if err != nil {
+			return UnitClaim{}, err
+		}
+	}
+	err = o.s.inTx(ctx, func(tx *storeTx) error {
+		out = UnitClaim{}
 		if err := lockClaimControllerTx(ctx, tx); err != nil {
 			return err
 		}
-		claimant := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
 		if err := lockClaimQueueTx(ctx, tx); err != nil {
 			return err
 		}
+		claimant := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{claimant}); err != nil {
 			return err
 		}
-		p, err := tx.ResolveAuthority(ctx, claimant)
-		if err != nil {
-			return err
-		}
-		if demand.Target != nil {
-			if _, err := tx.operator.claimTargetTeamTx(ctx, tx, p.Capability, *demand.Target); err != nil {
-				return err
-			}
-		}
-		kinds, err := claimKinds(p.Capability, demand)
-		if err != nil {
-			return err
-		}
 		if demand.FreeSlots != nil && *demand.FreeSlots <= 0 {
-			waiting = notFound("eligible work", "")
-			return nil
-		}
-		unit, err := queuedUnitTx(ctx, tx, demand, kinds)
-		if errors.Is(err, ErrNotFound) {
-			waiting = err
-			if demand.Target != nil {
-				waiting = tx.operator.claimRefusalTx(ctx, tx, demand, *demand.Target)
-			}
-			return nil
-		}
-		if err != nil {
-			return err
+			return notFound("eligible work", "")
 		}
 		out, err = tx.operator.claimUnitTx(ctx, tx, demand, unit)
-		if err == errRankingHold {
-			waiting, err = err, nil
-			if demand.Target == nil {
-				waiting = notFound("eligible work", "")
-			}
-		}
-
 		return err
 	})
-	if err == nil {
-		err = waiting
+	if err == errRankingHold && demand.Target == nil {
+		err = notFound("eligible work", "")
 	}
 	if err != nil {
 		var unpriced *UnpricedCPUClassError
@@ -79,6 +56,27 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		return UnitClaim{}, err
 	}
 	return out, nil
+}
+
+// Search holds a read snapshot only; award rechecks one candidate after arbitration.
+func (o *Operator) searchClaimUnit(ctx context.Context, demand UnitDemand) (UnitRef, error) {
+	tx, err := o.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return UnitRef{}, err
+	}
+	defer rollbackOrLog(tx)
+	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+	if err != nil {
+		return UnitRef{}, err
+	}
+	kinds, err := claimKinds(p.Capability, demand)
+	if err != nil {
+		return UnitRef{}, err
+	}
+	if demand.FreeSlots != nil && *demand.FreeSlots <= 0 {
+		return UnitRef{}, notFound("eligible work", "")
+	}
+	return queuedUnitTx(ctx, tx, demand, kinds)
 }
 
 var errRankingHold = authorityError(apierr.LockHeld, "work is waiting for a preferred runner")
@@ -155,13 +153,28 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	if _, err = claimKinds(p.Capability, UnitDemand{Target: &unit}); err != nil {
+	validation := demand
+	validation.Target = &unit
+	if _, err = claimKinds(p.Capability, validation); err != nil {
 		return UnitClaim{}, err
 	}
 	named := demand
 	named.Kinds = nil
 	named.Target = &unit
-	if _, err := queuedUnitTx(ctx, tx, named, []capability.UnitKind{unit.Kind}); err != nil {
+	q := claimSQL{}
+	err = claimInputsTx(ctx, tx, named, []capability.UnitKind{unit.Kind}, &q)
+	if err != nil {
+		return UnitClaim{}, err
+	}
+	q.facts[0].Named = boolInt(demand.Target != nil)
+	query, err := q.query(q.facts, q.teams, q.rates, q.kinds, named, q.now)
+	if err != nil {
+		return UnitClaim{}, err
+	}
+	if _, err := queryClaimTx(ctx, tx, &q, query); err != nil {
+		if errors.Is(err, ErrNotFound) && demand.Target != nil {
+			err = op.claimRefusalTx(ctx, tx, demand, unit)
+		}
 		return UnitClaim{}, err
 	}
 	profile, requirements, err := readMatchingInputsTx(ctx, tx, named, unit, true)

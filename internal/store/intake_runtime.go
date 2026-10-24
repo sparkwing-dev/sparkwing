@@ -269,6 +269,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 			if _, err := tx.execContext(ctx, `UPDATE triggers SET status='failed',finished_at=? WHERE team=? AND id=?`, now.UnixNano(), team, id); err != nil {
 				return AdmissionResult{}, err
 			}
+			if err := retireClaimContextTx(ctx, tx, team, UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(id)}); err != nil {
+				return AdmissionResult{}, err
+			}
 			result.OwnerUnit = nil
 		}
 	}

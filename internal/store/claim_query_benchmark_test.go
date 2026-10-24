@@ -304,6 +304,7 @@ func (d *claimBenchmarkDriver) Open(name string) (driver.Conn, error) {
 }
 
 type claimBenchmarkConn struct {
+	queueLocked bool
 	driver.Conn
 	probe        string
 	runProbe     string
@@ -312,7 +313,7 @@ type claimBenchmarkConn struct {
 }
 
 func (c *claimBenchmarkConn) instrument(query string) string {
-	if c.probe == "" || !c.trace.examine {
+	if c.probe == "" || !c.trace.examine || c.trace.lockedOnly && !c.queueLocked {
 		return query
 	}
 	query = strings.ReplaceAll(query, `n.status='pending'`, c.probe+`(n.node_id)=1 AND n.status='pending'`)
@@ -335,7 +336,15 @@ func (c *claimBenchmarkConn) Prepare(query string) (driver.Stmt, error) {
 	return c.Conn.Prepare(c.instrument(query))
 }
 
+func (c *claimBenchmarkConn) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
+	c.queueLocked = false
+	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, options)
+}
+
 func (c *claimBenchmarkConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if strings.HasPrefix(query, "SELECT ordinal FROM claim_awards WHERE singleton=1") {
+		c.queueLocked = true
+	}
 	c.trace.record(query, args)
 	return c.Conn.(driver.QueryerContext).QueryContext(ctx, c.instrument(query), args)
 }
@@ -351,6 +360,7 @@ type claimBenchmarkStatement struct {
 }
 
 type claimBenchmarkTrace struct {
+	lockedOnly bool
 	examine    bool
 	enabled    bool
 	statements []claimBenchmarkStatement

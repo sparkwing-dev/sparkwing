@@ -66,7 +66,7 @@ func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string), 
 }
 
 func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
-	var baseline, baselineRuns, baselineContexts [2]int64
+	var baseline, baselineRuns [2]int64
 	for _, tc := range []struct{ nodes, runs int }{{1, 1}, {4000, 1}, {1, 4000}, {4000, 2}} {
 		t.Run(fmt.Sprintf("nodes=%d/runs=%d", tc.nodes, tc.runs), func(t *testing.T) {
 			backlog := tc.nodes
@@ -124,13 +124,10 @@ func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
 				}
 				if tc.nodes == 1 && tc.runs == 1 {
 					baselineRuns[poll] = runs.Load()
-					baselineContexts[poll] = contexts.Load()
 				} else if got := runs.Load(); got != baselineRuns[poll] {
 					t.Errorf("poll %d examined %d runs with %d capped runs; want %d visits as with one capped run", poll, got, tc.runs, baselineRuns[poll])
 				}
-				if got := contexts.Load(); got > baselineContexts[poll] {
-					t.Errorf("poll %d examined %d policy rows with %d nodes/%d runs; want at most %d as with one capped policy", poll, got, tc.nodes, tc.runs, baselineContexts[poll])
-				}
+
 				t.Logf("poll %d examined %d nodes, %d runs, %d policies", poll, total.Load(), runs.Load(), contexts.Load())
 				got := total.Load()
 				if backlog == 1 && tc.runs == 1 {
@@ -448,5 +445,73 @@ func TestClaimSearchLoadsOverflowUsageOnlyForExaminedTeams(t *testing.T) {
 		if strings.Contains(statement.query, "FROM overflow_controls") && len(statement.args) > 0 && fmt.Sprint(statement.args[0]) == "b" {
 			t.Fatal("computed overflow usage for later fair-share team b")
 		}
+	}
+}
+
+func TestClaimLockWorkDoesNotGrowWithBacklogOrHistory(t *testing.T) {
+	for _, scenario := range []string{"bound run", "retained contexts"} {
+		t.Run(scenario, func(t *testing.T) {
+			var baseline [3]int64
+			for _, count := range []int{1, 4000} {
+				t.Run(fmt.Sprint(count), func(t *testing.T) {
+					s, demand := launcherFairnessFixture(t)
+					if scenario == "bound run" {
+						var original UnitDemand
+						s, original = unitClaimFixture(t)
+						demand = original
+						host, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: original.CapabilityPrefix, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
+						if err != nil {
+							t.Fatal(err)
+						}
+						demand.CapabilityPrefix = host.Award.CapabilityPrefix
+						if count > 1 {
+							rewriteSchemaExec(t, s.db, `WITH RECURSIVE backlog(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM backlog WHERE i<?) INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT team,run_id,'later-'||i,'pending',ready_at+1,spec_json,execution_json,claim_requirements,claim_context FROM nodes CROSS JOIN backlog WHERE team='a' AND node_id='job'`, count-1)
+						}
+					} else if count > 1 {
+						rewriteSchemaExec(t, s.db, `WITH RECURSIVE history(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM history WHERE i<?) INSERT INTO claim_contexts(team,id,requirements,unit_kind,overflow_account) SELECT c.team,'finished-'||i,c.requirements,'node','finished-account-'||i FROM claim_contexts c CROSS JOIN history WHERE c.team='a' AND c.id=(SELECT claim_context FROM nodes WHERE team='a' AND node_id='job')`, count)
+					}
+					var nodes, runs, contexts atomic.Int64
+					trace := countClaimVisits(t, s, func(string) { nodes.Add(1) }, func(string) { runs.Add(1) }, &contexts)
+					trace.lockedOnly = true
+					demand.Target = nil
+					demand.Kinds = []capability.UnitKind{capability.UnitNode}
+					claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+					if err != nil || claim.Team != "a" || claim.NodeID != "job" {
+						t.Fatalf("claim: %+v %v", claim, err)
+					}
+					got := [3]int64{nodes.Load(), runs.Load(), contexts.Load()}
+					if count == 1 {
+						baseline = got
+					} else if got != baseline {
+						t.Errorf("lock-held node/run/context visits=%v, want %v as with one row", got, baseline)
+					}
+					t.Logf("lock-held node/run/context visits=%v", got)
+				})
+			}
+		})
+	}
+}
+
+func TestClaimSearchSnapshotDoesNotLockSQLiteWriters(t *testing.T) {
+	s, _ := newRecordingStore(t)
+	if _, err := s.db.Exec(`INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	s.db.SetMaxOpenConns(2)
+	tx, err := s.beginSnapshotReadTx(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rollbackOrLog(tx)
+	writer, err := s.db.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = writer.Close() }()
+	if _, err := writer.ExecContext(t.Context(), `PRAGMA busy_timeout=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.ExecContext(t.Context(), `UPDATE teams SET updated_at=updated_at+1 WHERE name='a'`); err != nil {
+		t.Fatalf("candidate search blocked a writer: %v", err)
 	}
 }

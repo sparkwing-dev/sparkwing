@@ -842,7 +842,9 @@ provenance, resolved options and guards, job execution settings, repository
 scope, allowed pools and creator. Seal identities, source revisions, timestamps and unrelated job declarations
 do not split otherwise equal contexts. The context row stores its identity,
 requirement set and unit kind, and copies the overflow account and minute limit
-for indexed budget checks.
+for indexed budget checks. Finished sources clear their context reference in the
+finishing transaction. A context is deleted when its last source leaves. History
+reads the sealed run and job settings, not this search index.
 
 Push-bound Actions claims seek runs by team, repository key and sealed provenance
 SHA/ref and the shared verified-trust push predicate, then use the shared eligibility
@@ -850,9 +852,10 @@ predicate. Run-bound and here claims seek
 the bound run directly. Intake writes the provenance index from the sealed identity.
 Named rechecks seek the complete team and unit key.
 
-Broad claimants examine teams by their last committed award ordinal. Pool trust,
-overflow caps and exclusions are checked before node lookups. Funding and standing
-use the canonical per-unit eligibility predicate, including its unpriced exception.
+Broad claimants examine teams by their last committed award ordinal. Exclusions
+filter the team list. Context routes apply the shared overflow budget predicate
+before node lookups. Pool trust, funding and standing use the canonical per-unit
+eligibility predicate, including its unpriced exception.
 Overflow usage is loaded only for the team being examined and accounts with ready
 work. Label lookups select matching requirement sets, then immutable context routes
 with ready work. Indexed heads prove shared-claimant ranking holds. Each remaining route selects its first eligible
@@ -861,12 +864,13 @@ rejected-head probe cap, cursor advancement or fallback batch.
 When neither the claimant nor its placement observers use Cloud, selection skips
 overflow funding preparation entirely.
 
-This bounds node visits for repeated work sharing one policy route. Independent
-account/request overflow policies and distinct job preferences can still increase
-run-policy and context work under arbitration. Retained contexts are excluded by
-indexed readiness checks, but those checks still visit the retained context index.
-An absolute bound by team count requires a separate policy or eligibility-index
-decision.
+Candidate search uses a read snapshot without arbitration or row locks. It may
+visit multiple policies or ready sources. After search closes its snapshot, the
+award transaction takes queue arbitration and applies the same eligibility
+predicate to only the selected unit, with fresh authority, placement observers
+and funding. A stale candidate returns not-found for this poll. It does not restart
+the search under the lock. Backlog and retained contexts cannot increase the
+number of candidate rows checked while arbitration is held.
 
 Local foreground intake seals `Request.LocalForeground`. An omitted dispatch
 is resolved from the request before checking foreground authority. The shared predicate

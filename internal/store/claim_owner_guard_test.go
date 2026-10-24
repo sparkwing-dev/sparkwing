@@ -40,7 +40,7 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"claimUnit", "claimUnitTx"} {
+	for name, required := range map[string]string{"searchClaimUnit": "queuedUnitTx", "claimUnitTx": "queryClaimTx"} {
 		checked := false
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -53,7 +53,7 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 					return true
 				}
 				ident, ok := call.Fun.(*ast.Ident)
-				if ok && ident.Name == "queuedUnitTx" {
+				if ok && ident.Name == required {
 					checked = true
 				}
 				return true

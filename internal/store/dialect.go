@@ -246,7 +246,7 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 }
 
 func (s *Store) beginStoreTx(ctx context.Context, read bool) (*storeTx, error) {
-	tx, err := s.sqlRunner().BeginTx(ctx, nil)
+	tx, err := s.sqlRunner().BeginTx(ctx, &sql.TxOptions{ReadOnly: read})
 	if err != nil {
 		return nil, err
 	}

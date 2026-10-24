@@ -435,7 +435,8 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		return err
 	}
 	var kind capability.UnitKind
-	err = tx.QueryRowContext(ctx, `SELECT unit_kind FROM triggers WHERE team=? AND id=?`, team, id).Scan(&kind)
+	var previousContext string
+	err = tx.QueryRowContext(ctx, `SELECT unit_kind,claim_context FROM triggers WHERE team=? AND id=?`, team, id).Scan(&kind, &previousContext)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -446,6 +447,11 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		}
 		if _, err := tx.execContext(ctx, `UPDATE triggers SET claim_requirements=?,claim_context=? WHERE team=? AND id=?`, requirements, claimContext, team, id); err != nil {
 			return err
+		}
+		if previousContext != "" && previousContext != claimContext {
+			if err := deleteUnusedClaimContextTx(ctx, tx, team, previousContext); err != nil {
+				return err
+			}
 		}
 	}
 

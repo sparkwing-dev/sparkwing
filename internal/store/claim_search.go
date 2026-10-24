@@ -251,8 +251,6 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 		scoped.ordinal = &ordinal
 		scoped.teams = nil
 		scoped.overflow = nil
-		scoped.facts = slices.Clone(template.facts)
-		scoped.facts[0].Excluded = slices.Clone(current.Excluded)
 		for _, team := range group {
 			if current.Cloud == 0 && current.Team != team.Team || slices.Contains(current.Excluded, team.Team) {
 				continue
@@ -265,16 +263,8 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 				return UnitRef{}, err
 			}
 
-			runnable, err := claimTeamRunnableTx(ctx, tx, Team(team.Team), &teamTemplate)
-			if err != nil {
-				return UnitRef{}, err
-			}
-			if runnable {
-				scoped.teams = append(scoped.teams, team)
-				scoped.overflow = append(scoped.overflow, teamTemplate.overflow...)
-			} else {
-				scoped.facts[0].Excluded = append(scoped.facts[0].Excluded, team.Team)
-			}
+			scoped.teams = append(scoped.teams, team)
+			scoped.overflow = append(scoped.overflow, teamTemplate.overflow...)
 		}
 		if len(scoped.teams) == 0 {
 			continue
@@ -360,61 +350,6 @@ func claimRouteHeadsTx(ctx context.Context, tx *storeTx, template *claimSQL) ([]
 		heads = append(heads, h)
 	}
 	return heads, errors.Join(rows.Err(), rows.Close())
-}
-
-func claimTeamRunnableTx(ctx context.Context, tx *storeTx, team Team, template *claimSQL) (bool, error) {
-	current := template.facts[0]
-	if len(current.Pools) > 0 && current.Launcher == 0 && current.Trust != "any" {
-		if current.Trust != "" {
-			return false, nil
-		}
-		q := claimSQL{dialect: template.dialect}
-		q.args = append(q.args, team)
-		pools, err := q.jsonParam(current.Pools)
-		if err != nil {
-			return false, err
-		}
-		var reserved bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM secrets s WHERE s.team=? AND `+q.contains(pools, "s.only_on")+`)`, q.args...).Scan(&reserved); err != nil {
-			return false, err
-		}
-		if reserved {
-			return false, nil
-		}
-	}
-	if current.Cloud != 0 && !slices.Contains(template.kinds, capability.UnitEval) && slices.ContainsFunc(template.overflow, func(f claimOverflowFacts) bool { return f.Team == string(team) }) {
-		return claimTeamOverflowRunnableTx(ctx, tx, team, template)
-	}
-	return true, nil
-}
-
-func claimTeamOverflowRunnableTx(ctx context.Context, tx *storeTx, team Team, template *claimSQL) (bool, error) {
-	q := claimSQL{dialect: tx.dialect, overflow: template.overflow, route: true}
-	clock := q.param(template.now)
-	overflow, err := q.overflowFactsSQL()
-	if err != nil {
-		return false, err
-	}
-	minimum := q.overflowMinimumMinutesSQL("of.used_seconds")
-	eligibleKinds := func() string {
-		var kinds []string
-		for _, kind := range template.kinds {
-			kinds = append(kinds, q.param(string(kind)))
-		}
-		return `cc.unit_kind IN (` + strings.Join(kinds, ",") + `)`
-	}
-	projection := `SELECT cc.team,cc.requirements,cc.id AS context FROM claim_contexts cc WHERE cc.team=? AND `
-	q.args = append(q.args, team)
-	contexts := projection + eligibleKinds() + ` AND overflow_account IS NULL`
-	for _, budget := range []string{`overflow_minutes IS NULL`, `overflow_minutes>=` + minimum} {
-		q.args = append(q.args, team)
-		contexts += ` UNION ALL SELECT cc.team,cc.requirements,cc.id AS context FROM overflow_facts of JOIN claim_contexts cc ON cc.team=of.team AND cc.overflow_account=of.account WHERE cc.team=? AND ` + eligibleKinds() + ` AND (of.monthly_minutes IS NULL OR ` + q.number("of.monthly_minutes") + `>=` + minimum + `) AND ` + budget
-	}
-	// Retained policies without ready work must not keep a capped team runnable.
-	query := `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + overflow + ` SELECT EXISTS (SELECT 1 FROM (` + contexts + `) route CROSS JOIN clock WHERE ` + q.headSQL(template.kinds) + ` IS NOT NULL)`
-	var runnable bool
-	err = tx.QueryRowContext(ctx, query, q.args...).Scan(&runnable)
-	return runnable, err
 }
 
 // Placement-free work needs no ranking or preference relation in the SQL plan.
