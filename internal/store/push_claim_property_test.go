@@ -75,8 +75,12 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 
 func writePushRun(t *testing.T, s *Store, git runspec.Git) {
 	t.Helper()
-	body := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: git}}, assertedProvenance(t, "ci", git.Ref, git.SHA))
-	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,repo_key=?,git_branch=?,git_sha=?,provenance_sha=?,provenance_ref=? WHERE id='run'`, body, git.Repository.Key, git.Ref, git.SHA, git.SHA, git.Ref)
+	provenance, err := runspec.ActionsProvenance(1, git.Ref, git.SHA, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: git}}, provenance)
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,repo_key=?,git_branch=?,git_sha=? WHERE id='run'`, body, git.Repository.Key, git.Ref, git.SHA)
 }
 
 func TestPushAwardRefusesScopeEscape(t *testing.T) {

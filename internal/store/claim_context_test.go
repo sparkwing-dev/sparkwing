@@ -84,6 +84,7 @@ func TestClaimContextHoldsDoNotHideYoungerDifferentPolicies(t *testing.T) {
 		t.Run(difference, func(t *testing.T) {
 			s := authorityStore(t)
 			f := s.TestOnlyRankingFixture(t, true)
+			f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
 			observer := authorityRoot("restricted", "a")
 			observer.Repositories = []string{"github.com/acme/repo"}
 			authorityPersist(t, s, observer)

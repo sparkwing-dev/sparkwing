@@ -398,6 +398,7 @@ func TestRankingNoticeUsesTheClaimLivenessHorizon(t *testing.T) {
 
 func TestRankingHoldEndsAtTheWindowWithoutAwardGrace(t *testing.T) {
 	f := rankingFixture(t, true)
+	f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
 	livePolls(t, f, f.Actions)
 	f.At(limits.RankingWindow - time.Nanosecond)
 	wantNone(t, f, f.Self, capability.UnitPlan)

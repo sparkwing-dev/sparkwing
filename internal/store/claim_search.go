@@ -63,7 +63,9 @@ func (q *claimSQL) boundRunScope(current claimFacts, target *UnitRef) string {
 	}
 	if len(current.Pushes) > 0 {
 		p := current.Pushes[0]
-		return `br.team=` + q.param(current.Team) + ` AND br.repo_key=` + q.param(p.RepositoryKey) + ` AND br.provenance_sha=` + q.param(p.SHA) + ` AND br.provenance_ref=` + q.param(p.Ref)
+		scope := `br.team=` + q.param(current.Team) + ` AND br.repo_key=` + q.param(p.RepositoryKey) + ` AND br.provenance_sha=` + q.param(p.SHA) + ` AND br.provenance_ref=` + q.param(p.Ref)
+		raw, _ := json.Marshal(p)
+		return scope + ` AND EXISTS (SELECT 1 FROM (SELECT ` + q.param(string(raw)) + ` AS value) bound_push WHERE ` + q.pushScopeMatches(q.at(q.blob("br.request_json"), "provenance"), "bound_push.value", "br.repo_key") + `)`
 	}
 	return ""
 }

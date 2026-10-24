@@ -844,7 +844,8 @@ do not split otherwise equal contexts. The context row stores
 only its identity, requirement set and unit kind; it duplicates no run policy.
 
 Push-bound Actions claims seek runs by team, repository key and sealed provenance
-SHA/ref, then use the shared eligibility predicate. Run-bound and here claims seek
+SHA/ref and the shared verified-trust push predicate, then use the shared eligibility
+predicate. Run-bound and here claims seek
 the bound run directly. Intake writes the provenance index from the sealed identity.
 Named rechecks seek the complete team and unit key.
 
@@ -855,6 +856,8 @@ matching requirement sets, then immutable context routes. Indexed heads prove
 shared-claimant ranking holds. Each remaining route selects its first eligible
 source through a correlated application of the canonical predicate. There is no
 rejected-head probe cap, cursor advancement or fallback batch.
+When neither the claimant nor its placement observers use Cloud, selection skips
+overflow funding preparation entirely.
 
 This bounds node visits for repeated work sharing one policy route. Independent
 account/request overflow policies and distinct job preferences can still increase

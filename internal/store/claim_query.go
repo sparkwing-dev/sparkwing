@@ -321,6 +321,12 @@ func (q *claimSQL) terms(selector string, alternative func(string) string) strin
 func (q *claimSQL) fact(name string) string { return q.at("c.facts", name) }
 func (q *claimSQL) flag(name string) string { return q.number(q.fact(name)) }
 
+func (q *claimSQL) pushScopeMatches(provenance, push, repo string) string {
+	p := func(name string) string { return q.at(provenance, name) }
+	b := func(name string) string { return q.at(push, name) }
+	return `COALESCE((` + p("trust") + ` IN ('actions','verified','verified-default') AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `='gh:'||CAST(` + p("repository_id") + ` AS TEXT) AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
+}
+
 func (q *claimSQL) predicate() string {
 	f := q.fact
 	n := q.flag
@@ -336,7 +342,7 @@ func (q *claimSQL) predicate() string {
 	accepted := `(` + n("filter") + `=0 OR (w.kind IN ('node','eval') AND w.repo_display='' AND COALESCE(` + w("git", "repository", "display") + `,'')='') OR EXISTS (SELECT 1 FROM ` + q.array(f("accept"), "pattern") + ` WHERE ` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `))`
 	trust := `(` + f("trust") + `='any' OR (` + f("trust") + `='' AND NOT EXISTS (SELECT 1 FROM secrets s WHERE s.team=w.team AND ` + q.contains(f("pools"), "s.only_on") + `)) OR (` + q.at("w.request", "provenance", "trust") + ` IN ('verified-default','schedule') AND (` + f("pools") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + `) OR ` + n("launcher") + `=1)))`
 	bind := `(` + f("bind_run") + `='' OR (w.run_id=` + f("bind_run") + ` AND (` + n("here") + `=0 OR (w.kind='trigger' AND EXISTS (SELECT 1 FROM triggers bt WHERE bt.team=w.team AND bt.id=w.run_id AND (bt.generation<>0 OR ` + n("claim_by") + `>clock.now))))))`
-	pushes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("pushes"), "push") + ` WHERE COALESCE(` + q.at("push.value", "workflow_run_id") + `,'')='' OR ` + q.at("push.value", "repo_key") + `<>w.repo_key OR ` + q.at("push.value", "ref") + `<>COALESCE(` + q.at("w.request", "provenance", "ref") + `,'') OR ` + q.at("push.value", "sha") + `<>COALESCE(` + q.at("w.request", "provenance", "sha") + `,''))`
+	pushes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("pushes"), "push") + ` WHERE NOT (` + q.pushScopeMatches(q.at("w.request", "provenance"), "push.value", "w.repo_key") + `))`
 	personal := `(` + n("personal") + `=0 OR (` + f("account") + `<>'' AND ` + f("account") + `=w.requester AND NOT EXISTS (SELECT 1 FROM ancestors a WHERE a.team=w.team AND a.child=w.run_id AND a.origin IN ('github_app','schedule'))))`
 	runnerKind := `COALESCE(` + w("options", "runner", "value", "kind") + `,'')`
 	runnerValue := `COALESCE(` + w("options", "runner", "value", "value") + `,'')`
@@ -748,9 +754,11 @@ func claimInputsTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []
 	if err != nil {
 		return err
 	}
-	q.overflow, err = tx.operator.claimOverflowFactsTx(ctx, tx, scopeTeam, current, demand.Target)
-	if err != nil {
-		return err
+	if slices.ContainsFunc(facts, func(f claimFacts) bool { return f.Cloud != 0 }) {
+		q.overflow, err = tx.operator.claimOverflowFactsTx(ctx, tx, scopeTeam, current, demand.Target)
+		if err != nil {
+			return err
+		}
 	}
 	q.dialect = tx.dialect
 	q.facts, q.teams, q.rates, q.kinds, q.now = facts, teams, rates, kinds, tx.now(ctx).UnixNano()

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"modernc.org/sqlite"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -158,6 +160,56 @@ func TestClaimSearchActionsFindsBoundPushBehindOlderRuns(t *testing.T) {
 	}
 	if got := unrelatedRuns.Load(); got != 0 {
 		t.Errorf("examined %d unrelated runs preparing funding; want only the bound push", got)
+	}
+}
+
+func TestClaimSearchActionsRejectsUntrustedPushBeforeNodeLookup(t *testing.T) {
+	for _, named := range []bool{false, true} {
+		t.Run(fmt.Sprint("named=", named), func(t *testing.T) {
+			s, demand := unitClaimFixture(t)
+			actions := authorityRoot("actions", "a")
+			actions.Grants = []capability.Grant{capability.NodesClaim}
+			actions.Repositories = []string{"gh:1"}
+			actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+			authorityPersist(t, s, actions)
+			_, git := referenceAppProvenance(t, "refs/heads/main", fixtureFeatureSHA)
+			raw := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: git}}, assertedProvenance(t, "ci", git.Ref, git.SHA))
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE id='run'`, raw)
+			var examined atomic.Int64
+			countClaimVisits(t, s, func(string) { examined.Add(1) }, nil)
+			demand.CapabilityPrefix = actions.Prefix
+			if !named {
+				demand.Target = nil
+			}
+			demand.Kinds = []capability.UnitKind{capability.UnitNode}
+			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			var refused *apierr.Error
+			if named && (!errors.As(err, &refused) || refused.Code != apierr.Forbidden && refused.Code != apierr.LockHeld) || !named && !errors.Is(err, ErrNotFound) {
+				t.Errorf("Actions claim of asserted provenance: %v; want refusal", err)
+			}
+			if !named && examined.Load() != 0 {
+				t.Errorf("examined %d nodes of an untrusted push; want rejection at run lookup", examined.Load())
+			}
+		})
+	}
+}
+
+func TestClaimSearchWithoutCloudDoesNotReadOverflowRuns(t *testing.T) {
+	s, demand := unitClaimFixture(t)
+	rewriteSchemaExec(t, s.db, `WITH RECURSIVE backlog(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM backlog WHERE i<4000) INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,'backlog-'||i,i+1,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs CROSS JOIN backlog WHERE id='run'`)
+	var examined atomic.Int64
+	countClaimVisits(t, s, func(string) {}, func(id string) {
+		if strings.HasPrefix(id, "backlog-") {
+			examined.Add(1)
+		}
+	})
+	demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil || claim.NodeID != "job" {
+		t.Fatalf("self-hosted claim: %+v %v", claim, err)
+	}
+	if got := examined.Load(); got != 0 {
+		t.Errorf("examined %d runs for Cloud overflow with no Cloud claimant; want zero", got)
 	}
 }
 
