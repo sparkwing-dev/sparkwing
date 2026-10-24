@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -74,6 +75,24 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 		t.Fatal(err)
 	}
 	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}}
+	if _, err := s.AsOperator().ClaimUnit(ctx, demand); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Actions claim of member-asserted work: %v", err)
+	}
+	provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 42, DeliveryKey: "queue-order", VerifiedAt: time.Now(), Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567"}, runspec.Optional[runspec.PullRequest]{}, plan.Seal.Request.Request.Pipeline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Queue fixtures represent verified deliveries; member intake seals asserted provenance.
+	for _, sealed := range []runspec.SealedRequest{plan.Seal.Request, pending.Request} {
+		sealed.Provenance = provenance
+		body, err := json.Marshal(sealed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET request_json=? WHERE team=? AND id=?`, body, tenant.Team(), sealed.RunID); err != nil {
+			t.Fatal(err)
+		}
+	}
 	checkStoreQueueCounts(t, s, map[string]int{store.QueueStateReady: 3})
 	claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil || claim.RunID != pending.RunID || claim.Kind != capability.UnitTrigger {

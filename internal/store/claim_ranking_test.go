@@ -74,6 +74,7 @@ func TestUnmeteredPushClaimsWithoutCloudFunding(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			f := rankingFixture(t, false)
+			f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
 			f.At(8 * time.Second)
 			job := ""
 			if kind == capability.UnitNode {
