@@ -8,7 +8,34 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
+
+func TestConcurrencyMaintenanceLocksTeamBeforeCapacity(t *testing.T) {
+	s, recorder := newRecordingStore(t)
+	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+	maintenanceRun(t, s, "run", 1, runstate.RunRunning)
+	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a','job:global:key',1,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,arrived_at,lease_expires_at,policy) VALUES ('a','job:global:key','expired','run',1,1,'queue')`)
+	lease := maintenanceReaper(t, s)
+	recorder.reset()
+	result, err := s.AsOperator().MaintainConcurrency(t.Context(), lease)
+	if err != nil || len(result.StaleWaiters) != 1 {
+		t.Fatalf("maintenance: %+v, %v", result, err)
+	}
+	team, entry := -1, -1
+	for i, q := range recorder.snapshot() {
+		if q == "SELECT name FROM teams WHERE name=?" && team < 0 {
+			team = i
+		}
+		if strings.HasPrefix(q, "SELECT key FROM concurrency_entries WHERE team = ? AND key = ?") && entry < 0 {
+			entry = i
+		}
+	}
+	if team < 0 || entry <= team {
+		t.Fatalf("team lock=%d, capacity lock=%d; team must precede capacity", team, entry)
+	}
+}
 
 func TestDirectGrantLocksTeamBeforeWritingLedger(t *testing.T) {
 	s, recorder := newRecordingStore(t)

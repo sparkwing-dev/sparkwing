@@ -295,12 +295,16 @@ func TestPostgresConcurrentEvaluationReleasesRequestTheRunForWriting(t *testing.
 		b.start(func() error { return st.ReleaseUnit(ctx, claim, claim.Award.CapabilityPrefix) })
 	}
 	pids := b.waitBlocked(2)
+	if !b.held(`SELECT name FROM teams WHERE name='a' FOR KEY SHARE`) {
+		t.Fatal("release waits for the run without locking its team for update")
+	}
 	// safety: a row-lock waiter's tuple lock records its requested strength; ExclusiveLock is FOR NO KEY UPDATE.
 	var modes string
 	if err := b.db.QueryRowContext(ctx, `SELECT COALESCE(string_agg(mode,',' ORDER BY mode),'') FROM pg_locks WHERE locktype='tuple' AND relation='runs'::regclass AND pid::text=ANY(string_to_array($1,','))`, pids).Scan(&modes); err != nil {
 		t.Fatal(err)
 	}
-	if modes != "ExclusiveLock,ExclusiveLock" {
+	// The second release waits for the first release's team lock.
+	if modes != "ExclusiveLock" {
 		t.Fatalf("releases wait for the run in modes %v", modes)
 	}
 	b.release(2)

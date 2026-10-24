@@ -65,6 +65,15 @@ ORDER BY team,key`)
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
+	// Funding checks take the ledger; transitions already hold the team when
+	// they wait for capacity, so maintenance must take teams before entries.
+	var financialTeams []Team
+	for _, key := range keys {
+		financialTeams = append(financialTeams, key.team)
+	}
+	if err := lockFinancialTeamsTx(ctx, tx, financialTeams...); err != nil {
+		return nil, err
+	}
 	var locked []concurrencyKey
 	teams := map[Team]bool{}
 	for _, key := range keys {

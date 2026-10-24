@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
-func blockFinancialLedger(t *testing.T, ctx context.Context, s *store.Store) *runBlocker {
+func blockFinancialLedger(t *testing.T, ctx context.Context, s *store.Store, team store.Team) *runBlocker {
 	t.Helper()
 	s.DB().SetMaxOpenConns(8)
 	b := &runBlocker{t: t, ctx: ctx, db: s.DB(), done: make(chan error, 2)}
@@ -21,13 +22,34 @@ func blockFinancialLedger(t *testing.T, ctx context.Context, s *store.Store) *ru
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = b.tx.Rollback() })
-	if _, err := b.tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('sparkwing/ledger/a'))`); err != nil {
+	if _, err := b.tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "sparkwing/ledger/"+string(team)); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.tx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&b.pid); err != nil {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func TestPostgresConcurrencyMaintenanceLocksTeamBeforeCapacity(t *testing.T) {
+	f := newStoreRecoveryFixtureAt(t, true, storetest.NewPostgres(t), func(plan *nodeproto.PlanDoc) {
+		plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "key", Scope: new("global"), Capacity: new(1)}}
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	b := blockFinancialLedger(t, ctx, f.s, f.tenant.Team())
+	if _, err := b.tx.ExecContext(ctx, `SELECT name FROM teams WHERE name=$1 FOR UPDATE`, f.tenant.Team()); err != nil {
+		t.Fatal(err)
+	}
+	b.start(func() error {
+		_, err := f.s.AsOperator().MaintainConcurrency(ctx, f.lease)
+		return err
+	})
+	b.waitBlocked(1)
+	if b.held(`SELECT key FROM concurrency_entries WHERE key='job:global:key' FOR UPDATE`) {
+		t.Fatal("maintenance holds capacity while waiting for its team")
+	}
+	b.release(1)
 }
 
 func TestPostgresSettlementsLockAllWarningTeamsBeforeLedger(t *testing.T) {
@@ -49,7 +71,7 @@ func TestPostgresSettlementsLockAllWarningTeamsBeforeLedger(t *testing.T) {
 	if err := s.TestOnlySettleRefund(ctx, paid); err != nil {
 		t.Fatal(err)
 	}
-	b := blockFinancialLedger(t, ctx, s)
+	b := blockFinancialLedger(t, ctx, s, "a")
 	warning := capability.PaymentEvent{EventID: "warning", ObjectID: "warning", PaymentID: "payment-one", Mode: capability.PaymentTest, Kind: capability.PaymentWarningEvent, Fingerprint: "card", Actionable: true, Created: time.Now().Unix()}
 	b.start(func() error { return s.TestOnlySettleRefund(ctx, warning) })
 	b.waitBlocked(1)
@@ -89,7 +111,7 @@ func TestPostgresDirectGrantRacingTeamPurge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := blockFinancialLedger(t, ctx, s)
+	b := blockFinancialLedger(t, ctx, s, "a")
 	b.start(func() error {
 		result, err := tenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 1, Reference: "grant"})
 		if err == nil && !result.Created {
@@ -112,9 +134,9 @@ func TestPostgresDirectGrantRacingTeamPurge(t *testing.T) {
 	})
 	b.waitBlocked(2)
 	b.release(2)
-	for _, table := range []string{"teams", "credit_grants"} {
+	for table, column := range map[string]string{"teams": "name", "credit_grants": "team"} {
 		var count int
-		if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil || count != 0 {
+		if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE `+column+`='a'`).Scan(&count); err != nil || count != 0 {
 			t.Errorf("%s rows=%d: %v", table, count, err)
 		}
 	}

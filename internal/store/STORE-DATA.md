@@ -145,8 +145,9 @@ Final upload expiry uses quota admission and leased blob maintenance. Empty
 uploads reserve object capacity too, and expired tickets cannot commit.
 
 The raw paid-credit grant path is removed. `Tenant.GrantCredits` is removed.
-`Tenant.RecordCreditGrant` accepts free grants only. Payment reversals use verified
-provider settlement or the authorized console refund transaction.
+`Tenant.RecordCreditGrant` accepts free grants and bounded negative corrections
+of those grants. Payment reversals use verified provider settlement or the
+authorized console refund transaction.
 Paid checkout credit uses `Store.SettlePayment`, which derives the team and
 amount from the committed checkout. Actionable fraud warnings refuse
 unprotected payments before a grant commits. A protected same-payment warning
@@ -696,6 +697,8 @@ is locked before any ledger. Warnings include teams whose saved card is cleared.
 A shared team lock cannot be upgraded, and a new team cannot be added after a
 ledger lock. Payment callbacks revalidate their discovered teams after taking
 the payment identity lock. A changed binding restarts the transaction.
+Concurrency maintenance takes the same team locks before capacity entries
+because its funding checks acquire the ledger.
 
 `lock_order.go` defines the canonical tiers and comparator. Authority and unit
 batch locking use it. The acquisition-sequence test checks actual SQL against
