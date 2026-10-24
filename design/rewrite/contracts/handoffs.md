@@ -1074,3 +1074,7 @@ separate operations; no database transaction stays open across a provider call.
 - The max_children_per_root refusal tells the user the team's current limit, the 1,000 maximum, and how to fix it (raise the team setting or split the work).
 - A run whose statically declared child fan-out already exceeds the team's limit is refused at plan acceptance, before any child starts. Children created dynamically mid-run keep the creation-time check.
 - Korey authorized carrying merges and deploys forward without waiting for approval; the release (merge to main and the v0.68.0 tag) still follows the release policy.
+
+## 2026-10-24 Korey decision 60: verified main work runs only on fresh pods
+
+- Persistent Kubernetes runners (long-lived pods that serve many jobs) never claim verified work for a repository's default branch; that work runs on a fresh, single-use pod (or a Cloud pod), so no earlier job can leave anything behind for it. Persistent runners keep serving all other work. Closes the executor re-review finding on persistent runners taking verified main work.
