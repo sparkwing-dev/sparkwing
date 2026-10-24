@@ -64,6 +64,7 @@ func TestSurfaceSnapshotPreservesGuardRefusal(t *testing.T) {
 			body, err := json.Marshal(map[string]any{
 				"run_id": "run", "store_now": "2026-10-15T00:00:00Z", "cancel_requested": cancelled,
 				"guard_refusal": "branch guard refused", "jobs": []any{}, "generators": []any{}, "expansions": []any{},
+				"selection_skips": map[string]string{},
 			})
 			if err != nil {
 				t.Fatal(err)

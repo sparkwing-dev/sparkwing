@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"slices"
 
@@ -137,7 +138,7 @@ func (s *RemoteOwnerStore) schedule(ctx context.Context, runID string) (store.Sc
 	if wire.RunID != runID {
 		return store.ScheduleSnapshot{}, errors.New("scheduling response changed the run identity")
 	}
-	result := store.ScheduleSnapshot{CancelRequested: wire.CancelRequested}
+	result := store.ScheduleSnapshot{CancelRequested: wire.CancelRequested, SelectionSkips: maps.Clone(wire.SelectionSkips)}
 	for _, job := range wire.Jobs {
 		if job.ID == "" || job.ID != job.Declaration.ID {
 			return store.ScheduleSnapshot{}, errors.New("scheduling response changed a job identity")

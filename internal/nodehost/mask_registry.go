@@ -11,18 +11,49 @@ import (
 
 // MaskRegistry serializes run-local registrations and topology acceptance.
 type MaskRegistry struct {
-	mu     sync.Mutex
+	mu     *sync.Mutex
 	masker *secrets.Masker
 	// Replay must reproduce accepted topology even after credentials are issued.
 	replayMasks *secrets.Masker
 	identifiers map[string]string
+	jobs        map[[2]string]*MaskRegistry
+	parent      *MaskRegistry
+	users       int
 }
 
 // NewMaskRegistry uses the same masker that host logs and returned errors use.
 func NewMaskRegistry(masker *secrets.Masker) *MaskRegistry {
 	replayMasks := secrets.NewMasker()
 	replayMasks.Merge(masker)
-	return &MaskRegistry{masker: masker, replayMasks: replayMasks, identifiers: map[string]string{}}
+	return &MaskRegistry{mu: &sync.Mutex{}, masker: masker, replayMasks: replayMasks, identifiers: map[string]string{}}
+}
+
+func (r *MaskRegistry) job(run, job string) *MaskRegistry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := [2]string{run, job}
+	scoped := r.jobs[key]
+	if scoped == nil {
+		scoped = &MaskRegistry{mu: r.mu, masker: r.masker.Scoped(), replayMasks: r.replayMasks.Scoped(), identifiers: r.identifiers, parent: r}
+		if r.jobs == nil {
+			r.jobs = map[[2]string]*MaskRegistry{}
+		}
+		r.jobs[key] = scoped
+	}
+	scoped.users++
+	return scoped
+}
+
+func (r *MaskRegistry) releaseJob(run, job string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := [2]string{run, job}
+	if scoped := r.jobs[key]; scoped != nil {
+		scoped.users--
+		if scoped.users == 0 {
+			delete(r.jobs, key)
+		}
+	}
 }
 
 // ContainsSecret reports every presentation mask, including issued credentials.
@@ -41,12 +72,18 @@ func (r *MaskRegistry) registerValue(value string) error {
 
 // registerIssued protects a service value without changing accepted topology.
 func (r *MaskRegistry) registerIssued(value string) error {
+	if r.parent != nil {
+		return r.parent.registerIssued(value)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.masker == nil {
 		return errors.New("mask registration requires a shared masker")
 	}
-	return r.masker.Register(value)
+	if err := r.masker.Register(value); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *MaskRegistry) register(candidate *secrets.Masker) error {

@@ -488,7 +488,7 @@ type projections struct {
 	PlanHash      Hash
 }
 
-// safety: RetryInput carries sealed state unchanged and records the new requester as lineage.
+// safety: RetryInput carries source code and inputs with the authenticated retrier.
 type RetryInput struct {
 	Request     SealedRequest
 	Spec        Optional[Spec]
@@ -497,7 +497,7 @@ type RetryInput struct {
 	SourceRunID string
 }
 
-// safety: RetrySnapshot preserves source trust and seals while adding separate retry lineage.
+// safety: RetrySnapshot preserves source trust and keys asserted writes to the retrier.
 type RetrySnapshot struct {
 	Request SealedRequest
 	Spec    Optional[Spec]

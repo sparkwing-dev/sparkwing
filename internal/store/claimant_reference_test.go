@@ -61,7 +61,7 @@ func TestClaimRankingAndNoticeMatchIndependentClaimantModel(t *testing.T) {
 			case "cloud":
 				prefix = f.Launcher
 			}
-			if model.automated {
+			if model.automated || model.tier == "github-actions" {
 				f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
 			}
 			if model.excluded {

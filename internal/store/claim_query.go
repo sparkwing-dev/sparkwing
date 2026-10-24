@@ -305,6 +305,25 @@ func (q *claimSQL) terms(selector string, alternative func(string) string) strin
 func (q *claimSQL) fact(name string) string { return q.at("c.facts", name) }
 func (q *claimSQL) flag(name string) string { return q.number(q.fact(name)) }
 
+func (q *claimSQL) pushScopeMatches(provenance, push, repo string) string {
+	p := func(name string) string { return q.at(provenance, name) }
+	b := func(name string) string { return q.at(push, name) }
+	return `COALESCE((` + p("trust") + ` IN ('actions','verified','verified-default') AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `='gh:'||CAST(` + p("repository_id") + ` AS TEXT) AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
+}
+
+func writerPrincipalSQL(writer, kind string) string {
+	prefix := kind + "/"
+	return `CASE WHEN substr(` + writer + `,1,` + fmt.Sprint(len(prefix)) + `)='` + prefix + `' THEN replace(replace(replace(substr(` + writer + `,` + fmt.Sprint(len(prefix)+1) + `),'%2F','/'),'%3A',':'),'%25','%') ELSE '' END`
+}
+
+// Both placement explanations and awards use these SQL rules so their trust
+// decisions cannot diverge when a new provenance or pool mode is added.
+func (q *claimSQL) poolTrust(team, pools, trust, launcher, provenance string) string {
+	reserved := `EXISTS (SELECT 1 FROM secrets s WHERE s.team=` + team + ` AND ` + q.contains(pools, "s.only_on") + `)`
+	hasPools := `EXISTS (SELECT 1 FROM ` + q.array(pools, "pool") + `)`
+	return `((NOT (` + reserved + ` OR (` + trust + `='verified-default' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='any' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.at(provenance, "trust") + ` IN ('verified-default','schedule')))`
+}
+
 func (q *claimSQL) predicate() string {
 	f := q.fact
 	n := q.flag
@@ -318,9 +337,9 @@ func (q *claimSQL) predicate() string {
 	reservation := `(` + f("pools") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + `) OR EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + ` WHERE ` + q.contains("w.allowed_pools", q.text("pool.value")) + ` AND ` + q.anyAlternative("w.selectors", func(alt string) string { return alt + `='pool='||` + q.text("pool.value") }) + `))`
 	scopes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("scopes"), "scope") + ` WHERE NOT EXISTS (SELECT 1 FROM ` + q.array("scope.value", "pattern") + ` WHERE (` + q.at("pattern.value", "key") + `=w.repo_key AND w.repo_key<>'') OR (` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `)))`
 	accepted := `(` + n("filter") + `=0 OR (w.kind IN ('node','eval') AND w.repo_display='' AND COALESCE(` + w("git", "repository", "display") + `,'')='') OR EXISTS (SELECT 1 FROM ` + q.array(f("accept"), "pattern") + ` WHERE ` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `))`
-	trust := `(` + f("trust") + `='any' OR (` + f("trust") + `='' AND NOT EXISTS (SELECT 1 FROM secrets s WHERE s.team=w.team AND ` + q.contains(f("pools"), "s.only_on") + `)) OR (` + q.at("w.request", "provenance", "trust") + ` IN ('verified-default','schedule') AND (` + f("pools") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + `) OR ` + n("launcher") + `=1)))`
+	trust := q.poolTrust("w.team", f("pools"), f("trust"), n("launcher"), q.at("w.request", "provenance"))
 	bind := `(` + f("bind_run") + `='' OR (w.run_id=` + f("bind_run") + ` AND (` + n("here") + `=0 OR (w.kind='trigger' AND EXISTS (SELECT 1 FROM triggers bt WHERE bt.team=w.team AND bt.id=w.run_id AND (bt.generation<>0 OR ` + n("claim_by") + `>clock.now))))))`
-	pushes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("pushes"), "push") + ` WHERE COALESCE(` + q.at("push.value", "workflow_run_id") + `,'')='' OR ` + q.at("push.value", "repo_key") + `<>w.repo_key OR ` + q.at("push.value", "ref") + `<>COALESCE(` + q.at("w.request", "provenance", "ref") + `,'') OR ` + q.at("push.value", "sha") + `<>COALESCE(` + q.at("w.request", "provenance", "sha") + `,''))`
+	pushes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("pushes"), "push") + ` WHERE NOT (` + q.pushScopeMatches(q.at("w.request", "provenance"), "push.value", "w.repo_key") + `))`
 	personal := `(` + n("personal") + `=0 OR (` + f("account") + `<>'' AND ` + f("account") + `=w.requester AND NOT EXISTS (SELECT 1 FROM ancestors a WHERE a.team=w.team AND a.child=w.run_id AND a.origin IN ('github_app','schedule'))))`
 	runnerKind := `COALESCE(` + w("options", "runner", "value", "kind") + `,'')`
 	runnerValue := `COALESCE(` + w("options", "runner", "value", "value") + `,'')`
@@ -342,7 +361,7 @@ func (q *claimSQL) predicate() string {
 	if !any(func(f claimFacts) bool { return f.Filter != 0 }) {
 		accepted = "1=1"
 	}
-	if !any(func(f claimFacts) bool { return f.Trust != "any" }) {
+	if !any(func(f claimFacts) bool { return f.Trust != "any" || len(f.Pools) > 0 }) {
 		trust = "1=1"
 	}
 	if !any(func(f claimFacts) bool { return f.BindRun != "" }) {
@@ -610,8 +629,10 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 			return `(` + alt + `=size.label OR (NOT (substr(` + alt + `,1,10)='sparkwing-' AND substr(` + alt + `,-3)='cpu') AND ` + q.contains(q.at("unfunded.facts", "labels"), alt) + `))`
 		}) + ` ORDER BY size.ordinal LIMIT 1)`
 	}
+	writer := q.at(request, "provenance", "writer")
+	account, machine := writerPrincipalSQL(writer, "account"), writerPrincipalSQL(writer, "machine")
 	raw := `SELECT ready.team,ready.run_id,ready.node_id,ready.source_generation,ready.arrived,ready.kind,ready.requirements,r.repo_key,r.repo_display,` + repository + ` AS repository,` + request + ` AS request,` + spec + ` AS spec,` + selectors + ` AS selectors,` + prefers + ` AS preferences,` + q.blob("r.allowed_pools") + ` AS allowed_pools,r.created_principal,tm.claim_ranking,tm.claim_award_ordinal,
- CASE WHEN r.created_subject_kind='account' THEN r.created_principal WHEN r.created_subject_kind='machine' THEN (SELECT CASE WHEN COUNT(*)>0 AND COUNT(DISTINCT m.created_by)=1 AND MIN(CASE WHEN COALESCE(CAST(` + q.at(q.blob("m.authority_json"), "origin", "personal") + ` AS TEXT),'false') IN ('true','1') AND m.created_by<>'' THEN 1 ELSE 0 END)=1 THEN MIN(m.created_by) ELSE '' END FROM capabilities m WHERE m.team=r.team AND m.subject_id=r.created_principal AND m.subject_kind='machine' AND m.bind_kind='none' AND m.parent_id IS NULL) ELSE '' END AS requester
+ CASE WHEN (` + account + `)<>'' THEN ` + account + ` WHEN (` + machine + `)<>'' THEN (SELECT CASE WHEN COUNT(*)>0 AND COUNT(DISTINCT m.created_by)=1 AND MIN(CASE WHEN COALESCE(CAST(` + q.at(q.blob("m.authority_json"), "origin", "personal") + ` AS TEXT),'false') IN ('true','1') AND m.created_by<>'' THEN 1 ELSE 0 END)=1 THEN MIN(m.created_by) ELSE '' END FROM capabilities m WHERE m.team=r.team AND m.subject_id=(` + machine + `) AND m.subject_kind='machine' AND m.bind_kind='none' AND m.parent_id IS NULL) ELSE '' END AS requester
  FROM ready JOIN runs r ON r.team=ready.team AND r.id=ready.run_id JOIN teams tm ON tm.name=r.team,clock
  WHERE r.team IN (` + liveTeamsSQL + `) AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=clock.now)`
 	ancestorOrigin := q.at(q.blob("ar.request_json"), "request", "origin")

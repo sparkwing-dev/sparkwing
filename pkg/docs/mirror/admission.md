@@ -8,7 +8,8 @@ The store owns logical concurrency capacity in every execution mode. It commits
 plan admission with permission to release work. An executing host requests its
 complete job group set under its actual award, then acquires machine CPU and
 memory. A queued set holds no partial grant. Every job needs a committed start
-permit, including jobs without concurrency groups.
+permit, including jobs without concurrency groups. The store decides and commits
+admission skips, failures and queue timeouts; owners cannot assert those outcomes.
 
 An executable job evaluates `SkipIf` and memo first on its executing host, under
 that permit. The coordinator acquires no job groups for evaluation. A job that

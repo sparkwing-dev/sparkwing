@@ -90,6 +90,7 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 // Fragments correlate team keys with the final authenticated work/claimant pair.
 // They cannot execute SQL or accept database handles.
 var reviewedClaimSQLFragments = map[string]string{
+	"(*claimSQL).poolTrust":            "the correlated secret lookup uses the authenticated work team supplied by placement or the tenant-bound explanation query; this fragment cannot execute SQL",
 	"(*claimSQL).requirementsMatchSQL": "terms and alternatives bind the caller's scoped team and canonical requirement identity; this fragment cannot execute SQL",
 	"(*claimSQL).routesSQL":            "context routes join on both authenticated requirement team and requirement identity before selecting a tenant-keyed ready head",
 	"(*claimSQL).evaluationArrivalSQL": "the eval source correlates its run creation fallback on the same team and run identity",

@@ -234,7 +234,7 @@ func TestOperatorCreateTeamHTTPConsole(t *testing.T) {
 	checkActors := func(want string) {
 		t.Helper()
 		events, err := tenant.BusinessEvents(t.Context(), "", 10, "")
-		if err != nil || len(events) != 2 {
+		if err != nil || len(events) != 3 {
 			t.Fatalf("console audit: %+v %v", events, err)
 		}
 		for _, ev := range events {

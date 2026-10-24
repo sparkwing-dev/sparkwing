@@ -519,8 +519,9 @@ caller and response use the new route, grants and timestamp representation.
 
 ### Machine and deployment service provisioning
 
-POST `/api/v1/runners` uses PolicyRouter with member `runs.read` and
-BindNone. It accepts `name`, `repos`, optional `personal`, optional `reserved_pools`, optional
+POST `/api/v1/runners` uses PolicyRouter with a direct account session,
+`runs.write` or `team.admin`, and BindNone. The store requires `runs.write`
+for personal enrollment and `team.admin` for shared enrollment. It accepts `name`, `repos`, optional `personal`, optional `reserved_pools`, optional
 `grants` and optional absolute `expires_at`. The existing machine-name grammar
 and 32-pattern bound remain. Repository patterns use sourceurl's shared parser.
 Omitted grants select nodes.claim and triggers.claim. Explicit grants narrow
@@ -531,7 +532,7 @@ that the registering team admin may assign them.
 The approved machine-registration decision adds team `members_can_add_machines`,
 default true. A live independent account session may enroll its own personal
 machine when the setting permits it or the account has current `team.admin`.
-Any member role qualifies. Shared enrollment always requires current
+Personal enrollment requires current `runs.write`. Shared enrollment always requires current
 `team.admin`, as do shared-runner token rotation and revocation. The store
 rechecks the setting with current membership inside root issuance, under the
 same team lock as setting changes. Personal ownership and claim matching keep

@@ -451,7 +451,11 @@ registration fails. Registered secret values cannot occur in job, step, group or
 approval IDs, including generated declarations. Validation reports the field
 path without echoing the value. Registration also refuses a value contained in
 an already accepted identifier.
-Runtime mask registrations stay on the registering host, so declare a secret if its value may appear in an identifier on another host.
+Runtime mask registrations apply only to the registering job's output on its host.
+Declare a secret if its value may appear in another job or an identifier on another host.
+
+Child-run arguments containing a registered secret are refused before they leave
+the host. This uses the same secret check as job output, including encoded spellings.
 
 A job output that holds a registered secret value, plainly or base64-, URL- or
 JSON-escaped, is withheld. The job still passes, gets a `warn` annotation

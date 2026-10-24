@@ -230,7 +230,7 @@ func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 			if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "blocked"}, To: runstate.NodeSkipped, Cause: causeDependency, Actor: request.Actor}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "blocked"}, To: runstate.NodeCancelled, Cause: causeDependency, Actor: request.Actor}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: request.Actor.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(request.RunID), Cause: runstate.RunFinish, Actor: request.Actor}}); err != nil {

@@ -183,7 +183,7 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	}
 	closed := false
 	start := func(_ context.Context, input nodehost.NodeInput, _ nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
-		return &burstSDKProcess{runner: input.GrantedRunner, identity: selected.Identity, services: &burstSDKServices{handler: router, bearer: input.RouteBinding.Routes.Bearer, masker: masker, logs: &logs}, closed: &closed}, nil
+		return &burstSDKProcess{runner: input.GrantedRunner, identity: selected.Identity, services: &burstSDKServices{handler: router, bearer: input.RouteBinding.Routes.Bearer}, closed: &closed}, nil
 	}
 	if native != nil {
 		start = processes.Start
@@ -273,7 +273,10 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 			}
 			return processes.Delegate(ctx, capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256([]byte(award.Capability))}, capability.DelegateSpec{
 				Parent: principal.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport, capability.SecretsRelease}, Binding: principal.Capability.Binding, Repositories: principal.Capability.Repositories, ExpiresAt: principal.Capability.ExpiresAt,
-			}, nodehost.ProcessServices{RunID: award.RunID, Job: input.Accepted.Plan.Jobs[0], Secrets: []string{"TOKEN"}, Secret: func(ctx context.Context, _ capability.Authorized, name string) (string, bool, error) {
+			}, nodehost.ProcessServices{RunID: award.RunID, Job: input.Accepted.Plan.Jobs[0], Annotation: func(_ context.Context, _ capability.Authorized, request nodeproto.AnnotationRequest) error {
+				logs.WriteString(request.Message)
+				return nil
+			}, Secrets: []string{"TOKEN"}, Secret: func(ctx context.Context, _ capability.Authorized, name string) (string, bool, error) {
 				return services.Secret(ctx, name)
 			}})
 		},
@@ -328,8 +331,6 @@ type burstSDKServices struct {
 	sdkserve.Services
 	handler http.Handler
 	bearer  string
-	masker  *secrets.Masker
-	logs    *burstSDKLogs
 }
 
 type burstSDKLogs struct {
@@ -365,14 +366,24 @@ func (s *burstSDKServices) Secret(ctx context.Context, name string) (string, boo
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &value) != nil {
 		return "", false, fmt.Errorf("SDK secret service: HTTP %d", response.Code)
 	}
-	if !value.Masked || s.masker.Mask(value.Value) != "***" {
-		return "", false, errors.New("SDK received secret before mask registration")
+	if !value.Masked {
+		return "", false, errors.New("SDK secret service returned an unmasked secret")
 	}
 	return value.Value, value.Masked, nil
 }
 
 func (s *burstSDKServices) Emit(frame nodeproto.FrameLog) {
-	s.logs.WriteString(s.masker.Mask(frame.Message))
+	body, err := json.Marshal(nodeproto.AnnotationRequest{Message: frame.Message, Step: frame.Step})
+	if err != nil {
+		panic(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/node/v1/annotations", strings.NewReader(string(body)))
+	request.Header.Set("Authorization", "Bearer "+s.bearer)
+	response := httptest.NewRecorder()
+	s.handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		panic(fmt.Errorf("SDK log service: HTTP %d", response.Code))
+	}
 }
 
 type burstSDKProcess struct {

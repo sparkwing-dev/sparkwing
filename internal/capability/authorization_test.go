@@ -149,3 +149,37 @@ func TestOwnJobInputHasNoAdminBypass(t *testing.T) {
 		})
 	}
 }
+
+func TestRunnerEnrollmentRouteRequiresStoreOriginAuthority(t *testing.T) {
+	route, ok := LookupRoute("POST", "/api/v1/runners")
+	if !ok {
+		t.Fatal("runner enrollment route missing")
+	}
+	for _, tc := range []struct {
+		name    string
+		class   CredentialClass
+		grants  []Grant
+		allowed bool
+	}{
+		{"read-only session", CredentialSession, []Grant{RunsRead}, false},
+		{"personal session", CredentialSession, []Grant{RunsWrite}, true},
+		{"admin session", CredentialSession, []Grant{TeamAdmin}, true},
+		{"member token", CredentialBearer, []Grant{RunsRead, RunsWrite, TeamAdmin}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kind := AuthoritySession
+			if tc.class == CredentialBearer {
+				kind = AuthorityCapability
+			}
+			p := Principal{Class: tc.class, Authority: AuthorityRef{Kind: kind, ID: "member"}, Capability: Capability{Team: "team", Audience: Controller, Subject: Subject{Kind: SubjectAccount, ID: "member"}, Grants: tc.grants, Binding: Binding{Kind: BindingNone}}}
+			auth := Authenticated{Principal: p, Method: route.Method, Pattern: route.Path}
+			for i := range route.Access {
+				auth.Live = append(auth.Live, LiveAccess{RuleIndex: i})
+			}
+			_, err := Authorize(t.Context(), bindingCheck(allowBinding), route, auth, Target{Team: "team"})
+			if (err == nil) != tc.allowed {
+				t.Fatalf("enrollment allowed=%t, want %t: %v", err == nil, tc.allowed, err)
+			}
+		})
+	}
+}

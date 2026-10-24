@@ -73,7 +73,7 @@ func TestNativeOwnerProcessDelegatesThroughPrivateTransport(t *testing.T) {
 		}
 		return w.Code
 	}
-	if status := call("owner-mask"); status != http.StatusOK || masker.Mask("owner-mask") != "***" {
+	if status := call("owner-mask"); status != http.StatusOK || grant.masks.mask("owner-mask") != "***" || masker.Mask("owner-mask") != "owner-mask" {
 		t.Fatal("owner process service unavailable")
 	}
 	row, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"})

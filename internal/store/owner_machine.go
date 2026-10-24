@@ -20,16 +20,17 @@ func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Prin
 		if root.Parent != nil || root.Team != string(t.team) {
 			return nil
 		}
-		var requester, kind string
-		if err := tx.QueryRowContext(ctx, `SELECT created_principal,created_subject_kind FROM runs WHERE team=? AND id=?`, t.team, run).Scan(&requester, &kind); err != nil {
+		sealed, err := sealedRequestTx(ctx, tx, t.team, run)
+		if err != nil {
 			return err
 		}
-		if requester == "" {
+		requester := sealed.Provenance.Writer().Principal()
+		if requester.ID == "" {
 			return nil
 		}
 		switch root.Subject.Kind {
 		case capability.SubjectAccount, capability.SubjectLocal:
-			owner = kind == string(root.Subject.Kind) && root.Subject.ID == requester
+			owner = requester.Kind == string(root.Subject.Kind) && root.Subject.ID == requester.ID
 		case capability.SubjectMachine:
 			account, err := runRequesterAccountTx(ctx, tx, t.team, run)
 			if err != nil || account == "" {
@@ -48,15 +49,16 @@ func (t *Tenant) OwnerMachineClaimant(ctx context.Context, award capability.Prin
 }
 
 func runRequesterAccountTx(ctx context.Context, tx *storeTx, team Team, run string) (string, error) {
-	var requester, kind string
-	if err := tx.QueryRowContext(ctx, `SELECT created_principal,created_subject_kind FROM runs WHERE team=? AND id=?`, team, run).Scan(&requester, &kind); err != nil {
+	sealed, err := sealedRequestTx(ctx, tx, team, run)
+	if err != nil {
 		return "", err
 	}
-	switch kind {
+	requester := sealed.Provenance.Writer().Principal()
+	switch requester.Kind {
 	case string(capability.SubjectAccount):
-		return requester, nil
+		return requester.ID, nil
 	case string(capability.SubjectMachine):
-		return personalMachineOwnerTx(ctx, tx, team, requester)
+		return personalMachineOwnerTx(ctx, tx, team, requester.ID)
 	}
 	return "", nil
 }

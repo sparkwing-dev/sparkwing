@@ -21,6 +21,15 @@ unlock.
 ## [Unreleased]
 
 - **child runs:** Refuse declared child fan-out above the root's remaining allowance at plan acceptance, before children start. Limit errors retain their 409 and details, name the team's setting and the 1,000 maximum, and explain how to raise the limit or split the work. Dynamic children keep the creation-time check
+- **cache:** Retries preserve the source writer's memo and dependency-cache scope in full and failed modes. Personal placement reads the same sealed writer. Only that writer's principal can retry `--runner here` and other local runs. Other members must start a new run
+- **runtime:** Owners refuse `--only` when the controller omits the selection projection, with an error asking for a controller update
+- **security:** Deleting another member's run requires `team.admin` on the credential. Member schedule edits and deletion exclude GitHub App declarations. Runner enrollment routes require the same direct account session and grants as the store
+- **audit:** Approval decisions, cancellations, token minting and rotation, runner enrollment, and invitation acceptance commit typed audit events with each mutation. Audit payloads exclude comments, reasons and personal text
+
+- **security:** Actions push-bound runners require proven provenance for the exact repository, ref and commit. Matching ref and commit text on an asserted run cannot claim that runner.
+- **admission:** Only the store decides and commits admission skips, failures and queue timeouts. Hosts request admission and report declared approval predicates. Dependency skips and cancellations must match the accepted graph.
+- **runners:** Pools holding reserved secrets require launcher credentials even with `--trust=any`.
+- **secrets:** Explicit masks affect only the registering job's output. Runtime secrets and issued OIDC tokens register with the shared host masker. Child-run pipeline names, arguments, repository and branch receive the same secret check as job output before leaving the host.
 
 - **runtime:** Preserve cancellation after an automatic transaction rollback so interrupting an owner's state wait does not stop scheduling
 

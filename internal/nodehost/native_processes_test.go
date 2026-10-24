@@ -22,6 +22,77 @@ func nativeProcessesFixture(t *testing.T) (*NativeProcesses, capability.Credenti
 	return processes, lookup, spec, *services
 }
 
+func TestNativeProcessMasksApplyOnlyToItsOwnOutput(t *testing.T) {
+	processes, lookup, spec, services := nativeProcessesFixture(t)
+	services.StartChild = func(context.Context, capability.Authorized, ChildRequest) (string, error) { return "child", nil }
+	if err := processes.Masks.registerValue("accepted-secret"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, err := processes.Authorities.processServices(t.Context(), first.Binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("POST", "/node/v1/masks", strings.NewReader(`{"value":"other-job-log-text"}`))
+	if err := one.write(request, capability.Authorized{}, "/node/v1/masks"); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := processes.Authorities.deps.Parent.(*processParent)
+	parent.snapshot.Authorities[0].Principal.Capability.Binding.NodeID = "other-job"
+	parent.snapshot.Binding.Current.NodeID = "other-job"
+	spec.Binding.NodeID, services.Job.ID = "other-job", "other-job"
+	second, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := processes.Masks.registerValue("late-accepted-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := processes.Masks.registerIssued("late-issued-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := processes.Masks.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "generated-job"}}}, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest("POST", "/node/v1/masks", strings.NewReader(`{"value":"generated-job"}`))
+	if err := one.write(request, capability.Authorized{}, "/node/v1/masks"); err == nil {
+		t.Fatal("job mask ignored an identifier accepted after delegation")
+	}
+	var output []string
+	processes.Log = func(_ context.Context, _, _ string, frame nodeproto.FrameLog) error {
+		output = append(output, frame.Message)
+		return nil
+	}
+	for _, grant := range []ProcessGrant{first, resumed, second} {
+		config, err := processes.configuration(t.Context(), grant.Binding, grant.Revoke, ExecutorActivity{}, AcceptedRun{Spec: []byte(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := config.Log(t.Context(), nodeproto.FrameLog{Message: "accepted-secret late-accepted-secret late-issued-secret other-job-log-text"}); err != nil {
+			t.Fatal(err)
+		}
+		bound, err := processes.Authorities.processServices(t.Context(), grant.Binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		child := httptest.NewRequest("POST", "/node/v1/children", strings.NewReader(`{"pipeline":"build","args":{"value":"other-job-log-text"}}`))
+		_, _, err = bound.read(child, capability.Authorized{}, "/node/v1/children")
+		if (err != nil) != (grant.Binding.JobID == first.Binding.JobID) {
+			t.Fatalf("child argument masking crossed its job scope: job=%s error=%v", grant.Binding.JobID, err)
+		}
+	}
+	if len(output) != 3 || output[0] != "*** *** *** ***" || output[1] != "*** *** *** ***" || output[2] != "*** *** *** other-job-log-text" {
+		t.Fatalf("process log masking crossed its scope: %q", output)
+	}
+}
+
 func FuzzNativeProcessServicesIsolation(f *testing.F) {
 	f.Add("run", "job", false)
 	f.Add("foreign", "job", false)
@@ -45,8 +116,8 @@ func FuzzNativeProcessServicesIsolation(f *testing.F) {
 		if valid != (err == nil) || !valid && bound != nil {
 			t.Fatal("service lookup crossed its delegated process binding")
 		}
-		if valid && (bound.Masks != processes.Masks || bound.Cleanups == nil || bound.Cleanups == services.Cleanups) {
-			t.Fatal("delegation lost its shared masks or isolated cleanups")
+		if valid && (bound.Masks == processes.Masks || bound.Cleanups == nil || bound.Cleanups == services.Cleanups) {
+			t.Fatal("delegation lost its isolated masks or cleanups")
 		}
 	})
 }
@@ -151,4 +222,86 @@ func TestNativeProcessChildAwaitPausesItsAttemptIdleBudget(t *testing.T) {
 			t.Fatal("child wait did not resume the idle budget")
 		}
 	})
+}
+
+func TestNativeProcessRuntimeCredentialsUseHostMasker(t *testing.T) {
+	processes, lookup, spec, services := nativeProcessesFixture(t)
+	services.Secrets = []string{"TOKEN"}
+	services.Secret = func(context.Context, capability.Authorized, string) (string, bool, error) {
+		return "runtime-secret", true, nil
+	}
+	services.OIDC = func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error) {
+		return ProcessOIDCToken{Token: "runtime-token", ExpiresAt: time.Unix(2e9, 0)}, nil
+	}
+	first, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, err := processes.Authorities.processServices(t.Context(), first.Binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := processes.Authorities.deps.Parent.(*processParent)
+	parent.snapshot.Authorities[0].Principal.Capability.Binding.NodeID = "other-job"
+	parent.snapshot.Binding.Current.NodeID = "other-job"
+	spec.Binding.NodeID, services.Job.ID = "other-job", "other-job"
+	second, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	processes.Log = func(_ context.Context, _, _ string, frame nodeproto.FrameLog) error {
+		output += frame.Message
+		return nil
+	}
+	config, err := processes.configuration(t.Context(), second.Binding, second.Revoke, ExecutorActivity{}, AcceptedRun{Spec: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := httptest.NewRequest("GET", "/node/v1/secrets/TOKEN", nil)
+	secret.SetPathValue("name", "TOKEN")
+	if _, err := one.secret(secret, capability.Authorized{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := one.oidc(httptest.NewRequest("POST", "/node/v1/oidc-token", strings.NewReader(`{"audience":"cloud"}`)), capability.Authorized{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := processes.Masks.mask("runtime-secret runtime-token"); got != "*** ***" {
+		t.Errorf("shared host masker exposed credentials: %q", got)
+	}
+	if err := config.Log(t.Context(), nodeproto.FrameLog{Message: "runtime-secret runtime-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if output != "*** ***" {
+		t.Errorf("live sibling exposed issued credentials: %q", output)
+	}
+}
+
+func TestNativeProcessDropsJobMasksAfterLastRevocation(t *testing.T) {
+	processes, lookup, spec, services := nativeProcessesFixture(t)
+	first, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, err := processes.Authorities.processServices(t.Context(), first.Binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := one.Masks.registerValue("job-only-mask"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Revoke(); err != nil {
+		t.Fatal(err)
+	}
+	next, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := processes.Authorities.processServices(t.Context(), next.Binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if two.Masks.ContainsSecret("job-only-mask") {
+		t.Fatal("ended job's registrations survived its lifetime")
+	}
 }
