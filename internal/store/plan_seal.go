@@ -134,19 +134,6 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	if err = checkExpansionSecretPoolsTx(ctx, tx, team, runspec.Spec{Request: run.Request, Resolved: input.Resolved}, resolved.Jobs, selection); err != nil {
 		return runspec.Spec{}, nil, err
 	}
-	if run.Spec == nil {
-		var children int64
-		for _, job := range plan.Jobs {
-			children += int64(len(job.Children))
-		}
-		root := run.Lineage.RootRunID
-		if root == "" {
-			root = run.ID
-		}
-		if err := enforceChildCountTx(ctx, tx, team, root, children); err != nil {
-			return runspec.Spec{}, nil, err
-		}
-	}
 	body, err := json.Marshal(plan)
 	if err != nil {
 		return runspec.Spec{}, nil, err

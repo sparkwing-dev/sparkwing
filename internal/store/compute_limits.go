@@ -382,13 +382,6 @@ func enforceChildLimitsTx(ctx context.Context, tx *storeTx, team Team, root stri
 	if depth > limits.MaxChildDepth {
 		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("child runs nest at most %d levels deep, counting the root run", limits.MaxChildDepth), Details: map[string]any{"limit": "max_child_depth", "cap": limits.MaxChildDepth}}
 	}
-	return enforceChildCountTx(ctx, tx, team, root, 1)
-}
-
-func enforceChildCountTx(ctx context.Context, tx *storeTx, team Team, root string, additional int64) error {
-	if additional == 0 {
-		return nil
-	}
 	var created, ceiling int64
 	if err := tx.QueryRowContext(ctx, `SELECT r.created_at,t.max_children_per_root FROM runs r JOIN teams t ON t.name=r.team WHERE r.team=? AND r.id=?`, team, root).Scan(&created, &ceiling); err != nil {
 		return err
@@ -401,7 +394,7 @@ func enforceChildCountTx(ctx context.Context, tx *storeTx, team Team, root strin
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=? AND created_at>=? AND COALESCE(parent_run_id,'')<>'' AND retry_of='' AND `+expression+`=?`, team, created, root).Scan(&children); err != nil {
 		return err
 	}
-	if children+additional > ceiling {
+	if children >= ceiling {
 		maximum := strconv.FormatInt(limits.MaxChildrenPerRoot, 10)
 		for i := len(maximum) - 3; i > 0; i -= 3 {
 			maximum = maximum[:i] + "," + maximum[i:]
