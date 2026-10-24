@@ -14,6 +14,7 @@ func clonePredicateRun(t *testing.T, s *Store, request []byte, creator, subject 
 	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_subject_kind,created_at,log_retention_class,log_retention_days) SELECT team,'later',2,pipeline,status,?,'later',request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,?,?,2,log_retention_class,log_retention_days FROM runs WHERE id='run'`, request, creator, subject)
 	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,'later',unit_kind,2,2,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,'later',node_id,'pending',2,spec_json,execution_json FROM nodes WHERE run_id='run'`)
+	fixtureRunWriter(t, s, "later", runspec.PrincipalWriter(subject, creator))
 	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "later", NodeID: "job"})
 	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitTrigger, RunID: "later"})
 }
@@ -83,6 +84,7 @@ func TestClaimPredicateMachineRequesterRequiresPersonalOwnership(t *testing.T) {
 	}
 	clonePredicateRun(t, s, raw, "owner", "account")
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET created_principal='shared',created_subject_kind='machine' WHERE id='run'`)
+	fixtureRunWriter(t, s, "run", runspec.PrincipalWriter("machine", "shared"))
 	demand.CapabilityPrefix, demand.Target = personal.Prefix, nil
 	demand.Kinds = []capability.UnitKind{capability.UnitNode}
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)

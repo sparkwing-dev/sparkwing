@@ -21,6 +21,28 @@ func assertedProvenance(t testing.TB, pipeline, ref, sha string) runspec.Provena
 	return p
 }
 
+func fixtureRunWriter(t *testing.T, s *Store, run string, writer runspec.Writer) {
+	t.Helper()
+	var body []byte
+	if err := s.queryRow(t.Context(), `SELECT request_json FROM runs WHERE team='a' AND id=?`, run).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	var sealed runspec.SealedRequest
+	if err := json.Unmarshal(body, &sealed); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	sealed.Provenance, err = runspec.AssertedProvenance(writer, sealed.Provenance.Ref(), sealed.Provenance.SHA(), sealed.Provenance.Pipeline())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed.Hash, err = runspec.CanonicalHash(sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.testOnlyExec(t, `UPDATE runs SET request_json=? WHERE team='a' AND id=?`, sealWith(t, sealed, sealed.Provenance), run)
+}
+
 // assertedRef is the record scope an asserted fixture run of ref writes.
 func assertedRef(ref string) blob.RefScope {
 	p, err := runspec.AssertedProvenance(fixtureWriter, ref, "", "fixture")

@@ -147,7 +147,8 @@ team-wide shared secrets, like a GitHub reusable workflow called without
 own commit in the inherited repository is refused with `403`. An explicit
 child repository requires authorization from the parent's live claim and always
 runs as asserted. Cycle checks compare repository and pipeline together. A
-retry copies its source run's identity whole.
+retry keeps its source run's proven identity. An asserted retry keeps the source
+code and inputs, and writes cache and memo entries in the retrying principal's scope.
 
 An Actions push-bound runner takes work only when its sealed provenance proves
 the binding's exact repository, ref and commit through Actions or a verified
@@ -191,6 +192,10 @@ credential prefixes remain readable. The controller generates every request ID,
 ignores client-supplied `X-Request-ID` values and echoes its ID in the response. Source and secret releases record their authorized subject. Raw bearers,
 request bodies, captured environment values and secret-bearing hashes do not
 belong in logs or receipts. Public run details are redacted display projections.
+Approval decisions, run and job cancellations, token minting and rotation,
+runner enrollment, and invitation acceptance commit their audit events in the
+same transaction. These events contain IDs and closed decision values, without
+approval comments, cancellation reasons, email addresses or other personal text.
 Restricted claims and sealed execution inputs must never be rendered as details.
 Run creation and retry return display inputs, not the execution seal. Schedule
 declarations, overrides, effective arguments and fire history hide every argument

@@ -16,7 +16,7 @@ import (
 
 // sealProvenanceTx derives the identity a new run speaks for from facts this
 // admission transaction verified, and never from what the request body claims.
-// Retries never reach it: they carry their source run's sealed request whole.
+// Retries carry proven identity and reseal asserted identity for their retrier.
 // An unverified run also learns the repository's verified default branch, which it
 // may read verified cache records from but never writes as.
 func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal, input runspec.Request, run string) (runspec.Provenance, error) {

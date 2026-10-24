@@ -103,6 +103,33 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 			return capability.Issued{}, err
 		}
 	}
+	if request.Provision != nil || request.Delegate != nil {
+		actor := auditActor{system: auditController}
+		if request.Provision != nil && request.Provision.Authority != nil {
+			p, err := resolveProvisionAuthorityTx(ctx, tx, *request.Provision.Authority, request.Provision.ConsoleProof)
+			if err != nil {
+				return capability.Issued{}, err
+			}
+			actor = auditPrincipalActor(p)
+		} else if request.Delegate != nil {
+			p, err := tx.ResolveAuthority(ctx, request.Delegate.Parent)
+			if err != nil {
+				return capability.Issued{}, err
+			}
+			actor = auditPrincipalActor(p)
+		}
+		context := auditContext{At: tx.now(ctx), Team: Team(c.Team), Actor: actor}
+		payload := auditCredential{Operation: "token.minted", Credential: digestAudit(c.Prefix)}
+		if err := tx.operator.recordAudit(ctx, tx, context, payload); err != nil {
+			return capability.Issued{}, err
+		}
+		if request.Provision != nil && tx.rotatingRoot == nil && auditOneOf(request.Provision.Kind, string(capability.ProvisionMachine), string(capability.ProvisionService), string(capability.ProvisionActions)) {
+			payload.Operation = "runner.enrolled"
+			if err := tx.operator.recordAudit(ctx, tx, context, payload); err != nil {
+				return capability.Issued{}, err
+			}
+		}
+	}
 	return issued, nil
 }
 

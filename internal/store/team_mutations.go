@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -210,16 +211,12 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		if err != nil {
 			return err
 		}
-		role, err := t.roleTx(ctx, tx, p.Capability.Subject.ID)
-		if err != nil {
-			return err
-		}
-		if role != RoleOwner {
+		if !slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
 			var creator, kind string
 			if err := tx.QueryRowContext(ctx, `SELECT created_principal,created_subject_kind FROM runs WHERE team=? AND id=?`, t.team, run.ID).Scan(&creator, &kind); err != nil {
 				return err
 			}
-			if role != RoleEditor || kind != string(capability.SubjectAccount) || creator != p.Capability.Subject.ID {
+			if p.Capability.Subject.Kind != capability.SubjectAccount || kind != string(capability.SubjectAccount) || creator != p.Capability.Subject.ID {
 				return bindingRefusal()
 			}
 		}

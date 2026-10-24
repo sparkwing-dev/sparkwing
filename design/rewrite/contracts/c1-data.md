@@ -4470,3 +4470,12 @@ admission metadata. Host snapshots use that execution value directly.
 [`runstate.RunSummary`](../../../internal/runstate/reporting.go) beside its
 private team and plan snapshot. Handlers serialize the summary, so persistence
 metadata cannot enter the response through a missing field mapping.
+
+## Asserted retry provenance
+
+The unchanged-seal rule above applies to proven provenance. An asserted retry
+preserves its source code, inputs, default-branch fallback and secret restrictions,
+but seals its writer as the authenticated retrier. `CarryRetry` recomputes the
+request hash and, when present, the accepted spec hash together. The source seal
+remains unchanged. Personal placement and cache and memo authority read that
+sealed writer rather than the destination's creator metadata.

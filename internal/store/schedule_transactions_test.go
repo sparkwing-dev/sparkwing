@@ -521,3 +521,40 @@ func prepareAppPublication(t *testing.T, tenant *Tenant, installation, repositor
 	}
 	return p
 }
+
+func TestMemberCannotMutateAppSchedule(t *testing.T) {
+	for _, operation := range []string{"pause", "override", "clear override", "delete", "delete repo"} {
+		t.Run(operation, func(t *testing.T) {
+			tenant, a, body, _ := consentedScheduleFixture(t)
+			ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET github_installation_id=7,github_repository_id=701 WHERE team=? AND id=?`, tenant.team, ids[0])
+			before, err := tenant.GetCronSchedule(t.Context(), ids[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch operation {
+			case "pause":
+				_, err = tenant.PauseAuthorizedSchedule(t.Context(), a, ids[0], true)
+			case "override":
+				cron := "*/5 * * * *"
+				_, err = tenant.OverrideAuthorizedSchedule(t.Context(), a, ids[0], &cronspec.Override{Cron: &cron})
+			case "clear override":
+				_, err = tenant.OverrideAuthorizedSchedule(t.Context(), a, ids[0], nil)
+			case "delete":
+				_, _, err = tenant.DeleteAuthorizedSchedule(t.Context(), a, ids[0])
+			case "delete repo":
+				_, err = tenant.DeleteAuthorizedSchedules(t.Context(), a, body.RepoURL)
+			}
+			if err == nil {
+				t.Fatal("member mutated an App schedule")
+			}
+			after, err := tenant.GetCronSchedule(t.Context(), ids[0])
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("refused mutation changed App schedule: %v", err)
+			}
+		})
+	}
+}

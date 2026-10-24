@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **cache:** Asserted retries write memo and dependency-cache entries in the retrying principal's scope. Personal placement reads the same sealed writer
+- **security:** Deleting another member's run requires `team.admin` on the credential. Member schedule edits and deletion exclude GitHub App declarations. Runner enrollment routes require the same direct account session and grants as the store
+- **audit:** Approval decisions, cancellations, token minting and rotation, runner enrollment, and invitation acceptance commit typed audit events with each mutation. Audit payloads exclude comments, reasons and personal text
+
 - **security:** Actions push-bound runners require proven provenance for the exact repository, ref and commit. Matching ref and commit text on an asserted run cannot claim that runner.
 - **admission:** Only the store decides and commits admission skips, failures and queue timeouts. Hosts request admission and report declared approval predicates.
 - **runners:** Pools holding reserved secrets require launcher credentials even with `--trust=any`.

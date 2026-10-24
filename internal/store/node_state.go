@@ -363,6 +363,24 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 	if err := appendStateEventTx(ctx, tx, team, change.Ref, kind, row.StateSeq, change.Extra.Result, now); err != nil {
 		return runstate.Applied{}, err
 	}
+	if change.Cause == causeApprovalResolve || change.Cause == causeApprovalTimeout || change.Cause == causeCancel {
+		actor, err := stateAuditActorTx(ctx, tx, team, change.Actor)
+		if err != nil {
+			return runstate.Applied{}, err
+		}
+		node := digestAudit(string(row.Ref.NodeID))
+		var payload auditPayload = auditCancellation{RunID: string(row.Ref.RunID), Node: &node}
+		if change.Cause != causeCancel {
+			decision := auditRequestDecision("timed_out")
+			if change.Cause == causeApprovalResolve {
+				decision = auditRequestDecision(change.Extra.Approval.Decision)
+			}
+			payload = auditApprovalDecision{RunID: string(row.Ref.RunID), Node: node, Decision: decision}
+		}
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: actor}, payload); err != nil {
+			return runstate.Applied{}, err
+		}
+	}
 	if err := transitionNodeBillingTx(ctx, tx, team, previous, change, *edge, now); err != nil {
 		return runstate.Applied{}, err
 	}

@@ -10184,9 +10184,14 @@ paths:
         owner: team
         authentication: capability
         access:
-          - credential: unbound_member_or_local
+          - credential: account_session
             grants:
-              - runs.read
+              - runs.write
+            binding: none
+            liveness: credential
+          - credential: account_session
+            grants:
+              - team.admin
             binding: none
             liveness: credential
         retry: never

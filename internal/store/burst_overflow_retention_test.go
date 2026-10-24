@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestOverflowUsageLookupIndexesTeamAndRequester(t *testing.T) {
@@ -47,6 +48,7 @@ func overflowRetainedUsage(t *testing.T, name string, account bool) {
 		kind, want = capability.SubjectAccount, 70
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET created_principal=?,created_subject_kind=? WHERE team='a' AND id='run'`, name, kind)
+	fixtureRunWriter(t, s, "run", runspec.PrincipalWriter(string(kind), name))
 	claim, _ := meteredUnitClaim(t, s, demand)
 	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)

@@ -200,8 +200,9 @@ func manualReference(t *testing.T, s *Store, account string) string {
 	tenant := &Tenant{s: s, team: "a"}
 	result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: actor.Authority, IdempotencyKey: "manual-" + account, Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
-		Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "refs/heads/main", SHA: referenceFeature},
-		Source: runspec.Source{Ref: referenceFeature},
+		Git:     runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "refs/heads/main", SHA: referenceFeature},
+		Source:  runspec.Source{Ref: referenceFeature},
+		Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}},
 	}})
 	if err != nil {
 		t.Fatal(err)

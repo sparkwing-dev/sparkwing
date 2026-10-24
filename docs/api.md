@@ -75,9 +75,10 @@ GitHub Actions OIDC, browser CSRF/nonce or exact signed-object URL. A missing or
 invalid credential returns 401. A live credential without the route's authority
 returns 403. Resource conflicts use their canonical code, including `lock_held`.
 
-Machine enrollment at `POST /api/v1/runners` rechecks current team administration,
-repository patterns, reserved pools, the existing runner limit and active name
-uniqueness in the issuing transaction. Service issuance at
+Machine enrollment at `POST /api/v1/runners` requires a direct account session
+with `runs.write` for a personal runner or `team.admin` for a shared runner.
+The issuing transaction rechecks that authority, repository patterns, reserved
+pools, the existing runner limit and active name uniqueness. Service issuance at
 `POST /api/v1/operator/tokens` rechecks deployment authority and active service
 names. Registration facts persist with the capability root. Machine claims retain
 every ancestor's repository restriction, including after delegation and rotation.
@@ -191,7 +192,9 @@ cycles cannot repeat entries or prevent traversal from finishing.
 
 `RunPruner.DeleteRun` uses the authorized `DELETE /api/v1/runs/{run}` route.
 It succeeds after an empty HTTP 204 acknowledgement, including log cleanup.
-The client returns only an error. Prune output identifies the selected run and
+The client returns only an error. Deleting another member's run requires the
+credential to carry `team.admin`. A credential with `runs.control` may delete
+its own account's runs. Prune output identifies the selected run and
 any structured failure. It does not report a removed-row count or replay state.
 Cancel, retry and prune preserve numeric run selectors and stable IDs from flags
 or stdin. The authenticated controller resolves them within the current team.

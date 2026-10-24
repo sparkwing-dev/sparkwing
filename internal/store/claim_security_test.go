@@ -15,8 +15,8 @@ import (
 func ClaimSecurityRegressions(t *testing.T, open func(*testing.T) *Store) {
 	fixture := func(t *testing.T) *Store {
 		s := open(t)
-		rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1) ON CONFLICT(name) DO NOTHING`)
-		rewriteSchemaExec(t, s.db, `INSERT INTO team_counters(team) VALUES ('a'),('b') ON CONFLICT(team) DO NOTHING`)
+		s.testOnlyExec(t, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1) ON CONFLICT(name) DO NOTHING`)
+		s.testOnlyExec(t, `INSERT INTO team_counters(team) VALUES ('a'),('b') ON CONFLICT(team) DO NOTHING`)
 		return s
 	}
 	t.Run("editor asserted main", func(t *testing.T) { actionsClaimRefusesEditorAssertedMain(t, fixture) })
@@ -38,7 +38,7 @@ func actionsClaimRefusesEditorAssertedMain(t *testing.T, open func(*testing.T) *
 			if err != nil {
 				t.Fatal(err)
 			}
-			rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=? WHERE id=?`, s.now().Add(time.Hour).UnixNano(), admitted.RunID)
+			s.testOnlyExec(t, `UPDATE triggers SET expires_at=? WHERE id=?`, s.now().Add(time.Hour).UnixNano(), admitted.RunID)
 			root := authorityRoot("actions", "a")
 			root.Grants = []capability.Grant{capability.TriggersClaim}
 			root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:701", Ref: "refs/heads/main", SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/app/.github/workflows/sparkwing.yaml@refs/heads/main"}}
@@ -70,10 +70,10 @@ func reservedPoolTrustClaimAndExplanationParity(t *testing.T, open func(*testing
 						}
 						authorityPersist(t, s, root)
 						demand.CapabilityPrefix = root.Prefix
-						rewriteSchemaExec(t, s.db, `UPDATE runs SET allowed_pools=?`, []byte(`["prod"]`))
-						rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["pool=prod"]}}`))
+						s.testOnlyExec(t, `UPDATE runs SET allowed_pools=?`, []byte(`["prod"]`))
+						s.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["pool=prod"]}}`))
 						if secret {
-							rewriteSchemaExec(t, s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'',0,'prod')`)
+							s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'',0,'prod')`)
 						}
 						if verified {
 							p, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "verified", VerifiedAt: s.now(), Ref: "refs/heads/main", SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: true}, runspec.Optional[runspec.PullRequest]{}, "ci")
@@ -81,7 +81,7 @@ func reservedPoolTrustClaimAndExplanationParity(t *testing.T, open func(*testing
 								t.Fatal(err)
 							}
 							body := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}}, p)
-							rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?`, body)
+							s.testOnlyExec(t, `UPDATE runs SET request_json=?`, body)
 						}
 						indexFixtureUnit(t, s, "a", *demand.Target)
 						want := (!secret || launcher) && (trust == capability.TrustAny || trust == "" && !secret || verified && launcher)
@@ -144,7 +144,7 @@ func pushClaimProvenanceParity(t *testing.T, open func(*testing.T) *Store) {
 				t.Fatal(err)
 			}
 			body := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "refs/heads/main", SHA: referenceMain}}}, p)
-			rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE id='run'`, body)
+			s.testOnlyExec(t, `UPDATE runs SET request_json=? WHERE id='run'`, body)
 			err = s.inTx(t.Context(), func(tx *storeTx) error {
 				_, err := awardCapabilityTx(t.Context(), tx, capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", Purpose: capability.PurposeTrigger, Delivery: capability.DeliveryDirect}, &awardRow{team: "a", run: "run", holder: "actions", generation: 1, lease: sql.NullInt64{Valid: true, Int64: s.now().Add(time.Hour).UnixNano()}})
 				return err

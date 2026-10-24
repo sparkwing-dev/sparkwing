@@ -235,6 +235,15 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 	if err := appendStateEventTx(ctx, tx, team, runspec.NodeRef{RunID: runspec.RunID(row.ID)}, kind, row.StateSeq, map[string]string{"reason": change.Reason}, now); err != nil {
 		return runstate.Applied{}, err
 	}
+	if change.Cause == runstate.RunCancel {
+		actor, err := stateAuditActorTx(ctx, tx, team, change.Actor)
+		if err != nil {
+			return runstate.Applied{}, err
+		}
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: actor}, auditCancellation{RunID: row.ID}); err != nil {
+			return runstate.Applied{}, err
+		}
+	}
 	if err := writeRunEffectsTx(ctx, tx, team, row.ID, row.State, now); err != nil {
 		return runstate.Applied{}, err
 	}
