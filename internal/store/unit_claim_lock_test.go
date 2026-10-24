@@ -102,7 +102,11 @@ func TestTeamLedgerLockOrder(t *testing.T) {
 				acquireTeam := func() error {
 					return acquireLockSet(t.Context(), tx, func() lockSet {
 						var set lockSet
-						set.add(lockTeam, true, "a")
+						team := "a"
+						if inverse {
+							team = "b"
+						}
+						set.add(lockTeam, true, team)
 						return set
 					})
 				}

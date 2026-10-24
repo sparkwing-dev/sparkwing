@@ -147,6 +147,9 @@ func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor runst
 }
 
 func lockStateRunTx(ctx context.Context, tx *storeTx, team Team, id string) error {
+	if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
+		return err
+	}
 	var found string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team=? AND id=?`+tx.forNoKeyUpdate(), team, id).Scan(&found)
 	if errors.Is(err, sql.ErrNoRows) {

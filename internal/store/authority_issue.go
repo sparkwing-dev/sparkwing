@@ -211,6 +211,13 @@ func (op *Operator) lockUnitsTx(ctx context.Context, tx *storeTx, units []UnitRe
 			locks = append(locks, lock{tier: lockNode, team: team, run: string(unit.RunID), node: string(unit.NodeID)})
 		}
 	}
+	var teams []Team
+	for _, row := range locks {
+		teams = append(teams, Team(row.team))
+	}
+	if err := lockFinancialTeamsTx(ctx, tx, teams...); err != nil {
+		return err
+	}
 	compare := func(a, b lock) int {
 		return compareStoreLocks(storeLockKey{tier: a.tier, keys: [3]string{a.team, a.run, a.node}, generation: a.generation}, storeLockKey{tier: b.tier, keys: [3]string{b.team, b.run, b.node}, generation: b.generation})
 	}

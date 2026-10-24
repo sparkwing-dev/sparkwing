@@ -34,8 +34,7 @@ func (o *Operator) SetPaymentMode(ctx context.Context, mode capability.PaymentMo
 			return nil
 		}
 		var activity bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM credit_grants)
-            OR EXISTS(SELECT 1 FROM credit_charges) OR EXISTS(SELECT 1 FROM credit_checkouts)`).Scan(&activity); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM settings WHERE key='payment_mode_frozen')`).Scan(&activity); err != nil {
 			return err
 		}
 		if activity {

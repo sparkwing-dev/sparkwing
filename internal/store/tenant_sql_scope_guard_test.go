@@ -16,7 +16,6 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
-	"(*Operator).SetPaymentMode":                 "the store-wide activity check fixes one payment mode for every tenant ledger",
 	"(*Operator).claimObserversTx":               "claim placement discovers live claimant observations across teams, then checks every pair against authenticated scope",
 	"(*Operator).claimOverflowFactsTx":           "deployment claims gather each live team's overflow policy before the shared eligibility predicate filters pairs",
 	"(*Operator).claimTargetTeamTx":              "only the Cloud launcher resolves a globally named run; other claimants query their authenticated team before kind or trust diagnostics",
@@ -88,7 +87,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).deleteRetentionIdentityTx": "the elected deployment maintenance pass expires every team's spent identity rows while preserving session ancestry",
 	"(*Operator).closeRefundedQueueTx":      "a provider refund names a payment identity, and a queued refund it covers is settled for whichever team queued it",
 	"(*Operator).reconcileSetupStateTx":     "a verified setup event resolves its payer from the setup correlation committed before payment",
-	"(*Operator).applyPaymentStateTx":       "the payment owner resolves its payer before acquiring the ledger lock and reading mutable checkout state",
+	"(*Operator).discoverPaymentTeamsTx":    "payment identity and card fingerprint discover the complete affected team set before taking team and ledger locks",
 	"(*Operator).reducePaymentStateTx":      "a verified refill payment names its provider payment, which resolves the one refill that recorded it",
 	"(*Operator).reconcilePaymentStateTx":   "the payment owner resolves the payer by mode and provider payment identity before settling its normalized state",
 	"(*Operator).paymentTeamTx":             "a provider payment identity is resolved to the checkout or refill that took it before its team is known",

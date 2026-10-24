@@ -199,19 +199,22 @@ func (t *Tenant) RecordCreditGrant(
 func (s *Store) recordCreditGrant(
 	ctx context.Context, team Team, req CreditGrantRequest,
 ) (_ CreditGrantResult, err error) {
-	tx, err := s.beginTx(ctx)
+	var out CreditGrantResult
+	err = s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		out, err = recordCreditGrantTx(ctx, tx, team, req, auditActor{system: auditBreakGlass})
+		return err
+	})
 	if err != nil {
 		return CreditGrantResult{}, err
 	}
-	defer rollbackOrLog(tx)
-	out, err := recordCreditGrantTx(ctx, tx, team, req, auditActor{system: auditBreakGlass})
-	if err != nil {
-		return CreditGrantResult{}, err
-	}
-	return out, tx.Commit()
+	return out, nil
 }
 
 func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req CreditGrantRequest, actor auditActor) (_ CreditGrantResult, err error) {
+	if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
+		return CreditGrantResult{}, err
+	}
 	if err := req.validate(); err != nil {
 		return CreditGrantResult{}, err
 	}
@@ -320,7 +323,7 @@ func creditGrantByReferenceTx(
 }
 
 // safety: even a provider-free ledger fixes the store's mode before its first row is written.
-// The shared setting lock serializes writers against SetPaymentMode's activity check.
+// The marker commits with the first financial write and survives tenant purge.
 func ledgerPaymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMode, error) {
 	var exists int
 	err := tx.QueryRowContext(ctx, "SELECT 1 FROM settings WHERE key='payment_mode'").Scan(&exists)
@@ -331,7 +334,16 @@ func ledgerPaymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMo
 	} else if err != nil {
 		return "", err
 	}
-	return paymentModeTx(ctx, tx)
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	var frozen int
+	err = tx.QueryRowContext(ctx, "SELECT 1 FROM settings WHERE key='payment_mode_frozen'").Scan(&frozen)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, err = tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode_frozen',?) ON CONFLICT(key) DO NOTHING`, []byte(`true`))
+	}
+	return mode, err
 }
 
 const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?),

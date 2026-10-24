@@ -19,7 +19,7 @@ func (t *Tenant) openCreditCheckoutTx(ctx context.Context, tx *storeTx, amountMi
 	if err != nil {
 		return "", err
 	}
-	if err := t.lockTeamTx(ctx, tx); err != nil {
+	if _, err := lockLedgerTx(ctx, tx, t.team); err != nil {
 		return "", err
 	}
 	var deleting int
@@ -29,6 +29,9 @@ func (t *Tenant) openCreditCheckoutTx(ctx context.Context, tx *storeTx, amountMi
 	}
 	if deleting > 0 {
 		return "", ErrTeamBeingDeleted
+	}
+	if _, err := ledgerPaymentModeTx(ctx, tx); err != nil {
+		return "", err
 	}
 	nowNS := now.UnixNano()
 	if _, err := tx.execContext(ctx, `

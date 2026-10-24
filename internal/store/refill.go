@@ -256,6 +256,9 @@ func (o *Operator) DueRefills(ctx context.Context) ([]Refill, error) {
 }
 
 func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
+	if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
+		return nil, err
+	}
 	l, err := lockLedgerTx(ctx, tx, team)
 	if err != nil {
 		return nil, err
@@ -328,6 +331,9 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
+	if _, err := ledgerPaymentModeTx(ctx, tx); err != nil {
+		return nil, err
+	}
 	if _, err := l.execContext(ctx, `INSERT INTO credit_checkouts (id, team, session_id, payment_mode, currency, amount_minor,
 	    amount_micro, opened_at, expires_at, kind, customer_id, payment_method, receipt_email)
 	    VALUES (?, ?, ?, ?, 'usd', ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -351,10 +357,10 @@ func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, pa
 		if err != nil {
 			return err
 		}
-		if err := lockPaymentTx(ctx, tx, mode, paymentIntent); err != nil {
+		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
 			return err
 		}
-		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
+		if err := lockPaymentTx(ctx, tx, mode, paymentIntent); err != nil {
 			return err
 		}
 		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
@@ -440,6 +446,9 @@ func (o *Operator) CanConfirmRefill(ctx context.Context, r Refill) (bool, error)
 // The record and payment binding remain available for reconciliation and audit.
 func (o *Operator) RecordRefillCanceled(ctx context.Context, r Refill) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {
+		if _, err := lockLedgerTx(ctx, tx, r.Team); err != nil {
+			return err
+		}
 		_, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = 'canceled'
 		    WHERE team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
 			tx.now(ctx).UnixNano(), string(r.Team), r.ID, checkoutKindRefill, r.PaymentIntent)
@@ -454,7 +463,13 @@ func (o *Operator) RecordRefillAuthenticationRequired(ctx context.Context, r Ref
 		if err != nil {
 			return err
 		}
+		if err := lockPaymentTeamTx(ctx, tx, r.Team); err != nil {
+			return err
+		}
 		if err := lockPaymentTx(ctx, tx, mode, r.PaymentIntent); err != nil {
+			return err
+		}
+		if _, err := lockLedgerTx(ctx, tx, r.Team); err != nil {
 			return err
 		}
 		var checkout paymentCheckout

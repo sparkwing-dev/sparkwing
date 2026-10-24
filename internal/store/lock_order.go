@@ -119,6 +119,11 @@ func (s *lockSet) add(tier storeLockTier, write bool, keys ...string) {
 }
 
 func (s lockSet) normalized() lockSet {
+	for _, row := range slices.Clone(s.rows) {
+		if row.key.tier == lockLedger {
+			s.add(lockTeam, true, row.key.keys[0])
+		}
+	}
 	slices.SortFunc(s.rows, func(a, b rowLock) int { return compareStoreLocks(a.key, b.key) })
 	var rows []rowLock
 	for _, row := range s.rows {
@@ -148,7 +153,7 @@ func discoverAuthorityLocks(ctx context.Context, tx *storeTx, leaves []capabilit
 		for i, node := range chain {
 			c, ref := node.principal.Capability, node.principal.Authority
 			if c.Team != "" && !slices.Contains(tx.insertedAuthorities, ref) {
-				set.add(lockTeam, false, c.Team)
+				set.add(lockTeam, true, c.Team)
 			}
 			write := slices.Contains(writes, ref.ID) || ref.Kind == capability.AuthorityCapability && registeredClaimant(c)
 			set.rows = append(set.rows, rowLock{key: authorityLockKey(authorityLock{ref: ref, depth: len(chain) - 1 - i}), write: write})
@@ -200,6 +205,71 @@ func acquireLockSet(ctx context.Context, tx *storeTx, discover func() lockSet) e
 	return nil
 }
 
+// Financial writers lock the complete team set before any ledger. A warning
+// includes every team whose saved card it clears. Existing weaker locks cannot
+// be upgraded, and no new team may be discovered after a ledger is held.
+func lockFinancialTeamsTx(ctx context.Context, tx *storeTx, teams ...Team) error {
+	teams = slices.Compact(slices.Sorted(slices.Values(teams)))
+	for _, team := range teams {
+		row := rowLock{key: storeLockKey{tier: lockTeam, keys: [3]string{string(team)}}, write: true}
+		if slices.ContainsFunc(tx.authorityLocks, func(held rowLock) bool { return held.sameRow(row) && held.write }) {
+			continue
+		}
+		for _, held := range tx.authorityLocks {
+			if held.key.tier == lockTeam && (held.sameRow(row) || held.key.keys[0] > string(team)) {
+				tx.err = errors.New("financial lock order: declare all teams for update in sorted order before the ledger")
+				return tx.err
+			}
+		}
+		if err := tx.operator.acquireRowLock(ctx, tx, row); err != nil {
+			return err
+		}
+		tx.authorityLocks = append(tx.authorityLocks, row)
+	}
+	return nil
+}
+
+// Payment identity is locked after its discovered teams. Revalidation under
+// the payment lock restarts the transaction if a binding changed meanwhile.
+func lockPaymentTeamsTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (lockSet, error) {
+	var set lockSet
+	if err := acquireLockSet(ctx, tx, func() lockSet { set = tx.operator.discoverPaymentTeamsTx(ctx, tx, e); return set }); err != nil {
+		if !errors.Is(err, ErrUnknownTeam) {
+			return lockSet{}, err
+		}
+	}
+	set = set.normalized()
+	if set.err != nil {
+		return lockSet{}, set.err
+	}
+	for _, row := range set.rows {
+		team := Team(row.key.keys[0])
+		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
+			return lockSet{}, err
+		}
+	}
+	return set, nil
+}
+
+// safety: PostgreSQL runs concurrent claims and settlements in their own transactions, so a team's balance check and
+// the write it guards serialize on the team's lock; SQLite allows one writer and is already serial. The lock key is
+// a 32-bit hash of the team, so two teams can share one and serialize; that costs only waiting, never a balance.
+func lockLedgerTx(ctx context.Context, tx *storeTx, team Team) (*ledgerTx, error) {
+	if team == "" {
+		return nil, errors.New("ledger: a ledger lock names its team")
+	}
+	if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
+		return nil, err
+	}
+	if tx.dialect == DialectPostgres {
+		if _, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/ledger/"+string(team)); err != nil {
+			return nil, err
+		}
+	}
+	tx.ledgerLocked = true
+	return &ledgerTx{storeTx: tx, team: team}, nil
+}
+
 func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock) error {
 	k := row.key
 	var query string
@@ -233,9 +303,9 @@ func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock
 	mode := tx.forShare()
 	if row.write {
 		mode = tx.forUpdate()
-		// Team names and authority identities never change. Ledger writes may
-		// acquire their foreign-key key-share locks after the ledger advisory.
-		if k.tier == lockAuthority || k.tier == lockTeam {
+		// Authority identities never change; their foreign-key key-share locks
+		// remain compatible with authority mutations.
+		if k.tier == lockAuthority {
 			mode = tx.forNoKeyUpdate()
 		}
 	}
@@ -255,16 +325,6 @@ func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock
 			return authorityError(apierr.Unauthenticated, "membership is unavailable")
 		}
 		return errAuthorityChanged
-	}
-	return err
-}
-
-// Purge removes the team key itself, so it needs UPDATE rather than NO KEY UPDATE.
-func lockTeamForPurgeTx(ctx context.Context, tx *storeTx, team Team) error {
-	var name string
-	err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=?`+tx.forUpdate(), string(team)).Scan(&name)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrUnknownTeam
 	}
 	return err
 }

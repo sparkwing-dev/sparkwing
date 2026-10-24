@@ -691,15 +691,21 @@ GitHub or git I/O while it holds locks. Sets such as ancestry, batches and
 migration destinations are discovered without locks, locked complete in this
 order, then reread and validated.
 
+`lock_order.go` owns financial team and ledger acquisition. Every affected team
+is locked before any ledger. Warnings include teams whose saved card is cleared.
+A shared team lock cannot be upgraded, and a new team cannot be added after a
+ledger lock. Payment callbacks revalidate their discovered teams after taking
+the payment identity lock. A changed binding restarts the transaction.
+
 `lock_order.go` defines the canonical tiers and comparator. Authority and unit
 batch locking use it. The acquisition-sequence test checks actual SQL against
 that order with shuffled authority and unit inputs.
 
-1. Global advisories, in fixed order: credit ledger, settings, compute and free
+1. Global advisories, in fixed order: settings, compute and free
    tier, bootstrap and service enrollment, capacity admission.
 2. Singleton lease rows (maintenance, controller owner and reaper).
 3. Settings and signup gate rows.
-4. Teams, sorted.
+4. Teams, sorted. Financial writers take `FOR UPDATE` before any ledger lock.
 5. Accounts, sorted.
 6. Memberships.
 7. The complete authority set, deepest first, then by kind and key at equal
@@ -718,8 +724,9 @@ that order with shuffled authority and unit inputs.
 16. Blob digest advisories, sorted and deduplicated.
 17. Quota dimensions: monthly bytes, run bytes, run objects; admission before
     reservation within each dimension.
-18. Billing awards, intervals, payment rows and storage counters.
-19. Records, manifests, logs, events, effects and invitations.
+18. Credit ledgers, sorted by team.
+19. Billing awards, intervals, payment rows and storage counters.
+20. Records, manifests, logs, events, effects and invitations.
 
 Hot transaction families:
 
@@ -742,8 +749,8 @@ Justified exceptions:
 
 - A concurrency-maintenance entry lock followed by an implicit run key-share is
   compatible with renewal's run `NO KEY UPDATE`.
-- A team key-share from a foreign key followed by a team update during billing
-  is compatible with other key-share holders.
+- A Cloud service claimant has no tenant. Its authority can precede the selected
+  team because global service authority mutations do not wait for tenant rows.
 - GitHub source release locks its installation after work rows. No transaction
   holds an installation and then waits on work.
 - Work billing takes the ledger advisory after work locks, opposite team and

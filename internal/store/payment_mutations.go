@@ -168,10 +168,10 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor audit
 	if c.Customer == "" || c.PaymentMethod == "" || c.Fingerprint == "" {
 		return fmt.Errorf("%w: a card names its customer, payment method and fingerprint", ErrInvalidInput)
 	}
-	if err := (&Tenant{s: tx.store, team: team}).lockTeamTx(ctx, tx); err != nil {
+	if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
 		return err
 	}
-	if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
+	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 		return err
 	}
 	refusal, err := cardRefusalTx(ctx, tx, team, "", c.Fingerprint)

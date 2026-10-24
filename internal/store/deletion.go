@@ -532,7 +532,10 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, rech
 		if err := requireDeletionLeaseTx(ctx, tx, team, holder, TeamDeletionPending); err != nil {
 			return err
 		}
-		if err := lockTeamForPurgeTx(ctx, tx, team); err != nil {
+		if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
+			return err
+		}
+		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 			return err
 		}
 		if err := refuseDeletionWithMoneyInFlightTx(ctx, tx, team, tx.now(ctx)); err != nil {
@@ -571,14 +574,20 @@ func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder stri
 		if err := requireDeletionLeaseTx(ctx, tx, team, holder, TeamDeletionDone); err != nil {
 			return err
 		}
-		if err := lockTeamForPurgeTx(ctx, tx, team); err != nil && !errors.Is(err, ErrUnknownTeam) {
-			return err
+		lockErr := lockFinancialTeamsTx(ctx, tx, team)
+		if lockErr != nil && !errors.Is(lockErr, ErrUnknownTeam) {
+			return lockErr
 		}
-		if err := refuseDeletionWithMoneyInFlightTx(ctx, tx, team, tx.now(ctx)); err != nil && !errors.Is(err, ErrNotFound) {
-			return err
-		}
-		if err := deleteTenantRowsTx(ctx, tx, team); err != nil {
-			return err
+		if lockErr == nil {
+			if _, err := lockLedgerTx(ctx, tx, team); err != nil {
+				return err
+			}
+			if err := refuseDeletionWithMoneyInFlightTx(ctx, tx, team, tx.now(ctx)); err != nil {
+				return err
+			}
+			if err := deleteTenantRowsTx(ctx, tx, team); err != nil {
+				return err
+			}
 		}
 		res, err := tx.execContext(ctx, `
 		UPDATE team_deletions SET recheck_at = NULL, lease_holder = '', lease_until = NULL, last_error = ''

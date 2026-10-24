@@ -88,11 +88,7 @@ func checkUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 }
 
 func unitCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate) error {
-	l, err := lockLedgerTx(ctx, tx, team)
-	if err != nil {
-		return err
-	}
-	return unitCreditRefusalViewTx(ctx, l.view(), unit, price)
+	return unitCreditRefusalViewTx(ctx, ledgerView{tx: tx, team: team}, unit, price)
 }
 
 func unitCreditRefusalViewTx(ctx context.Context, view ledgerView, unit UnitRef, price CreditRate) error {

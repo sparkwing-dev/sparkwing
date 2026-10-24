@@ -46,15 +46,15 @@ func (o *Operator) MarkCardRefundMade(ctx context.Context, team Team, key, refun
 		return fmt.Errorf("%w: refund key %q", ErrInvalidInput, key)
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		// The mode is configuration, not payment state; the payment lock precedes all association reads.
+		// The team fence precedes payment identity and ledger locks.
 		mode, err := paymentModeTx(ctx, tx)
 		if err != nil {
 			return err
 		}
-		if err := lockPaymentTx(ctx, tx, mode, paymentIntent); err != nil {
+		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
 			return err
 		}
-		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
+		if err := lockPaymentTx(ctx, tx, mode, paymentIntent); err != nil {
 			return err
 		}
 		if _, err := lockLedgerTx(ctx, tx, team); err != nil {

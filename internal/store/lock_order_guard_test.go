@@ -38,8 +38,13 @@ func TestRowLockClausesLiveInLockOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
+			if literal, ok := n.(*ast.CompositeLit); ok {
+				if typ, ok := literal.Type.(*ast.Ident); ok && typ.Name == "ledgerTx" {
+					t.Errorf("%s: obtain ledgerTx through lockLedgerTx", fset.Position(literal.Pos()))
+				}
+			}
 			lit, ok := n.(*ast.BasicLit)
-			if ok && lit.Kind == token.STRING && rowLockClause.MatchString(lit.Value) {
+			if ok && lit.Kind == token.STRING && (rowLockClause.MatchString(lit.Value) || strings.Contains(lit.Value, "sparkwing/ledger/")) {
 				t.Errorf("%s: row lock outside lock_order.go: %s", fset.Position(lit.Pos()), lit.Value)
 			}
 			if expression, ok := n.(*ast.BinaryExpr); ok && locksAuthorityRows(expression) {

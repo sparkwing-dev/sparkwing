@@ -12,6 +12,9 @@ import (
 )
 
 func lockClaimOwnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
+	if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
+		return err
+	}
 	var id string
 	switch unit.Kind {
 	case capability.UnitTrigger, capability.UnitPlan:

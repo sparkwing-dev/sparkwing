@@ -17,7 +17,8 @@ push records a terminal run that did not start. Adding credits later does not
 start that delivery's run. Use Run now after funding.
 
 A store uses one payment mode for balances, standing and history. Once any grant,
-charge, checkout or refill exists, changing the mode is refused. Start a fresh store
+charge, checkout or refill has been written, changing the mode is refused even
+after those records are purged. Start a fresh store
 to switch between test and live, including when changing `--payment-mode` at startup.
 
 Operator free grants require an explicit idempotency key. A mistaken free grant

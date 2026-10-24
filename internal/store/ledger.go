@@ -138,22 +138,6 @@ func (v ledgerView) balance(ctx context.Context) (int64, error) {
 	return creditBalanceTx(ctx, v.tx, v.team)
 }
 
-// safety: PostgreSQL runs concurrent claims and settlements in their own transactions, so a team's balance check and
-// the write it guards serialize on the team's lock; SQLite allows one writer and is already serial. The lock key is
-// a 32-bit hash of the team, so two teams can share one and serialize; that costs only waiting, never a balance.
-func lockLedgerTx(ctx context.Context, tx *storeTx, team Team) (*ledgerTx, error) {
-	if team == "" {
-		return nil, errors.New("ledger: a ledger lock names its team")
-	}
-	if tx.dialect == DialectPostgres {
-		if _, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/ledger/"+string(team)); err != nil {
-			return nil, err
-		}
-	}
-	tx.ledgerLocked = true
-	return &ledgerTx{storeTx: tx, team: team}, nil
-}
-
 func (l *ledgerTx) insertGrant(ctx context.Context, g CreditGrant) error {
 	if g.Team != l.team {
 		return fmt.Errorf("ledger: grant for %q under %q's lock", g.Team, l.team)

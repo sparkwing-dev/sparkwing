@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -27,8 +28,19 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 	}
 	var result PaymentSettlement
 	err = s.inTx(ctx, func(tx *storeTx) error {
+		teams, err := lockPaymentTeamsTx(ctx, tx, event)
+		if err != nil {
+			return err
+		}
 		if err := lockPaymentTx(ctx, tx, event.Mode, paymentStateID(event)); err != nil {
 			return err
+		}
+		current := tx.operator.discoverPaymentTeamsTx(ctx, tx, event).normalized()
+		if current.err != nil {
+			return current.err
+		}
+		if !slices.Equal(teams.rows, current.rows) {
+			return errAuthorityChanged
 		}
 		if err := configuredPaymentModeTx(ctx, tx, event.Mode); err != nil {
 			return err
@@ -178,17 +190,12 @@ func samePaymentObject(a, b capability.PaymentEvent) bool {
 }
 
 func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent, actor auditActor) (PaymentSettlement, error) {
-	// The refill worker locks ledger before checkout; callbacks preserve that order after the payment lock.
-	var team Team
-	err := tx.QueryRowContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND ((payment_id<>'' AND payment_id=?) OR (session_id<>id AND session_id=?))`, e.Mode, e.PaymentID, e.CheckoutID).Scan(&team)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	set, err := lockPaymentTeamsTx(ctx, tx, e)
+	if err != nil {
 		return PaymentSettlement{}, err
 	}
-	if team != "" {
-		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
-			return PaymentSettlement{}, err
-		}
-		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
+	for _, row := range set.rows {
+		if _, err := lockLedgerTx(ctx, tx, Team(row.key.keys[0])); err != nil {
 			return PaymentSettlement{}, err
 		}
 	}
@@ -257,12 +264,29 @@ func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capa
 	return result, nil
 }
 
-func lockPaymentTeamTx(ctx context.Context, tx *storeTx, team Team) error {
-	lockErr := acquireLockSet(ctx, tx, func() lockSet {
-		var set lockSet
-		set.add(lockTeam, false, string(team))
+func (op *Operator) discoverPaymentTeamsTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) lockSet {
+	var set lockSet
+	rows, err := tx.queryContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND ((payment_id<>'' AND payment_id=?) OR (session_id<>id AND session_id=?))
+ UNION SELECT team FROM payment_correlations WHERE payment_mode=? AND provider_id IN (?,?,?)
+ UNION SELECT name FROM teams WHERE card_fingerprint<>'' AND card_fingerprint=? AND ?`, e.Mode, e.PaymentID, e.CheckoutID, e.Mode, e.ObjectID, e.IntentID, e.CheckoutID, e.Fingerprint, e.Kind == capability.PaymentWarningEvent && e.Actionable)
+	if err != nil {
+		set.err = err
 		return set
-	})
+	}
+	for rows.Next() {
+		var team string
+		if err := rows.Scan(&team); err != nil {
+			set.err = err
+			break
+		}
+		set.add(lockTeam, true, team)
+	}
+	set.err = errors.Join(set.err, rows.Err(), rows.Close())
+	return set
+}
+
+func lockPaymentTeamTx(ctx context.Context, tx *storeTx, team Team) error {
+	lockErr := lockFinancialTeamsTx(ctx, tx, team)
 	if lockErr != nil && !errors.Is(lockErr, ErrUnknownTeam) {
 		return lockErr
 	}
@@ -374,9 +398,6 @@ func (op *Operator) bindCompletedPageTx(ctx context.Context, tx *storeTx, e capa
 	}
 	if customer != e.CustomerID {
 		return PaymentSettlement{}, authorityError(apierr.Conflict, "completed page names another customer")
-	}
-	if err := (&Tenant{s: tx.store, team: Team(team)}).lockTeamTx(ctx, tx); err != nil {
-		return PaymentSettlement{}, err
 	}
 	if err := lockPaymentTeamTx(ctx, tx, Team(team)); err != nil {
 		return PaymentSettlement{}, err

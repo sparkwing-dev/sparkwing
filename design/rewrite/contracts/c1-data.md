@@ -3601,10 +3601,11 @@ unattached-checkout abort path and its legacy-only test are deleted. Ambiguous
 provider failures retain their reservation and replay identity.
 
 `Operator.SetPaymentMode` persists validated `test`/`live` configuration under the
-ledger lock. Controller startup calls it from the same `--payment-mode` that
-constructs the verifier. Reservations and verified settlement read that stored
-mode. Mode changes retain prior rows and their mode tags. This supplies the
-missing production writer for the existing `payment_mode` setting.
+payment-mode setting lock. Controller startup uses the same `--payment-mode` for
+the store and verifier. The first grant, charge, checkout or refill atomically
+persists an irreversible freeze marker. Purging teams never clears it. Switching
+modes after any financial activity requires a fresh store. Reservations and
+verified settlement read the store's fixed mode.
 
 ## Runner integration amendment: source reporting and declared references
 

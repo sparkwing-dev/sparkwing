@@ -99,6 +99,9 @@ func forgetCardTx(ctx context.Context, tx *storeTx, fingerprint, reason string, 
 }
 
 func forgetTeamCardTx(ctx context.Context, tx *storeTx, team Team, fingerprint, reason string, now time.Time) error {
+	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
+		return err
+	}
 	var method string
 	err := tx.QueryRowContext(ctx, `SELECT card_payment_method FROM teams WHERE name = ? AND card_fingerprint = ? AND card_fingerprint <> ''`, string(team), fingerprint).Scan(&method)
 	if errors.Is(err, sql.ErrNoRows) {
