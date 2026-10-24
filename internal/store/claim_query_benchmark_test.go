@@ -272,9 +272,10 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 // Latency excludes placement hydration and the post-timing instrumentation replay.
 type claimBenchmarkDriver struct {
 	driver.Driver
-	probe    string
-	runProbe string
-	trace    *claimBenchmarkTrace
+	probe        string
+	runProbe     string
+	contextProbe string
+	trace        *claimBenchmarkTrace
 }
 
 func (d *claimBenchmarkDriver) Open(name string) (driver.Conn, error) {
@@ -282,14 +283,15 @@ func (d *claimBenchmarkDriver) Open(name string) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &claimBenchmarkConn{Conn: conn, probe: d.probe, runProbe: d.runProbe, trace: d.trace}, nil
+	return &claimBenchmarkConn{Conn: conn, probe: d.probe, runProbe: d.runProbe, contextProbe: d.contextProbe, trace: d.trace}, nil
 }
 
 type claimBenchmarkConn struct {
 	driver.Conn
-	probe    string
-	runProbe string
-	trace    *claimBenchmarkTrace
+	probe        string
+	runProbe     string
+	contextProbe string
+	trace        *claimBenchmarkTrace
 }
 
 func (c *claimBenchmarkConn) instrument(query string) string {
@@ -297,6 +299,10 @@ func (c *claimBenchmarkConn) instrument(query string) string {
 		return query
 	}
 	query = strings.ReplaceAll(query, `n.status='pending'`, c.probe+`(n.node_id)=1 AND n.status='pending'`)
+	if c.contextProbe != "" {
+		query = strings.ReplaceAll(query, `FROM claim_contexts WHERE`, `FROM claim_contexts WHERE `+c.contextProbe+`(overflow_account)=1 AND`)
+		query = strings.ReplaceAll(query, `WHERE cc.unit_kind IN`, `WHERE `+c.contextProbe+`(cc.overflow_account)=1 AND cc.unit_kind IN`)
+	}
 	if c.runProbe != "" {
 		query = strings.ReplaceAll(query, `FROM runs WHERE`, `FROM runs WHERE `+c.runProbe+`(id)=1 AND`)
 		query = strings.ReplaceAll(query, `FROM runs br WHERE`, `FROM runs br WHERE `+c.runProbe+`(br.id)=1 AND`)

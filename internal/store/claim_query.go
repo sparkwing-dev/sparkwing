@@ -886,7 +886,12 @@ func (q *claimSQL) overflowAllowedSQL(alias, cloud string) string {
 }
 
 func (q *claimSQL) overflowBudgetAllowedSQL(team, account, minutes, cloud string) string {
-	return `(` + cloud + `=0 OR NOT EXISTS (SELECT 1 FROM overflow_facts of WHERE of.team=` + team + ` AND of.account=` + account + ` AND ((of.monthly_minutes IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number("of.monthly_minutes") + `*60) OR (` + minutes + ` IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number(minutes) + `*60))))`
+	minimum := q.overflowMinimumMinutesSQL("of.used_seconds")
+	return `(` + cloud + `=0 OR NOT EXISTS (SELECT 1 FROM overflow_facts of WHERE of.team=` + team + ` AND of.account=` + account + ` AND ((of.monthly_minutes IS NOT NULL AND ` + q.number("of.monthly_minutes") + `<` + minimum + `) OR (` + minutes + ` IS NOT NULL AND ` + q.number(minutes) + `<` + minimum + `))))`
+}
+
+func (q *claimSQL) overflowMinimumMinutesSQL(used string) string {
+	return `((` + q.number(used) + `+` + fmt.Sprint(SliceSeconds+59) + `)/60)`
 }
 
 func (q *claimSQL) overflowFactsSQL() (string, error) {

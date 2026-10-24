@@ -19,7 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string)) {
+func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string), contextVisits ...*atomic.Int64) {
 	t.Helper()
 	if s.dialect != DialectSQLite {
 		t.Skip("readiness predicate instrumentation requires SQLite")
@@ -43,7 +43,17 @@ func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string)) 
 			t.Fatal(err)
 		}
 	}
-	sql.Register(probe, &claimBenchmarkDriver{Driver: s.db.Driver(), probe: probe, runProbe: runProbe, trace: &claimBenchmarkTrace{examine: true}})
+	var contextProbe string
+	if len(contextVisits) > 0 {
+		contextProbe = probe + "_context"
+		if err := sqlite.RegisterScalarFunction(contextProbe, 1, func(_ *sqlite.FunctionContext, _ []driver.Value) (driver.Value, error) {
+			contextVisits[0].Add(1)
+			return int64(1), nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql.Register(probe, &claimBenchmarkDriver{Driver: s.db.Driver(), probe: probe, runProbe: runProbe, contextProbe: contextProbe, trace: &claimBenchmarkTrace{examine: true}})
 	db, err := sql.Open(probe, sqliteDSN(path))
 	if err != nil {
 		t.Fatal(err)
@@ -54,8 +64,8 @@ func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string)) 
 }
 
 func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
-	var baseline, baselineRuns [2]int64
-	for _, tc := range []struct{ nodes, runs int }{{1, 1}, {4000, 1}, {1, 4000}} {
+	var baseline, baselineRuns, baselineContexts [2]int64
+	for _, tc := range []struct{ nodes, runs int }{{1, 1}, {4000, 1}, {1, 4000}, {4000, 2}} {
 		t.Run(fmt.Sprintf("nodes=%d/runs=%d", tc.nodes, tc.runs), func(t *testing.T) {
 			backlog := tc.nodes
 			s, demand := launcherFairnessFixture(t)
@@ -84,17 +94,22 @@ func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT n.team,r.id,n.node_id,'pending',n.ready_at,n.spec_json,n.execution_json,n.claim_requirements,n.claim_context FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id='run' WHERE r.team='a' AND r.id LIKE 'capped-run-%'`)
 			}
 			rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT team,run_id,'next','pending',2,?,execution_json,claim_requirements,claim_context FROM nodes WHERE team='b' AND node_id='job'`, []byte(`{"id":"next"}`))
-			var capped, total, runs atomic.Int64
+			if tc.nodes > 1 && tc.runs > 1 {
+				rewriteSchemaExec(t, s.db, `INSERT INTO claim_contexts(team,id,requirements,unit_kind,overflow_account,overflow_minutes) SELECT n.team,n.node_id,c.requirements,c.unit_kind,c.overflow_account,c.overflow_minutes FROM nodes n JOIN claim_contexts c ON c.team=n.team AND c.id=n.claim_context WHERE n.team='a' AND n.run_id='run'`)
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET claim_context=node_id,execution_json=CAST(json_object('prefers',json_object('value',json_array(node_id))) AS BLOB) WHERE team='a'`)
+			}
+			var capped, total, runs, contexts atomic.Int64
 			countClaimVisits(t, s, func(id string) {
 				total.Add(1)
 				if strings.HasPrefix(id, "capped-") {
 					capped.Add(1)
 				}
-			}, func(string) { runs.Add(1) })
+			}, func(string) { runs.Add(1) }, &contexts)
 			for poll := range 2 {
 				capped.Store(0)
 				total.Store(0)
 				runs.Store(0)
+				contexts.Store(0)
 				claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil || claim.Team != "b" {
 					t.Fatalf("poll %d: capped team hid healthy work: %+v %v", poll, claim, err)
@@ -104,9 +119,14 @@ func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
 				}
 				if tc.nodes == 1 && tc.runs == 1 {
 					baselineRuns[poll] = runs.Load()
+					baselineContexts[poll] = contexts.Load()
 				} else if got := runs.Load(); got != baselineRuns[poll] {
 					t.Errorf("poll %d examined %d runs with %d capped runs; want %d visits as with one capped run", poll, got, tc.runs, baselineRuns[poll])
 				}
+				if got := contexts.Load(); got != baselineContexts[poll] {
+					t.Errorf("poll %d examined %d policy rows with %d nodes/%d runs; want %d as with one capped policy", poll, got, tc.nodes, tc.runs, baselineContexts[poll])
+				}
+				t.Logf("poll %d examined %d nodes, %d runs, %d policies", poll, total.Load(), runs.Load(), contexts.Load())
 				got := total.Load()
 				if backlog == 1 && tc.runs == 1 {
 					baseline[poll] = got

@@ -17,11 +17,11 @@ that post signed deliveries must treat 202 as acceptance for later processing.
 Disconnecting an installation revokes work still preparing source for admission
 or schedule publication. Those refused effects leave no receipt to replay.
 
-The schema baseline moves to version 24 for the inbox, targeted effect results,
+The schema baseline moves to version 25 for the inbox, targeted effect results,
 team queue attribution, idle free-slot tracking, per-team descendant ceilings
-and indexed overflow policy. Claim polls check overflow limits through the
-policy index before seeking queue heads, so repeated capped work does not
-add run or node scans.
+and indexed overflow policy. Claim polls seek each overflow account and test
+its budget ranges before selecting policy routes. Repeated capped policies add no per-policy, run or node scan, even when the
+jobs have different preferences.
 Recreate stores from an earlier baseline before starting this build.
 Existing stores are refused rather than opened under the new schema.
 

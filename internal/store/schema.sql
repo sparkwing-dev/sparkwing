@@ -139,6 +139,8 @@ CREATE TABLE claim_contexts (
     FOREIGN KEY(team,requirements_ref) REFERENCES claim_requirements(team,id)
 );
 CREATE INDEX idx_claim_contexts_requirements ON claim_contexts(team,requirements,unit_kind,id);
+CREATE INDEX idx_claim_contexts_overflow ON claim_contexts(team,overflow_account,overflow_minutes);
+CREATE INDEX idx_claim_contexts_kind_overflow ON claim_contexts(team,unit_kind,overflow_account,overflow_minutes);
 
 CREATE TABLE nodes (
     run_id TEXT NOT NULL,
