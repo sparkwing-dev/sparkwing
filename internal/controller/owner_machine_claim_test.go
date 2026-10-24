@@ -21,7 +21,7 @@ func TestClaimMarksOnlyTheRequestersPersonalMachineAsOwnerMachine(t *testing.T) 
 		personal bool
 	}{{"run-personal", true}, {"run-shared", false}} {
 		ctx := context.Background()
-		f.createRun(olga, tc.run, "https://github.com/acme/widgets.git", 701)
+		f.createRun(olga, tc.run, "https://github.com/acme/widgets.git", 701, runspec.PrincipalWriter("account", olga.id))
 		if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: tc.run, NodeID: "compile", Status: "pending"}); err != nil {
 			t.Fatal(err)
 		}
