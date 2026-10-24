@@ -30,10 +30,11 @@ func (s *Store) EnsureCredentialEpoch(ctx context.Context) error {
 	return s.ensureCredentialEpoch(ctx, s.credentialEpoch, false)
 }
 
-// PrepareRestore records an epoch rotated while the controller is stopped.
+// PrepareRestore holds schedules and cancels restored scheduled work while the controller is stopped.
+// The epoch stays unchanged unless the operator requested a security sign-out.
 func (o *Operator) PrepareRestore(ctx context.Context, epoch string) error {
-	if epoch == "" || epoch == o.s.credentialEpoch {
-		return errors.New("restore preparation requires a newly rotated credential epoch")
+	if epoch == "" {
+		return errors.New("restore preparation requires a credential epoch")
 	}
 	return o.s.ensureCredentialEpoch(ctx, epoch, true)
 }
@@ -55,8 +56,10 @@ func (s *Store) ensureCredentialEpoch(ctx context.Context, epoch string, prepare
 			if err := writeRestoreStateTx(ctx, tx, RestoreState{Epoch: epoch, Pending: true}); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE settings SET value=? WHERE key=?`, []byte(""), bootstrapUsedKey); err != nil {
-				return err
+			if string(previous) != epoch {
+				if _, err := tx.ExecContext(ctx, `UPDATE settings SET value=? WHERE key=?`, []byte(""), bootstrapUsedKey); err != nil {
+					return err
+				}
 			}
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('credential_epoch',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, []byte(epoch))
@@ -133,7 +136,6 @@ func writeRestoreStateTx(ctx context.Context, tx *storeTx, state RestoreState) e
 }
 
 // AcknowledgeRestore discards schedule catch-up through database time and lifts the hold.
-// API/local schedules need fresh consent because rotation invalidates their recorded authority.
 // Repeating acknowledgement leaves the first boundary unchanged.
 func (o *Operator) AcknowledgeRestore(ctx context.Context) error {
 	return o.s.inTx(ctx, func(tx *storeTx) error {

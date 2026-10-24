@@ -144,6 +144,7 @@ func (s *Server) handleRemoveGitHubRunnerBinding(w http.ResponseWriter, r *http.
 	if err := registry.RevokeGitHubRunner(r.Context(), a, id); err != nil {
 		return engineLookupError(err)
 	}
+	noteAuditTarget(r.Context(), "repository_id", strconv.FormatInt(id, 10))
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

@@ -74,8 +74,14 @@ cutover. Failed deliveries still require an admin's Process again action.
 ## Declared restore and credential epochs
 
 The external `credential-epoch` fences bearer tokens and dashboard sessions.
-Restore preparation rotates it and holds schedules until operator acknowledgment,
-which discards catch-up through its timestamp. The epoch directory must be
+Normal restore preparation preserves credentials and API/local schedule consent.
+It cancels restored unfinished scheduled runs and holds schedules until operator
+acknowledgment, which discards catch-up through its timestamp. Use
+`restore prepare --sign-out-everyone` for security incidents (a stolen database
+or leaked keys) to rotate the epoch and invalidate all earlier credentials and
+API/local schedule consent. Recover post-backup revocations and member changes
+from the controller's audit log stream, kept outside the database.
+The epoch directory must be
 writable and persistent; `--credential-epoch-dir` selects it when credentials
 are read-only. Helm uses a dedicated retained PVC independent of database storage.
 

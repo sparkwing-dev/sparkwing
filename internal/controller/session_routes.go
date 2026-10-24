@@ -140,8 +140,15 @@ func (s *Server) endVerifiedSession(w http.ResponseWriter, r *http.Request) erro
 	if !ok || proof.session == nil {
 		return routepolicy.MissingEndpointPolicy()
 	}
-	if err := s.operator.DeleteSession(proof.session.ID); err != nil {
+	revoked, err := s.operator.DeleteSession(proof.session.ID)
+	if err != nil {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
+	}
+	if revoked != nil {
+		notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{
+			Team: string(revoked.Team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: revoked.AccountID},
+		}})
+		noteSessionRevocation(r.Context(), revoked)
 	}
 	clearSessionCookies(w, s.cookiesSecure())
 	return nil
@@ -156,4 +163,13 @@ func sessionFlowError(err error) error {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 	}
 	return sessionUnavailable()
+}
+
+func noteSessionRevocation(ctx context.Context, revoked *store.SessionRevocation) {
+	if revoked == nil {
+		return
+	}
+	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
+		rec.revokedSessions = append(rec.revokedSessions, *revoked)
+	}
 }

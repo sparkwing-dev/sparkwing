@@ -880,6 +880,21 @@ Revocation cannot recall a signed URL or an external GitHub or OIDC credential
 already issued. Those retain their separate expirations. Stopping a runner is
 not proof that an external credential was recalled.
 
+A normal database restore keeps sessions, API tokens, runner and machine
+credentials, and API/local schedule consent valid. Recover revocations, member
+removals and demotions since the backup from the controller's audit log stream,
+kept outside the database. Its revocation lines identify token prefixes,
+accounts, machines or GitHub repository IDs and the team. Session logout and
+replacement identify the ended session by `session_digest`, `revoked_account_id`
+and `revoked_team`, including when the browser signs in as another account.
+Controller logs fingerprint credential shapes in messages, attributes and errors.
+Public token prefixes remain readable. Follow the operator runbook kept outside this repository.
+
+For a stolen database, leaked keys or another security incident,
+`sparkwing-controller restore prepare --sign-out-everyone` rotates the external
+credential epoch. All earlier credentials and API/local schedule consent then
+need replacement. See [Backup and restore](backup-restore.md#restore).
+
 ## When a runner's token dies
 
 A dead root prevents new claims and invalidates descendant authority. Work that

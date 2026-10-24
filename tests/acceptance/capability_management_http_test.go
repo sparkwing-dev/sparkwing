@@ -405,8 +405,14 @@ func TestCapabilityManagementHTTPAuditProperty(t *testing.T) {
 			}
 		}
 		w := authorityHTTP(s.Handler(), b, method, path, body)
-		return w.Code == status && (role && !strings.Contains(logs.String(), "role=") || !role && strings.Contains(logs.String(), "token_prefix="+raw[:16])) &&
-			!strings.Contains(logs.String(), raw) && !strings.Contains(logs.String(), b.raw) && !strings.Contains(logs.String(), f.result.Issued.Raw)
+		loggedTarget := strings.Contains(logs.String(), "token_prefix=")
+		wantTarget := !role && !complete
+		ok := w.Code == status && loggedTarget == wantTarget && (!wantTarget || strings.Contains(logs.String(), "token_prefix="+f.rows[0].Prefix)) &&
+			!strings.Contains(logs.String(), "role=") && !strings.Contains(logs.String(), raw) && !strings.Contains(logs.String(), b.raw) && !strings.Contains(logs.String(), f.result.Issued.Raw)
+		if !ok {
+			t.Logf("HTTP %d (want %d), target logged=%t (want %t): %s", w.Code, status, loggedTarget, wantTarget, logs.String())
+		}
+		return ok
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Fatal(err)

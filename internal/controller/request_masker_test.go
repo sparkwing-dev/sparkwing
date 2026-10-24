@@ -24,7 +24,7 @@ func TestRequestMaskerMasksItsOwnRequestAndKeepsNothing(t *testing.T) {
 	}), s.logger, func(*http.Request) string { return "/x" }, func(*http.Request) string { return "" })
 	for i := range 2000 {
 		logs.Reset()
-		secret := fmt.Sprintf("swt_%032x", i)
+		secret := fmt.Sprintf("external-secret-%032x", i)
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x?s="+secret, nil))
 		if strings.Contains(logs.String(), secret) || !strings.Contains(logs.String(), "failed with ***") {
 			t.Fatalf("request %d log: %s", i, logs.String())
@@ -32,8 +32,8 @@ func TestRequestMaskerMasksItsOwnRequestAndKeepsNothing(t *testing.T) {
 	}
 	register = false
 	logs.Reset()
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x?s=swt_"+fmt.Sprintf("%032x", 7), nil))
-	if !strings.Contains(logs.String(), "failed with swt_") {
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x?s=external-secret-"+fmt.Sprintf("%032x", 7), nil))
+	if !strings.Contains(logs.String(), "failed with external-secret-") {
 		t.Fatalf("a later request still masks an earlier request's secret, so registrations outlive their request: %s", logs.String())
 	}
 }

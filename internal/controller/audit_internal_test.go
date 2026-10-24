@@ -113,3 +113,51 @@ func TestClientClassNeverCarriesTheRawUserAgent(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditFormatsCredentialsInEveryField(t *testing.T) {
+	for _, prefix := range capability.CredentialPrefixes() {
+		credential := prefix + strings.Repeat("x", 43)
+		value := strings.Repeat("a", 110) + credential + "/" + strings.Repeat("z", 1<<20)
+		// Synthetic routes must not leave oversized series in the shared registry.
+		t.Cleanup(func() {
+			httpRequestsTotal.DeleteLabelValues(value, http.MethodDelete, "200")
+			httpRequestDurationSeconds.DeleteLabelValues(value, http.MethodDelete)
+		})
+		h, logs := auditHarness(t, value, func(w http.ResponseWriter, r *http.Request) {
+			notePolicyPrincipal(r.Context(), capability.Principal{Capability: capability.Capability{Team: value, Subject: capability.Subject{Kind: capability.SubjectKind(value), ID: value}}})
+			noteAuditTarget(r.Context(), "machine_id", value)
+			w.WriteHeader(http.StatusOK)
+		})
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("DELETE", "/", nil))
+		records := auditLines(t, logs, "audit")
+		for _, key := range []string{"route", "principal_kind", "principal_id", "team", "machine_id"} {
+			got, _ := records[0][key].(string)
+			if strings.Contains(got, prefix+"x") || !strings.Contains(got, "[credential:") {
+				t.Errorf("%s contains unsanitized credential: %q", key, got)
+			}
+			if len(got) > 256 || !strings.HasSuffix(got, "[truncated]") {
+				t.Errorf("%s length = %d, want at most 256 bytes with truncation marker", key, len(got))
+			}
+		}
+	}
+}
+
+func TestRequestIDIgnoresClientValues(t *testing.T) {
+	for _, id := range []string{"trace-1_A.b", strings.Repeat("a", 64), "", "bad id", "bad\nline", strings.Repeat("a", 65)} {
+		h, logs := auditHarness(t, "/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+		for range 2 {
+			req := httptest.NewRequest("POST", "/", nil)
+			req.Header.Set(RequestIDHeader, id)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			got := w.Header().Get(RequestIDHeader)
+			if len(got) != 24 || got == id {
+				t.Errorf("request ID %q became %q", id, got)
+			}
+		}
+		records := auditLines(t, logs, "audit")
+		if records[0]["request_id"] == records[1]["request_id"] {
+			t.Fatal("requests reused an ID")
+		}
+	}
+}

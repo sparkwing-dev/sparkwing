@@ -65,8 +65,12 @@ func TestSessionPersistenceNeverStoresReusableSecretsProperty(t *testing.T) {
 		if _, err := other.AsOperator().LookupSession(t.Context(), forged); err == nil {
 			t.Fatal("unrecorded presentation authenticated")
 		}
-		if err := other.AsOperator().DeleteSession(raw); err != nil {
-			t.Fatal(err)
+		revoked, err := other.AsOperator().DeleteSession(raw)
+		if err != nil || revoked == nil || revoked.Digest != storedHash || revoked.AccountID != account.ID || revoked.Team != "a" {
+			t.Fatalf("revocation identity: %+v %v", revoked, err)
+		}
+		if duplicate, err := other.AsOperator().DeleteSession(raw); err != nil || duplicate != nil {
+			t.Fatalf("absent session produced revocation: %+v %v", duplicate, err)
 		}
 		if _, err := s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialSession, Digest: digest, Audience: capability.Controller}, capability.RequestEvidence{}); err == nil {
 			t.Fatal("deleted session authenticated through its digest")

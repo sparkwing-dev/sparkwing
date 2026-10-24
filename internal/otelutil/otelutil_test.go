@@ -132,7 +132,7 @@ func TestInitPreservesConfiguredLogging(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(provider); otel.SetTextMapPropagator(propagator) })
 	var output bytes.Buffer
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	telemetry, err := Init(t.Context(), Config{ServiceName: "test"})
+	telemetry, err := Init(t.Context(), Config{ServiceName: "test", WrapLogHandler: func(h slog.Handler) slog.Handler { return &filteredLogHandler{h} }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,9 +143,22 @@ func TestInitPreservesConfiguredLogging(t *testing.T) {
 	})
 	output.Reset()
 	slog.Debug("after-init")
-	if !strings.Contains(output.String(), `"level":"DEBUG","msg":"after-init"`) {
+	log.Print("stdlib")
+	if !strings.Contains(output.String(), `"msg":"filtered stdlib"`) {
+		t.Fatalf("standard logger bypassed filter: %q", output.String())
+	}
+	if !strings.Contains(output.String(), `"level":"DEBUG","msg":"filtered after-init"`) {
 		t.Fatalf("configured JSON/debug handler lost: %q", output.String())
 	}
+}
+
+type filteredLogHandler struct{ slog.Handler }
+
+func (h *filteredLogHandler) Handle(ctx context.Context, record slog.Record) error {
+	if !strings.HasPrefix(record.Message, "filtered ") {
+		record.Message = "filtered " + record.Message
+	}
+	return h.Handler.Handle(ctx, record)
 }
 
 type startupLogHandler struct {

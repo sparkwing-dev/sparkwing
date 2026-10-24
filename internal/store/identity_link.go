@@ -219,27 +219,27 @@ func linkIdentityTx(ctx context.Context, tx *storeTx, accountID string, p SignIn
 	}, nil
 }
 
-func (op *Operator) unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, accountID, provider, keepHash string, now time.Time) (int64, error) {
+func (op *Operator) unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, accountID, provider, keepHash string, now time.Time) (IdentityUnlink, error) {
 	if err := lockAccountTx(ctx, tx, accountID); err != nil {
-		return 0, err
+		return IdentityUnlink{}, err
 	}
 	var subject string
 	err := tx.QueryRowContext(ctx, `SELECT subject FROM identities
 		WHERE account_id = ? AND provider = ? ORDER BY created_at LIMIT 1`, accountID, provider).
 		Scan(&subject)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrNotFound
+		return IdentityUnlink{}, ErrNotFound
 	}
 	if err != nil {
-		return 0, err
+		return IdentityUnlink{}, err
 	}
 	var methods int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM identities WHERE account_id = ?`, accountID).Scan(&methods); err != nil {
-		return 0, err
+		return IdentityUnlink{}, err
 	}
 	if methods <= 1 {
-		return 0, ErrLastSignInMethod
+		return IdentityUnlink{}, ErrLastSignInMethod
 	}
 	at := now.UTC().UnixNano()
 	for _, stmt := range []struct {
@@ -254,19 +254,26 @@ func (op *Operator) unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, ac
 		},
 	} {
 		if _, err := tx.ExecContext(ctx, stmt.sql, stmt.args...); err != nil {
-			return 0, err
+			return IdentityUnlink{}, err
 		}
 	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE account_id = ? AND hash <> ?`,
-		accountID, keepHash)
+	rows, err := tx.QueryContext(ctx, `DELETE FROM sessions WHERE account_id = ? AND hash <> ? RETURNING hash,account_id,COALESCE(team,'')`, accountID, keepHash)
 	if err != nil {
-		return 0, err
+		return IdentityUnlink{}, err
 	}
-	ended, err := res.RowsAffected()
-	if err != nil {
-		return 0, err
+	defer rows.Close()
+	out := IdentityUnlink{KeptSessionDigest: keepHash}
+	for rows.Next() {
+		var ended SessionRevocation
+		if err := rows.Scan(&ended.Digest, &ended.AccountID, &ended.Team); err != nil {
+			return IdentityUnlink{}, err
+		}
+		out.EndedSessions = append(out.EndedSessions, ended)
 	}
-	return ended, nil
+	if err := rows.Close(); err != nil {
+		return IdentityUnlink{}, err
+	}
+	return out, rows.Err()
 }
 
 func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {

@@ -52,8 +52,8 @@ func (f *accountWrites) AcceptAccountInvitation(_ context.Context, a capability.
 	return store.InvitationAcceptance{Team: "next-team"}, f.called(a, id)
 }
 
-func (f *accountWrites) UnlinkAccountIdentity(_ context.Context, a capability.Authorized, provider string) (int64, error) {
-	return 2, f.called(a, provider)
+func (f *accountWrites) UnlinkAccountIdentity(_ context.Context, a capability.Authorized, provider string) (store.IdentityUnlink, error) {
+	return store.IdentityUnlink{}, f.called(a, provider)
 }
 
 var _ controller.AccountWriter = (*store.Operator)(nil)

@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"runtime/debug"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -51,5 +53,5 @@ func (p provenance) line() string {
 }
 
 func emitStartupProvenance(w io.Writer) {
-	fmt.Fprintln(w, "sparkwing-controller:", readProvenance().line())
+	slog.New(controller.CredentialSafeLogHandler(slog.NewTextHandler(w, nil))).Info("sparkwing-controller: " + readProvenance().line())
 }
