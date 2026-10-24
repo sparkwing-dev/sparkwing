@@ -72,7 +72,7 @@ func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Tim
  (SELECT SUM(amount_micro) FROM credit_grants WHERE team=? AND kind IN (?,?)),
  (SELECT MIN(g.created_at) FROM credit_grants g WHERE g.team=? AND g.kind=? AND
  g.amount_micro+COALESCE((SELECT SUM(r.amount_micro) FROM credit_grants r WHERE r.team=g.team AND r.kind='reversal' AND r.reverses=g.reference AND g.reference<>''),0)>0),
- (SELECT MAX(COALESCE(released_at,created_at)) FROM credit_freezes WHERE team=? AND no_fault=0)`, team, CreditGrantPaid, CreditGrantReversal, team, CreditGrantPaid, team).Scan(&paid, &first, &incident)
+ (SELECT MAX(COALESCE(released_at,created_at)) FROM credit_freezes WHERE team=? AND no_fault=0)`, team, CreditGrantPaid, creditGrantReversal, team, CreditGrantPaid, team).Scan(&paid, &first, &incident)
 	if err != nil {
 		return p, err
 	}
@@ -100,9 +100,9 @@ func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Tim
 	p.history.Tier, p.prepayCeiling = billingPolicy[earned].tier, billingPolicy[ceiling].tier
 	p.row = billingPolicy[max(earned, min(backed, ceiling))]
 	switch {
-	case held || trust == BillingTrustRevoked:
+	case held || trust == billingTrustRevoked:
 		p.row = billingPolicyRow{tier: "Held"}
-	case trust == BillingTrustGranted:
+	case trust == billingTrustGranted:
 		p.row = billingPolicy[len(billingPolicy)-1]
 	}
 	return p, nil

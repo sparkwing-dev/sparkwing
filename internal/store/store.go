@@ -38,47 +38,20 @@ var busyTimeoutMS = DefaultBusyTimeoutMS
 
 // Failure reason codes; empty = no structured reason.
 const (
-	FailureUnknown           = ""
-	FailureOOMKilled         = "oom_killed"
-	FailureAgentLost         = "agent_lost"
-	FailureTimeout           = "timeout"
-	FailureNoProgressTimeout = "no_progress_timeout"
-	// FailureVerify: the node's action completed but its Verify
-	// postcondition returned an error. The failure is at the verify
-	// stage, not the action.
-	FailureVerify             = "verify"
-	FailureQueueTimeout       = "queue_timeout"
-	FailureRunnerLeaseExpired = "runner_lease_expired"
-	// FailureCreditsExhausted: the team's prepaid balance or a hold refused
+	failureAgentLost = "agent_lost"
+
+	FailureQueueTimeout = "queue_timeout"
+
+	// failureCreditsExhausted: the team's prepaid balance or a hold refused
 	// the node's next slice, and the node stopped within its drain.
-	FailureCreditsExhausted = "credits_exhausted"
+	failureCreditsExhausted = "credits_exhausted"
 	// FailureUnpricedCPUClass: the node's cpu request is above the largest
 	// class the credit rate table prices, so no claim could be billed.
 	FailureUnpricedCPUClass = "unpriced_cpu_class"
-	// FailureLogsAuth: the runner's logs.append calls returned 401/403
-	// against the controller's auth surface. The run's structured
-	// logs are unrecoverable; better to fail loud than report
-	// status=success with no observable output.
-	FailureLogsAuth = "logs_auth"
-	// FailureLogsDropped: log lines were lost because the log store
-	// stayed unreachable past the append retry budget. The node's own
-	// work may well have succeeded, but its record of that work is
-	// incomplete, so the same rule as FailureLogsAuth applies: a run
-	// nobody can read is not a run anybody should trust. Adopters who
-	// prefer the lossy behavior set logs.drop_policy: warn in config.yaml.
-	FailureLogsDropped = "logs_dropped"
-	// FailureSourceUnavailable: a launcher Job's init container was refused
-	// the run's source credential, which answers the same on every attempt,
-	// so the node is not retried.
-	FailureSourceUnavailable = "source_unavailable"
-	// FailureSourceFetch: a launcher Job's init container could not check
-	// out the run's source for a reason a later attempt may not meet. The
-	// node is retried within its budget, a planning node included.
-	FailureSourceFetch = "source_fetch"
 )
 
-// RetrySourceManual identifies an explicitly retried run.
-const RetrySourceManual = "manual"
+// retrySourceManual identifies an explicitly retried run.
+const retrySourceManual = "manual"
 
 // Store is the persistent state layer. One instance per process; safe
 // for concurrent use by multiple orchestrator goroutines. The
@@ -411,10 +384,10 @@ type Run struct {
 	PlanSnapshot []byte `json:"-"`
 }
 
-// ErrIDOwnedByAnotherTeam reports a write whose key already names a row of
+// errIDOwnedByAnotherTeam reports a write whose key already names a row of
 // a different team. It is not [ErrNotFound] because the caller supplied the
 // id and the id is taken, and it is not success because nothing was written.
-var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
+var errIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
 
 // safety: takes no team because the question is who owns the id, and an
 // answer scoped to the asker is no answer.
@@ -486,12 +459,12 @@ type RunFilter struct {
 	ProbeMayBeClamped bool
 }
 
-// HasCursor reports whether the filter resumes after an already-seen run. It keys on
+// hasCursor reports whether the filter resumes after an already-seen run. It keys on
 // the id alone, because a run started at the Unix epoch carries an instant of zero.
-func (f RunFilter) HasCursor() bool { return f.AfterID != "" }
+func (f RunFilter) hasCursor() bool { return f.AfterID != "" }
 
-// HasBeforeCursor reports whether the filter pages toward newer runs.
-func (f RunFilter) HasBeforeCursor() bool { return f.BeforeID != "" }
+// hasBeforeCursor reports whether the filter pages toward newer runs.
+func (f RunFilter) hasBeforeCursor() bool { return f.BeforeID != "" }
 
 // ListRuns returns runs ordered newest-first, then by id descending, filtered
 // by f. The cursor clause depends on that order.
@@ -515,7 +488,7 @@ func (s *Store) listRuns(ctx context.Context, query string, args []any, f RunFil
 	args = append(args, limit)
 
 	order := "COALESCE(started_at,0) DESC, id DESC"
-	if f.HasBeforeCursor() {
+	if f.hasBeforeCursor() {
 		order = "COALESCE(started_at,0) ASC, id ASC"
 	}
 	query += ` ORDER BY ` + order + ` LIMIT ?`
@@ -544,7 +517,7 @@ func (s *Store) listRuns(ctx context.Context, query string, args []any, f RunFil
 	if err := s.refreshRunPresentations(ctx, out); err != nil {
 		return nil, err
 	}
-	if f.HasBeforeCursor() {
+	if f.hasBeforeCursor() {
 		slices.Reverse(out)
 	}
 	return out, nil
@@ -622,13 +595,13 @@ func runFilterWhere(dialect Dialect, f RunFilter) (string, []any, error) {
 	if !f.Since.IsZero() {
 		addClause("started_at >= ?", f.Since.UnixNano())
 	}
-	if f.HasCursor() && f.HasBeforeCursor() {
+	if f.hasCursor() && f.hasBeforeCursor() {
 		return "", nil, errBothCursors
 	}
-	if f.HasCursor() {
+	if f.hasCursor() {
 		addClause(runCursorClause(f.AfterStartedAt), runCursorArgs(f)...)
 	}
-	if f.HasBeforeCursor() {
+	if f.hasBeforeCursor() {
 		addClause(runBeforeCursorClause(f.BeforeStartedAt), runBeforeCursorArgs(f)...)
 	}
 	for _, c := range runDisplayFilterClauses(dialect, f) {
@@ -649,9 +622,9 @@ func prefixUpperBound(prefix string) (string, bool) {
 	return "", false
 }
 
-// GetLatestRun returns the newest run for pipeline matching statuses
+// getLatestRun returns the newest run for pipeline matching statuses
 // within maxAge. ErrNotFound on miss.
-func (o *Operator) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
+func (o *Operator) getLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
 	return o.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE pipeline=?`, []any{pipeline}, pipeline, statuses, maxAge)
 }
 
@@ -711,7 +684,7 @@ func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 		r.PullRequest = &runstate.SummaryPullRequest{Number: int(pr.Number), Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}
 	}
 	if r.RetryOf != "" {
-		r.RetrySource = RetrySourceManual
+		r.RetrySource = retrySourceManual
 	}
 	return &r, nil
 }
@@ -821,7 +794,7 @@ func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 		return nil, err
 	}
 	for _, n := range out {
-		attempts, err := t.ListNodeExecutionAttempts(ctx, runID, n.NodeID)
+		attempts, err := t.listNodeExecutionAttempts(ctx, runID, n.NodeID)
 		if err != nil {
 			return nil, err
 		}
@@ -842,7 +815,7 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 	if err := scanNodeRow(row, record); err != nil {
 		return nil, err
 	}
-	attempts, err := t.ListNodeExecutionAttempts(ctx, runID, nodeID)
+	attempts, err := t.listNodeExecutionAttempts(ctx, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -898,15 +871,11 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 	return nil
 }
 
-// Step status constants. Steps are inserted as StepRunning on
-// step_start and transitioned to passed/failed/cancelled on step_end. Skipped
-// steps insert directly as StepSkipped with both lifecycle timestamps set.
+// Step status constants.
 const (
-	StepRunning   = "running"
-	StepPassed    = "passed"
-	StepFailed    = "failed"
-	StepCancelled = "cancelled"
-	StepSkipped   = "skipped"
+	stepPassed    = "passed"
+	stepFailed    = "failed"
+	stepCancelled = "cancelled"
 )
 
 // NodeStep is one row from the node_steps table: per-step runtime
@@ -1055,7 +1024,7 @@ func appendEventTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, k
 	if err := tx.QueryRowContext(ctx, `UPDATE runs SET event_bytes=event_bytes+?,event_count=event_count+1 WHERE team=? AND id=? RETURNING event_count`, eventBytes(kind, raw), team, runID).Scan(&seq); err != nil {
 		return 0, err
 	}
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.execContext(ctx, `
 INSERT INTO events (team, run_id, seq, node_id, kind, ts, payload)
 VALUES (?,?,?,?,?,?,?)`, string(team), runID, seq, nodeID, kind, at.UnixNano(), raw)
 	if err != nil {
@@ -1083,8 +1052,7 @@ const (
 
 // PauseRelease kinds: how the pause ended.
 const (
-	PauseReleaseManual  = "manual"
-	PauseReleaseTimeout = "timeout-released"
+	PauseReleaseManual = "manual"
 )
 
 // DebugPause is one row in the debug_pauses table.
@@ -1199,13 +1167,6 @@ func isUniqueViolation(err error) bool {
 		strings.Contains(msg, "duplicate key value")
 }
 
-// SpawnedChild identifies a child pipeline run for its parent job's display.
-type SpawnedChild struct {
-	ParentNodeID string `json:"parent_node_id"`
-	Pipeline     string `json:"pipeline"`
-	ChildRunID   string `json:"child_run_id"`
-}
-
 // GetTrigger returns one tenant trigger's sealed display and queue state.
 func (t *Tenant) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 	trigger, err := scanTrigger(t.s.queryRow(ctx, triggerSelect+` WHERE triggers.team=? AND triggers.id=?`, t.team, id))
@@ -1304,14 +1265,13 @@ var ErrLockHeld = errors.New("held by another holder")
 // ErrConcurrencySuperseded signals a concurrency holder was superseded.
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 
-// NodeStatusApprovalPending = nodes.status while waiting on a human.
-const NodeStatusApprovalPending = "approval_pending"
+// nodeStatusApprovalPending = nodes.status while waiting on a human.
+const nodeStatusApprovalPending = "approval_pending"
 
 // Approval resolutions. Empty means "still pending."
 const (
 	ApprovalResolutionApproved = "approved"
 	ApprovalResolutionDenied   = "denied"
-	ApprovalResolutionTimedOut = "timed_out"
 )
 
 // Approval on-timeout policies. Operator chooses per-gate; default
@@ -1412,15 +1372,6 @@ func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error) {
 	return v, nil
 }
 
-// TriggerIdempotencyIndexName is the unique index enforcing at most one
-// trigger per (pipeline, idempotency key).
-const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
-
-// TriggerWebhookReplayKeyIndexName is the unique index enforcing at most
-// one trigger per digest of the signed material a webhook delivery
-// carried.
-const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
-
 // safety: two Postgres openers of an empty database would both create the
 // baseline, so each takes this lock before looking.
 const migrateAdvisoryLock = `SELECT pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`
@@ -1440,7 +1391,7 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 	}
 	defer rollbackOrLog(tx)
 	if s.dialect == DialectPostgres {
-		if _, err := tx.ExecContext(ctx, migrateAdvisoryLock); err != nil {
+		if _, err := tx.execContext(ctx, migrateAdvisoryLock); err != nil {
 			return fmt.Errorf("acquire migrate advisory lock: %w", err)
 		}
 	}
@@ -1463,7 +1414,7 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 	default:
 		return schemaMismatchError(version, remedy)
 	}
-	translated, err := TranslateSchema(schemaNeutral, s.dialect)
+	translated, err := translateSchema(schemaNeutral, s.dialect)
 	if err == nil {
 		err = execStatements(ctx, tx, translated)
 	}
@@ -1473,7 +1424,7 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 	if err := tx.operator.installAuditProtection(ctx, tx); err != nil {
 		return fmt.Errorf("protect audit history: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.execContext(ctx,
 		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,
 		expectedSchemaVersion, time.Now().UnixNano()); err != nil {
 		return fmt.Errorf("record schema version: %w", err)

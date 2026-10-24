@@ -32,7 +32,7 @@ func TestChangedRevisionChildRequiredSecretSelection(t *testing.T) {
 		if _, _, err := selectedSecretTx(t.Context(), tx, tenant.team, "TOKEN", selection); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("release: %v", err)
 		}
-		var refused *SecretPreflightError
+		var refused *secretPreflightError
 		if err := secretPreflightTx(t.Context(), tx, tenant.team, run, selection, []string{"TOKEN"}); !errors.As(err, &refused) {
 			t.Fatalf("preflight accepted secret release refuses: %v", err)
 		}

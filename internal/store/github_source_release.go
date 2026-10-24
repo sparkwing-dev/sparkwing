@@ -168,7 +168,7 @@ func (t *Tenant) githubSourceRepositoriesTx(ctx context.Context, tx *storeTx, sl
 	if !extras {
 		return []int64{id}, []string{slug}, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT extra_repo_id,extra_repo FROM github_app_extra_repos WHERE team=? AND repository_id=? ORDER BY extra_repo`+tx.forShare(), t.team, id)
+	rows, err := tx.queryContext(ctx, `SELECT extra_repo_id,extra_repo FROM github_app_extra_repos WHERE team=? AND repository_id=? ORDER BY extra_repo`+tx.forShare(), t.team, id)
 	if err != nil {
 		return nil, nil, err
 	}

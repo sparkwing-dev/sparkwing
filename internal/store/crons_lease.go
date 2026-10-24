@@ -11,8 +11,8 @@ import (
 
 const cronTickStamp = "crons.tick"
 
-// CronTickWindow leaves scheduling overhead inside a one-minute timer interval.
-const CronTickWindow = 55 * time.Second
+// cronTickWindow leaves scheduling overhead inside a one-minute timer interval.
+const cronTickWindow = 55 * time.Second
 
 // RunCronTickLeased runs one schedule tick under the deployment's fenced lease.
 func (o *Operator) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error) {
@@ -23,7 +23,7 @@ func (o *Operator) RunCronTickLeased(ctx context.Context, holder string, ttl tim
 	if state.Pending {
 		return false, ErrRestorePending
 	}
-	return o.runWindowLeased(ctx, "schedules.tick", cronTickStamp, holder, CronTickWindow, ttl, fn)
+	return o.runWindowLeased(ctx, "schedules.tick", cronTickStamp, holder, cronTickWindow, ttl, fn)
 }
 
 func (o *Operator) runWindowLeased(ctx context.Context, name, stamp, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error) {
@@ -76,7 +76,7 @@ func (o *Operator) runWindowLeased(ctx context.Context, name, stamp, holder stri
 		if err := assertSingletonLeaseTx(ctx, tx, lease, name); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, stamp, []byte(strconv.FormatInt(tx.now(ctx).UnixNano(), 10)))
+		_, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, stamp, []byte(strconv.FormatInt(tx.now(ctx).UnixNano(), 10)))
 		return err
 	})
 	return true, err

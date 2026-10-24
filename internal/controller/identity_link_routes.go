@@ -23,12 +23,6 @@ type IdentityLinkWriter interface {
 	LinkAccountIdentity(context.Context, capability.IdentityLink, store.SignInProfile) (store.Identity, error)
 }
 
-// WithIdentityLinkWriter supplies account-link transactions before Handler is constructed.
-func (s *Server) WithIdentityLinkWriter(writer IdentityLinkWriter) *Server {
-	s.identityLinkWrites = writer
-	return s
-}
-
 func (s *Server) identityLinkWriter() (IdentityLinkWriter, error) {
 	if s.identityLinkWrites != nil {
 		return s.identityLinkWrites, nil

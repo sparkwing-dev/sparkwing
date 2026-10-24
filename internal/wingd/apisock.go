@@ -8,13 +8,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
-// APIDrainWindow bounds the API request drain before the finalization drain.
-const APIDrainWindow = 5 * time.Second
+// apiDrainWindow bounds the API request drain before the finalization drain.
+const apiDrainWindow = 5 * time.Second
 
-// APIConn carries a verified transport identity for the shared controller's
+// authenticatedAPIConn carries a verified transport identity for the shared controller's
 // local authorization. PeerIdentity returns a snapshot owned by the caller.
 // Missing kernel UID or client SID evidence refuses access before Accept returns.
-type APIConn interface {
+type authenticatedAPIConn interface {
 	net.Conn
 	PeerIdentity() localhostwire.LocalPeerIdentity
 }

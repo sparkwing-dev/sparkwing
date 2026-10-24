@@ -55,8 +55,8 @@ type gitCredentialConfirmReq struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-// GitCredentialReleaseJSON is one audit row of a release.
-type GitCredentialReleaseJSON struct {
+// gitCredentialReleaseJSON is one audit row of a release.
+type gitCredentialReleaseJSON struct {
 	Host             string `json:"host"`
 	Repository       string `json:"repository"`
 	RunID            string `json:"run_id"`

@@ -59,7 +59,7 @@ func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand)
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=?`, raw, body, tx.now(ctx).UnixNano(), c.Team, observation.CapabilityPrefix)
+		_, err = tx.execContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=?`, raw, body, tx.now(ctx).UnixNano(), c.Team, observation.CapabilityPrefix)
 		return err
 	})
 }
@@ -113,7 +113,7 @@ func registeredAgentsTx(ctx context.Context, tx *storeTx, team Team) ([]Register
 
 func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) ([]RegisteredAgent, error) {
 	now := tx.now(ctx)
-	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at,claim_observation_json FROM capabilities
+	rows, err := tx.queryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at,claim_observation_json FROM capabilities
  WHERE team=? AND subject_kind='machine' AND audience='controller' AND bind_kind='none'
  AND `+liveCredentialSQL("")+` ORDER BY prefix`, team, now.UnixNano(), now.UnixNano())
 	if err != nil {
@@ -298,6 +298,6 @@ func consumeClaimSlotTx(ctx context.Context, tx *storeTx, prefix, team string) e
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=? WHERE prefix=? AND COALESCE(team,'')=?`, raw, prefix, team)
+	_, err = tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=? WHERE prefix=? AND COALESCE(team,'')=?`, raw, prefix, team)
 	return err
 }

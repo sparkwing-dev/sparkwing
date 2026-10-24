@@ -134,7 +134,7 @@ func TestLocalControlExchangeCancellationAndWedgedOwner(t *testing.T) {
 				cancel()
 			}
 			_, err := exchangeLocalControl(ctx, peer, "fixture", nil)
-			want := ErrDaemonWedged
+			want := errDaemonWedged
 			if cancelNow {
 				want = context.Canceled
 			}

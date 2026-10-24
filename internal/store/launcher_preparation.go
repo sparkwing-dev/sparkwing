@@ -128,7 +128,7 @@ func renewLauncherPreparationTx(ctx context.Context, tx *storeTx, root capabilit
 		query = `UPDATE nodes SET lease_expires_at=?,last_heartbeat=? WHERE team=? AND run_id=? AND node_id=? AND capability_prefix=? AND generation=? AND claimed_by=?`
 		args = []any{expiry.UnixNano(), tx.now(ctx).UnixNano(), unit.Team, unit.RunID, unit.NodeID, current.Capability.Prefix, fence.Generation, fence.Holder}
 	}
-	result, err := tx.ExecContext(ctx, query, args...)
+	result, err := tx.execContext(ctx, query, args...)
 	if err != nil {
 		return time.Time{}, err
 	}

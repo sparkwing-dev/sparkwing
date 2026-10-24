@@ -61,7 +61,7 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 				result.Skipped = append(result.Skipped, SecretRotationSkip{Name: row.Name, Pipeline: row.Pipeline})
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE secrets SET value=? WHERE team=? AND name=? AND pipeline=?`, value, t.team, row.Name, row.Pipeline); err != nil {
+			if _, err := tx.execContext(ctx, `UPDATE secrets SET value=? WHERE team=? AND name=? AND pipeline=?`, value, t.team, row.Name, row.Pipeline); err != nil {
 				return err
 			}
 			result.Rotated++
@@ -71,7 +71,7 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE git_credentials SET secret=? WHERE team=? AND id=?`, value, t.team, row.ID); err != nil {
+			if _, err := tx.execContext(ctx, `UPDATE git_credentials SET secret=? WHERE team=? AND id=?`, value, t.team, row.ID); err != nil {
 				return err
 			}
 		}
@@ -85,7 +85,7 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 }
 
 func (t *Tenant) credentialSecretsTx(ctx context.Context, tx *storeTx) (_ []Secret, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT name,value,principal,pipeline,masked,shared,created_at,updated_at FROM secrets WHERE team=? ORDER BY name,pipeline`+tx.forUpdate(), t.team)
+	rows, err := tx.queryContext(ctx, `SELECT name,value,principal,pipeline,masked,shared,created_at,updated_at FROM secrets WHERE team=? ORDER BY name,pipeline`+tx.forUpdate(), t.team)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (t *Tenant) credentialSecretsTx(ctx context.Context, tx *storeTx) (_ []Secr
 }
 
 func (t *Tenant) credentialGitTx(ctx context.Context, tx *storeTx) (_ []GitCredential, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? ORDER BY host`+tx.forUpdate(), t.team)
+	rows, err := tx.queryContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? ORDER BY host`+tx.forUpdate(), t.team)
 	if err != nil {
 		return nil, err
 	}

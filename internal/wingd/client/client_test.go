@@ -206,7 +206,7 @@ func TestEnsureDaemon_BoundsAnUnreachablePredecessorElection(t *testing.T) {
 	if err == nil {
 		t.Fatal("unreachable predecessor election waited forever")
 	}
-	if !errors.Is(err, ErrDaemonUnreachable) || !strings.Contains(err.Error(), "predecessor") || !strings.Contains(err.Error(), "election lock") {
+	if !errors.Is(err, errDaemonUnreachable) || !strings.Contains(err.Error(), "predecessor") || !strings.Contains(err.Error(), "election lock") {
 		t.Fatalf("unreachable predecessor error = %v; want bounded election-lock diagnostic", err)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

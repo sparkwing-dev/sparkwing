@@ -48,7 +48,7 @@ func (t *Tenant) WriteActivity(ctx context.Context, ref runspec.NodeRef, actor r
 		if _, err := checkResultWriterTx(ctx, tx, t.team, ref, actor); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET status_detail=? WHERE team=? AND run_id=? AND node_id=?`, detail, t.team, ref.RunID, ref.NodeID); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE nodes SET status_detail=? WHERE team=? AND run_id=? AND node_id=?`, detail, t.team, ref.RunID, ref.NodeID); err != nil {
 			return err
 		}
 		return nil

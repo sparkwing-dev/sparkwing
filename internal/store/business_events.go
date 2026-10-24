@@ -13,15 +13,15 @@ import (
 const (
 	BusinessEventAccountAdmitted   = "account.admitted"
 	BusinessEventTeamCreated       = "team.created"
-	BusinessEventCheckoutOpened    = "checkout.opened"
-	BusinessEventCheckoutPaid      = "checkout.paid"
-	BusinessEventCheckoutFailed    = "checkout.failed"
-	BusinessEventCheckoutExpired   = "checkout.expired"
+	businessEventCheckoutOpened    = "checkout.opened"
+	businessEventCheckoutPaid      = "checkout.paid"
+	businessEventCheckoutFailed    = "checkout.failed"
+	businessEventCheckoutExpired   = "checkout.expired"
 	BusinessEventCreditGranted     = "credit.granted"
-	BusinessEventCreditReversed    = "credit.reversed"
+	businessEventCreditReversed    = "credit.reversed"
 	BusinessEventTeamFrozen        = "team.frozen"
 	BusinessEventTeamUnfrozen      = "team.unfrozen"
-	BusinessEventFirstRunSucceeded = "run.first_succeeded"
+	businessEventFirstRunSucceeded = "run.first_succeeded"
 )
 
 // BusinessEvent is one durable fact about an account or a team: an

@@ -83,7 +83,7 @@ func authorizeEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.Pro
 
 func checkEnrollmentNamesTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	now := tx.now(ctx)
-	rows, err := tx.QueryContext(ctx, `SELECT prefix,subject_id,revoked_at FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind=? AND audience='controller' AND bind_kind='none' AND unit_kind IS NULL AND parent_id IS NULL AND `+liveCredentialSQL("")+``, spec.Team, spec.Subject.Kind, now.UnixNano(), now.UnixNano())
+	rows, err := tx.queryContext(ctx, `SELECT prefix,subject_id,revoked_at FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind=? AND audience='controller' AND bind_kind='none' AND unit_kind IS NULL AND parent_id IS NULL AND `+liveCredentialSQL("")+``, spec.Team, spec.Subject.Kind, now.UnixNano(), now.UnixNano())
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func checkEnrollmentNamesTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if spec.Kind == capability.ProvisionMachine && tx.rotatingRoot == nil && len(names) >= MaxRunnerTokensPerTeam {
+	if spec.Kind == capability.ProvisionMachine && tx.rotatingRoot == nil && len(names) >= maxRunnerTokensPerTeam {
 		return ErrRunnerTokenLimit
 	}
 	return nil

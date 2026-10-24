@@ -241,8 +241,8 @@ const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, d
 // ErrCronScheduleTaken reports an arm or rename whose identity another of the team's schedules already holds.
 var ErrCronScheduleTaken = errors.New("store: another schedule holds this identity")
 
-// ScheduleRepositoryResolver resolves manual schedule identity without granting App authority.
-type ScheduleRepositoryResolver interface {
+// scheduleRepositoryResolver resolves manual schedule identity without granting App authority.
+type scheduleRepositoryResolver interface {
 	ResolveScheduleRepository(context.Context, Team, string) (runspec.Repository, error)
 }
 
@@ -269,7 +269,7 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule) (store
 	}
 	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: sched.RepoPath, GitHubRepositoryID: runspec.Optional[int64]{Set: sched.GitHubRepositoryID > 0, Value: sched.GitHubRepositoryID}})
 	if err != nil {
-		if resolver, ok := t.s.intakePolicy.(ScheduleRepositoryResolver); ok {
+		if resolver, ok := t.s.intakePolicy.(scheduleRepositoryResolver); ok {
 			repository, err = resolver.ResolveScheduleRepository(ctx, t.team, sched.RepoPath)
 		}
 	}
@@ -333,7 +333,7 @@ func (t *Tenant) armCronScheduleTx(ctx context.Context, tx *storeTx, sched CronS
 		if armedAt.IsZero() {
 			armedAt = now
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.execContext(ctx, `
 INSERT INTO cron_schedules (team, `+cronScheduleInsertColumns+`)
 VALUES (?, `+cronScheduleInsertPlaceholders+`)`,
 			string(t.team),
@@ -352,7 +352,7 @@ VALUES (?, `+cronScheduleInsertPlaceholders+`)`,
 			}
 			return CronSchedule{}, false, err
 		}
-	} else if _, err := tx.ExecContext(ctx, `
+	} else if _, err := tx.execContext(ctx, `
 UPDATE cron_schedules
    SET repo_path = ?, repo_key = ?, github_installation_id = ?, github_repository_id = ?,
        cron = ?, tz = ?, overlap = ?, catch_up_ns = ?, where_ = ?, git_branch = ?, args = ?,
@@ -479,7 +479,7 @@ func (t *Tenant) withdrawGitHubInstallation(ctx context.Context, installationID 
 				removed = slices.Compact(removed)
 				result.Repositories = removed
 			} else {
-				rows, err := tx.QueryContext(ctx, `SELECT repository_id FROM github_app_automation WHERE team=? AND installation_id=? UNION SELECT github_repository_id FROM cron_schedules WHERE team=? AND github_installation_id=? ORDER BY 1`, t.team, installationID, t.team, installationID)
+				rows, err := tx.queryContext(ctx, `SELECT repository_id FROM github_app_automation WHERE team=? AND installation_id=? UNION SELECT github_repository_id FROM cron_schedules WHERE team=? AND github_installation_id=? ORDER BY 1`, t.team, installationID, t.team, installationID)
 				if err != nil {
 					return result, err
 				}
@@ -529,7 +529,7 @@ func (t *Tenant) withdrawGitHubCronsTx(ctx context.Context, tx *storeTx, effect 
 			return 0, err
 		}
 		values := append([]any{tx.now(ctx).UnixNano(), t.team}, args...)
-		result, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared=0,updated_at=? WHERE team=? AND declared=1 AND `+predicate, values...)
+		result, err := tx.execContext(ctx, `UPDATE cron_schedules SET declared=0,updated_at=? WHERE team=? AND declared=1 AND `+predicate, values...)
 		if err != nil {
 			return 0, err
 		}
@@ -543,7 +543,7 @@ func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID,
 		if err := bumpGitHubPublicationTx(ctx, tx, t.team, repositoryID); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET repo_path=?,updated_at=? WHERE team=? AND github_installation_id=? AND github_repository_id=?`, repoURL, tx.now(ctx).UnixNano(), t.team, installationID, repositoryID)
+		_, err := tx.execContext(ctx, `UPDATE cron_schedules SET repo_path=?,updated_at=? WHERE team=? AND github_installation_id=? AND github_repository_id=?`, repoURL, tx.now(ctx).UnixNano(), t.team, installationID, repositoryID)
 		if isUniqueViolation(err) {
 			return fmt.Errorf("%w: a schedule already uses %s", ErrCronScheduleTaken, repoURL)
 		}
@@ -614,7 +614,7 @@ func (t *Tenant) setCronOverrideTx(ctx context.Context, tx *storeTx, id string, 
 	if o.CatchUp != nil {
 		catchUp = int64(*o.CatchUp)
 	}
-	result, err := tx.ExecContext(ctx,
+	result, err := tx.execContext(ctx,
 		`UPDATE cron_schedules
             SET override_cron = ?, override_tz = ?, override_overlap = ?,
                 override_catch_up_ns = ?, override_args = ?, override_base = ?,
@@ -644,14 +644,14 @@ func (t *Tenant) ClearCronOverride(ctx context.Context, id string) error {
 // unknown in t's team is an error wrapping [ErrNotFound].
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error) {
 	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
-		if _, err := tx.ExecContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND id = ?`+tx.forUpdate(), string(t.team), id); err != nil {
+		if _, err := tx.execContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND id = ?`+tx.forUpdate(), string(t.team), id); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.execContext(ctx,
 			`DELETE FROM cron_fires WHERE team = ? AND schedule_id = ?`, string(t.team), id); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx,
+		res, err := tx.execContext(ctx,
 			`DELETE FROM cron_schedules WHERE team = ? AND id = ?`, string(t.team), id)
 		if err != nil {
 			return err
@@ -672,17 +672,17 @@ func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error) 
 // report an uninstall that found nothing.
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error) {
 	return inTxResult(ctx, t.s, func(tx *storeTx) (int, error) {
-		if _, err := tx.ExecContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ? ORDER BY id`+tx.forUpdate(), string(t.team), repoPath); err != nil {
+		if _, err := tx.execContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ? ORDER BY id`+tx.forUpdate(), string(t.team), repoPath); err != nil {
 			return 0, err
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.execContext(ctx,
 			`DELETE FROM cron_fires
           WHERE team = ?
             AND schedule_id IN (SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ?)`,
 			string(t.team), string(t.team), repoPath); err != nil {
 			return 0, err
 		}
-		res, err := tx.ExecContext(ctx,
+		res, err := tx.execContext(ctx,
 			`DELETE FROM cron_schedules WHERE team = ? AND repo_path = ?`, string(t.team), repoPath)
 		if err != nil {
 			return 0, err
@@ -758,7 +758,7 @@ func (t *Tenant) resolveCronDueTx(ctx context.Context, tx *storeTx, id string, c
 			args = []any{cursor.UnixNano(), nullNanos(next), now.UnixNano(), fire.Outcome, string(t.team), id}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, update, args...); err != nil {
+	if _, err := tx.execContext(ctx, update, args...); err != nil {
 		return err
 	}
 	if fire != nil {
@@ -776,13 +776,13 @@ func (t *Tenant) resolveCronDueTx(ctx context.Context, tx *storeTx, id string, c
 				return err
 			}
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.execContext(ctx,
 			`INSERT INTO cron_fires (team, `+cronFireColumns+`) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?,''), ?, ?)`,
 			string(t.team), fireID, id, fire.DueAt.UnixNano(), fire.DecidedAt.UnixNano(),
 			fire.Outcome, fire.RunID, fire.Detail, fireArgs); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.execContext(ctx,
 			`DELETE FROM cron_fires
               WHERE team = ? AND schedule_id = ?
                 AND id NOT IN (SELECT id FROM cron_fires
@@ -864,7 +864,7 @@ func (o *Operator) RecordCronTick(ctx context.Context, tick CronTick) error {
 			{metaKeyCronLastTickVersion, tick.Version},
 			{metaKeyCronLastTickError, tick.Error},
 		} {
-			if _, err := tx.ExecContext(ctx,
+			if _, err := tx.execContext(ctx,
 				`INSERT INTO settings (key, value) VALUES (?, ?)
 				 ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
 				kv[0], []byte(kv[1])); err != nil {
@@ -911,7 +911,7 @@ func (o *Operator) GetCronTick(ctx context.Context) (tick CronTick, err error) {
 }
 
 func updateCronScheduleTx(ctx context.Context, tx *storeTx, id, query string, args ...any) error {
-	res, err := tx.ExecContext(ctx, query, args...)
+	res, err := tx.execContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}

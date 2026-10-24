@@ -143,7 +143,7 @@ func (c *Console) ConsoleFreeze(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return TeamCreditFreeze{}, err
 		}
-		if _, err := holdCreditFreezeTx(ctx, tx, t.team, OperatorHoldPrefix+id, "", reason, actor.subject.ID, tx.now(ctx), actor); err != nil {
+		if _, err := holdCreditFreezeTx(ctx, tx, t.team, operatorHoldPrefix+id, "", reason, actor.subject.ID, tx.now(ctx), actor); err != nil {
 			return TeamCreditFreeze{}, err
 		}
 		return teamCreditFreezeTx(ctx, tx, t.team)
@@ -280,7 +280,7 @@ func (c *Console) ConsoleApproveWaitlist(ctx context.Context, a capability.Autho
 			return nil, err
 		}
 		if oldest > 0 {
-			rows, err := tx.QueryContext(ctx, `SELECT id FROM accounts WHERE waitlisted_at<>0 ORDER BY waitlisted_at,id LIMIT ?`, oldest)
+			rows, err := tx.queryContext(ctx, `SELECT id FROM accounts WHERE waitlisted_at<>0 ORDER BY waitlisted_at,id LIMIT ?`, oldest)
 			if err != nil {
 				return nil, err
 			}
@@ -311,7 +311,7 @@ func (c *Console) ConsoleApproveWaitlist(ctx context.Context, a capability.Autho
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?)`, name, body); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?)`, name, body); err != nil {
 			return nil, err
 		}
 		return out, nil

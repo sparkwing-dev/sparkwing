@@ -280,14 +280,14 @@ func TestDaemon_BindsAPrivateSocket(t *testing.T) {
 		t.Fatal("daemon never became ready")
 	}
 
-	info, err := os.Lstat(d.SocketPath())
+	info, err := os.Lstat(d.layout.sock)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("socket mode %#o, want 0600", perm)
 	}
-	dirInfo, err := os.Lstat(filepath.Dir(d.SocketPath()))
+	dirInfo, err := os.Lstat(filepath.Dir(d.layout.sock))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestDaemon_NeverBindsInAnExposedDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Dir(d.SocketPath())
+	dir := filepath.Dir(d.layout.sock)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestDaemon_NeverBindsInAnExposedDirectory(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_ = ln.Close()
-		_ = os.RemoveAll(filepath.Dir(d.SocketPath()))
+		_ = os.RemoveAll(filepath.Dir(d.layout.sock))
 	})
 	if filepath.Dir(ln.Addr().String()) == dir || ValidateSocketDir(ln.Addr().String()) != nil {
 		t.Fatalf("daemon served %s out of the world-writable directory %s", ln.Addr(), dir)

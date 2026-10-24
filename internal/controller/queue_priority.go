@@ -9,8 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// QueuePriorityWriter rechecks tenant administration and commits an idempotent queue rank.
-type QueuePriorityWriter interface {
+// queuePriorityWriter rechecks tenant administration and commits an idempotent queue rank.
+type queuePriorityWriter interface {
 	Team() store.Team
 	SetAuthorizedGroupPriority(context.Context, capability.Authorized, string, controllerwire.QueuePriorityWrite) (controllerwire.QueuePriorityResult, error)
 }
@@ -32,7 +32,7 @@ func (s *Server) handleQueuePriority(w http.ResponseWriter, r *http.Request, a c
 		return err
 	}
 	input.IdempotencyKey = key
-	writer, err := tenantPort[QueuePriorityWriter](r.Context(), s, store.Team(a.Target.Team))
+	writer, err := tenantPort[queuePriorityWriter](r.Context(), s, store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}

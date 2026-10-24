@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
@@ -255,7 +256,7 @@ func (s *Server) metricsServer() *http.Server {
 	}
 	metricsMux := newRegisteredMux()
 	s.registerControllerEndpoints(metricsMux, []controllerwire.Endpoint{metricsEndpoint()})
-	metricsMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.handleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		routepolicy.WriteRouteMiss(w, routepolicy.AllowedRouteMethods(metricsMux.ServeMux, r, routeProbeMethods))
 	})
 	return &http.Server{

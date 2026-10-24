@@ -134,7 +134,7 @@ func addUsageTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef
 	if wall > math.MaxInt64-int64(u.Wall) {
 		return errors.New("node wall time overflow")
 	}
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.execContext(ctx, `
 UPDATE nodes
    SET cpu_nanos = cpu_nanos + ?,
        process_wall_nanos = process_wall_nanos + ?,

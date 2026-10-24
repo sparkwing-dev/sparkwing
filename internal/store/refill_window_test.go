@@ -16,9 +16,9 @@ func TestLateBoundRefillOutcomesKeepTheirSpendingWindows(t *testing.T) {
 		month   int64
 		limit   string
 	}{
-		{"day", 25 * time.Hour, false, 0, 0, RefillLimitStandingDaily},
-		{"week", 8 * refillDay, true, 1_000, 0, RefillLimitTeamWeekly},
-		{"month", 31 * refillDay, true, 0, 1_000, RefillLimitTeamMonthly},
+		{"day", 25 * time.Hour, false, 0, 0, refillLimitStandingDaily},
+		{"week", 8 * refillDay, true, 1_000, 0, refillLimitTeamWeekly},
+		{"month", 31 * refillDay, true, 0, 1_000, refillLimitTeamMonthly},
 	} {
 		for _, outcome := range []string{"granted", "refused", "refunded", "declined"} {
 			t.Run(window.name+"/"+outcome, func(t *testing.T) {
@@ -59,7 +59,7 @@ func TestLateBoundRefillOutcomesKeepTheirSpendingWindows(t *testing.T) {
 				}
 				if outcome == "refunded" {
 					refund := providerPaymentEvent(now, capability.PaymentRefund)
-					refund.PaymentID, refund.ObjectID, refund.Status = "pi_late", "re_late", CardRefundSucceeded
+					refund.PaymentID, refund.ObjectID, refund.Status = "pi_late", "re_late", cardRefundSucceeded
 					refund.AmountMinor = 1_000
 					if _, err := s.settlePaymentFacts(t.Context(), refund); err != nil {
 						t.Fatal(err)
@@ -119,7 +119,7 @@ func TestLatePaidRefillReplacesItsEarlierFailureWindow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 || st.Refill.Limit != RefillLimitTeamMonthly {
+			if st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 || st.Refill.Limit != refillLimitTeamMonthly {
 				t.Fatalf("late paid outcome retained its earlier failure window: %+v", st.Refill)
 			}
 			if next := dueRefillsFor(t, s, "a"); len(next) != 0 {

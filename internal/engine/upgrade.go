@@ -248,12 +248,12 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk engineid
 			if err := json.Unmarshal(raw, &deps); err != nil {
 				return err
 			}
-			if _, ok := deps[TypeScriptPackage]; ok {
+			if _, ok := deps[typeScriptPackage]; ok {
 				value, err := json.Marshal(strings.TrimPrefix(version, "v"))
 				if err != nil {
 					return err
 				}
-				deps[TypeScriptPackage] = value
+				deps[typeScriptPackage] = value
 				updated, err := json.Marshal(deps)
 				if err != nil {
 					return err
@@ -518,7 +518,7 @@ func (r *Resolver) PrepareRunnerUpdate(ctx context.Context, currentVersion strin
 	if err != nil {
 		return update, &apierr.Error{Code: apierr.Unavailable, Message: fmt.Sprintf("Runner update to %s failed: %v", version, err), Hint: runnerHint}
 	}
-	if _, err := r.StoreVerified(ctx, identity.Pin, update.Release); err != nil {
+	if _, err := r.storeVerified(ctx, identity.Pin, update.Release); err != nil {
 		return update, err
 	}
 	return update, nil

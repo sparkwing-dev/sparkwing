@@ -83,7 +83,7 @@ func TestPlanInsertionLimitsAreAtomicProperty(t *testing.T) {
 		if len(snapshot.Nodes) != count || snapshot.Run.Spec == nil {
 			return false
 		}
-		if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalNodesPerRun: 1}); err != nil {
+		if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{computeLimitGlobalNodesPerRun: 1}); err != nil {
 			t.Fatal(err)
 		}
 		replay, err := tenant.AcceptPlan(t.Context(), request)
@@ -97,20 +97,20 @@ func TestPlanInsertionLimitsAreAtomicProperty(t *testing.T) {
 func TestPlanInsertionGlobalLimitAndReplay(t *testing.T) {
 	tenant, request, _ := planFixture(t, runspec.DispatchHost)
 	request = planWithJobs(t, tenant, request, 3)
-	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalNodesPerRun: 2}); err != nil {
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{computeLimitGlobalNodesPerRun: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.AcceptPlan(t.Context(), request); !errors.Is(err, ErrComputeLimit) {
 		t.Fatalf("oversized plan: %v", err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "nodes", 0)
-	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalNodesPerRun: 3}); err != nil {
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{computeLimitGlobalNodesPerRun: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalNodesPerRun: 1}); err != nil {
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{computeLimitGlobalNodesPerRun: 1}); err != nil {
 		t.Fatal(err)
 	}
 	replay, err := tenant.AcceptPlan(t.Context(), request)
@@ -123,7 +123,7 @@ func TestPlanInsertionGlobalLimitAndReplay(t *testing.T) {
 func TestExpansionInsertionLimitRollsBackBatch(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
 	request.Body = []byte(`{"jobs":[{"id":"one","steps":[{"id":"step"}],"groups":["group"],"deps":["job"]},{"id":"two","steps":[{"id":"step"}],"groups":["group"],"deps":["job"]}]}`)
-	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalNodesPerRun: 2}); err != nil {
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{computeLimitGlobalNodesPerRun: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.AcceptExpansion(t.Context(), request); !errors.Is(err, ErrComputeLimit) {
@@ -134,13 +134,13 @@ func TestExpansionInsertionLimitRollsBackBatch(t *testing.T) {
 	if err != nil || source.Expansion != runstate.ExpansionExpected {
 		t.Fatalf("refused expansion changed source: %+v %v", source, err)
 	}
-	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalNodesPerRun: 3}); err != nil {
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{computeLimitGlobalNodesPerRun: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalNodesPerRun: 1}); err != nil {
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{computeLimitGlobalNodesPerRun: 1}); err != nil {
 		t.Fatal(err)
 	}
 	replay, err := tenant.AcceptExpansion(t.Context(), request)
@@ -180,7 +180,7 @@ func TestConcurrentPlanAcceptanceCannotExceedInsertionLimit(t *testing.T) {
 	tenant, request, _ := planFixture(t, runspec.DispatchHost)
 	request = planWithJobs(t, tenant, request, 3)
 	for _, cap := range []int64{2, 3} {
-		if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalNodesPerRun: cap}); err != nil {
+		if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{computeLimitGlobalNodesPerRun: cap}); err != nil {
 			t.Fatal(err)
 		}
 		results := make(chan error, 8)

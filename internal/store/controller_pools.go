@@ -36,7 +36,7 @@ func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[stri
 		return nil, nil, err
 	}
 	now := tx.now(ctx)
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND bind_kind='none' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY subject_id,prefix`, t.team, now.UnixNano(), now.UnixNano())
+	rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND bind_kind='none' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY subject_id,prefix`, t.team, now.UnixNano(), now.UnixNano())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -74,7 +74,7 @@ func readPoolRulesTx(ctx context.Context, tx *storeTx, team Team, id string) ([]
 		query += ` AND (id=? OR substr(id,1,?)=?)`
 		args = append(args, id, len(id)+1, id+".")
 	}
-	rows, err := tx.QueryContext(ctx, query+` ORDER BY id`, args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func (t *Tenant) WritePoolAccess(ctx context.Context, actor runstate.Actor, id s
 			return true, nil
 		}
 		for _, rule := range desired {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO pool_access_rules(team,id,pool,repo_key,branch,source,route,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, t.team, rule.ID, rule.Pool, rule.RepositoryKey, rule.Branch, rule.Source, rule.Route, p.Capability.Subject.ID, tx.now(ctx).UnixNano()); err != nil {
+			if _, err := tx.execContext(ctx, `INSERT INTO pool_access_rules(team,id,pool,repo_key,branch,source,route,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, t.team, rule.ID, rule.Pool, rule.RepositoryKey, rule.Branch, rule.Source, rule.Route, p.Capability.Subject.ID, tx.now(ctx).UnixNano()); err != nil {
 				return false, err
 			}
 		}
@@ -151,7 +151,7 @@ func (t *Tenant) DeletePoolAccess(ctx context.Context, actor runstate.Actor, poo
 		if _, err := checkTeamAdministrationTx(ctx, tx, t.team, actor); err != nil {
 			return false, err
 		}
-		result, err := tx.ExecContext(ctx, `DELETE FROM pool_access_rules WHERE team=? AND pool=? AND (id=? OR substr(id,1,?)=?)`, t.team, pool, id, len(id)+1, id+".")
+		result, err := tx.execContext(ctx, `DELETE FROM pool_access_rules WHERE team=? AND pool=? AND (id=? OR substr(id,1,?)=?)`, t.team, pool, id, len(id)+1, id+".")
 		if err != nil {
 			return false, err
 		}

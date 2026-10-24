@@ -15,7 +15,7 @@ import (
 )
 
 func (s *EngineController) handleSnapshot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	snapshot, err := s.Snapshot(r.Context(), a)
+	snapshot, err := s.snapshot(r.Context(), a)
 	if err != nil {
 		return err
 	}
@@ -23,9 +23,9 @@ func (s *EngineController) handleSnapshot(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
-// Snapshot takes one committed read and its shared scheduling projection. Empty
+// snapshot takes one committed read and its shared scheduling projection. Empty
 // generators survive, and no separate read can mix job state from another instant.
-func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error) {
+func (s *EngineController) snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error) {
 	tenant, err := s.runTransactions(ctx, authorized.Target.Team)
 	if err != nil {
 		return controllerwire.ScheduleSnapshot{}, err

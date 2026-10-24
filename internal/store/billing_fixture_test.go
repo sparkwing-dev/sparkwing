@@ -19,7 +19,7 @@ func (t *Tenant) TestOnlyOpenCreditCheckout(ctx context.Context, amountMicro int
 // TestOnlyAttachCreditCheckout binds fixture settlement facts.
 func (t *Tenant) TestOnlyAttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET session_id=?,expires_at=? WHERE team=? AND id=? AND session_id=id", sessionID, expiresAt.UnixNano(), t.team, id)
+		result, err := tx.execContext(ctx, "UPDATE credit_checkouts SET session_id=?,expires_at=? WHERE team=? AND id=? AND session_id=id", sessionID, expiresAt.UnixNano(), t.team, id)
 		if err != nil {
 			return err
 		}

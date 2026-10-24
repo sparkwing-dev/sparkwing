@@ -122,14 +122,14 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT CASE WHEN created_subject_kind='account' THEN created_principal ELSE '' END FROM runs WHERE team=? AND id=?),'')`, c.Team, c.Binding.RunID).Scan(&requester); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,requester_account) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Team, b.ReservationID, c.Prefix, c.Binding.RunID, c.Binding.NodeID, generation, b.PayerTeam, boolInt(b.Metered), b.ExecutorClass, b.Start, c.Unit, b.Unit, now, requester)
+	_, err = tx.execContext(ctx, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,requester_account) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Team, b.ReservationID, c.Prefix, c.Binding.RunID, c.Binding.NodeID, generation, b.PayerTeam, boolInt(b.Metered), b.ExecutorClass, b.Start, c.Unit, b.Unit, now, requester)
 	if err != nil {
 		return err
 	}
 	if b.Metered {
 		if err := l.insertCharge(ctx, CreditCharge{
 			ID: billingID("reservation", Team(c.Team), b.ReservationID, ""), Team: Team(c.Team), RunID: c.Binding.RunID,
-			NodeID: c.Binding.NodeID, TokenPrefix: c.Prefix, Principal: c.Subject.ID, Kind: CreditChargeReservation,
+			NodeID: c.Binding.NodeID, TokenPrefix: c.Prefix, Principal: c.Subject.ID, Kind: creditChargeReservation,
 			Seconds: reserveSeconds, AmountMicro: amount, CPUClassCores: price.Cores, RateMicroPerSecond: price.MicroPerSecond,
 			ChargedAt: time.Unix(0, now),
 		}); err != nil {
@@ -178,7 +178,7 @@ func startBillableIntervalTx(ctx context.Context, tx *storeTx, team Team, reserv
 	if overlap != 0 {
 		return authorityError(apierr.Conflict, "compute intervals overlap")
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO billable_intervals(team,id,run_id,node_id,attempt,generation,capability_prefix,reservation_id,payer_team,metered,executor_class,unit_kind,billing_unit,billing_start,started_at,charged_through) VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)`, team, id, a.run, a.node, attempt, a.generation, a.prefix, reservation, a.provenance.PayerTeam, a.provenance.ExecutorClass, a.unit, a.provenance.Unit, a.provenance.Start, at.UnixNano(), at.UnixNano())
+	_, err = tx.execContext(ctx, `INSERT INTO billable_intervals(team,id,run_id,node_id,attempt,generation,capability_prefix,reservation_id,payer_team,metered,executor_class,unit_kind,billing_unit,billing_start,started_at,charged_through) VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)`, team, id, a.run, a.node, attempt, a.generation, a.prefix, reservation, a.provenance.PayerTeam, a.provenance.ExecutorClass, a.unit, a.provenance.Unit, a.provenance.Start, at.UnixNano(), at.UnixNano())
 	return err
 }
 
@@ -211,7 +211,7 @@ func finishBillableIntervalTx(ctx context.Context, tx *storeTx, team Team, reser
 	if at.UnixNano() < charged {
 		return authorityError(apierr.Conflict, "compute finish precedes its charged checkpoint")
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE billable_intervals SET finished_at=? WHERE team=? AND reservation_id=? AND id=?", at.UnixNano(), team, reservation, id)
+	_, err = tx.execContext(ctx, "UPDATE billable_intervals SET finished_at=? WHERE team=? AND reservation_id=? AND id=?", at.UnixNano(), team, reservation, id)
 	return err
 }
 
@@ -250,7 +250,7 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 	if !final {
 		return result, nil
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE billing_awards SET settled_at=? WHERE team=? AND reservation_id=? AND settled_at IS NULL", tx.now(ctx).UnixNano(), team, reservation)
+	_, err = tx.execContext(ctx, "UPDATE billing_awards SET settled_at=? WHERE team=? AND reservation_id=? AND settled_at IS NULL", tx.now(ctx).UnixNano(), team, reservation)
 	return result, err
 }
 
@@ -290,7 +290,7 @@ func renewBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservatio
 	}
 	return l.insertCharge(ctx, CreditCharge{
 		ID: billingID("slice", team, reservation, through.UTC().Format(time.RFC3339Nano)), Team: team, RunID: a.run,
-		NodeID: a.node, TokenPrefix: a.prefix, Kind: CreditChargeSlice, Seconds: ahead, AmountMicro: want - paid,
+		NodeID: a.node, TokenPrefix: a.prefix, Kind: creditChargeSlice, Seconds: ahead, AmountMicro: want - paid,
 		CPUClassCores: class, RateMicroPerSecond: rate, ChargedAt: tx.now(ctx),
 	})
 }
@@ -303,7 +303,7 @@ func validateBillingCalculation(a billingAward, intervals []capability.BillableI
 }
 
 func readBillingIntervalsTx(ctx context.Context, tx *storeTx, a billingAward, through time.Time, checkpoint bool) ([]capability.BillableInterval, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT capability_prefix,billing_unit,started_at,finished_at,charged_through FROM billable_intervals WHERE team=? AND reservation_id=? ORDER BY started_at,id", a.team, a.provenance.ReservationID)
+	rows, err := tx.queryContext(ctx, "SELECT capability_prefix,billing_unit,started_at,finished_at,charged_through FROM billable_intervals WHERE team=? AND reservation_id=? ORDER BY started_at,id", a.team, a.provenance.ReservationID)
 	if err != nil {
 		return nil, err
 	}
@@ -339,9 +339,9 @@ func billingIntervalsTx(ctx context.Context, tx *storeTx, a billingAward, throug
 		return nil, err
 	}
 	if final {
-		_, err = tx.ExecContext(ctx, "UPDATE billable_intervals SET finished_at=COALESCE(finished_at,?),charged_through=COALESCE(finished_at,?) WHERE team=? AND reservation_id=?", through.UnixNano(), through.UnixNano(), a.team, a.provenance.ReservationID)
+		_, err = tx.execContext(ctx, "UPDATE billable_intervals SET finished_at=COALESCE(finished_at,?),charged_through=COALESCE(finished_at,?) WHERE team=? AND reservation_id=?", through.UnixNano(), through.UnixNano(), a.team, a.provenance.ReservationID)
 	} else {
-		_, err = tx.ExecContext(ctx, "UPDATE billable_intervals SET charged_through=COALESCE(finished_at,?) WHERE team=? AND reservation_id=?", through.UnixNano(), a.team, a.provenance.ReservationID)
+		_, err = tx.execContext(ctx, "UPDATE billable_intervals SET charged_through=COALESCE(finished_at,?) WHERE team=? AND reservation_id=?", through.UnixNano(), a.team, a.provenance.ReservationID)
 	}
 	return intervals, err
 }
@@ -381,9 +381,9 @@ func settleBillingChargesTx(ctx context.Context, l *ledgerTx, a billingAward, re
 		id = billingID("checkpoint", a.team, a.provenance.ReservationID, through.UTC().Format(time.RFC3339Nano))
 	}
 	chargedAt := l.now(ctx)
-	kind := CreditChargeUsage
+	kind := creditChargeUsage
 	if delta < 0 {
-		kind, chargedAt = CreditChargeRefund, time.Unix(0, a.awarded)
+		kind, chargedAt = creditChargeRefund, time.Unix(0, a.awarded)
 	}
 	return l.insertCharge(ctx, CreditCharge{
 		ID: id, Team: a.team, RunID: a.run, NodeID: a.node, TokenPrefix: a.prefix, Kind: kind,

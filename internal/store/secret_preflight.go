@@ -14,11 +14,11 @@ import (
 // it. It is read through the run's events, which only the team reads.
 const eventKindSecretPreflightRefused = "secret_preflight_refused"
 
-// SecretPreflightError refuses a plan that declares a required secret its run
+// secretPreflightError refuses a plan that declares a required secret its run
 // cannot read. Its text names only those declared secrets and where a team
 // member finds why, because it is answered to the planning claim; the reason
-// and owners of each are in [SecretPreflightError.Detail].
-type SecretPreflightError struct {
+// and owners of each are in [secretPreflightError.detail].
+type secretPreflightError struct {
 	RunID      string
 	Pipeline   string
 	problems   []secretProblem
@@ -35,9 +35,9 @@ type secretProblem struct {
 	OtherPipelines []string
 }
 
-func (e *SecretPreflightError) Unwrap() error { return authorityError(apierr.PlanInvalid, e.Error()) }
+func (e *secretPreflightError) Unwrap() error { return authorityError(apierr.PlanInvalid, e.Error()) }
 
-func (e *SecretPreflightError) Error() string {
+func (e *secretPreflightError) Error() string {
 	names := make([]string, len(e.problems))
 	for i, p := range e.problems {
 		names[i] = p.Name
@@ -48,9 +48,9 @@ func (e *SecretPreflightError) Error() string {
 		e.Pipeline, len(names), plural(len(names), "secret", "secrets"), strings.Join(names, ", "), e.RunID)
 }
 
-// Detail is the refusal for the team: each secret, which scope it is missing
+// detail is the refusal for the team: each secret, which scope it is missing
 // from, and the command that fixes it.
-func (e *SecretPreflightError) Detail() string {
+func (e *secretPreflightError) detail() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "pipeline %q did not start: it declares %d required %s this run cannot read.",
 		e.Pipeline, len(e.problems), plural(len(e.problems), "secret", "secrets"))
@@ -81,7 +81,7 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-func (s *Store) recordSecretPreflight(ctx context.Context, team Team, request PlanAcceptance, refused *SecretPreflightError) error {
+func (s *Store) recordSecretPreflight(ctx context.Context, team Team, request PlanAcceptance, refused *secretPreflightError) error {
 	return s.inTx(ctx, func(tx *storeTx) error {
 		if err := planAuthorityTx(ctx, tx, team, request); err != nil {
 			return err
@@ -93,7 +93,7 @@ func (s *Store) recordSecretPreflight(ctx context.Context, team Team, request Pl
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE team=? AND run_id=? AND node_id=? AND kind=?`, team, refused.RunID, PlanNodeID, eventKindSecretPreflightRefused).Scan(&existing); err != nil || existing != 0 {
 			return err
 		}
-		if _, err := appendEventTx(ctx, tx, team, refused.RunID, PlanNodeID, eventKindSecretPreflightRefused, map[string]string{"message": refused.Detail()}, tx.now(ctx)); err != nil {
+		if _, err := appendEventTx(ctx, tx, team, refused.RunID, PlanNodeID, eventKindSecretPreflightRefused, map[string]string{"message": refused.detail()}, tx.now(ctx)); err != nil {
 			return err
 		}
 		return planAuthorityTx(ctx, tx, team, request)
@@ -136,7 +136,7 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	for _, name := range required {
 		args = append(args, name)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT name, pipeline, shared FROM secrets
+	rows, err := tx.queryContext(ctx, `SELECT name, pipeline, shared FROM secrets
  WHERE team = ? AND name IN (?`+strings.Repeat(", ?", len(required)-1)+`)
  ORDER BY name, pipeline`, args...)
 	if err != nil {
@@ -165,7 +165,7 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	if pipeline == "" {
 		pipeline = run.Request.Provenance.Pipeline()
 	}
-	refused := &SecretPreflightError{RunID: runID, Pipeline: pipeline, sharedOnly: selection.scope == secretSharedOnly}
+	refused := &secretPreflightError{RunID: runID, Pipeline: pipeline, sharedOnly: selection.scope == secretSharedOnly}
 	for _, name := range required {
 		if readable[name] {
 			continue

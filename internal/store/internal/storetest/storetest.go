@@ -20,16 +20,16 @@ import (
 )
 
 const (
-	// DialectEnv selects the dialect the suite runs against; "postgres"
+	// dialectEnv selects the dialect the suite runs against; "postgres"
 	// is the only value that changes anything.
-	DialectEnv = "SPARKWING_TEST_STORE"
+	dialectEnv = "SPARKWING_TEST_STORE"
 	// URLEnv names the Postgres server that schema-scoped test stores
 	// are created on.
 	URLEnv = "SPARKWING_TEST_PG_URL"
 )
 
 func suiteRunsOnPostgres() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv(DialectEnv)), "postgres")
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(dialectEnv)), "postgres")
 }
 
 // Target is a store location that survives Close, so a test can open it
@@ -49,7 +49,7 @@ func New(t *testing.T) *Target {
 	}
 	dsn := os.Getenv(URLEnv)
 	if strings.TrimSpace(dsn) == "" {
-		t.Fatalf("%s=postgres requires %s to name a reachable Postgres", DialectEnv, URLEnv)
+		t.Fatalf("%s=postgres requires %s to name a reachable Postgres", dialectEnv, URLEnv)
 	}
 	return &Target{dialect: store.DialectPostgres, dsn: newSchema(t, dsn)}
 }
@@ -81,7 +81,7 @@ func PostgresURL(t *testing.T) string {
 	dsn := os.Getenv(URLEnv)
 	if strings.TrimSpace(dsn) == "" {
 		if suiteRunsOnPostgres() {
-			t.Fatalf("%s=postgres requires %s to name a reachable Postgres", DialectEnv, URLEnv)
+			t.Fatalf("%s=postgres requires %s to name a reachable Postgres", dialectEnv, URLEnv)
 		}
 		t.Skipf("%s not set; skipping Postgres test", URLEnv)
 	}

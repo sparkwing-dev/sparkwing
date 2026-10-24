@@ -39,7 +39,7 @@ func (s *EngineController) handleCancel(w http.ResponseWriter, r *http.Request, 
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
-	response, err := s.Cancel(r.Context(), a, body)
+	response, err := s.cancel(r.Context(), a, body)
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func (s *Server) handleRetry(engine *EngineController) func(http.ResponseWriter,
 			return err
 		}
 		response, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
-			return engine.Retry(ctx, a, body)
+			return engine.retry(ctx, a, body)
 		})
 		if err != nil {
 			return err

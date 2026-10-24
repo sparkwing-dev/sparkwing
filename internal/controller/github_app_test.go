@@ -744,7 +744,7 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := pushPayload(7, 701, "acme/widgets", headSHA)
-	if code, out := f.deliver("push", payload, ""); code != http.StatusTooManyRequests || computeLimitReason(out) != controller.ComputeLimitRefusedCode {
+	if code, out := f.deliver("push", payload, ""); code != http.StatusTooManyRequests || computeLimitReason(out) != "compute_limit" {
 		t.Fatalf("limited app webhook = %d %v, want compute-limit 429", code, out)
 	}
 	if got := f.triggers(olga.team); len(got) != 0 {

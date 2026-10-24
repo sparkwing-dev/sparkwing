@@ -72,7 +72,7 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 	slices.Sort(keys)
 	keys = slices.Compact(keys)
 	lockKeys := slices.Clone(keys)
-	rows, err := tx.QueryContext(ctx, `SELECT key FROM concurrency_holders WHERE team=? AND run_id=? AND node_id=? UNION SELECT key FROM concurrency_waiters WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID, t.team, binding.RunID, binding.NodeID)
+	rows, err := tx.queryContext(ctx, `SELECT key FROM concurrency_holders WHERE team=? AND run_id=? AND node_id=? UNION SELECT key FROM concurrency_waiters WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID, t.team, binding.RunID, binding.NodeID)
 	if err != nil {
 		return runstate.AcquireSlotResponse{}, err
 	}
@@ -141,11 +141,11 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		}
 		arrival = max(now.UnixNano(), latest.Int64+1)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO admission_work(team,run_id,node_id,arrived_at,lease_expires_at,generation,holder) VALUES(?,?,?,?,?,?,?) ON CONFLICT(team,run_id,node_id) DO UPDATE SET arrived_at=excluded.arrived_at,lease_expires_at=excluded.lease_expires_at,granted=0,generation=excluded.generation,holder=excluded.holder`, t.team, binding.RunID, binding.NodeID, arrival, expires, binding.Generation, actor.Holder); err != nil {
+	if _, err := tx.execContext(ctx, `INSERT INTO admission_work(team,run_id,node_id,arrived_at,lease_expires_at,generation,holder) VALUES(?,?,?,?,?,?,?) ON CONFLICT(team,run_id,node_id) DO UPDATE SET arrived_at=excluded.arrived_at,lease_expires_at=excluded.lease_expires_at,granted=0,generation=excluded.generation,holder=excluded.holder`, t.team, binding.RunID, binding.NodeID, arrival, expires, binding.Generation, actor.Holder); err != nil {
 		return runstate.AcquireSlotResponse{}, err
 	}
 	for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
-		rows, err := tx.QueryContext(ctx, `SELECT key FROM `+table+` WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID)
+		rows, err := tx.queryContext(ctx, `SELECT key FROM `+table+` WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID)
 		if err != nil {
 			return runstate.AcquireSlotResponse{}, err
 		}
@@ -163,14 +163,14 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 			return runstate.AcquireSlotResponse{}, err
 		}
 		for _, k := range obsolete {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE team=? AND run_id=? AND node_id=? AND key=?`, t.team, binding.RunID, binding.NodeID, k); err != nil {
+			if _, err := tx.execContext(ctx, `DELETE FROM `+table+` WHERE team=? AND run_id=? AND node_id=? AND key=?`, t.team, binding.RunID, binding.NodeID, k); err != nil {
 				return runstate.AcquireSlotResponse{}, err
 			}
 		}
 	}
 	// Trial policy effects commit only if every group grants. A wait retains no
 	// earlier group, and cancel_others cannot preempt before a later group waits.
-	if _, err := tx.ExecContext(ctx, `SAVEPOINT admission_set`); err != nil {
+	if _, err := tx.execContext(ctx, `SAVEPOINT admission_set`); err != nil {
 		return runstate.AcquireSlotResponse{}, err
 	}
 	result := runstate.AcquireSlotResponse{Kind: runstate.AcquireGranted, HolderID: id, LeaseExpiresAt: time.Unix(0, expires)}
@@ -189,11 +189,11 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		}
 	}
 	if result.Kind != runstate.AcquireGranted && result.Kind != runstate.AcquireCancellingOthers {
-		if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT admission_set`); err != nil {
+		if _, err := tx.execContext(ctx, `ROLLBACK TO SAVEPOINT admission_set`); err != nil {
 			return runstate.AcquireSlotResponse{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `RELEASE SAVEPOINT admission_set`); err != nil {
+	if _, err := tx.execContext(ctx, `RELEASE SAVEPOINT admission_set`); err != nil {
 		return runstate.AcquireSlotResponse{}, err
 	}
 	if result.Kind == runstate.AcquireQueued {
@@ -202,18 +202,18 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		}
 		for _, key := range keys {
 			group := declarations[key]
-			if _, err := tx.ExecContext(ctx, `INSERT INTO concurrency_entries(team,key,capacity,last_write_run_id,last_write_node_id,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(team,key) DO NOTHING`, t.team, key, max(group.Capacity, 1), binding.RunID, binding.NodeID, now.UnixNano()); err != nil {
+			if _, err := tx.execContext(ctx, `INSERT INTO concurrency_entries(team,key,capacity,last_write_run_id,last_write_node_id,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(team,key) DO NOTHING`, t.team, key, max(group.Capacity, 1), binding.RunID, binding.NodeID, now.UnixNano()); err != nil {
 				return result, err
 			}
-			if err := txPark(ctx, tx, t.team, ConcurrencyWaiter{Key: key, RunID: binding.RunID, NodeID: binding.NodeID, HolderID: id, Policy: OnLimitQueue, Cost: max(group.Cost, 1), DeclaredCapacity: max(group.Capacity, 1)}, arrival, expires); err != nil {
+			if err := txPark(ctx, tx, t.team, ConcurrencyWaiter{Key: key, RunID: binding.RunID, NodeID: binding.NodeID, HolderID: id, Policy: onLimitQueue, Cost: max(group.Cost, 1), DeclaredCapacity: max(group.Capacity, 1)}, arrival, expires); err != nil {
 				return result, err
 			}
 		}
 	} else if result.Kind == runstate.AcquireGranted || result.Kind == runstate.AcquireCancellingOthers {
-		if _, err := tx.ExecContext(ctx, `UPDATE admission_work SET granted=1 WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE admission_work SET granted=1 WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID); err != nil {
 			return result, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE concurrency_holders SET queue_arrived_at=? WHERE team=? AND run_id=? AND node_id=? AND holder_id=?`, arrival, t.team, binding.RunID, binding.NodeID, id); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE concurrency_holders SET queue_arrived_at=? WHERE team=? AND run_id=? AND node_id=? AND holder_id=?`, arrival, t.team, binding.RunID, binding.NodeID, id); err != nil {
 			return result, err
 		}
 		result.Kind, result.HolderID, result.LeaseExpiresAt = runstate.AcquireGranted, id, time.Unix(0, expires)
@@ -286,7 +286,7 @@ func (t *Tenant) RelinquishStart(ctx context.Context, b runstate.CapacityBinding
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE nodes SET ready_at=?,queue_started_at=? WHERE team=? AND run_id=? AND node_id=?`, nullableTime(ready), nullableTime(queued), t.team, b.RunID, b.NodeID)
+		_, err = tx.execContext(ctx, `UPDATE nodes SET ready_at=?,queue_started_at=? WHERE team=? AND run_id=? AND node_id=?`, nullableTime(ready), nullableTime(queued), t.team, b.RunID, b.NodeID)
 		return err
 	})
 }
@@ -338,7 +338,7 @@ func admitReleaseTx(ctx context.Context, tx *storeTx, team Team, runID string, a
 
 func clearAdmissionLevelTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {
 	for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE team=? AND run_id=? AND node_id=?`, team, runID, nodeID); err != nil {
+		if _, err := tx.execContext(ctx, `DELETE FROM `+table+` WHERE team=? AND run_id=? AND node_id=?`, team, runID, nodeID); err != nil {
 			return err
 		}
 	}
@@ -349,7 +349,7 @@ func discardAdmissionLevelTx(ctx context.Context, tx *storeTx, team Team, runID,
 	if err := clearAdmissionLevelTx(ctx, tx, team, runID, nodeID); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `DELETE FROM admission_work WHERE team=? AND run_id=? AND node_id=?`, team, runID, nodeID)
+	_, err := tx.execContext(ctx, `DELETE FROM admission_work WHERE team=? AND run_id=? AND node_id=?`, team, runID, nodeID)
 	return err
 }
 

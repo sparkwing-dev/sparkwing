@@ -38,7 +38,7 @@ func creditClaimFixture(t *testing.T, size int, rates store.CreditRateTable) (*e
 func TestCredits_AnUnpricedSizeIsRefusedAtomically(t *testing.T) {
 	e, tenant, h, root := creditClaimFixture(t, 32, store.CreditRateTable{{Cores: 2, MicroPerSecond: 10000}, {Cores: 4, MicroPerSecond: 20000}})
 	w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job"}`, http.StatusConflict)
-	if !strings.Contains(w.Body.String(), UnpricedCPUClassCode) {
+	if !strings.Contains(w.Body.String(), unpricedCPUClassCode) {
 		t.Fatalf("unpriced refusal: %s", w.Body)
 	}
 	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})

@@ -16,7 +16,7 @@ func ServeAPI(ctx context.Context, listener net.Listener, s localhostwire.LocalH
 		return errors.New("wingd: controller HTTP requires a listener")
 	}
 	return ServeLocalHTTP(ctx, localAPIListener{listener}, s.API, func(ctx context.Context, connection net.Conn) context.Context {
-		return localhostwire.WithLocalPeer(ctx, connection.(APIConn).PeerIdentity())
+		return localhostwire.WithLocalPeer(ctx, connection.(authenticatedAPIConn).PeerIdentity())
 	}, nil)
 }
 
@@ -27,7 +27,7 @@ func (l localAPIListener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	peer, ok := connection.(APIConn)
+	peer, ok := connection.(authenticatedAPIConn)
 	if ok {
 		owner, ownerErr := controllerPeerIdentity()
 		if ownerErr != nil {
@@ -80,7 +80,7 @@ func (c *localHTTPConn) Close() error {
 }
 
 func (c *localHTTPConn) PeerIdentity() localhostwire.LocalPeerIdentity {
-	if peer, ok := c.Conn.(APIConn); ok {
+	if peer, ok := c.Conn.(authenticatedAPIConn); ok {
 		return peer.PeerIdentity()
 	}
 	return localhostwire.LocalPeerIdentity{}
@@ -118,7 +118,7 @@ func ServeLocalHTTP(ctx context.Context, listener net.Listener, handler http.Han
 	shutdown := make(chan error, 1)
 	go func() {
 		<-ctx.Done()
-		drain, cancel := context.WithTimeout(context.WithoutCancel(ctx), APIDrainWindow)
+		drain, cancel := context.WithTimeout(context.WithoutCancel(ctx), apiDrainWindow)
 		defer cancel()
 		shutdown <- server.Shutdown(drain)
 	}()

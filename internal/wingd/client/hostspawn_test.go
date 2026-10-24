@@ -37,7 +37,7 @@ func TestSpawnUnstartableHostNamesTheExecutable(t *testing.T) {
 	if !errors.Is(cerr, os.ErrNotExist) || !strings.Contains(cerr.Error(), missing) {
 		t.Fatalf("connect error = %v, want missing executable %s", cerr, missing)
 	}
-	if errors.Is(cerr, ErrDaemonUnreachable) {
+	if errors.Is(cerr, errDaemonUnreachable) {
 		t.Fatal("a bad host binary was reported as an unreachable daemon")
 	}
 }
@@ -63,8 +63,8 @@ func TestSpawn_HostThatExitsImmediatelyFailsFast(t *testing.T) {
 		Backoff:     10 * time.Millisecond,
 	})
 	elapsed := time.Since(start)
-	if !errors.Is(err, ErrDaemonHostFailed) {
-		t.Fatalf("error %v does not match ErrDaemonHostFailed", err)
+	if !errors.Is(err, errDaemonHostFailed) {
+		t.Fatalf("error %v does not match errDaemonHostFailed", err)
 	}
 	if elapsed > 5*time.Second {
 		t.Fatalf("waited %s for a host that died immediately; the socket budget is ~%s", elapsed, daemonStartupBudget(Options{}))
@@ -100,8 +100,8 @@ func TestTakeover_BrokenSuccessorFailsFastNamingTheBinary(t *testing.T) {
 		DialTimeout: 200 * time.Millisecond,
 		Backoff:     5 * time.Millisecond,
 	})
-	if !errors.Is(err, ErrDaemonHostFailed) {
-		t.Fatalf("error %v does not match ErrDaemonHostFailed", err)
+	if !errors.Is(err, errDaemonHostFailed) {
+		t.Fatalf("error %v does not match errDaemonHostFailed", err)
 	}
 	if errors.Is(err, errTakeoverExhausted) {
 		t.Fatal("a broken successor was reported as a version skew after burning the takeover budget")
@@ -204,8 +204,8 @@ func TestEnsureDaemon_NoTakeoverDaemonProtocolTooOldFails(t *testing.T) {
 		NoTakeover:  true,
 		DialTimeout: 200 * time.Millisecond,
 	})
-	if !errors.Is(err, ErrDaemonTooOld) {
-		t.Fatalf("error %v does not match ErrDaemonTooOld", err)
+	if !errors.Is(err, errDaemonTooOld) {
+		t.Fatalf("error %v does not match errDaemonTooOld", err)
 	}
 	if errors.Is(err, errTakeoverExhausted) {
 		t.Fatal("a client that never takes over reported an exhausted takeover budget")
@@ -229,16 +229,16 @@ func TestEnsureDaemon_NoTakeoverDaemonProtocolTooOldFails(t *testing.T) {
 
 func TestMinHostingRelease_TakesTheHigherOfBothBars(t *testing.T) {
 	got := minHostingRelease()
-	if semver.Compare(got, FirstHostingRelease) < 0 {
-		t.Errorf("minHostingRelease() = %s, below the first hosting-capable release %s", got, FirstHostingRelease)
+	if semver.Compare(got, firstHostingRelease) < 0 {
+		t.Errorf("minHostingRelease() = %s, below the first hosting-capable release %s", got, firstHostingRelease)
 	}
 	if floor, ok := wingwire.ReleasedProtocolFloors().MinVersionSpeaking(wingd.ProtocolMajor); ok {
 		if semver.Compare(got, floor) < 0 {
 			t.Errorf("minHostingRelease() = %s, below the protocol floor %s for major %d", got, floor, wingd.ProtocolMajor)
 		}
 	}
-	if !semver.IsValid(FirstHostingRelease) {
-		t.Errorf("FirstHostingRelease %q is not a valid semver; the advice would name a version that does not exist", FirstHostingRelease)
+	if !semver.IsValid(firstHostingRelease) {
+		t.Errorf("firstHostingRelease %q is not a valid semver; the advice would name a version that does not exist", firstHostingRelease)
 	}
 }
 
@@ -247,7 +247,7 @@ func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 		t.Skip("git not available; the release pipeline carries the same check")
 	}
 	root := repoRootForTest(t)
-	cmd := exec.Command("git", "tag", "--list", FirstHostingRelease)
+	cmd := exec.Command("git", "tag", "--list", firstHostingRelease)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -257,12 +257,12 @@ func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 		return
 	}
 	const marker = "internal/wingd/supervise/supervise.go"
-	probe := exec.Command("git", "cat-file", "-e", FirstHostingRelease+":"+marker)
+	probe := exec.Command("git", "cat-file", "-e", firstHostingRelease+":"+marker)
 	probe.Dir = root
 	if err := probe.Run(); err != nil {
-		t.Fatalf("FirstHostingRelease names %s, a released tag that does not contain %s -- that build cannot host a "+
+		t.Fatalf("firstHostingRelease names %s, a released tag that does not contain %s -- that build cannot host a "+
 			"daemon, so every error message naming it as the minimum sends operators to a release that will not help. "+
-			"Point the constant at the release that actually ships daemon hosting.", FirstHostingRelease, marker)
+			"Point the constant at the release that actually ships daemon hosting.", firstHostingRelease, marker)
 	}
 }
 
@@ -292,8 +292,8 @@ func TestEnsureDaemon_NoTakeoverNeverSelfExecs(t *testing.T) {
 		DialTimeout: 200 * time.Millisecond,
 		Backoff:     10 * time.Millisecond,
 	})
-	if !errors.Is(err, ErrNoDaemonHost) {
-		t.Fatalf("error %v does not match ErrNoDaemonHost; an unwired no-takeover client fell back to self-exec", err)
+	if !errors.Is(err, errNoDaemonHost) {
+		t.Fatalf("error %v does not match errNoDaemonHost; an unwired no-takeover client fell back to self-exec", err)
 	}
 }
 

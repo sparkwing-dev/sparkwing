@@ -85,7 +85,7 @@ func requireBlobMemoTx(ctx context.Context, tx *storeTx, a blobActor) error {
 
 func blobReadSetTx(ctx context.Context, tx *storeTx, a blobActor, digest blob.Digest) (blob.ReadSet, error) {
 	set := blob.ReadSet{Reader: a.authority.Attempt.Value}
-	rows, err := tx.QueryContext(ctx, `SELECT `+blobReadCandidateColumns+` FROM blob_records b WHERE b.team=? AND b.repo_key=? AND (b.expires_at IS NULL OR b.expires_at>? OR EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id)) AND (b.digest=? OR b.manifest_digest=? OR EXISTS(SELECT 1 FROM blob_members m WHERE m.team=b.team AND m.member_digest=? AND (m.manifest_digest=b.manifest_digest OR (b.kind='manifest' AND m.manifest_digest=b.digest))))`, a.capability.Team, a.authority.Repo, tx.now(ctx).UnixNano(), digest, digest, digest)
+	rows, err := tx.queryContext(ctx, `SELECT `+blobReadCandidateColumns+` FROM blob_records b WHERE b.team=? AND b.repo_key=? AND (b.expires_at IS NULL OR b.expires_at>? OR EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id)) AND (b.digest=? OR b.manifest_digest=? OR EXISTS(SELECT 1 FROM blob_members m WHERE m.team=b.team AND m.member_digest=? AND (m.manifest_digest=b.manifest_digest OR (b.kind='manifest' AND m.manifest_digest=b.digest))))`, a.capability.Team, a.authority.Repo, tx.now(ctx).UnixNano(), digest, digest, digest)
 	if err != nil {
 		return set, err
 	}
@@ -245,7 +245,7 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 }
 
 func blobDependenciesTx(ctx context.Context, tx *storeTx, team Team, run, node string) (map[string]bool, []nodeproto.PipelineReference, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT node_id,spec_json FROM nodes WHERE team=? AND run_id=?", team, run)
+	rows, err := tx.queryContext(ctx, "SELECT node_id,spec_json FROM nodes WHERE team=? AND run_id=?", team, run)
 	if err != nil {
 		return nil, nil, err
 	}

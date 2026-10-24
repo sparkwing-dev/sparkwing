@@ -101,7 +101,7 @@ func scheduleNext(row CronSchedule, now time.Time, minimum int64) (*time.Time, e
 }
 
 func (t *Tenant) scheduleRowsTx(ctx context.Context, tx *storeTx) ([]CronSchedule, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team=? ORDER BY repo_path,pipeline,schedule_name`+tx.forUpdate(), t.team)
+	rows, err := tx.queryContext(ctx, `SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team=? ORDER BY repo_path,pipeline,schedule_name`+tx.forUpdate(), t.team)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func (t *Tenant) resolveScheduleTx(ctx context.Context, tx *storeTx, selector st
 
 // ReplaceAuthorizedSchedules atomically publishes a tenant's complete repository declaration set.
 func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Authorized, body ScheduleRepoRequest) ([]string, []string, error) {
-	if a.Target.Team != string(t.team) || body.Mode != ScheduleReplace && body.Mode != ScheduleUpsert {
+	if a.Target.Team != string(t.team) || body.Mode != scheduleReplace && body.Mode != scheduleUpsert {
 		return nil, nil, ErrInvalidInput
 	}
 	remote, err := sourceurl.ValidateCloneURL(body.RepoURL)
@@ -192,7 +192,7 @@ func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Au
 		rows = append(rows, row)
 		requests = append(requests, request)
 	}
-	return t.replaceConsentedSchedules(ctx, &a, nil, remote, rows, requests, body.Mode == ScheduleReplace)
+	return t.replaceConsentedSchedules(ctx, &a, nil, remote, rows, requests, body.Mode == scheduleReplace)
 }
 
 // ReplaceAuthorizedLocalSchedules persists prepared checkout declarations and captured inputs together.
@@ -373,7 +373,7 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a *capability.Au
 						if err != nil {
 							return err
 						}
-						if _, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET consent_json=?,armed_by=? WHERE team=? AND id=?`, string(consent), p.Capability.Subject.ID, t.team, stored.ID); err != nil {
+						if _, err = tx.execContext(ctx, `UPDATE cron_schedules SET consent_json=?,armed_by=? WHERE team=? AND id=?`, string(consent), p.Capability.Subject.ID, t.team, stored.ID); err != nil {
 							return err
 						}
 					}
@@ -385,7 +385,7 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a *capability.Au
 					owned := ownsSchedule(app, repo, row)
 					if owned && !keep[row.ID] && row.Declared {
 						if replace {
-							if _, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET declared=0,updated_at=? WHERE team=? AND id=?`, tx.now(ctx).UnixNano(), t.team, row.ID); err != nil {
+							if _, err = tx.execContext(ctx, `UPDATE cron_schedules SET declared=0,updated_at=? WHERE team=? AND id=?`, tx.now(ctx).UnixNano(), t.team, row.ID); err != nil {
 								return err
 							}
 							withdrawn = append(withdrawn, row.Pipeline+"/"+row.Name)
@@ -464,7 +464,7 @@ func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Autho
 				return err
 			}
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET paused=?,updated_at=? WHERE team=? AND id=?`, boolToInt(paused), tx.now(ctx).UnixNano(), t.team, row.ID)
+		_, err := tx.execContext(ctx, `UPDATE cron_schedules SET paused=?,updated_at=? WHERE team=? AND id=?`, boolToInt(paused), tx.now(ctx).UnixNano(), t.team, row.ID)
 		return err
 	})
 }
@@ -514,13 +514,13 @@ func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Au
 			return err
 		}
 		if row.Override == nil {
-			_, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET override_cron=NULL,override_tz=NULL,override_overlap=NULL,override_catch_up_ns=NULL,override_args=NULL,override_base=NULL,override_set_at=NULL,next_due_at=?,updated_at=? WHERE team=? AND id=?`, nullNanos(next), tx.now(ctx).UnixNano(), t.team, row.ID)
+			_, err = tx.execContext(ctx, `UPDATE cron_schedules SET override_cron=NULL,override_tz=NULL,override_overlap=NULL,override_catch_up_ns=NULL,override_args=NULL,override_base=NULL,override_set_at=NULL,next_due_at=?,updated_at=? WHERE team=? AND id=?`, nullNanos(next), tx.now(ctx).UnixNano(), t.team, row.ID)
 			return err
 		}
 		if err = t.setCronOverrideTx(ctx, tx, row.ID, *row.Override, tx.now(ctx)); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE cron_schedules SET next_due_at=? WHERE team=? AND id=?`, nullNanos(next), t.team, row.ID)
+		_, err = tx.execContext(ctx, `UPDATE cron_schedules SET next_due_at=? WHERE team=? AND id=?`, nullNanos(next), t.team, row.ID)
 		return err
 	})
 }
@@ -532,10 +532,10 @@ func (t *Tenant) DeleteAuthorizedSchedule(ctx context.Context, a capability.Auth
 }
 
 func deleteScheduleTx(ctx context.Context, tx *storeTx, team Team, id string) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM cron_fires WHERE team=? AND schedule_id=?`, team, id); err != nil {
+	if _, err := tx.execContext(ctx, `DELETE FROM cron_fires WHERE team=? AND schedule_id=?`, team, id); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `DELETE FROM cron_schedules WHERE team=? AND id=?`, team, id)
+	_, err := tx.execContext(ctx, `DELETE FROM cron_schedules WHERE team=? AND id=?`, team, id)
 	return err
 }
 

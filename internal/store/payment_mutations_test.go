@@ -32,7 +32,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 				}
 			}
 			if kind == "queued_refund" {
-				if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "queued", PaymentIntent: event.PaymentID, Actionable: true}, now); err != nil {
+				if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), paymentWarning{WarningID: "queued", PaymentIntent: event.PaymentID, Actionable: true}, now); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -204,7 +204,7 @@ func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
 				return false
 			}
 		}
-		if err := tenant.TestOnlySaveCard(t.Context(), older, "provider", second.Add(2*time.Hour)); !errors.Is(err, ErrStaleCardSetup) {
+		if err := tenant.TestOnlySaveCard(t.Context(), older, "provider", second.Add(2*time.Hour)); !errors.Is(err, errStaleCardSetup) {
 			t.Logf("older completion accepted: %v", err)
 			return false
 		}
@@ -216,7 +216,7 @@ func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
 		}
 		unordered := newer
 		unordered.AddedAt = time.Time{}
-		if err := tenant.TestOnlySaveCard(t.Context(), unordered, "provider", first); !errors.Is(err, ErrStaleCardSetup) {
+		if err := tenant.TestOnlySaveCard(t.Context(), unordered, "provider", first); !errors.Is(err, errStaleCardSetup) {
 			t.Logf("old receipt bypassed setup order: %v", err)
 			return false
 		}

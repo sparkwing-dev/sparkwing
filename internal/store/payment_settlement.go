@@ -23,7 +23,7 @@ func (o *Operator) SetPaymentMode(ctx context.Context, mode capability.PaymentMo
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, data)
+		_, err = tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, data)
 		return err
 	})
 }
@@ -163,7 +163,7 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		return err
 	}
 	if checkout.payment == "" && event.PaymentID != "" {
-		if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET payment_id = ? WHERE team = ? AND id = ? AND payment_mode = ?", event.PaymentID, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+		if _, err := tx.execContext(ctx, "UPDATE credit_checkouts SET payment_id = ? WHERE team = ? AND id = ? AND payment_mode = ?", event.PaymentID, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 			return err
 		}
 	}
@@ -178,7 +178,7 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 	}
 	// A paid outcome replaces any earlier failed outcome and starts its spending windows. Later deliveries
 	// cannot change the protection facts or restart those windows.
-	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET three_d_secure = ?, liability_shift = ?, closed_at = ?
+	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET three_d_secure = ?, liability_shift = ?, closed_at = ?
 	    WHERE team = ? AND id = ? AND payment_mode = ? AND liability_shift IS NULL`, event.ThreeDS, boolInt(event.LiabilityShift), now.UnixNano(), string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
@@ -215,11 +215,11 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 	if err := l.insertGrant(ctx, grant); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?), failure = '', refill_blocked = 0 WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), id, now.UnixNano(), string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+	if _, err := tx.execContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?), failure = '', refill_blocked = 0 WHERE team = ? AND id = ? AND payment_mode = ?", now.UnixNano(), id, now.UnixNano(), string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
-	if checkout.kind == CheckoutKindCheckout {
-		if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0 WHERE team = ? AND refill_blocked = 1`, string(team)); err != nil {
+	if checkout.kind == checkoutKindCheckout {
+		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0 WHERE team = ? AND refill_blocked = 1`, string(team)); err != nil {
 			return err
 		}
 	}
@@ -230,22 +230,22 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 	default:
 		threeDS = "unknown"
 	}
-	return recordGrantEventTx(ctx, tx, grant, auditActor{system: auditPaymentProvider}, auditGrant{SessionID: digestAudit(event.CheckoutID), ThreeDS: threeDS, LiabilityShift: event.LiabilityShift, Refill: checkout.kind == CheckoutKindRefill})
+	return recordGrantEventTx(ctx, tx, grant, auditActor{system: auditPaymentProvider}, auditGrant{SessionID: digestAudit(event.CheckoutID), ThreeDS: threeDS, LiabilityShift: event.LiabilityShift, Refill: checkout.kind == checkoutKindRefill})
 }
 
 func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout) error {
 	team, now := checkout.result.Team, tx.now(ctx)
 	failure := ""
-	kind := BusinessEventCheckoutFailed
+	kind := businessEventCheckoutFailed
 	switch {
-	case checkout.kind == CheckoutKindRefill:
-		failure, kind = cmp.Or(event.DeclineCode, "payment_failed"), BusinessEventRefillFailed
+	case checkout.kind == checkoutKindRefill:
+		failure, kind = cmp.Or(event.DeclineCode, "payment_failed"), businessEventRefillFailed
 		checkout.result.RefillFailed = failure
 	case event.Kind == capability.PaymentCheckoutExpired:
-		kind = BusinessEventCheckoutExpired
+		kind = businessEventCheckoutExpired
 	}
 	// A successful Add funds supersedes failures from earlier refill reservations, including delayed outcomes.
-	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?,
+	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?,
 	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team)
 	      AND NOT EXISTS (SELECT 1 FROM credit_checkouts recovery WHERE recovery.team = credit_checkouts.team
 	        AND recovery.kind = 'checkout' AND recovery.paid_at > credit_checkouts.opened_at) THEN 1 ELSE 0 END
@@ -261,18 +261,18 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, refusal cardRefusal) error {
 	team, now := checkout.result.Team, tx.now(ctx)
 	checkout.result.Refused = refusal.reason
-	if _, err := tx.ExecContext(ctx, `UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?), failure = ?, warning_id=?,
+	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?), failure = ?, warning_id=?,
 	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team) THEN 1 ELSE 0 END
 	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), refusal.reason, refusal.warning, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
-	if checkout.kind == CheckoutKindRefill {
+	if checkout.kind == checkoutKindRefill {
 		checkout.result.RefillFailed = refusal.reason
 	}
 	if err := forgetTeamCardTx(ctx, tx, team, event.Fingerprint, refusal.reason, now); err != nil {
 		return err
 	}
-	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(checkout.result.CheckoutID), Operation: BusinessEventCardRefused}); err != nil {
+	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(checkout.result.CheckoutID), Operation: businessEventCardRefused}); err != nil {
 		return err
 	}
 	return queueCardRefundTx(ctx, tx, team, event.PaymentID, event.AmountMinor, refusal.reason, now)
@@ -291,7 +291,7 @@ func (o *Operator) DeploymentID(ctx context.Context) (string, error) {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_deployment',?) ON CONFLICT(key) DO NOTHING`, data); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_deployment',?) ON CONFLICT(key) DO NOTHING`, data); err != nil {
 			return err
 		}
 		var encoded []byte

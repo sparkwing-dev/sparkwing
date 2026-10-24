@@ -181,7 +181,7 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 	if err != nil {
 		return UnitRef{}, err
 	}
-	rows, err := tx.QueryContext(ctx, query, args...)
+	rows, err := tx.queryContext(ctx, query, args...)
 	if err != nil {
 		return UnitRef{}, err
 	}
@@ -305,7 +305,7 @@ func rankingHeldContextsTx(ctx context.Context, tx *storeTx, demand UnitDemand, 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, query, q.args...)
+	rows, err := tx.queryContext(ctx, query, q.args...)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +344,7 @@ func claimProofFactsTx(ctx context.Context, tx *storeTx, heads []claimHead, fact
 		if err != nil {
 			return nil, err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT term.label FROM `+q.array(input, "head")+` JOIN claim_requirement_terms term ON term.team=`+q.at("head.value", "Team")+` AND term.requirements=`+q.at("head.value", "Requirements"), q.args...)
+		rows, err := tx.queryContext(ctx, `SELECT DISTINCT term.label FROM `+q.array(input, "head")+` JOIN claim_requirement_terms term ON term.team=`+q.at("head.value", "Team")+` AND term.requirements=`+q.at("head.value", "Requirements"), q.args...)
 		if err != nil {
 			return nil, err
 		}

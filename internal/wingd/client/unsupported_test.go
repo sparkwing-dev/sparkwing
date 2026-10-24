@@ -92,8 +92,8 @@ func TestStopReportsADaemonThatRefusesTheDrain(t *testing.T) {
 	})
 
 	err := Stop(context.Background(), Options{Home: home, Version: fakeDaemonVersion, DialTimeout: 500 * time.Millisecond})
-	if !errors.Is(err, ErrDaemonLacksOperation) {
-		t.Fatalf("Stop error = %v, want ErrDaemonLacksOperation instead of waiting for a daemon that never drains", err)
+	if !errors.Is(err, errDaemonLacksOperation) {
+		t.Fatalf("Stop error = %v, want errDaemonLacksOperation instead of waiting for a daemon that never drains", err)
 	}
 }
 
@@ -118,8 +118,8 @@ func TestSetPriorityReportsAnOlderDaemonAndHowToReplaceIt(t *testing.T) {
 
 	cl := connectToFakeDaemon(t, home)
 	_, err := cl.SetPriority(context.Background(), "run-1", 3, "")
-	if !errors.Is(err, ErrDaemonLacksOperation) {
-		t.Fatalf("SetPriority error = %v, want ErrDaemonLacksOperation", err)
+	if !errors.Is(err, errDaemonLacksOperation) {
+		t.Fatalf("SetPriority error = %v, want errDaemonLacksOperation", err)
 	}
 	if !strings.Contains(err.Error(), fakeDaemonVersion) {
 		t.Errorf("error does not name the daemon version: %v", err)

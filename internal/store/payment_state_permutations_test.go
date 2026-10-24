@@ -11,7 +11,7 @@ import (
 
 func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 	for _, refill := range []bool{false, true} {
-		for _, outcome := range []string{CardRefundSucceeded, "failed", "canceled"} {
+		for _, outcome := range []string{cardRefundSucceeded, "failed", "canceled"} {
 			for _, order := range deliveryOrders("pay", "pending", "terminal", "warning") {
 				t.Run(fmt.Sprintf("refill=%t/%s/%s", refill, outcome, strings.Join(order, "-")), func(t *testing.T) {
 					s, tenant, now := providerPaymentFixture(t)
@@ -20,7 +20,7 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 						pay = providerRefillEvent(t, s, now, capability.PaymentCardPaid)
 					}
 					pending := providerPaymentEvent(now, capability.PaymentRefund)
-					pending.EventID, pending.Status, pending.AmountMinor = "refund-pending", CardRefundPending, pay.AmountMinor
+					pending.EventID, pending.Status, pending.AmountMinor = "refund-pending", cardRefundPending, pay.AmountMinor
 					terminal := pending
 					terminal.EventID, terminal.Status = "refund-terminal", outcome
 					warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
@@ -47,7 +47,7 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 							t.Fatalf("delayed duplicate %s: %v", name, err)
 						}
 					}
-					if outcome != CardRefundSucceeded {
+					if outcome != cardRefundSucceeded {
 						for range 2 {
 							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment-0", pending.ObjectID); err != nil {
 								t.Fatal(err)
@@ -58,7 +58,7 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 					if err := s.db.QueryRow(`SELECT status FROM payment_refunds WHERE payment_mode='test' AND kind='refund' AND refund_id=?`, pending.ObjectID).Scan(&status); err != nil || status != outcome {
 						t.Fatalf("refund status=%q, want terminal %q: %v", status, outcome, err)
 					}
-					assertPaymentStateFinancialResult(t, s, tenant, now, outcome != CardRefundSucceeded)
+					assertPaymentStateFinancialResult(t, s, tenant, now, outcome != cardRefundSucceeded)
 				})
 			}
 		}
@@ -66,12 +66,12 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 }
 
 func TestPaymentStateEveryRefundResponseDeliveryPermutation(t *testing.T) {
-	for _, outcome := range []string{CardRefundSucceeded, "failed", "canceled"} {
+	for _, outcome := range []string{cardRefundSucceeded, "failed", "canceled"} {
 		for _, order := range deliveryOrders("response", "pending", "terminal") {
 			t.Run(outcome+"/"+strings.Join(order, "-"), func(t *testing.T) {
 				s, tenant, now := queuedRefundFixture(t, true)
 				pending := providerPaymentEvent(now, capability.PaymentRefund)
-				pending.EventID, pending.ObjectID, pending.Status, pending.AmountMinor = "pending", "refund", CardRefundPending, 1_000
+				pending.EventID, pending.ObjectID, pending.Status, pending.AmountMinor = "pending", "refund", cardRefundPending, 1_000
 				terminal := pending
 				terminal.EventID, terminal.Status = "terminal", outcome
 				for _, name := range order {
@@ -99,7 +99,7 @@ func TestPaymentStateEveryRefundResponseDeliveryPermutation(t *testing.T) {
 				if err := s.db.QueryRow(`SELECT status FROM payment_refunds WHERE payment_mode='test' AND kind='refund' AND refund_id='refund'`).Scan(&status); err != nil || status != outcome {
 					t.Fatalf("response did not share terminal state: %q, want %q: %v", status, outcome, err)
 				}
-				assertPaymentStateFinancialResult(t, s, tenant, now, outcome != CardRefundSucceeded)
+				assertPaymentStateFinancialResult(t, s, tenant, now, outcome != cardRefundSucceeded)
 			})
 		}
 	}
@@ -217,7 +217,7 @@ func TestPaymentStateProviderModesKeepIndependentConsequences(t *testing.T) {
 			s, tenant, now := providerPaymentFixture(t)
 			paid := capability.PaymentEvent{EventID: "paid", CheckoutID: "provider-session", PaymentID: "payment", Currency: "usd", AmountMinor: 100, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid}
 			consequence := providerPaymentEvent(now, kind)
-			consequence.ObjectID, consequence.Status = "same-provider-object", CardRefundSucceeded
+			consequence.ObjectID, consequence.Status = "same-provider-object", cardRefundSucceeded
 			if kind == capability.PaymentDisputeClosed {
 				consequence.Status = "lost"
 			}

@@ -12,30 +12,30 @@ import (
 
 // Event size limits, named so a refusal says which one it hit.
 const (
-	StorageLimitEventBytes       = "event_bytes"
-	StorageLimitEventBytesPerRun = "event_bytes_per_run"
-	StorageLimitEventsPerRun     = "events_per_run"
+	storageLimitEventBytes       = "event_bytes"
+	storageLimitEventBytesPerRun = "event_bytes_per_run"
+	storageLimitEventsPerRun     = "events_per_run"
 )
 
-// MaxEventKindBytes bounds an event's kind. A kind names a category, so it
+// maxEventKindBytes bounds an event's kind. A kind names a category, so it
 // is short and drawn from [A-Za-z0-9_.:-].
-const MaxEventKindBytes = 128
+const maxEventKindBytes = 128
 
-// ErrInvalidEventKind is returned when an event's kind is empty, longer than
-// [MaxEventKindBytes], or holds a byte outside [A-Za-z0-9_.:-].
-var ErrInvalidEventKind = errors.New("invalid event kind")
+// errInvalidEventKind is returned when an event's kind is empty, longer than
+// [maxEventKindBytes], or holds a byte outside [A-Za-z0-9_.:-].
+var errInvalidEventKind = errors.New("invalid event kind")
 
-// DefaultEventLimits returns the shared default event caps.
-func DefaultEventLimits() EventLimits {
-	return EventLimits{MaxBytesPerEvent: limits.EventBytes, MaxBytesPerRun: limits.RunEventBytes, MaxEventsPerRun: int64(limits.MaxEvents)}
+// defaultEventLimits returns the shared default event caps.
+func defaultEventLimits() eventLimits {
+	return eventLimits{MaxBytesPerEvent: limits.EventBytes, MaxBytesPerRun: limits.RunEventBytes, MaxEventsPerRun: int64(limits.MaxEvents)}
 }
 
-// EventLimits caps what a run stores as events. An event's bytes are its
+// eventLimits caps what a run stores as events. An event's bytes are its
 // kind plus its payload. The caps hold whether or not a storage quota tier is
 // configured, because an unconfigured controller is exactly the one with
 // nothing else between a runner token and the database's disk. A value of
 // zero or less lifts that cap.
-type EventLimits struct {
+type eventLimits struct {
 	MaxBytesPerEvent int64
 	MaxBytesPerRun   int64
 	MaxEventsPerRun  int64
@@ -47,11 +47,11 @@ const (
 	metaKeyEventMaxEventsPerRun = "event_max_events_per_run"
 )
 
-// ValidateEventKind reports [ErrInvalidEventKind] unless kind is 1 to
-// [MaxEventKindBytes] bytes of [A-Za-z0-9_.:-].
-func ValidateEventKind(kind string) error {
-	if kind == "" || len(kind) > MaxEventKindBytes {
-		return fmt.Errorf("%w: length %d, want 1 to %d bytes", ErrInvalidEventKind, len(kind), MaxEventKindBytes)
+// validateEventKind reports [errInvalidEventKind] unless kind is 1 to
+// [maxEventKindBytes] bytes of [A-Za-z0-9_.:-].
+func validateEventKind(kind string) error {
+	if kind == "" || len(kind) > maxEventKindBytes {
+		return fmt.Errorf("%w: length %d, want 1 to %d bytes", errInvalidEventKind, len(kind), maxEventKindBytes)
 	}
 	for i := 0; i < len(kind); i++ {
 		c := kind[i]
@@ -59,7 +59,7 @@ func ValidateEventKind(kind string) error {
 		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9',
 			c == '_', c == '.', c == ':', c == '-':
 		default:
-			return fmt.Errorf("%w: byte %q at %d is outside [A-Za-z0-9_.:-]", ErrInvalidEventKind, c, i)
+			return fmt.Errorf("%w: byte %q at %d is outside [A-Za-z0-9_.:-]", errInvalidEventKind, c, i)
 		}
 	}
 	return nil
@@ -69,16 +69,16 @@ func eventBytes(kind string, payload []byte) int64 {
 	return int64(len(kind) + len(payload))
 }
 
-// EventLimits returns the caps in force, the defaults where the operator
+// eventLimits returns the caps in force, the defaults where the operator
 // set none.
-func (s *Store) EventLimits(ctx context.Context) (EventLimits, error) {
-	return inTxResult(ctx, s, func(tx *storeTx) (EventLimits, error) {
+func (s *Store) eventLimits(ctx context.Context) (eventLimits, error) {
+	return inTxResult(ctx, s, func(tx *storeTx) (eventLimits, error) {
 		return eventLimitsTx(ctx, tx)
 	})
 }
 
-// SetEventLimits replaces every cap; zero or less lifts one.
-func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) error {
+// setEventLimits replaces every cap; zero or less lifts one.
+func (s *Store) setEventLimits(ctx context.Context, limits eventLimits) error {
 	return s.inTxOnce(ctx, func(tx *storeTx) error {
 		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxBytes, formatCreditSetting(limits.MaxBytesPerEvent)); err != nil {
 			return err
@@ -93,21 +93,21 @@ func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) error {
 	})
 }
 
-func eventLimitsTx(ctx context.Context, tx *storeTx) (EventLimits, error) {
-	defaults := DefaultEventLimits()
+func eventLimitsTx(ctx context.Context, tx *storeTx) (eventLimits, error) {
+	defaults := defaultEventLimits()
 	perEvent, err := creditSettingTx(ctx, tx, metaKeyEventMaxBytes, defaults.MaxBytesPerEvent)
 	if err != nil {
-		return EventLimits{}, err
+		return eventLimits{}, err
 	}
 	perRun, err := creditSettingTx(ctx, tx, metaKeyEventMaxBytesPerRun, defaults.MaxBytesPerRun)
 	if err != nil {
-		return EventLimits{}, err
+		return eventLimits{}, err
 	}
 	events, err := creditSettingTx(ctx, tx, metaKeyEventMaxEventsPerRun, defaults.MaxEventsPerRun)
 	if err != nil {
-		return EventLimits{}, err
+		return eventLimits{}, err
 	}
-	return EventLimits{MaxBytesPerEvent: perEvent, MaxBytesPerRun: perRun, MaxEventsPerRun: events}, nil
+	return eventLimits{MaxBytesPerEvent: perEvent, MaxBytesPerRun: perRun, MaxEventsPerRun: events}, nil
 }
 
 func refuseEventOverLimitsTx(ctx context.Context, tx *storeTx, team Team, runID string, size int64) error {
@@ -117,7 +117,7 @@ func refuseEventOverLimitsTx(ctx context.Context, tx *storeTx, team Team, runID 
 	}
 	if limits.MaxBytesPerEvent > 0 && size > limits.MaxBytesPerEvent {
 		return &StorageQuotaError{
-			Principal: string(team), Limit: StorageLimitEventBytes, Unit: "bytes",
+			Principal: string(team), Limit: storageLimitEventBytes, Unit: "bytes",
 			Allowed: limits.MaxBytesPerEvent, Requested: size,
 		}
 	}
@@ -135,13 +135,13 @@ func refuseEventOverLimitsTx(ctx context.Context, tx *storeTx, team Team, runID 
 	}
 	if limits.MaxBytesPerRun > 0 && size > limits.MaxBytesPerRun-storedBytes {
 		return &StorageQuotaError{
-			Principal: string(team), Limit: StorageLimitEventBytesPerRun, Unit: "bytes",
+			Principal: string(team), Limit: storageLimitEventBytesPerRun, Unit: "bytes",
 			Used: storedBytes, Allowed: limits.MaxBytesPerRun, Requested: size,
 		}
 	}
 	if limits.MaxEventsPerRun > 0 && storedEvents+1 > limits.MaxEventsPerRun {
 		return &StorageQuotaError{
-			Principal: string(team), Limit: StorageLimitEventsPerRun, Unit: "events",
+			Principal: string(team), Limit: storageLimitEventsPerRun, Unit: "events",
 			Used: storedEvents, Allowed: limits.MaxEventsPerRun, Requested: 1,
 		}
 	}

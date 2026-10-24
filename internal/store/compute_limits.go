@@ -16,9 +16,9 @@ import (
 
 // Compute guards use zero for an unlimited operator ceiling.
 const (
-	// ComputeLimitConcurrentRunners caps the cloud runners one team holds
+	// computeLimitConcurrentRunners caps the cloud runners one team holds
 	// at once, counted across every token of the team.
-	ComputeLimitConcurrentRunners = "max_concurrent_runners"
+	computeLimitConcurrentRunners = "max_concurrent_runners"
 	// ComputeLimitGlobalRunners caps the cloud runners the controller will
 	// ever have claimed across every principal.
 	ComputeLimitGlobalRunners = "max_global_runners"
@@ -35,9 +35,9 @@ const (
 	ComputeLimitNodesPerRun = "max_nodes_per_run"
 	// ComputeLimitRunsPerHour bounds intake per authenticated principal and team.
 	ComputeLimitRunsPerHour = "max_runs_per_hour"
-	// ComputeLimitGlobalNodesPerRun caps the nodes any run may carry,
+	// computeLimitGlobalNodesPerRun caps the nodes any run may carry,
 	// whichever principal created it.
-	ComputeLimitGlobalNodesPerRun = "max_global_nodes_per_run"
+	computeLimitGlobalNodesPerRun = "max_global_nodes_per_run"
 	// ComputeLimitGlobalRunsPerHour caps the runs the whole controller
 	// creates in an hour, whichever principal created them.
 	ComputeLimitGlobalRunsPerHour = "max_global_runs_per_hour"
@@ -46,12 +46,8 @@ const (
 	ComputeLimitCronSeconds = "min_cron_interval_seconds"
 )
 
-// EventKindComputeLimitBlocked records work a compute guard refused, so a run
-// that is waiting or was cut short says which cap it met.
-const EventKindComputeLimitBlocked = "compute_limit_blocked"
-
-// FailureComputeLimit is the failure reason on a node a compute guard stopped.
-const FailureComputeLimit = "compute_limit"
+// failureComputeLimit is the failure reason on a node a compute guard stopped.
+const failureComputeLimit = "compute_limit"
 
 // ErrComputeLimit is returned when a compute guard refuses work. The refusal
 // is a [ComputeLimitError], which names the cap and what was measured
@@ -102,10 +98,6 @@ type ComputeLimits struct {
 	CronSeconds       int64
 }
 
-// Any reports whether any guard is set, which is what lets a caller skip the
-// work of measuring against guards nobody configured.
-func (l ComputeLimits) Any() bool { return l != ComputeLimits{} }
-
 // ComputeUsage is what the guards are measuring right now: the cloud runners
 // claimed, per principal and in total.
 type ComputeUsage struct {
@@ -115,13 +107,13 @@ type ComputeUsage struct {
 }
 
 var computeLimitFields = map[string]func(*ComputeLimits) *int64{
-	ComputeLimitConcurrentRunners: func(l *ComputeLimits) *int64 { return &l.ConcurrentRunners },
+	computeLimitConcurrentRunners: func(l *ComputeLimits) *int64 { return &l.ConcurrentRunners },
 	ComputeLimitGlobalRunners:     func(l *ComputeLimits) *int64 { return &l.GlobalRunners },
 	ComputeLimitRunnerAlarm:       func(l *ComputeLimits) *int64 { return &l.RunnerAlarm },
 	ComputeLimitRunSeconds:        func(l *ComputeLimits) *int64 { return &l.RunSeconds },
 	ComputeLimitNodesPerRun:       func(l *ComputeLimits) *int64 { return &l.NodesPerRun },
 	ComputeLimitRunsPerHour:       func(l *ComputeLimits) *int64 { return &l.RunsPerHour },
-	ComputeLimitGlobalNodesPerRun: func(l *ComputeLimits) *int64 { return &l.GlobalNodesPerRun },
+	computeLimitGlobalNodesPerRun: func(l *ComputeLimits) *int64 { return &l.GlobalNodesPerRun },
 	ComputeLimitGlobalRunsPerHour: func(l *ComputeLimits) *int64 { return &l.GlobalRunsPerHour },
 	ComputeLimitCronSeconds:       func(l *ComputeLimits) *int64 { return &l.CronSeconds },
 }
@@ -245,7 +237,7 @@ func setComputeLimitsTx(ctx context.Context, tx *storeTx, updates map[string]int
 }
 
 func computeLimitsTx(ctx context.Context, tx *storeTx) (_ ComputeLimits, err error) {
-	rows, err := tx.QueryContext(ctx, computeLimitsSQL, computeLimitKeyArgs...)
+	rows, err := tx.queryContext(ctx, computeLimitsSQL, computeLimitKeyArgs...)
 	if err != nil {
 		return ComputeLimits{}, err
 	}
@@ -294,7 +286,7 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID str
 	if err != nil {
 		return err
 	}
-	ceiling, guard := limits.GlobalNodesPerRun, ComputeLimitGlobalNodesPerRun
+	ceiling, guard := limits.GlobalNodesPerRun, computeLimitGlobalNodesPerRun
 	if limits.NodesPerRun > 0 {
 		metered, err := rowPresentTx(ctx, tx, `SELECT 1 FROM capabilities WHERE team=? AND bind_run=? AND issuance='award' AND unit_kind IN ('trigger','plan') AND metered=1 LIMIT 1`, team, runID)
 		if err != nil {
@@ -337,7 +329,7 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, team Team, runID str
 	}
 	if present {
 		if owner != team {
-			return fmt.Errorf("%w: run %s", ErrIDOwnedByAnotherTeam, runID)
+			return fmt.Errorf("%w: run %s", errIDOwnedByAnotherTeam, runID)
 		}
 		createdBy, err := runPrincipalTx(ctx, tx, team, runID)
 		if err != nil || createdBy != "" || principal.ID == "" {
@@ -442,6 +434,6 @@ func lockComputeGuardsTx(ctx context.Context, tx *storeTx) error {
 	if tx.dialect != DialectPostgres {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/compute-guards")
+	_, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/compute-guards")
 	return err
 }

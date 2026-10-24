@@ -21,22 +21,22 @@ func recordPaymentConsequenceTx(ctx context.Context, tx *storeTx, e capability.P
 	    WHERE payment_mode = ? AND kind = ? AND refund_id = ?`+tx.forUpdate(), e.Mode, kind, e.ObjectID).Scan(&payment, &recorded, &status)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		_, err = tx.ExecContext(ctx, `INSERT INTO payment_refunds (payment_mode, kind, refund_id, payment_intent, amount_micro,
+		_, err = tx.execContext(ctx, `INSERT INTO payment_refunds (payment_mode, kind, refund_id, payment_intent, amount_micro,
 		    status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, e.Mode, kind, e.ObjectID, e.PaymentID, amount, e.Status, tx.now(ctx).UnixNano())
 		return err
 	case err != nil:
 		return err
 	case payment != e.PaymentID || recorded != amount:
 		return authorityError(apierr.Conflict, "payment consequence changed its payment or amount")
-	case status == CardRefundSucceeded || status == "failed" || status == "canceled":
-		if e.Status == CardRefundSucceeded || e.Status == "failed" || e.Status == "canceled" {
+	case status == cardRefundSucceeded || status == "failed" || status == "canceled":
+		if e.Status == cardRefundSucceeded || e.Status == "failed" || e.Status == "canceled" {
 			if status != e.Status {
 				return authorityError(apierr.Conflict, "payment consequence has conflicting terminal outcomes")
 			}
 		}
 		return nil
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE payment_refunds SET status = ?, updated_at = ? WHERE payment_mode = ? AND kind = ? AND refund_id = ?`,
+	_, err = tx.execContext(ctx, `UPDATE payment_refunds SET status = ?, updated_at = ? WHERE payment_mode = ? AND kind = ? AND refund_id = ?`,
 		e.Status, tx.now(ctx).UnixNano(), e.Mode, kind, e.ObjectID)
 	return err
 }
@@ -65,8 +65,8 @@ func applyPaymentConsequencesTx(ctx context.Context, tx *storeTx, team Team, pay
 	if !grant.Valid {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT kind, refund_id, amount_micro FROM payment_refunds
-	    WHERE payment_mode = ? AND payment_intent = ? AND status = ? ORDER BY updated_at, kind, refund_id`, mode, paymentIntent, CardRefundSucceeded)
+	rows, err := tx.queryContext(ctx, `SELECT kind, refund_id, amount_micro FROM payment_refunds
+	    WHERE payment_mode = ? AND payment_intent = ? AND status = ? ORDER BY updated_at, kind, refund_id`, mode, paymentIntent, cardRefundSucceeded)
 	if err != nil {
 		return err
 	}
@@ -118,8 +118,8 @@ func (op *Operator) closeRefundedQueueTx(ctx context.Context, tx *storeTx, payme
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE card_refunds SET status = ? WHERE payment_mode=? AND payment_intent = ? AND status = ?
-	    AND amount_micro > 0 AND amount_micro <= ?`, CardRefundSucceeded, mode, paymentIntent, CardRefundDue, refunded)
+	_, err = tx.execContext(ctx, `UPDATE card_refunds SET status = ? WHERE payment_mode=? AND payment_intent = ? AND status = ?
+	    AND amount_micro > 0 AND amount_micro <= ?`, cardRefundSucceeded, mode, paymentIntent, cardRefundDue, refunded)
 	return err
 }
 
@@ -130,7 +130,7 @@ func refundedMicroTx(ctx context.Context, tx *storeTx, paymentIntent string) (in
 	}
 	var refunded int64
 	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount_micro), 0) FROM payment_refunds
-	    WHERE payment_mode=? AND payment_intent = ? AND kind = 'refund' AND status = ?`, mode, paymentIntent, CardRefundSucceeded).Scan(&refunded)
+	    WHERE payment_mode=? AND payment_intent = ? AND kind = 'refund' AND status = ?`, mode, paymentIntent, cardRefundSucceeded).Scan(&refunded)
 	return refunded, err
 }
 
@@ -148,7 +148,7 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT kind,refund_id,status FROM payment_refunds WHERE payment_mode=? AND payment_intent=? ORDER BY kind,refund_id`, mode, payment)
+	rows, err := tx.queryContext(ctx, `SELECT kind,refund_id,status FROM payment_refunds WHERE payment_mode=? AND payment_intent=? ORDER BY kind,refund_id`, mode, payment)
 	if err != nil {
 		return err
 	}
@@ -176,14 +176,14 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 				}
 			}
 		case "refund":
-			if item.status == CardRefundSucceeded || item.status == "failed" || item.status == "canceled" {
+			if item.status == cardRefundSucceeded || item.status == "failed" || item.status == "canceled" {
 				if _, err := applyCardRefundTx(ctx, tx, team, payment, item.id, item.status, `refund_id = ? AND status = 'pending'`, []any{item.id}, tx.now(ctx)); err != nil {
 					return err
 				}
 			}
 		}
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT warning_id FROM payment_warnings WHERE payment_mode=? AND payment_intent=? AND actionable=1 ORDER BY warning_id`, mode, payment)
+	rows, err = tx.queryContext(ctx, `SELECT warning_id FROM payment_warnings WHERE payment_mode=? AND payment_intent=? AND actionable=1 ORDER BY warning_id`, mode, payment)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 		if err := holdForWarningTx(ctx, tx, team, id, payment, tx.now(ctx)); err != nil {
 			return err
 		}
-		if err := recordPaymentConsequenceTx(ctx, tx, capability.PaymentEvent{Mode: mode, ObjectID: id, PaymentID: payment, AmountMinor: amount, Status: CardRefundSucceeded}, "warning"); err != nil {
+		if err := recordPaymentConsequenceTx(ctx, tx, capability.PaymentEvent{Mode: mode, ObjectID: id, PaymentID: payment, AmountMinor: amount, Status: cardRefundSucceeded}, "warning"); err != nil {
 			return err
 		}
 	}

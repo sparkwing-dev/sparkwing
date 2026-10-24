@@ -85,19 +85,19 @@ func TestStandingRequestDecisionsResolveOnlyTheReviewedRequest(t *testing.T) {
 	if _, err := f.console.ConsoleDeclineStandingRequest(ctx, f.op, reviewed.ID, "stale"); !errors.Is(err, ErrStandingRequestClosed) {
 		t.Fatalf("stale decline: %v", err)
 	}
-	if _, err := f.console.ConsoleSetBillingTrust(ctx, f.op, BillingTrustChange{Trust: BillingTrustGranted, Reason: "stale", Request: reviewed.ID}); !errors.Is(err, ErrStandingRequestClosed) {
+	if _, err := f.console.ConsoleSetBillingTrust(ctx, f.op, BillingTrustChange{Trust: billingTrustGranted, Reason: "stale", Request: reviewed.ID}); !errors.Is(err, ErrStandingRequestClosed) {
 		t.Fatalf("stale approval: %v", err)
 	}
 	if b := billingStandingOf(t, f.tenant); b.Trust != BillingTrustAutomatic || f.state(t, successor.ID) != StandingRequestOpen {
 		t.Fatalf("stale decision changed trust=%s successor=%s", b.Trust, f.state(t, successor.ID))
 	}
-	if _, err := f.console.ConsoleSetBillingTrust(ctx, f.op, BillingTrustChange{Trust: BillingTrustRevoked, Reason: "x", Request: successor.ID}); !errors.Is(err, ErrInvalidInput) {
+	if _, err := f.console.ConsoleSetBillingTrust(ctx, f.op, BillingTrustChange{Trust: billingTrustRevoked, Reason: "x", Request: successor.ID}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("revocation approved a request: %v", err)
 	}
-	if _, err := f.console.ConsoleSetBillingTrust(ctx, f.op, BillingTrustChange{Trust: BillingTrustGranted, Reason: "Known customer", Request: successor.ID}); err != nil {
+	if _, err := f.console.ConsoleSetBillingTrust(ctx, f.op, BillingTrustChange{Trust: billingTrustGranted, Reason: "Known customer", Request: successor.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if b := billingStandingOf(t, f.tenant); b.Tier != "High" || f.state(t, successor.ID) != StandingRequestApproved {
+	if b := billingStandingOf(t, f.tenant); b.Tier != "High" || f.state(t, successor.ID) != standingRequestApproved {
 		t.Fatalf("approval: tier=%s state=%s", b.Tier, f.state(t, successor.ID))
 	}
 	more := f.request(t, "We need to make payments larger than $1,000.")
@@ -110,7 +110,7 @@ func TestStandingRequestDecisionsResolveOnlyTheReviewedRequest(t *testing.T) {
 func TestStandingGrantWithoutRequestLeavesRequestsOpen(t *testing.T) {
 	f := standingRequestFixture(t)
 	req := f.request(t, "pending")
-	if _, err := f.console.ConsoleSetBillingTrust(t.Context(), f.op, BillingTrustChange{Trust: BillingTrustGranted, Reason: "from the team view"}); err != nil {
+	if _, err := f.console.ConsoleSetBillingTrust(t.Context(), f.op, BillingTrustChange{Trust: billingTrustGranted, Reason: "from the team view"}); err != nil {
 		t.Fatal(err)
 	}
 	if f.state(t, req.ID) != StandingRequestOpen {

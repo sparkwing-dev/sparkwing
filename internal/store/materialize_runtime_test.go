@@ -126,7 +126,7 @@ func TestReconcileRecordCopyRollsBackWithState(t *testing.T) {
 	tenant, request := materializationFixture(t, runstate.SourceMemo)
 	copyErr := errors.New("corrupt manifest member")
 	tenant.s.materializations = materializationRecordsFunc(func(ctx context.Context, tx *storeTx, _ Team, _ runstate.Actor, _ runspec.NodeRef, _ runstate.MaterializeSource) (materializedRecords, error) {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('copied',?)`, []byte(`yes`)); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('copied',?)`, []byte(`yes`)); err != nil {
 			return materializedRecords{}, err
 		}
 		return materializedRecords{}, copyErr

@@ -15,7 +15,7 @@ func TestMeteredAwardPricesRequiredSizeDespiteProfilePins(t *testing.T) {
 	} {
 		t.Run(fmt.Sprint(pin.class), func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, true)
-			if _, _, err := (&Tenant{s: s, team: "a"}).TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "operator", Reason: "price coverage"}, *now); err != nil {
+			if _, _, err := (&Tenant{s: s, team: "a"}).TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: billingTrustGranted, Actor: "operator", Reason: "price coverage"}, *now); err != nil {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, s.db, "UPDATE credit_grants SET amount_micro=100000000")

@@ -217,7 +217,7 @@ func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobAc
 var _ materializationRecords = (*blobRecords)(nil)
 
 func tryMaterializationTx(ctx context.Context, tx *storeTx, team Team, request ReconcileRequest) (bool, error) {
-	if _, err := tx.ExecContext(ctx, "SAVEPOINT materialize_result"); err != nil {
+	if _, err := tx.execContext(ctx, "SAVEPOINT materialize_result"); err != nil {
 		return false, err
 	}
 
@@ -226,10 +226,10 @@ func tryMaterializationTx(ctx context.Context, tx *storeTx, team Team, request R
 		if !blob.IsCacheMiss(err) {
 			return false, err
 		}
-		if _, rollback := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT materialize_result"); rollback != nil {
+		if _, rollback := tx.execContext(ctx, "ROLLBACK TO SAVEPOINT materialize_result"); rollback != nil {
 			return false, errors.Join(err, rollback)
 		}
 	}
-	_, released := tx.ExecContext(ctx, "RELEASE SAVEPOINT materialize_result")
+	_, released := tx.execContext(ctx, "RELEASE SAVEPOINT materialize_result")
 	return err == nil, released
 }

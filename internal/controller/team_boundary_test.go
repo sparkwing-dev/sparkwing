@@ -459,10 +459,10 @@ func trendTotal(t *testing.T, f *tenancyFixture, auth string) int {
 	if code != http.StatusOK {
 		t.Fatalf("GET /trends = %d: %s", code, body)
 	}
-	var points []controller.TrendPoint
+	var points []trendPointResponse
 	if err := json.Unmarshal([]byte(body), &points); err != nil {
 		var wrapped struct {
-			Points []controller.TrendPoint `json:"points"`
+			Points []trendPointResponse `json:"points"`
 		}
 		if err := json.Unmarshal([]byte(body), &wrapped); err != nil {
 			t.Fatalf("decode trends %s: %v", body, err)

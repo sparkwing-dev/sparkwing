@@ -77,8 +77,8 @@ func (s *SourceController) transactions(ctx context.Context, team string) (sourc
 	return scopedTenantPort[sourceTransactions](ctx, store.Team(team), s.ResolveTenant)
 }
 
-// Release returns an App token or opens a stored credential after its audit commits.
-func (s *SourceController) Release(ctx context.Context, a capability.Authorized) (SourceCredentialResponse, error) {
+// release returns an App token or opens a stored credential after its audit commits.
+func (s *SourceController) release(ctx context.Context, a capability.Authorized) (SourceCredentialResponse, error) {
 	if s == nil {
 		return SourceCredentialResponse{}, routepolicy.MissingEndpointPolicy()
 	}
@@ -170,7 +170,7 @@ func (s *Server) handleSourceRelease(w http.ResponseWriter, r *http.Request, a c
 	if len(body) != 0 {
 		return invalidEngineBody("source release takes no body")
 	}
-	credential, err := s.sourceAdapter().Release(r.Context(), a)
+	credential, err := s.sourceAdapter().release(r.Context(), a)
 	if err != nil {
 		return err
 	}

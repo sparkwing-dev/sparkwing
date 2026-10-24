@@ -24,7 +24,7 @@ func (t *Tenant) ResumeAuthorizedDebugPause(ctx context.Context, authorized capa
 		if err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE debug_pauses SET released_at=?,released_by=?,release_kind=? WHERE team=? AND run_id=? AND node_id=? AND released_at IS NULL`, tx.now(ctx).UnixNano(), current.Capability.Subject.ID, PauseReleaseManual, t.team, target.RunID, target.NodeID)
+		result, err := tx.execContext(ctx, `UPDATE debug_pauses SET released_at=?,released_by=?,release_kind=? WHERE team=? AND run_id=? AND node_id=? AND released_at IS NULL`, tx.now(ctx).UnixNano(), current.Capability.Subject.ID, PauseReleaseManual, t.team, target.RunID, target.NodeID)
 		if err != nil {
 			return err
 		}
@@ -33,7 +33,7 @@ func (t *Tenant) ResumeAuthorizedDebugPause(ctx context.Context, authorized capa
 			return err
 		}
 		if row.StatusDetail == "paused" {
-			if _, err := tx.ExecContext(ctx, `UPDATE nodes SET status_detail='' WHERE team=? AND run_id=? AND node_id=? AND status_detail='paused'`, t.team, target.RunID, target.NodeID); err != nil {
+			if _, err := tx.execContext(ctx, `UPDATE nodes SET status_detail='' WHERE team=? AND run_id=? AND node_id=? AND status_detail='paused'`, t.team, target.RunID, target.NodeID); err != nil {
 				return err
 			}
 		}

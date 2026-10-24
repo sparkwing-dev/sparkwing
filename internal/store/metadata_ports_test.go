@@ -252,7 +252,7 @@ func TestMetadataRunnerClockAheadDoesNotBlockRecovery(t *testing.T) {
 		t.Fatalf("recover ahead-clock runner: %+v, %v", units, err)
 	}
 	steps, err := f.tenant.ListNodeSteps(t.Context(), string(f.ref.RunID))
-	if err != nil || len(steps) != 1 || steps[0].Status != store.StepFailed || steps[0].FinishedAt == nil {
+	if err != nil || len(steps) != 1 || steps[0].Status != "failed" || steps[0].FinishedAt == nil {
 		t.Fatalf("recovered steps = %+v, %v", steps, err)
 	}
 	var started, finished, sourceStarted int64

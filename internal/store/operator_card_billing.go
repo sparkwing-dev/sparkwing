@@ -20,7 +20,7 @@ func (o *Operator) DueCardRefunds(ctx context.Context) (_ []CardRefundWork, err 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT team,payment_intent,reason,attempts FROM card_refunds WHERE payment_mode=? AND status=? AND next_attempt_at<=? ORDER BY created_at`, mode, CardRefundDue, tx.now(ctx).UnixNano())
+	rows, err := tx.queryContext(ctx, `SELECT team,payment_intent,reason,attempts FROM card_refunds WHERE payment_mode=? AND status=? AND next_attempt_at<=? ORDER BY created_at`, mode, cardRefundDue, tx.now(ctx).UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (o *Operator) MarkCardRefundMade(ctx context.Context, team Team, key, refun
 		if err == nil && recordedPayment != paymentIntent {
 			return authorityError(apierr.Conflict, "refund belongs to another payment")
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE card_refunds SET refund_id=?, status='pending' WHERE payment_mode=? AND team=? AND payment_intent=? AND attempts=? AND status='due'`, refundID, mode, team, paymentIntent, attempt); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE card_refunds SET refund_id=?, status='pending' WHERE payment_mode=? AND team=? AND payment_intent=? AND attempts=? AND status='due'`, refundID, mode, team, paymentIntent, attempt); err != nil {
 			return err
 		}
 		return tx.operator.reconcilePaymentStateTx(ctx, tx, mode, paymentIntent, paymentAttribution{})

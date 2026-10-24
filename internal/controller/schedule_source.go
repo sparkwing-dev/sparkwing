@@ -135,7 +135,7 @@ func (s *Server) commitLocalSchedules(ctx context.Context, a capability.Authoriz
 var _ store.ScheduleSourcePolicy = (*Server)(nil)
 
 var (
-	_ ScheduleWriter     = (*store.Tenant)(nil)
-	_ ScheduledRunWriter = (*store.Tenant)(nil)
+	_ scheduleWriter     = (*store.Tenant)(nil)
+	_ scheduledRunWriter = (*store.Tenant)(nil)
 	_ ConcurrencyStore   = (*store.Tenant)(nil)
 )

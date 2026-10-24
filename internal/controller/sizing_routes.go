@@ -10,8 +10,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// SizingReader supplies tenant-scoped sizing without exposing another persistence owner.
-type SizingReader interface {
+// sizingReader supplies tenant-scoped sizing without exposing another persistence owner.
+type sizingReader interface {
 	GetPipelineProfile(context.Context, string, string) (*store.PipelineProfile, error)
 }
 
@@ -19,7 +19,7 @@ type SizingReader interface {
 // repository/pipeline binding in the same transaction. Exact retries must not
 // duplicate measurements. Tenant's unfenced measurement methods cannot satisfy it.
 type SizingStore interface {
-	SizingReader
+	sizingReader
 	SetProfilePin(context.Context, capability.Authorized, float64, int64) error
 	RecordProfileObservation(context.Context, capability.Authorized, store.ProfileObservation) error
 	RecordContention(context.Context, capability.Authorized) error
@@ -30,8 +30,8 @@ func (s *Server) sizingStore(ctx context.Context, team string) (SizingStore, err
 	return tenantPort[SizingStore](ctx, s, store.Team(team))
 }
 
-func (s *Server) sizingReader(ctx context.Context, team string) (SizingReader, error) {
-	return tenantPort[SizingReader](ctx, s, store.Team(team))
+func (s *Server) sizingReader(ctx context.Context, team string) (sizingReader, error) {
+	return tenantPort[sizingReader](ctx, s, store.Team(team))
 }
 
 func (s *Server) sizingEndpoints() []controllerwire.Endpoint {
@@ -48,4 +48,4 @@ func sizingTarget(r *http.Request) (capability.RequestEvidence, error) {
 	return capability.RequestEvidence{Target: capability.Target{Pipeline: r.PathValue("name"), NodeID: r.URL.Query().Get("job")}}, nil
 }
 
-var _ SizingReader = (*store.Tenant)(nil)
+var _ sizingReader = (*store.Tenant)(nil)

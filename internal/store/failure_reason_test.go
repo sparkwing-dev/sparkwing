@@ -16,7 +16,7 @@ func TestJobFinishPersistsMetadataAndRefusesOverwrite(t *testing.T) {
 			result := &runstate.NodeResult{Outcome: outcome}
 			if outcome == runstate.NodeFailed {
 				code := 137
-				result.Reason, result.MaskedError, result.ExitCode = store.FailureOOMKilled, "container killed", &code
+				result.Reason, result.MaskedError, result.ExitCode = "oom_killed", "container killed", &code
 			}
 			finish := store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: outcome, Result: result}
 			for i := range 2 {

@@ -15,7 +15,7 @@ import (
 
 const (
 	GoModule           = "github.com/sparkwing-dev/sparkwing"
-	TypeScriptPackage  = "@sparkwing/sdk"
+	typeScriptPackage  = "@sparkwing/sdk"
 	UpgradeCommand     = "sparkwing upgrade"
 	VersionIndexFormat = 1
 )

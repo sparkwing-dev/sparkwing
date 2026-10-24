@@ -29,7 +29,7 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 		facts.OIDCKind = "service"
 	}
 	if root.Subject.Kind == capability.SubjectLocal {
-		facts.Tier, facts.ExecutorClass = TierSelfHosted, "local"
+		facts.Tier, facts.ExecutorClass = tierSelfHosted, "local"
 	}
 	if root.Subject.Kind == capability.SubjectMachine && root.Parent == nil {
 		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
@@ -41,11 +41,11 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 		if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, root.Team, root.Prefix).Scan(&facts.OwnerAccount); err != nil {
 			return facts, err
 		}
-		facts.Tier = TierSelfHosted
+		facts.Tier = tierSelfHosted
 		if facts.Personal {
-			facts.Tier, facts.OIDCKind = TierPersonal, TierPersonal
+			facts.Tier, facts.OIDCKind = tierPersonal, tierPersonal
 			if request.OriginMachine == root.Subject.ID {
-				facts.Tier = TierHere
+				facts.Tier = tierHere
 			}
 		}
 	}
@@ -53,7 +53,7 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 		c := ancestor.principal.Capability
 		facts.Cloud = facts.Cloud || capability.CloudLauncher(c)
 		if c.Binding.Kind == capability.BindingPush {
-			facts.Tier, facts.OIDCKind = TierActions, TierActions
+			facts.Tier, facts.OIDCKind = tierActions, tierActions
 		}
 	}
 	facts.Cloud = facts.Cloud || leaf.Billing != nil && leaf.Billing.ExecutorClass == string(match.ClassCloud)
@@ -62,7 +62,7 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 	}
 	for _, ancestor := range chain {
 		if ancestor.principal.Capability.Purpose == capability.PurposeHere {
-			facts.ExecutorClass = TierHere
+			facts.ExecutorClass = tierHere
 		}
 	}
 	return facts, nil

@@ -36,8 +36,8 @@ type cronLauncher struct {
 	server *Server
 }
 
-// ScheduledRunWriter admits a stored schedule through the sealed intake transaction.
-type ScheduledRunWriter interface {
+// scheduledRunWriter admits a stored schedule through the sealed intake transaction.
+type scheduledRunWriter interface {
 	Team() store.Team
 	AdmitScheduledRun(context.Context, store.CronSchedule, time.Time) (store.AdmissionResult, error)
 }
@@ -47,7 +47,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	if s.Team == "" || s.ID == "" || due.IsZero() {
 		return "", invalidEngineBody("schedule team, id and due instant are required")
 	}
-	writer, err := tenantPort[ScheduledRunWriter](ctx, l.server, s.Team)
+	writer, err := tenantPort[scheduledRunWriter](ctx, l.server, s.Team)
 	if err != nil {
 		return "", err
 	}

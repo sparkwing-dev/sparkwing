@@ -22,20 +22,20 @@ func TestStoreDataCreditReadsStayInTenantAndUseStoreClock(t *testing.T) {
 		window := (time.Duration(seconds) + 1) * time.Second
 		for i, team := range teams {
 			rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)", team)
-			for j, kind := range []string{CreditGrantFree, CreditGrantPaid, CreditGrantReversal} {
+			for j, kind := range []string{CreditGrantFree, CreditGrantPaid, creditGrantReversal} {
 				value, reverses := int64(amount)+int64(i+1)*100+int64(j), ""
-				if kind == CreditGrantReversal {
+				if kind == creditGrantReversal {
 					value, reverses = -value, "payment:test:checkout"
 				}
 				rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(id,team,kind,amount_micro,reverses,created_at) VALUES (?,?,?,?,?,?)", fmt.Sprintf("%d_%d_%d", iteration, i, j), team, kind, value, reverses, j+1)
 			}
-			for j, kind := range []string{CreditChargeUsage, CreditChargeStorage, CreditChargeRefund} {
+			for j, kind := range []string{creditChargeUsage, CreditChargeStorage, creditChargeRefund} {
 				at := now.Add(-window)
 				value := int64(i+1)*10 + int64(j)
-				if kind == CreditChargeUsage {
+				if kind == creditChargeUsage {
 					at = at.Add(-time.Nanosecond)
 				}
-				if kind == CreditChargeRefund {
+				if kind == creditChargeRefund {
 					at, value = now, -value
 				}
 				rewriteSchemaExec(t, s.db, "INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES (?,?, 'run','job','award',?,0,?,?)", fmt.Sprintf("charge_%d_%d_%d", iteration, i, j), team, kind, value, at.UnixNano())

@@ -5,20 +5,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// SealSecret seals a fixture row with a fixed test key.
-func SealSecret(t T, team store.Team, row store.Secret) store.SealedSecret {
-	t.Helper()
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sealed, err := store.SealSecret(cipher, team, row)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return sealed
-}
-
 // SealGitCredential seals a fixture row with a fixed test key.
 func SealGitCredential(t T, team store.Team, row store.GitCredential) store.SealedGitCredential {
 	t.Helper()

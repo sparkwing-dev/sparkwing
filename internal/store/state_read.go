@@ -130,7 +130,7 @@ func stateTime(v sql.NullInt64) *time.Time {
 }
 
 func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id string) ([]runstate.AcceptedExpansionRow, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT node_id,generation,expansion_body,expansion_digest,expansion_registration FROM nodes WHERE team=? AND run_id=? AND expansion_body IS NOT NULL ORDER BY seq,node_id`, team, id)
+	rows, err := tx.queryContext(ctx, `SELECT node_id,generation,expansion_body,expansion_digest,expansion_registration FROM nodes WHERE team=? AND run_id=? AND expansion_body IS NOT NULL ORDER BY seq,node_id`, team, id)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (Run
 		return out, err
 	}
 	out.Expansions = out.Run.expansions
-	rows, err := tx.QueryContext(ctx, `SELECT node_id FROM nodes WHERE team=? AND run_id=? ORDER BY seq,node_id`, team, id)
+	rows, err := tx.queryContext(ctx, `SELECT node_id FROM nodes WHERE team=? AND run_id=? ORDER BY seq,node_id`, team, id)
 	if err != nil {
 		return out, err
 	}

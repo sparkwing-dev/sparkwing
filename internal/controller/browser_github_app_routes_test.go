@@ -111,7 +111,7 @@ func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 	client := githubapp.New(cfg)
 	s.githubApp = &githubAppState{client: client, stateKey: client.StateKey()}
 	s.identity.redirectURIs = []string{"https://controller.test/github/app/callback"}
-	testOnlyTenantPort[GitHubConnectWriter](s, func(context.Context, store.Team) (GitHubConnectWriter, error) { return f.writer, nil })
+	testOnlyTenantPort[gitHubConnectWriter](s, func(context.Context, store.Team) (gitHubConnectWriter, error) { return f.writer, nil })
 	f.h = s.Handler()
 	return f
 }
@@ -346,7 +346,7 @@ func TestGitHubBrowserConnectionCommitRefusal(t *testing.T) {
 
 func TestGitHubBrowserConnectionRequiresTransaction(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
-	testOnlyTenantPort[GitHubConnectWriter](f.s, func(context.Context, store.Team) (GitHubConnectWriter, error) { return nil, nil })
+	testOnlyTenantPort[gitHubConnectWriter](f.s, func(context.Context, store.Team) (gitHubConnectWriter, error) { return nil, nil })
 	f.h = f.s.Handler()
 	w := f.request("POST", "/github/app/connect", url.Values{"csrf_token": {f.csrf}}, nil, nil)
 	if w.Code != 500 || !strings.Contains(w.Body.String(), "policy_missing") || f.providerCalls != 0 {

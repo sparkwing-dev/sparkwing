@@ -108,10 +108,10 @@ func TestRefillLimitsStopTheNextRefill(t *testing.T) {
 		paid     int
 		want     string
 	}{
-		{"standing size", false, RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: 6_000}, 0, RefillLimitStandingSize},
-		{"standing daily", false, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}, 2, RefillLimitStandingDaily},
-		{"team weekly", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, WeekLimitCents: 1_500}, 1, RefillLimitTeamWeekly},
-		{"team monthly", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, MonthLimitCents: 2_500}, 2, RefillLimitTeamMonthly},
+		{"standing size", false, RefillSettings{Enabled: true, ThresholdCents: 500, AmountCents: 6_000}, 0, refillLimitStandingSize},
+		{"standing daily", false, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}, 2, refillLimitStandingDaily},
+		{"team weekly", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, WeekLimitCents: 1_500}, 1, refillLimitTeamWeekly},
+		{"team monthly", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, MonthLimitCents: 2_500}, 2, refillLimitTeamMonthly},
 		{"within limits", true, RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, WeekLimitCents: 5_000}, 2, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -194,7 +194,7 @@ func TestRefillExpiresAndAWarnedCardTurnsRefillOff(t *testing.T) {
 		t.Fatalf("expired refill not replaced: %+v", replaced)
 	}
 	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE kind='refill' AND failure='expired' AND payment_id=''", 1)
-	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "efw", PaymentIntent: "pi_elsewhere", Fingerprint: "fp_1", Actionable: true}, now); err != nil {
+	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), paymentWarning{WarningID: "efw", PaymentIntent: "pi_elsewhere", Fingerprint: "fp_1", Actionable: true}, now); err != nil {
 		t.Fatal(err)
 	}
 	tenant.s.SetTestClock(t, func() time.Time { return now })
@@ -449,7 +449,7 @@ func TestAFailedRefillWaitsForANewCardOrAddFunds(t *testing.T) {
 	if st, err := tenant.SpendStanding(t.Context()); err != nil || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 {
 		t.Fatalf("a failed refill escaped the windows: %+v, %v", st.Refill, err)
 	}
-	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='"+BusinessEventRefillSettings+"'", 2)
+	rewriteSchemaCount(t, s.db, "audit_events WHERE kind='"+businessEventRefillSettings+"'", 2)
 	addFunds(t, s, 100, "pi_manual")
 	tenant.s.SetTestClock(t, func() time.Time { return now })
 	if st, err := tenant.SpendStanding(t.Context()); err != nil || st.Refill.Failure != "" {
@@ -505,14 +505,14 @@ func TestARefundedRefillStillCountsAgainstEveryWindow(t *testing.T) {
 	r := openRefill(t, s, "a", 1_000, "payment")
 	payRefill(t, s, r, now)
 	refunded := providerPaymentEvent(now, capability.PaymentRefund)
-	refunded.PaymentID, refunded.ObjectID, refunded.Status = "payment", "re_refill", CardRefundSucceeded
+	refunded.PaymentID, refunded.ObjectID, refunded.Status = "payment", "re_refill", cardRefundSucceeded
 	refunded.AmountMinor = 1_000
 	if _, err := s.settlePaymentFacts(t.Context(), refunded); err != nil {
 		t.Fatal(err)
 	}
 	tenant.s.SetTestClock(t, func() time.Time { return now })
 	st, err := tenant.SpendStanding(t.Context())
-	if err != nil || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 || st.Refill.Limit != RefillLimitStandingDaily {
+	if err != nil || st.Refill.DayCount != 1 || st.Refill.WeekCents != 1_000 || st.Refill.MonthCents != 1_000 || st.Refill.Limit != refillLimitStandingDaily {
 		t.Fatalf("a refunded refill escaped the windows: %+v, %v", st.Refill, err)
 	}
 	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
@@ -534,7 +534,7 @@ func TestASavedCardRecoversAFailedRefillWithoutClearingItsWindows(t *testing.T) 
 	now = now.Add(time.Minute)
 	s.clock = func() time.Time { return now }
 	stale := Card{Customer: "cus_2", PaymentMethod: "pm_stale", Fingerprint: "fp_2", Brand: "visa", Last4: "4242", AddedAt: setupCreated.Add(-2 * time.Minute)}
-	if err := tenant.TestOnlySaveCard(t.Context(), stale, "billing", now); !errors.Is(err, ErrStaleCardSetup) {
+	if err := tenant.TestOnlySaveCard(t.Context(), stale, "billing", now); !errors.Is(err, errStaleCardSetup) {
 		t.Fatalf("stale card setup = %v", err)
 	}
 	tenant.s.SetTestClock(t, func() time.Time { return now })
@@ -641,7 +641,7 @@ func TestRefillGlobalMaximumAppliesWithAndWithoutStandingCaps(t *testing.T) {
 			rewriteSchemaExec(t, s.db, `UPDATE teams SET refill_amount_cents=? WHERE name='a'`, MaxCardPaymentCents+1)
 			tenant.s.SetTestClock(t, func() time.Time { return now })
 			st, err := tenant.SpendStanding(t.Context())
-			if err != nil || st.Refill.Limit != RefillLimitPaymentSize {
+			if err != nil || st.Refill.Limit != refillLimitPaymentSize {
 				t.Fatalf("legacy refill=%+v: %v", st.Refill, err)
 			}
 			if due := dueRefillsFor(t, s, "a"); len(due) != 0 {

@@ -9,9 +9,9 @@ import (
 
 // Placement reasons record the winning preference.
 const (
-	PlacementPreferred = "preference"
-	PlacementFallback  = "fallback"
-	PlacementNone      = "none"
+	placementPreferred = "preference"
+	placementFallback  = "fallback"
+	placementNone      = "none"
 )
 
 // PlacementPreference holds later preferences while an eligible runner is live; empty Prefers matches everyone.
@@ -33,8 +33,8 @@ func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.C
 	return context.WithValue(ctx, claimPlacementKey{}, placement)
 }
 
-// ClaimPlacementFromContext returns the server placement policy.
-func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool) {
+// claimPlacementFromContext returns the server placement policy.
+func claimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool) {
 	placement, ok := ctx.Value(claimPlacementKey{}).(ClaimPlacement)
 	return placement, ok
 }
@@ -51,7 +51,7 @@ func (p ClaimPlacement) preferencesFor(nodePrefers []string) []PlacementPreferen
 }
 
 func claimLiveness(ctx context.Context, request runspec.Request) time.Duration {
-	policy, _ := ClaimPlacementFromContext(ctx)
+	policy, _ := claimPlacementFromContext(ctx)
 	if policy.Liveness <= 0 && (request.Burst != nil || runAnywhere(request)) {
 		return time.Minute
 	}

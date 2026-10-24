@@ -11,14 +11,14 @@ const (
 	// StorageBytesPerGB is the gigabyte the storage rate prices, which is the gibibyte every other byte figure in this store is written in.
 	StorageBytesPerGB = 1 << 30
 
-	// StorageChargeDaySeconds is the day the storage rate prices.
-	StorageChargeDaySeconds = 86_400
+	// storageChargeDaySeconds is the day the storage rate prices.
+	storageChargeDaySeconds = 86_400
 
 	// CloudStorageRateMicroPerGBDay prices a gibibyte-day at the published 0.10 dollars a GB-month over a thirty-day month, which is 100 credits a month and about 3.33 credits a day.
 	CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
 
-	// MaxStorageRateMicroPerGBDay is the highest price an operator may put on a gibibyte-day, ten thousand dollars, which is the ceiling that keeps the charge arithmetic inside int64 for any byte count a database can hold.
-	MaxStorageRateMicroPerGBDay = 1_000_000_000_000
+	// maxStorageRateMicroPerGBDay is the highest price an operator may put on a gibibyte-day, ten thousand dollars, which is the ceiling that keeps the charge arithmetic inside int64 for any byte count a database can hold.
+	maxStorageRateMicroPerGBDay = 1_000_000_000_000
 )
 
 const (
@@ -35,10 +35,10 @@ type StorageChargeSweep struct {
 }
 
 func validStorageRate(micro int64) error {
-	if micro < 0 || micro > MaxStorageRateMicroPerGBDay {
+	if micro < 0 || micro > maxStorageRateMicroPerGBDay {
 		return fmt.Errorf(
 			"%w: the storage rate must be between 0 and %d micro-credits per gibibyte-day, got %d",
-			ErrInvalidCreditSetting, int64(MaxStorageRateMicroPerGBDay), micro)
+			ErrInvalidCreditSetting, int64(maxStorageRateMicroPerGBDay), micro)
 	}
 	return nil
 }
@@ -82,7 +82,7 @@ func storageChargeMicro(excessBytes, rateMicroPerGBDay, seconds int64) (int64, e
 	num := big.NewInt(excessBytes)
 	num.Mul(num, big.NewInt(rateMicroPerGBDay))
 	num.Mul(num, big.NewInt(seconds))
-	num.Quo(num, big.NewInt(int64(StorageBytesPerGB)*StorageChargeDaySeconds))
+	num.Quo(num, big.NewInt(int64(StorageBytesPerGB)*storageChargeDaySeconds))
 	if !num.IsInt64() {
 		return 0, fmt.Errorf(
 			"storage: %d bytes kept for %ds at %d micro-credits a gibibyte-day is more than the ledger can hold",

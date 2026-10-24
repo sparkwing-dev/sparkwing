@@ -274,10 +274,10 @@ func TestBillingModelCloudReclaimCannotRestartJobDeadline(t *testing.T) {
 // A funding stop persists on the metered job even after the balance or hold recovers.
 func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 	for _, hold := range []struct{ name, id, cause, says string }{
-		{"dispute", "dp_1", HoldCauseDispute, "dispute"},
+		{"dispute", "dp_1", holdCauseDispute, "dispute"},
 		{"warning", "efw_1", HoldCauseWarning, "fraud"},
-		{"operator", OperatorHoldPrefix + "x", HoldCauseOperator, "support"},
-		{"revoked", "", HoldCauseRevoked, "revoked"},
+		{"operator", operatorHoldPrefix + "x", HoldCauseOperator, "support"},
+		{"revoked", "", holdCauseRevoked, "revoked"},
 		{"out of credits", "", "unpaid", "add funds"},
 		{"no hold", "", "control", ""},
 	} {
@@ -296,7 +296,7 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 					placed = "console"
 				}
 				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES (?,'a','r',?,?,?)`, hold.id, hold.cause, placed, now.UnixNano())
-			case hold.cause == HoldCauseRevoked:
+			case hold.cause == holdCauseRevoked:
 				rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust='revoked' WHERE name='a'`)
 			case hold.cause == "unpaid":
 				rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=600`)
@@ -333,7 +333,7 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 			}
 			rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants WHERE id='late'`)
 			if hold.cause != "unpaid" {
-				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES ('dp_2','a','r',?,'',?)`, HoldCauseDispute, now.UnixNano())
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES ('dp_2','a','r',?,'',?)`, holdCauseDispute, now.UnixNano())
 			}
 			billingModelJob(t, s, "second")
 			demand.Target.NodeID = "second"

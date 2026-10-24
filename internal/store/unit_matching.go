@@ -237,7 +237,7 @@ func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor runstate
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE nodes SET owner_capability_prefix=? WHERE team=? AND run_id=? AND node_id=? AND capability_prefix=? AND generation=?`, actor.CapabilityPrefix, team, ref.RunID, ref.NodeID, claim.Award.CapabilityPrefix, claim.Award.Generation)
+	result, err := tx.execContext(ctx, `UPDATE nodes SET owner_capability_prefix=? WHERE team=? AND run_id=? AND node_id=? AND capability_prefix=? AND generation=?`, actor.CapabilityPrefix, team, ref.RunID, ref.NodeID, claim.Award.CapabilityPrefix, claim.Award.Generation)
 	if err != nil {
 		return UnitClaim{}, err
 	}

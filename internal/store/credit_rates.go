@@ -11,21 +11,15 @@ import (
 )
 
 const (
-	// CreditRateBaseClassCores is the class credit_rate_micro_per_second prices.
-	CreditRateBaseClassCores = 4
+	// creditRateBaseClassCores is the class credit_rate_micro_per_second prices.
+	creditRateBaseClassCores = 4
 
-	// MaxCreditRateTableEntries bounds the table an operator may store, which keeps the settings row small enough to read on every claim.
-	MaxCreditRateTableEntries = 32
+	// maxCreditRateTableEntries bounds the table an operator may store, which keeps the settings row small enough to read on every claim.
+	maxCreditRateTableEntries = 32
 
 	// DefaultWarmCPUClassCores is the class a warm runner pool serves when no operator set one.
 	DefaultWarmCPUClassCores = 2
 )
-
-// CPUClass is one rung of the billing ladder: a whole number of cores and the memory a Job gets on the machine they name.
-type CPUClass struct {
-	Cores       int64 `json:"cores"`
-	MemoryBytes int64 `json:"memory_bytes"`
-}
 
 // CPUClassMemoryBytes returns the catalog allocation for a billed class in whole mebibytes.
 func CPUClassMemoryBytes(cores int64) int64 { return match.CloudSizeMemoryBytes(cores) }
@@ -36,7 +30,7 @@ func CPUClassMemoryBytes(cores int64) int64 { return match.CloudSizeMemoryBytes(
 // follows that setting.
 var defaultCreditRates = []CreditRate{
 	{Cores: 2, MicroPerSecond: 9_000},
-	{Cores: CreditRateBaseClassCores, MicroPerSecond: DefaultCreditRateMicro},
+	{Cores: creditRateBaseClassCores, MicroPerSecond: DefaultCreditRateMicro},
 	{Cores: 8, MicroPerSecond: 33_000},
 }
 
@@ -88,29 +82,11 @@ func (t CreditRateTable) ClassForLabels(selector []string, profile match.Profile
 	return CreditRate{}, &UnpricedCPUClassError{Cores: size.CreditClass, MaxCores: largest}
 }
 
-// RateFor returns the micro-credits a second costs at the recorded class, rounding up to the next class the table still prices and falling back to the largest one.
-func (t CreditRateTable) RateFor(cores int64) int64 {
-	if len(t) == 0 {
-		return 0
-	}
-	for _, entry := range t {
-		if entry.Cores >= cores {
-			return entry.MicroPerSecond
-		}
-	}
-	return t[len(t)-1].MicroPerSecond
-}
-
-// BaseRate returns the price a node of [CreditRateBaseClassCores] cores pays, which is what credit_rate_micro_per_second carries for binaries that read only that setting.
-func (t CreditRateTable) BaseRate() int64 {
-	return t.RateFor(CreditRateBaseClassCores)
-}
-
 // safety: only a table that prices the base class itself may write the scalar,
 // which is what keeps the two settings naming one price.
 func (t CreditRateTable) baseClassRate() (int64, bool) {
 	for _, entry := range t {
-		if entry.Cores == CreditRateBaseClassCores {
+		if entry.Cores == creditRateBaseClassCores {
 			return entry.MicroPerSecond, true
 		}
 	}
@@ -122,9 +98,9 @@ func (t CreditRateTable) Validate() error {
 	if len(t) == 0 {
 		return fmt.Errorf("%w: the rate table must price at least one cpu class", ErrInvalidCreditSetting)
 	}
-	if len(t) > MaxCreditRateTableEntries {
+	if len(t) > maxCreditRateTableEntries {
 		return fmt.Errorf("%w: the rate table prices at most %d cpu classes",
-			ErrInvalidCreditSetting, MaxCreditRateTableEntries)
+			ErrInvalidCreditSetting, maxCreditRateTableEntries)
 	}
 	seen := make(map[int64]bool, len(t))
 	for _, entry := range t {
@@ -143,8 +119,8 @@ func (t CreditRateTable) Validate() error {
 	return nil
 }
 
-// Sorted returns a copy of the table ordered from the smallest class to the largest.
-func (t CreditRateTable) Sorted() CreditRateTable {
+// sorted returns a copy of the table ordered from the smallest class to the largest.
+func (t CreditRateTable) sorted() CreditRateTable {
 	out := append(CreditRateTable(nil), t...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Cores < out[j].Cores })
 	return out
@@ -154,7 +130,7 @@ func (t CreditRateTable) Sorted() CreditRateTable {
 func DefaultCreditRateTable(rate int64) CreditRateTable {
 	out := make(CreditRateTable, 0, len(defaultCreditRates))
 	for _, entry := range defaultCreditRates {
-		if entry.Cores == CreditRateBaseClassCores {
+		if entry.Cores == creditRateBaseClassCores {
 			entry.MicroPerSecond = rate
 		}
 		out = append(out, entry)
@@ -188,14 +164,14 @@ func creditRateTable(raw string, rate int64) (CreditRateTable, error) {
 	if err := stored.Validate(); err != nil {
 		return nil, fmt.Errorf("stored rate table prices nothing usable: %w", err)
 	}
-	return stored.Sorted(), nil
+	return stored.sorted(), nil
 }
 
 func addCreditRateTableWrites(writes map[string]string, table CreditRateTable) error {
 	if err := table.Validate(); err != nil {
 		return err
 	}
-	sorted := table.Sorted()
+	sorted := table.sorted()
 	encoded, err := json.Marshal(sorted)
 	if err != nil {
 		return fmt.Errorf("credits: encode the rate table: %w", err)

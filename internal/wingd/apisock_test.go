@@ -34,7 +34,7 @@ func (a *apiRecorder) accept(ctx context.Context, ln net.Listener) {
 		if err != nil {
 			return
 		}
-		if peer, ok := nc.(APIConn); ok {
+		if peer, ok := nc.(authenticatedAPIConn); ok {
 			identity := peer.PeerIdentity()
 			a.mu.Lock()
 			if identity.UID != nil {

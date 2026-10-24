@@ -22,7 +22,7 @@ func TestLocalEngineUsesVerifiedCacheWithoutVersionPolicyNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cached, err := r.StoreVerified(t.Context(), pin, release)
+	cached, err := r.storeVerified(t.Context(), pin, release)
 	if err != nil {
 		t.Fatal(err)
 	}

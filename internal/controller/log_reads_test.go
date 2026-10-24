@@ -277,7 +277,7 @@ func TestCommittedDashboardLiveTailRechecksAuthority(t *testing.T) {
 		f.denied = denied
 		reader := f.reader()
 		reader.live = newLiveLogs()
-		reader.live.AppendAt("run", "job", store.LiveLogAttempt(1, 3), 0, []byte("live tail\n"))
+		reader.live.appendAt("run", "job", store.LiveLogAttempt(1, 3), 0, []byte("live tail\n"))
 		ctx, cancel := context.WithCancel(t.Context())
 		out := &liveTailWriter{cancel: cancel}
 		off := int64(0)

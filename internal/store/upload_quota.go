@@ -15,9 +15,9 @@ type uploadQuotaDimension struct {
 
 func uploadQuotaDimensions(id, run, period string, bytes, objects int64) []uploadQuotaDimension {
 	return []uploadQuotaDimension{
-		{id: id, quota: "storage", period: period, amount: bytes, limitName: StorageLimitBytesPerMonth, unit: "bytes"},
-		{id: "run-bytes:" + id, quota: "storage.run.bytes:" + run, amount: bytes, limitName: StorageLimitBytesPerRun, unit: "bytes"},
-		{id: "run-objects:" + id, quota: "storage.run.objects:" + run, amount: objects, limitName: StorageLimitObjectsPerRun, unit: "objects"},
+		{id: id, quota: "storage", period: period, amount: bytes, limitName: storageLimitBytesPerMonth, unit: "bytes"},
+		{id: "run-bytes:" + id, quota: "storage.run.bytes:" + run, amount: bytes, limitName: storageLimitBytesPerRun, unit: "bytes"},
+		{id: "run-objects:" + id, quota: "storage.run.objects:" + run, amount: objects, limitName: storageLimitObjectsPerRun, unit: "objects"},
 	}
 }
 
@@ -44,12 +44,12 @@ func reserveUploadQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, 
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO quota_reservations(team,id,quota,period,amount,expires_at,state) VALUES (?,?,?,?,?,?,'held')`, team, d.id, d.quota, period, d.amount, expires.UnixNano())
+	_, err = tx.execContext(ctx, `INSERT INTO quota_reservations(team,id,quota,period,amount,expires_at,state) VALUES (?,?,?,?,?,?,'held')`, team, d.id, d.quota, period, d.amount, expires.UnixNano())
 	return err
 }
 
 func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d uploadQuotaDimension, reserve bool) (string, error) {
-	if _, err := tx.ExecContext(ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,?,?,?) ON CONFLICT(team,quota) DO NOTHING`, team, d.quota, d.period, tx.now(ctx).UnixNano()); err != nil {
+	if _, err := tx.execContext(ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,?,?,?) ON CONFLICT(team,quota) DO NOTHING`, team, d.quota, d.period, tx.now(ctx).UnixNano()); err != nil {
 		return "", err
 	}
 	var prior string
@@ -72,7 +72,7 @@ func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d
 	if d.amount > 0 && d.ceiling > 0 && d.amount > d.ceiling-used-reserved {
 		return "", &StorageQuotaError{Principal: string(team), Limit: d.limitName, Unit: d.unit, Used: used + reserved, Allowed: d.ceiling, Requested: d.amount}
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND quota=? AND state='held' AND expires_at<=?", team, d.quota, tx.now(ctx).UnixNano()); err != nil {
+	if _, err := tx.execContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND quota=? AND state='held' AND expires_at<=?", team, d.quota, tx.now(ctx).UnixNano()); err != nil {
 		return "", err
 	}
 	if reserve {
@@ -80,6 +80,6 @@ func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d
 	} else {
 		used += d.amount
 	}
-	_, err := tx.ExecContext(ctx, "UPDATE quota_admission SET period=?,used=?,reserved=?,updated_at=? WHERE team=? AND quota=?", d.period, used, reserved, tx.now(ctx).UnixNano(), team, d.quota)
+	_, err := tx.execContext(ctx, "UPDATE quota_admission SET period=?,used=?,reserved=?,updated_at=? WHERE team=? AND quota=?", d.period, used, reserved, tx.now(ctx).UnixNano(), team, d.quota)
 	return d.period, err
 }

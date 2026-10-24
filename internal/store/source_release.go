@@ -159,7 +159,7 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 		return capability.SourceExecutor{}, err
 	}
 	executor := capability.SourceExecutor{Team: string(t.team), MachineID: root.Subject.ID, Cloud: facts.Cloud, Shared: facts.Shared, OwnerAccountID: facts.OwnerAccount, AuthorizedRepositories: []string{repo}}
-	if facts.OIDCKind == TierActions {
+	if facts.OIDCKind == tierActions {
 		return capability.SourceExecutor{}, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "Actions runners use their own repository credential")
 	}
 	if facts.Cloud {

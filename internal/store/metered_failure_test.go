@@ -26,7 +26,7 @@ func TestMeteredFailureReportSettlesAndReleasesClaimProperty(t *testing.T) {
 			attempt = int64(applied.Attempt)
 		}
 		*now = now.Add(time.Duration(seed%15+1) * time.Second)
-		reason := []string{FailureCreditsExhausted, FailureComputeLimit}[seed%2]
+		reason := []string{failureCreditsExhausted, failureComputeLimit}[seed%2]
 		message := fmt.Sprintf("stopped-%d", seed)
 		change := nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeFailed, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(attempt), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: reason, MaskedError: message}}}
 		for replay := range 2 {

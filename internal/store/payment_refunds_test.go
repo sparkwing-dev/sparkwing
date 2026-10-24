@@ -136,7 +136,7 @@ func TestPaymentRefundAuditFailureRollsBackAndPriorReversalsCount(t *testing.T) 
 	if err != nil || got.Grant == nil || got.Grant.AmountMicro != -700000 || got.ReversedMicro != 1000000 || got.BalanceMicro != 0 {
 		t.Fatalf("refund after partial reversal=%+v: %v", got, err)
 	}
-	if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), "unknown", "refund", "console", 0); !errors.Is(err, ErrUnknownPayment) {
+	if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), "unknown", "refund", "console", 0); !errors.Is(err, errUnknownPayment) {
 		t.Fatalf("unknown payment=%v", err)
 	}
 }
@@ -146,7 +146,7 @@ func TestPaymentWarningFindsCheckoutTeam(t *testing.T) {
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)
 	}
-	warning := PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: true}
+	warning := paymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: true}
 	for range 2 {
 		team, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now())
 		if err != nil || team != "a" {
@@ -164,7 +164,7 @@ func TestAWarnedPurchaseIsNotGranted(t *testing.T) {
 	for _, actionable := range []bool{false, true} {
 		t.Run(map[bool]string{false: "informational", true: "actionable"}[actionable], func(t *testing.T) {
 			s, event := paymentFixture(t, capability.PaymentTest)
-			if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: actionable}, s.now()); err != nil {
+			if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), paymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: actionable}, s.now()); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {

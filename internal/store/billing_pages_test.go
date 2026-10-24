@@ -249,7 +249,7 @@ func TestBillingPagesCapEachPaymentIncludingHighStanding(t *testing.T) {
 		t.Run(fmt.Sprint("High=", high), func(t *testing.T) {
 			_, tenant, a := billingPageFixture(t)
 			if high {
-				if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "ops", Reason: "reviewed"}, tenant.s.now()); err != nil {
+				if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: billingTrustGranted, Actor: "ops", Reason: "reviewed"}, tenant.s.now()); err != nil {
 					t.Fatal(err)
 				}
 			}

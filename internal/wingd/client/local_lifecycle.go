@@ -16,7 +16,7 @@ func NewLocalLifecycle(home string, runtime wingd.LocalRuntime, units wingd.Mana
 	if err != nil {
 		return nil, err
 	}
-	return newProcessLifecycle(home, runtime, units, localOwnerClient{home: home}, EnsureLocalProcess), nil
+	return newProcessLifecycle(home, runtime, units, localOwnerClient{home: home}, ensureLocalProcess), nil
 }
 
 type controllerOwner interface {
@@ -33,12 +33,12 @@ func (o localOwnerClient) Status(ctx context.Context) (wingd.LocalStatus, error)
 }
 
 func (o localOwnerClient) SetStay(ctx context.Context, stay bool) error {
-	_, err := SetLocalStay(ctx, o.home, stay)
+	_, err := setLocalStay(ctx, o.home, stay)
 	return err
 }
 
 func (o localOwnerClient) EnsureDashboard(ctx context.Context, address string) error {
-	return StartLocalDashboard(ctx, o.home, address)
+	return startLocalDashboard(ctx, o.home, address)
 }
 
 func (o localOwnerClient) Drain(ctx context.Context) error {

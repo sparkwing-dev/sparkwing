@@ -28,7 +28,7 @@ func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder strin
 		return SingletonLease{}, fmt.Errorf("invalid singleton lease")
 	}
 	return inTxResult(ctx, o.s, func(tx *storeTx) (SingletonLease, error) {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO leases(name,holder,until,generation) VALUES (?,'',0,0) ON CONFLICT(name) DO NOTHING`, name); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO leases(name,holder,until,generation) VALUES (?,'',0,0) ON CONFLICT(name) DO NOTHING`, name); err != nil {
 			return SingletonLease{}, err
 		}
 		var prior string
@@ -44,7 +44,7 @@ func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder strin
 			generation++
 		}
 		expires := now.Add(ttl)
-		if _, err := tx.ExecContext(ctx, `UPDATE leases SET holder = ?, until = ?, generation = ? WHERE name = ?`, holder, expires.UnixNano(), generation, name); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE leases SET holder = ?, until = ?, generation = ? WHERE name = ?`, holder, expires.UnixNano(), generation, name); err != nil {
 			return SingletonLease{}, err
 		}
 		return SingletonLease{Name: name, Holder: holder, Generation: generation, ExpiresAt: expires}, nil
@@ -57,7 +57,7 @@ func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease
 		return SingletonLease{}, fmt.Errorf("invalid singleton renewal")
 	}
 	return inTxResult(ctx, o.s, func(tx *storeTx) (SingletonLease, error) {
-		if _, err := tx.ExecContext(ctx, `SELECT holder FROM leases WHERE name=?`+tx.forUpdate(), lease.Name); err != nil {
+		if _, err := tx.execContext(ctx, `SELECT holder FROM leases WHERE name=?`+tx.forUpdate(), lease.Name); err != nil {
 			return SingletonLease{}, err
 		}
 
@@ -65,7 +65,7 @@ func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease
 			return SingletonLease{}, err
 		}
 		lease.ExpiresAt = tx.now(ctx).Add(ttl)
-		if _, err := tx.ExecContext(ctx, `UPDATE leases SET until = ? WHERE name = ?`, lease.ExpiresAt.UnixNano(), lease.Name); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE leases SET until = ? WHERE name = ?`, lease.ExpiresAt.UnixNano(), lease.Name); err != nil {
 			return SingletonLease{}, err
 		}
 		return lease, nil
@@ -85,8 +85,8 @@ type ReapedUnit struct {
 	Failed      bool
 }
 
-// FinancialTables identifies records that never take a cascading run foreign key.
-func FinancialTables() []string {
+// financialTables identifies records that never take a cascading run foreign key.
+func financialTables() []string {
 	return []string{
 		"credit_grants", "credit_charges", "credit_checkouts", "credit_freezes",
 		"billing_awards", "billable_intervals",
@@ -149,7 +149,7 @@ func (t *Tenant) AddUsage(ctx context.Context, delta UsageDelta) error {
 		return err
 	}
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		result, err := tx.ExecContext(ctx, query, t.team, delta.Period, delta.ReplicaID, delta.Amount, tx.now(ctx).UnixNano())
+		result, err := tx.execContext(ctx, query, t.team, delta.Period, delta.ReplicaID, delta.Amount, tx.now(ctx).UnixNano())
 		if err != nil {
 			return err
 		}

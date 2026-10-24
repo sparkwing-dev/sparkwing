@@ -67,8 +67,8 @@ func TestMatchingProtocolLeavesTheTakeoverToTheVersionComparison(t *testing.T) {
 func TestMatchingProtocolRejectsAnUnorderedCrossBuildHandshake(t *testing.T) {
 	ack := wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, NativeProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "v1.0.0"}
 	err := buildMismatch("(devel)", ack)
-	if !errors.Is(err, ErrBuildMismatch) {
-		t.Fatalf("buildMismatch error = %v, want ErrBuildMismatch", err)
+	if !errors.Is(err, errBuildMismatch) {
+		t.Fatalf("buildMismatch error = %v, want errBuildMismatch", err)
 	}
 	for _, want := range []string{"(devel)", "v1.0.0", "same protocol major"} {
 		if !strings.Contains(err.Error(), want) {
@@ -92,8 +92,8 @@ func TestMatchingProtocolRejectsOldOrMissingNonBlockingBuildIdentityAtSameDispla
 				BinaryVersion: "v1.0.0",
 				BuildIdentity: buildIdentity,
 			}
-			if err := buildMismatch("v1.0.0", ack); !errors.Is(err, ErrBuildMismatch) {
-				t.Fatalf("old build identity error = %v, want ErrBuildMismatch", err)
+			if err := buildMismatch("v1.0.0", ack); !errors.Is(err, errBuildMismatch) {
+				t.Fatalf("old build identity error = %v, want errBuildMismatch", err)
 			}
 			if !sameVersionBuildReplacement("v1.0.0", ack) {
 				t.Fatal("same-version daemon without nonblocking admission was not replaceable")
@@ -120,7 +120,7 @@ func TestProtocolTooOldNamesBothMajorsAndNoPinTarget(t *testing.T) {
 		BinaryVersion:       "v0.22.0-dev+b9ade496",
 	}
 	err := protocolTooOld("", ack)
-	if !errors.Is(err, ErrProtocolTooOld) {
+	if !errors.Is(err, errProtocolTooOld) {
 		t.Fatalf("error %v does not match the sentinel", err)
 	}
 	msg := err.Error()

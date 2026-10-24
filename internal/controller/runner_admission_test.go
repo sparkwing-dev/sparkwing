@@ -37,11 +37,11 @@ func TestRunnerPolicyBuildKinds(t *testing.T) {
 				if development && err != nil || !development && (err == nil || !strings.Contains(err.Error(), "HTTP 403")) {
 					t.Fatalf("build %q policy result: %v", version, err)
 				}
-				_, err = (&SignedEngineVersionPolicy{Resolver: resolver}).Notices(t.Context(), "v1.2.3")
+				_, err = (&SignedEngineVersionPolicy{Resolver: resolver}).notices(t.Context(), "v1.2.3")
 				if development && err != nil || !development && (err == nil || !strings.Contains(err.Error(), "HTTP 403")) {
 					t.Fatalf("build %q run-page policy result: %v", version, err)
 				}
-				compatibility, err := (&SignedEngineVersionPolicy{Resolver: resolver}).Compatibility(t.Context(), "v1.2.3")
+				compatibility, err := (&SignedEngineVersionPolicy{Resolver: resolver}).compatibility(t.Context(), "v1.2.3")
 				if development && (err != nil || compatibility.EngineRelease != "v1.2.3") || !development && (err == nil || !strings.Contains(err.Error(), "HTTP 403")) {
 					t.Fatalf("build %q compatibility policy result: %+v: %v", version, compatibility, err)
 				}

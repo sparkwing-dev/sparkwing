@@ -58,14 +58,14 @@ func FuzzBlobAncestryStaysWithinTenantAndSealedDependencies(f *testing.F) {
 		}
 		for i := range names {
 			for j := range names {
-				got, err := tenant.NodeIsAncestor(t.Context(), "run", names[j], names[i])
+				got, err := tenant.nodeIsAncestor(t.Context(), "run", names[j], names[i])
 				if err != nil || got != reachable[i][j] {
 					t.Fatalf("graph=%x kind=%d %s -> %s: %v, %v, want %v", graph, kind, names[i], names[j], got, err, reachable[i][j])
 				}
 			}
 		}
 		foreign := &Tenant{s: s, team: "b"}
-		if got, err := foreign.NodeIsAncestor(t.Context(), "run", names[0], names[count-1]); err != nil || got {
+		if got, err := foreign.nodeIsAncestor(t.Context(), "run", names[0], names[count-1]); err != nil || got {
 			t.Fatalf("foreign ancestry=%v, %v", got, err)
 		}
 	})

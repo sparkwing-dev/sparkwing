@@ -70,6 +70,6 @@ func applyRunOwnerPolicyTx(ctx context.Context, tx *storeTx, team Team, row RunR
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE nodes SET expansion=CASE WHEN outcome IN ('success','memoized') THEN 'failed' ELSE 'none' END WHERE team=? AND run_id=? AND expansion='expected'`, team, row.ID)
+	_, err = tx.execContext(ctx, `UPDATE nodes SET expansion=CASE WHEN outcome IN ('success','memoized') THEN 'failed' ELSE 'none' END WHERE team=? AND run_id=? AND expansion='expected'`, team, row.ID)
 	return err
 }

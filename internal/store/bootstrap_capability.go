@@ -79,7 +79,7 @@ func (o *Operator) EnsureBootstrapCapability(ctx context.Context, spec capabilit
 			}
 			return nil
 		}
-		_, err = o.s.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &spec})
+		_, err = o.s.issue(ctx, tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &spec})
 		created = err == nil
 		return err
 	})
@@ -104,7 +104,7 @@ func (o *Operator) HasDeploymentAdministrator(ctx context.Context) (bool, error)
 func (op *Operator) hasDeploymentAdministratorTx(ctx context.Context, tx *storeTx) (bool, error) {
 	var prefixes []string
 	discover := func() lockSet {
-		rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team IS NULL AND audience='controller' AND bind_kind='none' AND subject_kind IN ('operator','service') ORDER BY prefix`)
+		rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE team IS NULL AND audience='controller' AND bind_kind='none' AND subject_kind IN ('operator','service') ORDER BY prefix`)
 		if err != nil {
 			return lockSet{err: err}
 		}
@@ -197,7 +197,7 @@ func discoverSetupAuthorityLocks(ctx context.Context, tx *storeTx, set lockSet) 
 }
 
 func (op *Operator) setupAuthorityRefsTx(ctx context.Context, tx *storeTx) ([]capability.AuthorityRef, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE subject_kind='operator' AND subject_id='bootstrap:admin' AND (team IS NULL OR team='')`)
+	rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE subject_kind='operator' AND subject_id='bootstrap:admin' AND (team IS NULL OR team='')`)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func (op *Operator) setupAuthorityRefsTx(ctx context.Context, tx *storeTx) ([]ca
 	}
 	for i := 0; i < len(refs); i++ {
 		ref := refs[i]
-		rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE parent_kind=? AND parent_id=?`, ref.Kind, ref.ID)
+		rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE parent_kind=? AND parent_id=?`, ref.Kind, ref.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -237,7 +237,7 @@ func (op *Operator) setupAuthorityRefsTx(ctx context.Context, tx *storeTx) ([]ca
 		if ref.Kind != capability.AuthorityCapability {
 			continue
 		}
-		rows, err = tx.QueryContext(ctx, `SELECT hash FROM sessions WHERE capability_prefix=?`, ref.ID)
+		rows, err = tx.queryContext(ctx, `SELECT hash FROM sessions WHERE capability_prefix=?`, ref.ID)
 		if err != nil {
 			return nil, err
 		}

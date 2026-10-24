@@ -7,10 +7,10 @@ import (
 
 const sessionTTL = 7 * 24 * time.Hour
 
-// DefaultSessionMaxLifetime bounds how long a browser session lives from
+// defaultSessionMaxLifetime bounds how long a browser session lives from
 // its creation, however often the dashboard renews it. Override it with
 // Server.WithSessionMaxLifetime.
-const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
+const defaultSessionMaxLifetime = 30 * 24 * time.Hour
 
 var errSessionLifetimeExceeded = errors.New("session exceeded its maximum lifetime")
 

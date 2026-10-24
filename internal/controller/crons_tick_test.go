@@ -333,7 +333,7 @@ func TestCronLauncherRequiresTheTenantTransactionBackend(t *testing.T) {
 	st := newStoreForTick(t)
 	sched := armPushedForTick(t, st)
 	srv := New(st, nil)
-	testOnlyTenantPort[ScheduledRunWriter](srv, func(context.Context, store.Team) (ScheduledRunWriter, error) { return nil, nil })
+	testOnlyTenantPort[scheduledRunWriter](srv, func(context.Context, store.Team) (scheduledRunWriter, error) { return nil, nil })
 	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
 	_, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due)
 	var missing *apierr.Error
@@ -341,7 +341,7 @@ func TestCronLauncherRequiresTheTenantTransactionBackend(t *testing.T) {
 		t.Fatalf("missing backend: %v", err)
 	}
 	other := teststore.ForTeam(t, st, store.DefaultTeam)
-	testOnlyTenantPort[ScheduledRunWriter](srv, func(context.Context, store.Team) (ScheduledRunWriter, error) { return other, nil })
+	testOnlyTenantPort[scheduledRunWriter](srv, func(context.Context, store.Team) (scheduledRunWriter, error) { return other, nil })
 	sched.Team = "other"
 	if _, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due); !errors.As(err, &missing) || missing.Code != apierr.PolicyMissing {
 		t.Fatalf("wrong-team backend = %v", err)

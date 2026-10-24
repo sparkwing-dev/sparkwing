@@ -38,7 +38,7 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
  WHERE e.team=? AND e.run_id=? AND e.status='pending' AND e.claimed_by IS NULL AND n.finished_at IS NOT NULL`
 		args = append(args, team, run.ID, team, run.ID)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT kind,node,since FROM (`+query+`) AS waiting ORDER BY since LIMIT 1`, args...)
+	rows, err := tx.queryContext(ctx, `SELECT kind,node,since FROM (`+query+`) AS waiting ORDER BY since LIMIT 1`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 		standings = append(standings, standing)
 	}
 	now := tx.now(ctx)
-	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind='service' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY prefix LIMIT ?`, "", now.UnixNano(), now.UnixNano(), limits.RankingObservations)
+	rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=? AND subject_kind='service' AND parent_id IS NULL AND `+liveCredentialSQL("")+` ORDER BY prefix LIMIT ?`, "", now.UnixNano(), now.UnixNano(), limits.RankingObservations)
 	if err != nil {
 		return nil, err
 	}
@@ -122,11 +122,11 @@ func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 	return standings, nil
 }
 
-var tierNames = map[string]string{TierHere: "The submitting machine", TierPersonal: "Personal machines", TierActions: "GitHub Actions runners", TierSelfHosted: "Self-hosted runners", TierCloud: "Cloud"}
+var tierNames = map[string]string{tierHere: "The submitting machine", tierPersonal: "Personal machines", tierActions: "GitHub Actions runners", tierSelfHosted: "Self-hosted runners", TierCloud: "Cloud"}
 
 func noEligibleCauseTx(ctx context.Context, tx *storeTx, team Team, run RunRow, unit UnitRef, standings []eligibility) (string, error) {
 	var names []string
-	for _, tier := range DefaultClaimRanking {
+	for _, tier := range defaultClaimRanking {
 		if slices.ContainsFunc(standings, func(e eligibility) bool { return e.failed == stepTier && e.tier == tier }) {
 			names = append(names, tierNames[tier])
 		}

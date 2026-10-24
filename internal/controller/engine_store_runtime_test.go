@@ -101,7 +101,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 			if !current {
 				engineSQL(t, s, `DELETE FROM memberships WHERE team='a' AND account_id='account'`)
 			}
-			result, err := server.Cancel(t.Context(), authorized, controllerwire.CancelRequest{Reason: "user_cancelled"})
+			result, err := server.cancel(t.Context(), authorized, controllerwire.CancelRequest{Reason: "user_cancelled"})
 			if !current {
 				var refusal *apierr.Error
 				if !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
@@ -111,7 +111,7 @@ func TestEngineCancelRechecksMembershipAndCommitsEffectsOnce(t *testing.T) {
 				if err != nil || result.StateSeq != 1 || result.Replayed || !result.CancelRequested {
 					t.Fatalf("cancel: %+v, %v", result, err)
 				}
-				replay, err := server.Cancel(t.Context(), authorized, controllerwire.CancelRequest{Reason: "user_cancelled"})
+				replay, err := server.cancel(t.Context(), authorized, controllerwire.CancelRequest{Reason: "user_cancelled"})
 				if err != nil || !replay.Replayed || replay.StateSeq != result.StateSeq {
 					t.Fatalf("replay: %+v, %v", replay, err)
 				}

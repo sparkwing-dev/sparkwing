@@ -63,7 +63,7 @@ func TestStoreDataRetainedStoragePricesUniqueBytesAndTenantAllowance(t *testing.
 	}
 	for i, want := range []int64{gb, 3 * gb} {
 		charge := billed.Charges[i]
-		if charge.StorageBytes != want || charge.Seconds != StorageChargeDaySeconds || charge.Kind != CreditChargeStorage || charge.RunID != "" || charge.CPUClassCores != 0 || charge.RateMicroPerSecond != 0 {
+		if charge.StorageBytes != want || charge.Seconds != storageChargeDaySeconds || charge.Kind != CreditChargeStorage || charge.RunID != "" || charge.CPUClassCores != 0 || charge.RateMicroPerSecond != 0 {
 			t.Fatalf("charge=%+v", charge)
 		}
 	}

@@ -33,10 +33,10 @@ func (o *Operator) ReleaseSingletonLease(ctx context.Context, lease SingletonLea
 		return ErrLockHeld
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		if _, err := tx.ExecContext(ctx, `SELECT holder FROM leases WHERE name=?`+tx.forUpdate(), lease.Name); err != nil {
+		if _, err := tx.execContext(ctx, `SELECT holder FROM leases WHERE name=?`+tx.forUpdate(), lease.Name); err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE leases SET holder='',until=0 WHERE name=? AND holder=? AND generation=?`, lease.Name, lease.Holder, lease.Generation)
+		result, err := tx.execContext(ctx, `UPDATE leases SET holder='',until=0 WHERE name=? AND holder=? AND generation=?`, lease.Name, lease.Holder, lease.Generation)
 		if err != nil {
 			return err
 		}

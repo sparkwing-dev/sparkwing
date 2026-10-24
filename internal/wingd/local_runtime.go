@@ -125,7 +125,7 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 	if err := controller.Ready(); err != nil {
 		return err
 	}
-	if err := d.SetLocalActivity(activity); err != nil {
+	if err := d.setLocalActivity(activity); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -267,7 +267,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 	if ctx.Err() == nil {
 		session.ready = true
 		workers.Go(func() {
-			serve("controller workers", func() error { return controller.Run(ctx, d.SetLocalActivity) })
+			serve("controller workers", func() error { return controller.Run(ctx, d.setLocalActivity) })
 		})
 		r.changed()
 	}
@@ -393,7 +393,7 @@ func (r *localRuntime) Status(ctx context.Context) (LocalStatus, error) {
 	}
 	select {
 	case <-r.run.done:
-		if errors.Is(r.run.err, ErrLocalStoreIncompatible) {
+		if errors.Is(r.run.err, errLocalStoreIncompatible) {
 			return LocalStatus{}, r.run.err
 		}
 		return LocalStatus{}, nil
@@ -419,7 +419,7 @@ func (r *localRuntime) control(session *localRuntimeSession, stay *bool) LocalSt
 	defer r.mu.Unlock()
 	status := r.statusLocked(session)
 	if stay != nil && status.Running {
-		if err := session.daemon.SetStay(*stay); err != nil {
+		if err := session.daemon.setStay(*stay); err != nil {
 			return r.statusLocked(session)
 		}
 		status = r.statusLocked(session)
@@ -444,7 +444,7 @@ func (r *localRuntime) SetStay(ctx context.Context, stay bool) error {
 	if !r.run.ready {
 		return errors.New("wingd: local controller is not ready")
 	}
-	return r.run.daemon.SetStay(stay)
+	return r.run.daemon.setStay(stay)
 }
 
 func (r *localRuntime) Drain(ctx context.Context) error {

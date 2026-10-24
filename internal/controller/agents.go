@@ -16,16 +16,16 @@ import (
 
 const runnerHeadroomStale = time.Hour
 
-// RunnerInventoryReader projects tenant runners without inferring identity from holders.
-type RunnerInventoryReader interface {
+// runnerInventoryReader projects tenant runners without inferring identity from holders.
+type runnerInventoryReader interface {
 	Team() store.Team
 	ReadRunners(context.Context) (capability.RunnerSnapshot, error)
 }
 
-var _ RunnerInventoryReader = (*store.Tenant)(nil)
+var _ runnerInventoryReader = (*store.Tenant)(nil)
 
 func (s *Server) runnerInventory(ctx context.Context, team string) (capability.RunnerSnapshot, error) {
-	reader, err := tenantPort[RunnerInventoryReader](ctx, s, store.Team(team))
+	reader, err := tenantPort[runnerInventoryReader](ctx, s, store.Team(team))
 	if err != nil {
 		return capability.RunnerSnapshot{}, err
 	}

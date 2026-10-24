@@ -21,7 +21,7 @@ func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditS
 	defer rollbackOrLog(tx)
 	var granted, reversed, charged sql.NullInt64
 	if err := tx.QueryRowContext(ctx, creditGrantSplitSQL,
-		t.team, CreditGrantReversal, t.team, CreditGrantReversal,
+		t.team, creditGrantReversal, t.team, creditGrantReversal,
 		t.team).Scan(&granted, &reversed, &charged); err != nil {
 		return out, err
 	}

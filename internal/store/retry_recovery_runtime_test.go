@@ -70,7 +70,7 @@ func TestReapedClaimCannotReportAfterReclaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	var outcome, reason string
-	if err := tenant.s.db.QueryRow(`SELECT outcome,failure_reason FROM node_attempts WHERE team='a' AND run_id='run' AND attempt=3`).Scan(&outcome, &reason); err != nil || outcome != string(runstate.NodeFailed) || reason != FailureAgentLost {
+	if err := tenant.s.db.QueryRow(`SELECT outcome,failure_reason FROM node_attempts WHERE team='a' AND run_id='run' AND attempt=3`).Scan(&outcome, &reason); err != nil || outcome != string(runstate.NodeFailed) || reason != failureAgentLost {
 		t.Fatalf("old attempt = %s/%s, %v", outcome, reason, err)
 	}
 }

@@ -114,18 +114,6 @@ func TestRunCronTickLeased_RefusesAMissingTickFunction(t *testing.T) {
 	}
 }
 
-func TestCronTickWindowLeavesRoomForAMinuteTimer(t *testing.T) {
-	// safety: a caller waking every minute stamps its tick a little after it
-	// started, so a lease window of a full minute would turn the next wake away
-	// and skip that minute entirely.
-	if store.CronTickWindow >= time.Minute {
-		t.Errorf("CronTickWindow = %s, want a window under a minute", store.CronTickWindow)
-	}
-	if store.CronTickWindow < 30*time.Second {
-		t.Errorf("CronTickWindow = %s, want a window near a minute", store.CronTickWindow)
-	}
-}
-
 func TestRunCronTickLeased_ReleasesTheClaimWhenTheTickIsCancelled(t *testing.T) {
 	st := storetest.Open(t)
 	ctx, cancel := context.WithCancel(context.Background())

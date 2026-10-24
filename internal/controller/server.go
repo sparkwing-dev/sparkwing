@@ -161,22 +161,6 @@ func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server {
 	return s
 }
 
-// WithQueueTimeout sets the queue timeout.
-func (s *Server) WithQueueTimeout(d time.Duration) *Server {
-	s.queueTimeout = d
-	return s
-}
-
-// WithCostRate sets the USD-per-runner-hour rate the receipt builder
-// uses to compute compute_cents. source is echoed into the
-// receipt's rate_source field for provenance. Zero rate = receipts
-// report compute_cents:0, matching unconfigured-profile semantics.
-func (s *Server) WithCostRate(rate float64, source string) *Server {
-	s.costPerRunnerHour = rate
-	s.costRateSource = source
-	return s
-}
-
 // WithBucketUsage supplies read-only reporting for the bucket ceiling.
 func (s *Server) WithBucketUsage(a storage.UsageReporter) *Server {
 	s.bucketUsageStore = a
@@ -328,11 +312,11 @@ func (s *Server) buildRegisteredRouters() *registeredMux {
 	endpoints = append(endpoints, s.githubAppEndpoints()...)
 	endpoints = append(endpoints, s.billingEndpoints()...)
 	s.registerControllerEndpoints(router, endpoints)
-	router.HandleFunc("GET /api/v1/health", s.handleHealth)
+	router.handleFunc("GET /api/v1/health", s.handleHealth)
 	if s.dataController != nil {
 		if objects, ok := s.dataController.Objects.(*blob.Filesystem); ok {
 			router.Handle("PUT /api/v1/data/uploads/{upload}", objects)
-			router.HandleFunc("GET /api/v1/data/objects/{key...}", func(w http.ResponseWriter, r *http.Request) {
+			router.handleFunc("GET /api/v1/data/objects/{key...}", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
 					w.Header().Set("Allow", http.MethodGet)
 					routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
@@ -347,7 +331,7 @@ func (s *Server) buildRegisteredRouters() *registeredMux {
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	router.Handle("POST /webhooks/stripe", s.paymentHandler())
 
-	router.HandleFunc("/", s.writeRouteMiss)
+	router.handleFunc("/", s.writeRouteMiss)
 	return router
 }
 
@@ -468,8 +452,8 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	go s.runCronTick(ctx, cronTickOffer)
 	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
 	go s.runBucketCeiling(ctx)
-	go s.runTeamDeletions(ctx, TeamDeletionInterval)
-	go s.runBilling(ctx, BillingInterval)
+	go s.runTeamDeletions(ctx, teamDeletionInterval)
+	go s.runBilling(ctx, billingInterval)
 	go s.runLicenseAlarm(ctx, licenseAlarmInterval)
 	inboxDone := make(chan struct{})
 	go func() {

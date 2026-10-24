@@ -62,7 +62,7 @@ func probeDeadline(ctx context.Context) (deadline time.Time, ownCeiling bool) {
 // than that has learned nothing about the daemon.
 func probeFault(sock, verb string, ownCeiling bool, err error) error {
 	if ownCeiling && errors.Is(err, os.ErrDeadlineExceeded) {
-		return fmt.Errorf("%w at %s: %w", ErrDaemonWedged, sock, err)
+		return fmt.Errorf("%w at %s: %w", errDaemonWedged, sock, err)
 	}
 	return fmt.Errorf("wingd/client: %s %s: %w", verb, sock, err)
 }

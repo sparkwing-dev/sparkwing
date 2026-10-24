@@ -161,7 +161,7 @@ func sealedRotationAuthorityTx(ctx context.Context, tx *storeTx, a capability.Au
 }
 
 func rotationTeamsTx(ctx context.Context, tx *storeTx) (_ []Team, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT name FROM teams ORDER BY name`)
+	rows, err := tx.queryContext(ctx, `SELECT name FROM teams ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 		if r.verify {
 			continue
 		}
-		if _, err := r.tx.ExecContext(ctx, `UPDATE secrets SET value=? WHERE team=? AND name=? AND pipeline=?`, value, t.team, row.Name, row.Pipeline); err != nil {
+		if _, err := r.tx.execContext(ctx, `UPDATE secrets SET value=? WHERE team=? AND name=? AND pipeline=?`, value, t.team, row.Name, row.Pipeline); err != nil {
 			return err
 		}
 	}
@@ -220,7 +220,7 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 		if r.verify {
 			continue
 		}
-		if _, err := r.tx.ExecContext(ctx, `UPDATE git_credentials SET secret=? WHERE team=? AND id=?`, value, t.team, row.ID); err != nil {
+		if _, err := r.tx.execContext(ctx, `UPDATE git_credentials SET secret=? WHERE team=? AND id=?`, value, t.team, row.ID); err != nil {
 			return err
 		}
 	}
@@ -228,7 +228,7 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 }
 
 func (r *sealedRotationTx) runEnvironments(ctx context.Context, team Team, after string) (string, bool, error) {
-	rows, err := r.tx.QueryContext(ctx, `SELECT id,submitted_env FROM runs WHERE team=? AND submitted_env<>'' AND id>? ORDER BY id LIMIT ?`+r.tx.forUpdate(), team, after, sealedRotationRunPage)
+	rows, err := r.tx.queryContext(ctx, `SELECT id,submitted_env FROM runs WHERE team=? AND submitted_env<>'' AND id>? ORDER BY id LIMIT ?`+r.tx.forUpdate(), team, after, sealedRotationRunPage)
 	if err != nil {
 		return after, false, err
 	}
@@ -256,7 +256,7 @@ func (r *sealedRotationTx) runEnvironments(ctx context.Context, team Team, after
 		if r.verify {
 			continue
 		}
-		if _, err := r.tx.ExecContext(ctx, `UPDATE runs SET submitted_env=? WHERE team=? AND id=?`, value, team, e.run); err != nil {
+		if _, err := r.tx.execContext(ctx, `UPDATE runs SET submitted_env=? WHERE team=? AND id=?`, value, team, e.run); err != nil {
 			return after, false, err
 		}
 	}
@@ -286,6 +286,6 @@ func (r *sealedRotationTx) sessionKey(ctx context.Context) error {
 	if r.verify {
 		return nil
 	}
-	_, err = r.tx.ExecContext(ctx, `UPDATE settings SET value=? WHERE key=? AND sealed=1`, []byte(value), metaKeySessionCSRFKey)
+	_, err = r.tx.execContext(ctx, `UPDATE settings SET value=? WHERE key=? AND sealed=1`, []byte(value), metaKeySessionCSRFKey)
 	return err
 }

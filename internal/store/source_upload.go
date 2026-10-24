@@ -74,7 +74,7 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 		if own > 0 {
 			reserved = 0
 		}
-		d := uploadQuotaDimension{id: blobUploadQuotaID(u.ID), quota: "storage", period: tx.now(ctx).Format("2006-01"), amount: reserved, ceiling: policy.MaxBytesPerMonth, limitName: StorageLimitBytesPerMonth, unit: "bytes"}
+		d := uploadQuotaDimension{id: blobUploadQuotaID(u.ID), quota: "storage", period: tx.now(ctx).Format("2006-01"), amount: reserved, ceiling: policy.MaxBytesPerMonth, limitName: storageLimitBytesPerMonth, unit: "bytes"}
 		if err := reserveUploadQuotaDimensionTx(ctx, tx, t.team, d, u.ExpiresAt); err != nil {
 			return u, err
 		}
@@ -83,7 +83,7 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 				return u, err
 			}
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO source_uploads(team,id,authority_kind,authority_id,repo_key,repo_display,execution_sha,pipeline_sha,digest,size,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, t.team, u.ID, authority.Kind, authority.ID, u.Scope.Repository, u.Scope.RepositoryDisplay, u.Scope.ExecutionSHA, u.Scope.PipelineSHA, u.Blob.Digest, u.Blob.Size, u.ExpiresAt.UnixNano())
+		_, err = tx.execContext(ctx, `INSERT INTO source_uploads(team,id,authority_kind,authority_id,repo_key,repo_display,execution_sha,pipeline_sha,digest,size,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, t.team, u.ID, authority.Kind, authority.ID, u.Scope.Repository, u.Scope.RepositoryDisplay, u.Scope.ExecutionSHA, u.Scope.PipelineSHA, u.Blob.Digest, u.Blob.Size, u.ExpiresAt.UnixNano())
 		if err != nil {
 			return u, err
 		}
@@ -152,7 +152,7 @@ func (t *Tenant) CommitSourceUpload(ctx context.Context, authority capability.Au
 		}
 		u.CommittedAt = tx.now(ctx).UnixNano()
 		u.ExpiresAt = tx.now(ctx).Add(sourceBundleRetention)
-		_, err = tx.ExecContext(ctx, "UPDATE source_uploads SET committed_at=?,expires_at=?,replica_id=?,period=?,charged_objects=? WHERE team=? AND id=?", u.CommittedAt, u.ExpiresAt.UnixNano(), replica, q.period, n, t.team, id)
+		_, err = tx.execContext(ctx, "UPDATE source_uploads SET committed_at=?,expires_at=?,replica_id=?,period=?,charged_objects=? WHERE team=? AND id=?", u.CommittedAt, u.ExpiresAt.UnixNano(), replica, q.period, n, t.team, id)
 		if err != nil {
 			return u, err
 		}
@@ -210,16 +210,16 @@ func bindSourceUploadTx(ctx context.Context, tx *storeTx, team Team, request Int
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) VALUES (?,'source_bundle',?,'source',?,?,?, ?,?,'local',?,'submission',?,?,0,?,?,?,?)`, team, result.RunID, u.Blob.Digest, result.RunID, input.Git.Repository.Key, scope.CapabilityScope(), identity.Principal, source, result.RunID, boolInt(scope.Verified), input.Git.SHA, facts, input.Pipeline, tx.now(ctx).UnixNano())
+	_, err = tx.execContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) VALUES (?,'source_bundle',?,'source',?,?,?, ?,?,'local',?,'submission',?,?,0,?,?,?,?)`, team, result.RunID, u.Blob.Digest, result.RunID, input.Git.Repository.Key, scope.CapabilityScope(), identity.Principal, source, result.RunID, boolInt(scope.Verified), input.Git.SHA, facts, input.Pipeline, tx.now(ctx).UnixNano())
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE source_uploads SET bound_run_id=? WHERE team=? AND id=? AND bound_run_id IS NULL", result.RunID, team, id)
+	_, err = tx.execContext(ctx, "UPDATE source_uploads SET bound_run_id=? WHERE team=? AND id=? AND bound_run_id IS NULL", result.RunID, team, id)
 	return err
 }
 
 func copyRetrySourceRecordTx(ctx context.Context, tx *storeTx, team Team, previous, run string) error {
-	result, err := tx.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) SELECT team,kind,?,name,digest,?,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,? FROM blob_records WHERE team=? AND run_id=? AND kind='source_bundle' AND source_kind='submission'`, run, run, tx.now(ctx).UnixNano(), team, previous)
+	result, err := tx.execContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) SELECT team,kind,?,name,digest,?,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,? FROM blob_records WHERE team=? AND run_id=? AND kind='source_bundle' AND source_kind='submission'`, run, run, tx.now(ctx).UnixNano(), team, previous)
 	if err != nil {
 		return err
 	}
@@ -269,7 +269,7 @@ func expireSourceUploadTx(ctx context.Context, tx *storeTx, team Team, id string
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx, "DELETE FROM source_uploads WHERE team=? AND id=?", team, id)
+	_, err = tx.execContext(ctx, "DELETE FROM source_uploads WHERE team=? AND id=?", team, id)
 	return err
 }
 
@@ -286,7 +286,7 @@ func (t *Tenant) AbortSourceUpload(ctx context.Context, authority capability.Aut
 		if err := releaseBlobQuotaReservationTx(ctx, tx, t.team, blobUploadQuotaID(id)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM source_uploads WHERE team=? AND id=? AND committed_at=0", t.team, id); err != nil {
+		if _, err := tx.execContext(ctx, "DELETE FROM source_uploads WHERE team=? AND id=? AND committed_at=0", t.team, id); err != nil {
 			return err
 		}
 		return nil

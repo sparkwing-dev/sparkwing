@@ -10,8 +10,8 @@ import (
 
 const (
 	BillingTrustAutomatic = ""
-	BillingTrustGranted   = "granted"
-	BillingTrustRevoked   = "revoked"
+	billingTrustGranted   = "granted"
+	billingTrustRevoked   = "revoked"
 )
 
 // BillingStanding is the team's current Cloud standing and operator decision.
@@ -78,10 +78,10 @@ type BillingTrustChange struct {
 }
 
 func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTrustChange, now time.Time, actor auditActor) (before, after BillingStanding, err error) {
-	if c.Trust != BillingTrustGranted && c.Trust != BillingTrustRevoked && c.Trust != BillingTrustAutomatic {
+	if c.Trust != billingTrustGranted && c.Trust != billingTrustRevoked && c.Trust != BillingTrustAutomatic {
 		return before, after, fmt.Errorf("%w: trust must be granted, revoked or automatic", ErrInvalidInput)
 	}
-	if c.Request != "" && c.Trust != BillingTrustGranted {
+	if c.Request != "" && c.Trust != billingTrustGranted {
 		return before, after, fmt.Errorf("%w: only a standing grant approves a standing request", ErrInvalidInput)
 	}
 	if c.Actor == "" || c.Reason == "" {
@@ -97,17 +97,17 @@ func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTr
 		return before, after, err
 	}
 	if c.Request != "" {
-		if _, err = decideStandingRequestTx(ctx, tx, t.team, c.Request, StandingRequestApproved, c.Actor, c.Reason, actor); err != nil {
+		if _, err = decideStandingRequestTx(ctx, tx, t.team, c.Request, standingRequestApproved, c.Actor, c.Reason, actor); err != nil {
 			return before, after, err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE teams SET billing_trust=?,billing_trust_by=?,billing_trust_at=?,billing_trust_reason=? WHERE name=?`, c.Trust, c.Actor, now.UnixNano(), c.Reason, t.team); err != nil {
+	if _, err = tx.execContext(ctx, `UPDATE teams SET billing_trust=?,billing_trust_by=?,billing_trust_at=?,billing_trust_reason=? WHERE name=?`, c.Trust, c.Actor, now.UnixNano(), c.Reason, t.team); err != nil {
 		return before, after, err
 	}
 	if after, err = trustStandingTx(ctx, tx, t.team, now); err != nil {
 		return before, after, err
 	}
-	if c.Trust == BillingTrustRevoked {
+	if c.Trust == billingTrustRevoked {
 		if err = stopHeldAwardsTx(ctx, tx, t.team); err != nil {
 			return before, after, err
 		}

@@ -142,7 +142,7 @@ func TestPublicationRecordRefusalRollsBackResult(t *testing.T) {
 			}
 			if mode != "missing_adapter" {
 				tenant.s.resultRecords = nodeResultRecordsFunc(func(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, row runstate.NodeRow, record runstate.NodeResult) error {
-					if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('published-record',?)`, []byte("yes")); err != nil {
+					if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('published-record',?)`, []byte("yes")); err != nil {
 						return err
 					}
 					if mode == "expired" {

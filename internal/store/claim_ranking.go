@@ -13,24 +13,24 @@ import (
 
 // Claim tiers order run-anywhere claimants in a team's claim ranking.
 const (
-	TierHere       = "here"
-	TierPersonal   = "personal"
-	TierActions    = "github-actions"
-	TierSelfHosted = "self-hosted"
+	tierHere       = "here"
+	tierPersonal   = "personal"
+	tierActions    = "github-actions"
+	tierSelfHosted = "self-hosted"
 	TierCloud      = "cloud"
 )
 
 // ClaimRankingDefault, as a team's whole ranking update, restores the default ranking.
 const ClaimRankingDefault = "default"
 
-// DefaultClaimRanking is the ranking of a team that has not set one.
-var DefaultClaimRanking = []string{TierHere, TierPersonal, TierActions, TierSelfHosted, TierCloud}
+// defaultClaimRanking is the ranking of a team that has not set one.
+var defaultClaimRanking = []string{tierHere, tierPersonal, tierActions, tierSelfHosted, TierCloud}
 
-// ValidateClaimRanking refuses unknown and repeated tiers; an empty ranking means first come.
-func ValidateClaimRanking(tiers []string) error {
+// validateClaimRanking refuses unknown and repeated tiers; an empty ranking means first come.
+func validateClaimRanking(tiers []string) error {
 	for i, tier := range tiers {
-		if !slices.Contains(DefaultClaimRanking, tier) || slices.Contains(tiers[:i], tier) {
-			return authorityError(apierr.BadRequest, "claim ranking takes distinct tiers from "+strings.Join(DefaultClaimRanking, ", "))
+		if !slices.Contains(defaultClaimRanking, tier) || slices.Contains(tiers[:i], tier) {
+			return authorityError(apierr.BadRequest, "claim ranking takes distinct tiers from "+strings.Join(defaultClaimRanking, ", "))
 		}
 	}
 	return nil
@@ -42,13 +42,13 @@ func claimRankingTx(ctx context.Context, tx *storeTx, team Team) ([]string, erro
 		return nil, err
 	}
 	if raw == "" {
-		return DefaultClaimRanking, nil
+		return defaultClaimRanking, nil
 	}
 	var tiers []string
 	if err := json.Unmarshal([]byte(raw), &tiers); err != nil {
 		return nil, err
 	}
-	return tiers, ValidateClaimRanking(tiers)
+	return tiers, validateClaimRanking(tiers)
 }
 
 func runAnywhere(r runspec.Request) bool {

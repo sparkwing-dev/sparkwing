@@ -37,7 +37,7 @@ func (f *runnerInventoryFake) ReadRunners(context.Context) (capability.RunnerSna
 func runnerInventoryFixture(t *testing.T, f *runnerInventoryFake) (http.Handler, string) {
 	t.Helper()
 	s, session := credentialSessionServer(t)
-	testOnlyTenantPort[RunnerInventoryReader](s, func(_ context.Context, team store.Team) (RunnerInventoryReader, error) {
+	testOnlyTenantPort[runnerInventoryReader](s, func(_ context.Context, team store.Team) (runnerInventoryReader, error) {
 		if team != "a" {
 			t.Fatalf("selected team %q", team)
 		}
@@ -147,7 +147,7 @@ func TestRunnerInventoryHTTPNameProperty(t *testing.T) {
 func TestRunnerInventoryHTTPRequiresMemberCredential(t *testing.T) {
 	s, session := credentialSessionServer(t)
 	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: time.Now()}}
-	testOnlyTenantPort[RunnerInventoryReader](s, func(context.Context, store.Team) (RunnerInventoryReader, error) { return f, nil })
+	testOnlyTenantPort[runnerInventoryReader](s, func(context.Context, store.Team) (runnerInventoryReader, error) { return f, nil })
 	h := s.Handler()
 	issued := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
 	var member credentialResponse
@@ -202,7 +202,7 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 	if issued.Code != 201 || json.Unmarshal(issued.Body.Bytes(), &credential) != nil {
 		t.Fatalf("member issuance: %d %s", issued.Code, issued.Body.String())
 	}
-	testOnlyTenantPort[RunnerInventoryReader](s, func(context.Context, store.Team) (RunnerInventoryReader, error) { return nil, nil })
+	testOnlyTenantPort[runnerInventoryReader](s, func(context.Context, store.Team) (runnerInventoryReader, error) { return nil, nil })
 	h = s.Handler()
 	w = engineClaimHTTP(t, h, credential.Capability, "GET", "/api/v1/runners", "", 500)
 	if !strings.Contains(w.Body.String(), `"code":"policy_missing"`) {

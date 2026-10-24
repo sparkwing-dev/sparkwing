@@ -101,16 +101,16 @@ func ParseRunFilterValidated(q url.Values) (RunFilter, error) {
 	// safety: a cursor half-read would silently serve the first page again, which
 	// reads to the caller as a result set that never advances.
 	id, instant := q.Get("after_id"), q.Get("after_started_at")
-	if (id != "" || instant != "") && !f.HasCursor() {
+	if (id != "" || instant != "") && !f.hasCursor() {
 		return RunFilter{}, fmt.Errorf(
 			"a cursor needs both after_id and a numeric after_started_at, got after_id=%q after_started_at=%q", id, instant)
 	}
 	id, instant = q.Get("before_id"), q.Get("before_started_at")
-	if (id != "" || instant != "") && !f.HasBeforeCursor() {
+	if (id != "" || instant != "") && !f.hasBeforeCursor() {
 		return RunFilter{}, fmt.Errorf(
 			"a cursor needs both before_id and a numeric before_started_at, got before_id=%q before_started_at=%q", id, instant)
 	}
-	if f.HasCursor() && f.HasBeforeCursor() {
+	if f.hasCursor() && f.hasBeforeCursor() {
 		return RunFilter{}, errBothCursors
 	}
 	for _, param := range []string{"started_after", "started_before", "finished_after", "finished_before"} {

@@ -72,7 +72,7 @@ func TestLockSetChangedDiscoveryRetriesWithoutCommittingEarlierAttempt(t *testin
 	err := retryConflict(t.Context(), func() error {
 		attempts++
 		return s.inTxOnce(t.Context(), func(tx *storeTx) error {
-			if _, err := tx.ExecContext(t.Context(), `UPDATE teams SET display_name=display_name || 'x' WHERE name='a'`); err != nil {
+			if _, err := tx.execContext(t.Context(), `UPDATE teams SET display_name=display_name || 'x' WHERE name='a'`); err != nil {
 				return err
 			}
 			return acquireLockSet(t.Context(), tx, func() lockSet {

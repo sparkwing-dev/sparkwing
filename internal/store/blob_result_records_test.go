@@ -231,7 +231,7 @@ func TestBlobResultRecordsUseTheOwningTransaction(t *testing.T) {
 	s, records, change := blobResultFixture(t)
 	rollback := errors.New("caller rolls back result")
 	err := s.inBlobTx(t.Context(), func(tx *storeTx) error {
-		if _, err := tx.ExecContext(t.Context(), "DELETE FROM blob_members WHERE team='a'"); err != nil {
+		if _, err := tx.execContext(t.Context(), "DELETE FROM blob_members WHERE team='a'"); err != nil {
 			return err
 		}
 		if _, err := transitionNodeTx(t.Context(), tx, "a", change); errors.Is(err, errBlobIOPending) {
@@ -239,7 +239,7 @@ func TestBlobResultRecordsUseTheOwningTransaction(t *testing.T) {
 		} else if !errors.Is(err, blob.ErrIntegrity) {
 			return fmt.Errorf("result ignored its transaction's removed member: %v", err)
 		}
-		if _, err := tx.ExecContext(t.Context(), "INSERT INTO blob_members(team,manifest_digest,member_digest) SELECT team,digest,? FROM blob_records WHERE team='a' AND kind='manifest'", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); err != nil {
+		if _, err := tx.execContext(t.Context(), "INSERT INTO blob_members(team,manifest_digest,member_digest) SELECT team,digest,? FROM blob_records WHERE team='a' AND kind='manifest'", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); err != nil {
 			return err
 		}
 		if _, err := transitionNodeTx(t.Context(), tx, "a", change); err != nil {

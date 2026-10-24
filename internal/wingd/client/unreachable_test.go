@@ -43,8 +43,8 @@ func TestQuery_UnreachableSocketIsNotAnIdleMachine(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err := Query(ctx, Options{Home: home, DialTimeout: 200 * time.Millisecond, Backoff: 10 * time.Millisecond})
-	if !errors.Is(err, ErrDaemonUnreachable) {
-		t.Fatalf("Query against a blocked socket: got %v, want ErrDaemonUnreachable", err)
+	if !errors.Is(err, errDaemonUnreachable) {
+		t.Fatalf("Query against a blocked socket: got %v, want errDaemonUnreachable", err)
 	}
 	if runtime.GOOS == "windows" && !errors.Is(err, syscall.Errno(10061)) {
 		t.Errorf("error does not retain native connection refusal: %v", err)
@@ -65,7 +65,7 @@ func TestQuery_AbsentSocketStaysNoDaemon(t *testing.T) {
 	if !errors.Is(err, ErrNoDaemon) {
 		t.Fatalf("Query with nothing listening: got %v, want ErrNoDaemon", err)
 	}
-	if errors.Is(err, ErrDaemonUnreachable) {
+	if errors.Is(err, errDaemonUnreachable) {
 		t.Errorf("an idle machine was reported as unreachable: %v", err)
 	}
 }
@@ -92,8 +92,8 @@ func TestProbe_TellsAnUnreachableSocketFromAnAbsentOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Probe(ctx, blockedSock); !errors.Is(err, ErrDaemonUnreachable) {
-		t.Errorf("probe of a blocked socket: got %v, want ErrDaemonUnreachable", err)
+	if _, err := Probe(ctx, blockedSock); !errors.Is(err, errDaemonUnreachable) {
+		t.Errorf("probe of a blocked socket: got %v, want errDaemonUnreachable", err)
 	}
 }
 
@@ -122,7 +122,7 @@ func TestDaemonUnreachable_DoesNotClaimAnUnobservedExit(t *testing.T) {
 	if !strings.Contains(err.Error(), logPath) {
 		t.Errorf("error dropped the daemon log path %q: %v", logPath, err)
 	}
-	if !errors.Is(err, ErrDaemonUnreachable) {
-		t.Errorf("a daemon that never served did not wrap ErrDaemonUnreachable: %v", err)
+	if !errors.Is(err, errDaemonUnreachable) {
+		t.Errorf("a daemon that never served did not wrap errDaemonUnreachable: %v", err)
 	}
 }

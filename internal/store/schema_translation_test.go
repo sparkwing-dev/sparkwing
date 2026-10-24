@@ -72,7 +72,7 @@ func TestSchemaScannerRejectsMalformedInput(t *testing.T) {
 				t.Fatalf("split malformed input = %#v, %v", got, err)
 			}
 			for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
-				if got, err := TranslateSchema(script, dialect); err == nil || got != "" {
+				if got, err := translateSchema(script, dialect); err == nil || got != "" {
 					t.Fatalf("translate malformed input (%s) = %q, %v", dialect, got, err)
 				}
 			}
@@ -82,7 +82,7 @@ func TestSchemaScannerRejectsMalformedInput(t *testing.T) {
 
 func TestTranslateSchemaKeepsQuotedBlobNames(t *testing.T) {
 	const neutral = "-- BLOB; stays a comment\n/* BLOB; BYTEA */ CREATE TABLE x (value BLOB, name TEXT CHECK(name <> 'it''s BLOB; BYTEA'), \"BLOB\"\"; BYTEA\" TEXT);"
-	got, err := TranslateSchema(neutral, DialectPostgres)
+	got, err := translateSchema(neutral, DialectPostgres)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,13 +90,13 @@ func TestTranslateSchemaKeepsQuotedBlobNames(t *testing.T) {
 	if got != want {
 		t.Fatalf("translation = %q", got)
 	}
-	if got, err := TranslateSchema(neutral, DialectSQLite); err != nil || got != neutral[:len(neutral)-1]+" STRICT;" {
+	if got, err := translateSchema(neutral, DialectSQLite); err != nil || got != neutral[:len(neutral)-1]+" STRICT;" {
 		t.Fatalf("SQLite translation = %q, %v", got, err)
 	}
-	if _, err = TranslateSchema(neutral, Dialect(100)); err == nil {
+	if _, err = translateSchema(neutral, Dialect(100)); err == nil {
 		t.Fatal("unknown dialect accepted")
 	}
-	if _, err = TranslateSchema("CREATE TABLE x (v BLOB); PRAGMA foreign_keys=OFF;", DialectPostgres); err == nil {
+	if _, err = translateSchema("CREATE TABLE x (v BLOB); PRAGMA foreign_keys=OFF;", DialectPostgres); err == nil {
 		t.Fatal("non-neutral pragma accepted")
 	}
 }

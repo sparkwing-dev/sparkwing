@@ -8,7 +8,7 @@ import (
 
 // Unselected memberships need the same immutable fence as the active team.
 func (op *Operator) recordSessionMembershipsTx(ctx context.Context, tx *storeTx, session string) error {
-	rows, err := tx.QueryContext(ctx, `SELECT m.team FROM sessions s JOIN memberships m ON m.account_id=s.account_id WHERE s.hash=?`, session)
+	rows, err := tx.queryContext(ctx, `SELECT m.team FROM sessions s JOIN memberships m ON m.account_id=s.account_id WHERE s.hash=?`, session)
 	if err != nil {
 		return err
 	}
@@ -25,7 +25,7 @@ func (op *Operator) recordSessionMembershipsTx(ctx context.Context, tx *storeTx,
 }
 
 func (t *Tenant) recordSessionMembershipTx(ctx context.Context, tx *storeTx, session string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO session_membership_epochs(session_hash,team,epoch)
+	_, err := tx.execContext(ctx, `INSERT INTO session_membership_epochs(session_hash,team,epoch)
  SELECT s.hash,m.team,COALESCE(e.epoch,0) FROM sessions s
  JOIN memberships m ON m.account_id=s.account_id
  LEFT JOIN membership_epochs e ON e.team=m.team AND e.account_id=m.account_id

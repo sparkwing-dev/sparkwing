@@ -84,7 +84,7 @@ func (t *Tenant) PrepareGitHubAppPublication(ctx context.Context, installation, 
 }
 
 func ensureGitHubPublicationTx(ctx context.Context, tx *storeTx, team Team, repository int64) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO github_app_publications(team,repository_id,generation) VALUES (?,?,0) ON CONFLICT(team,repository_id) DO NOTHING`, team, repository)
+	_, err := tx.execContext(ctx, `INSERT INTO github_app_publications(team,repository_id,generation) VALUES (?,?,0) ON CONFLICT(team,repository_id) DO NOTHING`, team, repository)
 	return err
 }
 
@@ -92,7 +92,7 @@ func bumpGitHubPublicationTx(ctx context.Context, tx *storeTx, team Team, reposi
 	if err := ensureGitHubPublicationTx(ctx, tx, team, repository); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE github_app_publications SET generation=generation+1 WHERE team=? AND repository_id=?`, team, repository)
+	_, err := tx.execContext(ctx, `UPDATE github_app_publications SET generation=generation+1 WHERE team=? AND repository_id=?`, team, repository)
 	return err
 }
 
@@ -103,7 +103,7 @@ func (t *Tenant) checkPublicationTx(ctx context.Context, tx *storeTx, p GitHubAp
 	if err := t.checkGitHubAppAutomationTx(ctx, tx, p.consent); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE github_app_publications SET generation=generation+1 WHERE team=? AND repository_id=? AND generation=?`, t.team, p.repositoryID, p.generation)
+	result, err := tx.execContext(ctx, `UPDATE github_app_publications SET generation=generation+1 WHERE team=? AND repository_id=? AND generation=?`, t.team, p.repositoryID, p.generation)
 	if err != nil {
 		return err
 	}
@@ -120,6 +120,6 @@ func (t *Tenant) ReplaceGitHubAppSchedules(ctx context.Context, p GitHubAppPubli
 }
 
 func invalidateGitHubInstallationPublicationsTx(ctx context.Context, tx *storeTx, team Team, installation int64) error {
-	_, err := tx.ExecContext(ctx, `UPDATE github_app_publications SET generation=generation+1 WHERE team=? AND repository_id IN (SELECT repository_id FROM github_app_automation WHERE team=? AND installation_id=? UNION SELECT github_repository_id FROM cron_schedules WHERE team=? AND github_installation_id=?)`, team, team, installation, team, installation)
+	_, err := tx.execContext(ctx, `UPDATE github_app_publications SET generation=generation+1 WHERE team=? AND repository_id IN (SELECT repository_id FROM github_app_automation WHERE team=? AND installation_id=? UNION SELECT github_repository_id FROM cron_schedules WHERE team=? AND github_installation_id=?)`, team, team, installation, team, installation)
 	return err
 }

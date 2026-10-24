@@ -11,7 +11,7 @@ import (
 
 func TestProtocolTooOld_StaysMatchableBySentinel(t *testing.T) {
 	err := protocolTooOld("v0.17.25", wingwire.HelloAck{ProtocolMajor: 2, BinaryVersion: "v0.22.0"})
-	if !errors.Is(err, ErrProtocolTooOld) {
+	if !errors.Is(err, errProtocolTooOld) {
 		t.Fatalf("wrapped error no longer matches the sentinel: %v", err)
 	}
 }

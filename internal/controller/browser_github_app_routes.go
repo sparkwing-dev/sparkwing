@@ -12,18 +12,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// GitHubConnectWriter rechecks session authority and linked identity when connecting an installation.
-type GitHubConnectWriter interface {
+// gitHubConnectWriter rechecks session authority and linked identity when connecting an installation.
+type gitHubConnectWriter interface {
 	Team() store.Team
 	LinkedGitHubSubject(context.Context, capability.Authorized) (string, error)
 	ConsumeGitHubConnect(context.Context, capability.Authorized, string, time.Time) error
 	BindAuthorizedGitHubInstallation(context.Context, capability.Authorized, store.GitHubAppInstallation) (store.GitHubAppInstallation, error)
 }
 
-var _ GitHubConnectWriter = (*store.Tenant)(nil)
+var _ gitHubConnectWriter = (*store.Tenant)(nil)
 
-func (s *Server) githubConnectWriter(ctx context.Context, a capability.Authorized) (GitHubConnectWriter, error) {
-	return tenantPort[GitHubConnectWriter](ctx, s, store.Team(a.Target.Team))
+func (s *Server) githubConnectWriter(ctx context.Context, a capability.Authorized) (gitHubConnectWriter, error) {
+	return tenantPort[gitHubConnectWriter](ctx, s, store.Team(a.Target.Team))
 }
 
 type githubBrowserProofKey struct{}

@@ -71,8 +71,8 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 		got[ev.Kind] = append(got[ev.Kind], ev)
 	}
 	for kind, want := range map[string]int{
-		store.BusinessEventTeamCreated:  1,
-		store.BusinessEventCheckoutPaid: 1, store.BusinessEventCreditReversed: 1,
+		store.BusinessEventTeamCreated: 1,
+		"checkout.paid":                1, "credit.reversed": 1,
 		store.BusinessEventCreditGranted: 1, store.BusinessEventTeamFrozen: 1,
 		store.BusinessEventTeamUnfrozen: 1,
 	} {
@@ -80,7 +80,7 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 			t.Errorf("%s events = %d, want %d (all: %+v)", kind, len(got[kind]), want, events)
 		}
 	}
-	if paid := got[store.BusinessEventCheckoutPaid]; len(paid) == 1 &&
+	if paid := got["checkout.paid"]; len(paid) == 1 &&
 		(paid[0].Actor != "payment_provider" || paid[0].Attrs["reference_digest"] != fmt.Sprintf("%x", sha256.Sum256([]byte("payment:test:fixture-row:pi_1")))) {
 		t.Errorf("paid event = %+v, want the verified provider and committed payment", paid[0])
 	}
@@ -166,7 +166,7 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 		}
 		finish = runstate.FinishRunRequest{Unit: claim.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(admitted.RunID), Actor: actor, Cause: runstate.RunFinish}}
 	}
-	events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded, 1000, "")
+	events, err := tenant.BusinessEvents(ctx, "run.first_succeeded", 1000, "")
 	if err != nil {
 		t.Fatal(err)
 	}

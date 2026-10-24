@@ -21,8 +21,8 @@ const (
 	runCreditRefused runstate.RunCause = "credit_refused"
 )
 
-// RunEdge records all legal run-state families; a cancel of live work is initially request-only.
-type RunEdge struct {
+// runEdge records all legal run-state families; a cancel of live work is initially request-only.
+type runEdge struct {
 	From         []runstate.RunState
 	To           []runstate.RunState
 	Actors       []runstate.ActorKind
@@ -31,12 +31,12 @@ type RunEdge struct {
 	RequestOnly  bool
 }
 
-// RunTransitions keeps publication, owner recovery and cooperative cancellation visible to implementers.
-func RunTransitions() []RunEdge {
+// runTransitions keeps publication, owner recovery and cooperative cancellation visible to implementers.
+func runTransitions() []runEdge {
 	active := []runstate.RunState{runstate.RunPending, runstate.RunRunning}
 	terminal := []runstate.RunState{runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled}
 	owners := []runstate.ActorKind{runstate.ActorRunHost, runstate.ActorController}
-	return []RunEdge{
+	return []runEdge{
 		{[]runstate.RunState{runstate.RunPending}, []runstate.RunState{runstate.RunFailed}, []runstate.ActorKind{runstate.ActorOperator}, runCreditRefused, "App admission; unstarted and unfunded", false},
 		{active, []runstate.RunState{runstate.RunFailed}, []runstate.ActorKind{runstate.ActorLauncher}, runstate.RunLaunchRejected, "exact live launcher plan award", false},
 		{[]runstate.RunState{runstate.RunPending}, []runstate.RunState{runstate.RunRunning}, owners, runstate.RunStart, "live owner; accepted plan", false},
@@ -82,7 +82,7 @@ func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish runstate.FinishRun
 			return errors.New("run still has live work")
 		}
 		if finish.Unit.Kind == runstate.OwnerTrigger {
-			result, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',claim_principal='',claimed_at=NULL,lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=?`, tx.now(ctx).UnixNano(), t.team, finish.Unit.RunID, finish.Unit.Generation, finish.Unit.Holder)
+			result, err := tx.execContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',claim_principal='',claimed_at=NULL,lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=?`, tx.now(ctx).UnixNano(), t.team, finish.Unit.RunID, finish.Unit.Generation, finish.Unit.Holder)
 			if err != nil {
 				return err
 			}
@@ -174,8 +174,8 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 		}
 		return runstate.Applied{}, &ErrIllegalTransition{From: string(row.State), To: string(change.To), Actor: change.Actor.Kind, Reason: reason}
 	}
-	var edge *RunEdge
-	for _, candidate := range RunTransitions() {
+	var edge *runEdge
+	for _, candidate := range runTransitions() {
 		if candidate.Cause == change.Cause && slices.Contains(candidate.From, row.State) && slices.Contains(candidate.To, change.To) && slices.Contains(candidate.Actors, change.Actor.Kind) {
 			e := candidate
 			edge = &e
@@ -222,7 +222,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 	if err != nil {
 		return runstate.Applied{}, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE runs SET status=?,error=?,started_at=?,finished_at=?,cancel_requested_at=?,cancel_reason=?,state_seq=?,state_digest=?,state_actor=? WHERE team=? AND id=? AND state_seq=?`, row.State, change.MaskedError, timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.CancelReason, row.StateSeq, digest, actor, team, row.ID, row.StateSeq-1)
+	result, err := tx.execContext(ctx, `UPDATE runs SET status=?,error=?,started_at=?,finished_at=?,cancel_requested_at=?,cancel_reason=?,state_seq=?,state_digest=?,state_actor=? WHERE team=? AND id=? AND state_seq=?`, row.State, change.MaskedError, timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.CancelReason, row.StateSeq, digest, actor, team, row.ID, row.StateSeq-1)
 	if err != nil {
 		return runstate.Applied{}, err
 	}
@@ -250,7 +250,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 			return runstate.Applied{}, err
 		}
 		if row.State == runstate.RunSuccess {
-			result, err := tx.ExecContext(ctx, `INSERT INTO team_first_success(team,run_id) VALUES (?,?) ON CONFLICT(team) DO NOTHING`, team, row.ID)
+			result, err := tx.execContext(ctx, `INSERT INTO team_first_success(team,run_id) VALUES (?,?) ON CONFLICT(team) DO NOTHING`, team, row.ID)
 			if err != nil {
 				return runstate.Applied{}, err
 			}
@@ -264,7 +264,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 				}
 			}
 			if row.Request.Request.Mode != runspec.IntakePublish {
-				_, err = tx.ExecContext(ctx, `INSERT INTO pipeline_success_pins(team,pipeline,run_id,finished_at) VALUES (?,?,?,?) ON CONFLICT(team,pipeline) DO UPDATE SET run_id=excluded.run_id,finished_at=excluded.finished_at WHERE pipeline_success_pins.finished_at<excluded.finished_at`, team, row.Pipeline, row.ID, now.UnixNano())
+				_, err = tx.execContext(ctx, `INSERT INTO pipeline_success_pins(team,pipeline,run_id,finished_at) VALUES (?,?,?,?) ON CONFLICT(team,pipeline) DO UPDATE SET run_id=excluded.run_id,finished_at=excluded.finished_at WHERE pipeline_success_pins.finished_at<excluded.finished_at`, team, row.Pipeline, row.ID, now.UnixNano())
 				if err != nil {
 					return runstate.Applied{}, err
 				}
@@ -424,7 +424,7 @@ func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, 
 			started = owner.started.Int64
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE triggers SET status=?,disruptions=?,claimed_by=NULL,capability_prefix='',claim_principal='',claimed_at=NULL,lease_expires_at=NULL,started_at=?,finished_at=? WHERE team=? AND id=? AND generation=?`, status, owner.disruptions, started, finished, target.team, target.ref.RunID, owner.generation)
+	result, err := tx.execContext(ctx, `UPDATE triggers SET status=?,disruptions=?,claimed_by=NULL,capability_prefix='',claim_principal='',claimed_at=NULL,lease_expires_at=NULL,started_at=?,finished_at=? WHERE team=? AND id=? AND generation=?`, status, owner.disruptions, started, finished, target.team, target.ref.RunID, owner.generation)
 	if err != nil {
 		return err
 	}
@@ -458,7 +458,7 @@ func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, 
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET state_seq=state_seq+1,state_digest=?,state_actor=? WHERE team=? AND id=?`, digest, actorJSON, target.team, target.ref.RunID); err != nil {
+	if _, err := tx.execContext(ctx, `UPDATE runs SET state_seq=state_seq+1,state_digest=?,state_actor=? WHERE team=? AND id=?`, digest, actorJSON, target.team, target.ref.RunID); err != nil {
 		return err
 	}
 	return appendStateEventTx(ctx, tx, target.team, runspec.NodeRef{RunID: target.ref.RunID}, "run_requeued", run.StateSeq+1, payload, now)
@@ -468,7 +468,7 @@ func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request
 	if err := checkOwnerTx(ctx, tx, team, controller, request.RunID); err != nil {
 		return err
 	}
-	write, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',claim_principal='',claimed_at=NULL,lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, tx.now(ctx).UnixNano(), team, request.RunID, request.Actor.Owner.Generation, request.Actor.Owner.Holder, request.Actor.CapabilityPrefix)
+	write, err := tx.execContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',claim_principal='',claimed_at=NULL,lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, tx.now(ctx).UnixNano(), team, request.RunID, request.Actor.Owner.Generation, request.Actor.Owner.Holder, request.Actor.CapabilityPrefix)
 	if err != nil {
 		return err
 	}
@@ -503,7 +503,7 @@ func writeEvalRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, u
 			started = unit.started.Int64
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE eval_units SET status=?,disruptions=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,started_at=?,finished_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=?`, status, unit.disruptions, started, finished, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration, unit.generation)
+	result, err := tx.execContext(ctx, `UPDATE eval_units SET status=?,disruptions=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,started_at=?,finished_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=?`, status, unit.disruptions, started, finished, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration, unit.generation)
 	if err != nil {
 		return err
 	}
@@ -522,9 +522,9 @@ func startOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef,
 	var err error
 	now := tx.now(ctx)
 	if unit.Kind == capability.UnitEval {
-		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='running',started_at=COALESCE(started_at,?) WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status IN ('claimed','running')`, now.UnixNano(), team, unit.RunID, unit.NodeID, unit.SourceGeneration, actor.Generation, actor.Holder, actor.CapabilityPrefix)
+		result, err = tx.execContext(ctx, `UPDATE eval_units SET status='running',started_at=COALESCE(started_at,?) WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status IN ('claimed','running')`, now.UnixNano(), team, unit.RunID, unit.NodeID, unit.SourceGeneration, actor.Generation, actor.Holder, actor.CapabilityPrefix)
 	} else {
-		result, err = tx.ExecContext(ctx, `UPDATE triggers SET started_at=COALESCE(started_at,?) WHERE team=? AND id=? AND unit_kind=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, now.UnixNano(), team, unit.RunID, unit.Kind, actor.Generation, actor.Holder, actor.CapabilityPrefix)
+		result, err = tx.execContext(ctx, `UPDATE triggers SET started_at=COALESCE(started_at,?) WHERE team=? AND id=? AND unit_kind=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, now.UnixNano(), team, unit.RunID, unit.Kind, actor.Generation, actor.Holder, actor.CapabilityPrefix)
 	}
 	if err != nil {
 		return err
@@ -552,6 +552,6 @@ func cancelRunNodesTx(ctx context.Context, tx *storeTx, team Team, runID string,
 			}
 		}
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE nodes SET expansion='none' WHERE team=? AND run_id=? AND expansion='expected'`, team, runID)
+	_, err = tx.execContext(ctx, `UPDATE nodes SET expansion='none' WHERE team=? AND run_id=? AND expansion='expected'`, team, runID)
 	return err
 }

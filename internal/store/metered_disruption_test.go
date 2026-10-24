@@ -187,7 +187,7 @@ func checkMeteredDisruptionLedger(t *testing.T, s *Store, price CreditRate, awar
 		t.Fatal(err)
 	}
 	for _, charge := range charges {
-		if charge.RateMicroPerSecond != price.MicroPerSecond || charge.CPUClassCores != price.Cores || (charge.Kind == CreditChargeRefund && !charge.ChargedAt.Equal(awarded)) {
+		if charge.RateMicroPerSecond != price.MicroPerSecond || charge.CPUClassCores != price.Cores || (charge.Kind == creditChargeRefund && !charge.ChargedAt.Equal(awarded)) {
 			t.Logf("charge lost awarded terms: %+v", charge)
 			return false
 		}

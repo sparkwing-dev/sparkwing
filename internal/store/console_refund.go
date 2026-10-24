@@ -75,15 +75,15 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 			return CreditReversal{}, authorityError(apierr.NotFound, "payment is unavailable in this team")
 		}
 		reference := paymentConsequenceReference(mode, "refund", req.RefundID)
-		_, existed, err := creditGrantByReferenceTx(ctx, tx, paid.Team, CreditGrantReversal, reference)
+		_, existed, err := creditGrantByReferenceTx(ctx, tx, paid.Team, creditGrantReversal, reference)
 		if err != nil {
 			return CreditReversal{}, err
 		}
-		if _, err := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentRefund, Mode: mode, ObjectID: req.RefundID, PaymentID: req.PaymentID, AmountMinor: req.AmountCents, Status: CardRefundSucceeded}, actor); err != nil {
+		if _, err := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentRefund, Mode: mode, ObjectID: req.RefundID, PaymentID: req.PaymentID, AmountMinor: req.AmountCents, Status: cardRefundSucceeded}, actor); err != nil {
 			return CreditReversal{}, err
 		}
 		result := CreditReversal{Team: paid.Team, PaidMicro: paid.AmountMicro}
-		grant, found, err := creditGrantByReferenceTx(ctx, tx, paid.Team, CreditGrantReversal, reference)
+		grant, found, err := creditGrantByReferenceTx(ctx, tx, paid.Team, creditGrantReversal, reference)
 		if err != nil {
 			return CreditReversal{}, err
 		}
@@ -103,7 +103,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return CreditReversal{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO console_refund_receipts(team,receipt_id,request_digest,result_json) VALUES (?,?,?,?)`, t.team, subject, requestDigest, body); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO console_refund_receipts(team,receipt_id,request_digest,result_json) VALUES (?,?,?,?)`, t.team, subject, requestDigest, body); err != nil {
 			return CreditReversal{}, err
 		}
 		grantID := ""

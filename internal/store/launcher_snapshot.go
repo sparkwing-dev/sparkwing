@@ -291,7 +291,7 @@ FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind=?
 	if len(wanted) > 0 {
 		query += ` OR ` + strings.Join(wanted, ` OR `)
 	}
-	rows, err := tx.QueryContext(ctx, query+` ORDER BY a.prefix`, args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY a.prefix`, args...)
 	if err != nil {
 		return nil, err
 	}

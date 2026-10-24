@@ -108,7 +108,7 @@ func sdkRequirement(body []byte) (string, error) {
 	}
 	var spec string
 	for _, deps := range []map[string]string{manifest.Dependencies, manifest.DevDependencies, manifest.PeerDependencies} {
-		if value := deps[TypeScriptPackage]; value != "" {
+		if value := deps[typeScriptPackage]; value != "" {
 			if spec != "" && spec != value {
 				return "", fmt.Errorf("conflicting SDK requirements")
 			}
@@ -116,7 +116,7 @@ func sdkRequirement(body []byte) (string, error) {
 		}
 	}
 	if spec == "" {
-		return "", fmt.Errorf("missing %s dependency", TypeScriptPackage)
+		return "", fmt.Errorf("missing %s dependency", typeScriptPackage)
 	}
 	return spec, nil
 }
@@ -170,9 +170,9 @@ func readNpmPin(dir string) (engineid.Pin, error) {
 		return engineid.Pin{}, fmt.Errorf("unsupported npm lockfile version")
 	}
 	if lock.LockfileVersion == 1 {
-		pin.Version = lock.Dependencies[TypeScriptPackage].Version
+		pin.Version = lock.Dependencies[typeScriptPackage].Version
 	} else {
-		pin.Version = lock.Packages["node_modules/"+TypeScriptPackage].Version
+		pin.Version = lock.Packages["node_modules/"+typeScriptPackage].Version
 		root := lock.Packages[""]
 		rootBody, err := json.Marshal(root)
 		if err != nil {
@@ -182,7 +182,7 @@ func readNpmPin(dir string) (engineid.Pin, error) {
 		if err != nil || rootSpec != spec {
 			return engineid.Pin{}, fmt.Errorf("package manifest and npm lockfile disagree")
 		}
-		if legacy := lock.Dependencies[TypeScriptPackage].Version; legacy != "" && legacy != pin.Version {
+		if legacy := lock.Dependencies[typeScriptPackage].Version; legacy != "" && legacy != pin.Version {
 			return engineid.Pin{}, fmt.Errorf("conflicting SDK lockfile resolutions")
 		}
 	}

@@ -19,9 +19,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// Issue persists one capability within its intake, claim or exchange transaction.
+// issue persists one capability within its intake, claim or exchange transaction.
 // Raw must not leave the transaction until its commit succeeds.
-func (s *Store) Issue(ctx context.Context, tx *storeTx, request capability.IssueRequest) (capability.Issued, error) {
+func (s *Store) issue(ctx context.Context, tx *storeTx, request capability.IssueRequest) (capability.Issued, error) {
 	return s.issueTx(ctx, tx, request, nil)
 }
 
@@ -74,7 +74,7 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 			return capability.Issued{}, err
 		}
 		if request.Provision.Kind == capability.ProvisionBootstrap && tx.rotatingRoot == nil {
-			result, err := tx.ExecContext(ctx, `UPDATE settings SET value=? WHERE key='bootstrap_admin'`, []byte(c.Prefix))
+			result, err := tx.execContext(ctx, `UPDATE settings SET value=? WHERE key='bootstrap_admin'`, []byte(c.Prefix))
 			if err != nil {
 				return capability.Issued{}, err
 			}
@@ -392,7 +392,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		start = capability.BillingAtStart
 	}
 	if here {
-		executor = TierHere
+		executor = tierHere
 	}
 
 	c.RootMetered = meteredPlacement(claimant.Capability, parent.Capability)
@@ -475,7 +475,7 @@ func childAppRepositoriesTx(ctx context.Context, tx *storeTx, team Team) ([]stri
 	if !ok {
 		return nil, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT `+githubAppInstallationCols+` FROM github_app_installations WHERE team=? AND suspended=0`+tx.forShare(), team)
+	rows, err := tx.queryContext(ctx, `SELECT `+githubAppInstallationCols+` FROM github_app_installations WHERE team=? AND suspended=0`+tx.forShare(), team)
 	if err != nil {
 		return nil, err
 	}
@@ -529,11 +529,11 @@ func bindExchangedUnitTx(ctx context.Context, tx *storeTx, c capability.Capabili
 	var err error
 	switch c.Unit {
 	case capability.UnitTrigger, capability.UnitPlan:
-		result, err = tx.ExecContext(ctx, "UPDATE triggers SET capability_prefix = ? WHERE team = ? AND id = ? AND capability_prefix = ? AND generation = ?", c.Prefix, c.Team, c.Binding.RunID, bootstrap, c.Binding.Generation)
+		result, err = tx.execContext(ctx, "UPDATE triggers SET capability_prefix = ? WHERE team = ? AND id = ? AND capability_prefix = ? AND generation = ?", c.Prefix, c.Team, c.Binding.RunID, bootstrap, c.Binding.Generation)
 	case capability.UnitNode:
-		result, err = tx.ExecContext(ctx, "UPDATE nodes SET capability_prefix = ? WHERE team = ? AND run_id = ? AND node_id = ? AND capability_prefix = ? AND generation = ?", c.Prefix, c.Team, c.Binding.RunID, c.Binding.NodeID, bootstrap, c.Binding.Generation)
+		result, err = tx.execContext(ctx, "UPDATE nodes SET capability_prefix = ? WHERE team = ? AND run_id = ? AND node_id = ? AND capability_prefix = ? AND generation = ?", c.Prefix, c.Team, c.Binding.RunID, c.Binding.NodeID, bootstrap, c.Binding.Generation)
 	case capability.UnitEval:
-		result, err = tx.ExecContext(ctx, "UPDATE eval_units SET capability_prefix = ? WHERE team = ? AND run_id = ? AND source_node_id = ? AND source_generation = ? AND capability_prefix = ? AND generation = ?", c.Prefix, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation, bootstrap, c.Binding.Expansion.Generation)
+		result, err = tx.execContext(ctx, "UPDATE eval_units SET capability_prefix = ? WHERE team = ? AND run_id = ? AND source_node_id = ? AND source_generation = ? AND capability_prefix = ? AND generation = ?", c.Prefix, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation, bootstrap, c.Binding.Expansion.Generation)
 	default:
 		return authorityError(apierr.BadRequest, "unknown exchange unit")
 	}
@@ -584,7 +584,7 @@ func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Ca
 	if err := tx.operator.persistCapabilityTx(ctx, tx, c, origin); err != nil {
 		return capability.Issued{}, err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE capabilities SET here_proof_public_key=? WHERE prefix=? AND COALESCE(team,'')=?", capability.HereProofPublicKey(raw), c.Prefix, c.Team); err != nil {
+	if _, err := tx.execContext(ctx, "UPDATE capabilities SET here_proof_public_key=? WHERE prefix=? AND COALESCE(team,'')=?", capability.HereProofPublicKey(raw), c.Prefix, c.Team); err != nil {
 		return capability.Issued{}, err
 	}
 	return capability.Issued{Raw: raw, Capability: c}, nil

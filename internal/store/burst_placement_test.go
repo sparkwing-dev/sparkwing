@@ -172,7 +172,7 @@ func burstHereOwnerFixture(t *testing.T) (*Store, UnitDemand, capability.Princip
 	var here capability.Issued
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		var err error
-		here, err = s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", HereRunID: "run", Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect}})
+		here, err = s.issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitTrigger, UnitID: "run", HereRunID: "run", Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect}})
 		return err
 	}); err != nil {
 		t.Fatal(err)

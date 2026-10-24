@@ -64,7 +64,7 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			resolved, err := resolver.StoreVerified(t.Context(), pin, release)
+			resolved, err := resolver.storeVerified(t.Context(), pin, release)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,7 +152,7 @@ func TestInstallSDKPreservesRegisteredSecretsProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := resolver.StoreVerified(t.Context(), pin, release)
+	resolved, err := resolver.storeVerified(t.Context(), pin, release)
 	if err != nil {
 		t.Fatal(err)
 	}

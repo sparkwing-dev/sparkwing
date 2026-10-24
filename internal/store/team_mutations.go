@@ -61,7 +61,7 @@ func (t *Tenant) RenameAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if name == "" || len(name) > maxDisplayNameLen {
 			return fmt.Errorf("%w: a display name is 1 to %d characters", ErrInvalidInput, maxDisplayNameLen)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET display_name=?,updated_at=? WHERE name=?`, name, tx.now(ctx).UnixNano(), t.team); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE teams SET display_name=?,updated_at=? WHERE name=?`, name, tx.now(ctx).UnixNano(), t.team); err != nil {
 			return err
 		}
 		return tx.QueryRowContext(ctx, `SELECT name,display_name,created_by FROM teams WHERE name=?`, t.team).Scan(&out.Slug, &out.DisplayName, &out.CreatedBy)
@@ -75,7 +75,7 @@ func (t *Tenant) RenameAuthorizedTeam(ctx context.Context, a capability.Authoriz
 // SetAuthorizedBuildTrust commits this team's execution policy under current administration.
 func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Authorized, trust bool) error {
 	return t.teamMutationTx(ctx, a, "SetAuthorizedBuildTrust", string(t.team), func(tx *storeTx, _ capability.Principal) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO team_build_trust(team,trust_local_builds) VALUES (?,?) ON CONFLICT(team) DO UPDATE SET trust_local_builds=excluded.trust_local_builds`, t.team, boolInt(trust))
+		_, err := tx.execContext(ctx, `INSERT INTO team_build_trust(team,trust_local_builds) VALUES (?,?) ON CONFLICT(team) DO UPDATE SET trust_local_builds=excluded.trust_local_builds`, t.team, boolInt(trust))
 		return err
 	})
 }
@@ -93,8 +93,8 @@ func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Au
 		if p.Capability.Subject != a.Principal.Capability.Subject {
 			return bindingRefusal()
 		}
-		email = NormalizeEmail(email)
-		if !LooksLikeEmail(email) || !role.Valid() || strings.TrimSpace(key) == "" {
+		email = normalizeEmail(email)
+		if !looksLikeEmail(email) || !role.Valid() || strings.TrimSpace(key) == "" {
 			return ErrInvalidInput
 		}
 		var created, expires int64
@@ -121,7 +121,7 @@ func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Au
 // DeleteAuthorizedInvitation withdraws an open invitation under current administration.
 func (t *Tenant) DeleteAuthorizedInvitation(ctx context.Context, a capability.Authorized, id string) error {
 	return t.teamMutationTx(ctx, a, "DeleteAuthorizedInvitation", id, func(tx *storeTx, _ capability.Principal) error {
-		result, err := tx.ExecContext(ctx, `UPDATE invitations SET withdrawn_at=? WHERE team=? AND id=? AND accepted_at IS NULL AND withdrawn_at IS NULL`, tx.now(ctx).UnixNano(), t.team, id)
+		result, err := tx.execContext(ctx, `UPDATE invitations SET withdrawn_at=? WHERE team=? AND id=? AND accepted_at IS NULL AND withdrawn_at IS NULL`, tx.now(ctx).UnixNano(), t.team, id)
 		return credentialRowChanged(result, err)
 	})
 }
@@ -239,13 +239,13 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		if _, err := tx.ResolveAuthority(ctx, a.Principal.Authority); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM pipeline_success_pins WHERE team=? AND run_id=?`, t.team, a.Target.RunID); err != nil {
+		if _, err := tx.execContext(ctx, `DELETE FROM pipeline_success_pins WHERE team=? AND run_id=?`, t.team, a.Target.RunID); err != nil {
 			return err
 		}
 		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(p)}, auditRunDeletion{RunID: a.Target.RunID}); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM runs WHERE team=? AND id=?`, t.team, a.Target.RunID)
+		_, err = tx.execContext(ctx, `DELETE FROM runs WHERE team=? AND id=?`, t.team, a.Target.RunID)
 		return err
 	})
 }

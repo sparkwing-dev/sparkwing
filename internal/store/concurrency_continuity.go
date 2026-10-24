@@ -29,7 +29,7 @@ func lockBoundCapacityTx(ctx context.Context, tx *storeTx, team Team, runID, nod
 	if includePlan {
 		plan = 1
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT key FROM concurrency_holders WHERE team = ? AND run_id = ? AND (? = '' OR node_id = ? OR (? = 1 AND node_id = ''))
+	rows, err := tx.queryContext(ctx, `SELECT key FROM concurrency_holders WHERE team = ? AND run_id = ? AND (? = '' OR node_id = ? OR (? = 1 AND node_id = ''))
 UNION SELECT key FROM concurrency_waiters WHERE team = ? AND run_id = ? AND (? = '' OR node_id = ? OR (? = 1 AND node_id = '')) ORDER BY key`, team, runID, nodeID, nodeID, plan, team, runID, nodeID, nodeID, plan)
 	if err != nil {
 		return err
@@ -68,7 +68,7 @@ func renewCapacityTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID 
 		if table == "concurrency_holders" {
 			superseded = " AND superseded=0"
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT key,node_id,holder_id,lease_expires_at FROM `+table+` AS leased
+		rows, err := tx.queryContext(ctx, `SELECT key,node_id,holder_id,lease_expires_at FROM `+table+` AS leased
 WHERE team=? AND run_id=? AND (?='' OR node_id=? OR node_id='') AND lease_expires_at>?`+superseded+`
 AND EXISTS (SELECT 1 FROM runs r WHERE r.team=leased.team AND r.id=leased.run_id AND r.finished_at IS NULL)
 AND (node_id='' OR EXISTS (SELECT 1 FROM nodes n WHERE n.team=leased.team AND n.run_id=leased.run_id AND n.node_id=leased.node_id AND n.status<>'done' AND n.cancel_requested_at IS NULL))`, team, runID, nodeID, nodeID, now.UnixNano())
@@ -95,12 +95,12 @@ AND (node_id='' OR EXISTS (SELECT 1 FROM nodes n WHERE n.team=leased.team AND n.
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE `+table+` SET lease_expires_at=? WHERE team=? AND key=? AND run_id=? AND node_id=? AND holder_id=?`, bound, team, r.key, runID, r.nodeID, r.holderID); err != nil {
+			if _, err := tx.execContext(ctx, `UPDATE `+table+` SET lease_expires_at=? WHERE team=? AND key=? AND run_id=? AND node_id=? AND holder_id=?`, bound, team, r.key, runID, r.nodeID, r.holderID); err != nil {
 				return err
 			}
 		}
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT node_id,lease_expires_at FROM admission_work WHERE team=? AND run_id=? AND (?='' OR node_id=? OR node_id='') AND lease_expires_at>?`, team, runID, nodeID, nodeID, now.UnixNano())
+	rows, err := tx.queryContext(ctx, `SELECT node_id,lease_expires_at FROM admission_work WHERE team=? AND run_id=? AND (?='' OR node_id=? OR node_id='') AND lease_expires_at>?`, team, runID, nodeID, nodeID, now.UnixNano())
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ AND (node_id='' OR EXISTS (SELECT 1 FROM nodes n WHERE n.team=leased.team AND n.
 		if err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE admission_work SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=?`, bound, team, runID, p.node); err != nil {
+		if _, err = tx.execContext(ctx, `UPDATE admission_work SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=?`, bound, team, runID, p.node); err != nil {
 			return err
 		}
 	}
@@ -135,10 +135,10 @@ func releaseCapacityRowsTx(ctx context.Context, tx *storeTx, team Team, runID, n
 	if err := lockBoundCapacityTx(ctx, tx, team, runID, nodeID, false); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM concurrency_holders WHERE team = ? AND run_id = ? AND (? = '' OR node_id = ?)`, team, runID, nodeID, nodeID); err != nil {
+	if _, err := tx.execContext(ctx, `DELETE FROM concurrency_holders WHERE team = ? AND run_id = ? AND (? = '' OR node_id = ?)`, team, runID, nodeID, nodeID); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `DELETE FROM concurrency_waiters WHERE team = ? AND run_id = ? AND (? = '' OR node_id = ?)`, team, runID, nodeID, nodeID)
+	_, err := tx.execContext(ctx, `DELETE FROM concurrency_waiters WHERE team = ? AND run_id = ? AND (? = '' OR node_id = ?)`, team, runID, nodeID, nodeID)
 	return err
 }
 
@@ -155,6 +155,6 @@ func releaseCapacityTx(ctx context.Context, tx *storeTx, team Team, runID, nodeI
 	if err := releaseCapacityRowsTx(ctx, tx, team, runID, nodeID); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `DELETE FROM admission_work WHERE team=? AND run_id=? AND (?='' OR node_id=?)`, team, runID, nodeID, nodeID)
+	_, err := tx.execContext(ctx, `DELETE FROM admission_work WHERE team=? AND run_id=? AND (?='' OR node_id=?)`, team, runID, nodeID, nodeID)
 	return err
 }

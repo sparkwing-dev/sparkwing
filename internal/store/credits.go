@@ -30,27 +30,22 @@ const (
 	// MaxCreditGrantMicro caps the size of one grant at ten million dollars.
 	MaxCreditGrantMicro = 1_000_000_000_000_000
 
-	// MaxCreditRateMicro is the highest price an operator may put on a cloud runner second: ten thousand dollars.
-	MaxCreditRateMicro = 1_000_000_000_000
+	// maxCreditRateMicro is the highest price an operator may put on a cloud runner second: ten thousand dollars.
+	maxCreditRateMicro = 1_000_000_000_000
 )
 
 const (
 	CreditGrantFree     = "free"
 	CreditGrantPaid     = "paid"
-	CreditGrantReversal = "reversal"
+	creditGrantReversal = "reversal"
 )
 
 const (
-	CreditChargeReservation = "reservation"
-	CreditChargeSlice       = "slice"
-	CreditChargeUsage       = "usage"
-	CreditChargeRefund      = "refund"
+	creditChargeReservation = "reservation"
+	creditChargeSlice       = "slice"
+	creditChargeUsage       = "usage"
+	creditChargeRefund      = "refund"
 	CreditChargeStorage     = "storage"
-)
-
-const (
-	// EventKindCreditsBlocked records a claim refused for an empty balance, so a run waiting on a metered runner says why.
-	EventKindCreditsBlocked = "credits_blocked"
 )
 
 // ErrInsufficientCredits is returned when a metered runner's controller has no balance left to pay for the work it asked for.
@@ -72,13 +67,13 @@ type InsufficientCreditsError struct {
 
 func (e *InsufficientCreditsError) Error() string {
 	switch e.Hold {
-	case HoldCauseDispute:
+	case holdCauseDispute:
 		return "credits held: a payment dispute on this team is open; Cloud work stops until it is resolved; contact support"
 	case HoldCauseWarning:
 		return "credits held: the card issuer reported possible fraud on a payment; Cloud work stops; contact support"
 	case HoldCauseOperator:
 		return "credits held by Sparkwing support; Cloud work stops; contact support"
-	case HoldCauseRevoked:
+	case holdCauseRevoked:
 		return "Cloud standing revoked by Sparkwing support; Cloud work stops; contact support"
 	}
 	return fmt.Sprintf("out of credits: balance %s, need %s; add funds or turn on automatic refill on the billing page",
@@ -282,7 +277,7 @@ func sameGrantTerms(stored CreditGrant, team Team, req CreditGrantRequest) error
 func reversedMicroTx(ctx context.Context, tx *storeTx, team Team, payment string) (int64, error) {
 	var sum sql.NullInt64
 	err := tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
-	  WHERE team = ? AND kind = ? AND reverses = ?`, string(team), CreditGrantReversal, payment).Scan(&sum)
+	  WHERE team = ? AND kind = ? AND reverses = ?`, string(team), creditGrantReversal, payment).Scan(&sum)
 	return -sum.Int64, err
 }
 
@@ -486,9 +481,9 @@ func (u CreditSettingsUpdate) validate() error {
 }
 
 func validCreditRate(micro int64) error {
-	if micro <= 0 || micro > MaxCreditRateMicro {
+	if micro <= 0 || micro > maxCreditRateMicro {
 		return fmt.Errorf("%w: the rate must be between 1 and %d micro-credits per second, got %d",
-			ErrInvalidCreditSetting, int64(MaxCreditRateMicro), micro)
+			ErrInvalidCreditSetting, int64(maxCreditRateMicro), micro)
 	}
 	return nil
 }

@@ -34,17 +34,6 @@ func (o *Operator) SetCreditSettings(ctx context.Context, up CreditSettingsUpdat
 	return out, tx.Commit()
 }
 
-// WarmCPUClassCores returns the configured warm runner CPU class.
-func (o *Operator) WarmCPUClassCores(ctx context.Context) (int64, error) {
-	return o.s.creditSetting(ctx, metaKeyWarmCPUClass, DefaultWarmCPUClassCores)
-}
-
-// CreditRateTable returns the deployment price ladder.
-func (o *Operator) CreditRateTable(ctx context.Context) (CreditRateTable, error) {
-	settings, err := o.CreditSettings(ctx)
-	return settings.RateTable, err
-}
-
 func setOperatorCreditSettingsTx(ctx context.Context, tx *storeTx, up CreditSettingsUpdate) (_ CreditSettings, err error) {
 	writes, err := creditSettingsWrites(up)
 	if err != nil {
@@ -67,4 +56,15 @@ func setOperatorCreditSettingsTx(ctx context.Context, tx *storeTx, up CreditSett
 		return CreditSettings{}, err
 	}
 	return out, nil
+}
+
+// WarmCPUClassCores returns the configured warm runner CPU class.
+func (o *Operator) WarmCPUClassCores(ctx context.Context) (int64, error) {
+	return o.s.creditSetting(ctx, metaKeyWarmCPUClass, DefaultWarmCPUClassCores)
+}
+
+// CreditRateTable returns the deployment price ladder.
+func (o *Operator) CreditRateTable(ctx context.Context) (CreditRateTable, error) {
+	settings, err := o.CreditSettings(ctx)
+	return settings.RateTable, err
 }

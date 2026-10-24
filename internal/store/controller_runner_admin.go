@@ -30,7 +30,7 @@ func (t *Tenant) DeleteRunner(ctx context.Context, actor runstate.Actor, name st
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var prefixes []string
 		if err := acquireLockSet(ctx, tx, func() lockSet {
-			rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND bind_kind='none' AND parent_id IS NULL ORDER BY prefix`, t.team, name)
+			rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='machine' AND subject_id=? AND bind_kind='none' AND parent_id IS NULL ORDER BY prefix`, t.team, name)
 			if err != nil {
 				return lockSet{err: err}
 			}

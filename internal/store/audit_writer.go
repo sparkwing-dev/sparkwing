@@ -286,7 +286,7 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 		ev.Kind, ev.SubjectID, ev.Account = BusinessEventTeamCreated, string(c.Team), p.AccountID
 	case auditFirstSuccess:
 		actorAllowed = c.Actor.system == auditController
-		ev.Kind, ev.RunID = BusinessEventFirstRunSucceeded, p.RunID
+		ev.Kind, ev.RunID = businessEventFirstRunSucceeded, p.RunID
 	case auditRunDeletion:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "run.deletion_authorized", p.RunID, p.RunID, true
 	case auditMutation:
@@ -297,19 +297,19 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 			ev.SubjectID = digestAudit(p.SubjectID).String()
 		}
 	case auditCheckout:
-		actorAllowed = p.Outcome == BusinessEventCheckoutOpened && c.Actor.system == auditController || p.Outcome != BusinessEventCheckoutOpened && c.Actor.system == auditPaymentProvider
+		actorAllowed = p.Outcome == businessEventCheckoutOpened && c.Actor.system == auditController || p.Outcome != businessEventCheckoutOpened && c.Actor.system == auditPaymentProvider
 		ev.Kind, ev.SubjectID = string(p.Outcome), p.CheckoutID
-		valid = auditOneOf(p.Outcome, BusinessEventCheckoutOpened, BusinessEventCheckoutFailed, BusinessEventCheckoutExpired, BusinessEventRefillFailed) && auditOneOf(p.PaymentMode, "", "test", "live")
+		valid = auditOneOf(p.Outcome, businessEventCheckoutOpened, businessEventCheckoutFailed, businessEventCheckoutExpired, businessEventRefillFailed) && auditOneOf(p.PaymentMode, "", "test", "live")
 	case auditGrant:
 		valid = auditOneOf(p.ThreeDS, "", "authenticated", "attempt_acknowledged", "attempted", "failed", "not_supported", "processing", "processing_error", "unknown", "required", "unavailable", "exempted")
 		ev.SubjectID = p.GrantID
 		switch p.Kind {
 		case CreditGrantPaid:
 			actorAllowed = c.Actor.system == auditPaymentProvider
-			ev.Kind = BusinessEventCheckoutPaid
-		case CreditGrantReversal:
+			ev.Kind = businessEventCheckoutPaid
+		case creditGrantReversal:
 			actorAllowed = actorAllowed || c.Actor.system == auditPaymentProvider
-			ev.Kind = BusinessEventCreditReversed
+			ev.Kind = businessEventCreditReversed
 		case CreditGrantFree:
 			actorAllowed = actorAllowed || c.Actor.system == auditBreakGlass
 			ev.Kind = BusinessEventCreditGranted
@@ -325,7 +325,7 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 	case auditCard:
 		actorAllowed = c.Actor.system == auditPaymentProvider
 		ev.Kind, ev.SubjectID = string(p.Operation), p.Reference.String()
-		valid = auditOneOf(p.Operation, BusinessEventCardAdded, BusinessEventCardRefused, BusinessEventCardBlocked, BusinessEventCardRefundDue)
+		valid = auditOneOf(p.Operation, businessEventCardAdded, businessEventCardRefused, businessEventCardBlocked, businessEventCardRefundDue)
 	case auditTrust:
 		actorAllowed = actorAllowed || c.Actor.system == auditBreakGlass
 		ev.Kind, ev.SubjectID = BusinessEventBillingTrustChanged, p.ReceiptID
@@ -344,14 +344,14 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 		ev.Kind, ev.SubjectID = "team.settings_changed", p.ReceiptID
 		for _, tiers := range [][]auditClaimTier{p.ClaimRanking, p.PreviousClaimRanking} {
 			for _, tier := range tiers {
-				valid = valid && auditOneOf(tier, TierHere, TierPersonal, TierActions, TierSelfHosted, TierCloud)
+				valid = valid && auditOneOf(tier, tierHere, tierPersonal, tierActions, tierSelfHosted, TierCloud)
 			}
 		}
 	case auditRefillSettings:
-		ev.Kind, ev.SubjectID = BusinessEventRefillSettings, p.ReceiptID
+		ev.Kind, ev.SubjectID = businessEventRefillSettings, p.ReceiptID
 	case auditRefill:
 		actorAllowed = c.Actor.system == auditController
-		ev.Kind, ev.SubjectID = BusinessEventRefillOpened, p.RefillID
+		ev.Kind, ev.SubjectID = businessEventRefillOpened, p.RefillID
 	case auditSecretRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "secret.released", p.Name.String(), p.RunID, true
 	case auditSourceRelease:
@@ -390,7 +390,7 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 	if ev.Team == "" {
 		team = nil
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO audit_events (id,ts,team,account,kind,subject_id,actor,attrs,run_id,actor_is_account,subject_is_account)
+	_, err = tx.execContext(ctx, `INSERT INTO audit_events (id,ts,team,account,kind,subject_id,actor,attrs,run_id,actor_is_account,subject_is_account)
  VALUES (?,?,?,?,?,?,?,?,?,?,CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE id=?) THEN 1 ELSE 0 END) ON CONFLICT DO NOTHING`, id, ev.At.UnixNano(), team, ev.Account, ev.Kind, ev.SubjectID, ev.Actor, string(attrs), ev.RunID, boolInt(accountActor), ev.SubjectID)
 	return err
 }

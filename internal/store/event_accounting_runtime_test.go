@@ -32,23 +32,23 @@ func TestStoreDataEventsRefuseEachLimitAtomically(t *testing.T) {
 	for _, tc := range []struct {
 		limit string
 		quota StorageQuota
-		caps  EventLimits
+		caps  eventLimits
 	}{
-		{StorageLimitBytesPerRun, StorageQuota{MaxBytesPerRun: 1}, EventLimits{}},
-		{StorageLimitBytesPerMonth, StorageQuota{MaxBytesPerMonth: 1}, EventLimits{}},
-		{StorageLimitEventBytes, StorageQuota{}, EventLimits{MaxBytesPerEvent: 1}},
-		{StorageLimitEventBytesPerRun, StorageQuota{}, EventLimits{MaxBytesPerRun: 1}},
-		{StorageLimitEventsPerRun, StorageQuota{}, EventLimits{MaxEventsPerRun: 1}},
+		{storageLimitBytesPerRun, StorageQuota{MaxBytesPerRun: 1}, eventLimits{}},
+		{storageLimitBytesPerMonth, StorageQuota{MaxBytesPerMonth: 1}, eventLimits{}},
+		{storageLimitEventBytes, StorageQuota{}, eventLimits{MaxBytesPerEvent: 1}},
+		{storageLimitEventBytesPerRun, StorageQuota{}, eventLimits{MaxBytesPerRun: 1}},
+		{storageLimitEventsPerRun, StorageQuota{}, eventLimits{MaxEventsPerRun: 1}},
 	} {
 		t.Run(tc.limit, func(t *testing.T) {
 			s, tenant, _, _ := resultFixture(t)
 			if err := tenant.SetStorageQuota(t.Context(), tc.quota); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.SetEventLimits(t.Context(), tc.caps); err != nil {
+			if err := s.setEventLimits(t.Context(), tc.caps); err != nil {
 				t.Fatal(err)
 			}
-			if tc.limit == StorageLimitEventsPerRun {
+			if tc.limit == storageLimitEventsPerRun {
 				if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", "k", nil); err != nil {
 					t.Fatal(err)
 				}
@@ -86,11 +86,11 @@ func eventAccountingSnapshot(t *testing.T, s *Store) string {
 }
 
 func TestStoreDataEventsShareCapacityWithUploadReservations(t *testing.T) {
-	for _, limit := range []string{StorageLimitBytesPerMonth, StorageLimitBytesPerRun} {
+	for _, limit := range []string{storageLimitBytesPerMonth, storageLimitBytesPerRun} {
 		t.Run(limit, func(t *testing.T) {
 			_, tenant, request := uploadFixture(t)
 			quota := StorageQuota{MaxBytesPerRun: 4}
-			if limit == StorageLimitBytesPerMonth {
+			if limit == storageLimitBytesPerMonth {
 				quota = StorageQuota{MaxBytesPerMonth: 4}
 			}
 			if err := tenant.SetStorageQuota(t.Context(), quota); err != nil {
@@ -138,7 +138,7 @@ func TestStoreDataEventsMonthAndRunUsageSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var refusal *StorageQuotaError
-	if _, err := tenant.AppendEventCharged(t.Context(), "second", "run", "", "k", nil); !errors.As(err, &refusal) || refusal.Limit != StorageLimitBytesPerRun || refusal.Used != 7 {
+	if _, err := tenant.AppendEventCharged(t.Context(), "second", "run", "", "k", nil); !errors.As(err, &refusal) || refusal.Limit != storageLimitBytesPerRun || refusal.Used != 7 {
 		t.Fatalf("new month reset run capacity: %v", err)
 	}
 	for month, want := range map[string]int64{"2026-01": 4, "2026-02": 3, "2025-12": 0} {

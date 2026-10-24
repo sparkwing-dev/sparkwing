@@ -143,7 +143,7 @@ func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (Accept
 		return persistPlanResultProofTx(ctx, tx, t.team, request)
 	})
 	if err != nil {
-		var refused *SecretPreflightError
+		var refused *secretPreflightError
 		if errors.As(err, &refused) {
 			return AcceptedPlan{}, errors.Join(err, t.s.recordSecretPreflight(ctx, t.team, request, refused))
 		}
@@ -223,7 +223,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		if err := expansionAuthorityTx(ctx, tx, t.team, request); err != nil {
 			return err
 		}
-		write, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_registration=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, accepted.hash, accepted.body, accepted.registration, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
+		write, err := tx.execContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_registration=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, accepted.hash, accepted.body, accepted.registration, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
 		if err != nil {
 			return err
 		}
@@ -335,7 +335,7 @@ func resolveExpansionLossTx(ctx context.Context, tx *storeTx, target expiredUnit
 	if err != nil {
 		return err
 	}
-	write, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion=?,expansion_failure=?,expansion_digest=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, state, body, digest, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration)
+	write, err := tx.execContext(ctx, `UPDATE nodes SET expansion=?,expansion_failure=?,expansion_digest=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, state, body, digest, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration)
 	if err != nil {
 		return err
 	}
@@ -370,7 +370,7 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,idempotency_scope,idempotency_key,idempotency_digest,request_sealed_at,trigger_source,git_branch,git_sha,repo_key,repo_display,repo_identity,retry_of,lineage_json,parent_run_id,parent_node_id,dispatch,intake_mode,admission,allowed_pools,created_subject_kind,created_principal,created_at,claim_wait_ns,log_retention_class,log_retention_days) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, result.Number, input.Pipeline, body, snapshot.request.Hash, scope, key, digest, snapshot.request.AdmittedAt.UnixNano(), input.Origin, input.Git.Ref, input.Git.SHA, input.Git.Repository.Key, input.Git.Repository.Display, identity, snapshot.execution.Lineage.RetryOf, lineage, snapshot.execution.Lineage.ParentRunID, snapshot.execution.Lineage.ParentJobID, input.Dispatch, input.Mode, input.Options.AdmissionClass.Value, pools, p.Capability.Subject.Kind, p.Capability.Subject.ID, now.UnixNano(), int64(input.Options.ClaimWait.Value), policy.LogRetentionClass, policy.LogRetentionDays)
+	_, err = tx.execContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,idempotency_scope,idempotency_key,idempotency_digest,request_sealed_at,trigger_source,git_branch,git_sha,repo_key,repo_display,repo_identity,retry_of,lineage_json,parent_run_id,parent_node_id,dispatch,intake_mode,admission,allowed_pools,created_subject_kind,created_principal,created_at,claim_wait_ns,log_retention_class,log_retention_days) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, result.Number, input.Pipeline, body, snapshot.request.Hash, scope, key, digest, snapshot.request.AdmittedAt.UnixNano(), input.Origin, input.Git.Ref, input.Git.SHA, input.Git.Repository.Key, input.Git.Repository.Display, identity, snapshot.execution.Lineage.RetryOf, lineage, snapshot.execution.Lineage.ParentRunID, snapshot.execution.Lineage.ParentJobID, input.Dispatch, input.Mode, input.Options.AdmissionClass.Value, pools, p.Capability.Subject.Kind, p.Capability.Subject.ID, now.UnixNano(), int64(input.Options.ClaimWait.Value), policy.LogRetentionClass, policy.LogRetentionDays)
 	if err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key,claim_requirements,claim_context) VALUES (?,?,'pending',?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, kind, now.UnixNano(), now.UnixNano(), expires, needs, prefers, delivery, replayKey, requirements, claimContext)
+	_, err = tx.execContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key,claim_requirements,claim_context) VALUES (?,?,'pending',?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, kind, now.UnixNano(), now.UnixNano(), expires, needs, prefers, delivery, replayKey, requirements, claimContext)
 	return err
 }
 
@@ -418,7 +418,7 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 	if err != nil {
 		return err
 	}
-	write, err := tx.ExecContext(ctx, `UPDATE runs SET spec_json=?,spec_hash=?,sealed_at=?,plan_json=?,plan_hash=?,plan_accepted_generation=?,claim_wait_ns=?,admission=? WHERE team=? AND id=? AND sealed_at IS NULL`, raw, spec.Hash, spec.SealedAt.UnixNano(), []byte(body), spec.PlanHash, generation, int64(spec.Resolved.Settings.Options.ClaimWait.Value), spec.Resolved.Settings.Options.AdmissionClass.Value, team, id)
+	write, err := tx.execContext(ctx, `UPDATE runs SET spec_json=?,spec_hash=?,sealed_at=?,plan_json=?,plan_hash=?,plan_accepted_generation=?,claim_wait_ns=?,admission=? WHERE team=? AND id=? AND sealed_at IS NULL`, raw, spec.Hash, spec.SealedAt.UnixNano(), []byte(body), spec.PlanHash, generation, int64(spec.Resolved.Settings.Options.ClaimWait.Value), spec.Resolved.Settings.Options.AdmissionClass.Value, team, id)
 	if err != nil {
 		return err
 	}
@@ -443,7 +443,7 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE triggers SET claim_requirements=?,claim_context=? WHERE team=? AND id=?`, requirements, claimContext, team, id); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE triggers SET claim_requirements=?,claim_context=? WHERE team=? AND id=?`, requirements, claimContext, team, id); err != nil {
 			return err
 		}
 	}
@@ -535,7 +535,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 		return AcceptedPlan{}, err
 	}
 	if run.Request.Request.Mode == runspec.IntakeExecute && dispatch == string(runspec.DispatchController) {
-		if _, err = tx.ExecContext(ctx, `UPDATE runs SET plan_accepted_generation=? WHERE team=? AND id=? AND plan_accepted_generation=0`, request.Actor.Owner.Generation, team, run.ID); err != nil {
+		if _, err = tx.execContext(ctx, `UPDATE runs SET plan_accepted_generation=? WHERE team=? AND id=? AND plan_accepted_generation=0`, request.Actor.Owner.Generation, team, run.ID); err != nil {
 			return AcceptedPlan{}, err
 		}
 		if err = acceptControllerPlanTx(ctx, tx, team, request, *controller, replay); err != nil {

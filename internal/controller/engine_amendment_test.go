@@ -136,7 +136,7 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := server.CancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: "user_cancelled"})
+	result, err := server.cancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: "user_cancelled"})
 	if err != nil || !result.CancelRequested {
 		t.Fatalf("cancel job: %+v, %v", result, err)
 	}
@@ -153,7 +153,7 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 	if err := json.Unmarshal(events[1].Payload, &cancellation); err != nil || events[1].Kind != "job_cancel_requested" || cancellation.Reason != "user_cancelled" {
 		t.Fatalf("cancel reason: %+v, %v", cancellation, err)
 	}
-	if _, err := server.CancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: "user_cancelled"}); err == nil {
+	if _, err := server.cancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: "user_cancelled"}); err == nil {
 		t.Fatal("stale owner cancelled a job")
 	}
 }
@@ -169,12 +169,12 @@ func TestEngineReadFailureUsesAuthorizedSourceGeneration(t *testing.T) {
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,generation,finished_at,spec_json,execution_json,failure_json) VALUES ('a','run','source','done','failed',4,1,?,?,?)`, []byte(`{"id":"source"}`), []byte(`{}`), raw)
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','recovery','pending',?,?)`, []byte(`{"id":"recovery","on_failure_of":"source"}`), []byte(`{}`))
 	owner.Target.NodeID, owner.Target.SourceGeneration = "source", 4
-	got, err := server.ReadFailure(t.Context(), owner)
+	got, err := server.readFailure(t.Context(), owner)
 	if err != nil || got == nil || got.Job != failure.Job || got.Stage != failure.Stage || got.Error.Code != failure.Error.Code || got.Error.Message != failure.Error.Message {
 		t.Fatalf("failure: %+v, %v", got, err)
 	}
 	owner.Target.SourceGeneration++
-	if _, err := server.ReadFailure(t.Context(), owner); err == nil {
+	if _, err := server.readFailure(t.Context(), owner); err == nil {
 		t.Fatal("requested source generation replaced the stored fence")
 	}
 }
@@ -246,7 +246,7 @@ func TestEngineCancellationIntentPreservesHolderProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		first, err := server.CancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: reason})
+		first, err := server.cancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: reason})
 		if err != nil || !first.CancelRequested {
 			return false
 		}
@@ -254,7 +254,7 @@ func TestEngineCancellationIntentPreservesHolderProperty(t *testing.T) {
 		if err != nil || row.Status != before.Status || row.Attempt != before.Attempt || row.CapabilityPrefix != holder.Award.CapabilityPrefix || row.ClaimedBy != holder.Award.Holder || row.Generation != holder.Award.Generation || row.CancelReason != reason || row.Outcome != "" || row.FinishedAt != nil {
 			return false
 		}
-		replay, err := server.CancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: reason})
+		replay, err := server.cancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: reason})
 		return err == nil && replay.Replayed && replay.StateSeq == first.StateSeq
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {

@@ -17,7 +17,7 @@ func TestStoreDataStandingReadsRetainedEventsInsteadOfHistoricalUsage(t *testing
 	rewriteSchemaExec(t, s.db, "INSERT INTO free_slots(team,taken_at) VALUES ('a',1)")
 	rewriteSchemaExec(t, s.db, "INSERT INTO storage_run_usage(team,run_id,period,replica_id,bytes,objects,updated_at) VALUES ('a','run','1970-01','replica',1000,1,1)")
 	got, err := tenant.StorageStanding(t.Context())
-	if err != nil || got.EventBytes != 17 || got.Tier != TeamTierFree {
+	if err != nil || got.EventBytes != 17 || got.Tier != teamTierFree {
 		t.Fatalf("standing=%+v, want 17 retained event bytes: %v", got, err)
 	}
 	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a'")
@@ -81,25 +81,25 @@ func TestStoreDataStandingPreservesFundingAndSlotPolicy(t *testing.T) {
 	check := func(want TeamStorageTier) {
 		t.Helper()
 		got, err := tenant.StorageStanding(t.Context())
-		if err != nil || got.Tier != want || got.AllowanceBytes != DefaultFreeAllowanceBytes {
+		if err != nil || got.Tier != want || got.AllowanceBytes != defaultFreeAllowanceBytes {
 			t.Fatalf("standing=%+v, want %s: %v", got, want, err)
 		}
 	}
-	check(TeamTierNone)
+	check(teamTierNone)
 	rewriteSchemaExec(t, s.db, "INSERT INTO free_slots(team,taken_at) VALUES ('a',?)", s.now().UnixNano())
-	check(TeamTierFree)
+	check(teamTierFree)
 	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
-	check(TeamTierFunded)
+	check(teamTierFunded)
 	if _, err := tenant.HoldByOperator(t.Context(), "operator", "held"); err != nil {
 		t.Fatal(err)
 	}
-	check(TeamTierFree)
+	check(teamTierFree)
 	if _, err := tenant.ReleaseOperatorHolds(t.Context(), "operator", "released"); err != nil {
 		t.Fatal(err)
 	}
-	check(TeamTierFunded)
+	check(teamTierFunded)
 }
 
 func TestStoreDataStandingRejectsCorruptAndOverflowedInventory(t *testing.T) {

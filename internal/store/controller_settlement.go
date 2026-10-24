@@ -88,7 +88,7 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 				if permission.Waiting {
 					continue
 				}
-				_, err = tx.ExecContext(ctx, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES (?,?,?,?,'pending',?) ON CONFLICT(team,run_id,source_node_id,source_generation) DO NOTHING`, team, runID, node.NodeID, node.Generation, actor.Owner.Generation)
+				_, err = tx.execContext(ctx, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES (?,?,?,?,'pending',?) ON CONFLICT(team,run_id,source_node_id,source_generation) DO NOTHING`, team, runID, node.NodeID, node.Generation, actor.Owner.Generation)
 				if err != nil {
 					return err
 				}

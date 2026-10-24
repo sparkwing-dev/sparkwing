@@ -20,7 +20,7 @@ func TestLeaseWatchControlReturnsServingFailure(t *testing.T) {
 	if err := writeTestFrame(daemon, &wingwire.Unsupported{Type: "lease-control"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-done; !errors.Is(err, ErrDaemonLacksOperation) {
+	if err := <-done; !errors.Is(err, errDaemonLacksOperation) {
 		t.Fatalf("watch hid serving failure: %v", err)
 	}
 }

@@ -14,10 +14,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// StartLocalDashboard waits for the elected owner's dashboard serving loop.
+// startLocalDashboard waits for the elected owner's dashboard serving loop.
 // An identical address reuses the listener. This never starts or replaces a
 // controller. Cancellation closes the request; the owner may already be serving.
-func StartLocalDashboard(ctx context.Context, home, address string) error {
+func startLocalDashboard(ctx context.Context, home, address string) error {
 	if address == "" {
 		return errors.New("wingd/client: dashboard address is required")
 	}

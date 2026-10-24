@@ -21,8 +21,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 )
 
-// DefaultCacheDirectory is shared by execution placements on this machine.
-func DefaultCacheDirectory() (string, error) {
+// defaultCacheDirectory is shared by execution placements on this machine.
+func defaultCacheDirectory() (string, error) {
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
@@ -49,7 +49,7 @@ func NewResolver(config Config) (*Resolver, error) {
 		return nil, err
 	}
 	if config.CacheDirectory == "" {
-		config.CacheDirectory, err = DefaultCacheDirectory()
+		config.CacheDirectory, err = defaultCacheDirectory()
 		if err != nil {
 			return nil, err
 		}
@@ -133,14 +133,14 @@ func (r *Resolver) resolve(ctx context.Context, identity engineid.Identity, targ
 	if identity.ManifestDigest != "" && digest(release.bundle.Manifest) != identity.ManifestDigest {
 		return Resolved{}, integrity(fmt.Errorf("release manifest differs from accepted engine identity"))
 	}
-	resolved, err := r.StoreVerified(ctx, identity.Pin, release)
+	resolved, err := r.storeVerified(ctx, identity.Pin, release)
 	resolved.Notices = notices
 	return resolved, err
 }
 
 func (r *Resolver) findCached(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, bool, error) {
 	if identity.ManifestDigest != "" {
-		return r.Cached(ctx, identity, target)
+		return r.cached(ctx, identity, target)
 	}
 	dir, err := r.targetDirectory(identity.Version, target)
 	if err != nil {
@@ -158,7 +158,7 @@ func (r *Resolver) findCached(ctx context.Context, identity engineid.Identity, t
 			continue
 		}
 		identity.ManifestDigest = entry.Name()
-		resolved, ok, err := r.Cached(ctx, identity, target)
+		resolved, ok, err := r.cached(ctx, identity, target)
 		if err != nil || ok {
 			return resolved, ok, err
 		}
@@ -166,8 +166,8 @@ func (r *Resolver) findCached(ctx context.Context, identity engineid.Identity, t
 	return Resolved{}, false, nil
 }
 
-// Cached re-verifies signatures, metadata and executable bytes; it grants no policy permission.
-func (r *Resolver) Cached(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, bool, error) {
+// cached re-verifies signatures, metadata and executable bytes; it grants no policy permission.
+func (r *Resolver) cached(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return Resolved{}, false, err
 	}
@@ -228,8 +228,8 @@ func readCachedRelease(version string, target releaseasset.Target, executable st
 	return VerifyRelease(version, target, bundle, keys)
 }
 
-// StoreVerified publishes a complete verified cache entry by an atomic directory rename.
-func (r *Resolver) StoreVerified(ctx context.Context, pin engineid.Pin, release VerifiedRelease) (resolved Resolved, result error) {
+// storeVerified publishes a complete verified cache entry by an atomic directory rename.
+func (r *Resolver) storeVerified(ctx context.Context, pin engineid.Pin, release VerifiedRelease) (resolved Resolved, result error) {
 	if err := ctx.Err(); err != nil {
 		return Resolved{}, err
 	}
@@ -244,7 +244,7 @@ func (r *Resolver) StoreVerified(ctx context.Context, pin engineid.Pin, release 
 		return Resolved{}, err
 	}
 	identity := engineid.Identity{Pin: pin, Version: version, ManifestDigest: digest(release.bundle.Manifest)}
-	if cached, ok, err := r.Cached(ctx, identity, release.target); err != nil || ok {
+	if cached, ok, err := r.cached(ctx, identity, release.target); err != nil || ok {
 		return cached, err
 	}
 	parent, err := r.targetDirectory(version, release.target)
@@ -276,7 +276,7 @@ func (r *Resolver) StoreVerified(ctx context.Context, pin engineid.Pin, release 
 	}
 	destination := filepath.Join(parent, identity.ManifestDigest)
 	if err := os.Rename(stage, destination); err != nil {
-		if cached, ok, cacheErr := r.Cached(ctx, identity, release.target); cacheErr != nil || ok {
+		if cached, ok, cacheErr := r.cached(ctx, identity, release.target); cacheErr != nil || ok {
 			return cached, cacheErr
 		}
 		if err := os.RemoveAll(destination); err != nil {

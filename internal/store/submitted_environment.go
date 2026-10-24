@@ -67,7 +67,7 @@ func (t *Tenant) installSubmittedEnvironmentTx(ctx context.Context, tx *storeTx,
 	if err != nil || !secrets.IsBound(envelope) {
 		return authorityError(apierr.Unavailable, "submitted environment encryption failed")
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE runs SET submitted_env=? WHERE team=? AND id=?`, envelope, t.team, result.RunID)
+	_, err = tx.execContext(ctx, `UPDATE runs SET submitted_env=? WHERE team=? AND id=?`, envelope, t.team, result.RunID)
 	return err
 }
 

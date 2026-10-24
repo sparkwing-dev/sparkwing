@@ -350,7 +350,7 @@ func TestIdentityOpenInvitationsAreCapped(t *testing.T) {
 	ctx := context.Background()
 	u := signIn(t, st, "s", "host@example.com")
 	tn := tenant(t, st, u.PersonalTeam)
-	for i := range store.MaxOpenInvitations {
+	for i := range 50 {
 		if _, err := tn.InviteForTest(t, ctx, u.Account.ID, fmt.Sprintf("guest%d@example.com", i), store.RoleReader, time.Now()); err != nil {
 			t.Fatalf("invitation %d: %v", i, err)
 		}
@@ -367,7 +367,7 @@ func TestIdentityDailyInvitationsAreCappedThroughWithdrawals(t *testing.T) {
 	ctx := context.Background()
 	u := signIn(t, st, "s", "host@example.com")
 	tn := tenant(t, st, u.PersonalTeam)
-	for i := range store.MaxInvitationsPerDay {
+	for i := range 100 {
 		inv, err := tn.InviteForTest(t, ctx, u.Account.ID, "victim@example.com", store.RoleReader, time.Now())
 		if err != nil {
 			t.Fatalf("invitation %d: %v", i, err)

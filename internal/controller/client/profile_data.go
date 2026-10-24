@@ -61,8 +61,8 @@ func OpenProfileData(ctx context.Context, options EngineOptions, scope capabilit
 	return p, nil
 }
 
-// PublicationStorage binds signed writes to one imported local attempt.
-func (p ProfileData) PublicationStorage(attempt runspec.AttemptIdentity) (blob.Store, blob.RecordStore, blob.Authority, error) {
+// publicationStorage binds signed writes to one imported local attempt.
+func (p ProfileData) publicationStorage(attempt runspec.AttemptIdentity) (blob.Store, blob.RecordStore, blob.Authority, error) {
 	a := p.Authority
 	if !a.Upload.Set || a.Upload.Value.Kind != blob.UploadPublication || attempt.Team != p.Team || attempt.RunID != a.Upload.Value.RunID || attempt.NodeID == "" || attempt.Attempt <= 0 || attempt.Generation <= 0 {
 		return nil, nil, a, localHostClientRefusal()
@@ -77,9 +77,9 @@ func (p ProfileData) PublicationStorage(attempt runspec.AttemptIdentity) (blob.S
 	return blob.NewSignedStore(blob.SignedStoreOptions{Signer: data, HTTPClient: blob.TransferClient{Transport: c.http.Transport}}), data, a, nil
 }
 
-// PublicationLogs uploads an imported attempt through the shared log segment path.
-func (p ProfileData) PublicationLogs(attempt runspec.AttemptIdentity) (logseg.Uploader, error) {
-	if _, _, _, err := p.PublicationStorage(attempt); err != nil {
+// publicationLogs uploads an imported attempt through the shared log segment path.
+func (p ProfileData) publicationLogs(attempt runspec.AttemptIdentity) (logseg.Uploader, error) {
+	if _, _, _, err := p.publicationStorage(attempt); err != nil {
 		return nil, err
 	}
 	c, err := newEngineClient(p.Options)

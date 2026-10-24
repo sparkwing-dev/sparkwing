@@ -13,12 +13,12 @@ import (
 const MinCardChargeCents = 50
 
 const (
-	BusinessEventCardAdded     = "card.added"
-	BusinessEventCardRefundDue = "card.refund_due"
+	businessEventCardAdded     = "card.added"
+	businessEventCardRefundDue = "card.refund_due"
 )
 
-// ErrStaleCardSetup refuses a card setup older than the card already on file.
-var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
+// errStaleCardSetup refuses a card setup older than the card already on file.
+var errStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
 
 // Card is the card a team saved for refills.
 type Card struct {
@@ -97,7 +97,7 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment stri
 		return err
 	}
 	amount := max(amountCents, 0) * MicroCreditsPerCent
-	if _, err := tx.ExecContext(ctx, `UPDATE card_refunds SET amount_micro = ?
+	if _, err := tx.execContext(ctx, `UPDATE card_refunds SET amount_micro = ?
 	    WHERE payment_mode=? AND team = ? AND payment_intent = ? AND amount_micro = 0`, amount, mode, string(team), payment); err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment stri
 	if amount > 0 && refunded >= amount {
 		return tx.operator.closeRefundedQueueTx(ctx, tx, payment)
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO card_refunds (payment_mode,payment_intent, team, reason, amount_micro, created_at)
+	res, err := tx.execContext(ctx, `INSERT INTO card_refunds (payment_mode,payment_intent, team, reason, amount_micro, created_at)
 	    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (payment_mode,team, payment_intent) DO NOTHING`,
 		mode, payment, string(team), reason, amount, now.UnixNano())
 	if err != nil {
@@ -117,7 +117,7 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment stri
 	if queued, err := res.RowsAffected(); err != nil || queued == 0 {
 		return err
 	}
-	return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(payment), Operation: BusinessEventCardRefundDue, AmountMicro: amount})
+	return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(payment), Operation: businessEventCardRefundDue, AmountMicro: amount})
 }
 
 // A same-payment warning preserves protected credit under a hold; other actionable
@@ -151,7 +151,7 @@ func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paym
 		string(team), freezeID); err != nil || held {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at)
+	if _, err := tx.execContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at)
 	    VALUES (?, ?, ?, ?, ?, ?)`,
 		freezeID, string(team), paymentIntent, "early fraud warning "+warning, HoldCauseWarning, now.UnixNano()); err != nil {
 		return err
@@ -162,8 +162,8 @@ func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paym
 	return tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: auditActor{system: auditController}}, auditHold{HoldID: digestAudit(freezeID), PaymentID: digestAudit(paymentIntent), WarningID: digestAudit(warning)})
 }
 
-// PaymentWarning is an early fraud warning on a payment.
-type PaymentWarning struct {
+// paymentWarning is an early fraud warning on a payment.
+type paymentWarning struct {
 	WarningID     string
 	PaymentIntent string
 	Fingerprint   string
@@ -172,9 +172,9 @@ type PaymentWarning struct {
 }
 
 const (
-	CardRefundDue       = "due"
-	CardRefundPending   = "pending"
-	CardRefundSucceeded = "succeeded"
+	cardRefundDue       = "due"
+	cardRefundPending   = "pending"
+	cardRefundSucceeded = "succeeded"
 )
 
 // safety: a failed refund is retried on a widening schedule, and never

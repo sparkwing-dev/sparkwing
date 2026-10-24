@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// ErrUnknownPayment is returned when a provider payment has no settled grant.
-var ErrUnknownPayment = errors.New("credits: no settled grant belongs to this payment id")
+// errUnknownPayment is returned when a provider payment has no settled grant.
+var errUnknownPayment = errors.New("credits: no settled grant belongs to this payment id")
 
 // CreditReversal reports what reversing a payment did. Grant is the reversal
 // the call wrote, or the one an earlier call wrote under the same reference;
@@ -34,9 +34,9 @@ type TeamCreditFreeze struct {
 // names who can lift it.
 const (
 	HoldCauseOperator = "operator"
-	HoldCauseDispute  = "dispute"
+	holdCauseDispute  = "dispute"
 	HoldCauseWarning  = "early_fraud_warning"
-	HoldCauseRevoked  = "revoked"
+	holdCauseRevoked  = "revoked"
 )
 
 // safety: the one reader of whether a team is held: revoked standing, or else its oldest open hold.
@@ -48,8 +48,8 @@ func teamHoldTx(ctx context.Context, q rowQuerier, team Team) (string, error) {
 		}
 		return "", err
 	}
-	if trust == BillingTrustRevoked {
-		return HoldCauseRevoked, nil
+	if trust == billingTrustRevoked {
+		return holdCauseRevoked, nil
 	}
 	var cause string
 	err := q.QueryRowContext(ctx, `SELECT cause FROM credit_freezes WHERE team = ? AND released_at IS NULL
@@ -60,13 +60,13 @@ func teamHoldTx(ctx context.Context, q rowQuerier, team Team) (string, error) {
 	return cause, err
 }
 
-// ErrDisputeConflict is returned when a hold or a reversal names a dispute
+// errDisputeConflict is returned when a hold or a reversal names a dispute
 // already held for another payment or team: a dispute disputes one payment.
-var ErrDisputeConflict = errors.New("credits: the dispute is already held for another payment")
+var errDisputeConflict = errors.New("credits: the dispute is already held for another payment")
 
-// OperatorHoldPrefix begins the id of every hold an operator places by hand,
+// operatorHoldPrefix begins the id of every hold an operator places by hand,
 // which keeps those holds apart from a payment dispute's.
-const OperatorHoldPrefix = "operator-"
+const operatorHoldPrefix = "operator-"
 
 // HoldByOperator holds t on actor's word and returns the hold's id. The hold
 // and its audit fact, naming actor and hold ID, commit together.
@@ -75,7 +75,7 @@ func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string) (stri
 	if err != nil {
 		return "", err
 	}
-	id = OperatorHoldPrefix + id
+	id = operatorHoldPrefix + id
 	_, err = t.hold(ctx, id, "", reason, actor)
 	return id, err
 }
@@ -98,7 +98,7 @@ func refuseBoundDisputeTx(ctx context.Context, tx *storeTx, disputeID string, te
 	}
 	if heldTeam != team || heldPayment != paymentID {
 		return true, fmt.Errorf("%w: %s is held for payment %q of team %s, not payment %q of team %s",
-			ErrDisputeConflict, disputeID, heldPayment, heldTeam, paymentID, team)
+			errDisputeConflict, disputeID, heldPayment, heldTeam, paymentID, team)
 	}
 	return true, nil
 }
@@ -140,7 +140,7 @@ func (t *Tenant) releaseFreezes(ctx context.Context, disputeID string, operatorO
 }
 
 func releasedDisputesTx(ctx context.Context, tx *storeTx, query string, args ...any) (_ []string, err error) {
-	rows, err := tx.QueryContext(ctx, query, args...)
+	rows, err := tx.queryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func (t *Tenant) CreditFreeze(ctx context.Context) (_ TeamCreditFreeze, err erro
 }
 
 func teamCreditFreezeTx(ctx context.Context, tx *storeTx, team Team) (_ TeamCreditFreeze, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT dispute_id, cause FROM credit_freezes
+	rows, err := tx.queryContext(ctx, `SELECT dispute_id, cause FROM credit_freezes
 	  WHERE team = ? AND released_at IS NULL ORDER BY created_at, dispute_id`, string(team))
 	if err != nil {
 		return TeamCreditFreeze{}, err

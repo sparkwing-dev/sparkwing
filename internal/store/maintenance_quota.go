@@ -80,7 +80,7 @@ func (t *Tenant) reserveQuota(ctx context.Context, quota string, amount int64) (
 		if err != nil {
 			return QuotaReservation{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,?,?,?) ON CONFLICT(team,quota) DO NOTHING`, t.team, quota, period, now.UnixNano()); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,?,?,?) ON CONFLICT(team,quota) DO NOTHING`, t.team, quota, period, now.UnixNano()); err != nil {
 			return QuotaReservation{}, err
 		}
 		var prior string
@@ -98,7 +98,7 @@ func (t *Tenant) reserveQuota(ctx context.Context, quota string, amount int64) (
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(sum(amount),0) FROM quota_reservations WHERE team = ? AND quota = ? AND period = ? AND state = 'held' AND expires_at <= ?`, t.team, quota, prior, now.UnixNano()).Scan(&expired); err != nil {
 			return QuotaReservation{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE quota_reservations SET state = 'released' WHERE team = ? AND quota = ? AND state = 'held' AND expires_at <= ?`, t.team, quota, now.UnixNano()); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE quota_reservations SET state = 'released' WHERE team = ? AND quota = ? AND state = 'held' AND expires_at <= ?`, t.team, quota, now.UnixNano()); err != nil {
 			return QuotaReservation{}, err
 		}
 		reserved -= expired
@@ -112,10 +112,10 @@ func (t *Tenant) reserveQuota(ctx context.Context, quota string, amount int64) (
 			return QuotaReservation{}, &StorageQuotaError{Principal: string(t.team), Limit: quota, Unit: "bytes", Used: used + reserved, Allowed: ceiling, Requested: amount}
 		}
 		reservation := QuotaReservation{ID: "qr_" + rand.Text(), Quota: quota, Amount: amount, ExpiresAt: now.Add(time.Hour)}
-		if _, err := tx.ExecContext(ctx, `UPDATE quota_admission SET period = ?, used = ?, reserved = ?, updated_at = ? WHERE team = ? AND quota = ?`, period, used, reserved+amount, now.UnixNano(), t.team, quota); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE quota_admission SET period = ?, used = ?, reserved = ?, updated_at = ? WHERE team = ? AND quota = ?`, period, used, reserved+amount, now.UnixNano(), t.team, quota); err != nil {
 			return QuotaReservation{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO quota_reservations(team,id,quota,period,amount,expires_at,state) VALUES (?,?,?,?,?,?,'held')`, t.team, reservation.ID, quota, period, amount, reservation.ExpiresAt.UnixNano()); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO quota_reservations(team,id,quota,period,amount,expires_at,state) VALUES (?,?,?,?,?,?,'held')`, t.team, reservation.ID, quota, period, amount, reservation.ExpiresAt.UnixNano()); err != nil {
 			return QuotaReservation{}, err
 		}
 		return reservation, nil
@@ -157,7 +157,7 @@ func (t *Tenant) settleQuota(ctx context.Context, id string, used int64) error {
 			return ErrLockHeld
 		}
 		if period == currentPeriod {
-			if _, err := tx.ExecContext(ctx, `UPDATE quota_admission SET used = used + ?, reserved = reserved - ?, updated_at = ? WHERE team = ? AND quota = ?`, used, amount, tx.now(ctx).UnixNano(), t.team, quota); err != nil {
+			if _, err := tx.execContext(ctx, `UPDATE quota_admission SET used = used + ?, reserved = reserved - ?, updated_at = ? WHERE team = ? AND quota = ?`, used, amount, tx.now(ctx).UnixNano(), t.team, quota); err != nil {
 				return err
 			}
 		}
@@ -165,7 +165,7 @@ func (t *Tenant) settleQuota(ctx context.Context, id string, used int64) error {
 		if used == 0 {
 			state = "released"
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE quota_reservations SET state = ?, used = ? WHERE team = ? AND id = ?`, state, used, t.team, id); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE quota_reservations SET state = ?, used = ? WHERE team = ? AND id = ?`, state, used, t.team, id); err != nil {
 			return err
 		}
 		return nil

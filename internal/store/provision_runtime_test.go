@@ -169,7 +169,7 @@ func TestRootProvisioningRechecksAuthorizerAndScope(t *testing.T) {
 			var issued capability.Issued
 			err := s.inTx(t.Context(), func(tx *storeTx) error {
 				var err error
-				issued, err = s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &spec})
+				issued, err = s.issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &spec})
 				return err
 			})
 			if err == nil || issued.Raw != "" {

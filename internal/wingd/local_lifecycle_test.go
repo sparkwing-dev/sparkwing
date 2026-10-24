@@ -46,34 +46,34 @@ func TestLocalDaemonActivityAndProbeIdle(t *testing.T) {
 	}
 	d := &Daemon{cfg: Config{Now: func() time.Time { return now }}, ledger: ledger, lastActivity: now, conns: map[*conn]struct{}{{}: {}}}
 	for _, hold := range []LocalActivity{{Runs: 1}, {QueuedTriggers: 1}, {HeldLeases: 1}, {DashboardConnections: 1}} {
-		if err := d.SetLocalActivity(hold); err != nil {
+		if err := d.setLocalActivity(hold); err != nil {
 			t.Fatal(err)
 		}
 		now = now.Add(2 * limits.LocalControllerIdleTimeout)
 		if d.idleElapsed() != 0 {
 			t.Fatalf("daemon idled with %+v", hold)
 		}
-		if err := d.SetLocalActivity(LocalActivity{}); err != nil {
+		if err := d.setLocalActivity(LocalActivity{}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	d.SetStay(true)
+	d.setStay(true)
 	now = now.Add(limits.LocalControllerIdleTimeout)
 	if d.idleElapsed() != 0 {
 		t.Fatal("stay did not pin controller")
 	}
-	d.SetStay(false)
+	d.setStay(false)
 	now = now.Add(limits.LocalControllerIdleTimeout)
 	for range 10 {
 		// safety: status reads and repeated zero-activity samples must not extend idle time.
-		if err := d.SetLocalActivity(LocalActivity{}); err != nil {
+		if err := d.setLocalActivity(LocalActivity{}); err != nil {
 			t.Fatal(err)
 		}
 		if d.idleElapsed() != limits.LocalControllerIdleTimeout {
 			t.Fatal("health observation extended idle deadline")
 		}
 	}
-	if err := d.SetLocalActivity(LocalActivity{Runs: -1}); err == nil {
+	if err := d.setLocalActivity(LocalActivity{Runs: -1}); err == nil {
 		t.Fatal("negative count was accepted")
 	}
 	now = now.Add(-time.Nanosecond)

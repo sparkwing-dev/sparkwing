@@ -65,7 +65,7 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 		if event.CheckoutID != "" {
 			checkoutID = result.CheckoutID
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO payment_events(team,payment_mode,event_id,checkout_id,payment_id,event_kind,event_digest,grant_id,processed_at,object_id,event_json,settlement_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, optionalString(string(result.Team)), event.Mode, event.EventID, checkoutID, event.PaymentID, event.Kind, digest, optionalString(result.GrantID), tx.now(ctx).UnixNano(), event.ObjectID, string(body), string(encoded))
+		_, err = tx.execContext(ctx, `INSERT INTO payment_events(team,payment_mode,event_id,checkout_id,payment_id,event_kind,event_digest,grant_id,processed_at,object_id,event_json,settlement_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, optionalString(string(result.Team)), event.Mode, event.EventID, checkoutID, event.PaymentID, event.Kind, digest, optionalString(result.GrantID), tx.now(ctx).UnixNano(), event.ObjectID, string(body), string(encoded))
 		return err
 	})
 	if err != nil {
@@ -126,7 +126,7 @@ func validateProviderPayment(e capability.PaymentEvent) error {
 }
 
 func checkPaymentObjectTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent) error {
-	rows, err := tx.QueryContext(ctx, "SELECT event_json FROM payment_events WHERE payment_mode=? AND object_id=?", event.Mode, event.ObjectID)
+	rows, err := tx.queryContext(ctx, "SELECT event_json FROM payment_events WHERE payment_mode=? AND object_id=?", event.Mode, event.ObjectID)
 	if err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capa
 		if e.Kind == capability.PaymentCardPaid {
 			status = "succeeded"
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO payment_states(payment_mode,payment_id,status,outcome_json) VALUES (?,?,?,?) ON CONFLICT(payment_mode,payment_id) DO UPDATE SET status=excluded.status,outcome_json=excluded.outcome_json WHERE payment_states.status<>'succeeded'`, e.Mode, e.PaymentID, status, string(encoded)); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO payment_states(payment_mode,payment_id,status,outcome_json) VALUES (?,?,?,?) ON CONFLICT(payment_mode,payment_id) DO UPDATE SET status=excluded.status,outcome_json=excluded.outcome_json WHERE payment_states.status<>'succeeded'`, e.Mode, e.PaymentID, status, string(encoded)); err != nil {
 			return PaymentSettlement{}, err
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT outcome_json FROM payment_states WHERE payment_mode=? AND payment_id=?`, e.Mode, e.PaymentID).Scan(&encoded); err != nil {
@@ -243,7 +243,7 @@ func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capa
 			kind = "refund"
 		}
 		reference := paymentConsequenceReference(e.Mode, kind, e.ObjectID)
-		reversal, found, err := creditGrantByReferenceTx(ctx, tx, result.Team, CreditGrantReversal, reference)
+		reversal, found, err := creditGrantByReferenceTx(ctx, tx, result.Team, creditGrantReversal, reference)
 		if err != nil {
 			return result, err
 		}
@@ -265,7 +265,7 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 		if e.CustomerID == "" || e.MethodID == "" || e.Fingerprint == "" {
 			return result, ErrInvalidInput
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO payment_setups(payment_mode,intent_id,customer_id,payment_method,fingerprint,brand,last4,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(payment_mode,intent_id) DO NOTHING`, e.Mode, e.ObjectID, e.CustomerID, e.MethodID, e.Fingerprint, e.Brand, e.Last4, e.Created)
+		res, err := tx.execContext(ctx, `INSERT INTO payment_setups(payment_mode,intent_id,customer_id,payment_method,fingerprint,brand,last4,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(payment_mode,intent_id) DO NOTHING`, e.Mode, e.ObjectID, e.CustomerID, e.MethodID, e.Fingerprint, e.Brand, e.Last4, e.Created)
 		if err == nil {
 			n, rowsErr := res.RowsAffected()
 			result.Replayed = n == 0
@@ -275,7 +275,7 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 	case capability.PaymentCardPaid, capability.PaymentCardFailed:
 		var checkout paymentCheckout
 		var customer string
-		err := tx.QueryRowContext(ctx, `SELECT id,team,kind,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id,customer_id FROM credit_checkouts WHERE payment_mode=? AND payment_id=? AND kind=?`+tx.forUpdate(), e.Mode, e.PaymentID, CheckoutKindRefill).Scan(append(checkout.scan(), &customer)...)
+		err := tx.QueryRowContext(ctx, `SELECT id,team,kind,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id,customer_id FROM credit_checkouts WHERE payment_mode=? AND payment_id=? AND kind=?`+tx.forUpdate(), e.Mode, e.PaymentID, checkoutKindRefill).Scan(append(checkout.scan(), &customer)...)
 		if errors.Is(err, sql.ErrNoRows) {
 			result.Payment = e.PaymentID
 			return result, nil
@@ -291,7 +291,7 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 		err = applyPaymentOutcomeTx(ctx, tx, e, &checkout)
 		return checkout.result, err
 	case capability.PaymentWarningEvent:
-		w := PaymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable}
+		w := paymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable}
 		now := tx.now(ctx)
 		if w.WarningID == "" || w.PaymentIntent == "" {
 			return result, fmt.Errorf("%w: a warning names itself and its payment", ErrInvalidInput)
@@ -300,7 +300,7 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 		if w.Actionable {
 			actionable = 1
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO payment_warnings (payment_mode, warning_id, payment_intent, fingerprint, actionable,
+		if _, err := tx.execContext(ctx, `INSERT INTO payment_warnings (payment_mode, warning_id, payment_intent, fingerprint, actionable,
 	    created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (payment_mode,warning_id) DO NOTHING`,
 			e.Mode, w.WarningID, w.PaymentIntent, w.Fingerprint, actionable, now.UnixNano()); err != nil {
 			return result, err
@@ -315,7 +315,7 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 		if !w.Actionable {
 			return result, nil
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE payment_warnings SET actionable=1 WHERE payment_mode=? AND warning_id=?", e.Mode, w.WarningID); err != nil {
+		if _, err := tx.execContext(ctx, "UPDATE payment_warnings SET actionable=1 WHERE payment_mode=? AND warning_id=?", e.Mode, w.WarningID); err != nil {
 			return result, err
 		}
 		if err := forgetCardTx(ctx, tx, fingerprint, CardRefusedWarning, now); err != nil {
@@ -329,9 +329,9 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 	case capability.PaymentDisputeOpened, capability.PaymentDisputeClosed:
 		result.Payment = e.PaymentID
 		if e.Kind == capability.PaymentDisputeOpened {
-			e.Status = CardRefundPending
+			e.Status = cardRefundPending
 		} else if e.Status == "lost" {
-			e.Status = CardRefundSucceeded
+			e.Status = cardRefundSucceeded
 		} else {
 			e.Status = "canceled"
 		}
@@ -364,7 +364,7 @@ func (op *Operator) bindCompletedPageTx(ctx context.Context, tx *storeTx, e capa
 	case !errors.Is(err, sql.ErrNoRows):
 		return PaymentSettlement{}, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES (?,?,'setup',?,?)`, e.Mode, e.IntentID, team, customer)
+	_, err = tx.execContext(ctx, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES (?,?,'setup',?,?)`, e.Mode, e.IntentID, team, customer)
 	return result, err
 }
 
@@ -405,9 +405,9 @@ func (op *Operator) reconcileSetupStateTx(ctx context.Context, tx *storeTx, mode
 		return team, nil
 	}
 	card.AddedAt = time.Unix(created, 0)
-	if err := saveCardTx(ctx, tx, team, card, auditActor{system: auditPaymentProvider}, tx.now(ctx)); err != nil && !errors.Is(err, ErrStaleCardSetup) {
+	if err := saveCardTx(ctx, tx, team, card, auditActor{system: auditPaymentProvider}, tx.now(ctx)); err != nil && !errors.Is(err, errStaleCardSetup) {
 		return "", err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE payment_setups SET applied=1 WHERE payment_mode=? AND intent_id=?`, mode, intent)
+	_, err = tx.execContext(ctx, `UPDATE payment_setups SET applied=1 WHERE payment_mode=? AND intent_id=?`, mode, intent)
 	return team, err
 }

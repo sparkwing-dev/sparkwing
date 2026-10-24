@@ -78,14 +78,14 @@ func (o *Operator) EnqueueGitHubDelivery(ctx context.Context, deliveryID, event 
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO github_app_deliveries
+	_, err = tx.execContext(ctx, `INSERT INTO github_app_deliveries
 		(digest,delivery_id,received_at,event,body,state,queue_team,installation_id,connection_generation)
 		VALUES (?,?,?,?,?,'pending',?,?,?)
 		ON CONFLICT DO NOTHING`, digest, deliveryID, now.UnixNano(), event, body, queueTeam, installation, generation)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO github_app_delivery_ids (delivery_id,digest) VALUES (?,?) ON CONFLICT DO NOTHING`, deliveryID, digest)
+	_, err = tx.execContext(ctx, `INSERT INTO github_app_delivery_ids (delivery_id,digest) VALUES (?,?) ON CONFLICT DO NOTHING`, deliveryID, digest)
 	if err != nil {
 		return err
 	}
@@ -115,14 +115,14 @@ func (o *Operator) ClaimGitHubDelivery(ctx context.Context, now time.Time) (*Git
 	}
 	defer rollbackOrLog(tx)
 	const cursorKey = "github_delivery_claim_team"
-	if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING`, cursorKey, []byte(`""`)); err != nil {
+	if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING`, cursorKey, []byte(`""`)); err != nil {
 		return nil, err
 	}
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`+tx.forUpdate(), cursorKey).Scan(&raw); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE github_app_deliveries SET state='failed',lease_until=0,last_error='processing lease expired' WHERE state='leased' AND lease_until<=?`, now.UnixNano()); err != nil {
+	if _, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state='failed',lease_until=0,last_error='processing lease expired' WHERE state='leased' AND lease_until<=?`, now.UnixNano()); err != nil {
 		return nil, err
 	}
 	var cursor string
@@ -152,7 +152,7 @@ func (o *Operator) ClaimGitHubDelivery(ctx context.Context, now time.Time) (*Git
 	if err != nil {
 		return nil, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE github_app_deliveries SET state='leased',lease=lease+1,
+	result, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state='leased',lease=lease+1,
 		lease_until=? WHERE digest=? AND lease=? AND state='pending'`,
 		now.Add(githubDeliveryLease).UnixNano(), digest, d.Lease)
 	if err != nil {
@@ -243,7 +243,7 @@ func githubDeliveryResultTx[T any](ctx context.Context, tx *storeTx, effect stri
 	if err != nil {
 		return result, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO github_app_delivery_effects(digest,effect,result) VALUES (?,?,?)`, digest, effect, string(encoded))
+	_, err = tx.execContext(ctx, `INSERT INTO github_app_delivery_effects(digest,effect,result) VALUES (?,?,?)`, digest, effect, string(encoded))
 	return result, err
 }
 
@@ -283,7 +283,7 @@ func (s *Store) githubDeliveryExec(ctx context.Context, effect, query string, ar
 	}
 	affected, err := inTxResult(ctx, s, func(tx *storeTx) (int64, error) {
 		return githubDeliveryResultTx(ctx, tx, "lifecycle:"+effect, func() (int64, error) {
-			result, err := tx.ExecContext(ctx, query, args...)
+			result, err := tx.execContext(ctx, query, args...)
 			if err != nil {
 				return 0, err
 			}
@@ -329,7 +329,7 @@ func (t *Tenant) ListFailedGitHubDeliveries(ctx context.Context, a capability.Au
 		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT delivery_id,event,received_at,last_error FROM github_app_deliveries WHERE queue_team=? AND state='failed' ORDER BY received_at DESC,digest`, t.team)
+		rows, err := tx.queryContext(ctx, `SELECT delivery_id,event,received_at,last_error FROM github_app_deliveries WHERE queue_team=? AND state='failed' ORDER BY received_at DESC,digest`, t.team)
 		if err != nil {
 			return err
 		}
@@ -367,7 +367,7 @@ func (t *Tenant) ProcessGitHubDeliveryAgain(ctx context.Context, a capability.Au
 			if err := githubDeliveryConnectionTx(ctx, tx, digest); err != nil {
 				return err
 			}
-			result, err := tx.ExecContext(ctx, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id=? AND queue_team=? AND state='failed'`, deliveryID, t.team)
+			result, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id=? AND queue_team=? AND state='failed'`, deliveryID, t.team)
 			if err != nil {
 				return err
 			}

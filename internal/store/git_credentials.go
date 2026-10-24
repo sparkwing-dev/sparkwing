@@ -16,12 +16,12 @@ const (
 	GitCredentialHTTPS = "https"
 )
 
-// MaxGitCredentialsPerTeam bounds repository credentials and explicit host-wide grants.
-const MaxGitCredentialsPerTeam = 50
+// maxGitCredentialsPerTeam bounds repository credentials and explicit host-wide grants.
+const maxGitCredentialsPerTeam = 50
 
 // ErrGitCredentialLimit refuses a team's credential past
-// [MaxGitCredentialsPerTeam].
-var ErrGitCredentialLimit = fmt.Errorf("store: a team stores at most %d git credentials", MaxGitCredentialsPerTeam)
+// [maxGitCredentialsPerTeam].
+var ErrGitCredentialLimit = fmt.Errorf("store: a team stores at most %d git credentials", maxGitCredentialsPerTeam)
 
 // ErrFingerprintMismatch refuses a confirmation that names a host key other
 // than the one the credential pinned.
@@ -50,11 +50,6 @@ type GitCredential struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
-
-// ErrClaimNotLive refuses a release whose claimant no longer holds a live
-// claim on the run when the release commits, and a claim token whose claim
-// was lost, finished, released or superseded by a later generation.
-var ErrClaimNotLive = errors.New("store: the claim on the run is no longer live")
 
 const gitCredentialCols = `id, team, host, repository_key, host_wide, kind, username, secret, known_hosts, fingerprint,
 	confirmed_at, created_by, created_at, updated_at`
@@ -103,7 +98,7 @@ func (t *Tenant) putGitCredentialTx(ctx context.Context, tx *storeTx, c GitCrede
 			string(t.team)).Scan(&n); err != nil {
 			return GitCredential{}, err
 		}
-		if n >= MaxGitCredentialsPerTeam {
+		if n >= maxGitCredentialsPerTeam {
 			return GitCredential{}, ErrGitCredentialLimit
 		}
 	}
@@ -122,12 +117,12 @@ func (t *Tenant) putGitCredentialTx(ctx context.Context, tx *storeTx, c GitCrede
 	created := at
 	if replacing {
 		created = prev.CreatedAt.UnixNano()
-		if _, err := tx.ExecContext(ctx, `DELETE FROM git_credentials WHERE team = ? AND host = ? AND repository_key = ?`,
+		if _, err := tx.execContext(ctx, `DELETE FROM git_credentials WHERE team = ? AND host = ? AND repository_key = ?`,
 			string(t.team), c.Host, c.Repository); err != nil {
 			return GitCredential{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.execContext(ctx, `
 		INSERT INTO git_credentials (`+gitCredentialCols+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, string(t.team), c.Host, c.Repository, c.HostWide, c.Kind, c.Username, c.Secret, c.KnownHosts, c.Fingerprint,

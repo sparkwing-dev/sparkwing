@@ -234,7 +234,7 @@ func (op *Operator) persistCapabilityTx(ctx context.Context, tx *storeTx, c capa
 	}
 	values = append(values, hex.EncodeToString(c.Digest[:]), body, c.Subject.ID)
 	columns := append(slices.Clone(authorityColumns), "digest", "authority_json", "created_by")
-	_, err = tx.ExecContext(ctx, "INSERT INTO capabilities ("+strings.Join(columns, ",")+") VALUES ("+strings.TrimSuffix(strings.Repeat("?,", len(values)), ",")+")", values...)
+	_, err = tx.execContext(ctx, "INSERT INTO capabilities ("+strings.Join(columns, ",")+") VALUES ("+strings.TrimSuffix(strings.Repeat("?,", len(values)), ",")+")", values...)
 	if err == nil {
 		tx.insertedAuthorities = append(tx.insertedAuthorities, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix})
 	}
@@ -404,10 +404,10 @@ func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capabi
 		if c.Unit == "" {
 			allowed := ScopesForRole(role)
 			if c.Data != nil {
-				if c.Data.Use == capability.DataRemoteCache && slices.Contains(allowed, ScopeRunsWrite) {
+				if c.Data.Use == capability.DataRemoteCache && slices.Contains(allowed, scopeRunsWrite) {
 					allowed = append(allowed, string(capability.DataRead))
 				}
-				if c.Data.Use == capability.DataPublish && slices.Contains(allowed, ScopeRunsWrite) {
+				if c.Data.Use == capability.DataPublish && slices.Contains(allowed, scopeRunsWrite) {
 					allowed = append(allowed, string(capability.DataWrite))
 				}
 			}
@@ -645,11 +645,11 @@ func (op *Operator) revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capa
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE capabilities SET revoked_at = ?, authority_json = ? WHERE prefix = ?", now.UnixNano(), body, ref.ID); err != nil {
+		if _, err := tx.execContext(ctx, "UPDATE capabilities SET revoked_at = ?, authority_json = ? WHERE prefix = ?", now.UnixNano(), body, ref.ID); err != nil {
 			return err
 		}
 	} else {
-		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET revoked_at = ? WHERE hash = ?", now.UnixNano(), ref.ID); err != nil {
+		if _, err := tx.execContext(ctx, "UPDATE sessions SET revoked_at = ? WHERE hash = ?", now.UnixNano(), ref.ID); err != nil {
 			return err
 		}
 	}

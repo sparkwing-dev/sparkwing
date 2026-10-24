@@ -26,7 +26,7 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 		return err
 	}
 	fund(t, tenant(t, st, team))
-	if got := standing(t, st, team); got.Tier != store.TeamTierFunded {
+	if got := standing(t, st, team); got.Tier != "funded" {
 		t.Fatalf("a team with credits = %+v, want funded", got)
 	}
 	if err := join("m0", "m0@example.com"); err != nil {
@@ -36,7 +36,7 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 	if _, err := teststore.ForTeam(t, st, team).TestOnlyHoldForDispute(ctx, "dp_frozen", "", "dispute opened", teststore.Now(st)); err != nil {
 		t.Fatal(err)
 	}
-	if got := standing(t, st, team); got.Tier == store.TeamTierFunded {
+	if got := standing(t, st, team); got.Tier == "funded" {
 		t.Fatalf("a frozen team with a positive balance = %+v, want not funded", got)
 	}
 	if err := join("m1", "m1@example.com"); !errors.Is(err, store.ErrTeamFull) {
@@ -46,7 +46,7 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 	if _, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_frozen", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := standing(t, st, team); got.Tier != store.TeamTierFunded {
+	if got := standing(t, st, team); got.Tier != "funded" {
 		t.Fatalf("after the hold is released = %+v, want funded again", got)
 	}
 	if err := join(fmt.Sprintf("m%d", 2), "m2@example.com"); err != nil {
@@ -69,12 +69,12 @@ func TestAFrozenTeamsEventsAreHeldToTheFreeShare(t *testing.T) {
 	if _, err := teststore.ForTeam(t, st, "acme").TestOnlyHoldForDispute(ctx, "dp_ev", "", "dispute opened", teststore.Now(st)); err != nil {
 		t.Fatal(err)
 	}
-	if got := standing(t, st, "acme"); got.Tier == store.TeamTierFunded {
+	if got := standing(t, st, "acme"); got.Tier == "funded" {
 		t.Fatalf("a frozen team's tier = %+v, want not funded", got)
 	}
 	err := appendBytes(acme, "r1", 200)
 	var quota *store.StorageQuotaError
-	if !errors.As(err, &quota) || quota.Limit != store.StorageLimitFreeEvents {
+	if !errors.As(err, &quota) || quota.Limit != "free_event_share" {
 		t.Fatalf("a frozen team's write past the share = %v, want a free event share refusal", err)
 	}
 }

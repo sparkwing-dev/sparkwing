@@ -138,7 +138,7 @@ func TestCanceledDialFailureDoesNotStartTheDaemon(t *testing.T) {
 func TestDaemonUnreachableRetainsCancellationAfterDialTimeout(t *testing.T) {
 	dialErr := &net.OpError{Op: "dial", Net: "unix", Err: context.DeadlineExceeded}
 	err := daemonUnreachable(shortHome(t), "fixture.sock", 0, context.Canceled, dialErr)
-	if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrDaemonUnreachable) || !errors.Is(err, dialErr) {
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, errDaemonUnreachable) || !errors.Is(err, dialErr) {
 		t.Fatalf("dial timeout lost cancellation or reachability evidence: %v", err)
 	}
 }

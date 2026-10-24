@@ -30,7 +30,7 @@ func (o *Operator) TestOnlyPaymentTeam(ctx context.Context, paymentID string) (T
 			return err
 		}
 		if !found {
-			return fmt.Errorf("%w: %q", ErrUnknownPayment, paymentID)
+			return fmt.Errorf("%w: %q", errUnknownPayment, paymentID)
 		}
 		team = grant.Team
 		return nil
@@ -59,7 +59,7 @@ func (t *Tenant) TestOnlySaveCard(ctx context.Context, c Card, actor string, now
 }
 
 // TestOnlyRecordPaymentWarning exercises the transaction owner with trusted fixture facts.
-func (o *Operator) TestOnlyRecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (team Team, err error) {
+func (o *Operator) TestOnlyRecordPaymentWarning(ctx context.Context, w paymentWarning, now time.Time) (team Team, err error) {
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
 		mode, modeErr := paymentModeTx(ctx, tx)
 		if modeErr != nil {

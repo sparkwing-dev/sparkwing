@@ -57,7 +57,7 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 			if reachable {
 				continue
 			}
-			result, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", c.team, c.key, tx.now(ctx).UnixNano())
+			result, err := tx.execContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", c.team, c.key, tx.now(ctx).UnixNano())
 			if err != nil {
 				return err
 			}
@@ -127,7 +127,7 @@ func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease Singleton
 			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
 				return err
 			}
-			_, err := tx.ExecContext(ctx, "UPDATE uploads SET staging_deleted_at=? WHERE team=? AND id=? AND staging_deleted_at IS NULL", tx.now(ctx).UnixNano(), u.team, u.key)
+			_, err := tx.execContext(ctx, "UPDATE uploads SET staging_deleted_at=? WHERE team=? AND id=? AND staging_deleted_at IS NULL", tx.now(ctx).UnixNano(), u.team, u.key)
 			return err
 		})
 		if err != nil {
@@ -140,7 +140,7 @@ func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease Singleton
 type teamKey struct{ team, key string }
 
 func teamKeysTx(ctx context.Context, tx *storeTx, query string, args ...any) ([]teamKey, error) {
-	rows, err := tx.QueryContext(ctx, query, args...)
+	rows, err := tx.queryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 		case reachable && collecting.Valid:
 			return fmt.Errorf("blob %s/%s gained a reference while its bytes were being collected", b.Team, b.Digest)
 		case reachable:
-			_, err = tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", b.Team, b.Digest)
+			_, err = tx.execContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", b.Team, b.Digest)
 			return err
 		}
 		b.CreatedAt = time.Unix(0, created).UTC()
@@ -227,7 +227,7 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 			return nil
 		}
 		collectingAt = tx.now(ctx).UnixNano()
-		_, err = tx.ExecContext(ctx, "UPDATE blob_tombstones SET collecting_at=? WHERE team=? AND digest=? AND collecting_at IS NULL", collectingAt, b.Team, b.Digest)
+		_, err = tx.execContext(ctx, "UPDATE blob_tombstones SET collecting_at=? WHERE team=? AND digest=? AND collecting_at IS NULL", collectingAt, b.Team, b.Digest)
 		return err
 	})
 	if err != nil || !claimed {
@@ -249,10 +249,10 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 		if err != nil || !current {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM blob_members WHERE team=? AND (manifest_digest=? OR member_digest=?)", b.Team, b.Digest, b.Digest); err != nil {
+		if _, err := tx.execContext(ctx, "DELETE FROM blob_members WHERE team=? AND (manifest_digest=? OR member_digest=?)", b.Team, b.Digest, b.Digest); err != nil {
 			return err
 		}
-		result, err := tx.ExecContext(ctx, "DELETE FROM blobs WHERE team=? AND digest=? AND EXISTS(SELECT 1 FROM blob_tombstones t WHERE t.team=blobs.team AND t.digest=blobs.digest AND t.collecting_at IS NOT NULL)", b.Team, b.Digest)
+		result, err := tx.execContext(ctx, "DELETE FROM blobs WHERE team=? AND digest=? AND EXISTS(SELECT 1 FROM blob_tombstones t WHERE t.team=blobs.team AND t.digest=blobs.digest AND t.collecting_at IS NOT NULL)", b.Team, b.Digest)
 		if err != nil {
 			return err
 		}
@@ -294,6 +294,6 @@ func clearBlobTombstoneTx(ctx context.Context, tx *storeTx, team Team, digest bl
 	if collecting != 0 {
 		return authorityError(apierr.Conflict, "blob bytes are being collected; retry after collection finishes")
 	}
-	_, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", team, digest)
+	_, err := tx.execContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", team, digest)
 	return err
 }

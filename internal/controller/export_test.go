@@ -56,3 +56,21 @@ func ProcessGitHubInboxForTest(s *Server, ctx context.Context, now time.Time) (m
 		}{out.status, append([]byte(nil), out.body.Bytes()...)}
 	}
 }
+
+// WithCostRate sets the USD-per-runner-hour rate the receipt builder
+// uses to compute compute_cents. source is echoed into the
+// receipt's rate_source field for provenance. Zero rate = receipts
+// report compute_cents:0, matching unconfigured-profile semantics.
+func (s *Server) WithCostRate(rate float64, source string) *Server {
+	s.costPerRunnerHour = rate
+	s.costRateSource = source
+	return s
+}
+
+// WithSignUpApprovalNotifier runs fn for each account an operator admits from
+// the waitlist, such as to email the person that they are in. A failure is
+// logged and does not undo the admission.
+func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server {
+	s.identity.signup.onApproved = fn
+	return s
+}

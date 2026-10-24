@@ -30,7 +30,7 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 				if team != "a" || got != actor || row.Attempt != 3 || row.Generation != 2 || result.OutputRecord == nil || *result.OutputRecord != record {
 					t.Fatal("attachment lost the attempt fence")
 				}
-				if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('attached',?)`, []byte("yes")); err != nil {
+				if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('attached',?)`, []byte("yes")); err != nil {
 					return err
 				}
 				if scenario == "bad_record" {

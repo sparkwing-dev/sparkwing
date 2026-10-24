@@ -48,8 +48,8 @@ type ExecutionAttempt struct {
 	RetryRunID        string     `json:"retry_run_id,omitempty"`
 }
 
-// ListNodeExecutionAttempts reads this tenant's persisted job attempts.
-func (t *Tenant) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) (_ []ExecutionAttempt, err error) {
+// listNodeExecutionAttempts reads this tenant's persisted job attempts.
+func (t *Tenant) listNodeExecutionAttempts(ctx context.Context, runID, nodeID string) (_ []ExecutionAttempt, err error) {
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func (t *Tenant) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID st
 	if _, err := readNodeTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(nodeID)}); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT attempt,generation,holder,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason FROM node_attempts WHERE team=? AND run_id=? AND node_id=? ORDER BY attempt`, t.team, runID, nodeID)
+	rows, err := tx.queryContext(ctx, `SELECT attempt,generation,holder,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason FROM node_attempts WHERE team=? AND run_id=? AND node_id=? ORDER BY attempt`, t.team, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}

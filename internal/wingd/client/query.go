@@ -12,13 +12,13 @@ import (
 
 var ErrNoDaemon = errors.New("wingd/client: no daemon running")
 
-var ErrDaemonUnreachable = errors.New("wingd/client: could not reach the admission daemon")
+var errDaemonUnreachable = errors.New("wingd/client: could not reach the admission daemon")
 
-// ErrDaemonWedged is a daemon that took the connection and then answered
+// errDaemonWedged is a daemon that took the connection and then answered
 // nothing before the caller's budget ran out. It is distinct from unreachable
 // because the socket is held: no successor can bind it, no admission is being
 // arbitrated behind it, and a drain that needs a handshake cannot replace it.
-var ErrDaemonWedged = errors.New("wingd/client: the daemon accepted the connection and did not answer")
+var errDaemonWedged = errors.New("wingd/client: the daemon accepted the connection and did not answer")
 
 func dialMeansAbsent(err error) bool {
 	if err == nil {
@@ -31,7 +31,7 @@ func unreachable(sock string, dialErr error) error {
 	if dialErr == nil || dialMeansAbsent(dialErr) {
 		return nil
 	}
-	return fmt.Errorf("%w at %s: %w", ErrDaemonUnreachable, sock, dialErr)
+	return fmt.Errorf("%w at %s: %w", errDaemonUnreachable, sock, dialErr)
 }
 
 func (cl *Client) QueueState(ctx context.Context) (wingwire.QueueState, error) {
@@ -74,7 +74,7 @@ func Query(ctx context.Context, opts Options) (wingwire.QueueState, error) {
 	noSpawn := queryOptions(opts)
 	cl, err := EnsureDaemon(ctx, noSpawn)
 	if err != nil {
-		if errors.Is(err, ErrDaemonUnreachable) {
+		if errors.Is(err, errDaemonUnreachable) {
 			return wingwire.QueueState{}, err
 		}
 		if errors.Is(err, ErrNoDaemon) {

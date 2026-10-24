@@ -36,7 +36,7 @@ func persistClaimRequirementsTx(ctx context.Context, tx *storeTx, team Team, sel
 	}
 	sum := sha256.Sum256(body)
 	id := hex.EncodeToString(sum[:])
-	created, err := tx.ExecContext(ctx, `INSERT INTO claim_requirements(team,id) VALUES (?,?) ON CONFLICT(team,id) DO NOTHING`, team, id)
+	created, err := tx.execContext(ctx, `INSERT INTO claim_requirements(team,id) VALUES (?,?) ON CONFLICT(team,id) DO NOTHING`, team, id)
 	if err != nil {
 		return "", err
 	}
@@ -46,7 +46,7 @@ func persistClaimRequirementsTx(ctx context.Context, tx *storeTx, team Team, sel
 	}
 	for term, selector := range terms {
 		for _, label := range strings.Split(selector, ",") {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO claim_requirement_terms(team,requirements,term,label) VALUES (?,?,?,?)`, team, id, term, label); err != nil {
+			if _, err := tx.execContext(ctx, `INSERT INTO claim_requirement_terms(team,requirements,term,label) VALUES (?,?,?,?)`, team, id, term, label); err != nil {
 				return "", err
 			}
 		}

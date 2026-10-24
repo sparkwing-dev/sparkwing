@@ -59,7 +59,7 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !want.RateTableSet || want.RateMicroPerSecond != 20000 || !reflect.DeepEqual(want.RateTable, table.Sorted()) || want.WarmCPUClassCores != warm || want.StorageRateMicroPerGBDay != rent || want.StorageFreeAllowanceBytes != free {
+	if !want.RateTableSet || want.RateMicroPerSecond != 20000 || !reflect.DeepEqual(want.RateTable, table.sorted()) || want.WarmCPUClassCores != warm || want.StorageRateMicroPerGBDay != rent || want.StorageFreeAllowanceBytes != free {
 		t.Fatalf("stored settings=%+v", want)
 	}
 	rows, err := s.db.Query("SELECT key,value FROM settings")
@@ -198,7 +198,7 @@ func TestStoreDataCreditSettingsScalarCannotRewriteInstalledTableProperty(t *tes
 		rate, scalar, grace := int64(price)+1, int64(price)+int64(delta)+2, int64(0)
 		cores := int64(8)
 		if hasBase {
-			cores = CreditRateBaseClassCores
+			cores = creditRateBaseClassCores
 		}
 		table := CreditRateTable{{Cores: cores, MicroPerSecond: rate}}
 		before, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table})

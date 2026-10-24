@@ -31,7 +31,7 @@ func TestWindowsLocalTransportCarriesClientSID(t *testing.T) {
 	go func() {
 		connection, err := listener.Accept()
 		if err == nil {
-			identity := connection.(APIConn).PeerIdentity()
+			identity := connection.(authenticatedAPIConn).PeerIdentity()
 			if identity.GOOS != "windows" || identity.SID == "" || identity.SID != owner.SID || identity.UID != nil {
 				err = errors.New("API connection lost its authenticated client SID")
 			}

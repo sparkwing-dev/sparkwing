@@ -19,8 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// ScheduleWriter rechecks authority and repository policy in each atomic schedule or intake transaction.
-type ScheduleWriter interface {
+// scheduleWriter rechecks authority and repository policy in each atomic schedule or intake transaction.
+type scheduleWriter interface {
 	Team() store.Team
 	ReplaceAuthorizedSchedules(context.Context, capability.Authorized, store.ScheduleRepoRequest) ([]string, []string, error)
 	DeleteAuthorizedSchedules(context.Context, capability.Authorized, string) (int, error)
@@ -30,8 +30,8 @@ type ScheduleWriter interface {
 	DeleteAuthorizedSchedule(context.Context, capability.Authorized, string) (string, bool, error)
 }
 
-func (s *Server) scheduleWriter(r *http.Request, a capability.Authorized) (ScheduleWriter, error) {
-	return tenantPort[ScheduleWriter](r.Context(), s, store.Team(a.Target.Team))
+func (s *Server) scheduleWriter(r *http.Request, a capability.Authorized) (scheduleWriter, error) {
+	return tenantPort[scheduleWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
 func (s *Server) scheduleEndpoints() []controllerwire.Endpoint {

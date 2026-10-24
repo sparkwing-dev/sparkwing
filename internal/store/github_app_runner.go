@@ -19,8 +19,8 @@ type GitHubAppRunner string
 // GitHubAppRunnerAnywhere leaves App runs to the team's claim ranking; cloud, github-actions and "pool=<name>" pin them.
 const (
 	GitHubAppRunnerAnywhere GitHubAppRunner = "anywhere"
-	GitHubAppRunnerCloud    GitHubAppRunner = TierCloud
-	GitHubAppRunnerActions  GitHubAppRunner = TierActions
+	gitHubAppRunnerCloud    GitHubAppRunner = TierCloud
+	gitHubAppRunnerActions  GitHubAppRunner = tierActions
 )
 
 // ParseGitHubAppRunner accepts anywhere (the default), cloud, github-actions or pool=<name>.
@@ -28,7 +28,7 @@ func ParseGitHubAppRunner(raw string) (GitHubAppRunner, error) {
 	switch raw {
 	case "", string(GitHubAppRunnerAnywhere):
 		return GitHubAppRunnerAnywhere, nil
-	case string(GitHubAppRunnerCloud), string(GitHubAppRunnerActions):
+	case string(gitHubAppRunnerCloud), string(gitHubAppRunnerActions):
 		return GitHubAppRunner(raw), nil
 	}
 	if pool, ok := strings.CutPrefix(raw, "pool="); ok && ValidRunnerName(pool) {
@@ -48,9 +48,9 @@ func (r GitHubAppRunner) apply(options *runspec.Options) {
 		}
 	}
 	switch {
-	case r == GitHubAppRunnerActions:
+	case r == gitHubAppRunnerActions:
 		options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerActions}}, Origin: origin}
-	case r == GitHubAppRunnerCloud:
+	case r == gitHubAppRunnerCloud:
 		require("class=" + match.ClassCloud)
 	case strings.HasPrefix(string(r), "pool="):
 		require(string(r))

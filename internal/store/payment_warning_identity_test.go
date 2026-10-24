@@ -25,7 +25,7 @@ func TestPaymentWarningCannotChangePaymentOrCardProperty(t *testing.T) {
 	index := 0
 	property := func(seed uint64) bool {
 		index++
-		warning := PaymentWarning{WarningID: fmt.Sprintf("warning-%d-%x", index, seed), PaymentIntent: event.PaymentID, Fingerprint: fmt.Sprintf("card-%x", seed), Actionable: true}
+		warning := paymentWarning{WarningID: fmt.Sprintf("warning-%d-%x", index, seed), PaymentIntent: event.PaymentID, Fingerprint: fmt.Sprintf("card-%x", seed), Actionable: true}
 		owner, stranger := Team("a"), Team("b")
 		if seed&1 != 0 {
 			warning.PaymentIntent, owner, stranger = other.PaymentID, stranger, owner
@@ -35,14 +35,14 @@ func TestPaymentWarningCannotChangePaymentOrCardProperty(t *testing.T) {
 			t.Logf("first warning: %q, %v", team, err)
 			return false
 		}
-		for _, mutate := range []func(*PaymentWarning){
-			func(w *PaymentWarning) {
+		for _, mutate := range []func(*paymentWarning){
+			func(w *paymentWarning) {
 				w.PaymentIntent = other.PaymentID
 				if owner == "b" {
 					w.PaymentIntent = event.PaymentID
 				}
 			},
-			func(w *PaymentWarning) { w.Fingerprint += "-other" },
+			func(w *paymentWarning) { w.Fingerprint += "-other" },
 		} {
 			changed := warning
 			mutate(&changed)
@@ -73,7 +73,7 @@ func TestPaymentWarningHoldAndAuditRollbackAndReplayAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := blobAccountingDiskStore(t, s)
-	warning := PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Fingerprint: "card", Actionable: true}
+	warning := paymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Fingerprint: "card", Actionable: true}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_warning_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); err == nil {
 		t.Fatal("warning committed without its audit")
@@ -117,7 +117,7 @@ func TestPaymentWarningHoldDoesNotReplaceUnrelatedDispute(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant := &Tenant{s: s, team: "a"}
-	warning := PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: true}
+	warning := paymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: true}
 	if _, err := tenant.TestOnlyHoldForDispute(t.Context(), warning.WarningID, event.PaymentID, "disputed", s.now()); err != nil {
 		t.Fatal(err)
 	}

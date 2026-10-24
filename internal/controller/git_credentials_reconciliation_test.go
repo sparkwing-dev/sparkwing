@@ -129,7 +129,7 @@ func (f *gitReleaseFixture) audits(want int) {
 	f.t.Helper()
 	w := f.request("GET", "/api/v1/team/git-credentials/releases", "", 200)
 	var got struct {
-		Releases []GitCredentialReleaseJSON `json:"releases"`
+		Releases []gitCredentialReleaseJSON `json:"releases"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		f.t.Fatal(err)

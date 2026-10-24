@@ -162,7 +162,7 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 		f.Kinds = slices.DeleteFunc(f.Kinds, func(k string) bool { return !slices.Contains(demand.Kinds, capability.UnitKind(k)) })
 	}
 	if len(demand.ExcludedTeamLabels) > 0 {
-		rows, err := tx.QueryContext(ctx, liveTeamsSQL+` ORDER BY name`)
+		rows, err := tx.queryContext(ctx, liveTeamsSQL+` ORDER BY name`)
 		if err != nil {
 			return f, err
 		}
@@ -183,10 +183,10 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 }
 
 func recordClaimAwardTx(ctx context.Context, tx *storeTx, team Team) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE claim_awards SET ordinal=ordinal+1 WHERE singleton=1`); err != nil {
+	if _, err := tx.execContext(ctx, `UPDATE claim_awards SET ordinal=ordinal+1 WHERE singleton=1`); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE teams SET claim_award_ordinal=(SELECT ordinal FROM claim_awards WHERE singleton=1) WHERE name=?`, team)
+	_, err := tx.execContext(ctx, `UPDATE teams SET claim_award_ordinal=(SELECT ordinal FROM claim_awards WHERE singleton=1) WHERE name=?`, team)
 	return err
 }
 
@@ -385,7 +385,7 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]cla
 		query += ` AND name=?`
 		args = append(args, scopeTeam)
 	}
-	rows, err := tx.QueryContext(ctx, query+` ORDER BY name`, args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY name`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +420,7 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]cla
 }
 
 func (o *Operator) claimObserversTx(ctx context.Context, tx *storeTx, current claimFacts, scopeTeam string) ([]claimFacts, error) {
-	policy, _ := ClaimPlacementFromContext(ctx)
+	policy, _ := claimPlacementFromContext(ctx)
 	horizon := policy.Liveness
 	if horizon <= 0 {
 		horizon = time.Minute
@@ -432,7 +432,7 @@ func (o *Operator) claimObserversTx(ctx context.Context, tx *storeTx, current cl
 		query += ` AND (team=? OR subject_kind='service')`
 		args = append(args, scopeTeam)
 	}
-	rows, err := tx.QueryContext(ctx, query+` ORDER BY prefix`, args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY prefix`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -689,7 +689,7 @@ func claimInputsTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []
 	if current.Cloud == 0 {
 		scopeTeam = current.Team
 	}
-	q.policy, _ = ClaimPlacementFromContext(ctx)
+	q.policy, _ = claimPlacementFromContext(ctx)
 	if demand.Target != nil {
 		team, found, err := tx.operator.runOwnerTx(ctx, tx, string(demand.Target.RunID))
 		if err != nil {
@@ -786,7 +786,7 @@ func (q *claimSQL) claimRankSQL(alias, facts string) string {
 		tier = `CASE WHEN ` + q.number(q.at(facts, "personal")) + `=1 AND ` + q.at(facts, "name") + `=COALESCE(` + q.at(alias+".request", "request", "origin_machine") + `,'') THEN 'here' ELSE ` + tier + ` END`
 	}
 	defaults := `CASE ` + tier
-	for rank, name := range DefaultClaimRanking {
+	for rank, name := range defaultClaimRanking {
 		defaults += ` WHEN ` + q.param(name) + ` THEN ` + fmt.Sprint(rank)
 	}
 	defaults += ` ELSE -1 END`

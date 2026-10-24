@@ -55,7 +55,7 @@ func TestQueuePriorityHTTPPreservesTenantAuthorityProperty(t *testing.T) {
 	property := func(input []byte, phase uint8) bool {
 		engineSQL(t, st, `UPDATE memberships SET role='editor' WHERE account_id='member'`)
 		fake.calls, fake.err, fake.team = 0, nil, "a"
-		testOnlyTenantPort[QueuePriorityWriter](s, func(_ context.Context, team store.Team) (QueuePriorityWriter, error) {
+		testOnlyTenantPort[queuePriorityWriter](s, func(_ context.Context, team store.Team) (queuePriorityWriter, error) {
 			if team != "a" {
 				return nil, routepolicy.MissingEndpointPolicy()
 			}

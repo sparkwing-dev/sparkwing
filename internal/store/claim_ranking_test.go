@@ -61,7 +61,7 @@ func TestRankingTopTierPresentClaimsImmediately(t *testing.T) {
 func TestRankingSeesTheLocalQueue(t *testing.T) {
 	f := rankingFixture(t, true)
 	local := f.LocalQueue(t)
-	if err := f.Rank(t, f.Admin, store.TierSelfHosted, store.TierActions); err != nil {
+	if err := f.Rank(t, f.Admin, "self-hosted", "github-actions"); err != nil {
 		t.Fatal(err)
 	}
 	livePolls(t, f, local)
@@ -77,7 +77,7 @@ func TestRankingCreditHoldOnlyWhenCloudCouldTakeTheUnit(t *testing.T) {
 		cause string
 	}{
 		"Cloud ranked out": {setup: func(t *testing.T, f *store.RankingFixture) {
-			if err := f.Rank(t, f.Admin, store.TierSelfHosted); err != nil {
+			if err := f.Rank(t, f.Admin, "self-hosted"); err != nil {
 				t.Fatal(err)
 			}
 		}, cause: "Cloud is off in this team's runner ranking"},
@@ -125,7 +125,7 @@ func TestRankingCloudTakesPartOnlyWithBilling(t *testing.T) {
 	for _, funded := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unfunded", true: "funded"}[funded], func(t *testing.T) {
 			f := rankingFixture(t, funded)
-			if err := f.Rank(t, f.Admin, store.TierCloud, store.TierSelfHosted); err != nil {
+			if err := f.Rank(t, f.Admin, store.TierCloud, "self-hosted"); err != nil {
 				t.Fatal(err)
 			}
 			livePolls(t, f, f.Launcher)
@@ -150,7 +150,7 @@ func TestRankingAdminReordersAndDropsTiers(t *testing.T) {
 	if err := f.Rank(t, f.Admin, store.TierCloud, store.TierCloud); err == nil {
 		t.Fatal("accepted a repeated tier")
 	}
-	if err := f.Rank(t, f.Admin, store.TierCloud, store.TierSelfHosted, store.TierPersonal); err != nil {
+	if err := f.Rank(t, f.Admin, store.TierCloud, "self-hosted", "personal"); err != nil {
 		t.Fatal(err)
 	}
 	tenant, err := f.Store.ForTeam(t.Context(), "a")
@@ -190,7 +190,7 @@ func TestRankingLeavesExplicitPlacementsAlone(t *testing.T) {
 		f.Request(t, func(r *runspec.Request) {
 			r.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"class=cloud"}}}
 		})
-		if err := f.Rank(t, f.Admin, store.TierSelfHosted); err != nil {
+		if err := f.Rank(t, f.Admin, "self-hosted"); err != nil {
 			t.Fatal(err)
 		}
 		livePolls(t, f, f.Self)
@@ -269,12 +269,12 @@ func TestRankingNoEligibleRunnerNamesTheCause(t *testing.T) {
 		want  string
 	}{
 		"a dropped tier": {setup: func(t *testing.T, f *store.RankingFixture) {
-			if err := f.Rank(t, f.Admin, store.TierHere, store.TierPersonal, store.TierActions, store.TierSelfHosted); err != nil {
+			if err := f.Rank(t, f.Admin, "here", "personal", "github-actions", "self-hosted"); err != nil {
 				t.Fatal(err)
 			}
 		}, want: "Cloud is off in this team's runner ranking"},
 		"several dropped tiers": {setup: func(t *testing.T, f *store.RankingFixture) {
-			if err := f.Rank(t, f.Admin, store.TierSelfHosted); err != nil {
+			if err := f.Rank(t, f.Admin, "self-hosted"); err != nil {
 				t.Fatal(err)
 			}
 			f.Poll(t, f.Personal)
@@ -326,7 +326,7 @@ func TestRankingAnUnpricedCloudClassDoesNotBlockAnotherClaimant(t *testing.T) {
 	if _, err := f.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Rank(t, f.Admin, store.TierCloud, store.TierSelfHosted); err != nil {
+	if err := f.Rank(t, f.Admin, store.TierCloud, "self-hosted"); err != nil {
 		t.Fatal(err)
 	}
 	livePolls(t, f, f.Launcher)

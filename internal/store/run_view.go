@@ -62,7 +62,7 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 }
 
 func readRunFailuresTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT error FROM runs WHERE team=? AND id=? AND error<>'' UNION ALL SELECT error FROM nodes WHERE team=? AND run_id=? AND error<>''`, team, runID, team, runID)
+	rows, err := tx.queryContext(ctx, `SELECT error FROM runs WHERE team=? AND id=? AND error<>'' UNION ALL SELECT error FROM nodes WHERE team=? AND run_id=? AND error<>''`, team, runID, team, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (t *Tenant) ListRunViews(ctx context.Context, after, through int64, limit i
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM runs WHERE team=? AND number>? AND number<=? ORDER BY number DESC LIMIT ?`, t.team, after, through, limit)
+	rows, err := tx.queryContext(ctx, `SELECT id FROM runs WHERE team=? AND number>? AND number<=? ORDER BY number DESC LIMIT ?`, t.team, after, through, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (t *Tenant) ListRunViews(ctx context.Context, after, through int64, limit i
 }
 
 func readRunAttemptsTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]runstate.NodeAttempt, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason FROM node_attempts WHERE team=? AND run_id=? ORDER BY node_id,attempt`, team, runID)
+	rows, err := tx.queryContext(ctx, `SELECT node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason FROM node_attempts WHERE team=? AND run_id=? ORDER BY node_id,attempt`, team, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +136,7 @@ func readRunAttemptsTx(ctx context.Context, tx *storeTx, team Team, runID string
 }
 
 func readRunLogSubjectsTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]blob.LogSubject, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation FROM log_streams WHERE team=? AND run_id=? ORDER BY created_at,id`, team, runID)
+	rows, err := tx.queryContext(ctx, `SELECT subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation FROM log_streams WHERE team=? AND run_id=? ORDER BY created_at,id`, team, runID)
 	if err != nil {
 		return nil, err
 	}

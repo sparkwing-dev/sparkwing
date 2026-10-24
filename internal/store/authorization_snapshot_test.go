@@ -106,7 +106,7 @@ func singleCursorStore(t *testing.T) (*Store, *authorizationConnection) {
 			t.Error(err)
 		}
 	})
-	schema, err := TranslateSchema(schemaNeutral, DialectSQLite)
+	schema, err := translateSchema(schemaNeutral, DialectSQLite)
 	if err != nil {
 		t.Fatal(err)
 	}

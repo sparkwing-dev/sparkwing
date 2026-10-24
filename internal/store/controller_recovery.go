@@ -47,7 +47,7 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 		if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.owner"); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT r.team,r.id FROM runs r WHERE `+controllerRunActive+` AND r.id>? ORDER BY r.id LIMIT ?`, after, limit)
+		rows, err := tx.queryContext(ctx, `SELECT r.team,r.id FROM runs r WHERE `+controllerRunActive+` AND r.id>? ORDER BY r.id LIMIT ?`, after, limit)
 		if err != nil {
 			return err
 		}

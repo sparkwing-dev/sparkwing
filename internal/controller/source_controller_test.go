@@ -128,7 +128,7 @@ func TestSourceControllerReturnsMintedTokenOnlyAfterReleaseCommit(t *testing.T) 
 		t.Run(fmt.Sprint(refuse), func(t *testing.T) {
 			transactions := &sourceMintTransactions{refuse: refuse}
 			controller := SourceController{GitHub: sourceMintProvider{transactions}, ResolveTenant: func(context.Context, store.Team) (TenantHandle, error) { return transactions, nil }}
-			got, err := controller.Release(t.Context(), capability.Authorized{Target: capability.Target{Team: "a"}})
+			got, err := controller.release(t.Context(), capability.Authorized{Target: capability.Target{Team: "a"}})
 			if transactions.phase != 3 {
 				t.Fatalf("release stopped at phase %d: %v", transactions.phase, err)
 			}

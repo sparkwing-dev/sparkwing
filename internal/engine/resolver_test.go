@@ -240,7 +240,7 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 			if err := corruption.mutate(cold.Executable); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok, err := r.Cached(ctx, cold.Identity, target); err != nil || ok {
+			if _, ok, err := r.cached(ctx, cold.Identity, target); err != nil || ok {
 				t.Fatalf("corrupt cache accepted: hit=%t err=%v", ok, err)
 			}
 			requests := len(transport.requests)
@@ -255,7 +255,7 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 			if err != nil || repaired.Identity != cold.Identity {
 				t.Fatalf("repair changed accepted engine: %+v %v", repaired, err)
 			}
-			if _, ok, err := r.Cached(ctx, cold.Identity, target); err != nil || !ok {
+			if _, ok, err := r.cached(ctx, cold.Identity, target); err != nil || !ok {
 				t.Fatalf("repaired cache missed: hit=%t err=%v", ok, err)
 			}
 		})
@@ -315,7 +315,7 @@ func TestReleaseVerificationRejectsUntrustedBytesBeforeExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := otherResolver.StoreVerified(t.Context(), engineid.Pin{SDK: engineid.GoSDK, Version: version}, verified); err == nil {
+	if _, err := otherResolver.storeVerified(t.Context(), engineid.Pin{SDK: engineid.GoSDK, Version: version}, verified); err == nil {
 		t.Fatal("resolver stored a release verified under another trust root")
 	}
 	for _, tc := range []struct {

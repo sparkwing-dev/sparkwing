@@ -24,7 +24,7 @@ func TestComputeLimitsAreUnlimitedUntilSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("limits: %v", err)
 	}
-	if limits.Any() {
+	if limits != (store.ComputeLimits{}) {
 		t.Fatalf("a fresh store reads %+v, want every guard at zero", limits)
 	}
 	for _, name := range store.ComputeLimitNames() {
@@ -57,7 +57,7 @@ func TestSetComputeLimitsRejectsUnknownAndNegative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("limits: %v", err)
 	}
-	if limits.Any() {
+	if limits != (store.ComputeLimits{}) {
 		t.Fatalf("limits = %+v, want the guard removed", limits)
 	}
 }
@@ -108,7 +108,7 @@ BEGIN SELECT RAISE(ABORT, 'run seconds refused'); END`); err != nil {
 	if err != nil {
 		t.Fatalf("read limits: %v", err)
 	}
-	if limits.Any() {
+	if limits != (store.ComputeLimits{}) {
 		t.Fatalf("the failed transaction changed limits: %+v", limits)
 	}
 }

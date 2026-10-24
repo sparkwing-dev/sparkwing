@@ -82,7 +82,7 @@ func setMachineOrigin(t *testing.T, s *Store, prefix string, origin *CapabilityO
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(t.Context(), `UPDATE capabilities SET authority_json=? WHERE prefix=?`, body, prefix)
+		_, err = tx.execContext(t.Context(), `UPDATE capabilities SET authority_json=? WHERE prefix=?`, body, prefix)
 		return err
 	}); err != nil {
 		t.Fatal(err)

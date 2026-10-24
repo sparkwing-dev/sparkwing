@@ -18,14 +18,14 @@ func ResolveAdmissionPolicy() (AdmissionPolicy, string, error) {
 		return AdmissionPolicy{}, "", err
 	}
 	if cfg.Admission == nil {
-		return DefaultAdmissionPolicy(), "default", nil
+		return defaultAdmissionPolicy(), "default", nil
 	}
 	policy, err := admissionPolicyFrom(*cfg.Admission)
 	return policy, path, err
 }
 
 func admissionPolicyFrom(raw userconfig.AdmissionConfig) (AdmissionPolicy, error) {
-	policy := DefaultAdmissionPolicy()
+	policy := defaultAdmissionPolicy()
 	policy.Mode = admission.Mode(configured(raw.Mode, string(policy.Mode)))
 	if policy.Mode == admission.ModeAuto || policy.Mode == admission.ModeCustom {
 		policy.Scheduling = admission.AutoPolicy()
