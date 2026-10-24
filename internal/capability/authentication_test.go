@@ -266,7 +266,7 @@ func TestTriggerAuthorityUsesSupportedJobBindings(t *testing.T) {
 func TestCompletedOwnerAuthenticationAllowsOnlyFinalLogs(t *testing.T) {
 	for _, kind := range []UnitKind{UnitTrigger, UnitPlan, UnitEval} {
 		t.Run(string(kind), func(t *testing.T) {
-			for _, change := range []string{"tail", "late", "sealed", "generation", "target", "revoked parent"} {
+			for _, change := range []string{"tail", "late", "sealed", "generation", "target", "run", "revoked parent"} {
 				t.Run(change, func(t *testing.T) {
 					r, p, _ := authenticationFixture()
 					c := &r.snapshot.Authorities[0].Principal.Capability
@@ -289,7 +289,7 @@ func TestCompletedOwnerAuthenticationAllowsOnlyFinalLogs(t *testing.T) {
 					finished := r.snapshot.Now.Add(-time.Second)
 					r.snapshot.Binding.FinishedAt = &finished
 					r.snapshot.Binding.LeaseExpiresAt = time.Time{}
-					p.Evidence.Target = Target{Team: "a", RunID: "run", ClaimID: "claim"}
+					p.Evidence.Target = Target{ClaimID: "claim"}
 					switch change {
 					case "late":
 						r.snapshot.Now = finished.Add(limits.LogSealGrace)
@@ -299,6 +299,8 @@ func TestCompletedOwnerAuthenticationAllowsOnlyFinalLogs(t *testing.T) {
 						r.snapshot.Binding.Current.Generation++
 					case "target":
 						p.Evidence.Target.ClaimID = "other-claim"
+					case "run":
+						p.Evidence.Target.RunID = "another-run"
 					case "revoked parent":
 						r.snapshot.Authorities[1].Principal.Capability.RevokedAt = &r.snapshot.Now
 					}

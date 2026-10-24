@@ -326,11 +326,9 @@ func resultMatches(p Principal, record *RecordedResult, evidence RequestEvidence
 }
 
 func logTarget(c Capability, target Target) bool {
-	if target.RunID != c.Binding.RunID {
-		return false
-	}
 	if target.ClaimID != "" {
-		return target.ClaimID == c.UnitID
+		// Claim routes resolve the run from the authenticated award afterward.
+		return target.ClaimID == c.UnitID && (target.RunID == "" || target.RunID == c.Binding.RunID)
 	}
-	return target.NodeID == c.Binding.NodeID
+	return target.RunID == c.Binding.RunID && target.NodeID == c.Binding.NodeID
 }

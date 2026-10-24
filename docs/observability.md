@@ -62,7 +62,8 @@ no lock shared across jobs. Log subjects use the committed attempt, without
 logging-only principal refreshes or node lookups. The store creates each stream
 in the transaction that starts its attempt or claims its owner unit. Hosts open
 spools without a registration request. Hosts also seal streams that produced no
-bytes, so quiet units do not keep log follow waiting after completion.
+bytes, so quiet units do not keep log follow waiting after completion. Completed
+trigger, plan and eval claims can seal their own stream during the same tail window.
 If a retry refuses the prior attempt's
 detached flush, that stream stays visible in run details and maintenance seals it
 incomplete.
