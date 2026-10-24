@@ -8,10 +8,29 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+func TestDynamicChildLimitExplainsTheFix(t *testing.T) {
+	tenant, request := childIntakeFixture(t)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE teams SET max_children_per_root=1 WHERE name='a'`)
+	if _, err := tenant.AdmitRun(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if replay, err := tenant.AdmitRun(t.Context(), request); err != nil || !replay.Replayed {
+		t.Fatalf("child replay at limit: %+v, %v", replay, err)
+	}
+	request.IdempotencyKey = "another-invocation"
+	_, err := tenant.AdmitRun(t.Context(), request)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.Conflict || refusal.Message != "This team allows 1 child runs per root run (maximum 1,000). Raise the team's child-run limit or split the work into separate runs." || refusal.Details["limit"] != "max_children_per_root" || refusal.Details["cap"] != int64(1) || refusal.Details["observed"] != int64(1) {
+		t.Fatalf("dynamic child limit: %+v, %v", refusal, err)
+	}
+	rewriteSchemaCount(t, tenant.s.db, "runs", 2)
+}
 
 func childIntakeFixture(t *testing.T) (*Tenant, IntakeRequest) {
 	t.Helper()

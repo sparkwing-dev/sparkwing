@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **child runs:** Refuse declared child fan-out above the root's remaining allowance at plan acceptance, before children start. Limit errors retain their 409 and details, name the team's setting and the 1,000 maximum, and explain how to raise the limit or split the work. Dynamic children keep the creation-time check
+
 - **runtime:** Preserve cancellation after an automatic transaction rollback so interrupting an owner's state wait does not stop scheduling
 
 - **storage:** Default shared daily object-request stops to off. Operators can opt into a daily emergency brake with `--object-store-budget`; per-team budgets and minute trips still apply
