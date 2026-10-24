@@ -32,7 +32,6 @@ func NewDeployment(st *store.Store, cfg deployment.Config, logger *slog.Logger) 
 		logger:             logger,
 		loginLimit:         newLoginLimiter(),
 		deliverySpools:     make(chan struct{}, githubDeliverySpools),
-		queueTimeout:       15 * time.Minute,
 		sessionMaxLifetime: defaultSessionMaxLifetime,
 		liveLogs:           newLiveLogs(),
 		cronHolder:         defaultCronHolder(),

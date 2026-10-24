@@ -113,7 +113,7 @@ func FuzzZeroSourceEvalCannotBorrowAnotherFence(f *testing.F) {
 				t.Fatal("eval renewal borrowed a distinct source or lease fence")
 			}
 		}
-		rewriteSchemaCount(t, s.db, "log_streams", 0)
+		rewriteSchemaCount(t, s.db, "log_streams", 1)
 	})
 }
 

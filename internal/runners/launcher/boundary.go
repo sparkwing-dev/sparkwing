@@ -90,12 +90,10 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 	if err := b.verifyNodeTeam(ctx, &node, team); err != nil {
 		return CloudNodeReservation{}, err
 	}
-	if raw := node.Annotations[reservationAnnotation]; raw != "" {
-		var held CloudNodeReservation
-		if err := json.Unmarshal([]byte(raw), &held); err != nil {
-			return CloudNodeReservation{}, ErrNoDedicatedNode
-		}
-		if held.Team == team && held.JobName == job && held.NodeUID == string(node.UID) && held.NodeName == node.Name && held.ReservationID != "" && held.Award == binding.LeaseRef() && node.Annotations[reservationNamespaceAnnotation] == b.Namespace {
+	// safety: replay must validate the binding too, even when quarantine could not persist.
+	if reservationEvidence(&node) {
+		held, recorded, ok := nodeReservation(&node)
+		if ok && !quarantined(node) && held.JobName == job && node.Annotations[reservationNamespaceAnnotation] == b.Namespace && sameBinding(recorded, binding) {
 			return held, nil
 		}
 		return CloudNodeReservation{}, ErrNoDedicatedNode

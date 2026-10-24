@@ -19,8 +19,8 @@ func (s *Server) handleTeamSettings(w http.ResponseWriter, r *http.Request, a ca
 		if err := decodeEngineRequest(r, &request); err != nil {
 			return err
 		}
-		if request.MembersCanAddMachines == nil && request.ClaimRanking == nil {
-			return invalidEngineBody("set members_can_add_machines or claim_ranking")
+		if request.MembersCanAddMachines == nil && request.ClaimRanking == nil && request.MaxChildrenPerRoot == nil {
+			return invalidEngineBody("set members_can_add_machines, claim_ranking or max_children_per_root")
 		}
 		if !s.deployment.Hosted() && request.ClaimRanking != nil && slices.Contains(*request.ClaimRanking, store.TierCloud) {
 			return invalidEngineBody("cloud is not a runner tier on a self-hosted controller, which has no Cloud launcher")

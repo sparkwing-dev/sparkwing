@@ -6,16 +6,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// TeamSettings reads the persisted enrollment policy and claim ranking.
+// TeamSettings reads the persisted enrollment policy, claim ranking and child-run limits.
 type TeamSettings struct {
 	MembersCanAddMachines bool     `json:"members_can_add_machines"`
 	ClaimRanking          []string `json:"claim_ranking"`
+	MaxChildrenPerRoot    int64    `json:"max_children_per_root"`
 }
 
-// TeamSettingsUpdate changes the named enrollment and ranking settings.
+// TeamSettingsUpdate changes the named enrollment, ranking and child-run settings.
 type TeamSettingsUpdate struct {
 	MembersCanAddMachines *bool     `json:"members_can_add_machines,omitempty"`
 	ClaimRanking          *[]string `json:"claim_ranking,omitempty"`
+	MaxChildrenPerRoot    *int64    `json:"max_children_per_root,omitempty"`
 }
 
 // FailedGitHubDelivery describes a failed inbox entry without its signed payload.

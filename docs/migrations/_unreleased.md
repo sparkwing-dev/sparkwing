@@ -17,9 +17,9 @@ that post signed deliveries must treat 202 as acceptance for later processing.
 Disconnecting an installation revokes work still preparing source for admission
 or schedule publication. Those refused effects leave no receipt to replay.
 
-The schema baseline moves to version 22 for the inbox, targeted effect results,
-team queue attribution and idle free-slot tracking. Recreate stores from an
-earlier baseline before starting this build.
+The schema baseline moves to version 23 for the inbox, targeted effect results,
+team queue attribution, idle free-slot tracking and per-team descendant ceilings.
+Recreate stores from an earlier baseline before starting this build.
 Existing stores are refused rather than opened under the new schema.
 
 ## Runner sizes are labels
@@ -62,7 +62,7 @@ not delay matching jobs. Existing stores must be recreated because the baseline
 adds normalized requirement sets and indexed references on queued work.
 Metered claim leases account for billable time that begins during issuance.
 
-The store baseline is 22. Earlier stores are refused and must be recreated under
+The store baseline is 23. Earlier stores are refused and must be recreated under
 the pre-launch baseline policy. Delivery receipts now include each targeted
 admission, publication, withdrawal and lifecycle result. Reprocessing preserves
 committed effects. Installation withdrawals keep their original repository targets
@@ -393,7 +393,7 @@ restrictions. Trusted exact-row inspection still uses `GetSecretRow`.
 Tenant's raw `UnbindGitHubAppInstallation`, `PutGitHubAppTrigger`,
 `DeleteGitHubAppTrigger`, `PutGitHubAppAutomation`, `DeleteGitHubAppAutomation`,
 `SetGitHubAppExtraRepos` and `SetGitHubAppExtraRepoIDs` are removed.
-Use the six authority-bearing methods in `GitHubAppWriter`. Tenant supplies the
+Use the six authority-bearing methods in `gitHubAppWriter`. Tenant supplies the
 production adapter. Supply slugs and verified numeric IDs together when setting
 extra repositories. Actors and timestamps come from the store transaction.
 
@@ -467,8 +467,8 @@ retries and refuses conflicting readings without changing the stored sample.
 
 `AcknowledgeNodeExecutionStart`, `FinishNodeExecutionAttempt`, `ExecutionStart`
 and `ExecutionAttemptFinish` are removed. Use `Tenant.TransitionNode` with the
-current award and source attempt ordinal. Select a tenant before calling
-`ListNodeExecutionAttempts`. It reads the current run's committed attempts.
+current award and source attempt ordinal. Tenant-scoped job reads include the
+committed attempts. The standalone `ListNodeExecutionAttempts` reader is private.
 The unused coordinator ID API and GitHub runner scope APIs are removed.
 Capability push bindings and the shared matcher own repository restrictions.
 
@@ -750,15 +750,15 @@ removed.
 
 ## Runner observation snapshots
 
-Embedded controllers supply `Server.WithRunnerInventory` with a tenant-scoped
-`RunnerInventoryReader`. Runner lists and queue headroom use the same committed
+The controller resolves a tenant-scoped `runnerInventoryReader` from its
+request tenant handle. Runner lists and queue headroom use the same committed
 snapshot. The old process-local presence, heartbeat and headroom registries and
 holder-name parser are removed. A missing snapshot adapter returns `policy_missing`.
 The `/api/v1/runners` response retains `agents`. Equal display names can appear in
 separate rows because they do not merge credentials. Last-seen and headroom
 observation times remain separate. Runner metrics read the same snapshots.
 
-`RunnerInventoryReader.ReadRunners` returns `capability.RunnerSnapshot`.
+`runnerInventoryReader.ReadRunners` returns `capability.RunnerSnapshot`.
 The snapshot, observation and headroom types live in `internal/capability`,
 so the store adapter can implement the reader without a controller import.
 
@@ -808,8 +808,9 @@ Link start and completion use the shared browser proof policy. Use the account's
 direct provider session and the matching session-bound CSRF form. Account-token
 sessions and Authorization headers cannot link identities. Failures return the
 canonical JSON error envelope instead of a settings-page refusal redirect.
-Embedded controllers supply `WithIdentityLinkWriter` to recheck the session and
-commit one-use nonce consumption and identity attachment.
+Controller construction binds the store operator as the identity-link writer
+to recheck the session and commit one-use nonce consumption and identity
+attachment.
 
 Nonlocal dashboard pages always require a live session. `Dashboard.Local`
 selects local pages. Elected local controllers obtain the API and dashboard
@@ -2562,9 +2563,9 @@ the server derives the approver. Its response is an `approval` envelope with
 `job_id` and omit lifecycle/release fields. The raw approval-request route is
 removed; execution owns gate creation.
 
-Embedded controllers must supply authority-bearing `ScheduleWriter` and
-`RunControlWriter` adapters. Legacy schedule, approval and debug-pause writes
-are not substitutes. The default refuses a missing adapter. Team invitation,
+Controller routes use the resolved tenant for the private `scheduleWriter` and
+`runControlWriter` ports. Legacy schedule, approval and debug-pause writes are
+not substitutes. The default refuses a missing adapter. Team invitation,
 trust, GitHub App, billing and storage reads now require the shared capability
 policy; API metrics requires `operator.limits` or console authority.
 
@@ -3055,7 +3056,9 @@ upgrading:
   scope. Team repository registration or live App installation coverage
   authorizes an explicit repository. A child in another repository always
   runs as asserted. Children nest at most 10 levels deep counting the root and one
-  root starts at most 50 children, retries excluded; past either bound intake
+  root uses the team-set child ceiling (1 to 1000, default 50, retries excluded). Team admins
+  change it with `team settings set --profile work --max-children-per-root 200`
+  or in Team settings; changes are audited. Past either bound intake
   answers `409` with `limit` `max_child_depth` or `max_children_per_root`. A
   child spends the admission budget recorded on its parent. App and schedule
   roots use the team bucket for flood and hourly limits. A retry charges the retrier and its

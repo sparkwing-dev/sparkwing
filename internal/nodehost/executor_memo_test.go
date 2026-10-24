@@ -5,14 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 )
 
 func executorMemoFixture(t *testing.T, value []byte) (*nodeExecutor, NodeInput, runspec.Spec, nodeproto.JobSpec, *executorSession, *memoBackendFixture) {
@@ -264,6 +267,64 @@ func TestExecutorMemoPropagatesLookupAndCopyFenceRefusals(t *testing.T) {
 			_, result, err := host.memo(t.Context(), session, input, job, spec)
 			if !errors.Is(err, refusal) || result != nil {
 				t.Fatalf("%s refusal became fresh execution: result=%+v error=%v", stage, result, err)
+			}
+		})
+	}
+}
+
+func TestMemoPublicationAndWarningFailurePreserveJobResult(t *testing.T) {
+	for _, requiredOutput := range []bool{false, true} {
+		t.Run(fmt.Sprint(requiredOutput), func(t *testing.T) {
+			input, state, deps, _ := executorFixture(t)
+			job := &input.Accepted.Plan.Jobs[0]
+			job.Memo = &nodeproto.MemoSpec{Input: &nodeproto.MemoInput{Kind: "const", Value: "key"}}
+			if requiredOutput {
+				job.ResultStep = "body"
+			}
+			hash, _ := runspec.CanonicalHash(input.Accepted.Plan)
+			jobHash, _ := runspec.CanonicalHash(*job)
+			input.Accepted.PlanHash, input.SpecHash = string(hash), string(jobHash)
+			state.row.Spec, _ = json.Marshal(*job)
+			state.row.SpecHash = input.SpecHash
+			var spec runspec.Spec
+			_ = json.Unmarshal(input.Accepted.Spec, &spec)
+			spec.PlanHash = hash
+			spec.Resolved.Settings.Options.NoMemo.Value = true
+			input.Accepted.Spec, _ = json.Marshal(spec)
+			state.accepted = &input.Accepted
+			deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
+				return &executorProcess{plan: input.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`"output"`)}}, nil
+			}
+			logs := &localLogs{run: input.Accepted.RunID, masker: deps.Masker, principal: capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitTrigger, Binding: capability.Binding{RunID: input.Accepted.RunID, Generation: 1}}}, upload: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
+				return nil, errors.New("warning persistence failed")
+			}}
+			t.Cleanup(func() { <-logs.finish(t.Context(), "") })
+			warned := false
+			deps.Log = func(ctx context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+				warned = warned || frame.Event == "memo_publish"
+				return logs.write(ctx, input.Accepted.RunID, "", frame)
+			}
+			deps.PublishOutput = func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) {
+				return nil, errors.New("required output refused")
+			}
+			executor, err := NewNodeExecutor(deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = executor.Execute(t.Context(), input)
+			if (err != nil) != requiredOutput {
+				t.Fatalf("requiredOutput=%v result=%v", requiredOutput, err)
+			}
+			if !requiredOutput && !warned {
+				t.Fatal("memo publication warning was not attempted")
+			}
+			final := state.changes[len(state.changes)-1]
+			want := runstate.NodeSuccess
+			if requiredOutput {
+				want = runstate.NodeFailed
+			}
+			if final.Extra.Result == nil || final.Extra.Result.Outcome != want {
+				t.Fatalf("result changed: %+v", final)
 			}
 		})
 	}

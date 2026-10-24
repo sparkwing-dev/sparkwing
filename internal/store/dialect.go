@@ -127,6 +127,7 @@ func (s *Store) queryRowNoCtx(q string, args ...any) rowScanner {
 }
 
 type storeTx struct {
+	ctx                  context.Context
 	operator             *Operator
 	authorityLocks       []rowLock
 	claimQueueLocked     bool
@@ -139,7 +140,6 @@ type storeTx struct {
 	clock                func(context.Context) (time.Time, error)
 	err                  error
 	cancelingTeam        Team
-	ctx                  context.Context
 	tx                   *sql.Tx
 	dialect              Dialect
 	store                *Store
@@ -160,7 +160,7 @@ func (s *Store) now() time.Time {
 
 // Read-only decisions may never commit, so clock failure must refuse construction.
 func (s *Store) snapshotTx(ctx context.Context, raw *sql.Tx, read bool) (*storeTx, error) {
-	t := &storeTx{operator: &Operator{s: s}, ctx: ctx, tx: raw, dialect: s.dialect, store: s, snapshotRead: read}
+	t := &storeTx{ctx: ctx, operator: &Operator{s: s}, tx: raw, dialect: s.dialect, store: s, snapshotRead: read}
 	if read && s.dialect == DialectSQLite {
 		// SQLite establishes its snapshot on the first table read.
 		var version int
@@ -271,8 +271,8 @@ func (t *storeTx) Commit() error {
 		return errors.Join(t.err, t.Rollback())
 	}
 	if err := t.tx.Commit(); err != nil {
-		// database/sql reports ErrTxDone when cancellation's rollback wins the race.
-		if errors.Is(err, sql.ErrTxDone) && t.ctx.Err() != nil {
+		// database/sql may finish its cancellation rollback before Commit observes it.
+		if errors.Is(err, sql.ErrTxDone) && t.ctx != nil && t.ctx.Err() != nil {
 			return t.ctx.Err()
 		}
 		return err

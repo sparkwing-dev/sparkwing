@@ -8,18 +8,66 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
+
+func TestCompletedTriggerLogRouteSealsQuietStream(t *testing.T) {
+	e, _ := engineRuntimeStore(t)
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{41}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	engineHTTPRoot(t, e, "a", "runner", []capability.Grant{capability.TriggersClaim})
+	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}}
+	if _, err := e.Finish(t.Context(), owner, controllerwire.FinishRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: int64(claim.Award.Generation)}}
+	body, err := json.Marshal(logCommitRequest{Subject: subject, Final: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := e.Server.Handler()
+	engineClaimHTTP(t, h, string(claim.Bearer), "POST", "/api/v1/claims/"+url.PathEscape(principal.Capability.UnitID)+"/log-manifest", string(body), http.StatusOK)
+	options, _, _ := memberObservationOptions(t, e.Store, objects)
+	reader, err := client.NewLogReader(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{})
+	if err != nil || !page.Complete {
+		t.Fatalf("quiet log follow did not complete: %+v %v", page, err)
+	}
+}
 
 func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) {
 	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
@@ -159,4 +207,25 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestAttemptLogsWithoutSegmentsDoNotNeedPhysicalBackend(t *testing.T) {
+	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	server := New(e.Store, nil).WithEngineController(e.EngineController)
+	h := server.Handler()
+	response := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, 200)
+	var award controllerwire.ClaimResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	claim := award.Claim
+	engineAdmitBearer(t, e.Store, claim.Capability)
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Binding.Generation}}
+	view, err := teststore.ForTeam(t, e.Store, "a").ReadRunView(t.Context(), "run")
+	if err != nil || !slices.ContainsFunc(view.Logs, func(got blob.LogSubject) bool { return reflect.DeepEqual(got, subject) }) {
+		t.Fatalf("attempt start did not register its stream: %+v %v", view.Logs, err)
+	}
+	body, _ := json.Marshal(logCommitRequest{Subject: subject, Final: true})
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(body), 200)
 }

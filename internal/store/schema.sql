@@ -10,6 +10,7 @@ CREATE TABLE teams (
     created_by TEXT NOT NULL DEFAULT '',
     members_can_add_machines BIGINT NOT NULL DEFAULT 1 CHECK(members_can_add_machines IN (0,1)),
     claim_ranking TEXT NOT NULL DEFAULT '',
+    max_children_per_root BIGINT NOT NULL DEFAULT 50 CHECK(max_children_per_root BETWEEN 1 AND 1000),
     claim_award_ordinal BIGINT NOT NULL DEFAULT 0 CHECK(claim_award_ordinal >= 0),
     billing_trust_at BIGINT NOT NULL DEFAULT 0,
     billing_trust_reason TEXT NOT NULL DEFAULT '',

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -65,10 +66,9 @@ type Launcher struct {
 	Poll     time.Duration
 	Logger   *slog.Logger
 
-	mu                sync.Mutex
-	waiting           map[string]*CloudJobAward
-	blockedTeamLabels []string
-	identity          string
+	mu       sync.Mutex
+	waiting  map[string]*CloudJobAward
+	identity string
 }
 
 func (l *Launcher) logger() *slog.Logger {
@@ -115,7 +115,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 				logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
 				cooldown = time.Now().Add(retryWait(synced, 0))
 			} else if synced != nil {
-				logger.Error("Cloud node faults contained; quarantined nodes are cordoned and annotated "+quarantineAnnotation+"; claiming continues", "error", synced)
+				logger.Error("Cloud node faults require operator inspection; suspect nodes are excluded from placement and quarantines use "+quarantineAnnotation+"; claiming continues", "error", synced)
 			}
 			if blocking(synced) == nil && admitted == nil {
 				if _, err := l.LaunchOne(ctx); err != nil {
@@ -168,9 +168,10 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := l.placeWaiting(ctx); err != nil {
 		return false, err
 	}
-	l.mu.Lock()
-	blocked := append([]string(nil), l.blockedTeamLabels...)
-	l.mu.Unlock()
+	blocked := make([]string, 0, len(l.Config.StoppedTeams))
+	for _, team := range l.Config.StoppedTeams {
+		blocked = append(blocked, TeamNodeValue(l.Config.Namespace, team))
+	}
 	award, err := l.Control.Claim(ctx, l.Config.Namespace, blocked)
 	if err != nil || award == nil {
 		return false, err
@@ -181,6 +182,9 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 func (l *Launcher) placeWaiting(ctx context.Context) error {
 	var errs []error
 	for _, award := range l.waitingAwards() {
+		if slices.Contains(l.Config.StoppedTeams, award.Binding.Team) {
+			continue
+		}
 		_, err := l.launch(ctx, award)
 		var failure *apierr.Error
 		if errors.Is(err, limits.ErrNoTime) || errors.As(err, &failure) && failure.Code == apierr.LockHeld {

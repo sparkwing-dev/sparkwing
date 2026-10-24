@@ -22,6 +22,10 @@ renewal, rejection, reservation validation and snapshot reads. A failed award
 returns an explicit deferred fence, preserving its Job while healthy awards
 continue. Database failures and invalid claimant authority still fail the request.
 
+Transaction commit preserves context cancellation when the database has already
+rolled back the cancelled transaction. An owner interrupting its state wait can
+continue scheduling without treating that rollback as a database failure.
+
 
 ## Collection and required blob reads
 
@@ -307,7 +311,7 @@ views display the stored pipeline key. They no longer decode historical keys.
 ## Reporting transactions and schedule lease
 
 `Tenant.WriteMetric(ctx, Authorized, MetricSample)` and
-`WriteUsage(ctx, Authorized, NodeUsage)` implement C2's `MetricWriter`. Both
+`WriteUsage(ctx, Authorized, NodeUsage)` implement C2's `metricWriter`. Both
 recheck the tenant, full live ancestry, selected route rule and current claim
 fence in the committing transaction. Job reports carry the captured attempt.
 A retry advances that attempt, so a delayed report cannot move to it. A holder
@@ -357,7 +361,7 @@ retries and refuses conflicting readings without changing the stored sample.
 
 ## Authorized team mutations
 
-C2's `TeamWriter` is implemented on `Tenant`. Rename, invitations and build trust
+C2's `teamWriter` is implemented on `Tenant`. Rename, invitations and build trust
 hold the team lock and recheck current administration. Invitations derive their
 identity from the tenant, committed account and request key. The existing row
 stores the immutable normalized email, role, actor and timestamps. Exact replay
@@ -402,8 +406,9 @@ does not change when that root's policy changes.
 `AcknowledgeNodeExecutionStart`, `FinishNodeExecutionAttempt`, `ExecutionStart`
 and `ExecutionAttemptFinish` are removed with their local and trigger writers.
 `Tenant.TransitionNode` owns attempt ordinals, attribution, retry and completion.
-`Store.ListNodeExecutionAttempts` is removed. Its tenant method reads the final
-`node_attempts` table under a snapshot and refuses a foreign run or job.
+`Store.ListNodeExecutionAttempts` is removed. The private tenant method
+`listNodeExecutionAttempts` reads the final `node_attempts` table under a snapshot
+and refuses a foreign run or job.
 The unused coordinator ID reader and transaction helper are removed too.
 
 The unused `GitHubRunnerCredentialPush`, `GitHubRunnerPush`,
@@ -652,8 +657,8 @@ release, follower resolution and per-group promotion exist only in ledger tests.
 
 `Operator.UsageMetrics`, its weekly-report types and `UsageWeekStart` are
 removed with the retired usage-metrics route. The unused
-`Tenant.ListSpawnedChildrenByRun` trigger reader is removed. `SpawnedChild`
-remains the existing decoration input type.
+`Tenant.ListSpawnedChildrenByRun` trigger reader and its unused `SpawnedChild`
+decoration input type are removed.
 
 Attempt starts derive executor class and location from claim ancestry and
 billing provenance. Machine names come from the registered subject. Actions
@@ -1358,9 +1363,10 @@ and reads no longer seal abandoned logs. `Tenant.RecordSegments` and leased
 `Operator.SealAbandonedLogStreams` own tagged persistence and sealing.
 Legacy capabilities no longer advertise segment upload support. Old output
 reads and host/client interfaces still need their final record cutover.
-`Store.NodeIsAncestor` is removed. Its controller caller uses
-`Tenant.NodeIsAncestor`, which shares the blob read-set dependency resolver over
-sealed job specs, including optional, artifact and generated-group dependencies.
+The exported `Store.NodeIsAncestor` and `Tenant.NodeIsAncestor` methods are
+removed. The private `Tenant.nodeIsAncestor` shares the blob read-set dependency
+resolver over sealed job specs, including optional, artifact and generated-group
+dependencies.
 The duplicate `MaxOutputBytes` and `MaxRunOutputBytes` constants are removed.
 Remaining output callers use `limits.NodeOutputBytes` (16 MiB) and
 `limits.RunOutputBytes` (1 GiB). File and signed-URL reads refuse bytes above
@@ -2251,8 +2257,11 @@ source job and immutable source generation, separate from its own lease fence.
 represent pre-job logs.
 
 `log_streams` persists that tagged identity, its generation, retention class and
-final commit digest. `log_segments` references the stream with the same generation.
-The writer rechecks its exact capability binding and persisted generation.
+final commit digest. The transaction that starts an attempt or claims an owner
+unit also creates its stream. Publication imports create their streams in the same transaction.
+`RecordSegments` appends and seals existing streams, refusing a missing registration.
+`log_segments` references the stream with the same generation. The writer rechecks
+its exact capability binding and persisted generation.
 An unsealed final job attempt may flush after its result commits until the
 persisted finish time plus `limits.LogSealGrace`. C1 rechecks the recorded writer,
 attempt, generation, current credential ancestry/expiry/membership and absence
@@ -3392,7 +3401,7 @@ trigger repository columns or issues one read per result.
 
 ## GitHub App administration transactions
 
-Tenant also implements C2 GitHubConnectWriter. Identity reads, nonce consumption
+Tenant also implements C2 gitHubConnectWriter. Identity reads, nonce consumption
 and installation binding recheck the same live direct owner session, current
 team membership and exact account/team in a store-clock transaction. Binding
 rechecks the linked provider subject, derives the connector and preserves a
@@ -3401,7 +3410,7 @@ Installation creation and update timestamps use nanoseconds. Raw installation
 binding and the unscoped connection nonce API are removed. Test fixtures use
 TestOnlySeedGitHubInstallation, which shares the binding statement.
 
-Tenant implements C2 GitHubAppWriter. All six mutations serialize on the team
+Tenant implements C2 gitHubAppWriter. All six mutations serialize on the team
 and recheck live authority, ancestry, membership and the selected team.admin
 access before commit. Subscription and automation writes lock and require the
 tenant's unsuspended installation. Actor and nanosecond timestamps derive from
@@ -3423,7 +3432,7 @@ in the earlier intake handoff. App admission uses the trusted transaction below.
 
 ## Run-control transactions and sealed intake rate guards
 
-Tenant implements C2's RunControlWriter. Debug-pause creation and approval
+Tenant implements C2's runControlWriter. Debug-pause creation and approval
 resolution recheck the canonical route's current member/local authority in the
 committing transaction. Targets stay in one tenant and run. Pause creation
 requires a live job and derives its timestamp and default expiry from the store
@@ -3464,7 +3473,7 @@ Inventory refuses future observations. Placement compares poll time and the
 stored last-use time against the same liveness cutoff.
 
 `Tenant.ReadRunners(context.Context) (capability.RunnerSnapshot, error)` implements
-C2's `RunnerInventoryReader`. It resolves live machine ancestry, accepted polls
+C2's `runnerInventoryReader`. It resolves live machine ancestry, accepted polls
 and current owner, job and eval awards in one store-clock snapshot. Roots remain
 distinct by their persisted authority. Cloud awards use their immutable billing
 reservation across exchange. Here jobs group under their original here award,
@@ -3541,7 +3550,7 @@ collection releases every decline hold on that team.
 
 ## Decision 112 production hosted pages
 
-`Tenant` implements C2's `BillingWriter` directly. Billing writes lock the team
+`Tenant` implements C2's `billingWriter` directly. Billing writes lock the team
 and member authority before the ledger, then recheck authority at commit. `billing_pages`
 is a tenant table with the reservation ID, caller account ID, request key,
 payment mode, immutable page facts and failed-delivery time. Its unique key is
@@ -3636,7 +3645,7 @@ migration or backfill is introduced.
 
 `TestMemoizedSourceZeroClaimsRenewsAndPublishesEvalLog` drives the persisted
 boundaries. `FuzzZeroSourceEvalCannotBorrowAnotherFence` refuses changed source
-and lease identities without committing a log stream.
+and lease identities without appending or sealing the awarded log stream.
 
 ## W9 launcher preparation renewal
 
@@ -3828,7 +3837,7 @@ No table, credential grant or public API changes.
 ## Imported local history
 
 CausePublishAttempt (`publish_attempt`) is a pending-to-pending operator edge
-under GuardPublication. TransitionExtra.Publication carries PublishedAttempt:
+under the private `guardPublication` rule. TransitionExtra.Publication carries PublishedAttempt:
 positive ordinal and generation, completed timestamps, terminal outcome and
 executor name. Import creates one terminal local node_attempts row, without an
 award, live holder, lease, trigger or billing reservation. It rejects a second import
@@ -3953,7 +3962,7 @@ ledger does not erase the identity of a retained or retried run.
 
 `CronSchedule.RepositoryKey` is a read projection of derived identity, separate
 from App installation authority. `ArmCronSchedule` ignores the input key and
-canonicalizes the source using the verified App IDs or `ScheduleRepositoryResolver`
+canonicalizes the source using the verified App IDs or `scheduleRepositoryResolver`
 on its existing intake policy. The controller implements that resolver through
 its shared run-intake identity lookup. Manual GitHub schedules acquire numeric
 identity without acquiring App authority. Manual/App conflicts compare those keys.
@@ -4088,7 +4097,7 @@ client's still-missing cross-repository source resolution.
 
 ## W1b scheduled intake and concurrency transactions
 
-Tenant implements C2's six `ScheduleWriter` mutations. Automatic and manual
+Tenant implements C2's six `scheduleWriter` mutations. Automatic and manual
 launches use W1's `AdmitScheduledRun(ctx, CronSchedule, due)` adapter and its
 private schedule authority proof. There is one call to the shared `admitRun`.
 The duplicate admission implementation, private intake selector and separate
@@ -4425,15 +4434,15 @@ Cloud-only placement or an exclusive Cloud ranking checks credit standing,
 including prepaid policy and holds, before admitting executable work. A
 refused push remains terminal history and replay retains that result.
 
-Each launcher pass has one fault ledger attributed only by protected team
-labels. Every contained teardown, release or quarantine fault enters that
-ledger once per node. More than three distinct faults block that team's next
-claim. Quarantine permission is tracked separately and permits at most three
-distinct nodes per team per pass; counting a fault grants no write permission.
-Reservation evidence on protected team nodes is classified before namespace
-filtering. Erased identity annotations still consume the protected label's budget
-when a reservation taint or quarantine remains. Only a recorded team matching the
-protected label in the launcher's namespace permits a quarantine or release write.
+Launcher faults isolate suspect nodes and report their identities to the operator.
+Healthy nodes keep serving the team. Reservation and binding metadata use one
+validation predicate for reconciliation and placement, including resumption.
+Damaged metadata keeps a node excluded even if quarantine cannot persist.
+Quarantine writes require the recorded team to match the protected team label in
+the launcher's namespace. Every retry retains and checks the original node UID
+and protected team. A replacement or ownership change refuses the write.
+Operators can stop a team's new claims and waiting placements with `--stop-team`
+on every launcher.
 
 ## Sealed masking projection (decision 43)
 

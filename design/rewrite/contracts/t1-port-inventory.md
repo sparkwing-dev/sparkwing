@@ -380,7 +380,7 @@ CSRF protection and capability issuance. Session-header writes require CSRF, API
 refusals preserve cookies, and nonlocal pages require sign-in before bootstrap.
 OperatorPageServesOnlyTheOperatorsSession covers the configured gate and refuses
 a capability-parented session. The local-directory deletion port uses a fake
-committing TeamWriter. It proves post-commit directory handling and exact authority
+committing teamWriter. It proves post-commit directory handling and exact authority
 forwarding, not production deletion atomicity.
 
 The four chunked_body_test.go regressions move to EngineClaimHTTPChunkedBody and
@@ -2657,7 +2657,7 @@ No acceptance registry or native-platform cell is added.
 
 ## Committed runner inventory
 
-`Tenant.ReadRunners` now supplies C2's production `RunnerInventoryReader`.
+`Tenant.ReadRunners` now supplies C2's production `runnerInventoryReader`.
 `TestRunnerInventoryWithSealedAdmissionAndEnrollment` uses storetest's isolated
 store through the real admission, plan, enrollment, claim and renewal paths.
 `TestRunnerInventoryHTTPUsesStoreSnapshot` drives the real default HTTP adapter.

@@ -474,3 +474,26 @@ func TestBoundaryDaemonExemptionRequiresAppsAPI(t *testing.T) {
 		})
 	}
 }
+
+func TestBoundarySkipsErasedReservationIdentity(t *testing.T) {
+	for _, evidence := range []string{"taint", "binding"} {
+		t.Run(evidence, func(t *testing.T) {
+			b, kube := boundaryFixture()
+			node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if evidence == "taint" {
+				node.Spec.Taints = []corev1.Taint{{Key: reservationTaint, Effect: corev1.TaintEffectNoSchedule}}
+			} else {
+				node.Annotations = map[string]string{bindingAnnotation: "damaged"}
+			}
+			if _, err := kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job"); !errors.Is(err, ErrNoDedicatedNode) {
+				t.Fatalf("suspect node accepted placement: %v", err)
+			}
+		})
+	}
+}

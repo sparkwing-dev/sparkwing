@@ -141,8 +141,8 @@ func wireOperations() map[string]wireOperation {
 		}{}, wire.RotatedToken{})
 	}
 	result["POST /api/v1/runners"] = operation("Enroll a runner once", wire.EnrollRunnerRequest{}, wire.CreatedToken{})
-	result["GET /api/v1/team/settings"] = operation("Read team machine enrollment settings and claim ranking", nil, wire.TeamSettings{})
-	result["PUT /api/v1/team/settings"] = operation("Change and audit team machine enrollment settings and claim ranking", wire.TeamSettingsUpdate{}, wire.TeamSettings{})
+	result["GET /api/v1/team/settings"] = operation("Read team enrollment, claim ranking and child-run settings", nil, wire.TeamSettings{})
+	result["PUT /api/v1/team/settings"] = operation("Change and audit team enrollment, claim ranking and child-run settings", wire.TeamSettingsUpdate{}, wire.TeamSettings{})
 	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))
 	result["POST /api/v1/data/records"] = operation("Commit a record", wire.DataRecordWriteRequest{}, wire.DataRecord{})
 	for _, path := range []string{"/api/v1/data/upload", "/api/v1/data/commit", "/api/v1/data/records"} {

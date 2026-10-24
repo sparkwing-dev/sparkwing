@@ -3,7 +3,6 @@ package controller
 import (
 	"bytes"
 	"context"
-	"slices"
 	"sync"
 	"time"
 )
@@ -97,21 +96,6 @@ func (l *liveLogs) watched(runID, nodeID string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.watchedLocked(liveKey{runID, nodeID}, l.clock())
-}
-
-// watchedNodes lists the run's nodes a viewer holds a live watch on.
-func (l *liveLogs) watchedNodes(runID string) []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	now := l.clock()
-	nodes := []string{}
-	for key := range l.watches {
-		if key.run == runID && l.watchedLocked(key, now) {
-			nodes = append(nodes, key.node)
-		}
-	}
-	slices.Sort(nodes)
-	return nodes
 }
 
 func (l *liveLogs) watchedLocked(key liveKey, now time.Time) bool {

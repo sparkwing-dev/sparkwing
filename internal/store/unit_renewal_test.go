@@ -51,6 +51,46 @@ func renewalFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitDemand,
 	return s, demand, claim, &now
 }
 
+func TestStartedUnitsRegisterLogsBeforeOutput(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, _, claim, _ := renewalFixture(t, kind)
+			tenant := &Tenant{s: s, team: claim.Team}
+			if kind != capability.UnitNode {
+				view, err := tenant.ReadRunView(t.Context(), claim.RunID)
+				if err != nil || len(view.Logs) != 1 {
+					t.Fatalf("owner award has no stream before its asynchronous heartbeat: %+v %v", view.Logs, err)
+				}
+			}
+			if kind == capability.UnitNode {
+				actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+				admitExecution(t, tenant, actor)
+				if _, err := tenant.TransitionNode(t.Context(), StartNode{Ref: runspec.NodeRef{RunID: actor.RunID, NodeID: actor.NodeID}, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				for range 2 {
+					if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			view, err := tenant.ReadRunView(t.Context(), claim.RunID)
+			if err != nil || len(view.Logs) != 1 {
+				t.Fatalf("started unit has no unique log stream: %+v %v", view.Logs, err)
+			}
+			subject := view.Logs[0]
+			if kind == capability.UnitNode {
+				if subject.Attempt == nil || subject.Attempt.Attempt != 1 || subject.Attempt.Generation != int64(claim.Award.Generation) {
+					t.Fatalf("attempt log identity lost: %+v", subject)
+				}
+			} else if subject.Unit == nil || string(subject.Unit.Kind) != string(kind) || subject.Unit.Generation != int64(claim.Award.Generation) || kind == capability.UnitEval && (subject.Unit.Source == nil || subject.Unit.Source.Generation != claim.SourceGeneration) {
+				t.Fatalf("owner log identity lost: %+v", subject)
+			}
+		})
+	}
+}
+
 func TestRenewUnitRecordsOwnerExecutionForRecovery(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
 		t.Run(string(kind), func(t *testing.T) {

@@ -178,7 +178,7 @@ on Unix, is also a cache miss. Auto mode restores the verified executable. Local
 mode reports the missing executable without fetching.
 
 Every start checks the current verified policy, even for a cached executable.
-`Cached` alone grants no execution permission. `Resolve` and `Ensure` enforce the
+The private `Resolver.cached` lookup alone grants no execution permission. `Resolve` and `Ensure` enforce the
 policy and recheck cached bytes before use. The existing `auto` mode may fetch a
 missing release. `local` requires the exact verified cached executable.
 
@@ -361,7 +361,7 @@ release resolver and need an explicit development workflow during implementation
 | [`VerifiedRelease.Target`](../../../internal/engine/release.go) | returns the exact platform and binary verified against the closed release matrix. |
 | [`VerifiedRelease.Asset`](../../../internal/engine/release.go) | supplies immutable verified bytes to the native installer without bypassing verification. |
 
-The constants `GoSDK`, `TypeScriptSDK`, `GoModule`, `TypeScriptPackage`,
+The constants `GoSDK`, `TypeScriptSDK`, `GoModule`, private `typeScriptPackage`,
 `ReleaseBase`, `VersionIndexURL`, `VersionIndexSignatureURL` and
 `UpgradeCommand` define the pin vocabulary and fixed publication origins.
 A build with the `qatrust` tag replaces those origins with

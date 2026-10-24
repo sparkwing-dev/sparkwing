@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -439,5 +440,39 @@ func TestSinkRecordsWriterLoss(t *testing.T) {
 	}
 	if manifest.Status != statusIncomplete || manifest.DroppedLines != 2 {
 		t.Fatalf("lost log sealed as complete: %+v", manifest)
+	}
+}
+
+func TestSpoolWriteFailureCannotSealComplete(t *testing.T) {
+	up := newMemUploader(newMemObjects(), testPrefix)
+	sink := newSink(t, up, Options{})
+	if err := sink.spool.Close(); err != nil {
+		t.Fatal(err)
+	}
+	readOnly, err := os.Open(sink.spool.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.spool = readOnly
+	if err := sink.Append([]byte("lost\n"), "", 0, 0); err == nil {
+		t.Fatal("read-only spool accepted bytes")
+	}
+	manifest, err := sink.Close(t.Context(), End{})
+	if err != nil {
+		t.Fatalf("closing after failed append: %v", err)
+	}
+	if manifest.Status != statusIncomplete || manifest.Reason != "log persistence failed" {
+		t.Fatalf("failed write sealed complete: %+v", manifest)
+	}
+}
+
+func TestSpoolCloseFailureCannotSealComplete(t *testing.T) {
+	sink := newSink(t, newMemUploader(newMemObjects(), testPrefix), Options{})
+	if err := sink.spool.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := sink.Close(t.Context(), End{})
+	if err == nil || manifest.Status != statusIncomplete {
+		t.Fatalf("failed close sealed complete: %+v %v", manifest, err)
 	}
 }

@@ -1030,9 +1030,10 @@ ConsumeIdentityLink(context.Context, capability.IdentityLink) error
 LinkAccountIdentity(context.Context, capability.IdentityLink, store.SignInProfile) (store.Identity, error)
 ```
 
-WithIdentityLinkWriter supplies them. The default requires Store to implement
-the interface. Missing adapters return policy_missing. C1 must use its store
-clock and recheck direct session ancestry, account, provider, recent sign-in, expiry and authority inside both transactions.
+`NewDeployment` binds the store operator as the `IdentityLinkWriter`. Missing
+writers return `policy_missing`. The operator uses its store clock and rechecks
+direct session ancestry, account, provider, recent sign-in, expiry and authority
+inside both transactions.
 Consumption atomically records the unique nonce and its complete binding.
 Attachment locks that consumed binding, rejects completed or mismatched claims,
 requires the matching verified provider profile and preserves account email.
@@ -2599,7 +2600,7 @@ and ScheduleDeletion are the transport types. List reads honor all and next;
 detail reads honor fires and next, including explicit zero. Override pointers
 preserve empty zones, zero catch-up and empty arguments.
 
-C2 declares ScheduleWriter with these exact methods:
+C2 declares scheduleWriter with these exact methods:
 
 - Team() store.Team
 - ReplaceAuthorizedSchedules(context.Context, capability.Authorized, controllerwire.ScheduleRepoRequest) ([]string, []string, error)
@@ -2626,7 +2627,7 @@ intake, immutable original source facts, current admission/billing guards and
 transactional idempotency. The HTTP adapter never calls legacy admitTrigger,
 ArmPushed, Pause, RunNow or the old unguarded write methods.
 
-C2 declares RunControlWriter with these exact methods:
+C2 declares runControlWriter with these exact methods:
 
 - Team() store.Team
 - CreateAuthorizedDebugPause(context.Context, capability.Authorized, string, string, time.Time, string) error
@@ -2670,11 +2671,9 @@ the persisted team and requires runs.control. Billing availability is checked
 after authentication. Invitation creation and all three billing-page POSTs
 require exactly one nonempty Idempotency-Key. Unknown body fields are refused.
 
-C2 declares TeamWriter, GitHubAppWriter and BillingWriter in their real route
-files. WithTeamWriter, WithGitHubAppWriter and WithBillingWriter resolve them
-for the selected team. Their Team must match Authorized.Target.Team. The
-default requires Tenant to implement the corresponding interface and refuses
-missing adapters. There is no call to an unfenced legacy method.
+C2 declares private `teamWriter`, `gitHubAppWriter` and `billingWriter` ports in
+their route files. Routes use the resolved tenant, which must implement the
+corresponding interface. Missing adapters are refused. There is no call to an unfenced legacy method.
 
 Every mutation below must recheck complete live authority and membership using
 the store clock in its committing transaction, deriving the team and audit
@@ -2682,7 +2681,7 @@ actor. Keep current product limits and refusal semantics. The exact interfaces
 are:
 
 ```go
-type TeamWriter interface {
+type teamWriter interface {
 	Team() store.Team
 	RenameAuthorizedTeam(context.Context, capability.Authorized, string) (store.TeamInfo, error)
 	DeleteAuthorizedTeam(context.Context, capability.Authorized) (store.TeamDeletion, error)
@@ -2694,7 +2693,7 @@ type TeamWriter interface {
 ```
 
 ```go
-type GitHubAppWriter interface {
+type gitHubAppWriter interface {
 	Team() store.Team
 	UnbindAuthorizedGitHubInstallation(context.Context, capability.Authorized, int64) error
 	PutAuthorizedGitHubTrigger(context.Context, capability.Authorized, store.GitHubAppTrigger) (store.GitHubAppTrigger, error)
@@ -2706,7 +2705,7 @@ type GitHubAppWriter interface {
 ```
 
 ```go
-type BillingWriter interface {
+type billingWriter interface {
 	Team() store.Team
 	PrepareAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPageKind, int64, string) (capability.BillingPage, error)
 	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
@@ -2771,7 +2770,7 @@ The retired browser Principal lookup and standalone form middleware are deleted.
 C2 declares the following local interface in browser_github_app_routes.go.
 
 ```go
-type GitHubConnectWriter interface {
+type gitHubConnectWriter interface {
     Team() store.Team
     LinkedGitHubSubject(context.Context, capability.Authorized) (string, error)
     ConsumeGitHubConnect(context.Context, capability.Authorized, string, time.Time) error
@@ -2847,7 +2846,7 @@ explicitly. Live-log append/read HTTP handlers and LiveLogRead are deleted.
 Dashboard log streaming retains its in-memory reader.
 
 The final metrics GET and POST routes and usage POST route are registered.
-MetricWriter declares Team, WriteMetric(ctx, Authorized, MetricSample) and
+metricWriter declares Team, WriteMetric(ctx, Authorized, MetricSample) and
 WriteUsage(ctx, Authorized, NodeUsage). W1 implements it on Tenant. Each write
 rechecks ancestry, current membership, exact tenant/job and the selected route
 alternative inside its transaction. Claim and owner reports must retain their
@@ -2961,7 +2960,7 @@ changed. W1 data-authority, metadata and charging composition remains required.
 
 ## Runner observation cutover
 
-`Server.WithRunnerInventory` supplies the tenant-scoped `RunnerInventoryReader`:
+The resolved tenant supplies the private `runnerInventoryReader`:
 `Team() store.Team` and `ReadRunners(context.Context) (capability.RunnerSnapshot, error)`.
 The snapshot types live in `internal/capability/runners.go` so persistence can
 implement the reader without importing the controller.
@@ -2991,7 +2990,7 @@ an observation older than the existing two-minute window yields `offline`.
 Headroom older than the existing one-hour window is omitted. Foreign readers,
 foreign rows, absent snapshot clocks and corrupt numeric/timestamp facts refuse
 before any partial response. The default uses Store.ForTeam only when Tenant
-implements RunnerInventoryReader. Missing adapters return `policy_missing`.
+implements runnerInventoryReader. Missing adapters return `policy_missing`.
 There is no ListAgentClaims or process-local observation fallback.
 
 Operational runner gauges use the same tenant snapshots through the existing
@@ -3052,7 +3051,7 @@ transaction behind that existing interface. GitHub metadata transport is also
 fake, while installation ownership is stored in SQLite.
 
 `POST /api/v1/runs/{run}/jobs/{job}/resume` requires one JSON object with no actor
-fields. `DebugPauseResumer` declares `Team()` and
+fields. `debugPauseResumer` declares `Team()` and
 `ResumeAuthorizedDebugPause(context.Context, capability.Authorized) error`.
 `Tenant` implements it. The committing transaction reloads current ancestry and
 membership, repeats native route authorization, locks the run and verifies the
@@ -3123,7 +3122,7 @@ with a deterministic primary key preserving kind/subject deduplication.
 
 PUT /api/v1/queue/groups/{group}/priority is registered under its existing policy.
 It validates controllerwire.QueuePriorityWrite, preserves explicit zero and
-passes the Idempotency-Key through controller.QueuePriorityWriter. That local
+passes the Idempotency-Key through controller.queuePriorityWriter. That local
 interface declares Team() and SetAuthorizedGroupPriority(context.Context,
 capability.Authorized, string, controllerwire.QueuePriorityWrite)
 (controllerwire.QueuePriorityResult, error). WithQueuePriorityWriter supplies a
@@ -3192,7 +3191,7 @@ method returns method_not_allowed and Allow before signature validation.
 
 ## Decision 112 billing composition amendment
 
-C1's `Tenant` now implements `BillingWriter`. `Server.New` reaches it through
+C1's `Tenant` now implements `billingWriter`. `Server.New` reaches it through
 its native tenant resolver. The controller asserts conformance at compile time.
 `WithBillingWriter` remains the contract test seam. No extra runtime resolver
 configuration is needed for checkout, card, pay-now or owner budgets.
@@ -3470,7 +3469,7 @@ and App-origin intake still requires a verified delivery in the transaction.
 
 ### W1b scheduled-intake boundary (integration reconciliation)
 
-`ScheduledRunWriter` is the controller tick's tenant transaction interface:
+`scheduledRunWriter` is the controller tick's tenant transaction interface:
 
 - `Team() store.Team`
 - `AdmitScheduledRun(context.Context, store.CronSchedule, time.Time) (store.AdmissionResult, error)`

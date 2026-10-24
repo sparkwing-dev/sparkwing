@@ -35,6 +35,7 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 		cfg.Namespace = textFlag(fs, "namespace")
 	}
 	cfg.Labels, _ = fs.GetStringSlice("label")
+	cfg.StoppedTeams, _ = fs.GetStringSlice("stop-team")
 	var poll time.Duration
 	if fs.Changed("poll") {
 		poll, err = time.ParseDuration(textFlag(fs, "poll"))

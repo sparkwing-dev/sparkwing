@@ -69,7 +69,6 @@ type Server struct {
 	idlePollsEnforced bool
 	lastClaimAward    atomic.Int64
 
-	queueTimeout    time.Duration
 	attentionCursor [2]string
 	attentionPassAt time.Time
 

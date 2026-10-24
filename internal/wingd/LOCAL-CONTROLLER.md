@@ -178,12 +178,12 @@ Transient startup failures can be retried. An incompatible store remains a
 doctor finding. A dashboard startup failure reaches its caller after that
 cleanup, with the original service error preserved.
 
-The daemon accepts live controller counts through `SetLocalActivity`. Runs,
+The daemon accepts live controller counts through `setLocalActivity`. Runs,
 queued triggers, held leases and dashboard connections prevent idle exit.
 The runtime counts its dashboard HTTP connections until they close, including
 idle keep-alive sockets and hijacked connections. Closing the last connection
 starts a fresh idle interval. Controller activity updates cannot erase that hold.
-Admission holders and waiting runs also remain active. `SetStay` pins the
+Admission holders and waiting runs also remain active. `setStay` pins the
 daemon. The client `Probe` API observes the handshake without requesting queue work.
 Health probes, repeated unchanged counts and idle API connections do
 not extend its idle deadline. The timeout comes from
@@ -198,7 +198,7 @@ decision.
 `LocalSubject` accepts matching kernel UIDs on Linux and macOS, or matching
 client SIDs on Windows. Missing identity refuses access. The socket transport
 also refuses peers when its platform implementation cannot supply credentials.
-`APIConn.PeerIdentity` exposes that verified identity to the shared controller.
+`authenticatedAPIConn.PeerIdentity` exposes that verified identity to the shared controller.
 The connection owns its identity snapshot. Changing an input UID or a returned
 UID cannot change the account attached to the connection. The API listener
 checks `LocalSubject` before yielding a connection. Unix uses kernel UIDs.
@@ -239,7 +239,7 @@ The maintenance loop runs the shared server's storage pass after readiness,
 on its first renewal tick and then at `StorageMaintenanceInterval`. It joins
 before the elected store and object backend close.
 The runtime adds its dashboard connection count. Its API server consumes the
-kernel identity on `APIConn`. Its dashboard server retains browser authentication.
+kernel identity on `authenticatedAPIConn`. Its dashboard server retains browser authentication.
 
 The native binder adopts committed self-claims through `OwnerHost.AdoptClaim`.
 It checks each private node award through the shared authentication and relation
@@ -265,7 +265,7 @@ contracts. The store also needs a typed incompatible-store error.
 `client.QueryLocalController` discovers the owner through the authenticated
 admission socket. It reports readiness, PID, version, stay policy and the four
 activity counts. The query uses a health-probe connection and leaves the idle
-deadline unchanged. `client.SetLocalStay` changes the owner's policy and checks
+deadline unchanged. `client.setLocalStay` changes the owner's policy and checks
 its acknowledgement. Neither operation starts a process or replaces another
 version. Missing sockets, unreachable owners, unsupported operations and stalled
 replies remain distinct errors. The existing `client.Stop` uses admission drain
@@ -276,7 +276,7 @@ Only an elected `LocalRuntime` serves it. A health probe may read status but
 cannot change policy. `local_control_status` is the process snapshot, not an
 installed-service claim. Native service inspection supplies that separate fact.
 
-`client.StartLocalDashboard` requests dashboard startup from an existing owner.
+`client.startLocalDashboard` requests dashboard startup from an existing owner.
 Its `local_dashboard` request waits for `local_dashboard_ack` after the serving
 loop reaches readiness. An identical address reuses the listener. A bind failure
 returns the owner's error and leaves the controller available. Probe connections

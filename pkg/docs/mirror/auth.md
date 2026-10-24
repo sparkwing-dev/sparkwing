@@ -751,8 +751,8 @@ there is no observation. It is not a zero-capacity sample.
 Runner and queue views read one tenant-scoped store snapshot. Display names and
 holder strings grant no identity. Distinct credentials with the same name remain
 separate observations. Accepted renewals refresh liveness without offering a free
-slot or refreshing headroom. Embedded controllers supply `WithRunnerInventory`.
-A missing adapter returns `policy_missing`.
+slot or refreshing headroom. The controller resolves the inventory reader from
+the request's tenant handle. A missing adapter returns `policy_missing`.
 
 A here runner is reserved for its run. Pool access comes from granted
 reservations and verified repository authority. The first eligible matching
@@ -813,9 +813,9 @@ The existing limit is ten link attempts per account per minute.
 `GET /auth/{provider}/link/complete` uses that same session and flow cookie.
 It consumes the flow before provider access and attaches only the verified
 provider identity. Neither endpoint renews the session or accepts an
-Authorization header. Failures return the canonical error envelope. Embedded
-controllers supply `WithIdentityLinkWriter` for committing session and nonce
-checks. A missing writer returns `policy_missing`.
+Authorization header. Failures return the canonical error envelope.
+Controller construction binds the store operator as the identity-link writer
+for committing session and nonce checks. A missing writer returns `policy_missing`.
 
 A nonlocal dashboard requires a live session for its private pages. Its login page remains available to
 signed-out browsers. `Dashboard.Local` selects local pages without browser login.

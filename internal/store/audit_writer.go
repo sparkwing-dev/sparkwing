@@ -187,6 +187,8 @@ type auditTeamSettings struct {
 	PreviousMembersCanAddMachines bool             `json:"previous_members_can_add_machines"`
 	ClaimRanking                  []auditClaimTier `json:"claim_ranking"`
 	PreviousClaimRanking          []auditClaimTier `json:"previous_claim_ranking"`
+	MaxChildrenPerRoot            int64            `json:"max_children_per_root"`
+	PreviousMaxChildrenPerRoot    int64            `json:"previous_max_children_per_root"`
 }
 type (
 	auditClaimTier      string
