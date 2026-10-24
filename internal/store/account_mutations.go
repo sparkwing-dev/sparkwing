@@ -118,9 +118,15 @@ func (o *Operator) AcceptAccountInvitation(ctx context.Context, a capability.Aut
 	return out, nil
 }
 
+// IdentityUnlink identifies the session retained and every session ended by a committed unlink.
+type IdentityUnlink struct {
+	KeptSessionDigest string
+	EndedSessions     []SessionRevocation
+}
+
 // UnlinkAccountIdentity retains the selected recent direct session and the last sign-in method.
-func (o *Operator) UnlinkAccountIdentity(ctx context.Context, a capability.Authorized, provider string) (int64, error) {
-	var ended int64
+func (o *Operator) UnlinkAccountIdentity(ctx context.Context, a capability.Authorized, provider string) (IdentityUnlink, error) {
+	var out IdentityUnlink
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		p, err := accountSessionTx(ctx, tx, a)
 		if err != nil {
@@ -130,11 +136,11 @@ func (o *Operator) UnlinkAccountIdentity(ctx context.Context, a capability.Autho
 		if now.Before(p.Capability.IssuedAt) || now.Sub(p.Capability.IssuedAt) > IdentityChangeSignInWindow {
 			return apierr.Authorization(apierr.ReasonReauthRequired, "sign in again before changing sign-in methods")
 		}
-		ended, err = tx.operator.unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now(ctx))
+		out, err = tx.operator.unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now(ctx))
 		return err
 	})
 	if err != nil {
-		return 0, err
+		return IdentityUnlink{}, err
 	}
-	return ended, nil
+	return out, nil
 }

@@ -282,6 +282,9 @@ func (f *identityFixture) metricValue(series string) float64 {
 			return v
 		}
 	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scan /metrics: %v", err)
+	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	t.Fatalf("/metrics has no series %s", series)
 	return 0

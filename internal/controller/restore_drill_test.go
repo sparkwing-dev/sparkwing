@@ -18,7 +18,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func TestRestoreDrillFencesCredentialsAndScheduleAdmission(t *testing.T) {
+func TestRestoreDrillCredentialsAndScheduleAdmission(t *testing.T) {
+	for _, signOut := range []bool{false, true} {
+		t.Run(map[bool]string{false: "normal", true: "sign-out-everyone"}[signOut], func(t *testing.T) {
+			checkRestoreDrill(t, signOut)
+		})
+	}
+}
+
+func checkRestoreDrill(t *testing.T, signOut bool) {
 	s, _, _ := billingNativeServer(t)
 	dir := t.TempDir()
 	epoch, err := credentials.LoadOrCreateEpoch(dir)
@@ -105,9 +113,12 @@ func TestRestoreDrillFencesCredentialsAndScheduleAdmission(t *testing.T) {
 	if err := os.WriteFile(restoredPath, backup, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	restoredEpoch, err := credentials.RotateEpoch(dir)
-	if err != nil {
-		t.Fatal(err)
+	restoredEpoch := epoch
+	if signOut {
+		restoredEpoch, err = credentials.RotateEpoch(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	restored, err := teststore.OpenExisting(restoredPath, append(options, store.WithCredentialEpoch(restoredEpoch))...)
 	if err != nil {
@@ -121,8 +132,11 @@ func TestRestoreDrillFencesCredentialsAndScheduleAdmission(t *testing.T) {
 	if err := restored.EnsureCredentialEpoch(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := restored.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {
-		t.Fatal("backup resurrected revoked token")
+	if err := restored.AsOperator().PrepareRestore(t.Context(), restoredEpoch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restored.AsOperator().ResolveAuthority(t.Context(), ref); (err != nil) != signOut {
+		t.Fatalf("restored token sign-out=%t: %v", signOut, err)
 	}
 	tenant, err := restored.ForTeam(t.Context(), "a")
 	if err != nil {
@@ -131,12 +145,16 @@ func TestRestoreDrillFencesCredentialsAndScheduleAdmission(t *testing.T) {
 	if run, err := tenant.ReadRun(t.Context(), pending.RunID); err != nil || run.CancelRequestedAt == nil || run.CancelReason != "cancelled by restore; rerun if needed" {
 		t.Fatalf("restored pending deploy: cancelled=%v reason=%q err=%v", run.CancelRequestedAt, run.CancelReason, err)
 	}
-	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
-	if _, err := restored.AsOperator().EnsureBootstrapCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: seed, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}); err != nil {
-		t.Fatal(err)
+	launcherAuthority := ref
+	if signOut {
+		seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
+		if _, err := restored.AsOperator().EnsureBootstrapCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: seed, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}); err != nil {
+			t.Fatal(err)
+		}
+		launcherAuthority.ID = seed[:store.CredentialPrefixLength]
 	}
 	launcher, err := restored.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
-		Authority: &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: seed[:store.CredentialPrefixLength]},
+		Authority: &launcherAuthority,
 		Kind:      capability.ProvisionService, RegistrationID: "service:restore-launcher", Subject: capability.Subject{Kind: capability.SubjectService, ID: "restore-launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch},
 	})
 	if err != nil {

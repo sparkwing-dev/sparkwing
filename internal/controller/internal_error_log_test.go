@@ -119,7 +119,7 @@ func TestSignedUploadFailureLogsMaskedCauseOnceProperty(t *testing.T) {
 		out := httptest.NewRecorder()
 		server.Handler().ServeHTTP(out, req)
 		records := auditLines(t, &logs, "http request failed")
-		if out.Code != 500 || len(records) != 1 || records[0]["request_id"] != "upload-request" || !strings.Contains(fmt.Sprint(records[0]["err"]), "upload read: ***") || !strings.Contains(fmt.Sprint(records[0]["err"]), "***") || strings.Contains(logs.String(), secret) || strings.Contains(out.Body.String(), secret) {
+		if out.Code != 500 || len(records) != 1 || records[0]["request_id"] != out.Header().Get(RequestIDHeader) || !strings.Contains(fmt.Sprint(records[0]["err"]), "upload read: ***") || !strings.Contains(fmt.Sprint(records[0]["err"]), "***") || strings.Contains(logs.String(), secret) || strings.Contains(out.Body.String(), secret) {
 			t.Logf("upload HTTP %d: %s logs=%s", out.Code, out.Body, logs.String())
 			return false
 		}

@@ -40,6 +40,7 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(controller.CredentialSafeLogHandler(slog.NewTextHandler(os.Stderr, nil))))
 	run := run
 	args := os.Args[1:]
 	if len(args) > 0 && args[0] == "admin" {
@@ -49,7 +50,7 @@ func main() {
 		run = func(args []string) error { return runRestore(args[1:], os.Stdout, os.Stderr) }
 	}
 	if err := run(args); err != nil {
-		fmt.Fprintln(os.Stderr, "sparkwing-controller:", err)
+		slog.Error("sparkwing-controller", "err", err)
 		os.Exit(1)
 	}
 }
@@ -465,6 +466,12 @@ func run(args []string) error {
 		}
 		defer func() { _ = lock.Close() }()
 	}
+	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller", Log: readLog(), WrapLogHandler: controller.CredentialSafeLogHandler})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tel.Shutdown(context.Background()) }()
+
 	var srv *controller.Server
 	var closeObjects func() error
 	epochDir := credentialEpochDirectory(*credentialEpochDir, *credentialsDir, p.Root)
@@ -570,12 +577,6 @@ func run(args []string) error {
 		return fmt.Errorf("open state db: %w", serr)
 	}
 	defer func() { _ = st.Close() }()
-
-	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller", Log: readLog()})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	deployment, err := st.AsOperator().DeploymentID(ctx)
 	if err != nil {
@@ -921,7 +922,7 @@ func dashboard(p paths.Paths, hsts, insecureCookies bool) controller.Dashboard {
 	if web.VerifyBundleEmbedded() == nil {
 		d.Bundle = web.BundleFS()
 	} else {
-		fmt.Fprintln(os.Stderr, "sparkwing-controller: this build carries no dashboard bundle; "+
+		slog.Warn("this build carries no dashboard bundle; " +
 			"dashboard pages answer 503 until a build that ran bin/build-web.sh is deployed")
 	}
 	return d

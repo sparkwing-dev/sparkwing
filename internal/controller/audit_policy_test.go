@@ -74,7 +74,7 @@ func TestAuditPolicyNeverLogsSecretPathsOrCredentialsProperty(t *testing.T) {
 			return false
 		}
 		rec := records[0]
-		for key, want := range map[string]any{"request_id": "audit-1", "method": "DELETE", "route": "/api/v1/secrets/{name}", "principal_id": "pusher", "principal_kind": "account", "team": string(store.DefaultTeam), "client_class": "other"} {
+		for key, want := range map[string]any{"request_id": w.Header().Get(RequestIDHeader), "method": "DELETE", "route": "/api/v1/secrets/{name}", "principal_id": "pusher", "principal_kind": "account", "team": string(store.DefaultTeam), "client_class": "other"} {
 			if rec[key] != want {
 				t.Log(rec)
 				return false
@@ -85,7 +85,7 @@ func TestAuditPolicyNeverLogsSecretPathsOrCredentialsProperty(t *testing.T) {
 				return false
 			}
 		}
-		return w.Header().Get(RequestIDHeader) == "audit-1"
+		return w.Header().Get(RequestIDHeader) != "audit-1" && len(w.Header().Get(RequestIDHeader)) == 24
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
 		t.Fatal(err)

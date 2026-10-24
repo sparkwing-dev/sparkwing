@@ -18,10 +18,12 @@ import (
 const restoreUsage = `usage: sparkwing-controller restore prepare|acknowledge [--credentials-dir DIR] [--credential-epoch-dir DIR] [--store sqlite|postgres]
 
 Stop every controller before replacing the database and keep it stopped for
-these operations. prepare rotates credential-epoch outside the database,
-invalidating every old bearer and session, cancelling unfinished scheduled runs,
-and holding new schedule admissions. acknowledge discards catch-up through that time
-and lifts the hold. API/local schedules need fresh consent before they can fire again.
+these operations. prepare cancels unfinished scheduled runs and holds new schedule
+admissions. Sessions, tokens, runner credentials and schedule consent stay valid.
+Use prepare --sign-out-everyone for security incidents such as a stolen database
+or leaked keys: it rotates credential-epoch outside the database, invalidating
+every old bearer, session and API/local schedule consent. acknowledge discards
+catch-up through that time and lifts the hold.
 All operations open an existing database and refuse to create one.
 Payment recovery is manual; follow the operator runbook kept outside this repository.`
 
@@ -37,6 +39,10 @@ func runRestore(args []string, stdout, stderr io.Writer) error {
 	dir := fs.String(credentials.FlagName, "", "directory holding the controller's credential files")
 	credentialEpochDir := fs.String(epochDirectoryFlag, "", epochDirectoryHelp)
 	kind := fs.String("store", "sqlite", "existing store: sqlite or postgres (requires pg-url credential)")
+	var signOutEveryone bool
+	if verb == "prepare" {
+		fs.BoolVar(&signOutEveryone, "sign-out-everyone", false, "invalidate all credentials and API/local schedule consent for security incidents (stolen database or leaked keys)")
+	}
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -83,9 +89,11 @@ func runRestore(args []string, stdout, stderr io.Writer) error {
 	op := st.AsOperator()
 	switch verb {
 	case "prepare":
-		epoch, err := credentials.RotateEpoch(epochDir)
-		if err != nil {
-			return err
+		if signOutEveryone {
+			epoch, err = credentials.RotateEpoch(epochDir)
+			if err != nil {
+				return err
+			}
 		}
 		if err := op.PrepareRestore(ctx, epoch); err != nil {
 			return err

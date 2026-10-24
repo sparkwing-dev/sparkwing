@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"sync"
@@ -37,7 +38,7 @@ const runnerNameIdle = 10 * time.Minute
 
 // WithRequestBudget installs b as the per-runner budget on the claim and
 // heartbeat routes. A refused request is answered 429 with a Retry-After
-// naming the real refill delay, and logged at warn with the runner and the
+// naming the real refill delay, and logged at warn with the principal and the
 // route class.
 func (s *Server) WithRequestBudget(b RequestBudget) *Server {
 	s.requestBudget = newPrincipalBudget(b)
@@ -99,6 +100,10 @@ func (s *Server) runnerBudgetKey(w http.ResponseWriter, r *http.Request, a capab
 	supplied := false
 	if identity == "" {
 		identity = r.Header.Get(store.RunnerIdentityHeader)
+		// Bound retained header bytes without merging distinct long runner names.
+		if len(identity) > maxAuditValue {
+			identity = fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
+		}
 		supplied = identity != ""
 	}
 	if identity == "" {
@@ -174,7 +179,7 @@ func (s *Server) admitRunnerRequest(w http.ResponseWriter, r *http.Request, a ca
 			_, wait = limiter.AllowWithRetry(key, now)
 		}
 		observePrincipalThrottled(class)
-		s.logger.Warn("request shed", "runner", key, "route_class", class, "retry_after", wait)
+		s.logger.Warn("request shed", "principal", credentialBudgetKey(a.Principal), "route_class", class, "retry_after", wait)
 		writeRetryAfter(w, wait, "too many "+class+" requests from this runner")
 	}
 	return key, allowed

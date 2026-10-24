@@ -227,16 +227,37 @@ func (op *Operator) lookupSessionTx(ctx context.Context, tx *storeTx, rawSession
 	return &sess, nil
 }
 
-// DeleteSession removes the session by its raw id. Idempotent.
-func (o *Operator) DeleteSession(rawSession string) error {
+// SessionRevocation identifies a session deleted by a committed transaction.
+type SessionRevocation struct {
+	Digest    string
+	AccountID string
+	Team      Team
+}
+
+// DeleteSession removes the session by its raw id and returns its committed identity, or nil if absent.
+func (o *Operator) DeleteSession(rawSession string) (*SessionRevocation, error) {
 	ctx, digest := context.Background(), sessionDigest(rawSession)
-	return o.s.inTx(ctx, func(tx *storeTx) error {
+	var revoked *SessionRevocation
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		revoked = nil
 		if err := acquireLockSet(ctx, tx, func() lockSet {
 			return discoverAuthorityWrite(ctx, tx, lockSet{}, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: digest})
 		}); err != nil {
 			return err
 		}
-		_, err := tx.execContext(ctx, `DELETE FROM sessions WHERE hash = ?`, digest)
-		return err
+		var row SessionRevocation
+		err := tx.QueryRowContext(ctx, `DELETE FROM sessions WHERE hash=? RETURNING hash,account_id,COALESCE(team,'')`, digest).Scan(&row.Digest, &row.AccountID, &row.Team)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		revoked = &row
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return revoked, nil
 }

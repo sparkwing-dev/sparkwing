@@ -16,7 +16,7 @@ type AccountWriter interface {
 	SelectAccountTeam(context.Context, capability.Authorized, store.Team) error
 	CreateAccountTeam(context.Context, capability.Authorized, store.TeamInfo) (store.TeamInfo, error)
 	AcceptAccountInvitation(context.Context, capability.Authorized, string) (store.InvitationAcceptance, error)
-	UnlinkAccountIdentity(context.Context, capability.Authorized, string) (int64, error)
+	UnlinkAccountIdentity(context.Context, capability.Authorized, string) (store.IdentityUnlink, error)
 }
 
 // WithAccountWriter supplies account transactions before Handler is constructed.

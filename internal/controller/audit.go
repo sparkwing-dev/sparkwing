@@ -13,17 +13,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// RequestIDHeader carries a request's correlation id. A caller's value is
-// kept when it is a short token and replaced otherwise, and every response
-// echoes the one the request was logged under.
+// RequestIDHeader carries a controller-generated correlation id. Every response
+// echoes the one the request was logged under. Client values are ignored.
 const RequestIDHeader = "X-Request-Id"
 
-const (
-	maxRequestIDLen = 64
-	maxAuditValue   = 128
-)
+const maxAuditValue = 128
 
 // safety: only these path wildcards, and the identity targets below, reach the
 // audit record. Other wildcards can carry values a log must not hold.
@@ -39,22 +36,15 @@ type auditTarget struct {
 }
 
 var (
-	memberTarget     = auditTarget{"member_id", opaqueID}
 	invitationTarget = auditTarget{"invitation_id", opaqueID}
 	tokenTarget      = auditTarget{"token_prefix", tokenPrefixTarget}
 )
 
-// safety: an identity route names its target so an investigation can follow one member, invitation or token. The path
-// is the caller's text, which can be a whole bearer pasted in place of a prefix, so each value passes its shape check
-// first: a token keeps only the prefix the store keys on, and an id must look like one the store mints.
+// safety: invitation and metering paths keep only shaped public identifiers.
+// Revocation targets come from successful store mutations instead of paths.
 var auditTargetIDs = map[string]map[string]auditTarget{
-	"/api/v1/team/members/{account}":            {"account": memberTarget},
 	"/api/v1/team/invitations/{id}":             {"id": invitationTarget},
 	"/api/v1/invitations/{id}/accept":           {"id": invitationTarget},
-	"/api/v1/tokens/{token}":                    {"token": tokenTarget},
-	"/api/v1/operator/tokens/{token}":           {"token": tokenTarget},
-	"/api/v1/tokens/{token}/rotate":             {"token": tokenTarget},
-	"/api/v1/operator/tokens/{token}/rotate":    {"token": tokenTarget},
 	"/api/v1/operator/runners/{runner}/metered": {"runner": tokenTarget},
 }
 
@@ -85,6 +75,7 @@ type auditRecord struct {
 	path                    string
 	principalID, kind, team string
 	targets                 []any
+	revokedSessions         []store.SessionRevocation
 	// safety: a GET that changes who can act, such as a sign-in callback, is audited like a write.
 	write     bool
 	emptyPoll bool
@@ -100,7 +91,7 @@ func withAuditRecord(ctx context.Context, id, route string) (context.Context, *a
 func notePolicyPrincipal(ctx context.Context, p capability.Principal) {
 	observeRequestPrincipal(string(p.Capability.Subject.Kind))
 	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
-		rec.principalID, rec.kind, rec.team = clip(p.Capability.Subject.ID), string(p.Capability.Subject.Kind), p.Capability.Team
+		rec.principalID, rec.kind, rec.team = p.Capability.Subject.ID, string(p.Capability.Subject.Kind), p.Capability.Team
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: clip(p.Capability.Subject.ID)})
 }
@@ -113,10 +104,10 @@ func noteAuditWrite(ctx context.Context) {
 	}
 }
 
-// safety: callers pass identifiers read back from a stored row or checked against a closed set, never request text.
+// safety: targets come from successful store operations; the writer sanitizes every field.
 func noteAuditTarget(ctx context.Context, key, value string) {
 	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok && value != "" {
-		rec.targets = append(rec.targets, key, clip(value))
+		rec.targets = append(rec.targets, key, value)
 	}
 }
 
@@ -152,25 +143,10 @@ func clientClass(ua string) string {
 	}
 }
 
-func requestID(r *http.Request) string {
-	if id := r.Header.Get(RequestIDHeader); validRequestID(id) {
-		return id
-	}
+func requestID() string {
 	var b [12]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
-}
-
-func validRequestID(id string) bool {
-	if id == "" || len(id) > maxRequestIDLen {
-		return false
-	}
-	for _, c := range id {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
-			return false
-		}
-	}
-	return true
 }
 
 func readOnlyMethod(method string) bool {
@@ -205,10 +181,15 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 	attrs = append(attrs, auditPathAttrs(rec.route, r.URL.EscapedPath())...)
 	attrs = append(attrs, rec.targets...)
 	attrs = append(attrs, pathAttrs...)
-	logger.InfoContext(ctx, "audit", attrs...)
+	if len(rec.revokedSessions) == 0 {
+		logger.InfoContext(ctx, "audit", attrs...)
+		return
+	}
+	for _, revoked := range rec.revokedSessions {
+		entry := append(attrs[:len(attrs):len(attrs)], "session_digest", revoked.Digest, "revoked_account_id", revoked.AccountID, "revoked_team", string(revoked.Team))
+		logger.InfoContext(ctx, "audit", entry...)
+	}
 }
-
-var pathCredential = regexp.MustCompile(`(?:` + strings.Join(capability.CredentialPrefixes(), "|") + `)[A-Za-z0-9_-]+`)
 
 func sanitizedMissingPath(path string, mask func(string) string) string {
 	parts := strings.Split(mask(path), "/")
@@ -225,7 +206,7 @@ func sanitizedMissingPath(path string, mask func(string) string) string {
 		previous = value
 		parts[i] = url.PathEscape(pathCredential.ReplaceAllString(mask(value), "[redacted]"))
 	}
-	return strings.Join(parts, "/")
+	return truncateLogValue(strings.Join(parts, "/"), maxLogValue)
 }
 
 func auditedRead(route string) bool {
@@ -251,7 +232,7 @@ func auditPathAttrs(route, path string) []any {
 		}
 		name = strings.TrimSuffix(name, "}")
 		key := auditPathIDs[name]
-		keep := clip
+		keep := func(value string) string { return value }
 		if target, ok := auditTargetIDs[route][name]; ok {
 			key, keep = target.key, target.keep
 		}

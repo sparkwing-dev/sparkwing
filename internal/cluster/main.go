@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -54,13 +55,17 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 		os.Exit(2)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, os.Args[1]+":", err)
+		writeRunnerError(os.Stderr, os.Args[1], err)
 		var usage *usageError
 		if errors.As(err, &usage) {
 			os.Exit(2)
 		}
 		os.Exit(1)
 	}
+}
+
+func writeRunnerError(writer io.Writer, command string, err error) {
+	fmt.Fprintln(writer, capability.FormatLogValue(fmt.Sprint(command+": ", err)))
 }
 
 func usage(writer io.Writer) {

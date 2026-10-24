@@ -3,11 +3,25 @@ package cluster
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
+
+func TestRunnerErrorOutputFingerprintsCredentials(t *testing.T) {
+	for _, prefix := range capability.CredentialPrefixes() {
+		credential := prefix + strings.Repeat("x", 43)
+		var output bytes.Buffer
+		writeRunnerError(&output, "warm", fmt.Errorf("invalid response: %s", credential))
+		if strings.Contains(output.String(), credential) || !strings.Contains(output.String(), "warm: invalid response: [credential:") {
+			t.Errorf("unsafe runner error: %q", output.String())
+		}
+	}
+}
 
 func TestRunnerVersionReportsStampedOfflineIdentity(t *testing.T) {
 	var output bytes.Buffer

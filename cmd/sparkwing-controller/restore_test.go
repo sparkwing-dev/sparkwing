@@ -3,22 +3,55 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func TestRestoreCommandRequiresExistingStoreAndAlwaysRotates(t *testing.T) {
+func TestRestoreHelpExplainsSecuritySignOut(t *testing.T) {
+	var out, stderr bytes.Buffer
+	if err := runRestore([]string{"prepare", "--help"}, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"--sign-out-everyone", "security incidents", "stolen database", "leaked keys"} {
+		if !strings.Contains(stderr.String(), text) {
+			t.Fatalf("restore help lacks %q: %s", text, &stderr)
+		}
+	}
+	if err := runRestore([]string{"acknowledge", "--sign-out-everyone"}, &out, &stderr); err == nil {
+		t.Fatal("acknowledgment accepted a preparation-only option")
+	}
+}
+
+func TestRestoreCommandPreservesCredentialsUnlessSignOutRequested(t *testing.T) {
+	for _, signOut := range []bool{false, true} {
+		t.Run(map[bool]string{false: "normal", true: "sign-out-everyone"}[signOut], func(t *testing.T) {
+			checkRestoreCommand(t, signOut)
+		})
+	}
+}
+
+func checkRestoreCommand(t *testing.T, signOut bool) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	var out, stderr bytes.Buffer
 	invoke := func(verb string) error {
 		out.Reset()
-		return runRestore([]string{verb}, &out, &stderr)
+		args := []string{verb}
+		if verb == "prepare" && signOut {
+			args = append(args, "--sign-out-everyone")
+		}
+		return runRestore(args, &out, &stderr)
 	}
 	if err := invoke("prepare"); err == nil {
 		t.Fatal("restore created an empty database")
@@ -27,30 +60,57 @@ func TestRestoreCommandRequiresExistingStoreAndAlwaysRotates(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("failed restore created state: %v", err)
 	}
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
 	before, err := credentials.LoadOrCreateEpoch(home)
 	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(path, store.WithCredentialEpoch(before))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := teststore.ProvisionCredential(t.Context(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkToken := func(st *store.Store, status int) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/operator/tokens", nil)
+		req.Header.Set("Authorization", "Bearer "+raw)
+		rec := httptest.NewRecorder()
+		controller.New(st, nil).Handler().ServeHTTP(rec, req)
+		if rec.Code != status {
+			t.Fatalf("token HTTP status = %d, want %d: %s", rec.Code, status, rec.Body)
+		}
+	}
+	checkToken(st, http.StatusOK)
+	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := invoke("prepare"); err != nil {
 		t.Fatal(err)
 	}
 	rotated, err := credentials.LoadOrCreateEpoch(home)
-	if err != nil || rotated == before {
-		t.Fatalf("epoch did not rotate: %v", err)
+	if err != nil || (rotated != before) != signOut {
+		t.Fatalf("epoch changed=%t, sign-out=%t: %v", rotated != before, signOut, err)
 	}
 	if err := invoke("prepare"); err != nil {
 		t.Fatal(err)
 	}
 	again, err := credentials.LoadOrCreateEpoch(home)
-	if err != nil || again == rotated {
-		t.Fatalf("preparation trusted a pending state restored from a backup: %v", err)
+	if err != nil || (again != rotated) != signOut {
+		t.Fatalf("repeated preparation epoch changed=%t, sign-out=%t: %v", again != rotated, signOut, err)
+	}
+	st, err = store.Open(path, store.WithCredentialEpoch(again))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := http.StatusOK
+	if signOut {
+		status = http.StatusUnauthorized
+	}
+	checkToken(st, status)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
 	}
 	if err := invoke("reconcile"); err == nil {
 		t.Fatal("removed reconcile command was accepted")
@@ -79,7 +139,7 @@ func TestRestoreUsesSeparatePersistentEpochDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, stderr bytes.Buffer
-	if err := runRestore([]string{"prepare", "--credentials-dir", creds, "--credential-epoch-dir", epochDir}, &out, &stderr); err != nil {
+	if err := runRestore([]string{"prepare", "--sign-out-everyone", "--credentials-dir", creds, "--credential-epoch-dir", epochDir}, &out, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	after, err := credentials.LoadOrCreateEpoch(epochDir)

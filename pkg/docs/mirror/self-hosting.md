@@ -179,12 +179,22 @@ file checks above to the epoch. The Helm chart always mounts a dedicated,
 retained PVC at `/var/lib/sparkwing/credential-epoch` and selects it with this
 flag, including when `/data` uses `emptyDir`. Preserve the latest epoch when
 restoring a database. Retain its volume independently of database backups.
-Declared restore preparation rotates the epoch and holds schedules until
-operator acknowledgment. All earlier bearer
-tokens and dashboard sessions are invalidated. Supply a fresh
-`bootstrap-admin-token` seed before restarting, then reissue runner and user
-credentials. Payment recovery is manual; follow the operator runbook kept
-outside this repository.
+Declared restore preparation holds schedules until operator acknowledgment and
+cancels restored unfinished scheduled runs. A normal restore keeps sessions,
+tokens, runner credentials and schedule consent valid. Keep the controller's
+audit log stream outside the database so revocations, member removals and
+demotions since the backup can be reapplied by identifier and team. Session
+logout and replacement lines include the revoked session digest, account and
+team, independently of the account signing in.
+Use `restore prepare --sign-out-everyone` for security incidents such as a stolen
+database or leaked keys. It rotates the epoch, invalidates earlier credentials
+and API/local schedule consent, and requires a fresh `bootstrap-admin-token`
+seed and reissued credentials. See [Backup and restore](backup-restore.md#restore).
+Payment recovery is manual; follow the operator runbook kept outside this repository.
+
+Controller log messages and attribute values, including nested groups and errors,
+replace Sparkwing credential shapes with `[credential:<digest>]` fingerprints
+before writing to stderr or telemetry. Public token prefixes remain readable.
 
 ### Client addresses behind proxies
 

@@ -84,3 +84,47 @@ func TestPeerAuthenticationCreatesRootForCurrentEpoch(t *testing.T) {
 		t.Fatalf("current epoch root unstable: %+v %v", again, err)
 	}
 }
+
+func TestNormalRestorePreservesCredentialsAndBootstrapFence(t *testing.T) {
+	s := authorityStore(t)
+	s.credentialEpoch = "original"
+	if err := s.EnsureCredentialEpoch(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	seed := bootstrapSpec([32]byte{1})
+	if created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), seed); err != nil || !created {
+		t.Fatalf("bootstrap: %t %v", created, err)
+	}
+	member := authorityMember(t, s, "session", RoleOwner)
+	rewriteSchemaExec(t, s.db, `UPDATE sessions SET credential_epoch=?`, s.credentialEpoch)
+	bootstrap := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: seed.Seed[:CredentialPrefixLength]}
+	refs := []capability.AuthorityRef{member.Authority}
+	specs := []capability.ProvisionSpec{
+		{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "session"}, Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone}},
+		{Kind: capability.ProvisionMachine, Authority: &member.Authority, Team: "a", RegistrationID: "runner:a:worker", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "worker"}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}},
+		{Kind: capability.ProvisionService, Authority: &bootstrap, RegistrationID: "service:administrator", Subject: capability.Subject{Kind: capability.SubjectService, ID: "administrator"}, Grants: []capability.Grant{capability.OperatorTokens}, Binding: capability.Binding{Kind: capability.BindingNone}},
+	}
+	for _, spec := range specs {
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		refs = append(refs, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+	}
+	var before []byte
+	if err := s.db.QueryRow(`SELECT value FROM settings WHERE key=?`, bootstrapUsedKey).Scan(&before); err != nil || len(before) == 0 {
+		t.Fatalf("setup did not close bootstrap: %q %v", before, err)
+	}
+	if err := s.AsOperator().PrepareRestore(t.Context(), s.credentialEpoch); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range refs {
+		if _, err := s.AsOperator().ResolveAuthority(t.Context(), ref); err != nil {
+			t.Fatalf("normal restore invalidated %s: %v", ref.ID, err)
+		}
+	}
+	var used []byte
+	if err := s.db.QueryRow(`SELECT value FROM settings WHERE key=?`, bootstrapUsedKey).Scan(&used); err != nil || string(used) != string(before) {
+		t.Fatalf("normal restore reopened bootstrap: %q %v", used, err)
+	}
+}
