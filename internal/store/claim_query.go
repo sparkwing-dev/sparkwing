@@ -50,12 +50,18 @@ type claimFacts struct {
 	Actions        int                        `json:"actions,omitempty"`
 	Kinds          []string                   `json:"kinds,omitempty"`
 	Labels         []string                   `json:"labels,omitempty"`
+	PlacementSizes []claimPlacementSize       `json:"placement_sizes,omitempty"`
 	Pools          []string                   `json:"pools,omitempty"`
 	Scopes         [][]claimRepositoryPattern `json:"scopes,omitempty"`
 	Accept         []claimRepositoryPattern   `json:"accept,omitempty"`
 	Filter         int                        `json:"filter,omitempty"`
 	Pushes         []capability.PushScope     `json:"pushes,omitempty"`
 	Excluded       []string                   `json:"excluded,omitempty"`
+}
+
+type claimPlacementSize struct {
+	Class  int64    `json:"class"`
+	Labels []string `json:"labels"`
 }
 
 func claimFactsForTeams(facts []claimFacts, teams map[string]bool) []claimFacts {
@@ -146,6 +152,11 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	}
 	if profile.Class == match.ClassCoordinator {
 		f.Labels = append(f.Labels, "local", "location=coordinator")
+	}
+	if f.Cloud == 1 {
+		for _, size := range match.CloudSizes() {
+			f.PlacementSizes = append(f.PlacementSizes, claimPlacementSize{Class: size.CreditClass, Labels: placementSizeLabels(f.Labels, size)})
+		}
 	}
 	f.Pools = slices.Clone(profile.ReservedPools)
 	if profile.Accept != nil {
@@ -824,8 +835,9 @@ func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
  UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,1,0,'[]','' FROM work w WHERE ` + burst + ` IS NULL AND w.preferences<>'[]'
  UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,` + q.index("p") + `,` + q.number(q.at("p.value", "hold")) + `,'[]',` + q.at("p.value", "target") + ` FROM work w CROSS JOIN ` + q.indexed(burstPrefs, "p") + ` WHERE ` + burst + ` IS NOT NULL
  )`
-	stepLabels := q.anyAlternative("s.selectors", func(alt string) string { return q.contains(q.at("e.facts", "labels"), alt) })
-	stepMatch := `(s.target='' AND (s.selectors='[]' OR ` + stepLabels + `)) OR (s.target='cloud' AND ` + q.number(q.at("e.facts", "cloud")) + `=1) OR (s.target='here' AND ` + q.at("e.facts", "here_run") + `=e.run_id) OR (s.target='machines' AND ` + q.number(q.at("e.facts", "personal")) + `=1) OR ` + q.contains(q.at("e.facts", "labels"), "s.target")
+	labels := `CASE WHEN ` + q.number(q.at("e.facts", "cloud")) + `=1 THEN (SELECT ` + q.at("ps.value", "labels") + ` FROM ` + q.array(q.at("e.facts", "placement_sizes"), "ps") + ` WHERE ` + q.number(q.at("ps.value", "class")) + `=e.cpu_class) ELSE ` + q.at("e.facts", "labels") + ` END`
+	stepLabels := q.anyAlternative("s.selectors", func(alt string) string { return q.contains(labels, alt) })
+	stepMatch := `(s.target='' AND (s.selectors='[]' OR ` + stepLabels + `)) OR (s.target='cloud' AND ` + q.number(q.at("e.facts", "cloud")) + `=1) OR (s.target='here' AND ` + q.at("e.facts", "here_run") + `=e.run_id) OR (s.target='machines' AND ` + q.number(q.at("e.facts", "personal")) + `=1) OR ` + q.contains(labels, "s.target")
 	pairs := `pairs AS MATERIALIZED (SELECT e.*,` + ranked + ` AS ranked,` + ranking + ` AS claim_rank,COALESCE((SELECT MIN(s.step) FROM steps s WHERE ` + same("s", "e") + ` AND (` + stepMatch + `)),(SELECT COUNT(*) FROM steps s WHERE ` + same("s", "e") + `)) AS preference_rank FROM eligible e)`
 	prefHold := `EXISTS (SELECT 1 FROM admissible b JOIN steps s ON ` + same("s", "b") + ` AND s.step=b.preference_rank WHERE ` + same("b", "w") + ` AND b.preference_rank<w.preference_rank AND clock.now<w.arrived+(SELECT SUM(s2.hold) FROM steps s2 WHERE ` + same("s2", "w") + ` AND s2.step<=s.step))`
 	available := `available AS MATERIALIZED (SELECT w.* FROM admissible w,clock WHERE (w.ranked=0 OR NOT (` + rankHold + `)) AND (w.kind<>'node' OR NOT (` + prefHold + `)))`

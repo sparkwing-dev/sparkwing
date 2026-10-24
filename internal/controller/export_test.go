@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 
@@ -36,7 +35,7 @@ func BindTenantPortForTest[P any](s *Server, resolve func(context.Context, store
 }
 
 // ProcessGitHubInboxForTest drains due deliveries through the production lease worker.
-func ProcessGitHubInboxForTest(s *Server, ctx context.Context, now time.Time) (map[string]struct {
+func ProcessGitHubInboxForTest(s *Server, ctx context.Context) (map[string]struct {
 	Status int
 	Body   []byte
 }, error,
@@ -46,7 +45,7 @@ func ProcessGitHubInboxForTest(s *Server, ctx context.Context, now time.Time) (m
 		Body   []byte
 	})
 	for {
-		out, err := s.processNextGitHubDelivery(ctx, now)
+		out, err := s.processNextGitHubDelivery(ctx)
 		if err != nil || out == nil {
 			return results, err
 		}

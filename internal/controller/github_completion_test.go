@@ -137,7 +137,7 @@ func newGitHubCompletion(t *testing.T) *githubCompletionFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.cfg = githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: f.api}}
+	f.cfg = githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook", HTTP: &http.Client{Transport: f.api}}
 	server.WithGitHubApp(f.cfg).WithDashboardURL("https://dash.example.test")
 	return f
 }

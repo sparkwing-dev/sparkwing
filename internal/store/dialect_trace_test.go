@@ -91,7 +91,7 @@ func replayDialectTrace(t *testing.T, target *storetest.Target, commands []diale
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: "free", Reference: "fixture", AmountMicro: 1000000}); err != nil {
+		if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: "free", Reference: "fixture", AmountMicro: 1000000, CreatedBy: "operator"}); err != nil {
 			t.Fatal(err)
 		}
 		rates := store.CreditRateTable{{Cores: 2, MicroPerSecond: 10}, {Cores: 8, MicroPerSecond: 10}}

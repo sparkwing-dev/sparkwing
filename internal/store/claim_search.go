@@ -216,7 +216,8 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 			return heldKeys[[2]string{string(head.Team), head.Context}]
 		})
 	}
-	for len(heads) > 0 {
+	const rejectedHeadLimit = 8
+	for rejected := 0; len(heads) > 0; rejected++ {
 		slices.SortFunc(heads, compareClaimHeads)
 		head := heads[0]
 		heads = heads[1:]
@@ -239,6 +240,18 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 		}
 		if !errors.Is(err, ErrNotFound) {
 			return UnitRef{}, err
+		}
+		if rejected+1 == rejectedHeadLimit {
+			// Other teams keep their turn without walking this route's backlog.
+			if len(heads) == 0 {
+				break
+			}
+			q := claimSQL{dialect: template.dialect, policy: template.policy, overflow: template.overflow, heads: heads}
+			query, err := q.query(template.facts, template.teams, template.rates, template.kinds, demand, template.now)
+			if err != nil {
+				return UnitRef{}, err
+			}
+			return queryClaimTx(ctx, tx, &q, query)
 		}
 		// Rejected heads advance only this transaction's merge of indexed routes.
 		next := claimSQL{dialect: template.dialect, route: true, after: &head}

@@ -28,7 +28,7 @@ func freeTierStore(t *testing.T) *store.Store {
 
 func TestSignUpFreeTierClosesWithTheLastSlot(t *testing.T) {
 	s := freeTierStore(t)
-	if err := s.SetFreeTeamSlots(t.Context(), 1); err != nil {
+	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), "", 1, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	server := New(s, nil)
@@ -52,7 +52,7 @@ func TestSignUpFreeTierClosesWithTheLastSlot(t *testing.T) {
 
 func TestTheServerIsItsOwnFreeTierSource(t *testing.T) {
 	s := freeTierStore(t)
-	if err := s.SetFreeTeamSlots(t.Context(), 0); err != nil {
+	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), "", 0, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer

@@ -19,6 +19,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
@@ -420,6 +421,12 @@ func run(args []string) error {
 			"the checkout service refuses a controller without its token")
 	}
 
+	if !strings.HasPrefix(*cacheBlobStore, "s3://") {
+		if _, err := filesystemDataEndpoint(*externalURL, *addr); err != nil {
+			return err
+		}
+	}
+
 	listeners, err := bindListeners(*addr, *trustedProxyAddr, *metricsAddr)
 	if err != nil {
 		return err
@@ -578,29 +585,21 @@ func run(args []string) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	deployment, err := st.AsOperator().DeploymentID(ctx)
-	if err != nil {
-		return fmt.Errorf("payment deployment identity: %w", err)
-	}
-
-	srv.WithPaymentDeployment(deployment)
 	if err := ensureBootstrapAdmin(ctx, st, creds.BootstrapAdminToken, slog.Default()); err != nil {
 		return err
 	}
 	if err := checkRequireAuth(ctx, st.AsOperator(), *requireAuth); err != nil {
 		return err
 	}
+	var configuredMode capability.PaymentMode
 	if paymentVerifier != nil {
-		if err := st.AsOperator().SetPaymentMode(ctx, cfg.PaymentMode()); err != nil {
-			return fmt.Errorf("persist payment configuration: %w", err)
-		}
+		configuredMode = cfg.PaymentMode()
 	}
-	if err := st.SetFreeTeamSlots(ctx, *freeTeamSlots); err != nil {
-		return fmt.Errorf("--free-team-slots: %w", err)
+	deploymentID, err := configureDeployment(ctx, p.StateDB(), cfg, *credentialsDir, epochDir, st, configuredMode, *freeTeamSlots)
+	if err != nil {
+		return fmt.Errorf("persist deployment configuration: %w", err)
 	}
-	if err := writeDeploymentRecord(ctx, p.StateDB(), cfg, *credentialsDir, epochDir, st); err != nil {
-		return err
-	}
+	srv.WithPaymentDeployment(deploymentID)
 	return controller.ServeWith(ctx, srv, listeners.Listeners)
 }
 

@@ -52,7 +52,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.githubAppProblem != nil {
-		problems = append(problems, s.githubAppProblem.Error())
+		problems = append(problems, errGitHubAppUnavailable.Error())
+	}
+	if s.hasPreviousWebhookSecret() {
+		problems = append(problems, previousWebhookSecretWarning)
 	}
 
 	resp := map[string]any{

@@ -52,6 +52,10 @@ type coveringEntry struct {
 // WithGitHubApp enables the deployment's GitHub App. The client holds the
 // App's private key; source tokens cover only the approved repository-ID set.
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
+	s.previousWebhookSecret = cfg.PreviousWebhookSecret != ""
+	if cfg.WebhookSecret == "" {
+		return s.WithGitHubAppUnavailable(errors.New("webhook secret is required"))
+	}
 	s.githubAppProblem = nil
 	client := githubapp.New(cfg)
 	s.githubApp = &githubAppState{
@@ -87,8 +91,14 @@ func (s *Server) githubAppUnavailable() error {
 }
 
 func (s *Server) writeGitHubAppUnavailable(w http.ResponseWriter) error {
-	// safety: App configuration failures contain no credentials and must remain actionable.
-	return apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: s.githubAppUnavailable().Error()})
+	apierr.NoteResponseError(w, s.githubAppUnavailable())
+	return apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: errGitHubAppUnavailable.Error()})
+}
+
+const previousWebhookSecretWarning = "GitHub App: remove the previous webhook secret after rotation"
+
+func (s *Server) hasPreviousWebhookSecret() bool {
+	return s.previousWebhookSecret || len(s.deployment.WebhookSecret().Previous()) > 0
 }
 
 func (s *Server) githubAppEnabled(w http.ResponseWriter) bool {

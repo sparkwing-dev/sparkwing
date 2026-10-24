@@ -226,7 +226,7 @@ func TestPaymentStateProviderModesKeepIndependentConsequences(t *testing.T) {
 			}
 			for _, mode := range []capability.PaymentMode{capability.PaymentTest, capability.PaymentLive} {
 				if mode == capability.PaymentLive {
-					if err := s.AsOperator().SetPaymentMode(t.Context(), mode); err != nil {
+					if _, err := s.AsOperator().ConfigureDeployment(t.Context(), mode, DefaultFreeTeamSlots, func() error { return nil }); err != nil {
 						t.Fatal(err)
 					}
 					rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('live','a','live-session','live','usd',100,100000000,1,2)`)

@@ -2744,7 +2744,7 @@ failure uses `Tenant.AbortBlobUpload`. The ticket binds the exact uploader and
 retains immutable replay state. The signed-data controller adapter remains an
 integration dependency. There is no service-token fallback.
 
-`SetFreeTeamSlots` writes the final settings table and refuses sealed values.
+`Operator.ConfigureDeployment` writes the final settings table and refuses sealed values.
 Its slot count and signup behavior keep their existing meaning.
 
 ## Storage maintenance uses committed inventory

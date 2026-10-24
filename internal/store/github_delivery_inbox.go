@@ -108,7 +108,7 @@ func (o *Operator) EnqueueGitHubDelivery(ctx context.Context, deliveryID, event 
 
 // ClaimGitHubDelivery rotates across teams and leases the team's oldest ready
 // delivery. Expired claims fail and require manual processing again.
-func (o *Operator) ClaimGitHubDelivery(ctx context.Context, now time.Time) (*GitHubDelivery, error) {
+func (o *Operator) ClaimGitHubDelivery(ctx context.Context) (*GitHubDelivery, error) {
 	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func (o *Operator) ClaimGitHubDelivery(ctx context.Context, now time.Time) (*Git
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`+tx.forUpdate(), cursorKey).Scan(&raw); err != nil {
 		return nil, err
 	}
-	if _, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state='failed',lease_until=0,last_error='processing lease expired' WHERE state='leased' AND lease_until<=?`, now.UnixNano()); err != nil {
+	if _, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state='failed',lease_until=0,last_error='processing lease expired' WHERE state='leased' AND lease_until<=?`, tx.now(ctx).UnixNano()); err != nil {
 		return nil, err
 	}
 	var cursor string
@@ -154,7 +154,7 @@ func (o *Operator) ClaimGitHubDelivery(ctx context.Context, now time.Time) (*Git
 	}
 	result, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state='leased',lease=lease+1,
 		lease_until=? WHERE digest=? AND lease=? AND state='pending'`,
-		now.Add(githubDeliveryLease).UnixNano(), digest, d.Lease)
+		tx.now(ctx).Add(githubDeliveryLease).UnixNano(), digest, d.Lease)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +298,7 @@ func (s *Store) githubDeliveryExec(ctx context.Context, effect, query string, ar
 
 // FinishGitHubDelivery records a fenced success or failure. Failures retain the
 // signed body for an administrator's explicit process-again action.
-func (o *Operator) FinishGitHubDelivery(ctx context.Context, claimed GitHubDelivery, reason string, now time.Time) error {
+func (o *Operator) FinishGitHubDelivery(ctx context.Context, claimed GitHubDelivery, reason string) error {
 	if claimed.ID == "" || claimed.Lease <= 0 {
 		return ErrInvalidInput
 	}
@@ -306,20 +306,22 @@ func (o *Operator) FinishGitHubDelivery(ctx context.Context, claimed GitHubDeliv
 	if reason != "" {
 		state = "failed"
 	}
-	result, err := o.s.exec(ctx, `UPDATE github_app_deliveries SET state=?,
-		body=CASE WHEN ?='done' THEN NULL ELSE body END,lease_until=0,last_error=?
-		WHERE delivery_id=? AND state='leased' AND lease=? AND lease_until>?`, state, state, reason, claimed.ID, claimed.Lease, now.UnixNano())
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return errGitHubDeliveryLeaseLost
-	}
-	return nil
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		result, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state=?,
+			body=CASE WHEN ?='done' THEN NULL ELSE body END,lease_until=0,last_error=?
+			WHERE delivery_id=? AND state='leased' AND lease=? AND lease_until>?`, state, state, reason, claimed.ID, claimed.Lease, tx.now(ctx).UnixNano())
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return errGitHubDeliveryLeaseLost
+		}
+		return nil
+	})
 }
 
 // ListFailedGitHubDeliveries exposes processing failures under current team administration.

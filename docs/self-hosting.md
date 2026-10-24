@@ -115,8 +115,10 @@ Startup refuses, before it opens the store or writes any setting, when:
   under another kind;
 - any other flag is invalid, or `--addr`, `--trusted-proxy-addr` or
   `--metrics-addr` cannot be bound. Every listener is bound before the store is
-  opened. The bootstrap seed, the payment mode and the free team slots are
-  written only after every check passes.
+  opened. The bootstrap seed is written after configuration checks pass. Payment
+  mode, deployment identity and free team slots commit together only after the
+  deployment record is written successfully. A failed database commit restores
+  the previous deployment record.
 
 A license that expires while the controller runs does not change the
 deployment. Metering, the free tier and sign-in keep working, and
@@ -253,8 +255,8 @@ regional S3 URL instead, so runner pods in the bucket's region can use the S3
 gateway endpoint. Without an S3 bucket, the standalone controller opens filesystem storage in
 its home directory's `data` directory and mounts signed data and log transfers.
 It uses `--external-url` when set, otherwise its listener address. Wildcard
-listener addresses use localhost in signed URLs. Set `--external-url` for remote
-runners. The key that signs these URLs is kept in `$SPARKWING_HOME/data-signing.key`,
+listeners require `--external-url` pointing at an address runners can reach;
+startup refuses them without it. The key that signs these URLs is kept in `$SPARKWING_HOME/data-signing.key`,
 so a restart does not invalidate transfers in flight. Filesystem storage needs
 no CloudFront signing keys.
 Controller embedders configure authenticated data routes through

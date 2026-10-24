@@ -17,11 +17,11 @@ func TestGitHubDeliveryCompletionReleasesPayload(t *testing.T) {
 	if err := op.EnqueueGitHubDelivery(t.Context(), "delivery", "push", []byte(`{"ref":"main"}`), now); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := op.ClaimGitHubDelivery(t.Context(), now)
+	claim, err := op.ClaimGitHubDelivery(t.Context())
 	if err != nil || claim == nil {
 		t.Fatalf("claim = %+v, %v", claim, err)
 	}
-	if err := op.FinishGitHubDelivery(t.Context(), *claim, "", now); err != nil {
+	if err := op.FinishGitHubDelivery(t.Context(), *claim, ""); err != nil {
 		t.Fatal(err)
 	}
 	var state string
@@ -45,11 +45,11 @@ func TestFailedGitHubDeliveryManualProcessingIsTeamScopedAndAudited(t *testing.T
 		if err := op.EnqueueGitHubDelivery(t.Context(), id, "push", []byte(id), now); err != nil {
 			t.Fatal(err)
 		}
-		claim, err := op.ClaimGitHubDelivery(t.Context(), now)
+		claim, err := op.ClaimGitHubDelivery(t.Context())
 		if err != nil || claim == nil {
 			t.Fatalf("claim: %+v %v", claim, err)
 		}
-		if err := op.FinishGitHubDelivery(t.Context(), *claim, "processing failed", now); err != nil {
+		if err := op.FinishGitHubDelivery(t.Context(), *claim, "processing failed"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -77,7 +77,7 @@ func TestFailedGitHubDeliveryManualProcessingIsTeamScopedAndAudited(t *testing.T
 	if err := tenant.ProcessGitHubDeliveryAgain(t.Context(), a, "ours"); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := op.ClaimGitHubDelivery(t.Context(), now)
+	claim, err := op.ClaimGitHubDelivery(t.Context())
 	if err != nil || claim == nil || claim.ID != "ours" {
 		t.Fatalf("manual claim: %+v %v", claim, err)
 	}
@@ -132,11 +132,11 @@ func TestFailedGitHubDeliveryCannotMutateReplacementConnection(t *testing.T) {
 					if err := op.EnqueueGitHubDelivery(ctx, "old", "installation", []byte(`{"installation":{"id":7}}`), now); err != nil {
 						t.Fatal(err)
 					}
-					claim, err := op.ClaimGitHubDelivery(ctx, now)
+					claim, err := op.ClaimGitHubDelivery(ctx)
 					if err != nil || claim == nil {
 						t.Fatalf("claim: %+v %v", claim, err)
 					}
-					if err := op.FinishGitHubDelivery(ctx, *claim, "failed before mutation", now); err != nil {
+					if err := op.FinishGitHubDelivery(ctx, *claim, "failed before mutation"); err != nil {
 						t.Fatal(err)
 					}
 					var current Team
@@ -145,14 +145,14 @@ func TestFailedGitHubDeliveryCannotMutateReplacementConnection(t *testing.T) {
 						if err := tenant.ProcessGitHubDeliveryAgain(ctx, a, "old"); err == nil {
 							t.Fatal("old delivery requeued against replacement connection")
 						}
-						if replay, err := op.ClaimGitHubDelivery(ctx, now); err != nil || replay != nil {
+						if replay, err := op.ClaimGitHubDelivery(ctx); err != nil || replay != nil {
 							t.Fatalf("refused delivery became claimable: %+v %v", replay, err)
 						}
 					} else {
 						if err := tenant.ProcessGitHubDeliveryAgain(ctx, a, "old"); err != nil {
 							t.Fatal(err)
 						}
-						replay, err := op.ClaimGitHubDelivery(ctx, now)
+						replay, err := op.ClaimGitHubDelivery(ctx)
 						if err != nil || replay == nil {
 							t.Fatalf("replay: %+v %v", replay, err)
 						}

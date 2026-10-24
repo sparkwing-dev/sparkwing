@@ -61,8 +61,8 @@ func (o *githubDeliveryOutcome) failureReason() string {
 	return ""
 }
 
-func (s *Server) processNextGitHubDelivery(ctx context.Context, now time.Time) (*githubDeliveryOutcome, error) {
-	queued, err := s.operator.ClaimGitHubDelivery(ctx, now)
+func (s *Server) processNextGitHubDelivery(ctx context.Context) (*githubDeliveryOutcome, error) {
+	queued, err := s.operator.ClaimGitHubDelivery(ctx)
 	if err != nil || queued == nil {
 		return nil, err
 	}
@@ -81,11 +81,7 @@ func (s *Server) processNextGitHubDelivery(ctx context.Context, now time.Time) (
 	if reason != "" {
 		s.logger.Warn("github app delivery failed", "delivery", queued.ID, "reason", reason)
 	}
-	finished := time.Now()
-	if now.After(finished) {
-		finished = now
-	}
-	return outcome, s.operator.FinishGitHubDelivery(ctx, *queued, reason, finished)
+	return outcome, s.operator.FinishGitHubDelivery(ctx, *queued, reason)
 }
 
 func (s *Server) runGitHubInbox(ctx context.Context) {
@@ -96,7 +92,7 @@ func (s *Server) runGitHubInbox(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		for ctx.Err() == nil {
-			outcome, err := s.processNextGitHubDelivery(ctx, time.Now())
+			outcome, err := s.processNextGitHubDelivery(ctx)
 			if err != nil {
 				s.logger.Error("github app inbox processing failed", "err", err)
 				break

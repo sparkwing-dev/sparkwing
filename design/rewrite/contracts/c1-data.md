@@ -2698,7 +2698,7 @@ still need W7's hard cut. Legacy direct-upload and node-log writers and their
 internal reservation code are removed. Their old host/client and read surfaces
 remain pending final data and tagged-log bindings.
 
-`SetFreeTeamSlots` writes the final settings table through the existing checked
+`Operator.ConfigureDeployment` writes the final settings table through the existing checked
 writer. Negative or sealed updates fail without replacing the prior value.
 The persisted setting survives reopening. The controller reads slot availability
 and passes full or unreadable conditions to its signup gate without a counter RPC.
@@ -3590,7 +3590,7 @@ Store fixtures reach transaction helpers through test-only methods. The unused
 unattached-checkout abort path and its legacy-only test are deleted. Ambiguous
 provider failures retain their reservation and replay identity.
 
-`Operator.SetPaymentMode` persists validated `test`/`live` configuration under the
+`Operator.ConfigureDeployment` persists validated `test`/`live` configuration under the
 ledger lock. Controller startup calls it from the same `--payment-mode` that
 constructs the verifier. Reservations and verified settlement read that stored
 mode. Mode changes retain prior rows and their mode tags. This supplies the

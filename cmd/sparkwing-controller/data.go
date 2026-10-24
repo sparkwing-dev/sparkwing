@@ -14,16 +14,9 @@ import (
 )
 
 func openFilesystemData(root, externalURL, address string) (*blob.Filesystem, error) {
-	endpoint := externalURL
-	if endpoint == "" {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, fmt.Errorf("filesystem data address: %w", err)
-		}
-		if host == "" || host == "0.0.0.0" || host == "::" {
-			host = "localhost"
-		}
-		endpoint = "http://" + net.JoinHostPort(host, port)
+	endpoint, err := filesystemDataEndpoint(externalURL, address)
+	if err != nil {
+		return nil, err
 	}
 	key, err := dataSigningKey(filepath.Join(root, "data-signing.key"))
 	if err != nil {
@@ -69,3 +62,18 @@ func dataSigningKey(path string) ([]byte, error) {
 }
 
 const dataSigningKeySize = 32
+
+func filesystemDataEndpoint(externalURL, address string) (string, error) {
+	endpoint := externalURL
+	if endpoint == "" {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return "", fmt.Errorf("filesystem data --addr: %w", err)
+		}
+		if host == "" || (net.ParseIP(host) != nil && net.ParseIP(host).IsUnspecified()) {
+			return "", errors.New("filesystem data on a wildcard listener requires --external-url reachable by runners")
+		}
+		endpoint = "http://" + net.JoinHostPort(host, port)
+	}
+	return endpoint, nil
+}

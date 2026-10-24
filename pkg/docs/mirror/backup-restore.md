@@ -25,6 +25,16 @@ session for the same account can stay valid. Identity unlink adds
 Payment recovery and targeted revocation recovery are manual. Follow the
 operator runbook kept outside this repository.
 
+After a restore, Cloud nodes may still hold orphan reservations or bindings for
+awards the restored controller no longer recognizes. The launcher excludes those
+nodes and quarantines them when their protected team identity matches: it cordons
+the node and adds the `sparkwing.dev/quarantined` taint and annotation. Healthy
+nodes can still take work. Inspect the launcher logs and the node's quarantine
+annotation, then terminate the node so fresh capacity replaces it. To reuse a node,
+first remove the orphan workload and its stale reservation or binding, then remove
+the quarantine taint and annotation and uncordon it. Uncordoning alone does not
+make it eligible again. Do not clear a live award's reservation or binding.
+
 ## Schema compatibility
 
 Keep the binary matching a database backup. This build does not upgrade older

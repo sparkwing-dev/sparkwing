@@ -3219,7 +3219,7 @@ guards govern funding. Cloud admissions own standing and budget enforcement.
 real sessions and CSRF, page commits, provider delivery and signed settlement.
 
 Controller startup commits its validated `--payment-mode` through
-`Operator.SetPaymentMode` before serving requests. Verifier configuration and
+`Operator.ConfigureDeployment` before serving requests. Verifier configuration and
 ledger configuration therefore share the operator's mode selection. Constructor
 proofs configure the ledger through that operator method instead of SQL seeding.
 

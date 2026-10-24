@@ -68,8 +68,8 @@ func TestConfigureGitHubApp(t *testing.T) {
 			configureGitHubApp(srv, c.flags, c.hook)
 			response := httptest.NewRecorder()
 			srv.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/webhooks/github-app", strings.NewReader(`{}`)))
-			if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "GitHub App unavailable: ") || !strings.Contains(response.Body.String(), c.want) {
-				t.Fatalf("App operation = %d %s, want unavailable with %q", response.Code, response.Body, c.want)
+			if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "GitHub App unavailable") || strings.Contains(response.Body.String(), c.want) {
+				t.Fatalf("App operation = %d %s, want generic unavailable hiding %q", response.Code, response.Body, c.want)
 			}
 		})
 	}
@@ -80,7 +80,7 @@ func TestGitHubAppDocsDescribeNarrowFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, term := range []string{"GitHub App unavailable: <reason>", "reads every page", "one-minute deadline", "empty or unreadable", "approved repository-ID set", "repositories_removed", "failed", "inherited child runs"} {
+	for _, term := range []string{"GitHub App unavailable", "health and doctor warn", "configuration details stay in controller logs", "reads every page", "one-minute deadline", "empty or unreadable", "approved repository-ID set", "repositories_removed", "failed", "inherited child runs"} {
 		if !strings.Contains(page, term) {
 			t.Errorf("GitHub App guide omits %q", term)
 		}
@@ -188,8 +188,8 @@ func TestGitHubAppStartupAvailability(t *testing.T) {
 				if path == "/api/v1/health" {
 					wantStatus = http.StatusOK
 				}
-				if err != nil || resp.StatusCode != wantStatus || !strings.Contains(string(body), "GitHub App unavailable:") || !strings.Contains(string(body), tc.want) {
-					t.Fatalf("%s = %d %s, %v; want unavailable with %q", path, resp.StatusCode, body, err, tc.want)
+				if err != nil || resp.StatusCode != wantStatus || !strings.Contains(string(body), "GitHub App unavailable") || strings.Contains(string(body), tc.want) {
+					t.Fatalf("%s = %d %s, %v; want generic unavailable hiding %q", path, resp.StatusCode, body, err, tc.want)
 				}
 			}
 		})

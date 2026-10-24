@@ -177,7 +177,7 @@ func TestTeamDeletionRetainsCheckoutAndHoldGuardsOnStoreClock(t *testing.T) {
 		t.Fatalf("hold: %v", err)
 	}
 	s.SetTestClock(t, func() time.Time { return now })
-	if _, err := tenant.ReleaseCreditFreezes(t.Context(), "dispute", "", ""); err != nil {
+	if _, err := tenant.ReleaseCreditFreezes(t.Context(), "dispute", "operator", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.DeleteAuthorizedTeam(t.Context(), a); err != nil {

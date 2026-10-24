@@ -12,15 +12,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// AuditActorBreakGlass identifies trusted in-pod administration.
-const AuditActorBreakGlass = "sparkwing-controller admin"
-
 type auditSystem string
 
 const (
 	auditController      auditSystem = "controller"
 	auditPaymentProvider auditSystem = "payment_provider"
-	auditBreakGlass      auditSystem = AuditActorBreakGlass
+	auditBreakGlass      auditSystem = "sparkwing-controller admin"
 )
 
 type auditActor struct {

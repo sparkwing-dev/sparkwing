@@ -40,7 +40,7 @@ func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
 			s, session := credentialSessionServer(t)
 			engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE team='a' AND account_id='member'`)
 			unavailable := !tc.replay
-			s.WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
+			s.WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook", HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
 				status, body := http.StatusBadGateway, "unavailable"
 				if r.URL.Path == "/app/installations/7/access_tokens" {
 					status, body = http.StatusCreated, `{"token":"token"}`
@@ -62,7 +62,7 @@ func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
 			var receipt string
 			if tc.replay {
 				engineSQL(t, s.store, `CREATE TRIGGER fail_delivery_completion BEFORE UPDATE ON github_app_deliveries WHEN NEW.state='done' BEGIN SELECT RAISE(ABORT,'crash before completion'); END`)
-				if outcome, err := s.processNextGitHubDelivery(t.Context(), now); err == nil || outcome == nil || outcome.failureReason() != "" {
+				if outcome, err := s.processNextGitHubDelivery(t.Context()); err == nil || outcome == nil || outcome.failureReason() != "" {
 					t.Fatalf("completion failure: %+v, %v", outcome, err)
 				}
 				if err := teststore.SQL(t, s.store).QueryRow(`SELECT result FROM github_app_delivery_effects WHERE effect LIKE 'withdraw-installation:%'`).Scan(&receipt); err != nil {
@@ -70,7 +70,7 @@ func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
 				}
 				engineSQL(t, s.store, `DROP TRIGGER fail_delivery_completion`)
 				now = now.Add(3 * time.Minute)
-				if outcome, err := s.processNextGitHubDelivery(t.Context(), now); err != nil || outcome != nil {
+				if outcome, err := s.processNextGitHubDelivery(t.Context()); err != nil || outcome != nil {
 					t.Fatalf("expired delivery retried automatically: %+v, %v", outcome, err)
 				}
 				r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/team/github-app/deliveries/removal/process-again", nil)
@@ -85,7 +85,7 @@ func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
 				}
 				unavailable = true
 			}
-			outcome, err := s.processNextGitHubDelivery(t.Context(), now)
+			outcome, err := s.processNextGitHubDelivery(t.Context())
 			if err != nil || outcome == nil {
 				t.Fatalf("removal: %+v, %v", outcome, err)
 			}

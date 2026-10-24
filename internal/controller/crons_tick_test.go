@@ -32,7 +32,7 @@ func newStoreForTick(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
+	cfg := githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook", HTTP: &http.Client{Transport: intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
 		status, body := http.StatusOK, ""
 		switch r.Method + " " + r.URL.Path {
 		case "GET /repos/acme/widgets/installation":
