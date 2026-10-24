@@ -328,6 +328,9 @@ signatures. Both run owners project `RunSnapshot.Scheduling()` and call
 The projection derives `--only` skips from the accepted spec's sealed options.
 `Decide` emits those skips before releasing work, and the store rechecks each
 dependency outcome against that decision. Owners cannot supply another selection.
+For `--only`, remote snapshots send `selection_skips` as an object, including an
+empty object when no jobs are excluded. An owner running with `--only` refuses a
+missing or null projection and asks for a controller update before dispatching work.
 C2 owns the canonical error object, code registry and credential authority.
 `nodeproto.ErrorUses()` inventories typed canonical codes and their reasons.
 `apierr.DecodeInner` validates every structured protocol error. C4 owns environment policy, settings,

@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -23,6 +24,10 @@ type ownerExecution struct {
 }
 
 func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry) (RunCompletion, error) {
+	var spec runspec.Spec
+	if err := json.Unmarshal(accepted.Spec, &spec); err != nil {
+		return RunCompletion{}, err
+	}
 	ctx, cancel := context.WithCancelCause(parent)
 	var workers sync.WaitGroup
 	defer func() { cancel(context.Canceled); workers.Wait() }()
@@ -123,6 +128,9 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		graph, err := project(snapshot)
 		if err != nil {
 			return RunCompletion{}, err
+		}
+		if spec.Resolved.Settings.Options.Only.Value != "" && graph.SelectionSkips == nil {
+			return RunCompletion{}, errors.New("controller does not support --only (missing selection_skips); update the controller before retrying")
 		}
 		for i := range graph.Nodes {
 			if !graph.CancelRequested && active[graph.Nodes[i].ID] != nil && graph.Nodes[i].Status == string(runstate.StatusDone) {

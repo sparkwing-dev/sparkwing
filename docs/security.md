@@ -54,8 +54,8 @@ The accepted run seals one registration projection containing raw arguments,
 secret defaults, effective values and every normalized list item. Stored secrets
 and OIDC tokens register with the shared host masker before release. Explicit
 `Mask` registrations affect only the registering job and end with its last
-process. Child arguments, repository and branch pass the output secret check
-before leaving the host.
+process. Child pipeline names, arguments, repository and branch pass the output
+secret check before leaving the host.
 
 See [secret values](secrets.md#values-that-can-be-secrets) for the masking
 length rule and save-time warning. Empty supplied arguments and defaults carry no value.
@@ -153,6 +153,9 @@ retry keeps its source run's sealed identity, including asserted provenance,
 in full and failed modes. Cache, memo and personal placement use that same
 writer because that principal chose the code. The retrier is recorded separately
 as the actor requesting the retry.
+Only the sealed writer's principal can retry a `--runner here` or other local
+run. Another member must start a new run because a retry keeps the source
+writer's code and data scope.
 
 An Actions push-bound runner takes work only when its sealed provenance proves
 the binding's exact repository, ref and commit through Actions or a verified

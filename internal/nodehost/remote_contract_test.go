@@ -70,6 +70,21 @@ func TestRemoteOwnerScheduleRejectsMismatchedIdentity(t *testing.T) {
 	}
 }
 
+func TestRemoteOwnerSchedulePreservesEmptySelectionAcrossWire(t *testing.T) {
+	encoded, err := json.Marshal(controllerwire.ScheduleSnapshot{RunID: "run", SelectionSkips: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire ownerWireFixture
+	if err := json.Unmarshal(encoded, &wire.snapshot); err != nil {
+		t.Fatal(err)
+	}
+	graph, err := (&RemoteOwnerStore{Controller: wire}).schedule(t.Context(), "run")
+	if err != nil || graph.SelectionSkips == nil || len(graph.SelectionSkips) != 0 {
+		t.Fatalf("empty selection lost across wire: %+v %v", graph, err)
+	}
+}
+
 func TestRemoteOwnerSchedulePropagatesTransportErrors(t *testing.T) {
 	sentinel := errors.New("transport failed")
 	wire := ownerWireFixture{err: sentinel}

@@ -90,7 +90,7 @@ func (s *ProcessServices) read(request *http.Request, auth capability.Authorized
 		if child.Pipeline == "" {
 			return nil, 0, executorError(apierr.BadRequest, "child request requires a pipeline")
 		}
-		payload, marshalErr := json.Marshal([]any{child.Args, child.Repo, child.Branch})
+		payload, marshalErr := json.Marshal(child)
 		if marshalErr != nil {
 			return nil, 0, marshalErr
 		}

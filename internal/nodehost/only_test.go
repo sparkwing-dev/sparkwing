@@ -87,6 +87,42 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 	}
 }
 
+func TestOnlyRequiresControllerSelectionProjection(t *testing.T) {
+	for _, tc := range []struct {
+		pattern   string
+		supported bool
+	}{{"keep", false}, {"*", false}, {"keep", true}, {"*", true}} {
+		t.Run(tc.pattern+"/supported="+strconv.FormatBool(tc.supported), func(t *testing.T) {
+			doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "keep", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "exclude", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			}}
+			f := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: tc.pattern}}})
+			f.Host.Project = func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
+				graph, err := snapshot.Scheduling()
+				if !tc.supported {
+					graph.SelectionSkips = nil
+				}
+				return graph, err
+			}
+			f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+				if !tc.supported || tc.pattern == "keep" && input.NodeID != "keep" {
+					t.Error("owner dispatched work without controller selection support")
+				}
+				return f.report(ctx, input, runstate.NodeSuccess)
+			})
+			completion, err := f.Host.Run(t.Context(), f.Input)
+			if tc.supported {
+				if err != nil || completion.Outcome != "success" {
+					t.Fatalf("supported selection: %+v %v", completion, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "controller does not support --only (missing selection_skips)") {
+				t.Fatalf("missing compatibility error: %v", err)
+			}
+		})
+	}
+}
+
 func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
 	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "test", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 	for _, tc := range []struct{ only, start, want string }{

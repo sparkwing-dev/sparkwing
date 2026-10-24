@@ -27,7 +27,7 @@ func PlanSelectionSkips(doc nodeproto.PlanDoc, pattern, start, stop string) (map
 		}
 	}
 	if len(doc.Jobs) == 0 {
-		return nil, nil
+		return map[string]string{}, nil
 	}
 	if len(matched) == 0 {
 		return nil, fmt.Errorf("--only=%q matched no jobs (declared: %v)", pattern, ids)

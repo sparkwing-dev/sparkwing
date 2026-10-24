@@ -1,10 +1,12 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -13,6 +15,49 @@ import (
 func RetryPlacementRegressions(t *testing.T, open func(*testing.T) *Store) {
 	t.Run("writer SQL parity", func(t *testing.T) { writerPrincipalSQLMatchesSealedWriter(t, open) })
 	t.Run("personal machine", func(t *testing.T) { retryPersonalPlacementUsesSealedWriter(t, open) })
+	t.Run("local writer only", func(t *testing.T) { retryLocalPlacementRequiresWriter(t, open) })
+}
+
+func retryLocalPlacementRequiresWriter(t *testing.T, open func(*testing.T) *Store) {
+	for _, mode := range []string{"all", "failed"} {
+		for _, placement := range []string{"here", "local", "local-triggered"} {
+			t.Run(mode+"/"+placement, func(t *testing.T) {
+				s := open(t)
+				tenant := referenceWorld(t, s, "gh:701")
+				alice := referenceMember(t, s, "alice", RoleEditor)
+				bob := referenceMember(t, s, "bob", RoleEditor)
+				input := runspec.Request{Version: 1, Pipeline: "ci", Mode: runspec.IntakeExecute, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "refs/heads/main", SHA: referenceMain}, Source: runspec.Source{Ref: referenceMain}}
+				here := placement == "here"
+				if here {
+					input.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
+				} else if placement == "local" {
+					input.Origin = runspec.OriginLocal
+				} else {
+					input.Dispatch, input.ExecutionLocation = runspec.DispatchHost, "local"
+				}
+				original, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: alice.Authority, Request: input})
+				if err != nil {
+					t.Fatal(err)
+				}
+				s.testOnlyExec(t, `UPDATE runs SET status='failed',finished_at=? WHERE team='a' AND id=?`, s.now().UnixNano(), original.RunID)
+				request := IntakeRequest{Authority: alice.Authority, RetryMode: mode, Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: original.RunID}}}
+				retry, err := tenant.AdmitRun(t.Context(), request)
+				if err != nil || retry.Request.Provenance != original.Request.Provenance || here && len(retry.HereBearer) == 0 {
+					t.Fatalf("writer's retry=%+v: %v", retry, err)
+				}
+				request.Authority = bob.Authority
+				refused, err := tenant.AdmitRun(t.Context(), request)
+				want := "only account/alice can retry a --runner here run; start a new run instead"
+				if !here {
+					want = "only account/alice can retry a local run; start a new run instead"
+				}
+				var canonical *apierr.Error
+				if !errors.As(err, &canonical) || canonical.Code != apierr.Forbidden || canonical.Message != want || refused.RunID != "" || len(refused.HereBearer) != 0 {
+					t.Fatalf("other principal's retry run=%q, bearer issued=%v: %v, want %q", refused.RunID, len(refused.HereBearer) != 0, err, want)
+				}
+			})
+		}
+	}
 }
 
 func writerPrincipalSQLMatchesSealedWriter(t *testing.T, open func(*testing.T) *Store) {

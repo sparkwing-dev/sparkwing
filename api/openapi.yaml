@@ -3569,6 +3569,7 @@ components:
         - run_id
         - store_now
         - cancel_requested
+        - selection_skips
         - jobs
         - generators
         - expansions

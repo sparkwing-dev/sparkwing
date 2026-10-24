@@ -274,6 +274,7 @@ func TestChildRequestRejectsSecretsInEveryOutboundField(t *testing.T) {
 		return "child", nil
 	}
 	for _, body := range []string{
+		`{"pipeline":"private-secret"}`,
 		`{"pipeline":"build","args":{"x":"private-secret"}}`,
 		`{"pipeline":"build","repo":"https://private-secret@example.com/repo"}`,
 		`{"pipeline":"build","branch":"private-secret"}`,

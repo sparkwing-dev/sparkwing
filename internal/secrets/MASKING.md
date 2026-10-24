@@ -43,8 +43,9 @@ The host's shared masker owns accepted secrets, runtime secret reads and issued
 OIDC tokens. Every live job sees new host registrations without copying them into
 its registry. Explicit mask registrations apply only to the registering job's
 logs, annotations, summaries and typed outputs. Its registry is released when
-its last delegated process ends. Child-run arguments, repository and branch pass
-the same secret check as typed output before any controller request or admission.
+its last delegated process ends. Child-run pipeline names, arguments, repository
+and branch pass the same secret check as typed output before any controller request
+or admission.
 
 Fresh identifiers are checked against every registered mask, including issued
 values. Issuance does not invalidate identifiers already accepted. That exemption
