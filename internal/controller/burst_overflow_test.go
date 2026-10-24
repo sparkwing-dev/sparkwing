@@ -36,7 +36,11 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 			}
 			run.Request.Request.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}, OverflowMinutes: &budget}
 			run.Request.Request.Git.Repository.Display = "https://github.com/acme/repo"
-			request := sealWith(t, run.Request, run.Request.Provenance)
+			provenance, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "account"), run.Request.Provenance.Ref(), run.Request.Provenance.SHA(), run.Pipeline)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := sealWith(t, run.Request, provenance)
 			engineSQL(t, e.Store, `UPDATE runs SET request_json=?,created_principal='account',created_subject_kind='account'`, request)
 			for _, id := range []string{"one", "two"} {
 				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu,team-4cpu"]}}`))
@@ -207,15 +211,24 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	}
 	run.Request.Request.Git.Repository.Display = "https://github.com/acme/repo"
 	run.Request.Request.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}}
-	request := sealWith(t, run.Request, run.Request.Provenance)
-	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_display='https://github.com/acme/repo',created_principal='someone-else',created_subject_kind='account'`, request)
+	provenance, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "account"), run.Request.Provenance.Ref(), run.Request.Provenance.SHA(), run.Pipeline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherWriter, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "someone-else"), provenance.Ref(), provenance.SHA(), run.Pipeline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := sealWith(t, run.Request, otherWriter)
+	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_display='https://github.com/acme/repo',created_principal='account',created_subject_kind='account'`, request)
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	engineAcceptedFixturePlan(t, e, "a", "run")
 	body := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job"}`
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusUnauthorized)
 	engineSQL(t, e.Store, `UPDATE teams SET members_can_add_machines=1 WHERE name='a'`)
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusForbidden)
-	engineSQL(t, e.Store, `UPDATE runs SET created_principal='account'`)
+	engineSQL(t, e.Store, `UPDATE runs SET request_json=?`, sealWith(t, run.Request, provenance))
+	engineAcceptedFixturePlan(t, e, "a", "run")
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusOK)
 	if _, err := manager.RevokeToken(t.Context(), enrolled.Prefix); err != nil {
 		t.Fatalf("session revocation of enrolled machine: %v", err)

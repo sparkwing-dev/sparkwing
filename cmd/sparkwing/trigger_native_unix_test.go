@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -91,8 +92,8 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 	if !replay.Replayed || replay.RunID != created.RunID || replay.HereBearer != "" || nativeTriggerSeal(t, state, replay.RunID).Hash != nativeTriggerSeal(t, state, created.RunID).Hash || nativeTriggerSeal(t, state, replay.RunID).Request.Reason != flags.reason {
 		t.Fatal("replay changed sealed reason or here authority")
 	}
-	carried, err := runspec.CarryRetry(runspec.RetryInput{Request: nativeTriggerSeal(t, state, created.RunID), SourceRunID: created.RunID})
-	if err != nil || carried.Request.Request.Reason != flags.reason || carried.Request.Hash != nativeTriggerSeal(t, state, created.RunID).Hash {
+	carried, err := runspec.CarryRetry(runspec.RetryInput{Request: nativeTriggerSeal(t, state, created.RunID), Retrier: runspec.Actor{Kind: "local", ID: "local-cli"}, SourceRunID: created.RunID})
+	if err != nil || carried.Request.Request.Reason != flags.reason || carried.Request.Provenance.Writer() != runspec.PrincipalWriter("local", "local-cli") || !reflect.DeepEqual(carried.Request.Request, nativeTriggerSeal(t, state, created.RunID).Request) {
 		t.Fatalf("retry lost reason or request seal: %v", err)
 	}
 	request.Request.Reason = "different reason"

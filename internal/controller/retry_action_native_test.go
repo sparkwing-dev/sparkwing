@@ -108,8 +108,15 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 					}
 				}
 				row, err := tenant.ReadRun(t.Context(), result.RunID)
-				if err != nil || row.State != runstate.RunPending || row.StartedAt != nil || row.FinishedAt != nil || row.Lineage.RetryOf != parent || !row.Lineage.Retrier.Set || row.Lineage.Retrier.Value.ID != "member" || !reflect.DeepEqual(row.Request, original.Request) || !reflect.DeepEqual(row.Spec, original.Spec) || !bytes.Equal(row.Plan, original.Plan) {
+				if err != nil || row.State != runstate.RunPending || row.StartedAt != nil || row.FinishedAt != nil || row.Lineage.RetryOf != parent || !row.Lineage.Retrier.Set || row.Lineage.Retrier.Value.ID != "member" || !reflect.DeepEqual(row.Request.Request, original.Request.Request) || row.Request.Provenance.Writer() != runspec.PrincipalWriter("account", "member") || (row.Spec == nil) != (original.Spec == nil) || accepted && (!reflect.DeepEqual(row.Spec.Request, row.Request) || row.Spec.PlanHash != original.Spec.PlanHash) || !bytes.Equal(row.Plan, original.Plan) {
 					t.Fatalf("retry did not retain execution inputs and independent lineage: %+v %v", row, err)
+				}
+				if accepted {
+					expected := *original.Spec
+					expected.Request, expected.Hash = row.Request, row.Spec.Hash
+					if !reflect.DeepEqual(*row.Spec, expected) {
+						t.Fatal("retry changed accepted execution inputs")
+					}
 				}
 				replay, err := control.Retry(t.Context(), selector, input)
 				if err != nil || !replay.Replayed || replay.RunID != result.RunID || replay.Number != result.Number || !reflect.DeepEqual(replay.Inputs, result.Inputs) {
@@ -182,8 +189,13 @@ func TestRetryAliasesReplayCommittedMode(t *testing.T) {
 				t.Fatal(err)
 			}
 			row, err := tenant.ReadRun(t.Context(), first.RunID)
-			if err != nil || row.Retry == nil || row.Retry.Mode != string(mode) || !reflect.DeepEqual(row.Request, source.Request) || !reflect.DeepEqual(row.Spec, source.Spec) {
+			if err != nil || row.Retry == nil || row.Retry.Mode != string(mode) || !reflect.DeepEqual(row.Request.Request, source.Request.Request) || row.Request.Provenance.Writer() != runspec.PrincipalWriter("account", "member") || row.Spec == nil || !reflect.DeepEqual(row.Spec.Request, row.Request) || row.Spec.PlanHash != source.Spec.PlanHash {
 				t.Fatalf("selection was not committed outside seals: %+v %v", row, err)
+			}
+			expected := *source.Spec
+			expected.Request, expected.Hash = row.Request, row.Spec.Hash
+			if !reflect.DeepEqual(*row.Spec, expected) {
+				t.Fatal("retry selection changed accepted execution inputs")
 			}
 		})
 	}

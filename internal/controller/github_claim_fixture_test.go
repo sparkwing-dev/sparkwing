@@ -35,7 +35,7 @@ func configureGitHubClaims(t *testing.T, s *controller.Server, st *store.Store) 
 	return s.WithEngineController(controller.NewEngineController(st, controller.EngineController{RunnerPolicy: githubClaimEnvironment{}, VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: versions}}))
 }
 
-func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, sha string, appID int64, dispatch runspec.Dispatch) {
+func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, sha string, appID int64, dispatch runspec.Dispatch, writers ...runspec.Writer) {
 	t.Helper()
 	now := teststore.Now(st)
 	if err := teststore.SeedRun(st, t.Context(), store.Team(team), store.Run{RunSummary: runstate.RunSummary{ID: run, Pipeline: "build", Status: "pending", CreatedAt: now, RepoURL: remote, GitBranch: ref, GitSHA: sha}}); err != nil {
@@ -62,6 +62,13 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 			commit = sha
 		}
 		seal.Provenance = controller.AssertedProvenance(t, "build", ref, commit)
+	}
+	if len(writers) > 0 {
+		var err error
+		seal.Provenance, err = runspec.AssertedProvenance(writers[0], ref, sha, seal.Request.Pipeline)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	body := controller.SealWith(t, seal, seal.Provenance)
 	if _, err := teststore.Exec(t.Context(), st, `UPDATE runs SET repo_key=?,repo_display=?,request_json=?,dispatch=? WHERE team=? AND id=?`, key, remote, body, dispatch, team, run); err != nil {

@@ -461,7 +461,7 @@ func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Spec == nil || !reflect.DeepEqual(*run.Spec, source.Spec) || !reflect.DeepEqual(run.Request, source.Spec.Request) || run.Lineage.RetryOf != plan.RunID || !run.Lineage.Retrier.Set || run.Lineage.Retrier.Value.ID != "retrier" || run.Request.Request.Actor.ID != "member" || !run.Request.Request.PullRequest.Set || run.Request.Request.PullRequest.Value.Number != 42 {
+	if run.Spec == nil || !reflect.DeepEqual(run.Request.Request, source.Spec.Request.Request) || !reflect.DeepEqual(run.Spec.Request, run.Request) || run.Request.Provenance.Writer() != runspec.PrincipalWriter("machine", "retrier") || run.Spec.Hash == source.Spec.Hash || run.Spec.PlanHash != source.Spec.PlanHash || run.Lineage.RetryOf != plan.RunID || !run.Lineage.Retrier.Set || run.Lineage.Retrier.Value.ID != "retrier" || run.Request.Request.Actor.ID != "member" || !run.Request.Request.PullRequest.Set || run.Request.Request.PullRequest.Value.Number != 42 {
 		t.Fatalf("retry lost seals/lineage: %+v", run)
 	}
 	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(retry.RunID), NodeID: "job"})
@@ -830,13 +830,17 @@ func TestPlanGuardRefusalPersistsSealWithoutOfferingJobs(t *testing.T) {
 func TestAdmissionRetryKeepsVerifiedAppFactsAndDoesNotReplayDelivery(t *testing.T) {
 	tenant, request, now := intakeFixture(t)
 	request.VerifiedDeliveryID = "delivery"
-	facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: fixtureFeatureSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}
+	request.Request.Source.Ref = fixtureFeatureSHA
+	facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: fixtureFeatureSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}
 	tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return facts, nil
 	})
 	original, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !original.Request.Provenance.Verified() {
+		t.Fatal("App retry fixture must begin with verified provenance")
 	}
 	request.VerifiedDeliveryID = ""
 	request.Request.Lineage.RetryOf = original.RunID
