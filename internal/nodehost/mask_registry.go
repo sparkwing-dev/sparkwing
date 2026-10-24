@@ -11,19 +11,21 @@ import (
 
 // MaskRegistry serializes run-local registrations and topology acceptance.
 type MaskRegistry struct {
-	mu     sync.Mutex
+	mu     *sync.Mutex
 	masker *secrets.Masker
 	// Replay must reproduce accepted topology even after credentials are issued.
 	replayMasks *secrets.Masker
 	identifiers map[string]string
 	jobs        map[[2]string]*MaskRegistry
+	parent      *MaskRegistry
+	users       int
 }
 
 // NewMaskRegistry uses the same masker that host logs and returned errors use.
 func NewMaskRegistry(masker *secrets.Masker) *MaskRegistry {
 	replayMasks := secrets.NewMasker()
 	replayMasks.Merge(masker)
-	return &MaskRegistry{masker: masker, replayMasks: replayMasks, identifiers: map[string]string{}}
+	return &MaskRegistry{mu: &sync.Mutex{}, masker: masker, replayMasks: replayMasks, identifiers: map[string]string{}}
 }
 
 func (r *MaskRegistry) job(run, job string) *MaskRegistry {
@@ -32,24 +34,25 @@ func (r *MaskRegistry) job(run, job string) *MaskRegistry {
 	key := [2]string{run, job}
 	scoped := r.jobs[key]
 	if scoped == nil {
-		scoped = NewMaskRegistry(secrets.NewMasker())
+		scoped = &MaskRegistry{mu: r.mu, masker: r.masker.Scoped(), replayMasks: r.replayMasks.Scoped(), identifiers: r.identifiers, parent: r}
 		if r.jobs == nil {
 			r.jobs = map[[2]string]*MaskRegistry{}
 		}
 		r.jobs[key] = scoped
 	}
-	scoped.inherit(r)
+	scoped.users++
 	return scoped
 }
 
-// The parent lock orders acceptance and registration before inheritance.
-func (r *MaskRegistry) inherit(parent *MaskRegistry) {
+func (r *MaskRegistry) releaseJob(run, job string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.masker.Merge(parent.masker)
-	r.replayMasks.Merge(parent.replayMasks)
-	for identifier, path := range parent.identifiers {
-		r.identifiers[identifier] = path
+	key := [2]string{run, job}
+	if scoped := r.jobs[key]; scoped != nil {
+		scoped.users--
+		if scoped.users == 0 {
+			delete(r.jobs, key)
+		}
 	}
 }
 
@@ -69,6 +72,9 @@ func (r *MaskRegistry) registerValue(value string) error {
 
 // registerIssued protects a service value without changing accepted topology.
 func (r *MaskRegistry) registerIssued(value string) error {
+	if r.parent != nil {
+		return r.parent.registerIssued(value)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.masker == nil {
@@ -76,9 +82,6 @@ func (r *MaskRegistry) registerIssued(value string) error {
 	}
 	if err := r.masker.Register(value); err != nil {
 		return err
-	}
-	for _, job := range r.jobs {
-		job.inherit(r)
 	}
 	return nil
 }
@@ -96,9 +99,6 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 	}
 	r.masker.Merge(candidate)
 	r.replayMasks.Merge(candidate)
-	for _, job := range r.jobs {
-		job.inherit(r)
-	}
 	return nil
 }
 
@@ -129,9 +129,6 @@ func (r *MaskRegistry) accept(plan nodeproto.PlanDoc, commit func() error, match
 	}
 	for identifier, path := range identifiers {
 		r.identifiers[identifier] = path
-	}
-	for _, job := range r.jobs {
-		job.inherit(r)
 	}
 	return nil
 }

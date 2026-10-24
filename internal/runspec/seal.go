@@ -192,7 +192,7 @@ func project(s Spec) projections {
 	return projections{RepoKey: r.Git.Repository.Key, RepoDisplay: r.Git.Repository.Display, Pipeline: r.Pipeline, SHA: r.Git.SHA, Ref: r.Git.Ref, DefaultBranch: branch, Dispatch: r.Dispatch, AllowedPools: append([]string(nil), s.Request.AllowedPools...), RequestHash: s.Request.Hash, SpecHash: s.Hash, PlanHash: s.PlanHash}
 }
 
-// CarryRetry preserves code and inputs, sealing asserted writes for the retrier.
+// CarryRetry preserves the sealed code, writer and inputs, recording the retrier separately.
 func CarryRetry(input RetryInput) (RetrySnapshot, error) {
 	if err := verifyRequest(input.Request); err != nil {
 		return RetrySnapshot{}, err
@@ -223,23 +223,6 @@ func CarryRetry(input RetryInput) (RetrySnapshot, error) {
 	snapshot, err := clone(RetrySnapshot{Request: input.Request, Spec: input.Spec, Lineage: lineage})
 	if err != nil {
 		return RetrySnapshot{}, err
-	}
-	if snapshot.Request.Provenance.Trust() == TrustAsserted {
-		if input.Retrier.Kind == "" || input.Retrier.ID == "" {
-			return RetrySnapshot{}, errors.New("asserted retry requires a retrier")
-		}
-		snapshot.Request.Provenance.identity.Writer = string(PrincipalWriter(input.Retrier.Kind, input.Retrier.ID))
-		snapshot.Request.Hash, err = CanonicalHash(snapshot.Request)
-		if err != nil {
-			return RetrySnapshot{}, err
-		}
-		if snapshot.Spec.Set {
-			snapshot.Spec.Value.Request = snapshot.Request
-			snapshot.Spec.Value.Hash, err = CanonicalHash(snapshot.Spec.Value)
-			if err != nil {
-				return RetrySnapshot{}, err
-			}
-		}
 	}
 	snapshot.Plan = append([]byte(nil), input.Plan...)
 	return snapshot, nil

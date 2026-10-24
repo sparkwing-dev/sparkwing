@@ -39,11 +39,12 @@ exists; bytes already emitted cannot be recalled. The host therefore registers
 known values before spawning author code and lazily issued values before
 releasing them.
 
-Each job inherits the host's accepted masks and owns subsequent
-runtime registrations. Explicit mask registrations, issued credentials, logs,
-annotations, summaries and typed outputs share that job's masker across processes and retries. A runtime
-registration cannot censor another job's output. Child-run arguments pass the
-same secret check as typed output before any controller request or child admission.
+The host's shared masker owns accepted secrets, runtime secret reads and issued
+OIDC tokens. Every live job sees new host registrations without copying them into
+its registry. Explicit mask registrations apply only to the registering job's
+logs, annotations, summaries and typed outputs. Its registry is released when
+its last delegated process ends. Child-run arguments, repository and branch pass
+the same secret check as typed output before any controller request or admission.
 
 Fresh identifiers are checked against every registered mask, including issued
 values. Issuance does not invalidate identifiers already accepted. That exemption

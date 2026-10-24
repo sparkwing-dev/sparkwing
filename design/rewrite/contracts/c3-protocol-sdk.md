@@ -1204,8 +1204,11 @@ secret defaults, list argument kinds, raw/effective values and normalized list
 items. The host argument validator and registration projection both use
 `argvalue.List` for comma splitting, Unicode whitespace trimming and empty-item
 omission. SDKs decode the host-prepared values.
-Known registrations precede author execution. Lazily issued values are registered
-before release. Refuse fewer than four characters in customer-stored
+Known registrations precede author execution. Runtime secret reads and OIDC
+tokens register with the shared host masker before release, so existing job
+streams see them. Explicit Mask registrations stay within the registering job
+and are released with its last delegated process. Child arguments, repository
+and branch pass the output secret check before leaving the host. Refuse fewer than four characters in customer-stored
 secrets, supplied secret args and selected nonempty defaults, including individual
 list items. Refusals direct authors to a plain config variable. Empty supplied
 arguments and defaults carry no value. Unselected defaults do not refuse a run.

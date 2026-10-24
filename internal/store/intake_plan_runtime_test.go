@@ -461,7 +461,7 @@ func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Spec == nil || !reflect.DeepEqual(run.Request.Request, source.Spec.Request.Request) || !reflect.DeepEqual(run.Spec.Request, run.Request) || run.Request.Provenance.Writer() != runspec.PrincipalWriter("machine", "retrier") || run.Spec.Hash == source.Spec.Hash || run.Spec.PlanHash != source.Spec.PlanHash || run.Lineage.RetryOf != plan.RunID || !run.Lineage.Retrier.Set || run.Lineage.Retrier.Value.ID != "retrier" || run.Request.Request.Actor.ID != "member" || !run.Request.Request.PullRequest.Set || run.Request.Request.PullRequest.Value.Number != 42 {
+	if run.Spec == nil || !reflect.DeepEqual(run.Request.Request, source.Spec.Request.Request) || !reflect.DeepEqual(run.Spec.Request, run.Request) || run.Request.Provenance.Writer() != source.Spec.Request.Provenance.Writer() || run.Spec.Hash != source.Spec.Hash || run.Spec.PlanHash != source.Spec.PlanHash || run.Lineage.RetryOf != plan.RunID || !run.Lineage.Retrier.Set || run.Lineage.Retrier.Value.ID != "retrier" || run.Request.Request.Actor.ID != "member" || !run.Request.Request.PullRequest.Set || run.Request.Request.PullRequest.Value.Number != 42 {
 		t.Fatalf("retry lost seals/lineage: %+v", run)
 	}
 	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(retry.RunID), NodeID: "job"})

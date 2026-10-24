@@ -50,6 +50,7 @@ const (
 	guardOwnerPolicy     edgeGuard = "typed_owner_policy"
 	guardUnpriced        edgeGuard = "authorized_unpriced_claim"
 	guardUnclaimed       edgeGuard = "unclaimed"
+	guardDependency      edgeGuard = "store_dependency_verdict"
 	guardHolder          edgeGuard = "live_exact_holder"
 	guardAward           edgeGuard = "atomic_award"
 	guardApproval        edgeGuard = "approval_resolution"
@@ -87,7 +88,7 @@ func nodeTransitions() []nodeEdge {
 		{[]runstate.NodeState{nodePending}, terminal, []runstate.ActorKind{runstate.ActorOperator}, runstate.CausePublish, []edgeGuard{guardPublication}, false},
 		{[]runstate.NodeState{nodePending}, []runstate.NodeState{nodePending}, []runstate.ActorKind{runstate.ActorOperator}, runstate.CausePublishAttempt, []edgeGuard{guardPublication}, false},
 		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeReady}, owners, runstate.CauseRelease, []edgeGuard{guardOwner, guardUnclaimed}, false},
-		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeSkipped, runstate.NodeCancelled}, owners, causeDependency, []edgeGuard{guardOwner, guardUnclaimed}, false},
+		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeSkipped, runstate.NodeCancelled}, owners, causeDependency, []edgeGuard{guardOwner, guardUnclaimed, guardDependency}, false},
 		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeFailed, runstate.NodeSkipped}, owners, causeOwnerPolicy, []edgeGuard{guardOwner, guardUnclaimed, guardOwnerPolicy}, false},
 		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeFailed, runstate.NodeSkipped}, owners, causeAdmissionRefused, []edgeGuard{guardOwner, guardUnclaimed}, false},
 		{[]runstate.NodeState{nodePending, runstate.NodeReady}, []runstate.NodeState{runstate.NodeApprovalPending}, owners, runstate.CauseApprovalOpen, []edgeGuard{guardOwner, guardUnclaimed}, false},
@@ -525,6 +526,25 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row runstate.N
 			}
 			if award.Claim.Kind != capability.UnitNode || runspec.NodeID(award.Claim.NodeID) != row.Ref.NodeID {
 				return holderRefusal()
+			}
+		case guardDependency:
+			snapshot, err := readSnapshotTx(ctx, tx, team, string(row.Ref.RunID))
+			if err != nil {
+				return err
+			}
+			graph, err := snapshot.Scheduling()
+			if err != nil {
+				return err
+			}
+			matched := false
+			for _, decision := range Decide(graph).Nodes {
+				if decision.NodeID == string(row.Ref.NodeID) && decision.Kind == DecisionTerminal && runstate.NodeState(decision.Outcome) == change.To {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return errors.New("dependency verdict differs from the accepted graph")
 			}
 		case guardUnclaimed:
 			if row.ClaimedBy != "" {

@@ -52,8 +52,10 @@ are masked as byte streams before line splitting. Protocol frames are decoded
 first, then their payloads are sanitized before trusted envelopes are built.
 The accepted run seals one registration projection containing raw arguments,
 secret defaults, effective values and every normalized list item. Stored secrets
-and OIDC tokens are registered before the host releases them. Explicit `Mask`
-registers author-generated values before subsequent output.
+and OIDC tokens register with the shared host masker before release. Explicit
+`Mask` registrations affect only the registering job and end with its last
+process. Child arguments, repository and branch pass the output secret check
+before leaving the host.
 
 See [secret values](secrets.md#values-that-can-be-secrets) for the masking
 length rule and save-time warning. Empty supplied arguments and defaults carry no value.
@@ -147,8 +149,10 @@ team-wide shared secrets, like a GitHub reusable workflow called without
 own commit in the inherited repository is refused with `403`. An explicit
 child repository requires authorization from the parent's live claim and always
 runs as asserted. Cycle checks compare repository and pipeline together. A
-retry keeps its source run's proven identity. An asserted retry keeps the source
-code and inputs, and writes cache and memo entries in the retrying principal's scope.
+retry keeps its source run's sealed identity, including asserted provenance,
+in full and failed modes. Cache, memo and personal placement use that same
+writer because that principal chose the code. The retrier is recorded separately
+as the actor requesting the retry.
 
 An Actions push-bound runner takes work only when its sealed provenance proves
 the binding's exact repository, ref and commit through Actions or a verified

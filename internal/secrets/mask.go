@@ -16,6 +16,7 @@ import (
 )
 
 type Masker struct {
+	parent        *Masker
 	mu            sync.RWMutex
 	raw           map[string]struct{}
 	values        []string
@@ -25,6 +26,9 @@ type Masker struct {
 }
 
 func NewMasker() *Masker { return &Masker{} }
+
+// Scoped sees current host registrations while keeping new registrations local.
+func (m *Masker) Scoped() *Masker { return &Masker{parent: m} }
 
 // ShortValueWarning explains the masking limit without revealing a secret.
 const ShortValueWarning = "Secret values shorter than 4 characters cannot be masked in logs."
@@ -71,6 +75,9 @@ func (m *Masker) add(value string) {
 func (m *Masker) Merge(other *Masker) {
 	if other == nil || other == m {
 		return
+	}
+	if other.parent != nil {
+		m.Merge(other.parent)
 	}
 	other.mu.RLock()
 	values := slices.Clone(other.values)
@@ -316,9 +323,11 @@ func (m *Masker) Values() []string {
 		return nil
 	}
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	out := make([]string, len(m.values))
-	copy(out, m.values)
+	out := slices.Clone(m.values)
+	m.mu.RUnlock()
+	if m.parent != nil {
+		out = append(out, m.parent.Values()...)
+	}
 	return out
 }
 

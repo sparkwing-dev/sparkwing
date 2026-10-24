@@ -4473,9 +4473,12 @@ metadata cannot enter the response through a missing field mapping.
 
 ## Asserted retry provenance
 
-The unchanged-seal rule above applies to proven provenance. An asserted retry
-preserves its source code, inputs, default-branch fallback and secret restrictions,
-but seals its writer as the authenticated retrier. `CarryRetry` recomputes the
-request hash and, when present, the accepted spec hash together. The source seal
-remains unchanged. Personal placement and cache and memo authority read that
-sealed writer rather than the destination's creator metadata.
+Every retry preserves its source seal, including the writer, in both full and
+failed modes. This includes asserted account, run and armer writers. The retrier
+is recorded only in execution lineage as the actor who requested the retry.
+Personal placement, owner-machine checks and cache and memo authority read the
+same sealed writer because that principal chose the code.
+
+Dependency terminal transitions require the outcome that `Decide(graph)` returns
+for that node in the committing transaction. An owner cannot bypass an approval
+by asserting that its dependencies require a skip.

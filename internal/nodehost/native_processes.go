@@ -32,12 +32,19 @@ func (p *NativeProcesses) Delegate(ctx context.Context, parent capability.Creden
 	services.activity = &nativeProcessActivity{}
 	issued, revoke, err := p.Authorities.delegate(ctx, parent, spec, &services)
 	if err != nil {
+		p.Masks.releaseJob(services.RunID, services.Job.ID)
 		return ProcessGrant{Revoke: revoke}, err
+	}
+	var once sync.Once
+	release := func() error {
+		err := revoke()
+		once.Do(func() { p.Masks.releaseJob(services.RunID, services.Job.ID) })
+		return err
 	}
 	return ProcessGrant{Binding: nodeproto.ProcessBinding{
 		RunID: spec.Binding.RunID, JobID: services.Job.ID,
 		Routes: nodeproto.ProcessRoutes{URL: strings.TrimRight(p.URL, "/"), Bearer: issued.Raw},
-	}, Revoke: revoke, masks: services.Masks}, nil
+	}, Revoke: release, masks: services.Masks}, nil
 }
 
 // Start launches an attempt with its live delegated services.

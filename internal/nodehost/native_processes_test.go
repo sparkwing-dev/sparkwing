@@ -223,3 +223,85 @@ func TestNativeProcessChildAwaitPausesItsAttemptIdleBudget(t *testing.T) {
 		}
 	})
 }
+
+func TestNativeProcessRuntimeCredentialsUseHostMasker(t *testing.T) {
+	processes, lookup, spec, services := nativeProcessesFixture(t)
+	services.Secrets = []string{"TOKEN"}
+	services.Secret = func(context.Context, capability.Authorized, string) (string, bool, error) {
+		return "runtime-secret", true, nil
+	}
+	services.OIDC = func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error) {
+		return ProcessOIDCToken{Token: "runtime-token", ExpiresAt: time.Unix(2e9, 0)}, nil
+	}
+	first, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, err := processes.Authorities.processServices(t.Context(), first.Binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := processes.Authorities.deps.Parent.(*processParent)
+	parent.snapshot.Authorities[0].Principal.Capability.Binding.NodeID = "other-job"
+	parent.snapshot.Binding.Current.NodeID = "other-job"
+	spec.Binding.NodeID, services.Job.ID = "other-job", "other-job"
+	second, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	processes.Log = func(_ context.Context, _, _ string, frame nodeproto.FrameLog) error {
+		output += frame.Message
+		return nil
+	}
+	config, err := processes.configuration(t.Context(), second.Binding, second.Revoke, ExecutorActivity{}, AcceptedRun{Spec: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := httptest.NewRequest("GET", "/node/v1/secrets/TOKEN", nil)
+	secret.SetPathValue("name", "TOKEN")
+	if _, err := one.secret(secret, capability.Authorized{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := one.oidc(httptest.NewRequest("POST", "/node/v1/oidc-token", strings.NewReader(`{"audience":"cloud"}`)), capability.Authorized{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := processes.Masks.mask("runtime-secret runtime-token"); got != "*** ***" {
+		t.Errorf("shared host masker exposed credentials: %q", got)
+	}
+	if err := config.Log(t.Context(), nodeproto.FrameLog{Message: "runtime-secret runtime-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if output != "*** ***" {
+		t.Errorf("live sibling exposed issued credentials: %q", output)
+	}
+}
+
+func TestNativeProcessDropsJobMasksAfterLastRevocation(t *testing.T) {
+	processes, lookup, spec, services := nativeProcessesFixture(t)
+	first, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, err := processes.Authorities.processServices(t.Context(), first.Binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := one.Masks.registerValue("job-only-mask"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Revoke(); err != nil {
+		t.Fatal(err)
+	}
+	next, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := processes.Authorities.processServices(t.Context(), next.Binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if two.Masks.ContainsSecret("job-only-mask") {
+		t.Fatal("ended job's registrations survived its lifetime")
+	}
+}

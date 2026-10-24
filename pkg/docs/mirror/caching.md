@@ -146,11 +146,12 @@ other run writes under its own scope, `manual:<writer>:<ref>`:
 | Child not at its parent's exact revision, under an asserted parent | The parent's writer |
 | Child not at its parent's exact revision, under any other parent | The parent run, `run/<id>` |
 | Run bound to a GitHub Actions push | `actions`, shared per ref |
-| Retry of an asserted run | The retrying principal |
+| Retry in full or failed mode | The source run's writer |
 
-A child at its parent's exact revision, and a retry of a proven run, write under
-the scope of the run they inherit from. An asserted retry keeps its source code
-and inputs, and writes in the retrier's scope. Every run writes only its own scope. Every run also
+A child at its parent's exact revision, and every retry, write under the scope
+of the run they inherit from. Retries preserve the sealed writer, code and
+inputs in full and failed modes. The retrier is recorded separately as an actor.
+Every run writes only its own scope. Every run also
 reads verified records of the repository's default branch, which intake learns
 from the verified records already stored, and a verified pull request also
 reads verified records of its base branch. One member's manual run therefore
