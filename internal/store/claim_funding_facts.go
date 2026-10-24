@@ -12,13 +12,28 @@ type claimOverflowFacts struct {
 	MonthlyMinutes *int64 `json:"monthly_minutes"`
 }
 
-func (o *Operator) claimOverflowFactsTx(ctx context.Context, tx *storeTx, team string, cloud bool) ([]claimOverflowFacts, error) {
+func (o *Operator) claimOverflowAccountsTx(ctx context.Context, tx *storeTx, team string, current claimFacts, target *UnitRef) ([]claimOverflowFacts, error) {
 	q := claimSQL{dialect: tx.dialect}
-	query := `SELECT DISTINCT team,created_principal FROM runs WHERE team IN (` + liveTeamsSQL + `) AND status IN ('pending','running') AND ` + q.at(q.blob("request_json"), "request", "burst") + ` IS NOT NULL`
-	if !cloud {
-		query += ` AND team=` + q.param(team)
+	clock := q.param(tx.now(ctx).UnixNano())
+	scope := `tm.name IN (` + liveTeamsSQL + `)`
+	if team != "" {
+		scope += ` AND tm.name=` + q.param(team)
 	}
-	rows, err := tx.queryContext(ctx, query+` ORDER BY team,created_principal`, q.args...)
+	// Index seeks skip whole policy ranges belonging to the same account.
+	query := `WITH RECURSIVE clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),accounts(team,account) AS (
+ SELECT tm.name,(SELECT MIN(cc.overflow_account) FROM claim_contexts cc,clock WHERE cc.team=tm.name AND cc.overflow_account IS NOT NULL AND ` + q.readyClaimContextSQL() + `) FROM teams tm WHERE ` + scope + `
+ UNION ALL SELECT accounts.team,(SELECT MIN(cc.overflow_account) FROM claim_contexts cc,clock WHERE cc.team=accounts.team AND cc.overflow_account>accounts.account AND ` + q.readyClaimContextSQL() + `) FROM accounts WHERE account IS NOT NULL
+ ) SELECT team,account FROM accounts WHERE account IS NOT NULL`
+	// Narrow claims gather funding only after their indexed binding lookup.
+	bound := claimSQL{dialect: tx.dialect}
+	if scope := bound.boundRunScope(current, target); scope != "" {
+		q = bound
+		query = `WITH bound_runs AS MATERIALIZED (SELECT br.id,br.team,br.created_principal,br.status,br.request_json FROM runs br WHERE ` + scope + `) SELECT DISTINCT team,created_principal AS account FROM bound_runs WHERE team IN (` + liveTeamsSQL + `) AND status IN ('pending','running') AND ` + q.at(q.blob("request_json"), "request", "burst") + ` IS NOT NULL`
+		if team != "" {
+			query += ` AND team=` + q.param(team)
+		}
+	}
+	rows, err := tx.queryContext(ctx, query+` ORDER BY team,account`, q.args...)
 	if err != nil {
 		return nil, err
 	}
@@ -33,6 +48,10 @@ func (o *Operator) claimOverflowFactsTx(ctx context.Context, tx *storeTx, team s
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
+	return out, nil
+}
+
+func claimOverflowUsageTx(ctx context.Context, tx *storeTx, out []claimOverflowFacts) ([]claimOverflowFacts, error) {
 	for i := range out {
 		control, err := overflowControlTx(ctx, tx, Team(out[i].Team), out[i].Account)
 		if err != nil {

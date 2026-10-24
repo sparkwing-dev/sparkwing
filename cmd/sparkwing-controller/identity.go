@@ -23,38 +23,57 @@ type identityFlags struct {
 	SignUpGate         string
 }
 
-// safety: a half-configured Google client is refused, because it would draw a sign-in button that cannot finish.
-func configureIdentity(srv *controller.Server, f identityFlags, logger *slog.Logger) error {
+type identityConfig struct {
+	flags      identityFlags
+	waitlist   bool
+	googleURIs []string
+}
+
+// safety: fatal sign-in configuration is checked before startup creates persistent
+// state. GitHub App settings are checked later and only disable the App.
+func parseIdentity(f identityFlags) (identityConfig, error) {
 	gate, err := store.ParseSignUpMode(f.SignUpGate)
 	if err != nil {
-		return fmt.Errorf("--signup-gate: %w", err)
+		return identityConfig{}, fmt.Errorf("--signup-gate: %w", err)
 	}
-	srv.WithSignUpWaitlist(gate == store.SignUpWaitlist)
+	cfg := identityConfig{flags: f, waitlist: gate == store.SignUpWaitlist}
+	google, err := providerConfigured("Google", "google", f.GoogleClientID, f.GoogleClientSecret)
+	if err != nil {
+		return identityConfig{}, err
+	}
+	github := f.GitHubApp.AppID != "" || f.GitHubApp.Slug != "" || f.GitHubApp.PrivateKey != "" ||
+		f.GitHubApp.ClientID != "" || f.GitHubApp.ClientSecret != "" || f.GitHubApp.CredentialError != nil ||
+		f.GitHubHook.Current() != nil || f.GitHubHook.Previous() != nil
+	if google || (f.RedirectURIs != "" && !github) {
+		uris, err := redirectAllowlist(f.RedirectURIs)
+		if err != nil {
+			return identityConfig{}, err
+		}
+		if google {
+			cfg.googleURIs = uris
+		}
+	}
+	return cfg, nil
+}
+
+func configureIdentity(srv *controller.Server, cfg identityConfig, logger *slog.Logger) {
+	f := cfg.flags
+	srv.WithSignUpWaitlist(cfg.waitlist)
 	// safety: the server counts the free-team slots itself, so a multi-team
 	// controller's gate always reads the free tier and never treats it as open.
 	srv.WithFreeTier(srv)
 	srv.CheckFreeTierSource()
-
-	google, err := providerConfigured("Google", "google", f.GoogleClientID, f.GoogleClientSecret)
-	if err != nil {
-		return err
-	}
-	if google {
-		uris, err := redirectAllowlist(f.RedirectURIs)
-		if err != nil {
-			return err
-		}
-		srv.WithGoogleSignIn(googleauth.New(googleauth.Google(f.GoogleClientID, f.GoogleClientSecret)), uris)
+	if len(cfg.googleURIs) != 0 {
+		srv.WithGoogleSignIn(googleauth.New(googleauth.Google(f.GoogleClientID, f.GoogleClientSecret)), cfg.googleURIs)
 	}
 	f.GitHubApp.RedirectURIs = f.RedirectURIs
 	configureGitHubApp(srv, f.GitHubApp, f.GitHubHook)
-	if !google && f.GitHubApp.ClientID == "" && f.GitHubApp.ClientSecret == "" {
-		return nil
+	if len(cfg.googleURIs) == 0 && f.GitHubApp.ClientID == "" && f.GitHubApp.ClientSecret == "" {
+		return
 	}
 	if !f.MultiTeam {
 		logger.Warn("sign-in is configured but not offered: it needs --deployment=team or cloud")
 	}
-	return nil
 }
 
 func providerConfigured(label, flag, id, secret string) (bool, error) {

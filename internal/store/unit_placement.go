@@ -22,8 +22,7 @@ func placementRank(profile match.Profile, demand match.Demand, preferences []Pla
 		if err != nil {
 			return len(preferences)
 		}
-		profile.Labels = slices.DeleteFunc(profile.Labels, func(label string) bool { return strings.HasPrefix(label, "sparkwing-") })
-		profile.Labels = append(profile.Labels, size.Label)
+		profile.Labels = placementSizeLabels(profile.Labels, size)
 	}
 	for i, preference := range preferences {
 		if len(preference.Prefers) == 0 || slices.ContainsFunc(preference.Prefers, func(term string) bool {
@@ -33,6 +32,11 @@ func placementRank(profile match.Profile, demand match.Demand, preferences []Pla
 		}
 	}
 	return len(preferences)
+}
+
+func placementSizeLabels(labels []string, size match.CloudSize) []string {
+	labels = slices.DeleteFunc(slices.Clone(labels), func(label string) bool { return strings.HasPrefix(label, "sparkwing-") })
+	return append(labels, size.Label)
 }
 
 func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, liveness time.Duration, launchers bool) ([]runnerPoll, error) {

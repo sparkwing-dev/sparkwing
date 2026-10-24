@@ -460,11 +460,11 @@ func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
 func TestPaymentOwnershipFollowsTheStoredIdentityNotTheHost(t *testing.T) {
 	e, tenant := engineRuntimeStore(t)
 	engineSQL(t, e.Store, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
-	id, err := e.Store.AsOperator().DeploymentID(t.Context())
+	id, err := e.Store.AsOperator().ConfigureDeployment(t.Context(), "", store.DefaultFreeTeamSlots, func() error { return nil })
 	if err != nil || !strings.HasPrefix(id, "dep-") {
 		t.Fatalf("deployment id %q: %v", id, err)
 	}
-	if again, err := e.Store.AsOperator().DeploymentID(t.Context()); err != nil || again != id {
+	if again, err := e.Store.AsOperator().ConfigureDeployment(t.Context(), "", store.DefaultFreeTeamSlots, func() error { return nil }); err != nil || again != id {
 		t.Fatalf("deployment id changed: %q then %q: %v", id, again, err)
 	}
 	billingModelCheckout(t, e.Store, tenant, "cs_owned", 2000)

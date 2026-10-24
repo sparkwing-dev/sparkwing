@@ -3,17 +3,17 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 )
 
-func loadOIDCIssuer(cfg deployment.Config, ttl time.Duration, log io.Writer) (*oidcissuer.Issuer, error) {
+func loadOIDCIssuer(cfg deployment.Config, ttl time.Duration) (*oidcissuer.Issuer, error) {
+	if err := oidcissuer.ValidateTTL(ttl); err != nil {
+		return nil, err
+	}
 	active, published := cfg.OIDCKey().Current(), cfg.OIDCKey().Previous()
 	if active == nil {
 		return nil, nil
@@ -25,11 +25,5 @@ func loadOIDCIssuer(cfg deployment.Config, ttl time.Duration, log io.Writer) (*o
 	if !strings.HasPrefix(issuerURL, "https://") {
 		return nil, fmt.Errorf("the OIDC issuer %q must be https, because cloud providers fetch its keys only over TLS", issuerURL)
 	}
-	iss, err := oidcissuer.New(issuerURL, active, published, ttl)
-	if err != nil {
-		return nil, err
-	}
-	slog.New(controller.CredentialSafeLogHandler(slog.NewTextHandler(log, nil))).Info("OIDC issuer",
-		"issuer", iss.URL(), "signing_key", iss.KeyIDs()[0], "published_keys", iss.KeyIDs(), "token_lifetime", iss.TTL())
-	return iss, nil
+	return oidcissuer.New(issuerURL, active, published, ttl)
 }

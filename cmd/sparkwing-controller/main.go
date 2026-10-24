@@ -19,6 +19,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
@@ -92,7 +93,7 @@ func run(args []string) error {
 		"base URL this controller answers on from outside the cluster, which is "+
 			"where runners transfer signed filesystem data and logs, and what GitHub Actions workflows "+
 			"and OIDC tokens name. Empty serves no workflow or OIDC issuer, and filesystem data uses --addr, "+
-			"with localhost for a wildcard listener.")
+			"and a wildcard listener requires --external-url.")
 	oidcTokenTTL := fs.Duration("oidc-token-ttl", oidcissuer.DefaultTTL,
 		"lifetime of an OIDC ID token, from 1m to 1h")
 	trustedProxyCIDRs := fs.String("trusted-proxy-cidrs", "", "comma-separated proxy CIDRs allowed to supply X-Forwarded-For for request logs and per-IP limits; empty ignores it")
@@ -420,20 +421,57 @@ func run(args []string) error {
 			"the checkout service refuses a controller without its token")
 	}
 
-	listeners, err := bindListeners(*addr, *trustedProxyAddr, *metricsAddr)
+	identity, err := parseIdentity(identityFlags{
+		MultiTeam:          cfg.MultiTeam(),
+		GoogleClientID:     *googleClientID,
+		GoogleClientSecret: creds.GoogleClientSecret,
+		GitHubApp: githubAppFlags{
+			AppID: *githubAppID, Slug: *githubAppSlug, ClientID: *githubClientID,
+			ClientSecret: creds.GitHubClientSecret, PrivateKey: creds.GitHubAppKey,
+			CredentialError: creds.GitHubError,
+		},
+		GitHubHook:   cfg.WebhookSecret(),
+		RedirectURIs: *oauthRedirectURIs,
+		SignUpGate:   *signUpGate,
+	})
 	if err != nil {
 		return err
 	}
-	defer listeners.close()
-
+	if _, err := readLog().Handler(os.Stderr); err != nil {
+		return err
+	}
+	oidcIssuer, err := loadOIDCIssuer(cfg, *oidcTokenTTL)
+	if err != nil {
+		return fmt.Errorf("oidc issuer: %w", err)
+	}
+	cipher, err := parseSecretsCipher(cfg)
+	if err != nil {
+		return err
+	}
+	var measurement storeurl.MeasurementURL
+	if *bucketStoreURL != "" {
+		measurement, err = storeurl.ParseMeasurementURL(*bucketStoreURL)
+		if err != nil {
+			return fmt.Errorf("--bucket-store: %w", err)
+		}
+	}
+	if strings.HasPrefix(*cacheBlobStore, "s3://") {
+		if _, _, err := s3store.ParseURL(*cacheBlobStore); err != nil {
+			return fmt.Errorf("--cache-blob-store: %w", err)
+		}
+	}
+	var cloudFront *controller.CloudFrontDataConfig
+	if *cloudFrontDomain != "" || *cloudFrontKeyPairID != "" || creds.CloudFrontKey != "" {
+		cloudFront, err = controller.ParseCloudFrontDataConfig(*cloudFrontDomain, *cloudFrontKeyPairID, creds.CloudFrontKey)
+		if err != nil {
+			return err
+		}
+	}
 	budget, err := objectguard.ParseBudget(*objectStoreBudget)
 	if err != nil {
 		return err
 	}
-	if err := objectguard.ConfigureShared(budget); err != nil {
-		return err
-	}
-	if err := applyBucketCeiling(objectguard.CeilingConfig{
+	ceiling := objectguard.CeilingConfig{
 		Limit: objectguard.CeilingLimit{
 			MaxBytes:    *maxBucketBytes,
 			MaxObjects:  *maxBucketObjects,
@@ -441,11 +479,33 @@ func run(args []string) error {
 			WarnObjects: *warnBucketObjects,
 		},
 		Reconcile: *bucketReconcile,
-	}); err != nil {
+	}
+	if err := validateBucketCeiling(ceiling); err != nil {
 		return err
 	}
 
+	if !strings.HasPrefix(*cacheBlobStore, "s3://") {
+		if _, err := filesystemDataEndpoint(*externalURL, *addr); err != nil {
+			return err
+		}
+	}
+
+	listeners, err := bindListeners(*addr, *trustedProxyAddr, *metricsAddr)
+	if err != nil {
+		return err
+	}
+	defer listeners.close()
+
+	if err := objectguard.ConfigureShared(budget); err != nil {
+		return err
+	}
+	objectguard.Shared().Ceiling().Configure(ceiling)
+
 	emitStartupProvenance(os.Stderr)
+	if oidcIssuer != nil {
+		slog.Info("OIDC issuer", "issuer", oidcIssuer.URL(), "signing_key", oidcIssuer.KeyIDs()[0],
+			"published_keys", oidcIssuer.KeyIDs(), "token_lifetime", oidcIssuer.TTL())
+	}
 
 	p, perr := paths.DefaultPaths()
 	if perr != nil {
@@ -511,34 +571,17 @@ func run(args []string) error {
 			WithIdleClaimPoll(*idleClaimPoll).
 			WithIdleClaimPollEnforced(guards.EnforceIdleClaimPoll).
 			WithEgressMeter(egress.New(egressCfg))
-		if err := configureIdentity(srv, identityFlags{
-			MultiTeam:          cfg.MultiTeam(),
-			GoogleClientID:     *googleClientID,
-			GoogleClientSecret: creds.GoogleClientSecret,
-			GitHubApp: githubAppFlags{
-				AppID: *githubAppID, Slug: *githubAppSlug, ClientID: *githubClientID,
-				ClientSecret: creds.GitHubClientSecret, PrivateKey: creds.GitHubAppKey,
-				CredentialError: creds.GitHubError,
-			},
-			GitHubHook:   cfg.WebhookSecret(),
-			RedirectURIs: *oauthRedirectURIs,
-			SignUpGate:   *signUpGate,
-		}, slog.Default()); err != nil {
-			return store.Policies{}, err
-		}
+		configureIdentity(srv, identity, slog.Default())
 		if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
 			return store.Policies{}, err
 		}
-		oidcIssuer, oerr := loadOIDCIssuer(cfg, *oidcTokenTTL, os.Stderr)
-		if oerr != nil {
-			return store.Policies{}, fmt.Errorf("oidc issuer: %w", oerr)
-		}
+
 		srv = srv.WithOIDCIssuer(oidcIssuer)
-		if err := configureSecrets(ctx, srv, st, cfg, generatedKeyPath(p.StateDB())); err != nil {
+		if err := configureSecrets(ctx, srv, st, cipher, generatedKeyPath(p.StateDB())); err != nil {
 			return store.Policies{}, err
 		}
 		if *bucketStoreURL != "" {
-			bucketStore, berr := storeurl.OpenMeasurementStore(ctx, *bucketStoreURL, *bucketMeasurePages)
+			bucketStore, berr := measurement.Open(ctx, *bucketMeasurePages)
 			if berr != nil {
 				return store.Policies{}, fmt.Errorf("--bucket-store: %w", berr)
 			}
@@ -551,8 +594,8 @@ func run(args []string) error {
 				return store.Policies{}, fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 			}
 			var backend blob.ObjectBackend = objects
-			if *cloudFrontDomain != "" || *cloudFrontKeyPairID != "" || creds.CloudFrontKey != "" {
-				backend, err = controller.NewCloudFrontDataBackend(objects, *cloudFrontDomain, *cloudFrontKeyPairID, creds.CloudFrontKey)
+			if cloudFront != nil {
+				backend, err = cloudFront.Backend(objects)
 				if err != nil {
 					return store.Policies{}, err
 				}
@@ -578,29 +621,21 @@ func run(args []string) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	deployment, err := st.AsOperator().DeploymentID(ctx)
-	if err != nil {
-		return fmt.Errorf("payment deployment identity: %w", err)
-	}
-
-	srv.WithPaymentDeployment(deployment)
 	if err := ensureBootstrapAdmin(ctx, st, creds.BootstrapAdminToken, slog.Default()); err != nil {
 		return err
 	}
 	if err := checkRequireAuth(ctx, st.AsOperator(), *requireAuth); err != nil {
 		return err
 	}
+	var configuredMode capability.PaymentMode
 	if paymentVerifier != nil {
-		if err := st.AsOperator().SetPaymentMode(ctx, cfg.PaymentMode()); err != nil {
-			return fmt.Errorf("persist payment configuration: %w", err)
-		}
+		configuredMode = cfg.PaymentMode()
 	}
-	if err := st.SetFreeTeamSlots(ctx, *freeTeamSlots); err != nil {
-		return fmt.Errorf("--free-team-slots: %w", err)
+	deploymentID, err := configureDeployment(ctx, p.StateDB(), cfg, *credentialsDir, epochDir, st, configuredMode, *freeTeamSlots)
+	if err != nil {
+		return fmt.Errorf("persist deployment configuration: %w", err)
 	}
-	if err := writeDeploymentRecord(ctx, p.StateDB(), cfg, *credentialsDir, epochDir, st); err != nil {
-		return err
-	}
+	srv.WithPaymentDeployment(deploymentID)
 	return controller.ServeWith(ctx, srv, listeners.Listeners)
 }
 
@@ -823,24 +858,27 @@ func checkInsecureCookies(cfg deployment.Config, insecure bool) error {
 		"publish the dashboard over TLS and drop the flag")
 }
 
-// safety: no secret is stored as plaintext; a multi-team controller holds other
-// people's credentials, so it refuses to start keyless, and a PostgreSQL one has
-// no volume to keep a generated key on, so it starts and refuses secret writes.
-func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Store,
-	cfg deployment.Config, keyPath string,
-) error {
+// safety: a multi-team controller must refuse missing encryption before creating persistent state.
+func parseSecretsCipher(cfg deployment.Config) (*secrets.Cipher, error) {
 	cipher, err := secretsCipher(cfg.SecretsKey())
 	if err != nil {
-		return err
+		return nil, err
 	}
+	if cipher == nil && cfg.MultiTeam() {
+		return nil, errors.New("a multi-team deployment holds other people's secrets, so they must be encrypted: " +
+			"put a base64-encoded 32-byte key in the " + credSecretsKey + " credential " +
+			"(generate one with `openssl rand -base64 32`)")
+	}
+	return cipher, nil
+}
+
+func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Store,
+	cipher *secrets.Cipher, keyPath string,
+) error {
 	switch {
 	case cipher != nil:
 		// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 		srv.WithSecretsCipher(cipher)
-	case cfg.MultiTeam():
-		return errors.New("a multi-team deployment holds other people's secrets, so they must be encrypted: " +
-			"put a base64-encoded 32-byte key in the " + credSecretsKey + " credential " +
-			"(generate one with `openssl rand -base64 32`)")
 	case st.Dialect() == store.DialectSQLite:
 		ring, err := localsecrets.NewStoreKeyring(keyPath, nil,
 			"Restore that key to "+keyPath+", or put it in the "+credSecretsKey+" credential, and start again.")
@@ -853,7 +891,6 @@ func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Sto
 		srv.WithSecretsCipher(ring.For(st.AsOperator()))
 	default:
 		srv.WithSecretsCipher(keylessCipher{})
-		return nil
 	}
 	return nil
 }
@@ -887,7 +924,7 @@ func configureMailer(ctx context.Context, srv *controller.Server, sender, config
 }
 
 // safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.
-func applyBucketCeiling(cfg objectguard.CeilingConfig) error {
+func validateBucketCeiling(cfg objectguard.CeilingConfig) error {
 	for name, n := range map[string]int64{
 		"--max-bucket-bytes":    cfg.Limit.MaxBytes,
 		"--max-bucket-objects":  cfg.Limit.MaxObjects,
@@ -901,7 +938,6 @@ func applyBucketCeiling(cfg objectguard.CeilingConfig) error {
 	if cfg.Reconcile < 0 {
 		return fmt.Errorf("--bucket-reconcile must not be negative; pass 0 to measure the bucket only at startup")
 	}
-	objectguard.Shared().Ceiling().Configure(cfg)
 	return nil
 }
 

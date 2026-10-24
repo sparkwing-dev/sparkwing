@@ -708,7 +708,7 @@ credential does not open it. It freezes and releases teams and grants credits:
 
 ```bash
 kubectl exec -n NAMESPACE deploy/RELEASE-sparkwing-full-controller -- \
-  sparkwing-controller admin grant --team qa-team --cents 500 --reason "QA fixture" --key qa-1
+  sparkwing-controller admin grant --operator ACCOUNT_ID --team qa-team --cents 500 --reason "QA fixture" --key qa-1
 ```
 
 It acts on the store the serving controller holds. Once startup succeeds, the
@@ -722,11 +722,11 @@ record or when the store it reaches differs, for example after `pg-url` was
 pointed at a restored copy.
 
 A grant with a `--key` it has seen reports the first grant instead of granting
-again. One grant is capped at 10,000 cents ($100); set
-`SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1` in the controller pod to allow more. Each
-action writes the console's business event with `sparkwing-controller admin` as
-the fixed system actor. Audit rows exclude free-form reasons and store grant
-keys as digests.
+again. One grant is capped at 10,000 cents ($100). Pass `--allow-large` on that
+invocation to allow more. Every command requires `--operator ACCOUNT_ID` with
+your existing account ID and records that identity in the business event and
+operator log. Pod access remains the authority for the command. Audit rows
+exclude free-form reasons and store grant keys as digests.
 
 ## Retained storage
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -161,5 +162,39 @@ func TestUnitOperationsShareControllerFence(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestConcurrentQueuedClaimsAwardOnlyOnce(t *testing.T) {
+	s := storetest.Open(t)
+	s.DB().SetMaxOpenConns(12)
+	demand := s.TestOnlyUnitDemand(t)
+	demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
+	start := make(chan struct{})
+	claims := make(chan store.UnitClaim, 12)
+	var group sync.WaitGroup
+	for range 12 {
+		group.Go(func() {
+			<-start
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			if errors.Is(err, store.ErrNotFound) {
+				return
+			}
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			claims <- claim
+		})
+	}
+	close(start)
+	group.Wait()
+	close(claims)
+	if len(claims) != 1 {
+		t.Fatalf("claim winners=%d; want one", len(claims))
+	}
+	claim := <-claims
+	if claim.Team != "a" || claim.RunID != "run" || claim.NodeID != "job" || claim.Award.Generation != 1 {
+		t.Fatalf("queued award: %+v", claim)
 	}
 }

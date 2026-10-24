@@ -33,7 +33,7 @@ func TestGitHubInstallationWithdrawalReplayKeepsOriginalTargets(t *testing.T) {
 			if err := op.EnqueueGitHubDelivery(ctx, "withdraw", "installation_repositories", []byte(`{"installation":{"id":7},"action":"removed"}`), now); err != nil {
 				t.Fatal(err)
 			}
-			delivery, err := op.ClaimGitHubDelivery(ctx, now)
+			delivery, err := op.ClaimGitHubDelivery(ctx)
 			if err != nil || delivery == nil {
 				t.Fatalf("claim: %v %v", delivery, err)
 			}
@@ -44,13 +44,13 @@ func TestGitHubInstallationWithdrawalReplayKeepsOriginalTargets(t *testing.T) {
 			} else if err := tenant.ReconcileGitHubInstallationRepositories(delivery.Context(ctx), 7, nil); err != nil {
 				t.Fatal(err)
 			}
-			if err := op.FinishGitHubDelivery(ctx, *delivery, "listing outage", now); err != nil {
+			if err := op.FinishGitHubDelivery(ctx, *delivery, "listing outage"); err != nil {
 				t.Fatal(err)
 			}
 			later := arm(702)
 			rewriteSchemaExec(t, s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a','gh:702',702,'acme/repo-702',7,'owner',?)`, now.Add(time.Second).UnixNano())
 			rewriteSchemaExec(t, s.db, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id='withdraw'`)
-			delivery, err = op.ClaimGitHubDelivery(ctx, now.Add(time.Second))
+			delivery, err = op.ClaimGitHubDelivery(ctx)
 			if err != nil || delivery == nil {
 				t.Fatalf("reclaim: %v %v", delivery, err)
 			}
@@ -135,7 +135,7 @@ func TestGitHubDeliveryPublicationReceiptSurvivesWithdrawal(t *testing.T) {
 	if err := op.EnqueueGitHubDelivery(ctx, "publication", "push", body, now); err != nil {
 		t.Fatal(err)
 	}
-	delivery, err := op.ClaimGitHubDelivery(ctx, now)
+	delivery, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || delivery == nil {
 		t.Fatalf("claim: %v %v", delivery, err)
 	}
@@ -149,14 +149,14 @@ func TestGitHubDeliveryPublicationReceiptSurvivesWithdrawal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := op.FinishGitHubDelivery(ctx, *delivery, "failed after publication", now); err != nil {
+	if err := op.FinishGitHubDelivery(ctx, *delivery, "failed after publication"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.WithdrawGitHubCronRepository(ctx, 7, 701); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id='publication'`)
-	delivery, err = op.ClaimGitHubDelivery(ctx, now.Add(time.Second))
+	delivery, err = op.ClaimGitHubDelivery(ctx)
 	if err != nil || delivery == nil {
 		t.Fatalf("reclaim: %v %v", delivery, err)
 	}
@@ -185,7 +185,7 @@ func TestGitHubDeliveryTargetedAdmissionsReplayBeforeSource(t *testing.T) {
 	if err := op.EnqueueGitHubDelivery(ctx, "admission", "push", body, now); err != nil {
 		t.Fatal(err)
 	}
-	delivery, err := op.ClaimGitHubDelivery(ctx, now)
+	delivery, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || delivery == nil {
 		t.Fatalf("claim: %v %v", delivery, err)
 	}
@@ -248,7 +248,7 @@ func TestGitHubDeliveryUnbindReturnsStoredTeam(t *testing.T) {
 	if err := op.EnqueueGitHubDelivery(ctx, "unbind", "installation", []byte(`{"installation":{"id":7},"action":"deleted"}`), now); err != nil {
 		t.Fatal(err)
 	}
-	delivery, err := op.ClaimGitHubDelivery(ctx, now)
+	delivery, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || delivery == nil {
 		t.Fatalf("claim: %v %v", delivery, err)
 	}
@@ -268,7 +268,7 @@ func TestGitHubUnappliedPublicationCannotAcquireLaterConsent(t *testing.T) {
 	if err := op.EnqueueGitHubDelivery(ctx, "before-consent", "push", []byte(`{"installation":{"id":7},"after":"before-consent"}`), now); err != nil {
 		t.Fatal(err)
 	}
-	delivery, err := op.ClaimGitHubDelivery(ctx, now)
+	delivery, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || delivery == nil {
 		t.Fatalf("claim: %v %v", delivery, err)
 	}
@@ -290,7 +290,7 @@ func TestGitHubDeliveryLosingConnectionDuringPreparationIsRevoked(t *testing.T) 
 	if err := op.EnqueueGitHubDelivery(ctx, "unbound-during-fetch", "push", body, now); err != nil {
 		t.Fatal(err)
 	}
-	delivery, err := op.ClaimGitHubDelivery(ctx, now)
+	delivery, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || delivery == nil {
 		t.Fatalf("claim: %v %v", delivery, err)
 	}

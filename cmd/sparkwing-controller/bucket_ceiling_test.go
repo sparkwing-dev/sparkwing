@@ -7,21 +7,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
 
-func TestApplyBucketCeilingConfiguresTheSharedLimiter(t *testing.T) {
-	if err := applyBucketCeiling(objectguard.CeilingConfig{
-		Limit: objectguard.CeilingLimit{MaxBytes: 1 << 30},
-	}); err != nil {
-		t.Fatalf("applyBucketCeiling: %v", err)
-	}
-	limiter := objectguard.Shared()
-	t.Cleanup(func() { limiter.Ceiling().Configure(objectguard.CeilingConfig{}) })
-	if got := limiter.Ceiling().Reconcile(); got != 0 {
-		t.Errorf("reconcile interval = %s, want the 0 that was configured", got)
+func TestValidateBucketCeilingAcceptsZeroBounds(t *testing.T) {
+	if err := validateBucketCeiling(objectguard.CeilingConfig{}); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestApplyBucketCeilingRefusesANegativeBound(t *testing.T) {
-	err := applyBucketCeiling(objectguard.CeilingConfig{
+func TestValidateBucketCeilingRefusesANegativeBound(t *testing.T) {
+	err := validateBucketCeiling(objectguard.CeilingConfig{
 		Limit:     objectguard.CeilingLimit{MaxBytes: -1},
 		Reconcile: time.Hour,
 	})

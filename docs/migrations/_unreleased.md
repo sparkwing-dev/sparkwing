@@ -17,8 +17,11 @@ that post signed deliveries must treat 202 as acceptance for later processing.
 Disconnecting an installation revokes work still preparing source for admission
 or schedule publication. Those refused effects leave no receipt to replay.
 
-The schema baseline moves to version 23 for the inbox, targeted effect results,
-team queue attribution, idle free-slot tracking and per-team descendant ceilings.
+The schema baseline moves to version 25 for the inbox, targeted effect results,
+team queue attribution, idle free-slot tracking, per-team descendant ceilings
+and indexed overflow policy. Claim polls seek each overflow account and test
+its budget ranges before selecting policy routes. Repeated capped policies add no per-policy, run or node scan, even when the
+jobs have different preferences.
 Recreate stores from an earlier baseline before starting this build.
 Existing stores are refused rather than opened under the new schema.
 
@@ -739,10 +742,11 @@ and decide when dependents can run. Accepted declarations stay unchanged.
 Embedded controllers use `blob.NewFilesystem` or `blob.NewS3` as their physical
 backend and pass it through `WithDataController` or `WithDataObjects`. The duplicate
 controller filesystem and S3 signer types and `WithSignedDownloads` are removed.
-Wrap an S3 backend with `controller.NewCloudFrontDataBackend` to sign public-ingress
-downloads through CloudFront. Direct requests retain regional S3 URLs. Uploads keep
-the backend's size and checksum constraints. Retained log readers use that same
-backend. `WithS3Logs` and the raw S3 log object adapter are removed. Replace
+Call `controller.ParseCloudFrontDataConfig` to validate CloudFront signing settings,
+then call the returned config's `Backend` method with an S3 backend to sign
+public-ingress downloads through CloudFront. Direct requests retain regional S3
+URLs. Uploads keep the backend's size and checksum constraints. Retained log
+readers use that same backend. `WithS3Logs` and the raw S3 log object adapter are removed. Replace
 `s3.NewArtifactStore` with `s3.NewMeasurementStore` for bucket measurements.
 Measurement handles expose `Usage` only. Local dashboard logs require committed
 tagged segments because run-directory log fallback is removed.
@@ -2744,7 +2748,7 @@ failure uses `Tenant.AbortBlobUpload`. The ticket binds the exact uploader and
 retains immutable replay state. The signed-data controller adapter remains an
 integration dependency. There is no service-token fallback.
 
-`SetFreeTeamSlots` writes the final settings table and refuses sealed values.
+`Operator.ConfigureDeployment` writes the final settings table and refuses sealed values.
 Its slot count and signup behavior keep their existing meaning.
 
 ## Storage maintenance uses committed inventory

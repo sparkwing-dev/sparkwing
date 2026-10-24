@@ -30,9 +30,15 @@ type cloudFrontDataBackend struct {
 	domain string
 }
 
-// NewCloudFrontDataBackend signs forwarded S3 downloads through CloudFront.
-func NewCloudFrontDataBackend(objects *blob.S3, domain, keyPairID, privateKey string) (blob.ObjectBackend, error) {
-	if objects == nil || domain == "" || keyPairID == "" || privateKey == "" {
+// CloudFrontDataConfig holds validated download signing configuration.
+type CloudFrontDataConfig struct {
+	signer *sign.URLSigner
+	domain string
+}
+
+// ParseCloudFrontDataConfig validates configuration without opening object storage.
+func ParseCloudFrontDataConfig(domain, keyPairID, privateKey string) (*CloudFrontDataConfig, error) {
+	if domain == "" || keyPairID == "" || privateKey == "" {
 		return nil, errors.New("CloudFront requires an S3 backend, domain, key pair ID and private key")
 	}
 	origin, err := url.Parse("https://" + domain)
@@ -46,7 +52,15 @@ func NewCloudFrontDataBackend(objects *blob.S3, domain, keyPairID, privateKey st
 	if err != nil {
 		return nil, errors.New("invalid CloudFront private key")
 	}
-	return &cloudFrontDataBackend{S3: objects, signer: sign.NewURLSigner(keyPairID, key), domain: domain}, nil
+	return &CloudFrontDataConfig{signer: sign.NewURLSigner(keyPairID, key), domain: domain}, nil
+}
+
+// Backend signs forwarded downloads from objects through CloudFront.
+func (c *CloudFrontDataConfig) Backend(objects *blob.S3) (blob.ObjectBackend, error) {
+	if objects == nil {
+		return nil, errors.New("CloudFront requires an S3 backend")
+	}
+	return &cloudFrontDataBackend{S3: objects, signer: c.signer, domain: c.domain}, nil
 }
 
 func (b *cloudFrontDataBackend) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error) {

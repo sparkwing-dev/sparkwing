@@ -79,7 +79,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.SetTestClock(t, func() time.Time { return now })
-	if _, err := teststore.ForTeam(t, st, "acme").ReleaseCreditFreezes(ctx, "dp_acme", "", ""); err != nil {
+	if _, err := teststore.ForTeam(t, st, "acme").ReleaseCreditFreezes(ctx, "dp_acme", "operator", ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"credit_checkouts", "credit_freezes"} {

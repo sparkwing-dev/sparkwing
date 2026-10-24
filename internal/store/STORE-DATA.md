@@ -159,7 +159,7 @@ Final upload tickets retain atomic reserve, verified commit, abort and replay.
 Legacy direct uploads and node logs still use the internal raw reservation code.
 Their consumer cutovers and old cache RPC client removal remain open.
 
-`SetFreeTeamSlots` persists checked JSON in the final settings table. Negative
+`Operator.ConfigureDeployment` persists checked JSON in the final settings table. Negative
 values and sealed rows refuse updates. The policy survives reopening, and an
 unreadable slot source cannot open the controller's signup gate.
 

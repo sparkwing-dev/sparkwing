@@ -197,7 +197,7 @@ func (s *Store) recordCreditGrant(
 		return CreditGrantResult{}, err
 	}
 	defer rollbackOrLog(tx)
-	out, err := recordCreditGrantTx(ctx, tx, team, req, auditActor{system: auditBreakGlass})
+	out, err := recordCreditGrantTx(ctx, tx, team, req, auditAccountActor(req.CreatedBy))
 	if err != nil {
 		return CreditGrantResult{}, err
 	}

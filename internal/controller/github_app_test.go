@@ -46,10 +46,9 @@ const headSHA = "89abcdef0123456789abcdef0123456789abcdef"
 
 type appFixture struct {
 	*identityFixture
-	app      *githubapptest.GitHub
-	logs     *syncBuffer
-	inboxNow time.Time
-	replica  func() (*controller.Server, string)
+	app     *githubapptest.GitHub
+	logs    *syncBuffer
+	replica func() (*controller.Server, string)
 }
 
 func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Server) *appFixture {
@@ -111,7 +110,7 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 	srv, url := primary, ts.URL
 	return &appFixture{
 		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin, srv: srv, clock: clock},
-		app:             app, replica: replica, logs: logs, inboxNow: teststore.Now(st).Add(time.Hour),
+		app:             app, replica: replica, logs: logs,
 	}
 }
 
@@ -557,7 +556,7 @@ func (f *appFixture) deliver(event string, payload any, signature string) (int, 
 	_ = json.NewDecoder(resp.Body).Decode(&out)
 	if resp.StatusCode == http.StatusAccepted {
 		// Event tests inspect processing separately from the persisted ingress acknowledgement.
-		outcomes, err := controller.ProcessGitHubInboxForTest(f.srv, f.t.Context(), f.inboxNow)
+		outcomes, err := controller.ProcessGitHubInboxForTest(f.srv, f.t.Context())
 		if err != nil {
 			f.t.Fatal(err)
 		}
@@ -753,7 +752,6 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalRunsPerHour: 0}); err != nil {
 		t.Fatal(err)
 	}
-	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
 	f.processAgain(olga, payload)
 	if code, out := f.deliver("push", payload, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
 		t.Fatalf("retry after quota clears = %d %v, want dispatched", code, out)
@@ -1313,7 +1311,6 @@ func TestGitHubAppRedeliveryChargesOnlyShedRuns(t *testing.T) {
 		t.Fatalf("first delivery = %v, want one run and one shed", out)
 	}
 	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
-	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
 	f.processAgain(olga, push)
 	if code, out := f.deliver("push", push, ""); code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"duplicate", "dispatched"}) {
 		t.Fatalf("redelivery with one run of allowance = %d %v, want the shed run started", code, out)
@@ -1344,7 +1341,6 @@ func TestGitHubAppPartialReleaseRedeliveryKeepsResolvedCommit(t *testing.T) {
 	}
 	f.app.SetCommit("acme/widgets", "refs/tags/v1", strings.Repeat("a", 40))
 	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
-	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
 	f.processAgain(olga, payload)
 	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"duplicate", "dispatched"}) {
 		t.Fatalf("release redelivery = %v", out)

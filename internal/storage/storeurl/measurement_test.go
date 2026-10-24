@@ -34,7 +34,11 @@ func s3Env(t *testing.T) {
 
 func measurementWithHTTP(t *testing.T, maxPages int, transport measurementHTTP) storage.UsageReporter {
 	t.Helper()
-	reporter, err := OpenMeasurementStore(t.Context(), "s3://bucket/prefix", maxPages)
+	cfg, err := ParseMeasurementURL("s3://bucket/prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter, err := cfg.Open(t.Context(), maxPages)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -113,3 +113,23 @@ func TestUnmeteredWorkDoesNotNeedAPricedClass(t *testing.T) {
 		}
 	}
 }
+
+func TestUnpricedCloudClaimWithZeroBalanceNamedAndQueued(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		t.Run(fmt.Sprintf("queued=%t", queued), func(t *testing.T) {
+			s, demand, _ := meteredUnitFixture(t, true)
+			rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
+			table := CreditRateTable{{Cores: 2, MicroPerSecond: 2}}
+			if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
+				t.Fatal(err)
+			}
+			if queued {
+				demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
+			}
+			_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			if !errors.Is(err, ErrUnpricedCPUClass) {
+				t.Fatalf("unpriced zero-balance claim: %v", err)
+			}
+		})
+	}
+}

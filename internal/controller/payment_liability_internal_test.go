@@ -32,7 +32,7 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 						}
 					}
 					engineSQL(t, s, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_payment_method,card_fingerprint) VALUES ('b',1,1,'cus_b','pm_b','fp_refill')`)
-					deployment, err := s.AsOperator().DeploymentID(t.Context())
+					deployment, err := s.AsOperator().ConfigureDeployment(t.Context(), "", store.DefaultFreeTeamSlots, func() error { return nil })
 					if err != nil {
 						t.Fatal(err)
 					}

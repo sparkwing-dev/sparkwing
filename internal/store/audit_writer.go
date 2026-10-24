@@ -12,15 +12,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// AuditActorBreakGlass identifies trusted in-pod administration.
-const AuditActorBreakGlass = "sparkwing-controller admin"
-
 type auditSystem string
 
 const (
 	auditController      auditSystem = "controller"
 	auditPaymentProvider auditSystem = "payment_provider"
-	auditBreakGlass      auditSystem = AuditActorBreakGlass
+	auditBreakGlass      auditSystem = "sparkwing-controller admin"
 )
 
 type auditActor struct {
@@ -115,6 +112,7 @@ type (
 		Node  *auditDigest `json:"node_digest,omitempty"`
 	}
 )
+
 type auditCredential struct {
 	Operation  auditCredentialOperation `json:"-"`
 	Credential auditDigest              `json:"-"`
@@ -126,6 +124,7 @@ type (
 		InvitationID string `json:"-"`
 	}
 )
+
 type auditMutation struct {
 	SubjectID string         `json:"-"`
 	Operation auditOperation `json:"operation"`

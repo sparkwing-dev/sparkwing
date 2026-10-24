@@ -15,33 +15,44 @@ import (
 	s3store "github.com/sparkwing-dev/sparkwing/internal/storage/s3"
 )
 
-// OpenMeasurementStore opens filesystem or S3 usage reporting with a bounded listing budget.
-func OpenMeasurementStore(ctx context.Context, raw string, maxPages int) (storage.UsageReporter, error) {
+// MeasurementURL is a validated filesystem or S3 measurement location.
+type MeasurementURL struct {
+	scheme, path, bucket, prefix string
+}
+
+// ParseMeasurementURL validates a measurement location without opening storage.
+func ParseMeasurementURL(raw string) (MeasurementURL, error) {
 	scheme, rest, err := splitScheme(raw)
 	if err != nil {
-		return nil, err
+		return MeasurementURL{}, err
 	}
+	cfg := MeasurementURL{scheme: scheme}
 	switch scheme {
 	case "fs":
-		path, err := fsPath(rest)
-		if err != nil {
-			return nil, err
-		}
-		return fs.NewUsageReporter(path)
+		cfg.path, err = fsPath(rest)
 	case "s3":
-		bucket, prefix, err := s3store.ParseURL("s3://" + rest)
-		if err != nil {
-			return nil, err
-		}
+		cfg.bucket, cfg.prefix, err = s3store.ParseURL(raw)
+	default:
+		err = fmt.Errorf("storeurl: unsupported scheme %q in %q", scheme, raw)
+	}
+	return cfg, err
+}
+
+// Open opens usage reporting with a bounded listing budget.
+func (u MeasurementURL) Open(ctx context.Context, maxPages int) (storage.UsageReporter, error) {
+	switch u.scheme {
+	case "fs":
+		return fs.NewUsageReporter(u.path)
+	case "s3":
 		client, err := s3store.NewClient(ctx)
 		if err != nil {
 			return nil, err
 		}
-		store := s3store.NewMeasurementStore(bucket, prefix, client)
+		store := s3store.NewMeasurementStore(u.bucket, u.prefix, client)
 		store.MaxUsagePages = maxPages
 		return store, nil
 	default:
-		return nil, fmt.Errorf("storeurl: unsupported scheme %q in %q", scheme, raw)
+		return nil, errors.New("storeurl: measurement URL is not configured")
 	}
 }
 
