@@ -448,44 +448,57 @@ type githubInstallationWithdrawal struct {
 	Count        int64
 }
 
-// WithdrawGitHubCronInstallation stops App schedules without touching manual rows.
-func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64) (int64, error) {
-	result, err := t.withdrawGitHubInstallation(ctx, installationID, nil, false)
-	return result.Count, err
-}
-
 // ReconcileGitHubInstallationRepositories withdraws consent and schedules for
 // repositories absent from the listing. A delivery replay keeps its original targets.
 func (t *Tenant) ReconcileGitHubInstallationRepositories(ctx context.Context, installationID int64, covered []int64) error {
-	_, err := t.withdrawGitHubInstallation(ctx, installationID, covered, true)
+	_, err := t.withdrawGitHubInstallation(ctx, installationID, covered, nil)
 	return err
 }
 
-func (t *Tenant) withdrawGitHubInstallation(ctx context.Context, installationID int64, covered []int64, consent bool) (githubInstallationWithdrawal, error) {
+// WithdrawGitHubInstallationRepositories withdraws consent and schedules for the
+// named positive repository IDs. An existing delivery receipt keeps its original targets.
+func (t *Tenant) WithdrawGitHubInstallationRepositories(ctx context.Context, installationID int64, removed []int64) error {
+	_, err := t.withdrawGitHubInstallation(ctx, installationID, nil, append([]int64{}, removed...))
+	return err
+}
+
+func (t *Tenant) withdrawGitHubInstallation(ctx context.Context, installationID int64, covered, removed []int64) (githubInstallationWithdrawal, error) {
 	return inTxResult(ctx, t.s, func(tx *storeTx) (githubInstallationWithdrawal, error) {
 		return githubDeliveryResultTx(ctx, tx, fmt.Sprintf("withdraw-installation:%s:%d", t.team, installationID), func() (githubInstallationWithdrawal, error) {
 			var result githubInstallationWithdrawal
-			rows, err := tx.QueryContext(ctx, `SELECT repository_id FROM github_app_automation WHERE team=? AND installation_id=? UNION SELECT github_repository_id FROM cron_schedules WHERE team=? AND github_installation_id=? ORDER BY 1`, t.team, installationID, t.team, installationID)
-			if err != nil {
-				return result, err
-			}
-			for rows.Next() {
-				var repository int64
-				if err := rows.Scan(&repository); err != nil {
-					return result, errors.Join(err, rows.Close())
+			if removed != nil {
+				if len(removed) == 0 {
+					return result, fmt.Errorf("%w: repository removal names no repositories", ErrInvalidInput)
 				}
-				if repository > 0 && !slices.Contains(covered, repository) {
-					result.Repositories = append(result.Repositories, repository)
+				for _, repository := range removed {
+					if repository <= 0 {
+						return result, fmt.Errorf("%w: repository removal requires positive repository IDs", ErrInvalidInput)
+					}
 				}
-			}
-			if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-				return result, err
+				slices.Sort(removed)
+				removed = slices.Compact(removed)
+				result.Repositories = removed
+			} else {
+				rows, err := tx.QueryContext(ctx, `SELECT repository_id FROM github_app_automation WHERE team=? AND installation_id=? UNION SELECT github_repository_id FROM cron_schedules WHERE team=? AND github_installation_id=? ORDER BY 1`, t.team, installationID, t.team, installationID)
+				if err != nil {
+					return result, err
+				}
+				for rows.Next() {
+					var repository int64
+					if err := rows.Scan(&repository); err != nil {
+						return result, errors.Join(err, rows.Close())
+					}
+					if repository > 0 && !slices.Contains(covered, repository) {
+						result.Repositories = append(result.Repositories, repository)
+					}
+				}
+				if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+					return result, err
+				}
 			}
 			for _, repository := range result.Repositories {
-				if consent {
-					if err := t.withdrawGitHubAppAutomationTx(ctx, tx, installationID, repository); err != nil {
-						return result, err
-					}
+				if err := t.withdrawGitHubAppAutomationTx(ctx, tx, installationID, repository); err != nil {
+					return result, err
 				}
 				n, err := t.withdrawGitHubCronsTx(ctx, tx, fmt.Sprintf("withdraw:%d:%d", installationID, repository), repository, `github_installation_id=? AND github_repository_id=?`, installationID, repository)
 				if err != nil {

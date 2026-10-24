@@ -36,7 +36,6 @@ func TestStartupMatrixRefusesBeforeTouchingTheStore(t *testing.T) {
 		{"unknown kind", nil, []string{"--deployment=teams"}, "--deployment"},
 		{"unknown store", nil, []string{"--store=postgresql"}, "--store"},
 		{"cloud limits off the cloud", nil, []string{"--limits-profile=cloud"}, "--deployment=cloud"},
-		{"previous webhook secret alone", map[string]string{credGitHubAppPreviousHook: "whsec"}, nil, credGitHubAppPreviousHook},
 		{
 			"payment mode, then a bad flag",
 			map[string]string{credStripeAPIKey: "sk_test_x", credStripeWebhookSecret: "whsec_x"},

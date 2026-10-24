@@ -513,23 +513,18 @@ func run(args []string) error {
 			MultiTeam:          cfg.MultiTeam(),
 			GoogleClientID:     *googleClientID,
 			GoogleClientSecret: creds.GoogleClientSecret,
-			GitHubClientID:     *githubClientID,
-			GitHubClientSecret: creds.GitHubClientSecret,
-			RedirectURIs:       *oauthRedirectURIs,
-			SignUpGate:         *signUpGate,
+			GitHubApp: githubAppFlags{
+				AppID: *githubAppID, Slug: *githubAppSlug, ClientID: *githubClientID,
+				ClientSecret: creds.GitHubClientSecret, PrivateKey: creds.GitHubAppKey,
+				CredentialError: creds.GitHubError,
+			},
+			GitHubHook:   cfg.WebhookSecret(),
+			RedirectURIs: *oauthRedirectURIs,
+			SignUpGate:   *signUpGate,
 		}, slog.Default()); err != nil {
 			return store.Policies{}, err
 		}
 		if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
-			return store.Policies{}, err
-		}
-		if err := configureGitHubApp(srv, githubAppFlags{
-			AppID:        *githubAppID,
-			Slug:         *githubAppSlug,
-			ClientID:     *githubClientID,
-			ClientSecret: creds.GitHubClientSecret,
-			PrivateKey:   creds.GitHubAppKey,
-		}, cfg.WebhookSecret()); err != nil {
 			return store.Policies{}, err
 		}
 		oidcIssuer, oerr := loadOIDCIssuer(cfg, *oidcTokenTTL, os.Stderr)

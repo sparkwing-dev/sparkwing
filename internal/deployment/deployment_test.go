@@ -92,7 +92,6 @@ func TestParseRefusesAMisdeclaredDeployment(t *testing.T) {
 		"cloud limits off the cloud":  {deployment.Inputs{LimitsCloud: true}, "--deployment=cloud"},
 		"previous secrets key alone":  {deployment.Inputs{SecretsPreviousKey: []byte("k")}, "secrets-key.previous"},
 		"published oidc key alone":    {deployment.Inputs{OIDCPublishedKey: []byte("k")}, "oidc-key.published"},
-		"previous webhook alone":      {deployment.Inputs{PreviousWebhookSecret: []byte("k")}, "github-app-webhook-secret.previous"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := deployment.Parse(tc.in); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -134,5 +133,12 @@ func TestControllerTransportRefusesPlainHTTPOffTheCluster(t *testing.T) {
 		if err := deployment.CheckControllerURL("--controller", raw); (err == nil) != ok {
 			t.Errorf("%s: err = %v, want allowed %v", raw, err, ok)
 		}
+	}
+}
+
+func TestIncompleteWebhookCredentialsDoNotBlockDeployment(t *testing.T) {
+	cfg, err := deployment.Parse(deployment.Inputs{PreviousWebhookSecret: []byte("previous")})
+	if err != nil || cfg.WebhookSecret().Current() != nil || string(cfg.WebhookSecret().Previous()) != "previous" {
+		t.Fatalf("optional App credentials = %+v, %v", cfg.WebhookSecret(), err)
 	}
 }

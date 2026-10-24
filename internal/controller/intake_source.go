@@ -9,7 +9,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
-	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -130,7 +129,7 @@ func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID str
 			continue
 		}
 		repositories, err := s.githubApp.client.InstallationRepositories(ctx, installation.InstallationID)
-		if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
+		if err != nil {
 			return "", errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity could not be verified"}, err)
 		}
 		for _, repository := range repositories {

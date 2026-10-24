@@ -8,9 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -22,7 +20,7 @@ type githubAppExtraReposJSON struct {
 
 func (s *Server) handleListGitHubAppExtraRepos(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -47,7 +45,7 @@ func (s *Server) handleListGitHubAppExtraRepos(w http.ResponseWriter, r *http.Re
 // that installation mints the token. The mint checks the coverage again.
 func (s *Server) handlePutGitHubAppExtraRepos(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+		return s.githubAppUnavailable()
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -110,8 +108,7 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 		}
 	}
 	listed, err := s.githubApp.client.InstallationRepositories(ctx, inst.InstallationID)
-	truncated := errors.Is(err, githubapp.ErrTooManyRepositories)
-	if err != nil && !truncated {
+	if err != nil {
 		return nil, http.StatusBadGateway, fmt.Errorf("GitHub installation repositories: %w", err)
 	}
 	ids := map[string]int64{}
@@ -120,9 +117,6 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 			if strings.EqualFold(l.FullName, raw) {
 				ids[strings.ToLower(raw)] = l.ID
 			}
-		}
-		if ids[strings.ToLower(raw)] == 0 && truncated {
-			return nil, http.StatusBadGateway, errors.New("the installation covers more repositories than GitHub lists, so " + raw + " cannot be confirmed")
 		}
 		if ids[strings.ToLower(raw)] == 0 {
 			return nil, http.StatusBadRequest, errors.New("the installation covering " + repo.Slug() + " does not list " + raw)

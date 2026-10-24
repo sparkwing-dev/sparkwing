@@ -41,6 +41,9 @@ func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capabilit
 	defer s.localSessionMu.Unlock()
 	outcomes, sweepErr := s.localSessions.Sweep(r.Context(), sessionledger.SweepOptions{DryRun: request.DryRun})
 	findings := []wingd.LocalDoctorFinding{}
+	if s.githubAppProblem != nil {
+		findings = append(findings, wingd.LocalDoctorFinding{Code: "github_app_unavailable", Message: s.githubAppProblem.Error()})
+	}
 	failure := sweepErr
 	for _, outcome := range outcomes {
 		switch outcome.Verdict {

@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -17,8 +17,8 @@ type identityFlags struct {
 	MultiTeam          bool
 	GoogleClientID     string
 	GoogleClientSecret string
-	GitHubClientID     string
-	GitHubClientSecret string
+	GitHubApp          githubAppFlags
+	GitHubHook         deployment.KeyPair
 	RedirectURIs       string
 	SignUpGate         string
 }
@@ -39,22 +39,17 @@ func configureIdentity(srv *controller.Server, f identityFlags, logger *slog.Log
 	if err != nil {
 		return err
 	}
-	github, err := providerConfigured("GitHub", "github", f.GitHubClientID, f.GitHubClientSecret)
-	if err != nil {
-		return err
-	}
-	if !google && !github {
-		return nil
-	}
-	uris, err := redirectAllowlist(f.RedirectURIs)
-	if err != nil {
-		return err
-	}
 	if google {
+		uris, err := redirectAllowlist(f.RedirectURIs)
+		if err != nil {
+			return err
+		}
 		srv.WithGoogleSignIn(googleauth.New(googleauth.Google(f.GoogleClientID, f.GoogleClientSecret)), uris)
 	}
-	if github {
-		srv.WithGitHubSignIn(githubauth.New(githubauth.GitHub(f.GitHubClientID, f.GitHubClientSecret)), uris)
+	f.GitHubApp.RedirectURIs = f.RedirectURIs
+	configureGitHubApp(srv, f.GitHubApp, f.GitHubHook)
+	if !google && f.GitHubApp.ClientID == "" && f.GitHubApp.ClientSecret == "" {
+		return nil
 	}
 	if !f.MultiTeam {
 		logger.Warn("sign-in is configured but not offered: it needs --deployment=team or cloud")

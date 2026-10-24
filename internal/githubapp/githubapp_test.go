@@ -6,11 +6,17 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
@@ -155,26 +161,31 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 	}
 }
 
-func TestInstallationRepositories_NamesACutList(t *testing.T) {
-	for _, tc := range []struct {
-		count     int
-		truncated bool
-	}{{1000, false}, {1001, true}} {
-		gh, client := fixture(t)
-		repos := make([]githubapptest.Repo, tc.count)
-		for i := range repos {
-			repos[i] = githubapptest.Repo{ID: int64(10000 + i), FullName: fmt.Sprintf("acme/r%d", i)}
+func TestInstallationRepositoriesListsEveryPage(t *testing.T) {
+	for _, count := range []int{1000, 1001, 10001} {
+		key, err := rsa.GenerateKey(rand.Reader, 1024)
+		if err != nil {
+			t.Fatal(err)
 		}
-		gh.SetRepos(7, repos...)
-		got, err := client.InstallationRepositories(context.Background(), 7)
-		if tc.truncated {
-			if !errors.Is(err, githubapp.ErrTooManyRepositories) || len(got) != 1000 {
-				t.Fatalf("%d repositories = %d listed, %v; want 1000 with ErrTooManyRepositories", tc.count, len(got), err)
+		client := githubapp.New(githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: refTransport(func(r *http.Request) (*http.Response, error) {
+			body := `{"token":"metadata"}`
+			if r.URL.Path == "/installation/repositories" {
+				page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+				repos := []githubapp.Repository{}
+				for i := (page - 1) * 100; i < min(page*100, count); i++ {
+					repos = append(repos, githubapp.Repository{ID: int64(10000 + i), FullName: fmt.Sprintf("acme/r%d", i)})
+				}
+				encoded, err := json.Marshal(map[string]any{"total_count": count, "repositories": repos})
+				if err != nil {
+					t.Fatal(err)
+				}
+				body = string(encoded)
 			}
-			continue
-		}
-		if err != nil || len(got) != tc.count || got[tc.count-1].ID != int64(10000+tc.count-1) {
-			t.Fatalf("%d repositories = %d listed, %v", tc.count, len(got), err)
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		})}})
+		got, err := client.InstallationRepositories(context.Background(), 7)
+		if err != nil || len(got) != count || got[count-1].ID != int64(10000+count-1) {
+			t.Fatalf("%d repositories = %d listed, %v", count, len(got), err)
 		}
 	}
 }
@@ -214,4 +225,96 @@ func TestWebhookMAC_AcceptsThePreviousSecretDuringRotation(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestInstallationRepositoriesRejectsNonAdvancingPages(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"repeated", "reordered", "overlapping", "truncated"} {
+		t.Run(mode, func(t *testing.T) {
+			pages := 0
+			client := githubapp.New(githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: refTransport(func(r *http.Request) (*http.Response, error) {
+				body := `{"token":"metadata"}`
+				if r.URL.Path == "/installation/repositories" {
+					pages++
+					if pages > 2 {
+						return nil, errors.New("listing kept going after a non-advancing page")
+					}
+					repos := make([]githubapp.Repository, 100)
+					for i := range repos {
+						repos[i].ID = int64(i + 1)
+					}
+					if pages == 2 {
+						switch mode {
+						case "reordered":
+							for i := range repos {
+								repos[i].ID = int64(100 - i)
+							}
+						case "overlapping":
+							for i := range repos {
+								repos[i].ID += 99
+							}
+						case "truncated":
+							repos = nil
+						}
+					}
+					encoded, err := json.Marshal(map[string]any{"repositories": repos, "total_count": 300})
+					if err != nil {
+						t.Fatal(err)
+					}
+					body = string(encoded)
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+			})}})
+			got, err := client.InstallationRepositories(t.Context(), 7)
+			want := "did not advance"
+			if mode == "truncated" {
+				want = "listing stopped"
+			}
+			if got != nil || err == nil || !strings.Contains(err.Error(), want) || pages != 2 {
+				t.Fatalf("listing = %d repositories, %v, %d pages; want explicit %q failure on page two", len(got), err, pages, want)
+			}
+		})
+	}
+}
+
+func TestInstallationRepositoriesHasOverallDeadline(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	synctest.Test(t, func(t *testing.T) {
+		client := githubapp.New(githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: refTransport(func(r *http.Request) (*http.Response, error) {
+			timer := time.NewTimer(9 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			case <-timer.C:
+			}
+			body := `{"token":"metadata"}`
+			if r.URL.Path == "/installation/repositories" {
+				page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+				repos := []githubapp.Repository{}
+				if page <= 20 {
+					for i := range 100 {
+						repos = append(repos, githubapp.Repository{ID: int64((page-1)*100 + i + 1)})
+					}
+				}
+				encoded, err := json.Marshal(map[string]any{"repositories": repos, "total_count": 2000})
+				if err != nil {
+					t.Fatal(err)
+				}
+				body = string(encoded)
+			}
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		})}})
+		started := time.Now()
+		got, err := client.InstallationRepositories(t.Context(), 7)
+		if got != nil || !errors.Is(err, context.DeadlineExceeded) || time.Since(started) != time.Minute {
+			t.Fatalf("listing = %d repositories, %v, elapsed %s; want one overall deadline", len(got), err, time.Since(started))
+		}
+	})
 }
