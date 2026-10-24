@@ -28,8 +28,9 @@ const (
 
 // Causes distinguish retry, materialization and cancellation even when their logical states coincide.
 const (
-	causeDependency  runstate.TransitionCause = "dependency"
-	causeOwnerPolicy runstate.TransitionCause = "owner_policy"
+	causeDependency       runstate.TransitionCause = "dependency"
+	causeOwnerPolicy      runstate.TransitionCause = "owner_policy"
+	causeAdmissionRefused runstate.TransitionCause = "admission_refused"
 
 	causeApprovalResolve runstate.TransitionCause = "approval_resolve"
 	causeApprovalTimeout runstate.TransitionCause = "approval_timeout"
@@ -87,7 +88,8 @@ func nodeTransitions() []nodeEdge {
 		{[]runstate.NodeState{nodePending}, []runstate.NodeState{nodePending}, []runstate.ActorKind{runstate.ActorOperator}, runstate.CausePublishAttempt, []edgeGuard{guardPublication}, false},
 		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeReady}, owners, runstate.CauseRelease, []edgeGuard{guardOwner, guardUnclaimed}, false},
 		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeSkipped, runstate.NodeCancelled}, owners, causeDependency, []edgeGuard{guardOwner, guardUnclaimed}, false},
-		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeSuccess, runstate.NodeFailed, runstate.NodeSkipped}, owners, causeOwnerPolicy, []edgeGuard{guardOwner, guardUnclaimed, guardOwnerPolicy}, false},
+		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeFailed, runstate.NodeSkipped}, owners, causeOwnerPolicy, []edgeGuard{guardOwner, guardUnclaimed, guardOwnerPolicy}, false},
+		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeFailed, runstate.NodeSkipped}, owners, causeAdmissionRefused, []edgeGuard{guardOwner, guardUnclaimed}, false},
 		{[]runstate.NodeState{nodePending, runstate.NodeReady}, []runstate.NodeState{runstate.NodeApprovalPending}, owners, runstate.CauseApprovalOpen, []edgeGuard{guardOwner, guardUnclaimed}, false},
 		{[]runstate.NodeState{runstate.NodeApprovalPending}, []runstate.NodeState{runstate.NodeSuccess, runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorOperator}, causeApprovalResolve, []edgeGuard{guardApproval}, false},
 		{[]runstate.NodeState{runstate.NodeApprovalPending}, []runstate.NodeState{runstate.NodeSuccess, runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorReaper, runstate.ActorRunHost}, causeApprovalTimeout, []edgeGuard{guardApprovalTimeout}, false},

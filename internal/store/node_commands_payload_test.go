@@ -60,3 +60,10 @@ func TestNodeCommandPayloadRejectsConflictingPayload(t *testing.T) {
 		t.Fatal("cancel accepted retry scheduling")
 	}
 }
+
+func TestAdmissionRefusalHasNoOwnerCommand(t *testing.T) {
+	_, err := NodeCommandFromPayload(runstate.NodeCommandPayload{Cause: causeAdmissionRefused, To: runstate.NodeSkipped}, runspec.NodeRef{RunID: "run", NodeID: "job"}, runstate.Actor{Kind: runstate.ActorRunHost})
+	if err == nil {
+		t.Fatal("store admission refusal accepted as an owner command")
+	}
+}

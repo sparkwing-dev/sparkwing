@@ -252,13 +252,10 @@ type OwnerExecution struct {
 	Allowed        bool
 }
 
-// OwnerPolicyKind identifies a decision made before execution is released.
+// OwnerPolicyKind identifies a declared approval predicate result.
 type OwnerPolicyKind string
 
 const (
-	PolicyAdmissionSkip  OwnerPolicyKind = "admission_skip"
-	PolicyAdmissionFail  OwnerPolicyKind = "admission_fail"
-	PolicyQueueTimeout   OwnerPolicyKind = "admission_queue_timeout"
 	PolicyApprovalFail   OwnerPolicyKind = "approval_fail"
 	PolicyApprovalBypass OwnerPolicyKind = "approval_bypass"
 )
@@ -306,13 +303,11 @@ const (
 	RunQueueTimeout   RunCause = "queue_timeout"
 	RunOwnerLost      RunCause = "owner_lost"
 	RunPublish        RunCause = "publish"
-	RunPolicyRefused  RunCause = "policy_refused"
 	RunLaunchRejected RunCause = "launch_rejected"
 )
 
 // RunTransition never accepts a client clock or effect payload; those derive from committed state.
 type RunTransition struct {
-	OwnerPolicy *OwnerPolicyResult
 	RunID       runspec.RunID
 	To          RunState
 	Actor       Actor
@@ -323,7 +318,6 @@ type RunTransition struct {
 
 // RunCompletion reports completion facts; the store derives the terminal verdict.
 type RunCompletion struct {
-	OwnerPolicy *OwnerPolicyResult
 	RunID       runspec.RunID
 	Actor       Actor
 	Cause       RunCause

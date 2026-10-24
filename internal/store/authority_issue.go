@@ -272,7 +272,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if err := checkRepositoryClaimScope(chain, capability.RepositoryIdentity{Key: row.repo, Display: row.display}); err != nil {
 		return capability.Capability{}, err
 	}
-	if err := checkPushClaimScope(chain, row.repo, sealed.Provenance.Ref(), sealed.Provenance.SHA()); err != nil {
+	if err := checkPushClaimScope(ctx, tx, chain, row.repo, sealed.Provenance); err != nil {
 		return capability.Capability{}, err
 	}
 	if prospective != nil {

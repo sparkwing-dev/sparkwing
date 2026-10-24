@@ -41,7 +41,6 @@ func runTransitions() []runEdge {
 		{active, []runstate.RunState{runstate.RunFailed}, []runstate.ActorKind{runstate.ActorLauncher}, runstate.RunLaunchRejected, "exact live launcher plan award", false},
 		{[]runstate.RunState{runstate.RunPending}, []runstate.RunState{runstate.RunRunning}, owners, runstate.RunStart, "live owner; accepted plan", false},
 		{active, terminal, owners, runstate.RunFinish, "live owner; no live work or expected expansions", false},
-		{active, []runstate.RunState{runstate.RunSuccess, runstate.RunFailed}, owners, runstate.RunPolicyRefused, "live owner; typed admission refusal; unfinished jobs unreleased", false},
 		{active, []runstate.RunState{runstate.RunCancelled}, []runstate.ActorKind{runstate.ActorOperator, runstate.ActorController, runstate.ActorReaper}, runstate.RunCancel, "cancel authority; resolves expected expansions; live work drains", true},
 		{active, []runstate.RunState{runstate.RunCancelled}, []runstate.ActorKind{runstate.ActorController, runstate.ActorReaper, runstate.ActorRunHost}, runstate.RunFinish, "cancel requested; no live work or expected expansions", false},
 		{[]runstate.RunState{runstate.RunPending}, []runstate.RunState{runstate.RunFailed}, []runstate.ActorKind{runstate.ActorReaper}, runstate.RunQueueTimeout, "queue deadline elapsed; no live claim", false},
@@ -63,8 +62,8 @@ func (t *Tenant) TransitionRun(ctx context.Context, change runstate.RunTransitio
 
 // FinishRunAndUnit prevents a terminal run from leaving an executable owner claim behind.
 func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish runstate.FinishRunRequest) (runstate.Applied, error) {
-	if finish.Transition.Cause != runstate.RunFinish && finish.Transition.Cause != runstate.RunPolicyRefused {
-		return runstate.Applied{}, errors.New("run completion requires finish or admission policy result")
+	if finish.Transition.Cause != runstate.RunFinish {
+		return runstate.Applied{}, errors.New("run completion requires finish")
 	}
 
 	var out runstate.Applied
@@ -73,7 +72,7 @@ func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish runstate.FinishRun
 			return holderRefusal()
 		}
 		var err error
-		change := runstate.RunTransition{RunID: finish.Transition.RunID, Actor: finish.Transition.Actor, Cause: finish.Transition.Cause, OwnerPolicy: finish.Transition.OwnerPolicy, Reason: finish.Transition.Reason, MaskedError: finish.Transition.MaskedError}
+		change := runstate.RunTransition{RunID: finish.Transition.RunID, Actor: finish.Transition.Actor, Cause: finish.Transition.Cause, Reason: finish.Transition.Reason, MaskedError: finish.Transition.MaskedError}
 		out, err = transitionRunTx(ctx, tx, t.team, change)
 		if err != nil {
 			return err
@@ -125,7 +124,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 			if err != nil {
 				return runstate.Applied{}, err
 			}
-			if accepted || change.Cause != runstate.RunFinish || change.OwnerPolicy != nil {
+			if accepted || change.Cause != runstate.RunFinish {
 				return runstate.Applied{}, holderRefusal()
 			}
 			if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, change.Reason, now); err != nil {
@@ -140,12 +139,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 	if err := validateResultProofTx(ctx, tx, team, change.Actor, runspec.NodeRef{RunID: change.RunID}, 0); err != nil {
 		return runstate.Applied{}, err
 	}
-	if change.Cause == runstate.RunPolicyRefused && row.FinishedAt == nil {
-		if err := applyRunOwnerPolicyTx(ctx, tx, team, row, change, now); err != nil {
-			return runstate.Applied{}, err
-		}
-	}
-	if change.Cause == runstate.RunFinish || change.Cause == runstate.RunPublish || change.Cause == runstate.RunPolicyRefused {
+	if change.Cause == runstate.RunFinish || change.Cause == runstate.RunPublish {
 		outcome, err := runVerdictTx(ctx, tx, team, row)
 		if err != nil {
 			return runstate.Applied{}, err
@@ -275,9 +269,6 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 }
 
 func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, change runstate.RunTransition, now time.Time) error {
-	if change.OwnerPolicy != nil && change.Cause != runstate.RunPolicyRefused {
-		return errors.New("unexpected run owner policy result")
-	}
 	switch change.Cause {
 	case runCreditRefused:
 		if tx.appAdmission == nil || row.StartedAt != nil || row.Spec != nil || row.StateSeq != 0 || change.Actor.Authority != tx.appAdmission.authority() {
@@ -293,8 +284,6 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 			return holderRefusal()
 		}
 		return nil
-	case runstate.RunPolicyRefused:
-		return checkOwnerTx(ctx, tx, team, change.Actor, row.ID)
 	case runstate.RunCancel:
 		return checkCancelActorTx(ctx, tx, team, change.Actor, row.ID)
 	case runstate.RunStart:

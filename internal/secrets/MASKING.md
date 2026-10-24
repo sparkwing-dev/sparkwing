@@ -1,6 +1,6 @@
 # Host masking contract
 
-The Go host owns one `secrets.Masker`. Secret values shorter than four Unicode
+The Go host owns masking through `secrets.Masker`. Secret values shorter than four Unicode
 code points are accepted, encrypted and access-controlled like other secrets,
 but `Register` skips them before deriving any masking patterns. This applies to
 stored and local secrets, supplied secret arguments, defaults and normalized
@@ -38,6 +38,12 @@ Each stream has one goroutine owner. Registration can add values while a stream
 exists; bytes already emitted cannot be recalled. The host therefore registers
 known values before spawning author code and lazily issued values before
 releasing them.
+
+Each job inherits the host's accepted masks and owns subsequent
+runtime registrations. Explicit mask registrations, issued credentials, logs,
+annotations, summaries and typed outputs share that job's masker across processes and retries. A runtime
+registration cannot censor another job's output. Child-run arguments pass the
+same secret check as typed output before any controller request or child admission.
 
 Fresh identifiers are checked against every registered mask, including issued
 values. Issuance does not invalidate identifiers already accepted. That exemption

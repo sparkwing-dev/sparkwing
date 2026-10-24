@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **security:** Actions push-bound runners require proven provenance for the exact repository, ref and commit. Matching ref and commit text on an asserted run cannot claim that runner.
+- **admission:** Only the store decides and commits admission skips, failures and queue timeouts. Hosts request admission and report declared approval predicates.
+- **runners:** Pools holding reserved secrets require launcher credentials even with `--trust=any`.
+- **secrets:** Explicit masks affect only the registering job's output. Child-run arguments receive the same secret check as job output before leaving the host.
+
 - **runtime:** Preserve cancellation after an automatic transaction rollback so interrupting an owner's state wait does not stop scheduling
 
 - **storage:** Default shared daily object-request stops to off. Operators can opt into a daily emergency brake with `--object-store-budget`; per-team budgets and minute trips still apply

@@ -40,6 +40,7 @@ func (h *sdkCode) readResult(ctx context.Context, row runstate.NodeRow, storage 
 }
 
 type executorSession struct {
+	masks       *MaskRegistry
 	rawArgs     map[string]string
 	jobArgs     map[string]map[string]string
 	closureArgs map[string]map[string]string

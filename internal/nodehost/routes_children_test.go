@@ -4,12 +4,44 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
+
+func TestChildArgumentsWithSecretsNeverLeaveHost(t *testing.T) {
+	for name, args := range map[string]string{
+		"value":   `{"token":"private-credential"}`,
+		"key":     `{"private-credential":"value"}`,
+		"encoded": `{"token":"cHJpdmF0ZS1jcmVkZW50aWFs"}`,
+		"plain":   `{"tag":"v1"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			service := newService(t)
+			if err := service.Masks.registerIssued("private-credential"); err != nil {
+				t.Fatal(err)
+			}
+			called := false
+			service.StartChild = func(context.Context, capability.Authorized, ChildRequest) (string, error) {
+				called = true
+				return "child", nil
+			}
+			request := httptest.NewRequest(http.MethodPost, "/node/v1/children", strings.NewReader(`{"pipeline":"build","args":`+args+`}`))
+			_, _, err := service.read(request, capability.Authorized{}, "/node/v1/children")
+			if name == "plain" {
+				if err != nil || !called {
+					t.Fatalf("ordinary args refused: %v", err)
+				}
+			} else if err == nil || called || strings.Contains(err.Error(), "private-credential") {
+				t.Fatalf("secret args crossed host boundary: called=%v err=%v", called, err)
+			}
+		})
+	}
+}
 
 func TestChildStartsAndAwaitsItsOutput(t *testing.T) {
 	s := start(t)

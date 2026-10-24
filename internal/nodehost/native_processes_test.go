@@ -22,6 +22,77 @@ func nativeProcessesFixture(t *testing.T) (*NativeProcesses, capability.Credenti
 	return processes, lookup, spec, *services
 }
 
+func TestNativeProcessMasksApplyOnlyToItsOwnOutput(t *testing.T) {
+	processes, lookup, spec, services := nativeProcessesFixture(t)
+	services.StartChild = func(context.Context, capability.Authorized, ChildRequest) (string, error) { return "child", nil }
+	if err := processes.Masks.registerValue("accepted-secret"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, err := processes.Authorities.processServices(t.Context(), first.Binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("POST", "/node/v1/masks", strings.NewReader(`{"value":"other-job-log-text"}`))
+	if err := one.write(request, capability.Authorized{}, "/node/v1/masks"); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := processes.Authorities.deps.Parent.(*processParent)
+	parent.snapshot.Authorities[0].Principal.Capability.Binding.NodeID = "other-job"
+	parent.snapshot.Binding.Current.NodeID = "other-job"
+	spec.Binding.NodeID, services.Job.ID = "other-job", "other-job"
+	second, err := processes.Delegate(t.Context(), lookup, spec, services)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := processes.Masks.registerValue("late-accepted-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := processes.Masks.registerIssued("late-issued-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := processes.Masks.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "generated-job"}}}, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest("POST", "/node/v1/masks", strings.NewReader(`{"value":"generated-job"}`))
+	if err := one.write(request, capability.Authorized{}, "/node/v1/masks"); err == nil {
+		t.Fatal("job mask ignored an identifier accepted after delegation")
+	}
+	var output []string
+	processes.Log = func(_ context.Context, _, _ string, frame nodeproto.FrameLog) error {
+		output = append(output, frame.Message)
+		return nil
+	}
+	for _, grant := range []ProcessGrant{first, resumed, second} {
+		config, err := processes.configuration(t.Context(), grant.Binding, grant.Revoke, ExecutorActivity{}, AcceptedRun{Spec: []byte(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := config.Log(t.Context(), nodeproto.FrameLog{Message: "accepted-secret late-accepted-secret late-issued-secret other-job-log-text"}); err != nil {
+			t.Fatal(err)
+		}
+		bound, err := processes.Authorities.processServices(t.Context(), grant.Binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		child := httptest.NewRequest("POST", "/node/v1/children", strings.NewReader(`{"pipeline":"build","args":{"value":"other-job-log-text"}}`))
+		_, _, err = bound.read(child, capability.Authorized{}, "/node/v1/children")
+		if (err != nil) != (grant.Binding.JobID == first.Binding.JobID) {
+			t.Fatalf("child argument masking crossed its job scope: job=%s error=%v", grant.Binding.JobID, err)
+		}
+	}
+	if len(output) != 3 || output[0] != "*** *** *** ***" || output[1] != "*** *** *** ***" || output[2] != "*** *** *** other-job-log-text" {
+		t.Fatalf("process log masking crossed its scope: %q", output)
+	}
+}
+
 func FuzzNativeProcessServicesIsolation(f *testing.F) {
 	f.Add("run", "job", false)
 	f.Add("foreign", "job", false)
@@ -45,8 +116,8 @@ func FuzzNativeProcessServicesIsolation(f *testing.F) {
 		if valid != (err == nil) || !valid && bound != nil {
 			t.Fatal("service lookup crossed its delegated process binding")
 		}
-		if valid && (bound.Masks != processes.Masks || bound.Cleanups == nil || bound.Cleanups == services.Cleanups) {
-			t.Fatal("delegation lost its shared masks or isolated cleanups")
+		if valid && (bound.Masks == processes.Masks || bound.Cleanups == nil || bound.Cleanups == services.Cleanups) {
+			t.Fatal("delegation lost its isolated masks or cleanups")
 		}
 	})
 }

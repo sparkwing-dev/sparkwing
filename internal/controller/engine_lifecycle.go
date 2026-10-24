@@ -186,5 +186,5 @@ func finishForStore(a capability.Authorized, body controllerwire.FinishRequest) 
 	if a.Access.Credential == capability.CredentialPublisher {
 		change.Cause = runstate.RunPublish
 	}
-	return runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, OwnerPolicy: change.OwnerPolicy, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: change.Actor.Owner}, nil
+	return runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: change.Actor.Owner}, nil
 }

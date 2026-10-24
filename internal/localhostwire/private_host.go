@@ -19,19 +19,17 @@ type LocalNodeSnapshot struct {
 
 // LocalRunTransition carries a lifecycle edge without actor authority.
 type LocalRunTransition struct {
-	To          runstate.RunState           `json:"to"`
-	Cause       runstate.RunCause           `json:"cause"`
-	Reason      string                      `json:"reason"`
-	MaskedError string                      `json:"masked_error"`
-	OwnerPolicy *runstate.OwnerPolicyResult `json:"owner_policy,omitempty"`
+	To          runstate.RunState `json:"to"`
+	Cause       runstate.RunCause `json:"cause"`
+	Reason      string            `json:"reason"`
+	MaskedError string            `json:"masked_error"`
 }
 
 // LocalRunCompletion requests the store-derived verdict without choosing an outcome.
 type LocalRunCompletion struct {
-	Cause       runstate.RunCause           `json:"cause"`
-	Reason      string                      `json:"reason"`
-	MaskedError string                      `json:"masked_error"`
-	OwnerPolicy *runstate.OwnerPolicyResult `json:"owner_policy,omitempty"`
+	Cause       runstate.RunCause `json:"cause"`
+	Reason      string            `json:"reason"`
+	MaskedError string            `json:"masked_error"`
 }
 
 // LocalAuthenticationRequest selects an authority within the host's awarded run.

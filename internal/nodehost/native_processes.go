@@ -28,7 +28,7 @@ func (p *NativeProcesses) Delegate(ctx context.Context, parent capability.Creden
 	if p.Authorities == nil || p.Masks == nil || p.Masks.masker == nil || err != nil || target.Host == "" || target.User != nil || (target.Scheme != "http" && target.Scheme != "https") {
 		return ProcessGrant{}, errors.New("native delegation requires authority, masks and a service URL")
 	}
-	services.Masks, services.Cleanups = p.Masks, &ProcessCleanups{}
+	services.Masks, services.Cleanups = p.Masks.job(services.RunID, services.Job.ID), &ProcessCleanups{}
 	services.activity = &nativeProcessActivity{}
 	issued, revoke, err := p.Authorities.delegate(ctx, parent, spec, &services)
 	if err != nil {
@@ -37,7 +37,7 @@ func (p *NativeProcesses) Delegate(ctx context.Context, parent capability.Creden
 	return ProcessGrant{Binding: nodeproto.ProcessBinding{
 		RunID: spec.Binding.RunID, JobID: services.Job.ID,
 		Routes: nodeproto.ProcessRoutes{URL: strings.TrimRight(p.URL, "/"), Bearer: issued.Raw},
-	}, Revoke: revoke}, nil
+	}, Revoke: revoke, masks: services.Masks}, nil
 }
 
 // Start launches an attempt with its live delegated services.
@@ -78,7 +78,7 @@ func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.P
 	if err != nil {
 		return config, config.failedStartup(err)
 	}
-	if service.Masks != p.Masks || service.activity == nil {
+	if service.activity == nil {
 		return config, config.failedStartup(errors.New("native services differ from the shared host binding"))
 	}
 	service.activity.set(activity)
@@ -91,6 +91,8 @@ func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.P
 	}}
 	config.Log = logs.write
 	config.output, config.Masks = logs, service.Masks
+	config.Environments.Masks = service.Masks
+	config.Environments.Base.Masker = service.Masks.masker
 	config.RunCleanups = func(ctx context.Context, scope CleanupScope) error {
 		ctx, cancel := context.WithCancelCause(ctx)
 		defer cancel(context.Canceled)

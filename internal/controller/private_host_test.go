@@ -176,44 +176,37 @@ func TestLocalHostPrivateTransportUsesPersistedOwnerAndNodeAwards(t *testing.T) 
 	}
 }
 
-func TestLocalHostFinishPreservesPolicyAndCompletesOwner(t *testing.T) {
-	for _, cause := range []runstate.RunCause{runstate.RunFinish, runstate.RunPolicyRefused} {
-		t.Run(string(cause), func(t *testing.T) {
-			server, host, tenant, owner := localHostFixture(t)
-			run, err := tenant.ReadRun(t.Context(), "run")
-			if err != nil {
-				t.Fatal(err)
-			}
-			spec, err := json.Marshal(runspec.Spec{Version: 1, Request: run.Request, Resolved: runspec.Resolved{Guards: runspec.Guards{Passed: true}}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			engineSQL(t, server.store, `UPDATE runs SET spec_json=?,spec_hash='spec',sealed_at=1,plan_json=?,plan_hash='plan' WHERE team='a' AND id='run'`, spec, []byte(`{"jobs":[]}`))
-			a := capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}}
-			actor := engineActor(a)
-			change := runstate.RunTransition{RunID: "run", Actor: actor, To: runstate.RunSuccess, Cause: cause}
-			if cause == runstate.RunPolicyRefused {
-				change.OwnerPolicy = &runstate.OwnerPolicyResult{Kind: runstate.PolicyAdmissionSkip, Generation: actor.Owner.Generation}
-			}
-			if _, err := host.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, OwnerPolicy: change.OwnerPolicy, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: actor.Owner}); err != nil {
-				t.Fatal(err)
-			}
-			var status string
-			if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT status FROM triggers WHERE team='a' AND id='run'`).Scan(&status); err != nil || status != "done" {
-				t.Fatalf("owner completion: %s %v", status, err)
-			}
-			run, err = tenant.ReadRun(t.Context(), "run")
-			if err != nil || run.State != runstate.RunSuccess || run.FinishedAt == nil {
-				t.Fatalf("run completion: %+v %v", run, err)
-			}
-		})
+func TestLocalHostFinishCompletesOwner(t *testing.T) {
+	server, host, tenant, owner := localHostFixture(t)
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := json.Marshal(runspec.Spec{Version: 1, Request: run.Request, Resolved: runspec.Resolved{Guards: runspec.Guards{Passed: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, server.store, `UPDATE runs SET spec_json=?,spec_hash='spec',sealed_at=1,plan_json=?,plan_hash='plan' WHERE team='a' AND id='run'`, spec, []byte(`{"jobs":[]}`))
+	a := capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}}
+	actor := engineActor(a)
+	change := runstate.RunTransition{RunID: "run", Actor: actor, To: runstate.RunSuccess, Cause: runstate.RunFinish}
+	if _, err := host.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: change.RunID, Actor: change.Actor, Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError}, Unit: actor.Owner}); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT status FROM triggers WHERE team='a' AND id='run'`).Scan(&status); err != nil || status != "done" {
+		t.Fatalf("owner completion: %s %v", status, err)
+	}
+	run, err = tenant.ReadRun(t.Context(), "run")
+	if err != nil || run.State != runstate.RunSuccess || run.FinishedAt == nil {
+		t.Fatalf("run completion: %+v %v", run, err)
 	}
 }
 
 func TestLocalHostRunTransitionCannotLeaveTerminalOwnerClaimed(t *testing.T) {
 	server, host, tenant, owner := localHostFixture(t)
 	for _, state := range []runstate.RunState{runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled} {
-		for _, cause := range []runstate.RunCause{runstate.RunFinish, runstate.RunPublish, runstate.RunPolicyRefused, runstate.RunCancel} {
+		for _, cause := range []runstate.RunCause{runstate.RunFinish, runstate.RunPublish, runstate.RunCause("policy_refused"), runstate.RunCancel} {
 			if _, err := host.TransitionRun(t.Context(), runstate.RunTransition{RunID: "run", To: state, Cause: cause}); err == nil {
 				t.Fatalf("terminal edge bypassed owner completion: %s %s", state, cause)
 			}

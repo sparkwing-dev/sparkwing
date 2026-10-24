@@ -149,6 +149,11 @@ child repository requires authorization from the parent's live claim and always
 runs as asserted. Cycle checks compare repository and pipeline together. A
 retry copies its source run's identity whole.
 
+An Actions push-bound runner takes work only when its sealed provenance proves
+the binding's exact repository, ref and commit through Actions or a verified
+App delivery. An asserted run cannot use that runner by naming the same ref
+and commit.
+
 A `source:` code pin that is a full commit ID keeps the run's class. A branch or
 tag pin that does not resolve to the execution commit demotes the run to
 `asserted`, because whoever can push that ref chooses the code. The demoted run

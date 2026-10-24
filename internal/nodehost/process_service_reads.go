@@ -90,6 +90,13 @@ func (s *ProcessServices) read(request *http.Request, auth capability.Authorized
 		if child.Pipeline == "" {
 			return nil, 0, executorError(apierr.BadRequest, "child request requires a pipeline")
 		}
+		args, err := json.Marshal(child.Args)
+		if err != nil {
+			return nil, 0, err
+		}
+		if s.Masks.ContainsSecret(string(args)) {
+			return nil, 0, executorError(apierr.BadRequest, "child arguments cannot contain a secret")
+		}
 		var id string
 		id, err = s.StartChild(ctx, auth, child)
 		if err == nil && id == "" {

@@ -16,6 +16,7 @@ type MaskRegistry struct {
 	// Replay must reproduce accepted topology even after credentials are issued.
 	replayMasks *secrets.Masker
 	identifiers map[string]string
+	jobs        map[[2]string]*MaskRegistry
 }
 
 // NewMaskRegistry uses the same masker that host logs and returned errors use.
@@ -23,6 +24,33 @@ func NewMaskRegistry(masker *secrets.Masker) *MaskRegistry {
 	replayMasks := secrets.NewMasker()
 	replayMasks.Merge(masker)
 	return &MaskRegistry{masker: masker, replayMasks: replayMasks, identifiers: map[string]string{}}
+}
+
+func (r *MaskRegistry) job(run, job string) *MaskRegistry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := [2]string{run, job}
+	scoped := r.jobs[key]
+	if scoped == nil {
+		scoped = NewMaskRegistry(secrets.NewMasker())
+		if r.jobs == nil {
+			r.jobs = map[[2]string]*MaskRegistry{}
+		}
+		r.jobs[key] = scoped
+	}
+	scoped.inherit(r)
+	return scoped
+}
+
+// The parent lock orders acceptance and registration before inheritance.
+func (r *MaskRegistry) inherit(parent *MaskRegistry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.masker.Merge(parent.masker)
+	r.replayMasks.Merge(parent.replayMasks)
+	for identifier, path := range parent.identifiers {
+		r.identifiers[identifier] = path
+	}
 }
 
 // ContainsSecret reports every presentation mask, including issued credentials.
@@ -46,7 +74,13 @@ func (r *MaskRegistry) registerIssued(value string) error {
 	if r.masker == nil {
 		return errors.New("mask registration requires a shared masker")
 	}
-	return r.masker.Register(value)
+	if err := r.masker.Register(value); err != nil {
+		return err
+	}
+	for _, job := range r.jobs {
+		job.inherit(r)
+	}
+	return nil
 }
 
 func (r *MaskRegistry) register(candidate *secrets.Masker) error {
@@ -62,6 +96,9 @@ func (r *MaskRegistry) register(candidate *secrets.Masker) error {
 	}
 	r.masker.Merge(candidate)
 	r.replayMasks.Merge(candidate)
+	for _, job := range r.jobs {
+		job.inherit(r)
+	}
 	return nil
 }
 
@@ -92,6 +129,9 @@ func (r *MaskRegistry) accept(plan nodeproto.PlanDoc, commit func() error, match
 	}
 	for identifier, path := range identifiers {
 		r.identifiers[identifier] = path
+	}
+	for _, job := range r.jobs {
+		job.inherit(r)
 	}
 	return nil
 }
