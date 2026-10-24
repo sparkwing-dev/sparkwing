@@ -392,16 +392,23 @@ Recoverable bytes can still be lost in a rare race, including identical S3
 bytes with the same ETag. A referenced digest with missing bytes fails loudly.
 A collecting digest that has gained a reference fails the pass loudly.
 
-`RecordSegments` and `ReadLogSegments` accept tagged job or owner-unit subjects.
+Attempt-start and owner-unit claim transactions create their log streams. Publication
+imports create their streams atomically too. `RecordSegments` appends and seals
+existing streams, refusing a missing registration. `RecordSegments` and
+`ReadLogSegments` accept tagged job or owner-unit subjects.
 `Segment.Size` and `Offset` count decoded bytes. `StoredBytes` counts the
 compressed object whose hash is `Digest`. Retained storage and billing count
 stored bytes once. Cursors continue to count decoded bytes. Both lengths are
 immutable on replay, and the proxied reader verifies both before returning bytes.
 `LogSegmentObjectKey` is shared with signing so a commit cannot substitute an
 object from another stream. Segments are contiguous and immutable. Final commits
-seal even empty streams, and only identical final bodies replay. Job tail grace
-uses the persisted finish time and original writer. Trigger, plan and eval logs
-retain their own live fences. A reader with run-read authority can read historical
+seal even empty streams, and only identical final bodies replay. Final-tail grace
+uses the persisted finish time and original writer. Completed trigger, plan and
+eval units accept only their awarded credential's logs before `LogSealGrace`
+ends. The current unit generation and eval source generation must still match.
+Credential ancestry stays live, and the allowance cannot renew or execute work.
+Maintenance waits for that grace before sealing an unfinished owner stream as
+incomplete. A reader with run-read authority can read historical
 segments after the writer ends. Log incompleteness never changes the job result.
 Segment replay counts retained bytes once. Refused content and byte-limit
 violations preserve the committed inventory. Run deletion cascades streams and
@@ -414,8 +421,9 @@ and tagged-stream maintenance own log lifetime.
 
 `SealAbandonedLogStreams` closes existing execution streams as incomplete under
 the maintenance lease. Finished job attempts keep their final tail grace through
-its exact boundary. Trigger, plan and eval streams close when their persisted
-unit fence is gone. Eval also checks the source generation. The bounded batch
+its exact boundary. Completed trigger, plan and eval streams keep that final
+tail window. Expired or replaced unit fences seal incomplete immediately.
+Eval also checks the source generation. The bounded batch
 locks runs and rechecks the maintenance fence before writing. Any error rolls
 the batch back. Existing final seals remain immutable. Publication streams keep
 their publisher's final-commit contract because publication has no lease.

@@ -117,6 +117,34 @@ function Members({ me }: { me: Me }) {
           />
           Members can add personal machines (members_can_add_machines)
         </label>
+        {settings && (
+          <form className="flex flex-wrap items-center gap-3 p-4 text-sm" onSubmit={(e) => {
+            e.preventDefault();
+            const ceiling = Number(new FormData(e.currentTarget).get("max_children_per_root"));
+            if (Number.isSafeInteger(ceiling) && ceiling > 0 && ceiling <= 1000) {
+              run("settings", async () => {
+                setSettings(await setTeamSettings({ max_children_per_root: ceiling }));
+              }, "Team settings saved");
+            }
+          }}>
+            <label htmlFor="max-children-per-root">Maximum child runs per root</label>
+            <input
+              key={settings.max_children_per_root}
+              id="max-children-per-root"
+              name="max_children_per_root"
+              type="number"
+              min="1"
+              max="1000"
+              step="1"
+              required
+              title="1 to 1000 descendants across every depth, excluding retries. Default 50. Changes are audited."
+              defaultValue={settings.max_children_per_root}
+              disabled={!owner || busy !== null}
+              className={`${inputClass} w-24`}
+            />
+            <button type="submit" className={buttonClass} disabled={!owner || busy !== null}>Save</button>
+          </form>
+        )}
       </Panel>
       <Panel
         title="Members"

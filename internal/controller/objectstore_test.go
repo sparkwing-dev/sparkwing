@@ -42,8 +42,11 @@ func TestObjectStoreBreaker_RouteReportsEveryClass(t *testing.T) {
 		t.Error("a fresh controller reports its object-store breaker as tripped")
 	}
 	for _, c := range body.Classes {
-		if c.PerMinute <= 0 || c.PerDay <= 0 {
-			t.Errorf("class %q carries no budget: per_minute=%d per_day=%d", c.Class, c.PerMinute, c.PerDay)
+		if c.PerMinute <= 0 {
+			t.Errorf("class %q carries no minute budget: per_minute=%d", c.Class, c.PerMinute)
+		}
+		if c.PerDay != 0 {
+			t.Errorf("class %q enables a shared daily stop by default: per_day=%d", c.Class, c.PerDay)
 		}
 	}
 }

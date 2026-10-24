@@ -2,8 +2,8 @@
 // object store.
 //
 // One Limiter per process counts PUT, GET, LIST and DELETE separately,
-// against a per-minute rate and a per-day budget each. Exceeding either
-// budget trips that class: every further request of that class is
+// against a per-minute rate and an optional per-day emergency budget.
+// Exceeding a configured budget trips that class: every further request is
 // refused with a *budgetError and nothing is queued. Classes are
 // independent, so a tripped PUT budget leaves reads working on their
 // own budget.
@@ -110,25 +110,13 @@ type Config struct {
 	Ceiling CeilingConfig
 }
 
-// Default budgets. The per-minute rates sit an order of magnitude above
-// a busy controller, which writes one object per log append, and far
-// below a retry loop with no sleep, which issues thousands of requests
-// a second and so trips in under two seconds. Each day budget is about
-// 150 times its minute rate, roughly two and a half hours at sustained
-// peak, so a leak that stays under the minute rate is still caught the
-// same day.
+// Default minute rates stop runaway retry loops. Shared daily budgets are
+// opt-in emergency brakes; ordinary enforcement uses per-team budgets.
 const (
-	defaultPutPerMinute = 1200
-	defaultPutPerDay    = 200000
-
-	defaultGetPerMinute = 3000
-	defaultGetPerDay    = 500000
-
-	defaultListPerMinute = 600
-	defaultListPerDay    = 100000
-
+	defaultPutPerMinute    = 1200
+	defaultGetPerMinute    = 3000
+	defaultListPerMinute   = 600
 	defaultDeletePerMinute = 600
-	defaultDeletePerDay    = 100000
 )
 
 // defaultConfig returns the built-in budgets.
@@ -137,10 +125,10 @@ func defaultConfig() Config {
 		Enabled: true,
 		Reset:   tripResetDay,
 		Limits: map[Class]Limit{
-			classPut:    {PerMinute: defaultPutPerMinute, PerDay: defaultPutPerDay},
-			classGet:    {PerMinute: defaultGetPerMinute, PerDay: defaultGetPerDay},
-			ClassList:   {PerMinute: defaultListPerMinute, PerDay: defaultListPerDay},
-			classDelete: {PerMinute: defaultDeletePerMinute, PerDay: defaultDeletePerDay},
+			classPut:    {PerMinute: defaultPutPerMinute},
+			classGet:    {PerMinute: defaultGetPerMinute},
+			ClassList:   {PerMinute: defaultListPerMinute},
+			classDelete: {PerMinute: defaultDeletePerMinute},
 		},
 	}
 }
@@ -291,9 +279,8 @@ func (l *Limiter) limitFor(st *classCounters, w Window) int {
 	return st.limit.PerMinute
 }
 
-// safety: a minute trip always clears on the minute roll, because the day budget
-// still bounds the total and one burst must not fail writes closed until
-// midnight. A day trip clears on the day roll only when configured to.
+// A minute trip clears on the minute roll so one burst cannot stop writes until
+// midnight. An optional day trip clears on the day roll only when configured to.
 func (l *Limiter) rollWindows(st *classCounters, now time.Time) {
 	if st.minuteStart.IsZero() || now.Sub(st.minuteStart) >= time.Minute {
 		st.minuteStart = now.Truncate(time.Minute)

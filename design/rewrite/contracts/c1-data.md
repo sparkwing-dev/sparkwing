@@ -22,6 +22,10 @@ renewal, rejection, reservation validation and snapshot reads. A failed award
 returns an explicit deferred fence, preserving its Job while healthy awards
 continue. Database failures and invalid claimant authority still fail the request.
 
+Transaction commit preserves context cancellation when the database has already
+rolled back the cancelled transaction. An owner interrupting its state wait can
+continue scheduling without treating that rollback as a database failure.
+
 
 ## Collection and required blob reads
 
@@ -2251,8 +2255,11 @@ source job and immutable source generation, separate from its own lease fence.
 represent pre-job logs.
 
 `log_streams` persists that tagged identity, its generation, retention class and
-final commit digest. `log_segments` references the stream with the same generation.
-The writer rechecks its exact capability binding and persisted generation.
+final commit digest. The transaction that starts an attempt or claims an owner
+unit also creates its stream. Publication imports create their streams in the same transaction.
+`RecordSegments` appends and seals existing streams, refusing a missing registration.
+`log_segments` references the stream with the same generation. The writer rechecks
+its exact capability binding and persisted generation.
 An unsealed final job attempt may flush after its result commits until the
 persisted finish time plus `limits.LogSealGrace`. C1 rechecks the recorded writer,
 attempt, generation, current credential ancestry/expiry/membership and absence
@@ -3653,7 +3660,7 @@ migration or backfill is introduced.
 
 `TestMemoizedSourceZeroClaimsRenewsAndPublishesEvalLog` drives the persisted
 boundaries. `FuzzZeroSourceEvalCannotBorrowAnotherFence` refuses changed source
-and lease identities without committing a log stream.
+and lease identities without appending or sealing the awarded log stream.
 
 ## W9 launcher preparation renewal
 
@@ -4442,15 +4449,15 @@ Cloud-only placement or an exclusive Cloud ranking checks credit standing,
 including prepaid policy and holds, before admitting executable work. A
 refused push remains terminal history and replay retains that result.
 
-Each launcher pass has one fault ledger attributed only by protected team
-labels. Every contained teardown, release or quarantine fault enters that
-ledger once per node. More than three distinct faults block that team's next
-claim. Quarantine permission is tracked separately and permits at most three
-distinct nodes per team per pass; counting a fault grants no write permission.
-Reservation evidence on protected team nodes is classified before namespace
-filtering. Erased identity annotations still consume the protected label's budget
-when a reservation taint or quarantine remains. Only a recorded team matching the
-protected label in the launcher's namespace permits a quarantine or release write.
+Launcher faults isolate suspect nodes and report their identities to the operator.
+Healthy nodes keep serving the team. Reservation and binding metadata use one
+validation predicate for reconciliation and placement, including resumption.
+Damaged metadata keeps a node excluded even if quarantine cannot persist.
+Quarantine writes require the recorded team to match the protected team label in
+the launcher's namespace. Every retry retains and checks the original node UID
+and protected team. A replacement or ownership change refuses the write.
+Operators can stop a team's new claims and waiting placements with `--stop-team`
+on every launcher.
 
 ## Sealed masking projection (decision 43)
 

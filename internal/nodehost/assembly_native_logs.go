@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -17,15 +20,15 @@ import (
 )
 
 type localLogs struct {
-	mu       sync.Mutex
-	run      string
-	masker   *secrets.Masker
-	current  func(context.Context) (capability.Principal, error)
-	claims   *nodeClaims
-	readNode func(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
-	upload   func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
-	sinks    map[string]*logseg.Sink
-	closed   bool
+	mu        sync.Mutex
+	flushes   sync.WaitGroup
+	run       string
+	masker    *secrets.Masker
+	principal capability.Principal
+	nodes     map[string]capability.Principal
+	upload    func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
+	streams   map[string]*localLogStream
+	closed    bool
 }
 
 type logHostStore struct {
@@ -36,26 +39,20 @@ type logHostStore struct {
 
 func (s logHostStore) AcceptPlan(ctx context.Context, request store.PlanAcceptance) (store.AcceptedPlan, error) {
 	if s.unit == capability.UnitPlan {
-		if err := s.logs.close(context.WithoutCancel(ctx)); err != nil {
-			return store.AcceptedPlan{}, err
-		}
+		s.logs.finish(context.WithoutCancel(ctx), "")
 	}
 	return s.NativeHostStore.AcceptPlan(ctx, request)
 }
 
 func (s logHostStore) AcceptExpansion(ctx context.Context, request store.ExpansionSubmission) (store.AcceptedExpansion, error) {
 	if s.unit == capability.UnitEval {
-		if err := s.logs.close(context.WithoutCancel(ctx)); err != nil {
-			return store.AcceptedExpansion{}, err
-		}
+		s.logs.finish(context.WithoutCancel(ctx), "")
 	}
 	return s.NativeHostStore.AcceptExpansion(ctx, request)
 }
 
 func (s logHostStore) FinishRunAndUnit(ctx context.Context, request runstate.FinishRunRequest) (runstate.Applied, error) {
-	if err := s.logs.close(context.WithoutCancel(ctx)); err != nil {
-		return runstate.Applied{}, err
-	}
+	s.logs.finish(context.WithoutCancel(ctx), "")
 	return s.NativeHostStore.FinishRunAndUnit(ctx, request)
 }
 
@@ -63,60 +60,197 @@ func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeComm
 	switch request.(type) {
 	case store.ReportNode, store.RetryNode, store.ReleaseNode:
 		ref, _ := store.NodeCommandAuthority(request)
-		if err := s.logs.closeNode(context.WithoutCancel(ctx), string(ref.NodeID)); err != nil {
-			return runstate.Applied{}, err
-		}
+		s.logs.finish(context.WithoutCancel(ctx), string(ref.NodeID))
 	}
 	return s.NativeHostStore.TransitionNode(ctx, request)
 }
 
-func (l *localLogs) closeNode(ctx context.Context, node string) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var result error
-	for key, sink := range l.sinks {
-		var subject blob.LogSubject
-		if err := json.Unmarshal([]byte(key), &subject); err != nil {
-			return err
-		}
-		if subject.Attempt != nil && subject.Attempt.NodeID == node {
-			_, err := sink.Close(ctx, logseg.End{})
-			delete(l.sinks, key)
-			result = errors.Join(result, err)
-		}
-	}
-	return result
+func (l *localLogs) alert(node string, err error) {
+	slog.Error("run logs incomplete", "run", l.run, "node", node, "error", l.masker.Mask(err.Error()))
 }
 
-func (l *localLogs) subject(ctx context.Context, node string) (capability.Principal, blob.LogSubject, error) {
-	p, err := l.current(ctx)
-	if err != nil {
-		return p, blob.LogSubject{}, err
+// finish detaches streams before committing lifecycle state. Uploads share no host lock.
+func (l *localLogs) finish(ctx context.Context, node string) <-chan struct{} {
+	streams := l.take(node)
+	done := make(chan struct{})
+	l.flushes.Add(1)
+	go func() {
+		defer l.flushes.Done()
+		defer close(done)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.LogSealGrace)
+		defer cancel()
+		for _, stream := range streams {
+			if err := stream.close(ctx); err != nil {
+				l.alert(node, err)
+			}
+		}
+	}()
+	return done
+}
+
+func (l *localLogs) take(node string) []*localLogStream {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if node == "" {
+		l.closed = true
 	}
+	var streams []*localLogStream
+	for key, stream := range l.streams {
+		if node == "" || stream.subject.Attempt != nil && stream.subject.Attempt.NodeID == node {
+			streams = append(streams, stream)
+			delete(l.streams, key)
+		}
+	}
+	return streams
+}
+
+type localLogStream struct {
+	mu      sync.Mutex
+	subject blob.LogSubject
+	upload  *logUpload
+	sink    *logseg.Sink
+	failed  bool
+	closed  bool
+}
+
+func (s *localLogStream) write(ctx context.Context, body []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return logseg.ErrClosed
+	}
+	if s.sink == nil {
+		var err error
+		s.sink, err = logseg.NewSink(ctx, s.upload, logseg.Options{Subject: s.subject})
+		if err != nil {
+			s.failed = true
+			return err
+		}
+		if s.failed {
+			s.sink.MarkIncomplete()
+		}
+	}
+	return s.sink.Append(body, "", 0, 0)
+}
+
+func (s *localLogStream) close(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	if s.sink == nil {
+		manifest := logseg.Manifest{Version: 1, Subject: &s.subject, Status: logseg.StatusComplete, SealedBy: "node", SealedAt: time.Now().UTC()}
+		if s.failed {
+			manifest.Status, manifest.Reason = "incomplete", "log persistence failed"
+		}
+		return s.upload.PutManifest(ctx, manifest)
+	}
+	manifest, err := s.sink.Close(ctx, logseg.End{})
+	if err == nil && manifest.Status == "incomplete" {
+		err = errors.New(manifest.Reason)
+	}
+	return err
+}
+
+func (l *localLogs) bind(p capability.Principal, attempt int64) {
+	node := ""
+	if p.Capability.Unit == capability.UnitNode {
+		p.Capability.Binding.Attempt = attempt
+		node = p.Capability.Binding.NodeID
+		l.mu.Lock()
+		if l.nodes == nil {
+			l.nodes = map[string]capability.Principal{}
+		}
+		l.nodes[node] = p
+		l.mu.Unlock()
+	}
+	if _, err := l.open(node); err != nil {
+		l.alert(node, err)
+	}
+}
+
+// subject uses authority captured at assembly or after a committed attempt's storage binding.
+// Persistence still checks the current writer, credential ancestry and attempt fence.
+func (l *localLogs) subject(node string) (capability.Principal, blob.LogSubject, error) {
+	l.mu.Lock()
+	p := l.principal
+	if bound, ok := l.nodes[node]; node != "" && ok {
+		p = bound
+	}
+	l.mu.Unlock()
 	b := p.Capability.Binding
 	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: p.Capability.Team, RunID: l.run, Unit: &blob.LogUnit{Kind: blob.LogUnitKind(p.Capability.Unit), Generation: b.Generation}}
 	if p.Capability.Unit == capability.UnitEval && b.Expansion != nil {
 		subject.Unit.Generation = b.Expansion.Generation
 		subject.Unit.Source = &blob.LogSource{NodeID: b.NodeID, Generation: b.Generation}
 	}
-	if node != "" {
-		row, err := l.readNode(ctx, runspec.NodeRef{RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(node)})
-		if err != nil {
-			return p, blob.LogSubject{}, err
-		}
-		if row.Ref != (runspec.NodeRef{RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(node)}) {
+	if p.Capability.Unit == capability.UnitNode {
+		if b.NodeID != node || b.RunID != l.run || b.Attempt <= 0 {
 			return p, blob.LogSubject{}, nodeClaimMismatch()
 		}
-		if row.Status == runstate.StatusRunning && row.Attempt > 0 && row.CapabilityPrefix != "" {
-			p, err = l.claims.principal(ctx, node, int64(row.Generation), int64(row.Attempt))
-			if err != nil {
-				return p, blob.LogSubject{}, err
-			}
-			subject.Kind, subject.Unit = blob.LogJobAttempt, nil
-			subject.Attempt = &runspec.AttemptIdentity{Team: p.Capability.Team, RunID: l.run, NodeID: node, Generation: int64(row.Generation), Attempt: int64(row.Attempt)}
-		}
+		subject.Kind, subject.Unit = blob.LogJobAttempt, nil
+		subject.Attempt = &runspec.AttemptIdentity{Team: p.Capability.Team, RunID: l.run, NodeID: node, Generation: b.Generation, Attempt: b.Attempt}
 	}
 	return p, subject, subject.Validate()
+}
+
+// logUpload bounds background segment uploads independently of lifecycle calls.
+type logUpload struct {
+	open func(context.Context) (logseg.Uploader, error)
+	up   logseg.Uploader
+}
+
+func (u *logUpload) uploader(ctx context.Context) (logseg.Uploader, error) {
+	if u.up == nil {
+		up, err := u.open(ctx)
+		if err != nil {
+			return nil, err
+		}
+		u.up = up
+	}
+	return u.up, nil
+}
+
+func (u *logUpload) PutSegment(ctx context.Context, segment logseg.Segment, body []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, limits.LogSealGrace)
+	defer cancel()
+	up, err := u.uploader(ctx)
+	if err != nil {
+		return err
+	}
+	return up.PutSegment(ctx, segment, body)
+}
+
+func (u *logUpload) PutManifest(ctx context.Context, manifest logseg.Manifest) error {
+	up, err := u.uploader(ctx)
+	if err != nil {
+		return err
+	}
+	return up.PutManifest(ctx, manifest)
+}
+
+func (l *localLogs) open(node string) (*localLogStream, error) {
+	p, subject, err := l.subject(node)
+	if err != nil {
+		return nil, err
+	}
+	key, err := json.Marshal(subject)
+	if err != nil {
+		return nil, err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return nil, logseg.ErrClosed
+	}
+	if l.streams == nil {
+		l.streams = map[string]*localLogStream{}
+	}
+	stream := l.streams[string(key)]
+	if stream == nil {
+		stream = &localLogStream{subject: subject, upload: &logUpload{open: func(ctx context.Context) (logseg.Uploader, error) { return l.upload(ctx, p, subject) }}}
+		l.streams[string(key)] = stream
+	}
+	return stream, nil
 }
 
 func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto.FrameLog) error {
@@ -126,11 +260,11 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 	if run != l.run || l.masker == nil {
 		return errors.New("local logs require the awarded run and shared masker")
 	}
-	p, subject, err := l.subject(ctx, node)
-	if err != nil {
-		return err
+	stream, err := l.open(node)
+	if errors.Is(err, logseg.ErrClosed) {
+		l.alert(node, err)
+		return nil
 	}
-	key, err := json.Marshal(subject)
 	if err != nil {
 		return err
 	}
@@ -138,40 +272,8 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodeproto
 	if err != nil {
 		return err
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.closed {
-		return logseg.ErrClosed
+	if err := stream.write(ctx, body); err != nil {
+		l.alert(node, err)
 	}
-	if l.sinks == nil {
-		l.sinks = map[string]*logseg.Sink{}
-	}
-	sink := l.sinks[string(key)]
-	if sink == nil {
-		uploader, err := l.upload(ctx, p, subject)
-		if err != nil {
-			return err
-		}
-		sink, err = logseg.NewSink(ctx, uploader, logseg.Options{Subject: subject})
-		if err != nil {
-			return err
-		}
-		l.sinks[string(key)] = sink
-	}
-	return sink.Append(body, "", 0, 0)
-}
-
-func (l *localLogs) close(ctx context.Context) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.closed {
-		return nil
-	}
-	l.closed = true
-	var result error
-	for _, sink := range l.sinks {
-		_, err := sink.Close(ctx, logseg.End{})
-		result = errors.Join(result, err)
-	}
-	return result
+	return nil
 }

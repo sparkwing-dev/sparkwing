@@ -101,3 +101,31 @@ func TestSelfHostedControllerRefusesTheCloudTier(t *testing.T) {
 		}
 	}
 }
+
+func TestChildCeilingTeamSettingsHTTP(t *testing.T) {
+	s, session := credentialSessionServer(t)
+	engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.write,team.admin'`)
+	for _, tc := range []struct {
+		role, body string
+		status     int
+	}{
+		{"editor", `{"max_children_per_root":200}`, 403},
+		{"owner", `{"max_children_per_root":0}`, 400},
+		{"owner", `{"max_children_per_root":-1}`, 400},
+		{"owner", `{"max_children_per_root":1000}`, 200},
+		{"owner", `{"max_children_per_root":1001}`, 400},
+	} {
+		engineSQL(t, s.store, `UPDATE memberships SET role=? WHERE account_id='member'`, tc.role)
+		r := httptest.NewRequest("PUT", "https://controller.test/api/v1/team/settings", strings.NewReader(tc.body))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Origin", "https://controller.test")
+		r.Header.Set(csrfHeaderName, "session-csrf")
+		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "session-csrf"})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != tc.status || tc.status == 200 && !strings.Contains(w.Body.String(), `"max_children_per_root":1000`) {
+			t.Fatalf("%s %s: %d %s", tc.role, tc.body, w.Code, w.Body)
+		}
+	}
+}

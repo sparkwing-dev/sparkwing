@@ -15,6 +15,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
+func TestLogPersistenceCannotCreateStream(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	rewriteSchemaExec(t, s.db, "DELETE FROM log_streams")
+	if err := tenant.RecordSegments(t.Context(), logCommit(actor, attempt)); err == nil {
+		t.Fatal("log flush created a stream outside its attempt transaction")
+	}
+	rewriteSchemaCount(t, s.db, "log_streams", 0)
+	rewriteSchemaCount(t, s.db, "log_segments", 0)
+}
+
 func TestLogPersistenceRetainedBytesCountSegmentsOnce(t *testing.T) {
 	s, tenant, actor, attempt := resultFixture(t)
 	commit := logCommit(actor, attempt)
@@ -270,7 +280,7 @@ func TestLogPersistenceFailureRollsBackWholeCommit(t *testing.T) {
 	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
 		t.Fatal("gap accepted")
 	}
-	rewriteSchemaCount(t, s.db, "log_streams", 0)
+	rewriteSchemaCount(t, s.db, "log_streams", 1)
 	rewriteSchemaCount(t, s.db, "log_segments", 0)
 }
 
@@ -307,15 +317,9 @@ func TestLogPersistenceSealedReplayStillChecksAncestry(t *testing.T) {
 func TestLogPersistenceOwnerUnitsHaveIndependentFences(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
 		t.Run(string(kind), func(t *testing.T) {
-			s, claim := releaseFixture(t, kind)
-			tenant := &Tenant{s: s, team: "a"}
-			actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
-			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogUnitKind(kind), Generation: int64(claim.Award.Generation)}}
-			if kind == capability.UnitEval {
-				subject.Unit.Source = &blob.LogSource{NodeID: "job", Generation: claim.SourceGeneration}
-				rewriteSchemaExec(t, s.db, "UPDATE nodes SET generation=? WHERE run_id='run' AND node_id='job'", claim.SourceGeneration)
-			}
-			commit := SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Final: true}
+			s, tenant, commit := maintenanceOwnerLogFixture(t, kind)
+			subject := commit.Subject
+			commit.Final = true
 			if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 				t.Fatal(err)
 			}
@@ -371,11 +375,10 @@ func TestLogPersistenceReadDoesNotBorrowSealedReplayGrace(t *testing.T) {
 func TestLogPersistenceTriggerReadRechecksItsOwnerLease(t *testing.T) {
 	for _, stale := range []string{"expired", "generation", "holder", "prefix", "ended"} {
 		t.Run(stale, func(t *testing.T) {
-			s, claim := releaseFixture(t, capability.UnitTrigger)
-			tenant := &Tenant{s: s, team: "a"}
-			actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
-			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: int64(claim.Award.Generation)}}
-			if err := tenant.RecordSegments(t.Context(), SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Final: true}); err != nil {
+			s, tenant, commit := maintenanceOwnerLogFixture(t, capability.UnitTrigger)
+			actor, subject := commit.Actor, commit.Subject
+			commit.Final = true
+			if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 				t.Fatal(err)
 			}
 			jobSubject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: 2}}

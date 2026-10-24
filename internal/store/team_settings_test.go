@@ -1,15 +1,92 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
+
+func TestChildCeilingTeamSetting(t *testing.T) {
+	s, spec := machineEnrollment(t)
+	tenant := &Tenant{s: s, team: "a"}
+	a := teamAuthorization(t, s, runstate.Actor{Authority: *spec.Authority}, "a", "PUT", "/api/v1/team/settings")
+	initial, err := tenant.TeamSettings(t.Context())
+	if err != nil || initial.MaxChildrenPerRoot != 50 {
+		t.Fatalf("default child ceiling: %+v %v", initial, err)
+	}
+	childLimitsFixture(t, s, 50)
+	check := func(wantError bool) {
+		t.Helper()
+		err := s.inTx(t.Context(), func(tx *storeTx) error {
+			return enforceChildLimitsTx(t.Context(), tx, "a", "root", 2)
+		})
+		if (err != nil) != wantError {
+			t.Fatalf("child intake at 50 descendants: %v", err)
+		}
+	}
+	check(true)
+	for _, ceiling := range []int64{1000, 1000, 20} {
+		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MaxChildrenPerRoot: &ceiling}); err != nil {
+			t.Fatal(err)
+		}
+		check(ceiling == 20)
+	}
+	events, err := tenant.BusinessEvents(t.Context(), "team.settings_changed", 1000, "")
+	if err != nil || len(events) != 2 {
+		t.Fatalf("child ceiling audits: %+v %v", events, err)
+	}
+	for _, e := range events {
+		if e.Actor != "owner" || e.Attrs["max_children_per_root"] == nil || e.Attrs["max_children_per_root"] == e.Attrs["previous_max_children_per_root"] {
+			t.Fatalf("missing child ceiling audit: %+v", e)
+		}
+	}
+	s.testOnlyExec(t, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1) ON CONFLICT(name) DO NOTHING`)
+	other, err := (&Tenant{s: s, team: "b"}).TeamSettings(t.Context())
+	if err != nil || other.MaxChildrenPerRoot != 50 {
+		t.Fatalf("changed another team's ceiling: %+v %v", other, err)
+	}
+	for _, ceiling := range []int64{-1, 0, 1001, 9223372036854775807} {
+		var invalid *apierr.Error
+		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MaxChildrenPerRoot: &ceiling}); !errors.As(err, &invalid) || invalid.Code != apierr.BadRequest {
+			t.Fatalf("invalid ceiling %d: %v", ceiling, err)
+		}
+	}
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_child_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	ceiling := int64(200)
+	if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MaxChildrenPerRoot: &ceiling}); err == nil {
+		t.Fatal("changed ceiling without its audit")
+	}
+	check(true)
+}
+
+func TestChildCeilingDatabaseRange(t *testing.T) {
+	s, _ := machineEnrollment(t)
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		_, err := tx.ExecContext(t.Context(), `UPDATE teams SET max_children_per_root=1000 WHERE name='a'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ceiling := range []int64{-1, 0, 1001, 9223372036854775807} {
+		if err := s.inTx(t.Context(), func(tx *storeTx) error {
+			_, err := tx.ExecContext(t.Context(), `UPDATE teams SET max_children_per_root=? WHERE name='a'`, ceiling)
+			return err
+		}); err == nil {
+			t.Fatalf("database accepted child ceiling %d", ceiling)
+		}
+	}
+	current, err := (&Tenant{s: s, team: "a"}).TeamSettings(t.Context())
+	if err != nil || current.MaxChildrenPerRoot != 1000 {
+		t.Fatalf("rejected update changed child ceiling: %+v %v", current, err)
+	}
+}
 
 func TestMachineEnrollmentTeamSettingProperty(t *testing.T) {
 	property := func(enabled, personal bool, roleIndex uint8) bool {
@@ -113,10 +190,11 @@ func TestTeamSettingRechecksAuthorityProperty(t *testing.T) {
 			a.Principal.Authority.ID = fmt.Sprintf("absent-%d", suffix)
 		}
 		tenant := &Tenant{s: s, team: "a"}
-		err := tenant.SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MembersCanAddMachines: new(bool)})
+		ceiling := int64(200)
+		err := tenant.SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MembersCanAddMachines: new(bool), MaxChildrenPerRoot: &ceiling})
 		current, readErr := tenant.TeamSettings(t.Context())
 		events, auditErr := tenant.BusinessEvents(t.Context(), "team.settings_changed", 1000, "")
-		return err != nil && readErr == nil && current.MembersCanAddMachines && auditErr == nil && len(events) == 0
+		return err != nil && readErr == nil && current.MembersCanAddMachines && current.MaxChildrenPerRoot == 50 && auditErr == nil && len(events) == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
 		t.Fatal(err)

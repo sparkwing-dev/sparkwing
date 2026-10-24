@@ -17,9 +17,9 @@ that post signed deliveries must treat 202 as acceptance for later processing.
 Disconnecting an installation revokes work still preparing source for admission
 or schedule publication. Those refused effects leave no receipt to replay.
 
-The schema baseline moves to version 22 for the inbox, targeted effect results,
-team queue attribution and idle free-slot tracking. Recreate stores from an
-earlier baseline before starting this build.
+The schema baseline moves to version 23 for the inbox, targeted effect results,
+team queue attribution, idle free-slot tracking and per-team descendant ceilings.
+Recreate stores from an earlier baseline before starting this build.
 Existing stores are refused rather than opened under the new schema.
 
 ## Runner sizes are labels
@@ -62,7 +62,7 @@ not delay matching jobs. Existing stores must be recreated because the baseline
 adds normalized requirement sets and indexed references on queued work.
 Metered claim leases account for billable time that begins during issuance.
 
-The store baseline is 22. Earlier stores are refused and must be recreated under
+The store baseline is 23. Earlier stores are refused and must be recreated under
 the pre-launch baseline policy. Delivery receipts now include each targeted
 admission, publication, withdrawal and lifecycle result. Reprocessing preserves
 committed effects. Installation withdrawals keep their original repository targets
@@ -3055,7 +3055,9 @@ upgrading:
   scope. Team repository registration or live App installation coverage
   authorizes an explicit repository. A child in another repository always
   runs as asserted. Children nest at most 10 levels deep counting the root and one
-  root starts at most 50 children, retries excluded; past either bound intake
+  root uses the team-set child ceiling (1 to 1000, default 50, retries excluded). Team admins
+  change it with `team settings set --profile work --max-children-per-root 200`
+  or in Team settings; changes are audited. Past either bound intake
   answers `409` with `limit` `max_child_depth` or `max_children_per_root`. A
   child spends the admission budget recorded on its parent. App and schedule
   roots use the team bucket for flood and hourly limits. A retry charges the retrier and its

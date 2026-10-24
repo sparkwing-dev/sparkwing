@@ -15,10 +15,10 @@ const (
 	maxLabels int = 32
 	// maxPipelineRefs bounds pipeline references per plan.
 	maxPipelineRefs int = 32
+	// MaxChildrenPerRoot is the largest supported team descendant ceiling.
+	MaxChildrenPerRoot int64 = 1000
 	// MaxChildDepth bounds a child-run chain, counting the root run as one level.
 	MaxChildDepth int = 10
-	// MaxChildrenPerRoot bounds the child runs started under one root run, at every depth.
-	MaxChildrenPerRoot int = 50
 	// MaxAnnotations bounds annotations per run.
 	MaxAnnotations int = 1000
 	// MaxEvents bounds events per run.

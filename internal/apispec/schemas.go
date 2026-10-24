@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -131,6 +132,12 @@ func (b *schemaBuilder) fields(t reflect.Type, properties schema, required *[]st
 			continue
 		}
 		value := b.value(field.Type)
+		if name == "max_children_per_root" && (t == reflect.TypeFor[controllerwire.TeamSettings]() || t == reflect.TypeFor[controllerwire.TeamSettingsUpdate]()) {
+			value = schema{"type": "integer", "minimum": 1, "maximum": limits.MaxChildrenPerRoot}
+			if field.Type.Kind() == reflect.Pointer {
+				value = nullable(value)
+			}
+		}
 		optional := false
 		for _, option := range tag[1:] {
 			if option == "omitempty" || option == "omitzero" {

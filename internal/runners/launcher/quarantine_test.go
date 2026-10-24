@@ -201,10 +201,9 @@ func TestQuarantineWriteFailures(t *testing.T) {
 	}
 }
 
-// A damaged team's reservations consume only its own quarantine budget.
-func TestQuarantineBudgetStopsOnlyFaultedTeam(t *testing.T) {
+func TestNodeFaultsQuarantineEveryAuthorizedNodeWithoutStoppingClaims(t *testing.T) {
 	l, kube, _, control := fixture()
-	for i := range maxQuarantinesPerSync + 1 {
+	for i := range 4 {
 		binding := boundaryBinding("team")
 		binding.UnitID = "unit-" + string(rune('a'+i))
 		node := reservedNode(t, "node-"+string(rune('a'+i)), binding, "garbage")
@@ -228,7 +227,7 @@ func TestQuarantineBudgetStopsOnlyFaultedTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := l.Sync(t.Context())
-	if blocking(err) != nil || !strings.Contains(err.Error(), "its claims stop") {
+	if err == nil || blocking(err) != nil || !strings.Contains(err.Error(), "node-d") {
 		t.Fatalf("fault was not confined to its team: %v", err)
 	}
 	nodes, err := kube.CoreV1().Nodes().List(t.Context(), metav1.ListOptions{})
@@ -241,12 +240,12 @@ func TestQuarantineBudgetStopsOnlyFaultedTeam(t *testing.T) {
 			tainted++
 		}
 	}
-	if tainted != maxQuarantinesPerSync+1 {
-		t.Fatalf("quarantined %d nodes in one pass, want %d", tainted, maxQuarantinesPerSync+1)
+	if tainted != 5 {
+		t.Fatalf("quarantined %d nodes in one pass, want %d", tainted, 5)
 	}
 	control.award = nil
-	if _, err := l.LaunchOne(t.Context()); err != nil || !slices.Equal(control.excluded, []string{TeamNodeValue("cloud", "team")}) {
-		t.Fatalf("claim did not exclude only the faulted team: excluded=%v err=%v", control.excluded, err)
+	if _, err := l.LaunchOne(t.Context()); err != nil || len(control.excluded) != 0 {
+		t.Fatalf("node faults excluded healthy team claims: excluded=%v err=%v", control.excluded, err)
 	}
 	if err := l.Sync(t.Context()); blocking(err) != nil {
 		t.Fatalf("the next pass crossed the team boundary: %v", err)
@@ -258,13 +257,13 @@ func TestQuarantineBudgetStopsOnlyFaultedTeam(t *testing.T) {
 		t.Fatalf("sync after operator cleanup: %v", err)
 	}
 	if _, err := l.LaunchOne(t.Context()); err != nil || len(control.excluded) != 0 {
-		t.Fatalf("team stayed blocked after returning within its budget: excluded=%v err=%v", control.excluded, err)
+		t.Fatalf("operator cleanup stopped healthy team claims: excluded=%v err=%v", control.excluded, err)
 	}
 }
 
-func TestErasedReservationIdentityStillBlocksProtectedTeam(t *testing.T) {
+func TestErasedReservationIdentityReportsNodesWithoutStoppingTeam(t *testing.T) {
 	l, kube, _, control := fixture()
-	for i := range maxQuarantinesPerSync + 1 {
+	for i := range 4 {
 		binding := boundaryBinding("team")
 		name := fmt.Sprintf("erased-%d", i)
 		node := reservedNode(t, name, binding, "")
@@ -281,18 +280,18 @@ func TestErasedReservationIdentityStillBlocksProtectedTeam(t *testing.T) {
 	if _, err := kube.CoreV1().Nodes().Create(t.Context(), foreign, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	for i := range maxQuarantinesPerSync + 1 {
+	for i := range 4 {
 		free := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("free-%d", i), Labels: map[string]string{TeamNodeLabel: TeamNodeValue("cloud", "free")}}}
 		if _, err := kube.CoreV1().Nodes().Create(t.Context(), free, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := l.Sync(t.Context()); blocking(err) != nil {
-		t.Fatal(err)
+	if err := l.Sync(t.Context()); err == nil || blocking(err) != nil || !strings.Contains(err.Error(), "erased-3") {
+		t.Fatalf("erased node identity was not reported: %v", err)
 	}
 	control.award = nil
-	if _, err := l.LaunchOne(t.Context()); err != nil || !slices.Equal(control.excluded, []string{TeamNodeValue("cloud", "team")}) {
-		t.Fatalf("erased reservations did not block their protected team: excluded=%v err=%v", control.excluded, err)
+	if _, err := l.LaunchOne(t.Context()); err != nil || len(control.excluded) != 0 {
+		t.Fatalf("erased reservations stopped healthy team claims: excluded=%v err=%v", control.excluded, err)
 	}
 	nodes, err := kube.CoreV1().Nodes().List(t.Context(), metav1.ListOptions{})
 	if err != nil {
@@ -305,12 +304,12 @@ func TestErasedReservationIdentityStillBlocksProtectedTeam(t *testing.T) {
 	}
 }
 
-func TestReleaseConflictsConsumeOnlyProtectedTeamFaultBudget(t *testing.T) {
+func TestReleaseConflictsLeaveHealthyTeamClaimsAvailable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		l, kube, _, control := fixture()
 		l.Boundary = &KubernetesBoundary{Kube: kube, Namespace: l.Config.Namespace, Clear: func(context.Context, CloudNodeReservation) error { return nil }}
 		control.remove, control.award = true, nil
-		for i := range maxQuarantinesPerSync + 1 {
+		for i := range 4 {
 			binding := boundaryBinding("team")
 			binding.UnitID = "unit-" + string(rune('a'+i))
 			node := reservedNode(t, "node-"+string(rune('a'+i)), binding, "")
@@ -329,8 +328,8 @@ func TestReleaseConflictsConsumeOnlyProtectedTeamFaultBudget(t *testing.T) {
 		if err := l.Sync(t.Context()); err == nil || blocking(err) != nil {
 			t.Fatalf("release faults were not contained: %v", err)
 		}
-		if _, err := l.LaunchOne(t.Context()); err != nil || !slices.Equal(control.excluded, []string{TeamNodeValue("cloud", "team")}) {
-			t.Fatalf("release faults did not stop only their protected team: excluded=%v err=%v", control.excluded, err)
+		if _, err := l.LaunchOne(t.Context()); err != nil || len(control.excluded) != 0 {
+			t.Fatalf("release faults stopped healthy team claims: excluded=%v err=%v", control.excluded, err)
 		}
 		if err := kube.CoreV1().Nodes().Delete(t.Context(), "node-a", metav1.DeleteOptions{}); err != nil {
 			t.Fatal(err)
@@ -339,16 +338,15 @@ func TestReleaseConflictsConsumeOnlyProtectedTeamFaultBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := l.LaunchOne(t.Context()); err != nil || len(control.excluded) != 0 {
-			t.Fatalf("repaired team stayed blocked: %v %v", control.excluded, err)
+			t.Fatalf("repair stopped healthy team claims: %v %v", control.excluded, err)
 		}
 	})
 }
 
-// Faults observed during teardown consume budget without granting quarantine writes.
-func TestPreviouslyCountedFaultsDoNotAuthorizeExtraQuarantines(t *testing.T) {
+func TestPriorTeardownFaultsDoNotLimitQuarantine(t *testing.T) {
 	l, kube, _, control := fixture()
 	var prior []error
-	for i := range maxQuarantinesPerSync + 4 {
+	for i := range 7 {
 		binding := boundaryBinding("team")
 		binding.UnitID = fmt.Sprintf("unit-%d", i)
 		node := reservedNode(t, fmt.Sprintf("node-%d", i), binding, "")
@@ -372,11 +370,148 @@ func TestPreviouslyCountedFaultsDoNotAuthorizeExtraQuarantines(t *testing.T) {
 			quarantines++
 		}
 	}
-	if quarantines != maxQuarantinesPerSync {
-		t.Fatalf("previously counted faults authorized %d quarantines, want %d", quarantines, maxQuarantinesPerSync)
+	if quarantines != 7 {
+		t.Fatalf("prior faults limited quarantine to %d nodes, want %d", quarantines, 7)
 	}
 	control.award = nil
-	if _, err := l.LaunchOne(t.Context()); err != nil || !slices.Equal(control.excluded, []string{TeamNodeValue("cloud", "team")}) {
-		t.Fatalf("claim did not block faulted team: excluded=%v err=%v", control.excluded, err)
+	if _, err := l.LaunchOne(t.Context()); err != nil || len(control.excluded) != 0 {
+		t.Fatalf("node faults stopped healthy team claims: excluded=%v err=%v", control.excluded, err)
+	}
+}
+
+func TestOperatorStopsOnlyNamedTeamClaims(t *testing.T) {
+	l, _, _, control := fixture()
+	l.Config.StoppedTeams = []string{"team", "another"}
+	control.award = nil
+	if _, err := l.LaunchOne(t.Context()); err != nil || !slices.Equal(control.excluded, []string{TeamNodeValue("cloud", "team"), TeamNodeValue("cloud", "another")}) {
+		t.Fatalf("operator stop was not passed to claims: excluded=%v err=%v", control.excluded, err)
+	}
+	l.Config.StoppedTeams = nil
+	if _, err := l.LaunchOne(t.Context()); err != nil || len(control.excluded) != 0 {
+		t.Fatalf("operator resume retained a stop: excluded=%v err=%v", control.excluded, err)
+	}
+}
+
+func TestOperatorStopHoldsWaitingPlacement(t *testing.T) {
+	l, kube, _, control := fixture()
+	l.Config.StoppedTeams = []string{"team"}
+	l.wait(control.award)
+	control.award = nil
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := kube.BatchV1().Jobs(l.Config.Namespace).List(t.Context(), metav1.ListOptions{})
+	if err != nil || len(jobs.Items) != 0 || len(l.waitingAwards()) != 1 {
+		t.Fatalf("operator stop allowed waiting placement: jobs=%v err=%v", jobs, err)
+	}
+	l.Config.StoppedTeams = nil
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err = kube.BatchV1().Jobs(l.Config.Namespace).List(t.Context(), metav1.ListOptions{})
+	if err != nil || len(jobs.Items) != 1 {
+		t.Fatalf("operator resume did not place held award: jobs=%v err=%v", jobs, err)
+	}
+}
+
+func TestReservationBindingMismatchStaysExcludedDuringQuarantineConflicts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		boundary, kube := boundaryFixture()
+		binding := boundaryBinding("team")
+		job := jobName(binding)
+		original, _, err := boundary.Reserve(t.Context(), binding, job)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tampered := binding
+		tampered.UnitID = "other-unit"
+		raw, err := json.Marshal(tampered)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node.Annotations[bindingAnnotation] = string(raw)
+		if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		patches := 0
+		kube.PrependReactor("patch", "nodes", func(ktesting.Action) (bool, runtime.Object, error) {
+			patches++
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, "node", errors.New("changed"))
+		})
+		l, _, _, _ := fixture()
+		l.Kube = kube
+		if err := l.Sync(t.Context()); err == nil || blocking(err) != nil || patches == 0 {
+			t.Fatalf("suspect node was not reported without blocking healthy claims: patches=%d err=%v", patches, err)
+		}
+		if _, _, err := boundary.Reserve(t.Context(), binding, job); !errors.Is(err, ErrNoDedicatedNode) {
+			t.Fatalf("resumed a suspect reservation while quarantine conflicted: %v", err)
+		}
+		node, err = kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err = json.Marshal(binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node.Annotations[bindingAnnotation] = string(raw)
+		if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		resumed, _, err := boundary.Reserve(t.Context(), binding, job)
+		if err != nil || resumed != original {
+			t.Fatalf("repaired reservation did not resume: %+v %v", resumed, err)
+		}
+	})
+}
+
+func TestQuarantineRetryStaysWithinOriginalNodeAndTeam(t *testing.T) {
+	for _, change := range []string{"replacement", "protected team", "erased ownership", "protected team during patch"} {
+		t.Run(change, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				_, kube := boundaryFixture()
+				node := reservedNode(t, "tampered", boundaryBinding("team"), "garbage")
+				if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				patches := 0
+				kube.PrependReactor("patch", "nodes", func(ktesting.Action) (bool, runtime.Object, error) {
+					patches++
+					if patches > 1 {
+						return false, nil, nil
+					}
+					changed := node.DeepCopy()
+					switch change {
+					case "replacement":
+						changed.UID = "replacement-uid"
+					case "protected team", "protected team during patch":
+						changed.Labels[TeamNodeLabel] = TeamNodeValue("cloud", "other")
+					case "erased ownership":
+						changed.Annotations = nil
+					}
+					if err := kube.Tracker().Update(corev1.SchemeGroupVersion.WithResource("nodes"), changed, ""); err != nil {
+						t.Fatal(err)
+					}
+					if change == "protected team during patch" {
+						return false, nil, nil
+					}
+					return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, node.Name, errors.New("changed"))
+				})
+				if err := quarantineNode(t.Context(), kube, node, "cloud", "reservation is malformed or does not match its award"); err == nil || change != "protected team during patch" && blocking(err) != nil {
+					t.Fatalf("changed node was not reported as a contained fault: %v", err)
+				}
+				got, err := kube.CoreV1().Nodes().Get(t.Context(), node.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if patches != 1 || quarantined(*got) || got.Spec.Unschedulable {
+					t.Fatalf("quarantine crossed changed identity: patches=%d node=%+v", patches, got)
+				}
+			})
+		})
 	}
 }

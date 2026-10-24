@@ -23,23 +23,20 @@ const quarantineAnnotation = "sparkwing.dev/quarantined"
 // errAwardMismatch marks a controller decision that disagrees with the award an observation carried.
 var errAwardMismatch = errors.New("controller sync returned duplicate or changed Cloud bindings")
 
-// nodeFault identifies a contained node fault for sync to charge to its protected
-// team label. It has no Unwrap, so an API error cannot be discarded along with it.
+// nodeFault names the suspect node for operator inspection. It has no Unwrap,
+// so an API error cannot be discarded along with it.
 type nodeFault struct{ node, cause string }
 
 func (f *nodeFault) Error() string {
 	return fmt.Sprintf("Cloud node %s: %s", f.node, f.cause)
 }
 
-// safety: a kubelet can rewrite its own Node's annotations, so a fault read
-// from them must leave the node cordoned and tainted. NodeRestriction stops a
-// kubelet from removing the taint.
-// Placement skips conflicting reservations, so repeated conflicts become node
-// faults. Claims continue within the team's quarantine budget. Other failed
-// writes block until quarantine persists.
-func quarantineNode(ctx context.Context, kube kubernetes.Interface, node *corev1.Node, cause string) error {
-	fault := &nodeFault{node: node.Name, cause: "quarantined: " + cause}
-	if node.Labels[TeamNodeLabel] == "" {
+// safety: a kubelet can rewrite its own annotations. Placement must reject
+// damaged reservation bindings even when repeated conflicts prevent quarantine.
+func quarantineNode(ctx context.Context, kube kubernetes.Interface, node *corev1.Node, namespace, cause string) error {
+	fault := &nodeFault{node: node.Name, cause: cause}
+	uid, team := node.UID, node.Labels[TeamNodeLabel]
+	if uid == "" || team == "" || !ownsNodeReservation(node, namespace) {
 		return fault
 	}
 	current := node
@@ -51,6 +48,10 @@ func quarantineNode(ctx context.Context, kube kubernetes.Interface, node *corev1
 			}
 			current = fresh
 		}
+		if current.UID != uid || current.Labels[TeamNodeLabel] != team || !ownsNodeReservation(current, namespace) {
+			fault.cause = "ownership changed before quarantine"
+			return fault
+		}
 		patch, err := quarantinePatch(current, cause)
 		current = nil
 		if err != nil || patch == nil {
@@ -61,6 +62,9 @@ func quarantineNode(ctx context.Context, kube kubernetes.Interface, node *corev1
 	})
 	switch {
 	case err == nil:
+		fault.cause = "quarantined: " + cause
+		return fault
+	case errors.Is(err, fault):
 		return fault
 	case apierrors.IsConflict(err):
 		fault.cause += "; quarantine still conflicting, retrying next pass"
@@ -69,14 +73,13 @@ func quarantineNode(ctx context.Context, kube kubernetes.Interface, node *corev1
 	return fmt.Errorf("quarantine Cloud node %s (%s): %w", node.Name, cause, err)
 }
 
-// quarantinePatch fences the write to the node's UID and adds only what is
-// missing, so the kubelet's own concurrent writes cannot undo it.
+// Protected identity tests keep a concurrent replacement or team change outside the write.
 func quarantinePatch(node *corev1.Node, cause string) ([]byte, error) {
 	tainted := slices.ContainsFunc(node.Spec.Taints, func(t corev1.Taint) bool { return t.Key == quarantineAnnotation })
 	if node.Spec.Unschedulable && tainted && node.Annotations[quarantineAnnotation] == cause {
 		return nil, nil
 	}
-	ops := []map[string]any{{"op": "test", "path": "/metadata/uid", "value": node.UID}, {"op": "add", "path": "/spec/unschedulable", "value": true}}
+	ops := []map[string]any{{"op": "test", "path": "/metadata/uid", "value": node.UID}, {"op": "test", "path": "/metadata/labels/" + strings.ReplaceAll(TeamNodeLabel, "/", "~1"), "value": node.Labels[TeamNodeLabel]}, {"op": "add", "path": "/spec/unschedulable", "value": true}}
 	if node.Annotations == nil {
 		ops = append(ops, map[string]any{"op": "add", "path": "/metadata/annotations", "value": map[string]string{quarantineAnnotation: cause}})
 	} else {

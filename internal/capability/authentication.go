@@ -230,6 +230,16 @@ func liveAccess(p Principal, state BindingState, evidence RequestEvidence, class
 	if !isClaim(p) {
 		return LiveAccess{}, c.Unit == "" && (b.Kind == BindingNone || b.Kind == BindingPush || b.Kind == BindingRun)
 	}
+	if class == liveLogTail && c.Unit != UnitNode && state.FinishedAt != nil && !state.LogSealed &&
+		!now.Before(*state.FinishedAt) && now.Before(state.FinishedAt.Add(limits.LogSealGrace)) && logTarget(c, evidence.Target) {
+		if (c.Unit == UnitTrigger || c.Unit == UnitPlan) && sameFence(b, state.Current) {
+			return LiveAccess{}, true
+		}
+		if c.Unit == UnitEval && b.Expansion != nil && state.Expansion != nil && state.Expansion.ExpiresAt.IsZero() &&
+			state.Expansion.Lease == *b.Expansion && b.RunID == state.Current.RunID && b.NodeID == state.Current.NodeID && b.Generation == state.Current.Generation {
+			return LiveAccess{}, true
+		}
+	}
 	// safety: eval authority belongs to its own lease even during bootstrap source acquisition.
 	if c.Unit == UnitEval || class == LiveExpansion {
 		return LiveAccess{}, expansionLive(b, state, now)
@@ -316,11 +326,9 @@ func resultMatches(p Principal, record *RecordedResult, evidence RequestEvidence
 }
 
 func logTarget(c Capability, target Target) bool {
-	if target.RunID != c.Binding.RunID {
-		return false
-	}
 	if target.ClaimID != "" {
-		return target.ClaimID == c.UnitID
+		// Claim routes resolve the run from the authenticated award afterward.
+		return target.ClaimID == c.UnitID && (target.RunID == "" || target.RunID == c.Binding.RunID)
 	}
-	return target.NodeID == c.Binding.NodeID
+	return target.RunID == c.Binding.RunID && target.NodeID == c.Binding.NodeID
 }

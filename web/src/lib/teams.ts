@@ -374,14 +374,14 @@ export async function mintMachineToken(
   return (await res.json()) as MintedMachineToken;
 }
 
-export type TeamSettings = { members_can_add_machines: boolean };
+export type TeamSettings = { members_can_add_machines: boolean; max_children_per_root: number };
 
 export async function getTeamSettings(): Promise<TeamSettings> {
   const res = await send("GET", "/api/v1/team/settings", "Read team settings");
   return (await res.json()) as TeamSettings;
 }
 
-export async function setTeamSettings(settings: TeamSettings): Promise<TeamSettings> {
+export async function setTeamSettings(settings: Partial<TeamSettings>): Promise<TeamSettings> {
   const res = await send("PUT", "/api/v1/team/settings", "Change team settings", settings);
   return (await res.json()) as TeamSettings;
 }

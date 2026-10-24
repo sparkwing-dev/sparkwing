@@ -111,10 +111,10 @@ func checkStorageRemoteCache(t *testing.T) {
 				restore := storageDamageCache(t, dir, i.Team, bodies, map[string]blob.Digest{
 					"corrupt_output": output, "missing_output": output, "corrupt_manifest": manifest, "corrupt_member": artifact,
 				}[fault], fault == "missing_output")
-				found := storageCacheFound(t.Context(), cache, key, budget)
+				found, lookupErr := storageCacheFound(t.Context(), cache, key, budget)
 				restore()
 				if found != (fault == "") {
-					t.Fatalf("%s %s: found=%t", kind, fault, found)
+					t.Fatalf("%s %s (seed %x, ordinal %d): found=%t, error=%v", kind, fault, seed, ordinal, found, lookupErr)
 				}
 				allowed := []blob.Digest{output}
 				if kind == blob.KindMemo {
@@ -210,16 +210,13 @@ func storageDamageCache(t *testing.T, dir, team string, bodies map[blob.Digest][
 	}
 }
 
-func storageCacheFound(ctx context.Context, cache blob.RemoteCache, key blob.RecordKey, budget blob.Budget) bool {
-	found := false
+func storageCacheFound(ctx context.Context, cache blob.RemoteCache, key blob.RecordKey, budget blob.Budget) (bool, error) {
 	if key.Kind == blob.KindMemo {
 		hit, err := cache.Memo(ctx, blob.MemoKey{Repo: key.Scope.Repo, Ref: blob.RefScope{Ref: "feature"}, Pipeline: key.Scope.Pipeline, Job: key.Scope.Job, Hash: runspec.Hash(key.Scope.Key)}, budget)
-		found = err == nil && hit.Found
-	} else {
-		record, err := cache.Depcache(ctx, blob.DepcacheKey{Repo: key.Scope.Repo, Ref: blob.RefScope{Ref: "feature"}, Name: key.Name, Key: key.Scope.Key}, budget)
-		found = err == nil && record.Digest != ""
+		return err == nil && hit.Found, err
 	}
-	return found
+	record, err := cache.Depcache(ctx, blob.DepcacheKey{Repo: key.Scope.Repo, Ref: blob.RefScope{Ref: "feature"}, Name: key.Name, Key: key.Scope.Key}, budget)
+	return err == nil && record.Digest != "", err
 }
 
 func storageCacheAccess(t *testing.T, cache blob.RemoteCache, allowed []blob.Digest, bodies map[blob.Digest][]byte, found bool) bool {

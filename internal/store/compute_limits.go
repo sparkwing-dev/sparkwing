@@ -389,8 +389,8 @@ func enforceChildLimitsTx(ctx context.Context, tx *storeTx, team Team, root stri
 	if depth > limits.MaxChildDepth {
 		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("child runs nest at most %d levels deep, counting the root run", limits.MaxChildDepth), Details: map[string]any{"limit": "max_child_depth", "cap": limits.MaxChildDepth}}
 	}
-	var created int64
-	if err := tx.QueryRowContext(ctx, `SELECT created_at FROM runs WHERE team=? AND id=?`, team, root).Scan(&created); err != nil {
+	var created, ceiling int64
+	if err := tx.QueryRowContext(ctx, `SELECT r.created_at,t.max_children_per_root FROM runs r JOIN teams t ON t.name=r.team WHERE r.team=? AND r.id=?`, team, root).Scan(&created, &ceiling); err != nil {
 		return err
 	}
 	expression := `json_extract(lineage_json, '$.root_run_id')`
@@ -401,8 +401,8 @@ func enforceChildLimitsTx(ctx context.Context, tx *storeTx, team Team, root stri
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=? AND created_at>=? AND COALESCE(parent_run_id,'')<>'' AND retry_of='' AND `+expression+`=?`, team, created, root).Scan(&children); err != nil {
 		return err
 	}
-	if children >= int64(limits.MaxChildrenPerRoot) {
-		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("a root run starts at most %d child runs", limits.MaxChildrenPerRoot), Details: map[string]any{"limit": "max_children_per_root", "cap": limits.MaxChildrenPerRoot, "observed": children}}
+	if children >= ceiling {
+		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("a root run starts at most %d child runs", ceiling), Details: map[string]any{"limit": "max_children_per_root", "cap": ceiling, "observed": children}}
 	}
 	return nil
 }

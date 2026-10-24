@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -691,6 +692,9 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, row.ClaimedBy, row.CapabilityPrefix, kind, name, location, now.UnixNano())
 		if err != nil {
+			return err
+		}
+		if err := createLogStreamTx(ctx, tx, blob.LogSubject{Kind: blob.LogJobAttempt, Team: string(team), RunID: string(row.Ref.RunID), Attempt: &runspec.AttemptIdentity{Team: string(team), RunID: string(row.Ref.RunID), NodeID: string(row.Ref.NodeID), Generation: int64(row.Generation), Attempt: int64(row.Attempt)}}); err != nil {
 			return err
 		}
 	case runstate.NodeApprovalPending:

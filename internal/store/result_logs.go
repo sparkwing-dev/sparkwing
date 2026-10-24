@@ -61,6 +61,17 @@ func logIdentity(subject blob.LogSubject) (logStreamIdentity, error) {
 	return identity, nil
 }
 
+func createLogStreamTx(ctx context.Context, tx *storeTx, subject blob.LogSubject) error {
+	identity, err := logIdentity(subject)
+	if err != nil {
+		return err
+	}
+	now := tx.now(ctx).UnixNano()
+	_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at)
+		SELECT team,id,?,?,?,?,?,?,?,?,?,log_retention_class,?,? FROM runs WHERE team=? AND id=?`, identity.id, string(subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, now, now, subject.Team, subject.RunID)
+	return err
+}
+
 // RecordSegments atomically commits contiguous segments and seals under the current writer fence.
 func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error {
 	if commit.Subject.Team != string(t.team) {
@@ -121,11 +132,7 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 		return tx.Commit()
 	}
 	if !exists {
-		now := tx.now(ctx)
-		_, err = tx.ExecContext(ctx, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, t.team, commit.Subject.RunID, identity.id, string(commit.Subject.Kind), identity.node, identity.attempt, identity.generation, identity.unit, identity.source, identity.sourceGeneration, identity.id, retention, now.UnixNano(), now.UnixNano())
-		if err != nil {
-			return err
-		}
+		return authorityError(apierr.Conflict, "log stream was not registered with its attempt or unit")
 	}
 	if err := appendSegmentsTx(ctx, tx, t.team, commit.Subject.RunID, identity, commit.Segments); err != nil {
 		return err
@@ -251,13 +258,13 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 	unit := subject.Unit
 	var holder, prefix, status string
 	var generation int64
-	var lease sql.NullInt64
+	var lease, finished sql.NullInt64
 	if unit.Kind == blob.LogEval {
 		source := unit.Source
 		if source == nil || c.Unit != capability.UnitEval || c.Binding.Expansion == nil || c.Binding.NodeID != source.NodeID || c.Binding.Generation != source.Generation || c.Binding.Expansion.Generation != unit.Generation || !slices.Contains(c.Grants, capability.ExpansionSubmit) {
 			return holderRefusal()
 		}
-		err := tx.QueryRowContext(ctx, "SELECT COALESCE(claimed_by,''),capability_prefix,status,generation,lease_expires_at FROM eval_units WHERE team = ? AND run_id = ? AND source_node_id = ? AND source_generation = ?", team, subject.RunID, source.NodeID, source.Generation).Scan(&holder, &prefix, &status, &generation, &lease)
+		err := tx.QueryRowContext(ctx, "SELECT COALESCE(claimed_by,''),capability_prefix,status,generation,lease_expires_at,finished_at FROM eval_units WHERE team = ? AND run_id = ? AND source_node_id = ? AND source_generation = ?", team, subject.RunID, source.NodeID, source.Generation).Scan(&holder, &prefix, &status, &generation, &lease, &finished)
 		if err != nil {
 			return err
 		}
@@ -275,12 +282,24 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 		if string(c.Unit) != string(unit.Kind) || c.Binding.Generation != unit.Generation || !slices.Contains(c.Grants, capability.LogTail) {
 			return holderRefusal()
 		}
-		err := tx.QueryRowContext(ctx, "SELECT COALESCE(claimed_by,''),capability_prefix,status,generation,lease_expires_at FROM triggers WHERE team = ? AND id = ? AND unit_kind = ?", team, subject.RunID, string(unit.Kind)).Scan(&holder, &prefix, &status, &generation, &lease)
+		err := tx.QueryRowContext(ctx, "SELECT COALESCE(claimed_by,''),capability_prefix,status,generation,lease_expires_at,finished_at FROM triggers WHERE team = ? AND id = ? AND unit_kind = ?", team, subject.RunID, string(unit.Kind)).Scan(&holder, &prefix, &status, &generation, &lease, &finished)
 		if err != nil {
 			return err
 		}
 	}
 	now := tx.now(ctx)
+	if finished.Valid && (status == "done" || status == "failed") && generation == unit.Generation && generation == int64(actor.Generation) &&
+		now.UnixNano() >= finished.Int64 && now.UnixNano() < finished.Int64+int64(limits.LogSealGrace) {
+		// Retired rows clear the live writer; the immutable awarded credential retains its identity.
+		award, err := decodeAwardUnit(c.Unit, c.UnitID)
+		if err != nil || (c.Issuance != capability.Award && c.Issuance != capability.Exchange) || c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder || string(award.RunID) != subject.RunID {
+			return holderRefusal()
+		}
+		if unit.Source != nil && (string(award.NodeID) != unit.Source.NodeID || award.SourceGeneration != unit.Source.Generation) {
+			return holderRefusal()
+		}
+		return nil
+	}
 	if (status != "claimed" && status != "running") || holder != actor.Holder || prefix != actor.CapabilityPrefix || runspec.ClaimGeneration(generation) != runspec.ClaimGeneration(unit.Generation) || runspec.ClaimGeneration(generation) != actor.Generation || !lease.Valid || lease.Int64 <= now.UnixNano() {
 		return holderRefusal()
 	}

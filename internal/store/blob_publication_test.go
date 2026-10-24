@@ -14,6 +14,7 @@ import (
 
 func TestBlobPublicationRequiresTerminalImportedAttempt(t *testing.T) {
 	s, tenant, logs := publishedLogFixture(t)
+	rewriteSchemaExec(t, s.db, "DELETE FROM log_streams")
 	authority := dataAccessAuthority(t, s, logs.Actor.CapabilityPrefix)
 	iteration := 0
 	property := func(ordinal, generation uint16) bool {

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -46,15 +48,22 @@ func runTeamSettings(ctx context.Context, inv clisurface.Invocation) error {
 	case "json":
 		return json.NewEncoder(os.Stdout).Encode(result)
 	case "plain":
-		fmt.Printf("%t %s\n", result.MembersCanAddMachines, ranking)
+		fmt.Printf("%t %s %d\n", result.MembersCanAddMachines, ranking, result.MaxChildrenPerRoot)
 	default:
-		fmt.Printf("members_can_add_machines: %t\nclaim_ranking: %s\n", result.MembersCanAddMachines, ranking)
+		fmt.Printf("members_can_add_machines: %t\nclaim_ranking: %s\nmax_children_per_root: %d\n", result.MembersCanAddMachines, ranking, result.MaxChildrenPerRoot)
 	}
 	return nil
 }
 
 func teamSettingsUpdate(inv clisurface.Invocation) (controllerwire.TeamSettingsUpdate, error) {
 	var update controllerwire.TeamSettingsUpdate
+	if inv.Has("max-children-per-root") {
+		ceiling, err := strconv.ParseInt(inv.Value("max-children-per-root"), 10, 64)
+		if err != nil || ceiling <= 0 || ceiling > limits.MaxChildrenPerRoot {
+			return update, &clisurface.UsageError{Path: inv.Command.Path, Message: "--max-children-per-root must be an integer from 1 to 1000"}
+		}
+		update.MaxChildrenPerRoot = &ceiling
+	}
 	if raw := inv.Value("members-can-add-machines"); raw != "" {
 		enabled := raw == "true"
 		update.MembersCanAddMachines = &enabled
@@ -73,8 +82,8 @@ func teamSettingsUpdate(inv clisurface.Invocation) (controllerwire.TeamSettingsU
 		}
 		update.ClaimRanking = &tiers
 	}
-	if update.MembersCanAddMachines == nil && update.ClaimRanking == nil {
-		return update, &clisurface.UsageError{Path: inv.Command.Path, Message: "pass --members-can-add-machines or --claim-ranking"}
+	if update.MembersCanAddMachines == nil && update.ClaimRanking == nil && update.MaxChildrenPerRoot == nil {
+		return update, &clisurface.UsageError{Path: inv.Command.Path, Message: "pass --members-can-add-machines, --claim-ranking or --max-children-per-root"}
 	}
 	return update, nil
 }
