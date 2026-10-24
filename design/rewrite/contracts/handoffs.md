@@ -1068,3 +1068,9 @@ separate operations; no database transaction stays open across a provider call.
 ## 2026-10-23 Korey decision 58: child-run limit default 50, team-settable up to 1,000
 
 - Amends decision 56 item 7. The per-root descendant ceiling is a team setting: default 50, maximum 1,000, enforced in the committing writer and the database.
+
+## 2026-10-23 Korey decision 59: child-run limit errors explain the fix and fail early
+
+- The max_children_per_root refusal tells the user the team's current limit, the 1,000 maximum, and how to fix it (raise the team setting or split the work).
+- A run whose statically declared child fan-out already exceeds the team's limit is refused at plan acceptance, before any child starts. Children created dynamically mid-run keep the creation-time check.
+- Korey authorized carrying merges and deploys forward without waiting for approval; the release (merge to main and the v0.68.0 tag) still follows the release policy.
