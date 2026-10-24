@@ -83,10 +83,13 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor runsta
 			return holderRefusal()
 		}
 	}
+	if err := lockOwnerUnitTx(ctx, tx, team, UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(runID)}); err != nil {
+		return err
+	}
 	var holder, prefix, status string
 	var generation int64
 	var until sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),capability_prefix,status,generation,lease_expires_at FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), team, runID).Scan(&holder, &prefix, &status, &generation, &until)
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),capability_prefix,status,generation,lease_expires_at FROM triggers WHERE team=? AND id=?`, team, runID).Scan(&holder, &prefix, &status, &generation, &until)
 	if err != nil {
 		return err
 	}
@@ -188,10 +191,7 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 		return holderRefusal()
 	}
 	if actor.Kind == runstate.ActorRunHost {
-		var id string
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), team, runID).Scan(&id); err != nil {
-			return err
-		}
+		return lockOwnerUnitTx(ctx, tx, team, UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(runID)})
 	}
 	return nil
 }

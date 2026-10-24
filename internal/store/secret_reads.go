@@ -113,7 +113,7 @@ func (t *Tenant) secretClaimFenceTx(ctx context.Context, tx *storeTx, c capabili
 	if c.UnitID == "" || b.RunID == "" || b.Expansion != nil || c.Delivery == capability.DeliveryBootstrap || !slices.Contains([]capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitNode}, c.Unit) {
 		return bindingRefusal()
 	}
-	if err := lockClaimOwnerTx(ctx, tx, t.team, UnitRef{Kind: c.Unit, RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)}); err != nil {
+	if err := lockOwnerUnitTx(ctx, tx, t.team, UnitRef{Kind: c.Unit, RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)}); err != nil {
 		return err
 	}
 	if err := lockStateRunTx(ctx, tx, t.team, b.RunID); err != nil {

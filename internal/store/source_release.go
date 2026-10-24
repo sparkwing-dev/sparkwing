@@ -92,7 +92,7 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 	if b.Expansion != nil {
 		unit.Kind = b.Expansion.Kind
 	}
-	if err := lockClaimOwnerTx(ctx, tx, t.team, unit); err != nil {
+	if err := lockOwnerUnitTx(ctx, tx, t.team, unit); err != nil {
 		return capability.SourceReleaseRequest{}, err
 	}
 	if err := lockStateRunTx(ctx, tx, t.team, b.RunID); err != nil {

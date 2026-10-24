@@ -59,13 +59,14 @@ func TestExpansionRechecksControllerExpiryAfterEvalFenceRead(t *testing.T) {
 	connection := recordStoreFences(t, s)
 	s.pinnedClock = func() time.Time { return *now }
 	reads := 0
-	connection.beforeLock = func(query string) {
+	connection.beforeQuery = func(query string) error {
 		if strings.HasPrefix(query, "SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,owner_generation FROM eval_units") {
 			reads++
 			if reads == 2 {
 				*now = expires
 			}
 		}
+		return nil
 	}
 	if _, err := tenant.AcceptExpansion(t.Context(), request); reads != 2 || err == nil {
 		t.Fatalf("eval reads=%d acceptance=%v", reads, err)

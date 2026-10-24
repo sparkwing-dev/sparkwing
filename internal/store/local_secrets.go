@@ -111,7 +111,7 @@ func (o *Operator) ResupplyHereSecrets(ctx context.Context, authority capability
 			return bindingRefusal()
 		}
 		tenant := &Tenant{s: o.s, team: Team(c.Team)}
-		if err := lockClaimOwnerTx(ctx, tx, tenant.team, UnitRef{Kind: c.Unit, RunID: runspec.RunID(c.Binding.RunID)}); err != nil {
+		if err := lockOwnerUnitTx(ctx, tx, tenant.team, UnitRef{Kind: c.Unit, RunID: runspec.RunID(c.Binding.RunID)}); err != nil {
 			return err
 		}
 		if err := lockStateRunTx(ctx, tx, tenant.team, c.Binding.RunID); err != nil {

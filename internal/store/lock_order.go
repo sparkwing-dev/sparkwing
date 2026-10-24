@@ -229,6 +229,21 @@ func lockFinancialTeamsTx(ctx context.Context, tx *storeTx, teams ...Team) error
 	return nil
 }
 
+func lockOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
+	if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
+		return err
+	}
+	var id string
+	switch unit.Kind {
+	case capability.UnitTrigger, capability.UnitPlan:
+		return tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), team, unit.RunID).Scan(&id)
+	case capability.UnitEval:
+		return tx.QueryRowContext(ctx, `SELECT run_id FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&id)
+	default:
+		return nil
+	}
+}
+
 // Payment identity is locked after its discovered teams. Revalidation under
 // the payment lock restarts the transaction if a binding changed meanwhile.
 func lockPaymentTeamsTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (lockSet, error) {

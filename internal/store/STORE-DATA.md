@@ -699,6 +699,8 @@ ledger lock. Payment callbacks revalidate their discovered teams after taking
 the payment identity lock. A changed binding restarts the transaction.
 Concurrency maintenance takes the same team locks before capacity entries
 because its funding checks acquire the ledger.
+Owner claims and reapers use the same helper to lock the team before trigger or
+evaluation rows. Raw owner-row locks are confined to `lock_order.go` by the guard.
 
 `lock_order.go` defines the canonical tiers and comparator. Authority and unit
 batch locking use it. The acquisition-sequence test checks actual SQL against

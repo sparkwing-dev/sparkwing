@@ -1049,7 +1049,7 @@ precision, or receipt time when completion time is absent. Older timestamps
 cannot replace the saved card. The subsecond migration marker is removed.
 Collection amounts must fit the credit ledger's integer representation.
 Refund retry state is read and updated under one transaction and ledger lock.
-Payment settlement and refund reconciliation first share-lock the team row and
+Payment settlement and refund reconciliation first lock the team row FOR UPDATE and
 refuse a team whose deletion has started. Purge takes the exclusive team lock,
 rechecks unfinished refunds, open checkouts and unfinished bound payments, then
 removes the team's SQL rows in that transaction. A refund's checkout survives

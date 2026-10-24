@@ -153,11 +153,11 @@ func (op *Operator) loadAwardRowTx(ctx context.Context, tx *storeTx, spec capabi
 	row := awardRow{run: string(unit.RunID), node: string(unit.NodeID)}
 	switch spec.Unit {
 	case capability.UnitTrigger, capability.UnitPlan:
-		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at,created_at,cancel_requested_at FROM triggers WHERE id = ? AND unit_kind = ?"+tx.forUpdate(), unit.RunID, string(spec.Unit)).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease, &row.created, &row.cancel)
+		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at,created_at,cancel_requested_at FROM triggers WHERE id = ? AND unit_kind = ?", unit.RunID, string(spec.Unit)).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease, &row.created, &row.cancel)
 	case capability.UnitNode:
 		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,attempt,lease_expires_at,cancel_requested_at,spec_json FROM nodes WHERE run_id = ? AND node_id = ? AND status <> 'done'"+tx.forUpdate(), unit.RunID, unit.NodeID).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.attempt, &row.lease, &row.cancel, &row.spec)
 	case capability.UnitEval:
-		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at FROM eval_units WHERE run_id = ? AND source_node_id = ? AND source_generation = ? AND status IN ('pending','claimed','running')"+tx.forUpdate(), unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease)
+		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at FROM eval_units WHERE run_id = ? AND source_node_id = ? AND source_generation = ? AND status IN ('pending','claimed','running')", unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease)
 	default:
 		return row, authorityError(apierr.BadRequest, "unknown award unit")
 	}
@@ -226,10 +226,12 @@ func (op *Operator) lockUnitsTx(ctx context.Context, tx *storeTx, units []UnitRe
 	for _, l := range slices.Compact(locks) {
 		var err error
 		switch l.tier {
-		case lockTrigger:
-			err = tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), l.team, l.run).Scan(&held)
-		case lockEval:
-			err = tx.QueryRowContext(ctx, `SELECT run_id FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), l.team, l.run, l.node, l.generation).Scan(&held)
+		case lockTrigger, lockEval:
+			kind := capability.UnitTrigger
+			if l.tier == lockEval {
+				kind = capability.UnitEval
+			}
+			err = lockOwnerUnitTx(ctx, tx, Team(l.team), UnitRef{Kind: kind, RunID: runspec.RunID(l.run), NodeID: runspec.NodeID(l.node), SourceGeneration: l.generation})
 		case lockRun:
 			err = tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team=? AND id=?`+tx.forNoKeyUpdate(), l.team, l.run).Scan(&held)
 		default:

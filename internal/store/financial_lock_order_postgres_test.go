@@ -31,6 +31,54 @@ func blockFinancialLedger(t *testing.T, ctx context.Context, s *store.Store, tea
 	return b
 }
 
+func TestPostgresOwnerReaperAndClaimerLockTeamBeforeOwner(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, demand, ctx := lockOrderStore(t)
+			table, ownerQuery := "triggers", `SELECT id FROM triggers WHERE team='a' AND id='run' FOR UPDATE`
+			if kind == capability.UnitEval {
+				s.TestOnlyEvaluations(t, "job")
+				table = "eval_units"
+				ownerQuery = `SELECT run_id FROM eval_units WHERE team='a' AND run_id='run' AND source_node_id='job' AND source_generation=7 FOR UPDATE`
+				demand.Target = &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
+			} else if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET unit_kind=$1`, kind); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.DB().ExecContext(ctx, `UPDATE `+table+` SET status='claimed',claimed_by='lost',capability_prefix='lost-cap',generation=7,claimed_at=1,lease_expires_at=1`); err != nil {
+				t.Fatal(err)
+			}
+			lease, err := s.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", "reaper", time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b := blockFinancialLedger(t, ctx, s, "a")
+			if _, err := b.tx.ExecContext(ctx, `SELECT name FROM teams WHERE name='a' FOR UPDATE`); err != nil {
+				t.Fatal(err)
+			}
+			b.start(func() error {
+				reaped, err := s.AsOperator().ReapUnits(ctx, lease, 1)
+				if err == nil && (len(reaped) != 1 || !reaped[0].Requeued) {
+					return fmt.Errorf("reap: %+v", reaped)
+				}
+				return err
+			})
+			b.waitBlocked(1)
+			if b.held(ownerQuery) {
+				t.Fatal("reaper holds owner while waiting for team")
+			}
+			b.start(func() error {
+				claim, err := s.AsOperator().ClaimUnit(ctx, demand)
+				if err == nil && claim.Award.CapabilityPrefix == "" {
+					return fmt.Errorf("claim has no award: %+v", claim)
+				}
+				return err
+			})
+			b.waitBlocked(2)
+			b.release(2)
+		})
+	}
+}
+
 func TestPostgresConcurrencyMaintenanceLocksTeamBeforeCapacity(t *testing.T) {
 	f := newStoreRecoveryFixtureAt(t, true, storetest.NewPostgres(t), func(plan *nodeproto.PlanDoc) {
 		plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "key", Scope: new("global"), Capacity: new(1)}}

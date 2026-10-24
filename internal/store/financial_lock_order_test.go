@@ -6,10 +6,50 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
+
+func TestOwnerReapersLockTeamBeforeOwner(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, recorder := newRecordingStore(t)
+			rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+			unitClaimFixtureStore(t, s)
+			table := "triggers"
+			if kind == capability.UnitEval {
+				s.TestOnlyEvaluations(t, "job")
+				table = "eval_units"
+			} else {
+				rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind=?`, kind)
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE `+table+` SET status='claimed',claimed_by='lost',capability_prefix='lost-cap',generation=7,claimed_at=1,lease_expires_at=1`)
+			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorder.reset()
+			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 1)
+			if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+				t.Fatalf("reap: %+v, %v", reaped, err)
+			}
+			team, owner := -1, -1
+			for i, q := range recorder.snapshot() {
+				if q == "SELECT name FROM teams WHERE name=?" && team < 0 {
+					team = i
+				}
+				if strings.Contains(q, "FROM "+table+" WHERE team=?") && owner < 0 {
+					owner = i
+				}
+			}
+			if team < 0 || owner <= team {
+				t.Fatalf("team lock=%d, owner=%d; team must precede owner", team, owner)
+			}
+		})
+	}
+}
 
 func TestConcurrencyMaintenanceLocksTeamBeforeCapacity(t *testing.T) {
 	s, recorder := newRecordingStore(t)
@@ -84,6 +124,11 @@ func TestFinancialLockOrderRejectsUpgradesAndLateTeams(t *testing.T) {
 	}
 	if compareLockTiers(lockTeam, lockLedger) >= 0 {
 		t.Fatal("team locks must precede ledger locks")
+	}
+	for _, work := range []storeLockTier{lockTrigger, lockEval, lockRun, lockNode} {
+		if compareLockTiers(lockTeam, work) >= 0 || compareLockTiers(work, lockLedger) >= 0 {
+			t.Fatalf("%s locks must follow teams and precede ledgers", work)
+		}
 	}
 }
 

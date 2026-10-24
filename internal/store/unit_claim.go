@@ -171,7 +171,7 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err = checkClaimantBindingTx(ctx, tx, p.Capability, unit); err != nil {
 		return UnitClaim{}, err
 	}
-	if err = lockClaimOwnerTx(ctx, tx, team, unit); err != nil {
+	if err = lockOwnerUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
 	if err = lockStateRunTx(ctx, tx, team, string(unit.RunID)); err != nil {
