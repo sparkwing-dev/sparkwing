@@ -575,7 +575,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	if err != nil {
 		return "", err
 	}
-	overflowParam, err := q.jsonParam(q.overflow)
+	overflowCTE, err := q.overflowFactsSQL()
 	if err != nil {
 		return "", err
 	}
@@ -690,7 +690,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	ctes := `WITH RECURSIVE clock(now) AS (SELECT ` + clock + `),` + currentCTE + `claimants(facts,team,is_cloud) AS ` + claimantMaterialized + ` (` + claimants + `),
  team_facts AS MATERIALIZED (SELECT ` + q.at("tf.value", "team") + ` AS team,` + q.number(q.at("tf.value", "available")) + ` AS available,` + q.number(q.at("tf.value", "balance")) + ` AS balance,` + q.number(q.at("tf.value", "held")) + ` AS held FROM ` + q.array(teamsParam, "tf") + `),
  ` + claimantScopes + `,
- overflow_facts AS MATERIALIZED (SELECT ` + q.at("of.value", "team") + ` AS team,` + q.at("of.value", "account") + ` AS account,` + q.number(q.at("of.value", "used_seconds")) + ` AS used_seconds,` + q.at("of.value", "monthly_minutes") + ` AS monthly_minutes FROM ` + q.array(overflowParam, "of") + `),
+ ` + overflowCTE + `,
  rates AS MATERIALIZED (SELECT ` + q.number(q.at("rate.value", "cores")) + ` AS cpu_class,` + q.number(q.at("rate.value", "micro_per_second")) + ` AS price FROM ` + q.array(rateParam, "rate") + `),
  ` + runScopeCTE + headsCTE + `source(team,run_id,node_id,source_generation,arrived,kind,execution,requirements) AS MATERIALIZED (` + ready + `),ready AS NOT MATERIALIZED (SELECT * FROM source ` + readyFilter + `),work_input AS MATERIALIZED (` + raw + `),work AS MATERIALIZED (SELECT base.*,CASE WHEN ` + q.anywhere("base.request") + ` THEN 1 ELSE 0 END AS run_anywhere,CASE WHEN ` + q.pinned("base.selectors") + ` THEN 1 ELSE 0 END AS pinned FROM work_input base),
  ancestors(team,child,id,origin,parent) AS (SELECT ar.team,ar.id,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM runs ar JOIN work aw ON aw.team=ar.team AND aw.run_id=ar.id UNION SELECT a.team,a.child,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM ancestors a JOIN runs ar ON ar.team=a.team AND ar.id=a.parent),
@@ -882,5 +882,17 @@ func (q *claimSQL) rankingHold() string {
 }
 
 func (q *claimSQL) overflowAllowedSQL(alias, cloud string) string {
-	return `(` + cloud + `=0 OR ` + q.at(alias+".request", "request", "burst") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM overflow_facts of WHERE of.team=` + alias + `.team AND of.account=` + alias + `.created_principal AND ((of.monthly_minutes IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number("of.monthly_minutes") + `*60) OR (` + q.at(alias+".request", "request", "burst", "overflow_minutes") + ` IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number(q.at(alias+".request", "request", "burst", "overflow_minutes")) + `*60))))`
+	return `(` + q.at(alias+".request", "request", "burst") + ` IS NULL OR ` + q.overflowBudgetAllowedSQL(alias+`.team`, alias+`.created_principal`, q.at(alias+".request", "request", "burst", "overflow_minutes"), cloud) + `)`
+}
+
+func (q *claimSQL) overflowBudgetAllowedSQL(team, account, minutes, cloud string) string {
+	return `(` + cloud + `=0 OR NOT EXISTS (SELECT 1 FROM overflow_facts of WHERE of.team=` + team + ` AND of.account=` + account + ` AND ((of.monthly_minutes IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number("of.monthly_minutes") + `*60) OR (` + minutes + ` IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number(minutes) + `*60))))`
+}
+
+func (q *claimSQL) overflowFactsSQL() (string, error) {
+	input, err := q.jsonParam(q.overflow)
+	if err != nil {
+		return "", err
+	}
+	return `overflow_facts AS MATERIALIZED (SELECT ` + q.at("of.value", "team") + ` AS team,` + q.at("of.value", "account") + ` AS account,` + q.number(q.at("of.value", "used_seconds")) + ` AS used_seconds,` + q.at("of.value", "monthly_minutes") + ` AS monthly_minutes FROM ` + q.array(input, "of") + `)`, nil
 }

@@ -300,6 +300,7 @@ func (c *claimBenchmarkConn) instrument(query string) string {
 	if c.runProbe != "" {
 		query = strings.ReplaceAll(query, `FROM runs WHERE`, `FROM runs WHERE `+c.runProbe+`(id)=1 AND`)
 		query = strings.ReplaceAll(query, `FROM runs br WHERE`, `FROM runs br WHERE `+c.runProbe+`(br.id)=1 AND`)
+		query = strings.ReplaceAll(query, `FROM runs r WHERE`, `FROM runs r WHERE `+c.runProbe+`(r.id)=1 AND`)
 	}
 	return query
 }

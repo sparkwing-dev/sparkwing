@@ -75,7 +75,8 @@ func (q *claimSQL) sourceScope(alias string, kind capability.UnitKind) string {
 	if q.heads != nil {
 		conditions = append(conditions, `sh.kind=`+q.param(string(kind)))
 	}
-	if q.team != "" {
+	// A duplicate team equality can make SQLite ignore the route's context index.
+	if q.team != "" && !q.route {
 		conditions = append(conditions, alias+`.team=`+q.param(q.team))
 	}
 	if q.route {
@@ -188,8 +189,12 @@ func (q *claimSQL) requirementRoutes(current claimFacts) (string, error) {
 }
 
 func (template *claimSQL) routesSQL() (string, []any, error) {
-	q := claimSQL{dialect: template.dialect, route: true, team: template.team, ordinal: template.ordinal}
+	q := claimSQL{dialect: template.dialect, route: true, team: template.team, ordinal: template.ordinal, overflow: template.overflow}
 	clock := q.param(template.now)
+	overflow, err := q.overflowFactsSQL()
+	if err != nil {
+		return "", nil, err
+	}
 	routes, err := q.requirementRoutes(template.facts[0])
 	if err != nil {
 		return "", nil, err
@@ -199,12 +204,15 @@ func (template *claimSQL) routesSQL() (string, []any, error) {
 		kinds = append(kinds, q.param(string(kind)))
 	}
 	contexts := `,contexts AS MATERIALIZED (SELECT routes.*,cc.id AS context FROM routes JOIN claim_contexts cc ON cc.team=routes.team AND cc.requirements=routes.requirements WHERE cc.unit_kind IN (` + strings.Join(kinds, ",") + `)`
+	if template.facts[0].Cloud != 0 {
+		contexts += ` AND ` + q.overflowBudgetAllowedSQL("cc.team", "cc.overflow_account", "cc.overflow_minutes", "1")
+	}
 	if slices.Contains(template.kinds, capability.UnitEval) {
 		contexts += ` UNION ALL SELECT routes.*,'' AS context FROM routes WHERE routes.requirements=''`
 	}
 	contexts += `)`
 	head := q.headSQL(template.kinds)
-	return `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + routes + contexts + ` SELECT route.team,route.requirements,route.ordinal,route.context,` + head + ` FROM contexts route CROSS JOIN clock`, q.args, nil
+	return `WITH clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),` + overflow + `,` + routes + contexts + ` SELECT route.team,route.requirements,route.ordinal,route.context,` + head + ` FROM contexts route CROSS JOIN clock`, q.args, nil
 }
 
 func decodeClaimHead(head *claimHead, raw string) error {
@@ -381,23 +389,7 @@ func claimTeamRunnableTx(ctx context.Context, tx *storeTx, team Team, template *
 			return false, nil
 		}
 	}
-	if current.Cloud == 0 || len(template.overflow) == 0 {
-		return true, nil
-	}
-	q := claimSQL{dialect: template.dialect}
-	overflow, err := q.jsonParam(template.overflow)
-	if err != nil {
-		return false, err
-	}
-	q.args = append(q.args, team)
-	cloud := `0`
-	if current.Cloud != 0 {
-		cloud = `1`
-	}
-	query := `WITH overflow_facts AS (SELECT ` + q.at("of.value", "team") + ` AS team,` + q.at("of.value", "account") + ` AS account,` + q.number(q.at("of.value", "used_seconds")) + ` AS used_seconds,` + q.at("of.value", "monthly_minutes") + ` AS monthly_minutes FROM ` + q.array(overflow, "of") + `) SELECT EXISTS(SELECT 1 FROM (SELECT r.team,r.created_principal,` + q.blob("r.request_json") + ` AS request FROM runs r WHERE r.team=? AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute') sized WHERE ` + q.overflowAllowedSQL("sized", cloud) + `)`
-	var allowed bool
-	err = tx.QueryRowContext(ctx, query, q.args...).Scan(&allowed)
-	return allowed, err
+	return true, nil
 }
 
 // Placement-free work needs no ranking or preference relation in the SQL plan.

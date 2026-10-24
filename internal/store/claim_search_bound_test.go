@@ -54,9 +54,10 @@ func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string)) 
 }
 
 func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
-	var baseline [2]int64
-	for _, backlog := range []int{1, 4000} {
-		t.Run(fmt.Sprint(backlog), func(t *testing.T) {
+	var baseline, baselineRuns [2]int64
+	for _, tc := range []struct{ nodes, runs int }{{1, 1}, {4000, 1}, {1, 4000}} {
+		t.Run(fmt.Sprintf("nodes=%d/runs=%d", tc.nodes, tc.runs), func(t *testing.T) {
+			backlog := tc.nodes
 			s, demand := launcherFairnessFixture(t)
 			var raw []byte
 			if err := s.db.QueryRow(`SELECT request_json FROM runs WHERE id='run'`).Scan(&raw); err != nil {
@@ -78,17 +79,22 @@ func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
 			if backlog > 1 {
 				rewriteSchemaExec(t, s.db, `WITH RECURSIVE backlog(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM backlog WHERE i<?) INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT team,run_id,printf('capped-%04d',i),'pending',1,spec_json,execution_json,claim_requirements,claim_context FROM nodes CROSS JOIN backlog WHERE team='a' AND node_id='capped-0000'`, backlog-1)
 			}
+			if tc.runs > 1 {
+				rewriteSchemaExec(t, s.db, `WITH RECURSIVE backlog(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM backlog WHERE i<?) INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_subject_kind,created_at,log_retention_class,log_retention_days) SELECT team,'capped-run-'||i,number+i,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_subject_kind,created_at,log_retention_class,log_retention_days FROM runs CROSS JOIN backlog WHERE team='a' AND id='run'`, tc.runs-1)
+				rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT n.team,r.id,n.node_id,'pending',n.ready_at,n.spec_json,n.execution_json,n.claim_requirements,n.claim_context FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id='run' WHERE r.team='a' AND r.id LIKE 'capped-run-%'`)
+			}
 			rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT team,run_id,'next','pending',2,?,execution_json,claim_requirements,claim_context FROM nodes WHERE team='b' AND node_id='job'`, []byte(`{"id":"next"}`))
-			var capped, total atomic.Int64
+			var capped, total, runs atomic.Int64
 			countClaimVisits(t, s, func(id string) {
 				total.Add(1)
 				if strings.HasPrefix(id, "capped-") {
 					capped.Add(1)
 				}
-			}, nil)
+			}, func(string) { runs.Add(1) })
 			for poll := range 2 {
 				capped.Store(0)
 				total.Store(0)
+				runs.Store(0)
 				claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil || claim.Team != "b" {
 					t.Fatalf("poll %d: capped team hid healthy work: %+v %v", poll, claim, err)
@@ -96,8 +102,13 @@ func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
 				if got := capped.Load(); got != 0 {
 					t.Errorf("poll %d examined %d capped backlog nodes; want no node visits for a refused team", poll, got)
 				}
+				if tc.nodes == 1 && tc.runs == 1 {
+					baselineRuns[poll] = runs.Load()
+				} else if got := runs.Load(); got != baselineRuns[poll] {
+					t.Errorf("poll %d examined %d runs with %d capped runs; want %d visits as with one capped run", poll, got, tc.runs, baselineRuns[poll])
+				}
 				got := total.Load()
-				if backlog == 1 {
+				if backlog == 1 && tc.runs == 1 {
 					baseline[poll] = got
 				} else if got != baseline[poll] {
 					t.Errorf("poll %d examined %d nodes with %d capped nodes; want %d visits as with one capped node", poll, got, backlog, baseline[poll])

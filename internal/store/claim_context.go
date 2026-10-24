@@ -84,6 +84,10 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 	if err != nil {
 		return "", err
 	}
-	_, err = tx.execContext(ctx, `INSERT INTO claim_contexts(team,id,requirements,unit_kind) VALUES (?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, team, id, requirements, kind)
+	var account, minutes any
+	if sealed.Request.Burst != nil {
+		account, minutes = principal, sealed.Request.Burst.OverflowMinutes
+	}
+	_, err = tx.execContext(ctx, `INSERT INTO claim_contexts(team,id,requirements,unit_kind,overflow_account,overflow_minutes) VALUES (?,?,?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, team, id, requirements, kind, account, minutes)
 	return id, err
 }

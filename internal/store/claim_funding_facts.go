@@ -14,16 +14,15 @@ type claimOverflowFacts struct {
 
 func (o *Operator) claimOverflowFactsTx(ctx context.Context, tx *storeTx, team string, current claimFacts, target *UnitRef) ([]claimOverflowFacts, error) {
 	q := claimSQL{dialect: tx.dialect}
-	source, prefix := "runs", ""
-	// Filter after the indexed binding lookup so funding cannot widen it to a team scan.
+	query := `SELECT DISTINCT team,overflow_account AS account FROM claim_contexts WHERE team IN (` + liveTeamsSQL + `) AND overflow_account IS NOT NULL`
+	// Narrow claims gather funding only after their indexed binding lookup.
 	if scope := q.boundRunScope(current, target); scope != "" {
-		source, prefix = "bound_runs", `WITH bound_runs AS MATERIALIZED (SELECT br.id,br.team,br.created_principal,br.status,br.request_json FROM runs br WHERE `+scope+`) `
+		query = `WITH bound_runs AS MATERIALIZED (SELECT br.id,br.team,br.created_principal,br.status,br.request_json FROM runs br WHERE ` + scope + `) SELECT DISTINCT team,created_principal AS account FROM bound_runs WHERE team IN (` + liveTeamsSQL + `) AND status IN ('pending','running') AND ` + q.at(q.blob("request_json"), "request", "burst") + ` IS NOT NULL`
 	}
-	query := prefix + `SELECT DISTINCT team,created_principal FROM ` + source + ` WHERE team IN (` + liveTeamsSQL + `) AND status IN ('pending','running') AND ` + q.at(q.blob("request_json"), "request", "burst") + ` IS NOT NULL`
 	if team != "" {
 		query += ` AND team=` + q.param(team)
 	}
-	rows, err := tx.queryContext(ctx, query+` ORDER BY team,created_principal`, q.args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY team,account`, q.args...)
 	if err != nil {
 		return nil, err
 	}

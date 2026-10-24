@@ -132,6 +132,9 @@ CREATE TABLE claim_contexts (
     requirements TEXT NOT NULL DEFAULT '',
     requirements_ref TEXT GENERATED ALWAYS AS (NULLIF(requirements,'')) STORED,
     unit_kind TEXT NOT NULL CHECK(unit_kind IN ('node','plan','trigger')),
+    overflow_account TEXT,
+    overflow_minutes BIGINT CHECK(overflow_minutes >= 0),
+    CHECK(overflow_minutes IS NULL OR overflow_account IS NOT NULL),
     PRIMARY KEY(team,id),
     FOREIGN KEY(team,requirements_ref) REFERENCES claim_requirements(team,id)
 );
