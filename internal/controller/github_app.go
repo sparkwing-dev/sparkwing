@@ -81,7 +81,7 @@ func (s *Server) InstallationTokenByIDs(ctx context.Context, installation int64,
 	return s.githubApp.client.InstallationTokenByIDs(ctx, installation, ids, permissions)
 }
 
-var errGitHubAppUnavailable = errors.New("GitHub App unavailable")
+var errGitHubAppUnavailable = &apierr.Error{Code: apierr.Unavailable, Message: "GitHub App unavailable"}
 
 func (s *Server) githubAppUnavailable() error {
 	if s.githubAppProblem != nil {

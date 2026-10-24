@@ -840,8 +840,9 @@ runner selection keeps its label-term alternatives.
 plan acceptance and expansion insertion. A context hash includes the request,
 provenance, resolved options and guards, job execution settings, repository
 scope, allowed pools and creator. Seal identities, source revisions, timestamps and unrelated job declarations
-do not split otherwise equal contexts. The context row stores
-only its identity, requirement set and unit kind; it duplicates no run policy.
+do not split otherwise equal contexts. The context row stores its identity,
+requirement set and unit kind, and copies the overflow account and minute limit
+for indexed budget checks.
 
 Push-bound Actions claims seek runs by team, repository key and sealed provenance
 SHA/ref and the shared verified-trust push predicate, then use the shared eligibility
@@ -849,11 +850,12 @@ predicate. Run-bound and here claims seek
 the bound run directly. Intake writes the provenance index from the sealed identity.
 Named rechecks seek the complete team and unit key.
 
-Broad claimants examine teams by their last committed award ordinal. Funding,
-standing, pool trust and exclusions are checked before node lookups. Overflow uses
-the same predicate at the run-policy check and the award check. Label lookups select
-matching requirement sets, then immutable context routes. Indexed heads prove
-shared-claimant ranking holds. Each remaining route selects its first eligible
+Broad claimants examine teams by their last committed award ordinal. Pool trust,
+overflow caps and exclusions are checked before node lookups. Funding and standing
+use the canonical per-unit eligibility predicate, including its unpriced exception.
+Overflow usage is loaded only for the team being examined and accounts with ready
+work. Label lookups select matching requirement sets, then immutable context routes
+with ready work. Indexed heads prove shared-claimant ranking holds. Each remaining route selects its first eligible
 source through a correlated application of the canonical predicate. There is no
 rejected-head probe cap, cursor advancement or fallback batch.
 When neither the claimant nor its placement observers use Cloud, selection skips
@@ -861,8 +863,10 @@ overflow funding preparation entirely.
 
 This bounds node visits for repeated work sharing one policy route. Independent
 account/request overflow policies and distinct job preferences can still increase
-run-policy and context work under arbitration. An absolute bound by team count
-requires a separate policy or eligibility-index decision.
+run-policy and context work under arbitration. Retained contexts are excluded by
+indexed readiness checks, but those checks still visit the retained context index.
+An absolute bound by team count requires a separate policy or eligibility-index
+decision.
 
 Local foreground intake seals `Request.LocalForeground`. An omitted dispatch
 is resolved from the request before checking foreground authority. The shared predicate
@@ -3697,12 +3701,12 @@ prepaid credits cover it (decision 26). An unpriced CPU class reports no hold.
 ## Break-glass credit grants
 
 Break-glass in-pod grants extend frozen §9's break-glass scope from freeze to
-grants; capped at $100 without the explicit flag. `sparkwing-controller admin
-grant` refuses more than 10,000 cents per grant unless the pod sets
-`SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1`. It grants once per key with reference
-`admin:<key>` and records `credit.granted` with fixed system actor
-`sparkwing-controller admin` and a digest of the reference. Audit rows exclude
-free-form reasons. No remote credential reaches it.
+grants. They are capped at $100 without the explicit flag. `sparkwing-controller admin
+grant` refuses more than 10,000 cents per grant unless `--allow-large` is supplied
+for that invocation. `--operator` names the operator's own account ID. It grants
+once per key with reference `admin:<key>` and records `credit.granted` with that
+account as the actor and a digest of the reference. Audit rows exclude free-form
+reasons. No remote credential reaches it.
 
 ## Integrated working-tree source uploads
 

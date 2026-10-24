@@ -19,7 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string), contextVisits ...*atomic.Int64) {
+func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string), contextVisits ...*atomic.Int64) *claimBenchmarkTrace {
 	t.Helper()
 	if s.dialect != DialectSQLite {
 		t.Skip("readiness predicate instrumentation requires SQLite")
@@ -53,7 +53,8 @@ func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string), 
 			t.Fatal(err)
 		}
 	}
-	sql.Register(probe, &claimBenchmarkDriver{Driver: s.db.Driver(), probe: probe, runProbe: runProbe, contextProbe: contextProbe, trace: &claimBenchmarkTrace{examine: true}})
+	trace := &claimBenchmarkTrace{examine: true}
+	sql.Register(probe, &claimBenchmarkDriver{Driver: s.db.Driver(), probe: probe, runProbe: runProbe, contextProbe: contextProbe, trace: trace})
 	db, err := sql.Open(probe, sqliteDSN(path))
 	if err != nil {
 		t.Fatal(err)
@@ -61,6 +62,7 @@ func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string), 
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	s.db = db
+	return trace
 }
 
 func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
@@ -97,6 +99,9 @@ func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
 			if tc.nodes > 1 && tc.runs > 1 {
 				rewriteSchemaExec(t, s.db, `INSERT INTO claim_contexts(team,id,requirements,unit_kind,overflow_account,overflow_minutes) SELECT n.team,n.node_id,c.requirements,c.unit_kind,c.overflow_account,c.overflow_minutes FROM nodes n JOIN claim_contexts c ON c.team=n.team AND c.id=n.claim_context WHERE n.team='a' AND n.run_id='run'`)
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET claim_context=node_id,execution_json=CAST(json_object('prefers',json_object('value',json_array(node_id))) AS BLOB) WHERE team='a'`)
+				// Retained history is covered separately; this fixture measures ready backlog.
+				rewriteSchemaExec(t, s.db, `DELETE FROM claim_contexts WHERE team='a' AND unit_kind='node' AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team=claim_contexts.team AND n.claim_context=claim_contexts.id)`)
+
 			}
 			var capped, total, runs, contexts atomic.Int64
 			countClaimVisits(t, s, func(id string) {
@@ -123,8 +128,8 @@ func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
 				} else if got := runs.Load(); got != baselineRuns[poll] {
 					t.Errorf("poll %d examined %d runs with %d capped runs; want %d visits as with one capped run", poll, got, tc.runs, baselineRuns[poll])
 				}
-				if got := contexts.Load(); got != baselineContexts[poll] {
-					t.Errorf("poll %d examined %d policy rows with %d nodes/%d runs; want %d as with one capped policy", poll, got, tc.nodes, tc.runs, baselineContexts[poll])
+				if got := contexts.Load(); got > baselineContexts[poll] {
+					t.Errorf("poll %d examined %d policy rows with %d nodes/%d runs; want at most %d as with one capped policy", poll, got, tc.nodes, tc.runs, baselineContexts[poll])
 				}
 				t.Logf("poll %d examined %d nodes, %d runs, %d policies", poll, total.Load(), runs.Load(), contexts.Load())
 				got := total.Load()
@@ -360,5 +365,88 @@ func TestClaimSearchNarrowRunDoesNotExamineOtherRuns(t *testing.T) {
 				t.Errorf("examined %d unrelated runs preparing funding; want only the bound run", got)
 			}
 		})
+	}
+}
+
+func TestClaimRoutesReturnOnlyContextsWithReadyWork(t *testing.T) {
+	for _, retained := range []int{0, 4000} {
+		t.Run(fmt.Sprint(retained), func(t *testing.T) {
+			s, demand := launcherFairnessFixture(t)
+			if retained > 0 {
+				rewriteSchemaExec(t, s.db, `WITH RECURSIVE history(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM history WHERE i<?) INSERT INTO claim_contexts(team,id,requirements,unit_kind,overflow_account) SELECT c.team,'finished-'||i,c.requirements,'node','finished-account-'||i FROM claim_contexts c CROSS JOIN history WHERE c.team='a' AND c.id=(SELECT claim_context FROM nodes WHERE team='a' AND node_id='job')`, retained)
+				rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT c.team,'run',c.id,'done','success',1,1,?, ?,c.requirements,c.id FROM claim_contexts c WHERE c.team='a' AND c.id LIKE 'finished-%'`, []byte(`{}`), []byte(`{}`))
+			}
+			var contexts atomic.Int64
+			countClaimVisits(t, s, func(string) {}, nil, &contexts)
+			if err := s.inTx(t.Context(), func(tx *storeTx) error {
+				q := claimSQL{}
+				if err := claimInputsTx(t.Context(), tx, demand, demand.Kinds, &q); err != nil {
+					return err
+				}
+				query, args, err := q.routesSQL()
+				if err != nil {
+					return err
+				}
+				rows, err := tx.queryContext(t.Context(), query, args...)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = rows.Close() }()
+				count := 0
+				rejected := false
+				for rows.Next() {
+					var team, requirement, context string
+					var ordinal int64
+					var head sql.NullString
+					if err := rows.Scan(&team, &requirement, &ordinal, &context, &head); err != nil {
+						return err
+					}
+					if !head.Valid && !rejected {
+						t.Errorf("returned retained context %s without ready work", context)
+						rejected = true
+					}
+					count++
+				}
+				if count != 2 {
+					t.Errorf("returned %d context routes; want two ready teams", count)
+				}
+				return rows.Err()
+			}); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("retained=%d context predicate evaluations=%d", retained, contexts.Load())
+		})
+	}
+}
+
+func TestClaimSearchLoadsOverflowUsageOnlyForExaminedTeams(t *testing.T) {
+	s, demand := launcherFairnessFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET claim_award_ordinal=1 WHERE name='b'`)
+	var raw []byte
+	if err := s.db.QueryRow(`SELECT request_json FROM runs WHERE team='b'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var sealed runspec.SealedRequest
+	if err := json.Unmarshal(raw, &sealed); err != nil {
+		t.Fatal(err)
+	}
+	sealed.Request.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "cloud"}}}
+	raw, err := json.Marshal(sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE team='b'`, raw)
+	indexFixtureUnit(t, s, "b", UnitRef{Kind: capability.UnitNode, RunID: "run-b", NodeID: "job"})
+	trace := countClaimVisits(t, s, func(string) {}, nil)
+	trace.enabled = true
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	trace.enabled = false
+	if err != nil || claim.Team != "a" {
+		t.Fatalf("claim: %+v %v", claim, err)
+	}
+	for _, statement := range trace.statements {
+		if strings.Contains(statement.query, "FROM overflow_controls") && len(statement.args) > 0 && fmt.Sprint(statement.args[0]) == "b" {
+			t.Fatal("computed overflow usage for later fair-share team b")
+		}
 	}
 }

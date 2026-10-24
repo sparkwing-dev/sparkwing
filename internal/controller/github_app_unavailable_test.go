@@ -13,13 +13,15 @@ import (
 
 func TestGitHubAppUnavailableKeepsControllerAvailable(t *testing.T) {
 	s, session := credentialSessionServer(t)
-	s.WithGitHubAppUnavailable(errors.New("private key is malformed"))
+	s.WithDashboard(Dashboard{}).WithGitHubAppUnavailable(errors.New("private key is malformed"))
 	for _, tc := range []struct {
 		method, path, want string
 		status             int
 	}{
 		{"GET", "/api/v1/health", `"status":"degraded"`, http.StatusOK},
 		{"GET", "/api/v1/team/github-app", "GitHub App unavailable", http.StatusServiceUnavailable},
+		{"GET", "/api/v1/team/github-app/extra-repos", `"code":"unavailable"`, http.StatusServiceUnavailable},
+		{"GET", githubAppCallbackPath, `"code":"unavailable"`, http.StatusServiceUnavailable},
 		{"POST", "/webhooks/github-app", "GitHub App unavailable", http.StatusServiceUnavailable},
 	} {
 		r := httptest.NewRequest(tc.method, tc.path, nil)
@@ -27,7 +29,7 @@ func TestGitHubAppUnavailableKeepsControllerAvailable(t *testing.T) {
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
 		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) || strings.Contains(w.Body.String(), "private key is malformed") {
-			t.Fatalf("%s: HTTP %d %s", tc.path, w.Code, w.Body)
+			t.Errorf("%s: HTTP %d %s", tc.path, w.Code, w.Body)
 		}
 	}
 	provider := s.sourceAdapter().GitHub

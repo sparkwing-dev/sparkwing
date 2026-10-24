@@ -12,16 +12,17 @@ type claimOverflowFacts struct {
 	MonthlyMinutes *int64 `json:"monthly_minutes"`
 }
 
-func (o *Operator) claimOverflowFactsTx(ctx context.Context, tx *storeTx, team string, current claimFacts, target *UnitRef) ([]claimOverflowFacts, error) {
+func (o *Operator) claimOverflowAccountsTx(ctx context.Context, tx *storeTx, team string, current claimFacts, target *UnitRef) ([]claimOverflowFacts, error) {
 	q := claimSQL{dialect: tx.dialect}
+	clock := q.param(tx.now(ctx).UnixNano())
 	scope := `tm.name IN (` + liveTeamsSQL + `)`
 	if team != "" {
 		scope += ` AND tm.name=` + q.param(team)
 	}
 	// Index seeks skip whole policy ranges belonging to the same account.
-	query := `WITH RECURSIVE accounts(team,account) AS (
- SELECT tm.name,(SELECT MIN(overflow_account) FROM claim_contexts WHERE team=tm.name AND overflow_account IS NOT NULL) FROM teams tm WHERE ` + scope + `
- UNION ALL SELECT accounts.team,(SELECT MIN(overflow_account) FROM claim_contexts WHERE team=accounts.team AND overflow_account>accounts.account) FROM accounts WHERE account IS NOT NULL
+	query := `WITH RECURSIVE clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),accounts(team,account) AS (
+ SELECT tm.name,(SELECT MIN(cc.overflow_account) FROM claim_contexts cc,clock WHERE cc.team=tm.name AND cc.overflow_account IS NOT NULL AND ` + q.readyClaimContextSQL() + `) FROM teams tm WHERE ` + scope + `
+ UNION ALL SELECT accounts.team,(SELECT MIN(cc.overflow_account) FROM claim_contexts cc,clock WHERE cc.team=accounts.team AND cc.overflow_account>accounts.account AND ` + q.readyClaimContextSQL() + `) FROM accounts WHERE account IS NOT NULL
  ) SELECT team,account FROM accounts WHERE account IS NOT NULL`
 	// Narrow claims gather funding only after their indexed binding lookup.
 	bound := claimSQL{dialect: tx.dialect}
@@ -47,6 +48,10 @@ func (o *Operator) claimOverflowFactsTx(ctx context.Context, tx *storeTx, team s
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
+	return out, nil
+}
+
+func claimOverflowUsageTx(ctx context.Context, tx *storeTx, out []claimOverflowFacts) ([]claimOverflowFacts, error) {
 	for i := range out {
 		control, err := overflowControlTx(ctx, tx, Team(out[i].Team), out[i].Account)
 		if err != nil {

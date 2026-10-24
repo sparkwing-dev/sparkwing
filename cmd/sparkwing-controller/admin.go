@@ -24,9 +24,8 @@ const adminUsage = `usage: sparkwing-controller admin freeze --operator ACCOUNT_
 Break-glass for the operator console. When console sign-in is down, run it in
 the controller pod with kubectl exec; it acts on the controller's state
 database directly, beside the running controller, so the cluster access that
-reaches the pod is the credential. It opens the store the running controller
-declared (its --store and --credentials-dir, which the controller records
-under SPARKWING_HOME at startup) and never creates one.
+reaches the pod is the credential. It opens the running controller's recorded
+store configuration under SPARKWING_HOME and never creates a store.
 
 freeze holds the team: its metered claims are refused until the hold is
 released, while work already running finishes. unfreeze releases the holds

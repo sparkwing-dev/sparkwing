@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // Each route is an indexed requirement set, not a remembered scan position.
@@ -188,6 +187,10 @@ func (q *claimSQL) requirementRoutes(current claimFacts) (string, error) {
 	return `labels(value) AS MATERIALIZED (SELECT ` + q.text("label.value") + ` FROM ` + q.array(labels, "label") + `),matched AS MATERIALIZED (SELECT DISTINCT team,requirements FROM claim_requirement_terms WHERE label IN (SELECT value FROM labels)),routes AS MATERIALIZED (` + routes + `)`, nil
 }
 
+func (q *claimSQL) readyClaimContextSQL() string {
+	return `(EXISTS (SELECT 1 FROM nodes ready_context WHERE ready_context.team=cc.team AND ready_context.claim_requirements=cc.requirements AND ready_context.claim_context=cc.id AND cc.unit_kind='node' AND ready_context.status='pending' AND ready_context.ready_at IS NOT NULL AND ready_context.ready_at<=clock.now AND ready_context.claimed_by IS NULL AND ready_context.capability_prefix='' AND ready_context.cancel_requested_at IS NULL) OR EXISTS (SELECT 1 FROM triggers ready_context WHERE ready_context.team=cc.team AND ready_context.claim_requirements=cc.requirements AND ready_context.claim_context=cc.id AND ready_context.unit_kind=cc.unit_kind AND ready_context.status='pending' AND ready_context.claimed_by IS NULL AND ready_context.capability_prefix='' AND ready_context.cancel_requested_at IS NULL AND ready_context.available_at<=clock.now))`
+}
+
 func (template *claimSQL) routesSQL() (string, []any, error) {
 	q := claimSQL{dialect: template.dialect, route: true, team: template.team, ordinal: template.ordinal, overflow: template.overflow}
 	clock := q.param(template.now)
@@ -203,7 +206,7 @@ func (template *claimSQL) routesSQL() (string, []any, error) {
 	for _, kind := range template.kinds {
 		kinds = append(kinds, q.param(string(kind)))
 	}
-	contexts := `,contexts AS MATERIALIZED (SELECT routes.*,cc.id AS context FROM routes JOIN claim_contexts cc ON cc.team=routes.team AND cc.requirements=routes.requirements WHERE cc.unit_kind IN (` + strings.Join(kinds, ",") + `)`
+	contexts := `,contexts AS MATERIALIZED (SELECT routes.*,cc.id AS context FROM routes JOIN claim_contexts cc ON cc.team=routes.team AND cc.requirements=routes.requirements CROSS JOIN clock WHERE cc.unit_kind IN (` + strings.Join(kinds, ",") + `) AND ` + q.readyClaimContextSQL()
 	if template.facts[0].Cloud != 0 {
 		contexts += ` AND ` + q.overflowBudgetAllowedSQL("cc.team", "cc.overflow_account", "cc.overflow_minutes", "1")
 	}
@@ -247,18 +250,28 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 		scoped := *template
 		scoped.ordinal = &ordinal
 		scoped.teams = nil
+		scoped.overflow = nil
 		scoped.facts = slices.Clone(template.facts)
 		scoped.facts[0].Excluded = slices.Clone(current.Excluded)
 		for _, team := range group {
 			if current.Cloud == 0 && current.Team != team.Team || slices.Contains(current.Excluded, team.Team) {
 				continue
 			}
-			runnable, err := claimTeamRunnableTx(ctx, tx, Team(team.Team), template)
+			teamTemplate := *template
+			teamTemplate.overflow = slices.DeleteFunc(slices.Clone(template.overflow), func(f claimOverflowFacts) bool { return f.Team != team.Team })
+			overflow, err := claimOverflowUsageTx(ctx, tx, teamTemplate.overflow)
+			teamTemplate.overflow = overflow
+			if err != nil {
+				return UnitRef{}, err
+			}
+
+			runnable, err := claimTeamRunnableTx(ctx, tx, Team(team.Team), &teamTemplate)
 			if err != nil {
 				return UnitRef{}, err
 			}
 			if runnable {
 				scoped.teams = append(scoped.teams, team)
+				scoped.overflow = append(scoped.overflow, teamTemplate.overflow...)
 			} else {
 				scoped.facts[0].Excluded = append(scoped.facts[0].Excluded, team.Team)
 			}
@@ -351,26 +364,6 @@ func claimRouteHeadsTx(ctx context.Context, tx *storeTx, template *claimSQL) ([]
 
 func claimTeamRunnableTx(ctx context.Context, tx *storeTx, team Team, template *claimSQL) (bool, error) {
 	current := template.facts[0]
-	if current.Metered != 0 {
-		for _, facts := range template.teams {
-			if facts.Team != string(team) {
-				continue
-			}
-			if facts.Held != 0 {
-				return false, nil
-			}
-			var minPrice int64
-			minClass := match.CloudSizes()[0].CreditClass
-			for _, rate := range template.rates {
-				if minPrice == 0 || rate.MicroPerSecond < minPrice {
-					minPrice = rate.MicroPerSecond
-				}
-			}
-			if facts.Balance < minPrice*SliceSeconds || current.Cloud != 0 && facts.Available < minClass {
-				return false, nil
-			}
-		}
-	}
 	if len(current.Pools) > 0 && current.Launcher == 0 && current.Trust != "any" {
 		if current.Trust != "" {
 			return false, nil

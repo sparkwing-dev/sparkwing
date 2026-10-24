@@ -742,10 +742,11 @@ and decide when dependents can run. Accepted declarations stay unchanged.
 Embedded controllers use `blob.NewFilesystem` or `blob.NewS3` as their physical
 backend and pass it through `WithDataController` or `WithDataObjects`. The duplicate
 controller filesystem and S3 signer types and `WithSignedDownloads` are removed.
-Wrap an S3 backend with `controller.NewCloudFrontDataBackend` to sign public-ingress
-downloads through CloudFront. Direct requests retain regional S3 URLs. Uploads keep
-the backend's size and checksum constraints. Retained log readers use that same
-backend. `WithS3Logs` and the raw S3 log object adapter are removed. Replace
+Call `controller.ParseCloudFrontDataConfig` to validate CloudFront signing settings,
+then call the returned config's `Backend` method with an S3 backend to sign
+public-ingress downloads through CloudFront. Direct requests retain regional S3
+URLs. Uploads keep the backend's size and checksum constraints. Retained log
+readers use that same backend. `WithS3Logs` and the raw S3 log object adapter are removed. Replace
 `s3.NewArtifactStore` with `s3.NewMeasurementStore` for bucket measurements.
 Measurement handles expose `Usage` only. Local dashboard logs require committed
 tagged segments because run-directory log fallback is removed.

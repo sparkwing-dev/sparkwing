@@ -40,7 +40,10 @@ func parseIdentity(f identityFlags) (identityConfig, error) {
 	if err != nil {
 		return identityConfig{}, err
 	}
-	if google || f.RedirectURIs != "" {
+	github := f.GitHubApp.AppID != "" || f.GitHubApp.Slug != "" || f.GitHubApp.PrivateKey != "" ||
+		f.GitHubApp.ClientID != "" || f.GitHubApp.ClientSecret != "" || f.GitHubApp.CredentialError != nil ||
+		f.GitHubHook.Current() != nil || f.GitHubHook.Previous() != nil
+	if google || (f.RedirectURIs != "" && !github) {
 		uris, err := redirectAllowlist(f.RedirectURIs)
 		if err != nil {
 			return identityConfig{}, err

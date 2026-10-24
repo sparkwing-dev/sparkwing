@@ -770,7 +770,10 @@ func claimInputsTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []
 		return err
 	}
 	if slices.ContainsFunc(facts, func(f claimFacts) bool { return f.Cloud != 0 }) {
-		q.overflow, err = tx.operator.claimOverflowFactsTx(ctx, tx, scopeTeam, current, demand.Target)
+		q.overflow, err = tx.operator.claimOverflowAccountsTx(ctx, tx, scopeTeam, current, demand.Target)
+		if err == nil && (demand.Target != nil || current.BindRun != "" || len(current.Pushes) > 0) {
+			q.overflow, err = claimOverflowUsageTx(ctx, tx, q.overflow)
+		}
 		if err != nil {
 			return err
 		}

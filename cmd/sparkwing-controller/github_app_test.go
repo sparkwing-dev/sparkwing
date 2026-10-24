@@ -8,16 +8,19 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
@@ -112,6 +115,8 @@ func TestGitHubAppStartupAvailability(t *testing.T) {
 		args                                    []string
 	}{
 		{name: "missing redirects", want: "oauth-redirect-uris"},
+		{name: "invalid redirects", redirect: "not-a-url", want: "oauth-redirect-uris"},
+		{name: "insecure redirects", redirect: "http://dashboard.example/callback", want: "oauth-redirect-uris"},
 		{name: "empty key", credential: credGitHubAppKey, want: "github-app-key"},
 		{name: "empty webhook", credential: credGitHubAppWebhookSecret, want: "github-app-webhook-secret"},
 		{name: "empty previous webhook", credential: credGitHubAppPreviousHook, want: "github-app-webhook-secret.previous"},
@@ -189,6 +194,39 @@ func TestGitHubAppStartupAvailability(t *testing.T) {
 				}
 				if err != nil || resp.StatusCode != wantStatus || !strings.Contains(string(body), "GitHub App unavailable") || strings.Contains(string(body), tc.want) {
 					t.Fatalf("%s = %d %s, %v; want generic unavailable hiding %q", path, resp.StatusCode, body, err, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestGitHubOnlyInvalidRedirectKeepsControllerAvailable(t *testing.T) {
+	for _, redirect := range []string{"", "not-a-url", "http://dashboard.example/callback"} {
+		t.Run(redirect, func(t *testing.T) {
+			cfg, err := parseIdentity(identityFlags{
+				SignUpGate:   "open",
+				GitHubApp:    githubAppFlags{ClientID: "client", ClientSecret: "secret"},
+				RedirectURIs: redirect,
+			})
+			if err != nil {
+				t.Fatalf("GitHub-only configuration stopped controller startup: %v", err)
+			}
+			st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = st.Close() })
+			srv := controller.New(st, nil)
+			configureIdentity(srv, cfg, slog.Default())
+			for _, path := range []string{"/api/v1/health", "/webhooks/github-app"} {
+				method, status := http.MethodGet, http.StatusOK
+				if path == "/webhooks/github-app" {
+					method, status = http.MethodPost, http.StatusServiceUnavailable
+				}
+				w := httptest.NewRecorder()
+				srv.Handler().ServeHTTP(w, httptest.NewRequest(method, path, nil))
+				if w.Code != status || !strings.Contains(w.Body.String(), "GitHub App unavailable") || strings.Contains(w.Body.String(), "oauth-redirect-uris") {
+					t.Fatalf("%s: HTTP %d %s", path, w.Code, w.Body)
 				}
 			}
 		})
