@@ -304,7 +304,7 @@ Capabilities remain declarative; owner and executor operations encode lifecycle 
 | Hello, operations, frames, describe, flat plan and shared validation | `internal/nodeproto/*_contract.go` |
 | Windows inherited-handle argv spelling | `internal/protofd/transport_contract.go` |
 | Run and node host roles, layer order, event-following reconciliation | `internal/nodehost/host.go` |
-| Pure graph decisions, selection dependency closure and consistent snapshot projection | `internal/store/scheduling_contract.go` |
+| Pure graph decisions, selection dependency closure and consistent snapshot projection | `internal/store/scheduling_contract.go`, `internal/store/scheduling_selection.go` |
 | Every unit's renewal loop | `internal/lease/keeper.go` |
 | Checkout and entry acquisition | `internal/source/source.go` |
 | SDK planning, canonical validation and hashing | `internal/nodehost/planning.go` |
@@ -325,6 +325,9 @@ C1 owns state transitions, schema, accepted spec storage and blob authority.
 C1 owns `ReconcileNode` and `AcceptExpansion`. C3 hosts consume those exact
 signatures. Both run owners project `RunSnapshot.Scheduling()` and call
 `store.Decide`; the store remains the only state writer.
+The projection derives `--only` skips from the accepted spec's sealed options.
+`Decide` emits those skips before releasing work, and the store rechecks each
+dependency outcome against that decision. Owners cannot supply another selection.
 C2 owns the canonical error object, code registry and credential authority.
 `nodeproto.ErrorUses()` inventories typed canonical codes and their reasons.
 `apierr.DecodeInner` validates every structured protocol error. C4 owns environment policy, settings,
@@ -387,6 +390,7 @@ are part of this contract.
 | `store.NodeDecision` | Carries one job action with its generation, outcome and reason. |
 | `store.ScheduleDecision` | Returns ordered graph actions and an optional final run verdict. |
 | `store.Decide` | Exposes the single pure `decide()` to run hosts. |
+| `store.PlanSelectionSkips` | Validates selection and derives exclusions through the scheduling dependency closure. |
 | `store.RunSnapshot.Scheduling` | Projects accepted declarations and persisted state, including empty generator groups, into `ScheduleSnapshot`. |
 | `store.ReconcileRequest`, `runstate.SourcePolicy` | Carry typed resume, retry, memo or coalescing source authority. |
 | `runstate.ReconciledNode` | Returns the persisted node and any committed claim or authorized source. |

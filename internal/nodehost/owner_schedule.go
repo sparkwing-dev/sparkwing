@@ -2,7 +2,6 @@ package nodehost
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -24,14 +23,6 @@ type ownerExecution struct {
 }
 
 func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry) (RunCompletion, error) {
-	var spec runspec.Spec
-	if err := json.Unmarshal(accepted.Spec, &spec); err != nil {
-		return RunCompletion{}, err
-	}
-	skips, err := selectionSkips(accepted.Plan, spec.Resolved.Settings.Options)
-	if err != nil {
-		return RunCompletion{}, err
-	}
 	ctx, cancel := context.WithCancelCause(parent)
 	var workers sync.WaitGroup
 	defer func() { cancel(context.Canceled); workers.Wait() }()
@@ -112,20 +103,6 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			if stop != nil {
 				stop(&lease.CancelError{Reason: row.CancelReason})
 			}
-		}
-		selected := false
-		for _, row := range snapshot.Nodes {
-			reason, excluded := skips[string(row.Ref.NodeID)]
-			if !excluded || row.Status != runstate.StatusPending || row.ClaimedBy != "" || row.ReadyAt != nil || snapshot.Run.CancelRequestedAt != nil {
-				continue
-			}
-			if _, err := h.Store.TransitionNode(ctx, store.DependencyNode{Ref: row.Ref, Actor: input.Owner, Result: &runstate.NodeResult{Outcome: runstate.NodeSkipped, Reason: reason}, Outcome: runstate.NodeSkipped}); err != nil {
-				return RunCompletion{}, err
-			}
-			selected = true
-		}
-		if selected {
-			continue
 		}
 		for _, row := range snapshot.Nodes {
 			if row.Status != runstate.StatusDone || active[string(row.Ref.NodeID)] != nil {

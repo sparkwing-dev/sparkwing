@@ -27,12 +27,19 @@ func TestEngineSnapshotRetainsEmptyExpansionAndPersistedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, server.Store, `UPDATE runs SET plan_json=?,plan_hash='plan',sealed_at=1,spec_json=?,spec_hash='spec'`, plan, []byte(`{}`))
+	spec, err := json.Marshal(runspec.Spec{Resolved: runspec.Resolved{Settings: runspec.ExecutionSettings{Options: runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "source"}}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, server.Store, `UPDATE runs SET plan_json=?,plan_hash='plan',sealed_at=1,spec_json=?,spec_hash='spec'`, plan, spec)
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,seq,status,outcome,finished_at,generation,attempt,state_seq,spec_json,execution_json,expansion,expansion_body,expansion_registration,expansion_digest) VALUES ('a','run','source',0,'done','success',1,3,2,7,?,?,'accepted',?,?,?)`, []byte(`{"id":"source","closures":{"generate":["empty"]}}`), []byte(`{}`), expansion, registrationJSON, digest)
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,seq,status,spec_json,execution_json) VALUES ('a','run','consumer',1,'pending',?,?)`, []byte(`{"id":"consumer","needs_generated":["empty"]}`), []byte(`{}`))
 	got, err := server.snapshot(t.Context(), owner)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got.SelectionSkips["consumer"] != `outside --only="source"` || len(got.SelectionSkips) != 1 {
+		t.Fatalf("snapshot lost sealed selection: %+v", got.SelectionSkips)
 	}
 	bodyHash, err := runspec.CanonicalHash(json.RawMessage(`{"jobs":[]}`))
 	if err != nil {

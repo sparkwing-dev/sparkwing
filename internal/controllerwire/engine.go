@@ -357,6 +357,7 @@ type ScheduleSnapshot struct {
 	StoreNow        time.Time           `json:"store_now"`
 	CancelRequested bool                `json:"cancel_requested"`
 	GuardRefusal    string              `json:"guard_refusal,omitempty"`
+	SelectionSkips  map[string]string   `json:"selection_skips,omitempty"`
 	Jobs            []ScheduleJob       `json:"jobs"`
 	Generators      []ScheduleGenerator `json:"generators"`
 	Expansions      []AcceptedExpansion `json:"expansions"`

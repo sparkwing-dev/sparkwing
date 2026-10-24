@@ -49,6 +49,7 @@ type ScheduleExpansion struct {
 type ScheduleSnapshot struct {
 	CancelRequested bool
 	GuardRefusal    string
+	SelectionSkips  map[string]string
 	Nodes           []ScheduleNode
 	Expansions      []ScheduleExpansion
 }
@@ -105,6 +106,14 @@ func Decide(snapshot ScheduleSnapshot) ScheduleDecision {
 	for _, node := range nodes {
 		if node.CancelRequested && node.Status != "done" {
 			result.Nodes = append(result.Nodes, NodeDecision{NodeID: node.ID, Generation: node.Generation, Kind: DecisionCancelHolder, Outcome: "cancelled", Reason: node.CancelReason})
+		}
+	}
+	if len(result.Nodes) != 0 {
+		return result
+	}
+	for _, node := range nodes {
+		if reason, excluded := snapshot.SelectionSkips[node.ID]; excluded && node.Status == "pending" && !node.Claimed && !node.Ready {
+			result.Nodes = append(result.Nodes, NodeDecision{NodeID: node.ID, Generation: node.Generation, Kind: DecisionTerminal, Outcome: "skipped", Reason: reason})
 		}
 	}
 	if len(result.Nodes) != 0 {
@@ -246,8 +255,8 @@ func scheduleDependencies(node ScheduleNode, byID map[string]int, groups map[str
 	return unique, true
 }
 
-// PlanDependencyClosure returns the selected jobs and every prerequisite used by scheduling.
-func PlanDependencyClosure(plan nodeproto.PlanDoc, selected []string) (map[string]bool, error) {
+// planDependencyClosure returns the selected jobs and every prerequisite used by scheduling.
+func planDependencyClosure(plan nodeproto.PlanDoc, selected []string) (map[string]bool, error) {
 	nodes := make([]ScheduleNode, len(plan.Jobs))
 	byID := make(map[string]int, len(nodes))
 	groups := make(map[string]ScheduleExpansion)
@@ -364,10 +373,19 @@ func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
 	if plan.Jobs == nil {
 		return ScheduleSnapshot{}, fmt.Errorf("accepted plan has no jobs array")
 	}
+	var skips map[string]string
+	if snapshot.Run.Spec != nil {
+		options := snapshot.Run.Spec.Resolved.Settings.Options
+		var err error
+		skips, err = PlanSelectionSkips(plan, options.Only.Value, options.StartAt.Value, options.StopAt.Value)
+		if err != nil {
+			return ScheduleSnapshot{}, err
+		}
+	}
 	projection := scheduleProjection{
 		runID:    snapshot.Run.ID,
 		finished: snapshot.Run.FinishedAt != nil,
-		result:   ScheduleSnapshot{CancelRequested: snapshot.Run.CancelRequestedAt != nil, GuardRefusal: runGuardRefusal(snapshot.Run)},
+		result:   ScheduleSnapshot{CancelRequested: snapshot.Run.CancelRequestedAt != nil, GuardRefusal: runGuardRefusal(snapshot.Run), SelectionSkips: skips},
 		rows:     make(map[string]runstate.NodeRow, len(snapshot.Nodes)),
 		jobs:     make(map[string]nodeproto.JobSpec, len(snapshot.Nodes)),
 		groups:   make(map[string]int),

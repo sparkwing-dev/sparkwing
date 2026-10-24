@@ -28,7 +28,7 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 	}}
 
 	f := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "build-l*"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}})
-	skips, err := onlySkips(doc, "build-l*", "", "")
+	skips, err := store.PlanSelectionSkips(doc, "build-l*", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
 		{"[", "", `--only="["`},
 		{"build", "compile", "--only is mutually exclusive with --start-at / --stop-at"},
 	} {
-		if _, err := onlySkips(doc, tc.only, tc.start, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if _, err := store.PlanSelectionSkips(doc, tc.only, tc.start, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("only=%q start=%q: err=%v, want %q", tc.only, tc.start, err, tc.want)
 		}
 	}

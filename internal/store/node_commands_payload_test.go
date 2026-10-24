@@ -97,3 +97,42 @@ func TestOwnerCannotSkipApprovalThroughDependencyEdge(t *testing.T) {
 		t.Fatalf("refused dependency verdict changed approval: %+v %v", row, err)
 	}
 }
+
+func TestDependencySkipUsesSealedSelection(t *testing.T) {
+	for _, selected := range []runspec.NodeID{"build", "gate"} {
+		t.Run(string(selected), func(t *testing.T) {
+			tenant, plan, _ := planFixtureWithInput(t, runspec.DispatchHost, func(in *IntakeRequest) {
+				in.Request.Options.Only = runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: string(selected)}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}
+			})
+			doc := testBodyPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build"}, {ID: "gate", Approval: &nodeproto.ApprovalSpec{}}}})
+			plan.Seal.Plan, _ = json.Marshal(doc)
+			var err error
+			plan.Seal.Resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Request: plan.Seal.Request, Declarations: plan.Seal.Declarations, Plan: doc})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := tenant.ReadSnapshot(t.Context(), plan.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			graph, err := snapshot.Scheduling()
+			if err != nil {
+				t.Fatal(err)
+			}
+			decision := Decide(graph)
+			if len(decision.Nodes) != 1 || decision.Nodes[0].NodeID == string(selected) || decision.Nodes[0].Kind != DecisionTerminal || decision.Nodes[0].Outcome != "skipped" || decision.Nodes[0].Reason != `outside --only="`+string(selected)+`"` {
+				t.Fatalf("store did not decide the sealed selection: %+v", decision)
+			}
+			for _, id := range []runspec.NodeID{"build", "gate"} {
+				ref := runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: id}
+				_, err := tenant.TransitionNode(t.Context(), DependencyNode{Ref: ref, Actor: plan.Actor, Outcome: runstate.NodeSkipped})
+				if (err == nil) != (id != selected) {
+					t.Fatalf("dependency skip %s: %v", id, err)
+				}
+			}
+		})
+	}
+}

@@ -93,7 +93,7 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 		t.Fatal("replay changed sealed reason or here authority")
 	}
 	carried, err := runspec.CarryRetry(runspec.RetryInput{Request: nativeTriggerSeal(t, state, created.RunID), Retrier: runspec.Actor{Kind: "local", ID: "local-cli"}, SourceRunID: created.RunID})
-	if err != nil || carried.Request.Request.Reason != flags.reason || carried.Request.Provenance.Writer() != runspec.PrincipalWriter("local", "local-cli") || !reflect.DeepEqual(carried.Request.Request, nativeTriggerSeal(t, state, created.RunID).Request) {
+	if err != nil || carried.Request.Request.Reason != flags.reason || !reflect.DeepEqual(carried.Request, nativeTriggerSeal(t, state, created.RunID)) || !carried.Lineage.Retrier.Set || carried.Lineage.Retrier.Value.ID != "local-cli" {
 		t.Fatalf("retry lost reason or request seal: %v", err)
 	}
 	request.Request.Reason = "different reason"

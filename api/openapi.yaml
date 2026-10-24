@@ -3556,6 +3556,12 @@ components:
             - type: "null"
         run_id:
           type: string
+        selection_skips:
+          anyOf:
+            - additionalProperties:
+                type: string
+              type: object
+            - type: "null"
         store_now:
           format: date-time
           type: string
