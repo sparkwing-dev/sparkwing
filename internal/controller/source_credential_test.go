@@ -98,13 +98,32 @@ func (f *appFixture) claimRunNodeOn(owner signedIn, runID, repoURL string, repoI
 	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
+	path := "/api/v1/runners/claim"
+	var pools []string
+	if repoID > 0 && !personal {
+		pools = []string{"source"}
+		path = "/api/v1/launcher/claim"
+		if _, err := teststore.Exec(ctx, f.store, `UPDATE runs SET allowed_pools=? WHERE team=? AND id=?`, []byte(`["source"]`), owner.team, runID); err != nil {
+			f.t.Fatal(err)
+		}
+		if _, err := teststore.Exec(ctx, f.store, `UPDATE nodes SET execution_json=? WHERE team=? AND run_id=? AND node_id='compile'`, []byte(`{"requires":{"value":["pool=source"]}}`), owner.team, runID); err != nil {
+			f.t.Fatal(err)
+		}
+	}
 	if err := teststore.SeedNodeReady(f.store, ctx, runID, "compile"); err != nil {
 		f.t.Fatal(err)
 	}
-	bearer, prefix = f.enrollRunner(owner, "r-"+runID, personal)
+	bearer, prefix = f.enrollRunner(owner, "r-"+runID, personal, pools...)
 	var n controllerwire.ClaimResponse
-	if code := f.call("POST", "/api/v1/runners/claim", bearer, githubClaimBody(capability.UnitNode, runID, "compile"), &n); code != http.StatusOK || n.Claim == nil || n.Claim.RunID != runID || n.Claim.Capability == "" {
+	if code := f.call("POST", path, bearer, githubClaimBody(capability.UnitNode, runID, "compile"), &n); code != http.StatusOK || n.Claim == nil || n.Claim.RunID != runID || n.Claim.Capability == "" {
 		f.t.Fatalf("claim %s = %d %+v", runID, code, n)
+	}
+	if len(pools) > 0 {
+		var exchanged controllerwire.ExchangeResponse
+		if code := f.call("POST", "/api/v1/claims/exchange", "Bearer "+n.Claim.Capability, struct{}{}, &exchanged); code != http.StatusOK {
+			f.t.Fatalf("exchange %s = %d", runID, code)
+		}
+		n.Claim = &exchanged.Claim
 	}
 	if n.Claim.Request.Request.Git.SHA != headSHA || n.Claim.Request.Request.Source.Location.RemoteURL != repoURL {
 		f.t.Fatalf("claim changed sealed checkout: %+v", n.Claim.Request.Request.Git)
@@ -117,14 +136,17 @@ func (f *appFixture) teamRunner(owner signedIn, name string) (auth, prefix strin
 	return f.enrollRunner(owner, name, false)
 }
 
-func (f *appFixture) enrollRunner(owner signedIn, name string, personal bool) (auth, prefix string) {
+func (f *appFixture) enrollRunner(owner signedIn, name string, personal bool, pools ...string) (auth, prefix string) {
 	f.t.Helper()
 	var m struct {
 		Capability string `json:"capability"`
 		Prefix     string `json:"prefix"`
 	}
-	if code := f.call("POST", "/api/v1/runners", owner.auth,
-		map[string]any{"name": name, "repos": []string{"github.com/*/*", "gitlab.example.com/*/*", "git.example.invalid/*/*"}, "personal": personal}, &m); code != http.StatusCreated {
+	body := map[string]any{"name": name, "repos": []string{"github.com/*/*", "gitlab.example.com/*/*", "git.example.invalid/*/*"}, "personal": personal}
+	if len(pools) > 0 {
+		body["reserved_pools"], body["grants"] = pools, []capability.Grant{capability.ClaimsLaunch}
+	}
+	if code := f.call("POST", "/api/v1/runners", owner.auth, body, &m); code != http.StatusCreated {
 		f.t.Fatalf("mint runner = %d", code)
 	}
 	return "Bearer " + m.Capability, m.Prefix
@@ -280,18 +302,7 @@ func TestSourceCredential_NeedsTheRunsOwnClaimToken(t *testing.T) {
 	f := newAppFixture(t)
 	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
 	f.connect(olga, 501, 7, acmeAdmin)
-	f.createRun(olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
-	if err := teststore.SeedNode(f.store, context.Background(), store.Node{RunID: "run-widgets", NodeID: "compile", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := teststore.SeedNodeReady(f.store, context.Background(), "run-widgets", "compile"); err != nil {
-		t.Fatal(err)
-	}
-	machine, _ := f.teamRunner(olga, "holder")
-	if code := f.call("POST", "/api/v1/runners/claim", machine,
-		githubClaimBody(capability.UnitNode, "run-widgets", "compile"), nil); code != http.StatusOK {
-		t.Fatalf("claim = %d", code)
-	}
+	machine, _, _ := f.claimRunNode(olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
 	idle, _ := f.teamRunner(olga, "idle")
 	for name, auth := range map[string]string{"the claim's machine": machine, "an idle machine": idle, "the owner": olga.auth} {
 		if got, code := f.sourceCredential(auth, "run-widgets"); code != http.StatusForbidden || got.Error != "forbidden" || got.Token != "" {

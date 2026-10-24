@@ -94,14 +94,8 @@ func TestSourceClaimsFollowSeededReadiness(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			e, _, _ := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-			dispatch, team := runspec.DispatchHost, "a"
-			grants := []capability.Grant{capability.NodesClaim}
-			if kind == capability.UnitPlan {
-				dispatch, team = runspec.DispatchController, ""
-				grants = []capability.Grant{capability.ClaimsLaunch}
-			}
-			controller.EngineHTTPRoot(t, e, team, "source-claimant", grants)
-			seedSourceRun(t, e.Store, "a", "source-run", "https://github.com/acme/widgets.git", "gh:701", "refs/heads/main", headSHA, 701, dispatch)
+			controller.EngineHTTPRoot(t, e, "", "source-claimant", []capability.Grant{capability.ClaimsLaunch})
+			seedSourceRun(t, e.Store, "a", "source-run", "https://github.com/acme/widgets.git", "gh:701", "refs/heads/main", headSHA, 701, runspec.DispatchController)
 			target := &store.UnitRef{Kind: kind, RunID: "source-run"}
 			if kind == capability.UnitNode {
 				if err := teststore.SeedNode(e.Store, t.Context(), store.Node{RunID: "source-run", NodeID: "compile", Status: "pending"}); err != nil {
@@ -111,11 +105,10 @@ func TestSourceClaimsFollowSeededReadiness(t *testing.T) {
 					t.Fatal(err)
 				}
 				target.NodeID = "compile"
-			} else {
-				tenant := teststore.ForTeam(t, e.Store, "a")
-				if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "fixture:source-run", CreatedBy: "fixture"}); err != nil {
-					t.Fatal(err)
-				}
+			}
+			tenant := teststore.ForTeam(t, e.Store, "a")
+			if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "fixture:source-run", CreatedBy: "fixture"}); err != nil {
+				t.Fatal(err)
 			}
 			claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "source-claimant", Target: target})
 			if err != nil {
