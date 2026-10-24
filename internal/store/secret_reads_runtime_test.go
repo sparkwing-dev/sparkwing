@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	modernsqlite "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -203,9 +204,9 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	tenant, owner := secretReadStoreFixture(t)
 	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 	b := owner.Binding
-	actor := Actor{Kind: ActorRunHost, Authority: owner.Principal.Authority, CapabilityPrefix: owner.Principal.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(b.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: "job"}
-	reconciled, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: ref, Actor: actor, Policy: SourceResume})
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: owner.Principal.Authority, CapabilityPrefix: owner.Principal.Capability.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(b.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}}
+	ref := runspec.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: "job"}
+	reconciled, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: ref, Actor: actor, Policy: runstate.SourceResume})
 	if err != nil || reconciled.Claim == nil {
 		t.Fatalf("job claim: %+v %v", reconciled, err)
 	}
@@ -219,9 +220,9 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	if row, err := tenant.ReadSecret(t.Context(), a); err != nil || row == nil {
 		t.Fatalf("unstarted job read: %+v %v", row, err)
 	}
-	holder := Actor{Kind: ActorHolder, Authority: p.Authority, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
+	holder := runstate.Actor{Kind: runstate.ActorHolder, Authority: p.Authority, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
 	admitExecution(t, tenant, holder)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: holder, To: NodeRunning, Cause: CauseStart, SourceAttempt: new(runspec.AttemptOrdinal)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: holder, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: new(runspec.AttemptOrdinal)}); err != nil {
 		t.Fatal(err)
 	}
 	if row, err := tenant.ReadSecret(t.Context(), a); err != nil || row == nil {

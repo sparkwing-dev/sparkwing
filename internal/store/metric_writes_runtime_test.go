@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -88,7 +89,7 @@ func TestMetricTransactionsRecheckReportingAuthorityProperty(t *testing.T) {
 	if err != nil || principal.Capability.Parent == nil {
 		t.Fatalf("claim ancestry = %+v, %v", principal.Capability.Parent, err)
 	}
-	if err := f.tenant.RevokeAuthority(t.Context(), store.Actor{Kind: store.ActorOperator, Authority: f.plan.Seal.Request.AuthorityRef}, *principal.Capability.Parent); err != nil {
+	if err := f.tenant.RevokeAuthority(t.Context(), runstate.Actor{Kind: runstate.ActorOperator, Authority: f.plan.Seal.Request.AuthorityRef}, *principal.Capability.Parent); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.WriteMetric(t.Context(), metric, store.MetricSample{TS: time.Unix(1800000001, 0)}); err == nil {
@@ -102,14 +103,14 @@ func TestMetricTransactionsRecheckReportingAuthorityProperty(t *testing.T) {
 func TestMetricReportsFollowAttemptAndCancellation(t *testing.T) {
 	f := newStoreRecoveryFixture(t, true)
 	before := metricAuthorization(t, f, "metrics")
-	if _, err := f.tenant.TransitionNode(t.Context(), store.RetryNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Result: &store.NodeResult{Outcome: store.NodeFailed}}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.RetryNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Result: &runstate.NodeResult{Outcome: runstate.NodeFailed}}); err != nil {
 		t.Fatal(err)
 	}
 	sample := store.MetricSample{TS: time.Unix(1800000000, 0), MemoryBytes: 100}
 	if err := f.tenant.WriteMetric(t.Context(), before, sample); err == nil {
 		t.Fatal("previous attempt wrote a sample")
 	}
-	if _, err := f.tenant.TransitionNode(t.Context(), store.CancelNode{Ref: f.ref, Actor: f.owner, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "stop"}}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.CancelNode{Ref: f.ref, Actor: f.owner, Result: &runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: "stop"}}); err != nil {
 		t.Fatal(err)
 	}
 	current := metricAuthorization(t, f, "metrics")
@@ -119,7 +120,7 @@ func TestMetricReportsFollowAttemptAndCancellation(t *testing.T) {
 	if err := f.tenant.WriteUsage(t.Context(), metricAuthorization(t, f, "usage"), store.NodeUsage{CPUTime: 1, Wall: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(2), Outcome: store.NodeCancelled, Result: &store.NodeResult{Outcome: store.NodeCancelled}}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(2), Outcome: runstate.NodeCancelled, Result: &runstate.NodeResult{Outcome: runstate.NodeCancelled}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.tenant.WriteMetric(t.Context(), current, sample); err == nil {
@@ -132,7 +133,7 @@ func TestMetricReportsFollowAttemptAndCancellation(t *testing.T) {
 
 func TestMetricRunHostReportsFinishedJobsUnderItsOwnFence(t *testing.T) {
 	f := newStoreRecoveryFixture(t, true)
-	if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
+	if _, err := f.tenant.TransitionNode(t.Context(), store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: runstate.NodeSuccess, Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess}}); err != nil {
 		t.Fatal(err)
 	}
 	principal, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.owner.Authority)

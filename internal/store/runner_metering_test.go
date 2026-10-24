@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func runnerMeteringFixture(t *testing.T) (*Store, UnitDemand, capability.Authorized) {
@@ -65,7 +66,7 @@ func TestRunnerMeteringChangesOnlyFutureAwards(t *testing.T) {
 	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (&Tenant{s: s, team: "a"}).TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeReady, Cause: CauseRelease, Actor: owner}); err != nil {
+	if _, err := (&Tenant{s: s, team: "a"}).TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, To: runstate.NodeReady, Cause: runstate.CauseRelease, Actor: owner}); err != nil {
 		t.Fatal(err)
 	}
 	next, err := s.AsOperator().ClaimUnit(t.Context(), demand)

@@ -13,8 +13,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func blobResultFixture(t *testing.T) (*Store, *blobRecords, nodeTransition) {
@@ -38,15 +38,15 @@ func blobResultFixture(t *testing.T) (*Store, *blobRecords, nodeTransition) {
 	}
 	s.resultRecords = records
 	a := intent.Identity.Attempt.Value
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}}
-	change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID)}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &request.Key}}}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}}
+	change := nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID)}, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &request.Key}}}
 	return s, records, change
 }
 
 func assertBlobResultUnchanged(t *testing.T, records *blobRecords, change nodeTransition) {
 	t.Helper()
 	row, err := records.tenant.ReadNode(t.Context(), change.Ref)
-	if err != nil || row.Status != StatusRunning || row.StateSeq != 0 || row.CapabilityPrefix != change.Actor.CapabilityPrefix {
+	if err != nil || row.Status != runstate.StatusRunning || row.StateSeq != 0 || row.CapabilityPrefix != change.Actor.CapabilityPrefix {
 		t.Fatalf("refused attachment changed job: %+v, %v", row, err)
 	}
 	var closed int
@@ -65,7 +65,7 @@ func TestBlobResultRecordsCommitAndReplayWithTerminalState(t *testing.T) {
 		}
 	}
 	row, err := records.tenant.ReadNode(t.Context(), change.Ref)
-	if err != nil || row.Status != StatusDone || row.Outcome != NodeSuccess {
+	if err != nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeSuccess {
 		t.Fatalf("result did not finish job: %+v, %v", row, err)
 	}
 	var outcome string
@@ -79,7 +79,7 @@ func TestBlobResultRecordsCommitAndReplayWithTerminalState(t *testing.T) {
 	if err != nil || len(events) != 1 {
 		t.Fatalf("result events: %+v, %v", events, err)
 	}
-	var persisted NodeResult
+	var persisted runstate.NodeResult
 	if err := json.Unmarshal(events[0].Payload, &persisted); err != nil || !reflect.DeepEqual(persisted, *change.Extra.Result) {
 		t.Fatalf("result references did not persist: %+v, %v", persisted, err)
 	}

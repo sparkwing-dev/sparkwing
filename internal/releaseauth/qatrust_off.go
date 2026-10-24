@@ -2,4 +2,4 @@
 
 package releaseauth
 
-var qaPublicKeys []string
+func qaPublicKeys() []string { return nil }

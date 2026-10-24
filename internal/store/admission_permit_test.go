@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -31,7 +31,7 @@ func TestExecutionStartRequiresAwardBoundAdmission(t *testing.T) {
 			if err != nil || row.StartedAt != nil || row.Attempt != 0 {
 				t.Fatalf("refused start changed attempt: %+v %v", row, err)
 			}
-			binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+			binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 			bad := f.holder
 			bad.NodeFence.Generation++
 			binding.Generation++
@@ -40,7 +40,7 @@ func TestExecutionStartRequiresAwardBoundAdmission(t *testing.T) {
 			}
 			assertNoJobPermit(t, f)
 			binding.Generation = int64(f.holder.Generation)
-			if result, err := f.tenant.MayStart(t.Context(), binding, f.holder); err != nil || result.Kind != store.AcquireGranted {
+			if result, err := f.tenant.MayStart(t.Context(), binding, f.holder); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("admission: %+v %v", result, err)
 			}
 			assertProcessPermitSnapshot(t, f, false)
@@ -81,20 +81,20 @@ func TestJobAdmissionPolicyCommitsTerminalOutcome(t *testing.T) {
 						doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new(policy)}}
 					})
 					blockerBinding, blocker := admissionPolicyBlocker(t, f)
-					if result, err := f.tenant.MayStart(t.Context(), blockerBinding, blocker); err != nil || result.Kind != store.AcquireGranted {
+					if result, err := f.tenant.MayStart(t.Context(), blockerBinding, blocker); err != nil || result.Kind != runstate.AcquireGranted {
 						t.Fatalf("blocker: %+v %v", result, err)
 					}
-					binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+					binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
 					result, err := f.tenant.MayStart(t.Context(), binding, f.holder)
-					wantKind, wantOutcome := store.AcquireSkipped, store.NodeSkipped
+					wantKind, wantOutcome := runstate.AcquireSkipped, runstate.NodeSkipped
 					if policy == "fail" {
-						wantKind, wantOutcome = store.AcquireFailed, store.NodeFailed
+						wantKind, wantOutcome = runstate.AcquireFailed, runstate.NodeFailed
 					}
 					if err != nil || result.Kind != wantKind {
 						t.Fatalf("policy: %+v %v, want %s", result, err, wantKind)
 					}
 					row, err := f.tenant.ReadNode(t.Context(), f.ref)
-					if err != nil || row.Status != store.StatusDone || row.Outcome != wantOutcome || row.Attempt != 0 {
+					if err != nil || row.Status != runstate.StatusDone || row.Outcome != wantOutcome || row.Attempt != 0 {
 						t.Fatalf("policy did not settle unstarted award: %+v %v", row, err)
 					}
 					assertNoJobPermit(t, f)
@@ -120,7 +120,7 @@ func TestJobAdmissionPolicyCommitsTerminalOutcome(t *testing.T) {
 	}
 }
 
-func admissionAcceptedPlan(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodeproto.PlanDoc)) (store.PlanAcceptance, store.Actor) {
+func admissionAcceptedPlan(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodeproto.PlanDoc)) (store.PlanAcceptance, runstate.Actor) {
 	t.Helper()
 	ctx := t.Context()
 	intake, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request})
@@ -154,21 +154,21 @@ func admissionAcceptedPlan(t *testing.T, f *storeRecoveryFixture, edits ...func(
 	return plan, owner
 }
 
-func admissionPolicyBlocker(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodeproto.PlanDoc)) (store.CapacityBinding, store.Actor) {
+func admissionPolicyBlocker(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodeproto.PlanDoc)) (runstate.CapacityBinding, runstate.Actor) {
 	t.Helper()
 	ctx := t.Context()
 	plan, owner := admissionAcceptedPlan(t, f, edits...)
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: f.ref.NodeID}
+	ref := runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: f.ref.NodeID}
 	if _, err := f.tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: owner}); err != nil {
 		t.Fatal(err)
 	}
-	release, err := f.tenant.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: owner, Policy: store.SourceResume})
-	if err != nil || release.Kind != store.Execute || release.Claim == nil {
+	release, err := f.tenant.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: owner, Policy: runstate.SourceResume})
+	if err != nil || release.Kind != runstate.Execute || release.Claim == nil {
 		t.Fatalf("blocker award: %+v %v", release, err)
 	}
 	claim := release.Claim
-	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix}, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
-	return store.CapacityBinding{RunID: plan.RunID, NodeID: string(ref.NodeID), Generation: int64(claim.Generation)}, actor
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix}, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
+	return runstate.CapacityBinding{RunID: plan.RunID, NodeID: string(ref.NodeID), Generation: int64(claim.Generation)}, actor
 }
 
 func assertProcessPermitSnapshot(t *testing.T, f *storeRecoveryFixture, want bool) {

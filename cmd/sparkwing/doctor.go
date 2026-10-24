@@ -19,8 +19,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -52,7 +54,7 @@ type doctorDependencies struct {
 	version string
 	local   func(context.Context) (dashboardServices, error)
 	machine func(context.Context) doctorReport
-	sweep   func(context.Context, dashboardServices, bool) ([]wingd.LocalDoctorFinding, error)
+	sweep   func(context.Context, dashboardServices, bool) ([]localhostwire.LocalDoctorFinding, error)
 }
 
 func runDoctor(inv clisurface.Invocation) error {
@@ -106,7 +108,7 @@ func inspectDoctor(ctx context.Context, dryRun bool, deps doctorDependencies) (d
 	// safety: lifecycle inspection must not acquire a second writing store or start an activity hold.
 	findings, err := services.lifecycle.Doctor(ctx, deps.version)
 	if err == nil && deps.sweep != nil {
-		var swept []wingd.LocalDoctorFinding
+		var swept []localhostwire.LocalDoctorFinding
 		swept, err = deps.sweep(ctx, services, dryRun)
 		findings = append(findings, swept...)
 	}
@@ -245,7 +247,7 @@ func inspectDoctorGoToolchain(ctx context.Context, dir string, env []string) *op
 	return finding
 }
 
-func sweepDoctorSessions(ctx context.Context, services dashboardServices, dryRun bool) ([]wingd.LocalDoctorFinding, error) {
+func sweepDoctorSessions(ctx context.Context, services dashboardServices, dryRun bool) ([]localhostwire.LocalDoctorFinding, error) {
 	if _, err := ensureLocalController(ctx, services.options.Home, func(context.Context) (dashboardServices, error) {
 		return services, nil
 	}); err != nil {

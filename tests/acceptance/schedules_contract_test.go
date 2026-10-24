@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -99,7 +101,7 @@ func TestSurfaceSchedulesTransport(t *testing.T) {
 			}
 			tz, catchUp := "", "0s"
 			args := map[string]string{"empty": "", "message": "a=b"}
-			_, err = manager.OverrideSchedule(t.Context(), "s1", controllerwire.ScheduleOverride{TZ: &tz, CatchUp: &catchUp, Args: &args})
+			_, err = manager.OverrideSchedule(t.Context(), "s1", cronspec.Override{TZ: &tz, CatchUp: &catchUp, Args: &args})
 			if err != nil {
 				t.Fatal(err)
 			}

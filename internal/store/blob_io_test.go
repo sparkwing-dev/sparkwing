@@ -9,8 +9,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 type probingManifests struct {
@@ -89,14 +89,14 @@ func TestBlobObjectReadsRunOutsideTransactions(t *testing.T) {
 		t.Fatalf("memo=%+v,%v", hit, err)
 	}
 	a := intent.Identity.Attempt.Value
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID)}
-	report := nodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &artifacts.Key}}}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(a.Generation)}}
+	ref := runspec.NodeRef{RunID: runspec.RunID(a.RunID), NodeID: runspec.NodeID(a.NodeID)}
+	report := nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &artifacts.Key}}}
 	if _, err := records.tenant.TransitionNode(t.Context(), report); err != nil {
 		t.Fatal(err)
 	}
 	_, tenant, request := materializationTarget(t, s, records.tenant, ref)
-	if got, err := tenant.ReconcileNode(t.Context(), request); err != nil || got.Kind != Materialize {
+	if got, err := tenant.ReconcileNode(t.Context(), request); err != nil || got.Kind != runstate.Materialize {
 		t.Fatalf("materialization: %+v: %v", got, err)
 	}
 	if calls["verify"] < 2 || calls["read"] < 4 || calls["blob"] < 1 {
@@ -163,7 +163,7 @@ func TestBlobMaterializationRecheckAfterVerification(t *testing.T) {
 		s.resultRecords, s.materializations = records, records
 	}
 	got, err := tenant.ReconcileNode(t.Context(), request)
-	if err != nil || got.Kind != Dispatch || got.Node.OutputRecord != nil {
+	if err != nil || got.Kind != runstate.Dispatch || got.Node.OutputRecord != nil {
 		t.Fatalf("stale verification materialized: %+v: %v", got, err)
 	}
 	var copied int

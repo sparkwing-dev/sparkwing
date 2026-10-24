@@ -10,10 +10,11 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // DepcacheRecords restores and saves declared directories through bound storage.
@@ -52,8 +53,8 @@ func (d DepcacheRecords) Prepare(ctx context.Context, input NodeInput, job nodep
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context, current NodeInput, result *store.NodeResult) error {
-		if result.Outcome != store.NodeSuccess {
+	return func(ctx context.Context, current NodeInput, result *runstate.NodeResult) error {
+		if result.Outcome != runstate.NodeSuccess {
 			return nil
 		}
 		for _, cache := range caches {

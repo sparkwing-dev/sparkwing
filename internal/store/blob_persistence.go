@@ -13,8 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blobActor, intent blob.UploadIntent, accounting blobAccounting) (blob.Receipt, error) {
@@ -127,7 +127,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 		}
 		return a, checkBlobAuthorityHints(input, a.authority)
 	}
-	actor := Actor{Kind: ActorHolder, Authority: p.Authority, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: p.Authority, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}}
 	switch {
 	case c.Data.Use == capability.DataPublish:
 		if a.mode != "publish" || c.Binding.Kind != capability.BindingRun {
@@ -148,7 +148,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 			a.authority.Attempt = input.Attempt
 		}
 	case c.Unit == capability.UnitNode:
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
+		row, err := readNodeTx(ctx, tx, team, runspec.NodeRef{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
 		if err != nil {
 			return a, err
 		}
@@ -159,7 +159,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 			return a, err
 		}
 		// safety: source reads precede execution; output writes require an attempt.
-		if row.Status == StatusPending && row.StartedAt == nil && grant == capability.DataRead {
+		if row.Status == runstate.StatusPending && row.StartedAt == nil && grant == capability.DataRead {
 			return a, checkBlobAuthorityHints(input, a.authority)
 		}
 		if row.Attempt <= 0 {

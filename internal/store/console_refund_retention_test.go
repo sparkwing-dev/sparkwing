@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -33,7 +32,7 @@ func assertConsoleRefundReceiptSurvivesAuditRetention(t *testing.T, target *stor
 	if _, err := team.TestOnlySettlePaidCredit(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "payment"}); err != nil {
 		t.Fatal(err)
 	}
-	req := controllerwire.OperatorRefund{PaymentID: "payment", RefundID: "original-refund", AmountCents: 1, Reason: "support"}
+	req := store.OperatorRefund{PaymentID: "payment", RefundID: "original-refund", AmountCents: 1, Reason: "support"}
 	original, err := console.ConsoleRefund(t.Context(), a, req, "original")
 	if err != nil || !original.Created || original.Grant == nil {
 		t.Fatalf("original receipt: %+v: %v", original, err)

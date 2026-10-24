@@ -8,14 +8,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -44,7 +45,7 @@ func TestEmbeddedOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
 	var subject blob.LogSubject
 	var retired func(context.Context) (string, error)
 	var cleanupErr error
-	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
+	host := localcontroller.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 		retired, principal = binding.Bearer, binding.Principal
 		private, err := client.NewLocalHostClient(client.EngineOptions{URL: "http://local", HTTP: transport, Bearer: binding.Bearer}, unit.RunID)
 		if err != nil {
@@ -82,7 +83,7 @@ func TestEmbeddedOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(principal.Capability.Binding.RunID), NodeID: runspec.NodeID(principal.Capability.Binding.NodeID), Holder: principal.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(principal.Capability.Binding.Generation)}}
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(principal.Capability.Binding.RunID), NodeID: runspec.NodeID(principal.Capability.Binding.NodeID), Holder: principal.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(principal.Capability.Binding.Generation)}}
 	result, err := (logseg.CommittedReader{Records: tenant, Objects: objects}).Read(t.Context(), actor, blob.LogReadRequest{Subject: subject}, &output)
 	if err != nil || !result.Complete || output.String() != "last owner line\n" {
 		t.Fatalf("cancelled owner lost persisted final logs: complete=%t output=%q: %v", result.Complete, output.String(), err)

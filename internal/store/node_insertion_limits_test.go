@@ -7,9 +7,9 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
@@ -131,7 +131,7 @@ func TestExpansionInsertionLimitRollsBackBatch(t *testing.T) {
 	}
 	rewriteSchemaCount(t, tenant.s.db, "nodes", 1)
 	source, err := tenant.ReadNode(t.Context(), request.Source)
-	if err != nil || source.Expansion != ExpansionExpected {
+	if err != nil || source.Expansion != runstate.ExpansionExpected {
 		t.Fatalf("refused expansion changed source: %+v %v", source, err)
 	}
 	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalNodesPerRun: 3}); err != nil {
@@ -155,8 +155,8 @@ func TestOwnerReadyReplayPreservesQueueAge(t *testing.T) {
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}
-	change := nodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}
+	ref := runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}
+	change := nodeTransition{Ref: ref, Actor: request.Actor, To: runstate.NodeReady, Cause: runstate.CauseRelease}
 	first, err := tenant.TransitionNode(t.Context(), change)
 	if err != nil {
 		t.Fatal(err)

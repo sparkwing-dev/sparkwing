@@ -12,9 +12,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -69,7 +71,7 @@ func (s *hostState) subscribe(context.Context, string) (stateSubscription, error
 	}}, nil
 }
 
-func (s *hostState) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
+func (s *hostState) TransitionNode(ctx context.Context, change store.NodeCommand) (runstate.Applied, error) {
 	applied, err := s.Tenant.TransitionNode(ctx, change)
 	if err == nil {
 		s.notify()
@@ -90,8 +92,8 @@ type storeHostFixture struct {
 	Store       *store.Store
 	Tenant      *store.Tenant
 	State       *hostState
-	Actor       store.Actor
-	Control     store.Actor
+	Actor       runstate.Actor
+	Control     runstate.Actor
 	Accepted    AcceptedRun
 	Input       RunInput
 	Host        OwnerHost
@@ -109,10 +111,10 @@ func newStoreHostFixtureOn(t *testing.T, database *store.Store, plan nodeproto.P
 }
 
 func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request) *storeHostFixture {
-	return newStoreHostFixtureForEngine(t, database, plan, request, engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}})
+	return newStoreHostFixtureForEngine(t, database, plan, request, engineid.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}})
 }
 
-func newStoreHostFixtureForEngine(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request, selected engine.Identity) *storeHostFixture {
+func newStoreHostFixtureForEngine(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request, selected engineid.Identity) *storeHostFixture {
 	t.Helper()
 	f := newStoreOwnerFixture(t, database, request)
 	ctx, tenant, actor := t.Context(), f.Tenant, f.Actor
@@ -133,7 +135,7 @@ func newStoreHostFixtureForEngine(t *testing.T, database *store.Store, plan node
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(f.Input.RunID), Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+	if _, err := tenant.TransitionRun(ctx, runstate.RunTransition{RunID: runspec.RunID(f.Input.RunID), Actor: actor, To: runstate.RunRunning, Cause: runstate.RunStart}); err != nil {
 		t.Fatal(err)
 	}
 	spec, _ := json.Marshal(accepted.Spec)
@@ -200,23 +202,23 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
 	requestBody, err := json.Marshal(admitted.Request.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &storeHostFixture{OwnerBearer: claim.Bearer, Store: database, Tenant: tenant, Actor: actor, Control: store.Actor{Kind: store.ActorOperator, Authority: authority, CapabilityPrefix: root}}
+	f := &storeHostFixture{OwnerBearer: claim.Bearer, Store: database, Tenant: tenant, Actor: actor, Control: runstate.Actor{Kind: runstate.ActorOperator, Authority: authority, CapabilityPrefix: root}}
 	f.Input = RunInput{RunID: admitted.RunID, Owner: actor, SealedRequest: requestBody, RequestHash: string(admitted.Request.Hash), GrantedRunner: nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}}
 
 	f.State = &hostState{Tenant: tenant}
-	f.Host = OwnerHost{executionAdmission: ComposeStartGate(tenant, nil, false), Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Masker: secrets.NewMasker(), Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
+	f.Host = OwnerHost{executionAdmission: ComposeStartGate(tenant, nil, false), Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Masker: secrets.NewMasker(), Renew: func(ctx context.Context, actor runstate.Actor, executing bool) (runstate.LeaseBeat, error) {
 		beat, err := database.AsOperator().RenewUnit(ctx, actor.CapabilityPrefix, executing)
 		if err == nil {
 			beat.ExpiresAt = time.Now().Add(beat.ExpiresAt.Sub(teststore.Now(database)))
 		}
 		return beat, err
-	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }}
-	setTestPolicies(&f.Host, func(context.Context, testPolicyName, EvaluationInput, store.NodeRow, StorageBinding) (ownerLayerResult, error) {
+	}, Local: func(runstate.NodeRow) bool { return true }, AdoptClaim: func(context.Context, runstate.ReconciledNode) error { return nil }}
+	setTestPolicies(&f.Host, func(context.Context, testPolicyName, EvaluationInput, runstate.NodeRow, StorageBinding) (ownerLayerResult, error) {
 		return ownerLayerResult{}, nil
 	})
 	follower := stateFollower{Store: f.State, Subscribe: f.State.subscribe}

@@ -14,6 +14,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"golang.org/x/sys/windows"
 )
 
@@ -26,7 +27,7 @@ type pipeConn struct {
 	*os.File
 	path     string
 	server   bool
-	identity LocalPeerIdentity
+	identity localhostwire.LocalPeerIdentity
 	peerOnce sync.Once
 	peerErr  error
 	stopAuth func() bool

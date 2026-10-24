@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -37,7 +38,7 @@ func storeDataRequest(t *testing.T, s *serverFixture, method, path, body string,
 	if !operator {
 		authority.principal.Capability.Grants = []capability.Grant{capability.RunsRead}
 	}
-	s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(authority), Bindings: authority})
+	s.WithAuthorization(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authority), Bindings: authority})
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
 	r.Header.Set("Authorization", "Bearer "+authority.raw)
 	r.Header.Set("Content-Type", "application/json")

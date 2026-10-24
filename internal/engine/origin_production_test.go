@@ -11,8 +11,8 @@ import (
 )
 
 func TestDefaultBuildTrustsOnlyProductionKeyAndOrigins(t *testing.T) {
-	if !slices.Equal(releaseauth.TrustedPublicKeys, []string{releaseauth.ProductionPublicKey}) {
-		t.Fatalf("default build trusts %v, want only the production key", releaseauth.TrustedPublicKeys)
+	if !slices.Equal(releaseauth.TrustedPublicKeys(), []string{releaseauth.ProductionPublicKey}) {
+		t.Fatalf("default build trusts %v, want only the production key", releaseauth.TrustedPublicKeys())
 	}
 	if VersionIndexURL != "https://sparkwing.dev/versions.json" || VersionIndexSignatureURL != "https://sparkwing.dev/versions.json.sig" || ReleaseBase != "https://github.com/sparkwing-dev/sparkwing/releases/download" {
 		t.Fatalf("default build reads %s, %s and %s", VersionIndexURL, VersionIndexSignatureURL, ReleaseBase)

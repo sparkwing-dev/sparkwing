@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -24,7 +23,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 			ctx := t.Context()
 			start := time.Unix(1700000000, 0)
 			finish := start.Add(time.Minute)
-			run := store.Run{ID: "r", Pipeline: "aggregate", Status: "success", StartedAt: start, FinishedAt: &finish}
+			run := store.Run{RunSummary: runstate.RunSummary{ID: "r", Pipeline: "aggregate", Status: "success", StartedAt: start, FinishedAt: &finish}}
 			if err := teststore.SeedRun(st, ctx, store.DefaultTeam, run); err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +52,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 				if err := teststore.SeedNode(st, ctx, store.Node{RunID: "r", NodeID: id, Status: "running"}); err != nil {
 					t.Fatal(err)
 				}
-				if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, controllerwire.NodeRef{RunID: "r", NodeID: runspec.NodeID(id)}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
+				if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, runspec.NodeRef{RunID: "r", NodeID: runspec.NodeID(id)}, runstate.NodeResult{Outcome: runstate.NodeState(outcome), MaskedError: ""}); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := teststore.SQL(t, st).Exec(`UPDATE nodes SET started_at=?, finished_at=? WHERE run_id=? AND node_id=?`, begin.UnixNano(), end.UnixNano(), "r", id); err != nil {

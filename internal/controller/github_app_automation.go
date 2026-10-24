@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -218,7 +219,14 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			return engineLookupError(err)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"automation": list})
+		var out []controllerwire.GitHubAppAutomation
+		if list != nil {
+			out = make([]controllerwire.GitHubAppAutomation, len(list))
+		}
+		for i, row := range list {
+			out[i] = automationView(row)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"automation": out})
 		return nil
 	}
 	in, repo, err := s.resolveAutomationRepository(r.Context(), tenant, slug)

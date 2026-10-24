@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -735,7 +737,7 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
 		t.Fatalf("subscribe = %d", code)
 	}
-	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{ID: "existing", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "existing", Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalRunsPerHour: 1}); err != nil {

@@ -14,6 +14,8 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -34,11 +36,7 @@ func TestRunFiltersTreatSQLMetacharactersAsLiteral(t *testing.T) {
 		}
 		for i, value := range values {
 			for _, tn := range []*store.Tenant{teamA, teamB} {
-				if err := teststore.SeedRun(f.store, ctx, tn.Team(), store.Run{
-					ID: fmt.Sprintf("literal-%s-%d", tn.Team(), i), Pipeline: value,
-					Status: "running", GitBranch: value, DeclaredRepo: value, RepoURL: value,
-					StartedAt: time.Now(),
-				}); err != nil {
+				if err := teststore.SeedRun(f.store, ctx, tn.Team(), store.Run{RunSummary: runstate.RunSummary{ID: fmt.Sprintf("literal-%s-%d", tn.Team(), i), Pipeline: value, Status: "running", GitBranch: value, DeclaredRepo: value, RepoURL: value, StartedAt: time.Now()}}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -229,7 +227,7 @@ func TestRunFilterTenantLiteralsProperty(t *testing.T) {
 			index++
 			literal := fmt.Sprintf("value-%d-", index) + hex.EncodeToString(value) + "' OR 1=1 -- %_"
 			for _, tenant := range []*store.Tenant{teamA, teamB} {
-				if err := teststore.SeedRun(f.store, t.Context(), tenant.Team(), store.Run{ID: fmt.Sprintf("%s-%d", tenant.Team(), index), Pipeline: literal, Status: "running", GitBranch: literal, DeclaredRepo: literal, RepoURL: literal}); err != nil {
+				if err := teststore.SeedRun(f.store, t.Context(), tenant.Team(), store.Run{RunSummary: runstate.RunSummary{ID: fmt.Sprintf("%s-%d", tenant.Team(), index), Pipeline: literal, Status: "running", GitBranch: literal, DeclaredRepo: literal, RepoURL: literal}}); err != nil {
 					t.Fatal(err)
 				}
 			}

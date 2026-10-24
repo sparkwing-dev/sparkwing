@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -29,8 +28,8 @@ func TestUnitReaperContinuesAfterTargetFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "target refused") || len(page) != 1 || page[0].RunID != "good" {
 		t.Fatalf("reap results=%+v, error=%v", page, err)
 	}
-	bad, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "bad", NodeID: "job"})
-	if err != nil || bad.Status != store.StatusRunning || bad.Disruptions != 0 {
+	bad, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "bad", NodeID: "job"})
+	if err != nil || bad.Status != runstate.StatusRunning || bad.Disruptions != 0 {
 		t.Fatalf("failed target changed: %+v, %v", bad, err)
 	}
 }
@@ -73,8 +72,8 @@ func TestUnitReaperBoundsNodeRecovery(t *testing.T) {
 				t.Fatalf("recovered unit: %+v", unit)
 			}
 			seen[unit.RunID] = true
-			row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.NodeID)})
-			if err != nil || row.Status != store.StatusPending || row.Generation != 4 || row.Attempt != 1 || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.ApplicationRetries != 0 {
+			row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.NodeID)})
+			if err != nil || row.Status != runstate.StatusPending || row.Generation != 4 || row.Attempt != 1 || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.ApplicationRetries != 0 {
 				t.Fatalf("requeued node: %+v, %v", row, err)
 			}
 		}
@@ -95,11 +94,11 @@ func TestUnitReaperPreservesAgentLostAttempt(t *testing.T) {
 			if err != nil || len(page) != 1 || page[0].Failed != (disruptions == 2) || page[0].Disruptions != disruptions+1 {
 				t.Fatalf("loss policy: %+v, %v", page, err)
 			}
-			row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.Generation != 4 || row.ApplicationRetries != 0 {
 				t.Fatalf("claim survived loss: %+v, %v", row, err)
 			}
-			if disruptions == 2 && (row.Outcome != store.NodeFailed || row.FinishedAt == nil) {
+			if disruptions == 2 && (row.Outcome != runstate.NodeFailed || row.FinishedAt == nil) {
 				t.Fatalf("disruption limit: %+v", row)
 			}
 			var outcome, reason string

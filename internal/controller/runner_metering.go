@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
 // RunnerMeteringWriter changes enrolled root metering after rechecking console authority in its transaction.
@@ -33,7 +34,7 @@ func (s *Server) handleSetRunnerMetered(w http.ResponseWriter, r *http.Request, 
 		writer, _ = any(s.operator).(RunnerMeteringWriter)
 	}
 	if writer == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	runner := r.PathValue("runner")
 	if err := writer.SetRunnerMetered(r.Context(), a, runner, *request.Metered); err != nil {

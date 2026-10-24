@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
 const (
@@ -63,5 +64,5 @@ func writeRetryAfterStatus(w http.ResponseWriter, status int, after time.Duratio
 	if status == http.StatusServiceUnavailable {
 		code = apierr.Unavailable
 	}
-	writePolicyError(w, &apierr.Error{Code: code, Message: message, Details: map[string]any{"retry_after_ms": retryAfterWholeSeconds(after) * 1000}})
+	routepolicy.WritePolicyError(w, &apierr.Error{Code: code, Message: message, Details: map[string]any{"retry_after_ms": retryAfterWholeSeconds(after) * 1000}})
 }

@@ -10,12 +10,10 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestNativeServicesPublishesAndConsumesArtifacts(t *testing.T) {
@@ -41,7 +39,7 @@ func TestNativeServicesPublishesAndConsumesArtifacts(t *testing.T) {
 			job := nodeproto.JobSpec{ID: "job", Artifacts: []string{"result.txt"}}
 			if consume {
 				key := blob.ResultRecordKey(runspec.AttemptIdentity{Team: "default", RunID: "run", NodeID: "producer", Generation: 4, Attempt: 2}, input.Storage.Authority.Repo, input.Storage.Authority.Ref.Scope, "burst", blob.KindManifest)
-				state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "producer"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: 4, Attempt: 2, ManifestRecord: &key}
+				state.node = runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "producer"}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Generation: 4, Attempt: 2, ManifestRecord: &key}
 				job.Artifacts = nil
 				job.Consumes = []nodeproto.ArtifactInput{{Producer: "producer", Into: "received"}}
 				_, err = prepare(t.Context(), input, job)
@@ -53,7 +51,7 @@ func TestNativeServicesPublishesAndConsumesArtifacts(t *testing.T) {
 				if err != nil || finish == nil {
 					t.Fatalf("prepare artifacts: %v", err)
 				}
-				err = finish(t.Context(), input, &store.NodeResult{Outcome: store.NodeSuccess})
+				err = finish(t.Context(), input, &runstate.NodeResult{Outcome: runstate.NodeSuccess})
 				if !errors.Is(err, backend.failure) || backend.upload.Identity != input.Storage.Authority.Upload.Value || backend.upload.Authority != input.Storage.Authority {
 					t.Fatalf("native artifact publication bypassed authenticated bytes: %+v %v", backend.upload, err)
 				}
@@ -165,7 +163,7 @@ func FuzzNativeArtifactPublicationKeepsAwardScope(f *testing.F) {
 		if err != nil || finish == nil {
 			t.Fatalf("prepare artifacts: %v", err)
 		}
-		err = finish(t.Context(), input, &store.NodeResult{Outcome: store.NodeSuccess})
+		err = finish(t.Context(), input, &runstate.NodeResult{Outcome: runstate.NodeSuccess})
 		if err == nil || backend.upload.Body != nil {
 			t.Fatalf("foreign execution published under another award: %v", err)
 		}

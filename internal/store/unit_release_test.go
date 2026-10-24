@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestReleaseUnitOwnerFenceProperty(t *testing.T) {
@@ -124,7 +125,7 @@ func releaseFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitClaim) 
 	if kind == capability.UnitNode {
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='pending',started_at=NULL WHERE run_id='run'`)
 	}
-	return s, UnitClaim{Team: "a", Kind: kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: c.Prefix, Holder: "machine", Generation: 7}}
+	return s, UnitClaim{Team: "a", Kind: kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: runstate.ClaimAward{CapabilityPrefix: c.Prefix, Holder: "machine", Generation: 7}}
 }
 
 func TestReleaseUnitReturnsUnstartedWorkWithoutAttempt(t *testing.T) {
@@ -215,7 +216,7 @@ func TestReleaseUnitCannotRequeueCancelledOwnerWork(t *testing.T) {
 			operator.Grants = []capability.Grant{capability.RunsControl}
 			authorityPersist(t, s, operator)
 			tenant := &Tenant{s: s, team: "a"}
-			_, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: runspec.RunID(claim.RunID), To: RunCancelled, Cause: RunCancel, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}, CapabilityPrefix: operator.Prefix}})
+			_, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(claim.RunID), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}, CapabilityPrefix: operator.Prefix}})
 			if err != nil {
 				t.Fatal(err)
 			}

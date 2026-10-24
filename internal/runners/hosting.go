@@ -28,10 +28,11 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) erro
 	if strings.TrimSpace(h.ControllerURL) == "" || h.Bind == nil {
 		return errors.New("runner host requires a controller URL and native service binding")
 	}
-	return hostAward(ctx, unit, h.bind)
+	return HostAward(ctx, unit, h.bind)
 }
 
-func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(context.Context, controllerwire.ClaimedUnit, controllerwire.ClaimedUnit, nodehost.RunInput) (nodehost.NativeServices, storeInputs, error)) (result error) {
+// HostAward captures and validates an award before entering the shared native host.
+func HostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(context.Context, controllerwire.ClaimedUnit, controllerwire.ClaimedUnit, nodehost.RunInput) (nodehost.NativeServices, HostInputs, error)) (result error) {
 	if err := award.ValidateAward(unit, capability.DeliveryDirect); err != nil {
 		return err
 	}
@@ -69,18 +70,18 @@ func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(c
 		return err
 	}
 	if captured.Unit == capability.UnitNode {
-		inputs.node.Storage = services.Storage
-		return claimed.Execute(ctx, inputs.node)
+		inputs.Node.Storage = services.Storage
+		return claimed.Execute(ctx, inputs.Node)
 	}
-	inputs.run.Storage = services.Storage
+	inputs.Run.Storage = services.Storage
 	if captured.Unit == capability.UnitPlan {
-		_, err = owner.Plan(ctx, inputs.run)
+		_, err = owner.Plan(ctx, inputs.Run)
 		return err
 	}
 	if captured.Unit == capability.UnitEval {
-		return owner.Evaluate(ctx, inputs.run, captured.JobID, captured.SourceGeneration, *captured.Binding.Expansion)
+		return owner.Evaluate(ctx, inputs.Run, captured.JobID, captured.SourceGeneration, *captured.Binding.Expansion)
 	}
-	_, err = owner.Run(ctx, inputs.run)
+	_, err = owner.Run(ctx, inputs.Run)
 	return err
 }
 
@@ -93,32 +94,32 @@ func captureUnit(unit controllerwire.ClaimedUnit) (controllerwire.ClaimedUnit, e
 	return captured, err
 }
 
-func (h Hosting) bind(ctx context.Context, unit, original controllerwire.ClaimedUnit, input nodehost.RunInput) (nodehost.NativeServices, storeInputs, error) {
+func (h Hosting) bind(ctx context.Context, unit, original controllerwire.ClaimedUnit, input nodehost.RunInput) (nodehost.NativeServices, HostInputs, error) {
 	controller, err := h.controller(unit.Capability)
 	if err != nil {
-		return nodehost.NativeServices{}, storeInputs{}, err
+		return nodehost.NativeServices{}, HostInputs{}, err
 	}
 	beat, err := controller.Renew(ctx, unit.UnitID, controllerwire.RenewalRequest{})
 	if err != nil {
-		return nodehost.NativeServices{}, storeInputs{}, err
+		return nodehost.NativeServices{}, HostInputs{}, err
 	}
 	if beat.CancelRequested {
-		return nodehost.NativeServices{}, storeInputs{}, &lease.CancelError{Reason: beat.CancelReason}
+		return nodehost.NativeServices{}, HostInputs{}, &lease.CancelError{Reason: beat.CancelReason}
 	}
 	if err := context.Cause(ctx); err != nil {
-		return nodehost.NativeServices{}, storeInputs{}, err
+		return nodehost.NativeServices{}, HostInputs{}, err
 	}
 	services, principal, err := h.Bind(ctx, original, controller)
 	if err == nil {
 		err = context.Cause(ctx)
 	}
 	if err != nil {
-		return services, storeInputs{}, err
+		return services, HostInputs{}, err
 	}
 	if !principalMatches(unit, principal) || services.Config.Store == nil {
-		return services, storeInputs{}, awardMismatch()
+		return services, HostInputs{}, awardMismatch()
 	}
-	inputs, err := nativeInputs(ctx, services.Config.Store, unit, principal, input)
+	inputs, err := NativeInputs(ctx, services.Config.Store, unit, principal, input)
 	return services, inputs, err
 }
 

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -37,17 +39,13 @@ func TestControllerFixturesKeepCredentialsAndRunsSeparate(t *testing.T) {
 		}
 	}
 
-	if err := teststore.SeedRun(firstStore, t.Context(), store.DefaultTeam, store.Run{
-		ID: "fixture-run", Pipeline: "first", Status: "running", StartedAt: time.Unix(100, 0),
-	}); err != nil {
+	if err := teststore.SeedRun(firstStore, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "fixture-run", Pipeline: "first", Status: "running", StartedAt: time.Unix(100, 0)}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.ForTeam(t, secondStore, store.DefaultTeam).GetRun(t.Context(), "fixture-run"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("fresh fixture found another fixture's run: %v", err)
 	}
-	if err := teststore.SeedRun(secondStore, t.Context(), store.DefaultTeam, store.Run{
-		ID: "fixture-run", Pipeline: "second", Status: "running", StartedAt: time.Unix(100, 0),
-	}); err != nil {
+	if err := teststore.SeedRun(secondStore, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "fixture-run", Pipeline: "second", Status: "running", StartedAt: time.Unix(100, 0)}}); err != nil {
 		t.Fatal(err)
 	}
 	row, err := teststore.ForTeam(t, firstStore, store.DefaultTeam).GetRun(t.Context(), "fixture-run")

@@ -11,26 +11,27 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 func TestLocalSubject(t *testing.T) {
 	uid, foreign := uint32(1000), uint32(1001)
 	for _, goos := range []string{"linux", "darwin"} {
-		owner := LocalPeerIdentity{GOOS: goos, UID: &uid}
+		owner := localhostwire.LocalPeerIdentity{GOOS: goos, UID: &uid}
 		if got, err := LocalSubject(owner, owner); err != nil || got != "local:1000" {
 			t.Fatalf("%s: %q, %v", goos, got, err)
 		}
-		for _, peer := range []LocalPeerIdentity{{GOOS: goos}, {GOOS: goos, UID: &foreign}, {GOOS: "windows", UID: &uid}} {
+		for _, peer := range []localhostwire.LocalPeerIdentity{{GOOS: goos}, {GOOS: goos, UID: &foreign}, {GOOS: "windows", UID: &uid}} {
 			if _, err := LocalSubject(peer, owner); err == nil {
 				t.Fatalf("accepted unverified peer %+v", peer)
 			}
 		}
 	}
-	owner := LocalPeerIdentity{GOOS: "windows", SID: "S-1-5-21-1000"}
+	owner := localhostwire.LocalPeerIdentity{GOOS: "windows", SID: "S-1-5-21-1000"}
 	if got, err := LocalSubject(owner, owner); err != nil || got != "local:S-1-5-21-1000" {
 		t.Fatalf("Windows: %q, %v", got, err)
 	}
-	for _, peer := range []LocalPeerIdentity{{GOOS: "windows"}, {GOOS: "windows", SID: "S-1-5-21-1001"}, {GOOS: "plan9"}} {
+	for _, peer := range []localhostwire.LocalPeerIdentity{{GOOS: "windows"}, {GOOS: "windows", SID: "S-1-5-21-1001"}, {GOOS: "plan9"}} {
 		if _, err := LocalSubject(peer, owner); err == nil {
 			t.Fatalf("accepted unverified peer %+v", peer)
 		}

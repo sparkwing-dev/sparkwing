@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -81,7 +82,7 @@ func NewEngineController(st *store.Store, cfg EngineController) *EngineControlle
 	if cfg.Launcher == nil {
 		cfg.Launcher = storeLauncherSync{op}
 	}
-	cfg.authorization = RouteAuthorization{Authenticator: capability.NewAuthenticator(op), Bindings: op}
+	cfg.authorization = routepolicy.Authorization{Authenticator: capability.NewAuthenticator(op), Bindings: op}
 	if cfg.ResolveTenant == nil {
 		cfg.ResolveTenant = storeTenantResolver(st)
 	}

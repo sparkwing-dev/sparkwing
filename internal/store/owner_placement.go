@@ -8,26 +8,15 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-// OwnerExecution binds a private placement decision to its owner and declaration.
-type OwnerExecution struct {
-	Owner          capability.AuthorityRef
-	Team           Team
-	Generation     int64
-	Node           controllerwire.NodeRef
-	NodeGeneration int64
-	SpecHash       string
-	Allowed        bool
-}
-
 // OwnerCanExecute checks private placement decisions against the authenticated owner.
-func OwnerCanExecute(owner capability.Principal) func(NodeRow) bool {
-	return func(node NodeRow) bool {
+func OwnerCanExecute(owner capability.Principal) func(runstate.NodeRow) bool {
+	return func(node runstate.NodeRow) bool {
 		p, c := node.OwnerExecution, owner.Capability
-		return p != nil && p.Allowed && p.Owner == owner.Authority && p.Team == Team(c.Team) &&
+		return p != nil && p.Allowed && p.Owner == owner.Authority && p.Team == c.Team &&
 			owner.Authority == (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}) &&
 			c.Binding.Kind == capability.BindingTrigger && p.Generation > 0 && p.Generation == c.Binding.Generation &&
 			p.Node.RunID == runspec.RunID(c.Binding.RunID) && p.Node == node.Ref && runspec.ClaimGeneration(p.NodeGeneration) == node.Generation &&
@@ -73,7 +62,7 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 	return UnitDemand{}, authorityError(apierr.Unavailable, "self-claim host observation is unavailable")
 }
 
-func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, ref controllerwire.NodeRef) (bool, error) {
+func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, ref runspec.NodeRef) (bool, error) {
 	demand, ok, err := ownerExecutionDemandTx(ctx, tx, owner)
 	if !ok || err != nil {
 		return false, err
@@ -94,7 +83,7 @@ func ownerExecutionDemandTx(ctx context.Context, tx *storeTx, owner capability.P
 	return demand, true, nil
 }
 
-func ownerDemandEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, demand UnitDemand, ref controllerwire.NodeRef) (bool, error) {
+func ownerDemandEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, demand UnitDemand, ref runspec.NodeRef) (bool, error) {
 	unit := UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}
 	if _, err := claimKinds(owner.Capability, UnitDemand{Target: &unit}); err != nil {
 		return false, nil

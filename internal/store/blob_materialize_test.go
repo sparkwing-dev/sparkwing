@@ -11,8 +11,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func (fakeBlobManifests) VerifyBlob(context.Context, blob.Blob) error { return nil }
@@ -44,9 +44,9 @@ func blobMaterializationFixture(t *testing.T) (*Store, *Tenant, ReconcileRequest
 	return materializationTarget(t, s, records.tenant, change.Ref)
 }
 
-func materializationTarget(t *testing.T, s *Store, tenant *Tenant, sourceRef controllerwire.NodeRef) (*Store, *Tenant, ReconcileRequest) {
+func materializationTarget(t *testing.T, s *Store, tenant *Tenant, sourceRef runspec.NodeRef) (*Store, *Tenant, ReconcileRequest) {
 	t.Helper()
-	maintenanceRun(t, s, "target", 2, RunRunning)
+	maintenanceRun(t, s, "target", 2, runstate.RunRunning)
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET pipeline='ci',repo_key='gh:1',request_json=?,spec_json=?,spec_hash='spec',plan_json=?,plan_hash='plan',sealed_at=1,plan_accepted_generation=1 WHERE id='target'", []byte(`{"version":1,"request":{"git":{"ref":"main"}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`), []byte(`{}`), []byte(`{"jobs":[{"id":"job","memo":{}}]}`))
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET lineage_json=? WHERE id='target'", []byte(`{"retry_of":"run","retry":{"mode":"failed","results":{"job":{"Ref":{"run_id":"run","job_id":"job"},"StateSeq":1}}}}`))
 	rewriteSchemaExec(t, s.db, "INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json) VALUES ('a','target','job','pending',?,'same',?)", []byte(`{"id":"job","memo":{}}`), []byte(`{}`))
@@ -63,9 +63,9 @@ func materializationTarget(t *testing.T, s *Store, tenant *Tenant, sourceRef con
 	owner.ExpiresAt = &expiry
 	authorityPersist(t, s, owner)
 	rewriteSchemaExec(t, s.db, "INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES ('a','target','claimed','trigger',1,1,'host','target-owner',1,?,?,?,1)", expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
-	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "target", Holder: "host", Generation: 1}}}
-	source := MaterializeSource{Kind: SourceManualRetry, Result: &MaterializedResultSource{Ref: sourceRef, StateSeq: 1}}
-	return s, tenant, ReconcileRequest{Ref: controllerwire.NodeRef{RunID: "target", NodeID: "job"}, Actor: actor, Policy: source.Kind, Source: &source}
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "target", Holder: "host", Generation: 1}}}
+	source := runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &runstate.MaterializedResultSource{Ref: sourceRef, StateSeq: 1}}
+	return s, tenant, ReconcileRequest{Ref: runspec.NodeRef{RunID: "target", NodeID: "job"}, Actor: actor, Policy: source.Kind, Source: &source}
 }
 
 func MaterializationTestFixture(t *testing.T, manifests BlobManifestReader, output, manifest blob.Blob, members []blob.Blob) (*Store, *Tenant, ReconcileRequest) {
@@ -107,21 +107,21 @@ func MaterializationTestFixture(t *testing.T, manifests BlobManifestReader, outp
 		t.Fatal(err)
 	}
 	attempt := intent.Identity.Attempt.Value
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(attempt.Generation)}}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID)}
-	change := nodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(attempt.Attempt), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &out.Key, ManifestRecord: &artifacts.Key}}}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(attempt.Generation)}}
+	ref := runspec.NodeRef{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID)}
+	change := nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(attempt.Attempt), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess, OutputRecord: &out.Key, ManifestRecord: &artifacts.Key}}}
 	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 		t.Fatal(err)
 	}
 	s, tenant, request := materializationTarget(t, s, records.tenant, ref)
-	request.Policy, request.Source = SourceMemo, &MaterializeSource{Kind: SourceMemo, Record: memo.Key}
+	request.Policy, request.Source = runstate.SourceMemo, &runstate.MaterializeSource{Kind: runstate.SourceMemo, Record: memo.Key}
 	return s, tenant, request
 }
 
 func TestBlobMaterializationCopiesExactRecordsWithoutAnAttempt(t *testing.T) {
 	s, tenant, request := blobMaterializationFixture(t)
 	got, err := tenant.ReconcileNode(t.Context(), request)
-	if err != nil || got.Kind != Materialize || got.Node.Attempt != 0 || got.Node.OutputRecord == nil || got.Node.ManifestRecord == nil {
+	if err != nil || got.Kind != runstate.Materialize || got.Node.Attempt != 0 || got.Node.OutputRecord == nil || got.Node.ManifestRecord == nil {
 		t.Fatalf("materialization: %+v: %v", got, err)
 	}
 	rewriteSchemaCount(t, s.db, "blob_records", 4)
@@ -130,8 +130,8 @@ func TestBlobMaterializationCopiesExactRecordsWithoutAnAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "blob_records", 2)
-	request.Source, request.Policy = nil, SourceNone
-	if got, err := tenant.ReconcileNode(t.Context(), request); err != nil || got.Kind != KeepTerminal || got.Node.OutputRecord == nil {
+	request.Source, request.Policy = nil, runstate.SourceNone
+	if got, err := tenant.ReconcileNode(t.Context(), request); err != nil || got.Kind != runstate.KeepTerminal || got.Node.OutputRecord == nil {
 		t.Fatalf("replay after source retention: %+v: %v", got, err)
 	}
 }
@@ -173,7 +173,7 @@ func TestBlobMaterializationRollsBackBothRecordsWithState(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "blob_records", 2)
 	row, err := tenant.ReadNode(t.Context(), request.Ref)
-	if err != nil || row.Status != StatusPending || row.OutputRecord != nil || row.ManifestRecord != nil {
+	if err != nil || row.Status != runstate.StatusPending || row.OutputRecord != nil || row.ManifestRecord != nil {
 		t.Fatalf("partial result: %+v: %v", row, err)
 	}
 }
@@ -203,16 +203,16 @@ func TestBlobMaterializationCannotOutliveOwnerProperty(t *testing.T) {
 
 func TestBlobMaterializationMemoSelectsExactRecord(t *testing.T) {
 	s, tenant, request := blobMaterializationFixture(t)
-	request.Policy, request.Source = SourceMemo, seedMaterializationMemo(t, s, tenant)
+	request.Policy, request.Source = runstate.SourceMemo, seedMaterializationMemo(t, s, tenant)
 	got, err := tenant.ReconcileNode(t.Context(), request)
-	if err != nil || got.Node.Outcome != NodeMemoized || got.Node.OutputRecord == nil || got.Node.ManifestRecord == nil || got.Node.Attempt != 0 {
+	if err != nil || got.Node.Outcome != runstate.NodeMemoized || got.Node.OutputRecord == nil || got.Node.ManifestRecord == nil || got.Node.Attempt != 0 {
 		t.Fatalf("memo copy: %+v: %v", got, err)
 	}
 }
 
-func seedMaterializationMemo(t *testing.T, s *Store, tenant *Tenant) *MaterializeSource {
+func seedMaterializationMemo(t *testing.T, s *Store, tenant *Tenant) *runstate.MaterializeSource {
 	t.Helper()
-	source, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+	source, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,12 +239,12 @@ func seedMaterializationMemo(t *testing.T, s *Store, tenant *Tenant) *Materializ
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &MaterializeSource{Kind: SourceMemo, Record: key}
+	return &runstate.MaterializeSource{Kind: runstate.SourceMemo, Record: key}
 }
 
 func TestBlobMaterializationCoalescingRequiresPersistedReadAuthority(t *testing.T) {
 	_, tenant, request := blobMaterializationFixture(t)
-	request.Policy, request.Source.Kind = SourceCoalesced, SourceCoalesced
+	request.Policy, request.Source.Kind = runstate.SourceCoalesced, runstate.SourceCoalesced
 	if _, err := tenant.ReconcileNode(t.Context(), request); err == nil {
 		t.Fatal("spec equality authorized an unproven coalesced read")
 	}
@@ -261,7 +261,7 @@ func TestBlobMaterializationMissLeavesJobAvailable(t *testing.T) {
 				rewriteSchemaExec(t, s.db, "DELETE FROM blob_records WHERE kind=?", missing)
 			}
 			got, err := tenant.ReconcileNode(t.Context(), request)
-			if err != nil || got.Kind != Dispatch || got.Node.Status != StatusPending || got.Node.StateSeq != 0 || got.Node.OutputRecord != nil || got.Claim != nil {
+			if err != nil || got.Kind != runstate.Dispatch || got.Node.Status != runstate.StatusPending || got.Node.StateSeq != 0 || got.Node.OutputRecord != nil || got.Claim != nil {
 				t.Fatalf("miss was not executable: %+v: %v", got, err)
 			}
 			var copied int

@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // MembershipUpdate changes a member's role, or removes it when Role is nil.
@@ -15,7 +16,7 @@ type MembershipUpdate struct {
 }
 
 // UpdateMembership preserves the last owner and fences removed or demoted membership authority atomically.
-func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change MembershipUpdate) error {
+func (t *Tenant) UpdateMembership(ctx context.Context, actor runstate.Actor, change MembershipUpdate) error {
 	if change.AccountID == "" || (change.Role != nil && !change.Role.Valid()) {
 		return ErrInvalidInput
 	}

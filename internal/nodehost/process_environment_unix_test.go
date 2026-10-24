@@ -14,11 +14,12 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
@@ -228,7 +229,7 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 				},
 			}
 			deps.Start = cfg.startNode
-			deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			deps.EnsureEngine = func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return input.Engine, nil
 			}
 			host, err := NewNodeExecutor(deps)
@@ -241,7 +242,7 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 				t.Fatalf("body=%t revoked=%t cleaned=%t error=%v", body, revoked, cleaned, err)
 			}
 			last := st.changes[len(st.changes)-1]
-			if last.Cause != store.CauseReport || wantBody && last.To != store.NodeSuccess || !wantBody && (last.To != store.NodeFailed || !strings.Contains(last.Extra.Result.Reason, "plan_drift")) {
+			if last.Cause != runstate.CauseReport || wantBody && last.To != runstate.NodeSuccess || !wantBody && (last.To != runstate.NodeFailed || !strings.Contains(last.Extra.Result.Reason, "plan_drift")) {
 				t.Fatalf("transition=%+v", last)
 			}
 		})

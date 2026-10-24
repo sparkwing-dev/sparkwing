@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // SeedTrigger adds a reporting run and its owner projection without admitting executable work.
 func SeedTrigger(s *store.Store, ctx context.Context, team store.Team, v store.Trigger) error {
-	return SeedTriggerWithRun(s, ctx, team, v, store.Run{ID: v.ID, Pipeline: v.Pipeline, Status: "pending", CreatedAt: v.CreatedAt, Args: v.Args, DeclaredRepo: v.Repo, RepoURL: v.RepoURL, GitBranch: v.GitBranch, GitSHA: v.GitSHA, TriggerSource: v.TriggerSource, ParentRunID: v.ParentRunID, RetryOf: v.RetryOf})
+	return SeedTriggerWithRun(s, ctx, team, v, store.Run{RunSummary: runstate.RunSummary{ID: v.ID, Pipeline: v.Pipeline, Status: "pending", CreatedAt: v.CreatedAt, Args: v.Args, DeclaredRepo: v.Repo, RepoURL: v.RepoURL, GitBranch: v.GitBranch, GitSHA: v.GitSHA, TriggerSource: v.TriggerSource, ParentRunID: v.ParentRunID, RetryOf: v.RetryOf}})
 }
 
 // SeedTriggerClaim keeps reporting fixtures from assembling partial owner fences.
-func SeedTriggerClaim(s *store.Store, ctx context.Context, team store.Team, run string, actor store.Actor, until time.Time, started *time.Time) error {
+func SeedTriggerClaim(s *store.Store, ctx context.Context, team store.Team, run string, actor runstate.Actor, until time.Time, started *time.Time) error {
 	var start any
 	if started != nil {
 		start = started.UnixNano()

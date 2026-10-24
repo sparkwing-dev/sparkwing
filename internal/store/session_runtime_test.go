@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
@@ -180,7 +181,7 @@ func TestCapabilitySessionEndsWithItsCapability(t *testing.T) {
 				*now = expiry
 			} else {
 				target := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
-				if err := (&Tenant{s: s, team: "a"}).RevokeAuthority(t.Context(), Actor{Authority: target, CapabilityPrefix: root.Prefix}, target); err != nil {
+				if err := (&Tenant{s: s, team: "a"}).RevokeAuthority(t.Context(), runstate.Actor{Authority: target, CapabilityPrefix: root.Prefix}, target); err != nil {
 					t.Fatal(err)
 				}
 			}

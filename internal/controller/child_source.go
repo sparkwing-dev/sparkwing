@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -94,7 +95,7 @@ type intakeRevisionAccess struct {
 func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error) {
 	s := a.server
 	if s.operator == nil {
-		return source.Credential{}, missingEndpointPolicy()
+		return source.Credential{}, routepolicy.MissingEndpointPolicy()
 	}
 	host, err := sourceurl.Host(spec.RemoteURL)
 	if err != nil {

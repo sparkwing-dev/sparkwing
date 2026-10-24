@@ -10,10 +10,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -29,7 +32,7 @@ func TestLocalQueueCacheDoesNotDependOnOwnerWinningJobClaim(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = owned.Close() })
 			tenant := teststore.ForTeam(t, owned, store.DefaultTeam)
-			if err := teststore.SeedRun(owned, t.Context(), store.DefaultTeam, store.Run{ID: "run", Pipeline: "ci", Status: "running"}); err != nil {
+			if err := teststore.SeedRun(owned, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run", Pipeline: "ci", Status: "running"}}); err != nil {
 				t.Fatal(err)
 			}
 			run, err := tenant.ReadRun(t.Context(), "run")
@@ -81,7 +84,7 @@ func TestLocalQueueCacheDoesNotDependOnOwnerWinningJobClaim(t *testing.T) {
 			})
 			t.Cleanup(func() { http.DefaultTransport = previous })
 			principal := capability.Principal{Capability: capability.Capability{Team: "default", Unit: unit, Binding: capability.Binding{RunID: "run", NodeID: "job"}}}
-			binding := runners.StoreBinding{Tenant: tenant, Principal: principal, Bearer: func(context.Context) (string, error) { return "award", nil }}
+			binding := localcontroller.StoreBinding{Tenant: tenant, Principal: principal, Bearer: func(context.Context) (string, error) { return "award", nil }}
 			services, err := localNativeServices(t.Context(), home, owned, binding, client.EngineOptions{URL: "http://local"}, func(context.Context, nodehost.NativeConfig) (nodehost.NativeServices, error) {
 				return nodehost.NativeServices{Close: func() error { closed++; return nil }}, nil
 			})

@@ -6,12 +6,11 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 // TeamSettings reads the team's machine enrollment policy and claim ranking.
-func (t *Tenant) TeamSettings(ctx context.Context) (controllerwire.TeamSettings, error) {
-	var out controllerwire.TeamSettings
+func (t *Tenant) TeamSettings(ctx context.Context) (TeamSettings, error) {
+	var out TeamSettings
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
 		out, err = teamSettingsTx(ctx, tx, t.team)
@@ -20,8 +19,8 @@ func (t *Tenant) TeamSettings(ctx context.Context) (controllerwire.TeamSettings,
 	return out, err
 }
 
-func teamSettingsTx(ctx context.Context, tx *storeTx, team Team) (controllerwire.TeamSettings, error) {
-	var out controllerwire.TeamSettings
+func teamSettingsTx(ctx context.Context, tx *storeTx, team Team) (TeamSettings, error) {
+	var out TeamSettings
 	if err := tx.QueryRowContext(ctx, `SELECT members_can_add_machines FROM teams WHERE name=?`, team).Scan(&out.MembersCanAddMachines); err != nil {
 		return out, err
 	}
@@ -31,7 +30,7 @@ func teamSettingsTx(ctx context.Context, tx *storeTx, team Team) (controllerwire
 }
 
 // SetAuthorizedTeamSettings commits a policy change and its audit under current administration.
-func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, update controllerwire.TeamSettingsUpdate) error {
+func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, update TeamSettingsUpdate) error {
 	reset := update.ClaimRanking != nil && slices.Equal(*update.ClaimRanking, []string{ClaimRankingDefault})
 	if update.ClaimRanking != nil && !reset {
 		if err := ValidateClaimRanking(*update.ClaimRanking); err != nil {

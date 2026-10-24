@@ -7,6 +7,7 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -33,7 +34,7 @@ VALUES ('default','real-run',1,'example','running',?,'request',1,'gh:1','host','
 	}
 	d := configuredHandlerDaemon(t, Config{Runs: &FuncRunStore{IsTerminal: func(id string) (bool, error) {
 		row, err := tenant.ReadRun(context.Background(), id)
-		return row.State == store.RunSuccess || row.State == store.RunFailed || row.State == store.RunCancelled, err
+		return row.State == runstate.RunSuccess || row.State == runstate.RunFailed || row.State == runstate.RunCancelled, err
 	}}}, 4)
 	parent, peer := handlerConn(t, d)
 	grant := mustGrantFrame(t, callAndRead(t, peer, func() {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestClosuresRunOnceAroundRetries(t *testing.T) {
@@ -72,9 +72,9 @@ func TestClosuresRunOnceAroundRetries(t *testing.T) {
 				t.Fatalf("error=%v", err)
 			}
 			report := state.changes[len(state.changes)-1]
-			wantOutcome := store.NodeFailed
+			wantOutcome := runstate.NodeFailed
 			if mode == "retry-success" {
-				wantOutcome = store.NodeSuccess
+				wantOutcome = runstate.NodeSuccess
 			}
 			if report.To != wantOutcome {
 				t.Fatalf("report=%+v", report)

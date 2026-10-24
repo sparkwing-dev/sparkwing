@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -86,7 +87,7 @@ func checkRestoreDrill(t *testing.T, signOut bool) {
 	if err != nil || pending.RunID == "" {
 		t.Fatalf("pending scheduled deploy: %+v %v", pending, err)
 	}
-	if run, err := liveTenant.ReadRun(t.Context(), pending.RunID); err != nil || run.State != store.RunPending || run.CancelRequestedAt != nil {
+	if run, err := liveTenant.ReadRun(t.Context(), pending.RunID); err != nil || run.State != runstate.RunPending || run.CancelRequestedAt != nil {
 		t.Fatalf("backup scheduled run: state=%s cancelled=%v err=%v", run.State, run.CancelRequestedAt, err)
 	}
 	backupPath := filepath.Join(dir, "backup.db")
@@ -98,7 +99,7 @@ func checkRestoreDrill(t *testing.T, signOut bool) {
 	if result, err := liveTenant.AdmitScheduledRun(t.Context(), schedule, firedAfterBackup); err != nil || result.RunID == "" {
 		t.Fatalf("live cron admission: %+v %v", result, err)
 	}
-	if err := live.AsOperator().RevokeAuthority(t.Context(), store.Actor{Authority: ref}, ref); err != nil {
+	if err := live.AsOperator().RevokeAuthority(t.Context(), runstate.Actor{Authority: ref}, ref); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := live.AsOperator().ResolveAuthority(t.Context(), ref); err == nil {

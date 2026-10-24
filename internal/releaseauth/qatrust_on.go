@@ -7,4 +7,4 @@ package releaseauth
 // A production build never carries the qatrust tag.
 const QAPublicKey = "S37ijVuRXJjKzLlFAkPYR8YFXmayaiH21BHzbndcPFU="
 
-var qaPublicKeys = []string{QAPublicKey}
+func qaPublicKeys() []string { return []string{QAPublicKey} }

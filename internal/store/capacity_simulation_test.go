@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -39,7 +39,7 @@ func TestAdmissionDeterministicSimulation(t *testing.T) {
 
 type admissionSimRun struct {
 	id, host                          string
-	owner, holder                     store.Actor
+	owner, holder                     runstate.Actor
 	released, admitted, started, done bool
 	claimLease, ownerLease            time.Time
 	capacity                          map[string]admissionSimLease
@@ -132,11 +132,11 @@ func simulateAdmission(t *testing.T, seed uint64, target *storetest.Target) {
 			s.release(i)
 		}
 	}
-	if got := s.admit(0, false); got != store.AcquireQueued {
+	if got := s.admit(0, false); got != runstate.AcquireQueued {
 		t.Fatalf("lapsed plan did not queue: %s", got)
 	}
 	s.handoff(0)
-	if got := s.admit(0, true); got != store.AcquireGranted {
+	if got := s.admit(0, true); got != runstate.AcquireGranted {
 		t.Fatalf("released job gated by parent plan: %s", got)
 	}
 	s.settle(0)
@@ -190,27 +190,27 @@ func simulateAdmission(t *testing.T, seed uint64, target *storetest.Target) {
 	}
 }
 
-func (s *admissionSimulation) ref(i int) controllerwire.NodeRef {
-	return controllerwire.NodeRef{RunID: runspec.RunID(s.runs[i].id), NodeID: "job"}
+func (s *admissionSimulation) ref(i int) runspec.NodeRef {
+	return runspec.NodeRef{RunID: runspec.RunID(s.runs[i].id), NodeID: "job"}
 }
 
-func (s *admissionSimulation) admit(i int, job bool) store.AcquireKind {
+func (s *admissionSimulation) admit(i int, job bool) runstate.AcquireKind {
 	s.t.Helper()
 	s.now = s.now.Add(time.Nanosecond)
 	run := &s.runs[i]
-	binding := store.CapacityBinding{RunID: run.id, Generation: int64(run.owner.Owner.Generation)}
+	binding := runstate.CapacityBinding{RunID: run.id, Generation: int64(run.owner.Owner.Generation)}
 	actor := run.owner
 	if job {
 		binding.NodeID, binding.Generation, actor = "job", int64(run.holder.Generation), run.holder
 	}
 	result, err := s.f.tenant.MayStart(s.t.Context(), binding, actor)
-	if err != nil || result.Kind != store.AcquireGranted && result.Kind != store.AcquireQueued {
+	if err != nil || result.Kind != runstate.AcquireGranted && result.Kind != runstate.AcquireQueued {
 		s.t.Fatalf("admit run=%d job=%t: %+v, %v", i, job, result, err)
 	}
 	level := "plan"
 	if job {
 		level = "job"
-		run.admitted = result.Kind == store.AcquireGranted
+		run.admitted = result.Kind == runstate.AcquireGranted
 	}
 	s.reserve(i, level)
 	s.check()
@@ -244,16 +244,16 @@ func (s *admissionSimulation) start(i int) {
 		if err != nil {
 			s.t.Fatalf("claim run=%d: %v", i, err)
 		}
-		run.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(run.id), NodeID: "job", Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+		run.holder = runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(run.id), NodeID: "job", Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 		s.observeAuthorityLeases(i)
 	}
-	if s.admit(i, true) != store.AcquireGranted {
+	if s.admit(i, true) != runstate.AcquireGranted {
 		return
 	}
 	if !s.jobLapsed && i == s.lapseJobRun {
 		s.jobLapsed = true
 		s.lapse(i, "job")
-		if s.admit(i, true) != store.AcquireGranted {
+		if s.admit(i, true) != runstate.AcquireGranted {
 			return
 		}
 	}
@@ -264,7 +264,7 @@ func (s *admissionSimulation) start(i int) {
 	if !s.computeWithdrawn && i == s.computeBusyRun {
 		s.computeWithdrawn = true
 		stale := run.holder
-		if err := s.f.tenant.RelinquishStart(s.t.Context(), store.CapacityBinding{RunID: run.id, NodeID: "job", Generation: int64(stale.Generation)}, stale); err != nil {
+		if err := s.f.tenant.RelinquishStart(s.t.Context(), runstate.CapacityBinding{RunID: run.id, NodeID: "job", Generation: int64(stale.Generation)}, stale); err != nil {
 			s.t.Fatal(err)
 		}
 		after, err := s.f.tenant.ReadNode(s.t.Context(), s.ref(i))
@@ -274,7 +274,7 @@ func (s *admissionSimulation) start(i int) {
 		if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.StartNode{Ref: s.ref(i), Actor: stale, SourceAttempt: acceptanceAttempt(row.Attempt)}); err == nil {
 			s.t.Fatal("relinquished provisional award retained its permit")
 		}
-		run.holder, run.admitted = store.Actor{}, false
+		run.holder, run.admitted = runstate.Actor{}, false
 		if run.host == "runner" {
 			run.host = "simulation"
 		} else {
@@ -330,14 +330,14 @@ func (s *admissionSimulation) crashClaim(i int) {
 	}
 	run.claimLease = s.now
 	s.check()
-	if _, err := s.f.tenant.MayStart(s.t.Context(), store.CapacityBinding{RunID: run.id, NodeID: "job", Generation: int64(stale.Generation)}, stale); err == nil {
+	if _, err := s.f.tenant.MayStart(s.t.Context(), runstate.CapacityBinding{RunID: run.id, NodeID: "job", Generation: int64(stale.Generation)}, stale); err == nil {
 		s.t.Fatal("expired claim obtained execution permit")
 	}
 	units, err := s.f.s.AsOperator().ReapUnits(s.t.Context(), s.f.lease, 10)
 	if err != nil || len(units) != 1 || !units[0].Requeued || units[0].NodeID != "job" {
 		s.t.Fatalf("claim crash: %+v, %v", units, err)
 	}
-	run.holder, run.admitted, run.started = store.Actor{}, false, false
+	run.holder, run.admitted, run.started = runstate.Actor{}, false, false
 	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.ReadyNode{Ref: s.ref(i), Actor: run.owner}); err != nil {
 		s.t.Fatal(err)
 	}
@@ -364,10 +364,10 @@ func (s *admissionSimulation) settle(i int) {
 	if !run.admitted || !run.started {
 		s.t.Fatalf("predicate/body without permit: %+v", run)
 	}
-	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.ReportNode{Ref: s.ref(i), Actor: run.holder, Outcome: store.NodeSuccess, SourceAttempt: acceptanceAttempt(row.Attempt)}); err != nil {
+	if _, err := s.f.tenant.TransitionNode(s.t.Context(), store.ReportNode{Ref: s.ref(i), Actor: run.holder, Outcome: runstate.NodeSuccess, SourceAttempt: acceptanceAttempt(row.Attempt)}); err != nil {
 		s.t.Fatal(err)
 	}
-	if _, err := s.f.tenant.FinishRunAndUnit(s.t.Context(), store.FinishRunRequest{Transition: store.RunCompletion{RunID: runspec.RunID(run.id), Actor: run.owner, Cause: store.RunFinish}, Unit: run.owner.Owner}); err != nil {
+	if _, err := s.f.tenant.FinishRunAndUnit(s.t.Context(), runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: runspec.RunID(run.id), Actor: run.owner, Cause: runstate.RunFinish}, Unit: run.owner.Owner}); err != nil {
 		s.t.Fatal(err)
 	}
 	run.done = true

@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -84,7 +85,7 @@ func burstSDKSourceFixture(t *testing.T) (string, string, *engine.Resolver, engi
 	sourcetest.Git(t, repo, "add", ".")
 	sourcetest.Git(t, repo, "commit", "-qm", "execution snapshot")
 	sha := sourcetest.Git(t, repo, "rev-parse", "HEAD")
-	pin, err := engine.ReadPin(directory, engine.GoSDK)
+	pin, err := engine.ReadPin(directory, engineid.GoSDK)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,7 @@ func executeBurstUploadedSDK(t *testing.T, engines *engine.Resolver, selected en
 		engines: engines,
 		source: &source.Options{
 			Workspace: t.TempDir(), Access: access, BundleTransport: options.HTTP.Transport,
-			Engines: engines, Target: selected.Target, SDK: engine.GoSDK,
+			Engines: engines, Target: selected.Target, SDK: engineid.GoSDK,
 			Base: procenv.Base{Ambient: os.Environ(), SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}},
 		},
 		acquire: func(ctx context.Context, spec source.Spec, options source.Options) (*source.Entry, error) {

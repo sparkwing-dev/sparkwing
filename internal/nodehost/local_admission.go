@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -30,18 +30,18 @@ type Lease interface {
 type LocalAdmission struct {
 	Daemon     Admitter
 	Controller string
-	Queued     func(context.Context, controllerwire.NodeRef, wingwire.Queued)
+	Queued     func(context.Context, runspec.NodeRef, wingwire.Queued)
 }
 
 var errComputeBusy = errors.New("machine compute is busy")
 
-func (a *LocalAdmission) node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
+func (a *LocalAdmission) node(ctx context.Context, accepted AcceptedRun, row runstate.NodeRow, body func(context.Context) error) error {
 	return a.machine(ctx, accepted, row, false, body)
 }
-func (a *LocalAdmission) tryNode(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
+func (a *LocalAdmission) tryNode(ctx context.Context, accepted AcceptedRun, row runstate.NodeRow, body func(context.Context) error) error {
 	return a.machine(ctx, accepted, row, true, body)
 }
-func (a *LocalAdmission) machine(ctx context.Context, accepted AcceptedRun, row store.NodeRow, nonblocking bool, body func(context.Context) error) error {
+func (a *LocalAdmission) machine(ctx context.Context, accepted AcceptedRun, row runstate.NodeRow, nonblocking bool, body func(context.Context) error) error {
 	spec, err := admissionSpec(accepted)
 	if err != nil {
 		return err
@@ -73,7 +73,7 @@ func (a *LocalAdmission) holderRunID(run string) string {
 	return string(wingwire.RemoteRunID(a.Controller, run))
 }
 
-func (a *LocalAdmission) hold(parent context.Context, ref controllerwire.NodeRef, request wingwire.AdmissionRequest, body func(context.Context, Lease) error) (err error) {
+func (a *LocalAdmission) hold(parent context.Context, ref runspec.NodeRef, request wingwire.AdmissionRequest, body func(context.Context, Lease) error) (err error) {
 	if err := context.Cause(parent); err != nil {
 		return err
 	}
@@ -102,13 +102,13 @@ func (a *LocalAdmission) hold(parent context.Context, ref controllerwire.NodeRef
 	joined := make(chan error, 1)
 	go func() {
 		err := held.Watch(func(evicted wingwire.Evicted) {
-			cancel(&admissionFailure{Outcome: store.NodeSuperseded, Err: &lease.CancelError{Reason: fmt.Sprintf("admission on %q superseded by %s", evicted.Key, evicted.SupersededBy)}})
+			cancel(&admissionFailure{Outcome: runstate.NodeSuperseded, Err: &lease.CancelError{Reason: fmt.Sprintf("admission on %q superseded by %s", evicted.Key, evicted.SupersededBy)}})
 		}, func(stopped wingwire.Cancel) {
 			cancel(&lease.CancelError{Reason: stopped.Reason})
 		})
 		if err != nil {
 			if errors.Is(err, wingdclient.ErrReattachRejected) {
-				cancel(&admissionFailure{Outcome: store.NodeSuperseded, Err: &lease.CancelError{Reason: "local admission lease lost"}})
+				cancel(&admissionFailure{Outcome: runstate.NodeSuperseded, Err: &lease.CancelError{Reason: "local admission lease lost"}})
 			} else {
 				cancel(err)
 			}
@@ -131,9 +131,9 @@ func localAdmissionFailure(err error) error {
 	if errors.As(err, &refused) {
 		switch refused.Policy {
 		case wingwire.PolicySkip:
-			return errors.Join(&admissionFailure{Outcome: store.NodeSkipped, Err: err}, waitFailure(err, refused))
+			return errors.Join(&admissionFailure{Outcome: runstate.NodeSkipped, Err: err}, waitFailure(err, refused))
 		case wingwire.PolicyFail:
-			return errors.Join(&admissionFailure{Outcome: store.NodeFailed, Err: err}, waitFailure(err, refused))
+			return errors.Join(&admissionFailure{Outcome: runstate.NodeFailed, Err: err}, waitFailure(err, refused))
 		}
 	}
 	return err

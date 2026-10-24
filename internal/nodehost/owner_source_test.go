@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -26,7 +27,7 @@ type ownerSourceEngine struct {
 	ensured      int
 }
 
-func (r *ownerSourceEngine) Resolve(_ context.Context, pin engine.Pin, target releaseasset.Target) (engine.Resolved, error) {
+func (r *ownerSourceEngine) Resolve(_ context.Context, pin engineid.Pin, target releaseasset.Target) (engine.Resolved, error) {
 	r.resolvedPins++
 	if pin != r.resolved.Identity.Pin || target != r.resolved.Target {
 		return engine.Resolved{}, executorError(apierr.SpecDrift, "planning source changed its engine pin or target")
@@ -34,7 +35,7 @@ func (r *ownerSourceEngine) Resolve(_ context.Context, pin engine.Pin, target re
 	return r.resolved, nil
 }
 
-func (r *ownerSourceEngine) Ensure(ctx context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+func (r *ownerSourceEngine) Ensure(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (engine.Resolved, error) {
 	r.ensured++
 	return r.claimEngine.Ensure(ctx, identity, target)
 }
@@ -65,7 +66,7 @@ func TestOwnerHostAcquiresSealedSourceWithExplicitEnvironment(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			resolved := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}, Executable: exe, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
+			resolved := engine.Resolved{Identity: engineid.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}, Executable: exe, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
 			if resumed {
 				f.snapshot.Run.Spec.Request = f.snapshot.Run.Request
 				f.snapshot.Run.Spec.Resolved.Engine = resolved.Identity
@@ -73,9 +74,9 @@ func TestOwnerHostAcquiresSealedSourceWithExplicitEnvironment(t *testing.T) {
 			engines := &ownerSourceEngine{claimEngine: claimEngine{resolved: resolved}}
 			installed := 0
 			host.Acquire = nil
-			host.Source = source.Options{Engines: engines, Target: resolved.Target, SDK: engine.GoSDK,
+			host.Source = source.Options{Engines: engines, Target: resolved.Target, SDK: engineid.GoSDK,
 				Base: procenv.Base{Local: true, Captured: []string{"PATH=/daemon/bin"}}, BuildEnvironment: sourcetest.BuildEnvironment,
-				ReadPin: func(string, engine.SDKKind) (engine.Pin, error) { return resolved.Identity.Pin, nil },
+				ReadPin: func(string, engineid.SDKKind) (engineid.Pin, error) { return resolved.Identity.Pin, nil },
 				InstallSDK: func(_ context.Context, got engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
 					directory, env := filepath.Join(request.Directory, request.PipelineDir), request.Environment
 					installed++

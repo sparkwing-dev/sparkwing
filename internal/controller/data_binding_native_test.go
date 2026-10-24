@@ -11,10 +11,9 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestEveryDataEndpointDecodesBinding(t *testing.T) {

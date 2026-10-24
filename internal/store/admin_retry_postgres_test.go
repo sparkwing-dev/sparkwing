@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -36,7 +37,7 @@ func TestPostgresAdminTransactionsRetryDeadlockVictims(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				actor := store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, CapabilityPrefix: root.Prefix}
+				actor := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, CapabilityPrefix: root.Prefix}
 				table, event = "capabilities", "UPDATE"
 				lockQuery, lockArgs = `SELECT prefix FROM capabilities WHERE prefix=$1 FOR UPDATE`, []any{root.Prefix}
 				action = func(ctx context.Context) error { return st.AsOperator().RevokeAuthority(ctx, actor, actor.Authority) }

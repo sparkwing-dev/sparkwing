@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -87,7 +88,7 @@ func (c *Claimant) Close() (err error) {
 		return nil
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.issued.Capability.Prefix}
-	return c.tenant.RevokeAuthority(context.Background(), store.Actor{Kind: store.ActorOperator, Authority: ref}, ref)
+	return c.tenant.RevokeAuthority(context.Background(), runstate.Actor{Kind: runstate.ActorOperator, Authority: ref}, ref)
 }
 
 // ResolveClaimProfile binds local placement facts to the captured OS account.

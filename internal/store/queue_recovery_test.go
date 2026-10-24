@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestUnstartedNodeRequeuesKeepQueueDeadline(t *testing.T) {
@@ -23,10 +23,10 @@ func TestUnstartedNodeRequeuesKeepQueueDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}
 	initial := *now
 	for i := range 4 {
-		if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
+		if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: request.Actor, To: runstate.NodeReady, Cause: runstate.CauseRelease}); err != nil {
 			t.Fatal(err)
 		}
 		claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}})
@@ -45,7 +45,7 @@ func TestUnstartedNodeRequeuesKeepQueueDeadline(t *testing.T) {
 		t.Fatalf("original queue deadline: %+v, %v", reaped, err)
 	}
 	node, err := tenant.ReadNode(t.Context(), ref)
-	if err != nil || node.Outcome != NodeFailed || node.Attempt != 0 {
+	if err != nil || node.Outcome != runstate.NodeFailed || node.Attempt != 0 {
 		t.Fatalf("expired unstarted job: %+v, %v", node, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "node_attempts", 0)
@@ -65,18 +65,18 @@ func TestStartedNodeDisruptionGetsNewQueueInterval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}
 	initial := *now
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: request.Actor, To: runstate.NodeReady, Cause: runstate.CauseRelease}); err != nil {
 		t.Fatal(err)
 	}
 	claim, err := tenant.s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	admitExecution(t, tenant, actor)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	*now = claim.Award.LeaseExpiresAt
@@ -84,7 +84,7 @@ func TestStartedNodeDisruptionGetsNewQueueInterval(t *testing.T) {
 		t.Fatal(err)
 	}
 	requeued := *now
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: request.Actor, To: NodeReady, Cause: CauseRelease}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: request.Actor, To: runstate.NodeReady, Cause: runstate.CauseRelease}); err != nil {
 		t.Fatal(err)
 	}
 	*now = initial.Add(20 * time.Minute)

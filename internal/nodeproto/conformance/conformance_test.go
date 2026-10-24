@@ -45,7 +45,7 @@ func TestGoSDKConformsV2(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	build := exec.CommandContext(t.Context(), "go", "build", "-p", "4", "-o", bin, "./gofixture")
+	build := exec.CommandContext(t.Context(), "go", "build", "-p", "4", "-o", bin, "./testdata/gofixture")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build fixture: %v\n%s", err, output)
 	}

@@ -127,7 +127,7 @@ var computeLimitFields = map[string]func(*ComputeLimits) *int64{
 }
 
 // ComputeLimitNames returns every guard name, sorted, which is the set
-// [Store.SetComputeLimit] accepts.
+// [Operator.SetComputeLimits] accepts.
 func ComputeLimitNames() []string {
 	out := make([]string, 0, len(computeLimitFields))
 	for name := range computeLimitFields {

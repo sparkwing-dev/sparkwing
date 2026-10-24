@@ -14,8 +14,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestCapturedEnvironmentSurvivesRepeatedReadsAndPreservesExactValues(t *testing.T) {
@@ -236,7 +236,7 @@ func TestClaimedNodeHostRefusesChangedCapturedValuesBeforeAcquisition(t *testing
 		return nil, nil
 	}
 	err := host.Execute(t.Context(), input)
-	if err == nil || len(*processes) != 0 || len(state.changes) != 1 || state.changes[0].Cause != store.CauseReport || state.changes[0].To != store.NodeFailed {
+	if err == nil || len(*processes) != 0 || len(state.changes) != 1 || state.changes[0].Cause != runstate.CauseReport || state.changes[0].To != runstate.NodeFailed {
 		t.Fatalf("changed snapshot: changes=%v error=%v", state.changes, err)
 	}
 }

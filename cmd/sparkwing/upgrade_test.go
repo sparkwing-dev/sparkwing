@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
@@ -34,7 +35,7 @@ func (f *fakeUpgradeResolver) Upgrade(_ context.Context, request engine.UpgradeR
 	return f.result, f.err
 }
 
-func upgradeFixture(t *testing.T, sdk engine.SDKKind) string {
+func upgradeFixture(t *testing.T, sdk engineid.SDKKind) string {
 	t.Helper()
 	root := t.TempDir()
 	dir := filepath.Join(root, ".sparkwing")
@@ -42,7 +43,7 @@ func upgradeFixture(t *testing.T, sdk engine.SDKKind) string {
 		t.Fatal(err)
 	}
 	name, body := "main.go", "package main\n"
-	if sdk == engine.TypeScriptSDK {
+	if sdk == engineid.TypeScriptSDK {
 		name, body = "package.json", `{"dependencies":{"@sparkwing/sdk":"1.0.0"}}`
 	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
@@ -52,13 +53,13 @@ func upgradeFixture(t *testing.T, sdk engine.SDKKind) string {
 }
 
 func TestUpgradeSelectsRepositorySDKAndReportsPreview(t *testing.T) {
-	for _, sdk := range []engine.SDKKind{engine.GoSDK, engine.TypeScriptSDK} {
+	for _, sdk := range []engineid.SDKKind{engineid.GoSDK, engineid.TypeScriptSDK} {
 		t.Run(string(sdk), func(t *testing.T) {
 			root := upgradeFixture(t, sdk)
 			fake := &fakeUpgradeResolver{result: engine.UpgradeResult{DryRun: true, Plan: engine.UpgradePlan{
-				Before: engine.Pin{SDK: sdk, Version: "1.0.0"}, After: engine.Pin{SDK: sdk, Version: "1.1.0"},
+				Before: engineid.Pin{SDK: sdk, Version: "1.0.0"}, After: engineid.Pin{SDK: sdk, Version: "1.1.0"},
 				Edits:   []engine.PinEdit{{Path: ".sparkwing/manifest", BeforeDigest: "digest", After: []byte("proposed")}},
-				Notices: []engine.Notice{{Kind: engine.NoticeIndexFallback, Reason: "using verified cached policy", Hint: "restore connectivity"}},
+				Notices: []engineid.Notice{{Kind: engineid.NoticeIndexFallback, Reason: "using verified cached policy", Hint: "restore connectivity"}},
 			}}}
 			var out bytes.Buffer
 			command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, out: &out}
@@ -112,7 +113,7 @@ func TestUpgradeReportPreservesOutputFailure(t *testing.T) {
 }
 
 func TestUpgradePreservesPolicyAndVerificationFailures(t *testing.T) {
-	root := upgradeFixture(t, engine.GoSDK)
+	root := upgradeFixture(t, engineid.GoSDK)
 	for _, failure := range []error{&apierr.Error{Code: apierr.VersionRevoked, Message: "signed security reason", Hint: "sparkwing upgrade"}, errors.New("type checking failed")} {
 		fake := &fakeUpgradeResolver{err: failure}
 		var out bytes.Buffer
@@ -127,9 +128,9 @@ func TestUpgradePreservesPolicyAndVerificationFailures(t *testing.T) {
 }
 
 func TestUpgradeVerifiedResult(t *testing.T) {
-	root := upgradeFixture(t, engine.GoSDK)
+	root := upgradeFixture(t, engineid.GoSDK)
 	verifier := &upgradeVerifier{}
-	fake := &fakeUpgradeResolver{result: engine.UpgradeResult{Applied: true, Verified: true, Plan: engine.UpgradePlan{Before: engine.Pin{Version: "v1.0.0"}, After: engine.Pin{Version: "v1.1.0"}}}}
+	fake := &fakeUpgradeResolver{result: engine.UpgradeResult{Applied: true, Verified: true, Plan: engine.UpgradePlan{Before: engineid.Pin{Version: "v1.0.0"}, After: engineid.Pin{Version: "v1.1.0"}}}}
 	var out bytes.Buffer
 	command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, verifier: verifier, out: &out}
 	if err := command.runArgs(t.Context(), []string{"--checkout", root, "--output=pretty"}); err != nil {
@@ -148,9 +149,9 @@ func TestUpgradePlainReportsTargetVersion(t *testing.T) {
 	for _, dryRun := range []bool{false, true} {
 		for _, version := range []string{"v1.2.3", "1.2.3"} {
 			result := engine.UpgradeResult{DryRun: dryRun, Applied: !dryRun, Verified: !dryRun, Plan: engine.UpgradePlan{
-				Before: engine.Pin{Version: "1.0.0"}, After: engine.Pin{Version: version},
+				Before: engineid.Pin{Version: "1.0.0"}, After: engineid.Pin{Version: version},
 				Edits:   []engine.PinEdit{{Path: "package-lock.json"}},
-				Notices: []engine.Notice{{Reason: "cached policy", Hint: "restore connectivity"}},
+				Notices: []engineid.Notice{{Reason: "cached policy", Hint: "restore connectivity"}},
 			}}
 			var out bytes.Buffer
 			if err := writeUpgradeReport(&out, "plain", result); err != nil {
@@ -164,10 +165,10 @@ func TestUpgradePlainReportsTargetVersion(t *testing.T) {
 }
 
 func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
-	for _, sdk := range []engine.SDKKind{engine.GoSDK, engine.TypeScriptSDK} {
+	for _, sdk := range []engineid.SDKKind{engineid.GoSDK, engineid.TypeScriptSDK} {
 		t.Run(string(sdk), func(t *testing.T) {
 			root := upgradeFixture(t, sdk)
-			selected := engine.Resolved{Executable: filepath.Join(root, "verified-engine"), Identity: engine.Identity{Pin: engine.Pin{SDK: sdk}}}
+			selected := engine.Resolved{Executable: filepath.Join(root, "verified-engine"), Identity: engineid.Identity{Pin: engineid.Pin{SDK: sdk}}}
 			var catalog bytes.Buffer
 			if err := ndjson.Write(&catalog, []PipelineIndex{{Name: "first", Short: "Build and test", Entrypoint: ".sparkwing/main.go", Triggers: []string{"push"}}, {Name: "hidden"}}); err != nil {
 				t.Fatal(err)
@@ -207,7 +208,7 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 				t.Fatalf("commands: %v", commands)
 			}
 			wantNative := [][]string{{"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}}
-			if sdk == engine.TypeScriptSDK {
+			if sdk == engineid.TypeScriptSDK {
 				wantNative = [][]string{{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}}
 			}
 			if !reflect.DeepEqual(commands[:1], wantNative) {
@@ -234,7 +235,7 @@ func TestUpgradeVerifierRejectsMalformedPipelineList(t *testing.T) {
 }
 
 func TestUpgradeVerifierStopsAtFailure(t *testing.T) {
-	root := upgradeFixture(t, engine.GoSDK)
+	root := upgradeFixture(t, engineid.GoSDK)
 	for _, failAt := range []int{1, 2, 3, 4, 5} {
 		calls := 0
 		failure := errors.New("verification failed")
@@ -251,7 +252,7 @@ func TestUpgradeVerifierStopsAtFailure(t *testing.T) {
 			}
 			return []byte("{\"name\":\"check\"}\n"), nil
 		}}
-		err := verifier.Verify(t.Context(), root, engine.Resolved{Executable: filepath.Join(root, "engine"), Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK}}})
+		err := verifier.Verify(t.Context(), root, engine.Resolved{Executable: filepath.Join(root, "engine"), Identity: engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK}}})
 		if !errors.Is(err, failure) || calls != failAt {
 			t.Fatalf("failure %d: calls=%d error=%v", failAt, calls, err)
 		}
@@ -259,10 +260,10 @@ func TestUpgradeVerifierStopsAtFailure(t *testing.T) {
 }
 
 func TestUpgradeVerifierRefusesInvalidInputsBeforeInstalling(t *testing.T) {
-	root := upgradeFixture(t, engine.GoSDK)
+	root := upgradeFixture(t, engineid.GoSDK)
 	for _, selected := range []engine.Resolved{
-		{Executable: "relative", Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK}}},
-		{Executable: filepath.Join(root, "engine"), Identity: engine.Identity{Pin: engine.Pin{SDK: "other"}}},
+		{Executable: "relative", Identity: engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK}}},
+		{Executable: filepath.Join(root, "engine"), Identity: engineid.Identity{Pin: engineid.Pin{SDK: "other"}}},
 	} {
 		verifier := upgradeVerifier{
 			install: func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error) {
@@ -284,7 +285,7 @@ func TestUpgradeVerifierRefusesInvalidInputsBeforeInstalling(t *testing.T) {
 }
 
 func TestUpgradeVerifierRequiresSelectedInstallerResult(t *testing.T) {
-	root := upgradeFixture(t, engine.GoSDK)
+	root := upgradeFixture(t, engineid.GoSDK)
 	for _, command := range []engine.SDKCommand{
 		{},
 		{Directory: root, Command: []string{filepath.Join(root, "entry")}},
@@ -300,7 +301,7 @@ func TestUpgradeVerifierRequiresSelectedInstallerResult(t *testing.T) {
 				return nil, nil
 			},
 		}
-		if err := verifier.Verify(t.Context(), root, engine.Resolved{Executable: filepath.Join(root, "engine"), Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK}}}); err == nil {
+		if err := verifier.Verify(t.Context(), root, engine.Resolved{Executable: filepath.Join(root, "engine"), Identity: engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK}}}); err == nil {
 			t.Fatalf("accepted %+v", command)
 		}
 	}
@@ -344,7 +345,7 @@ func FuzzUpgradeVerifierMasksStageFailures(f *testing.F) {
 					return []byte("{\"name\":\"check\"}\n"), fail()
 				},
 			}
-			err := verifier.Verify(t.Context(), root, engine.Resolved{Executable: filepath.Join(root, "engine"), Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK}}})
+			err := verifier.Verify(t.Context(), root, engine.Resolved{Executable: filepath.Join(root, "engine"), Identity: engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK}}})
 			if !errors.Is(err, failure) || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), encoded) {
 				t.Fatalf("stage %d: credential leaked or cause lost", failAt)
 			}

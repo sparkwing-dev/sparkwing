@@ -6,19 +6,18 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestOwnerExpansionHTTPDerivesSourceAuthority(t *testing.T) {
 	for _, report := range []struct {
 		name, body string
-		state      store.ExpansionState
+		state      runstate.ExpansionState
 	}{
-		{"success", `{"source_generation":3,"body":{"jobs":[]},"registration":{"version":1}}`, store.ExpansionAccepted},
-		{"failure", `{"source_generation":3,"failure":{"code":"sdk_error","message":"generator failed"}}`, store.ExpansionFailed},
+		{"success", `{"source_generation":3,"body":{"jobs":[]},"registration":{"version":1}}`, runstate.ExpansionAccepted},
+		{"failure", `{"source_generation":3,"failure":{"code":"sdk_error","message":"generator failed"}}`, runstate.ExpansionFailed},
 	} {
 		t.Run(report.name, func(t *testing.T) {
 			now := time.Now().UTC()
@@ -39,7 +38,7 @@ func TestOwnerExpansionHTTPDerivesSourceAuthority(t *testing.T) {
 			for range 2 {
 				engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/expansion", report.body, 200)
 			}
-			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil || node.Expansion != report.state || node.Attempt != 2 || node.Generation != 3 {
 				t.Fatalf("expansion source changed: %+v %v", node, err)
 			}

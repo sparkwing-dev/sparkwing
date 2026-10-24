@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // ScheduleNode is the immutable graph projection consumed by the shared decider.
@@ -368,7 +368,7 @@ func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
 		runID:    snapshot.Run.ID,
 		finished: snapshot.Run.FinishedAt != nil,
 		result:   ScheduleSnapshot{CancelRequested: snapshot.Run.CancelRequestedAt != nil, GuardRefusal: runGuardRefusal(snapshot.Run)},
-		rows:     make(map[string]NodeRow, len(snapshot.Nodes)),
+		rows:     make(map[string]runstate.NodeRow, len(snapshot.Nodes)),
 		jobs:     make(map[string]nodeproto.JobSpec, len(snapshot.Nodes)),
 		groups:   make(map[string]int),
 		accepted: make(map[string]bool),
@@ -402,7 +402,7 @@ type scheduleProjection struct {
 	runID    string
 	finished bool
 	result   ScheduleSnapshot
-	rows     map[string]NodeRow
+	rows     map[string]runstate.NodeRow
 	jobs     map[string]nodeproto.JobSpec
 	groups   map[string]int
 	accepted map[string]bool
@@ -444,12 +444,12 @@ func (projection *scheduleProjection) add(job nodeproto.JobSpec) error {
 		return fmt.Errorf("job %q: %w", job.ID, err)
 	}
 	projection.jobs[job.ID] = job
-	if job.Approval == nil && row.Status == StatusApprovalPending {
+	if job.Approval == nil && row.Status == runstate.StatusApprovalPending {
 		return fmt.Errorf("job %q waits for an undeclared approval", job.ID)
 	}
 	node := scheduleDeclaration(job)
 	node.Status, node.Outcome, node.Generation = string(row.Status), string(row.Outcome), int64(row.Generation)
-	node.Ready, node.Claimed = row.Status == StatusPending && row.ClaimedBy == "" && row.ReadyAt != nil, row.ClaimedBy != ""
+	node.Ready, node.Claimed = row.Status == runstate.StatusPending && row.ClaimedBy == "" && row.ReadyAt != nil, row.ClaimedBy != ""
 	node.CancelRequested, node.CancelReason = row.CancelRequestedAt != nil, row.CancelReason
 	node.Expansion = string(row.Expansion)
 	projection.result.Nodes = append(projection.result.Nodes, node)
@@ -474,10 +474,10 @@ func scheduleDeclaration(job nodeproto.JobSpec) ScheduleNode {
 	}
 }
 
-func (projection *scheduleProjection) expand(expansion AcceptedExpansionRow) error {
+func (projection *scheduleProjection) expand(expansion runstate.AcceptedExpansionRow) error {
 	source, exists := projection.jobs[string(expansion.Source.NodeID)]
 	row := projection.rows[source.ID]
-	if !exists || expansion.Source.RunID != runspec.RunID(projection.runID) || projection.accepted[source.ID] || len(source.Closures.Generate) == 0 || row.Expansion != ExpansionAccepted || row.Generation != runspec.ClaimGeneration(expansion.SourceGeneration) {
+	if !exists || expansion.Source.RunID != runspec.RunID(projection.runID) || projection.accepted[source.ID] || len(source.Closures.Generate) == 0 || row.Expansion != runstate.ExpansionAccepted || row.Generation != runspec.ClaimGeneration(expansion.SourceGeneration) {
 		return fmt.Errorf("expansion source %q disagrees with persisted declaration or generation", expansion.Source.NodeID)
 	}
 	var body struct {
@@ -503,32 +503,32 @@ func (projection *scheduleProjection) expand(expansion AcceptedExpansionRow) err
 	return nil
 }
 
-func validateScheduleState(row NodeRow) error {
+func validateScheduleState(row runstate.NodeRow) error {
 	if row.Generation < 0 {
 		return fmt.Errorf("negative generation")
 	}
-	if row.Status != StatusDone && row.Outcome != "" {
+	if row.Status != runstate.StatusDone && row.Outcome != "" {
 		return fmt.Errorf("nonterminal row has an outcome")
 	}
 	if (row.ClaimedBy == "") != (row.LeaseExpiresAt == nil) || row.ClaimedBy == "" && row.CapabilityPrefix != "" {
 		return fmt.Errorf("claim columns disagree")
 	}
 	switch row.Status {
-	case StatusPending:
-	case StatusRunning:
+	case runstate.StatusPending:
+	case runstate.StatusRunning:
 		if row.ClaimedBy == "" {
 			return fmt.Errorf("running row has no holder")
 		}
-	case StatusApprovalPending:
+	case runstate.StatusApprovalPending:
 		if row.ClaimedBy != "" {
 			return fmt.Errorf("approval row has a holder")
 		}
-	case StatusDone:
+	case runstate.StatusDone:
 		if row.ClaimedBy != "" {
 			return fmt.Errorf("terminal row has a holder")
 		}
 		switch row.Outcome {
-		case NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized:
+		case runstate.NodeSuccess, runstate.NodeFailed, runstate.NodeCancelled, runstate.NodeSkipped, runstate.NodeSuperseded, runstate.NodeMemoized:
 		default:
 			return fmt.Errorf("terminal row has an invalid outcome")
 		}
@@ -546,16 +546,16 @@ func (projection *scheduleProjection) validate() error {
 		row := projection.rows[id]
 		valid := false
 		switch row.Expansion {
-		case ExpansionAbsent:
+		case runstate.ExpansionAbsent:
 			valid = len(job.Closures.Generate) == 0
-		case ExpansionExpected:
-			valid = len(job.Closures.Generate) != 0 && !projection.result.CancelRequested && (row.Status != StatusDone || scheduleSucceeded(string(row.Outcome)))
-		case ExpansionAccepted:
-			valid = projection.accepted[id] && row.Status == StatusDone && scheduleSucceeded(string(row.Outcome))
-		case ExpansionFailed:
-			valid = len(job.Closures.Generate) != 0 && row.Status == StatusDone && scheduleSucceeded(string(row.Outcome))
-		case ExpansionNone:
-			valid = len(job.Closures.Generate) != 0 && (projection.result.CancelRequested || row.Status == StatusDone && (projection.finished || !scheduleSucceeded(string(row.Outcome))))
+		case runstate.ExpansionExpected:
+			valid = len(job.Closures.Generate) != 0 && !projection.result.CancelRequested && (row.Status != runstate.StatusDone || scheduleSucceeded(string(row.Outcome)))
+		case runstate.ExpansionAccepted:
+			valid = projection.accepted[id] && row.Status == runstate.StatusDone && scheduleSucceeded(string(row.Outcome))
+		case runstate.ExpansionFailed:
+			valid = len(job.Closures.Generate) != 0 && row.Status == runstate.StatusDone && scheduleSucceeded(string(row.Outcome))
+		case runstate.ExpansionNone:
+			valid = len(job.Closures.Generate) != 0 && (projection.result.CancelRequested || row.Status == runstate.StatusDone && (projection.finished || !scheduleSucceeded(string(row.Outcome))))
 		}
 		if !valid {
 			return fmt.Errorf("job %q has inconsistent expansion state %q", id, row.Expansion)

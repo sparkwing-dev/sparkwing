@@ -4,12 +4,14 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestProfileCompletionRollsBackWhenLeaseLapsesDuringFold(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
-	maintenanceRun(t, s, "run", 1, RunSuccess)
-	maintenanceEffects(t, s, RunSuccess)
+	maintenanceRun(t, s, "run", 1, runstate.RunSuccess)
+	maintenanceEffects(t, s, runstate.RunSuccess)
 	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "completion", "worker", time.Minute)
 	if err != nil {
 		t.Fatal(err)

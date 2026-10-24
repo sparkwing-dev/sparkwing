@@ -12,7 +12,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func consoleFixture(t *testing.T) (*Store, *Console, capability.Authorized) {
@@ -34,7 +35,7 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO session_membership_epochs(session_hash,team,epoch) SELECT 'derived',team,epoch FROM session_membership_epochs WHERE session_hash='operator'`)
 	writes := []func(capability.Authorized) error{
 		func(a capability.Authorized) error {
-			_, err := c.ConsoleRefund(t.Context(), a, controllerwire.OperatorRefund{PaymentID: "pi_test", RefundID: "re_test", AmountCents: 1, Reason: "support"}, "once")
+			_, err := c.ConsoleRefund(t.Context(), a, OperatorRefund{PaymentID: "pi_test", RefundID: "re_test", AmountCents: 1, Reason: "support"}, "once")
 			return err
 		},
 		func(a capability.Authorized) error {
@@ -234,7 +235,7 @@ func TestDeletionActorCannotBePresentedByCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rollbackOrLog(tx)
-	if err := prepareStateActorTx(context.Background(), tx, "a", "run", Actor{Kind: ActorOperator}); err == nil {
+	if err := prepareStateActorTx(context.Background(), tx, "a", "run", runstate.Actor{Kind: runstate.ActorOperator}); err == nil {
 		t.Fatal("unverified internal actor acquired authority")
 	}
 }
@@ -249,8 +250,8 @@ func TestConsoleTeamDeletionUsesNativeCancellation(t *testing.T) {
 	if _, err := c.ConsoleDeleteTeam(t.Context(), a); err != nil {
 		t.Fatal(err)
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || row.Status != StatusRunning || row.ClaimedBy != "runner" || row.Generation != 2 || row.Attempt != 3 || row.CancelReason != "team_deleted" || row.CancelRequestedAt == nil {
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || row.Status != runstate.StatusRunning || row.ClaimedBy != "runner" || row.Generation != 2 || row.Attempt != 3 || row.CancelReason != "team_deleted" || row.CancelRequestedAt == nil {
 		t.Fatalf("holder rights: %+v %v", row, err)
 	}
 	run, err := tenant.ReadRun(t.Context(), "run")

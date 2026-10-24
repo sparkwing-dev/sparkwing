@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func successfulExpansionFixture(t *testing.T) (*Tenant, ExpansionSubmission) {
@@ -26,11 +27,11 @@ func TestExpansionSuccessCommitsTopologyAndExecutionSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.State != ExpansionAccepted || accepted.BodyHash == "" || len(accepted.Nodes) != 1 || accepted.Nodes[0].SpecHash == "" {
+	if accepted.State != runstate.ExpansionAccepted || accepted.BodyHash == "" || len(accepted.Nodes) != 1 || accepted.Nodes[0].SpecHash == "" {
 		t.Fatalf("accepted = %+v", accepted)
 	}
 	node := accepted.Nodes[0]
-	if node.Ref.NodeID != "generated" || node.StateSeq != 0 || node.Status != StatusPending || node.Execution.Retry.Value != 2 {
+	if node.Ref.NodeID != "generated" || node.StateSeq != 0 || node.Status != runstate.StatusPending || node.Execution.Retry.Value != 2 {
 		t.Fatalf("generated job = %+v", node)
 	}
 	snapshot, err := tenant.ReadSnapshot(t.Context(), "run")
@@ -56,7 +57,7 @@ func TestExpansionEmptySuccessPreservesEmptyGroup(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
 	request.Body = []byte(`{"jobs":[]}`)
 	accepted, err := tenant.AcceptExpansion(t.Context(), request)
-	if err != nil || accepted.State != ExpansionAccepted || len(accepted.Nodes) != 0 {
+	if err != nil || accepted.State != runstate.ExpansionAccepted || len(accepted.Nodes) != 0 {
 		t.Fatalf("empty expansion = %+v, %v", accepted, err)
 	}
 	snapshot, err := tenant.ReadSnapshot(t.Context(), "run")
@@ -103,7 +104,7 @@ func TestExpansionRefusalRollsBackAllJobsAndBarrier(t *testing.T) {
 				t.Fatalf("partial insertion: %d, %v", count, err)
 			}
 			node, err := tenant.ReadNode(t.Context(), request.Source)
-			if err != nil || node.Expansion != ExpansionExpected {
+			if err != nil || node.Expansion != runstate.ExpansionExpected {
 				t.Fatalf("barrier changed: %s, %v", node.Expansion, err)
 			}
 		})
@@ -159,7 +160,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 			}
 			if mode != "allowed" {
 				node, readErr := tenant.ReadNode(t.Context(), request.Source)
-				if readErr != nil || node.Expansion != ExpansionExpected {
+				if readErr != nil || node.Expansion != runstate.ExpansionExpected {
 					t.Fatalf("refused expansion changed barrier: %+v, %v", node, readErr)
 				}
 			}

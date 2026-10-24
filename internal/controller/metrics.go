@@ -9,13 +9,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func (s *Server) metricEndpoints() []Endpoint {
+func (s *Server) metricEndpoints() []controllerwire.Endpoint {
 	engine := s.engineController
-	return []Endpoint{
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/metrics", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleAddJobMetric},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/usage", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleAddJobUsage},
 	}

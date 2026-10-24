@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 var ErrLocalStoreIncompatible = errors.New("wingd: incompatible local store")
@@ -250,17 +252,17 @@ func (l *localLifecycle) Status(ctx context.Context) (LocalStatus, error) {
 	return status, nil
 }
 
-func (l *localLifecycle) Doctor(ctx context.Context, version string) ([]LocalDoctorFinding, error) {
+func (l *localLifecycle) Doctor(ctx context.Context, version string) ([]localhostwire.LocalDoctorFinding, error) {
 	status, err := l.Status(ctx)
 	if errors.Is(err, ErrLocalStoreIncompatible) {
-		return []LocalDoctorFinding{{Code: "incompatible_store", Message: err.Error(), Hint: "Use the controller version that created this store, or select a fresh home."}}, nil
+		return []localhostwire.LocalDoctorFinding{{Code: "incompatible_store", Message: err.Error(), Hint: "Use the controller version that created this store, or select a fresh home."}}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	var findings []LocalDoctorFinding
+	var findings []localhostwire.LocalDoctorFinding
 	if status.Running && status.Version != version {
-		findings = append(findings, LocalDoctorFinding{Code: "version_skew", Message: fmt.Sprintf("controller version %q differs from CLI %q", status.Version, version), Hint: "Restart the local controller with sparkwing dashboard stop and sparkwing dashboard start."})
+		findings = append(findings, localhostwire.LocalDoctorFinding{Code: "version_skew", Message: fmt.Sprintf("controller version %q differs from CLI %q", status.Version, version), Hint: "Restart the local controller with sparkwing dashboard stop and sparkwing dashboard start."})
 	}
 	if l.units == nil {
 		return findings, nil
@@ -271,10 +273,10 @@ func (l *localLifecycle) Doctor(ctx context.Context, version string) ([]LocalDoc
 	}
 	for _, unit := range units {
 		if unit.Version != version {
-			findings = append(findings, LocalDoctorFinding{Code: "unit_version_skew", Unit: unit.Name, Message: fmt.Sprintf("managed unit version %q differs from CLI %q", unit.Version, version), Hint: "Run sparkwing update to refresh managed units."})
+			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "unit_version_skew", Unit: unit.Name, Message: fmt.Sprintf("managed unit version %q differs from CLI %q", unit.Version, version), Hint: "Run sparkwing update to refresh managed units."})
 		}
 		if !validUnitArguments(unit) {
-			findings = append(findings, LocalDoctorFinding{Code: "removed_unit_verb", Unit: unit.Name, Message: fmt.Sprintf("managed unit has unsupported arguments %q", unit.Arguments), Hint: "Reinstall this unit with sparkwing dashboard install or sparkwing schedules install."})
+			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "removed_unit_verb", Unit: unit.Name, Message: fmt.Sprintf("managed unit has unsupported arguments %q", unit.Arguments), Hint: "Reinstall this unit with sparkwing dashboard install or sparkwing schedules install."})
 		}
 	}
 	return findings, nil

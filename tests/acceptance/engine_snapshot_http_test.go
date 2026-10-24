@@ -14,12 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -46,10 +47,10 @@ func (f *snapshotTransactions) ReadOwnerSnapshot(ctx context.Context, _ capabili
 func snapshotFixture(b *credentialBoundary) *snapshotTransactions {
 	return &snapshotTransactions{
 		snapshot: store.RunSnapshot{
-			Run: store.RunRow{ID: "run", Team: "team"}, StoreNow: b.snapshot.Now,
-			Nodes: []store.NodeRow{
-				{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "first"}, Status: "pending", Generation: 2, Spec: json.RawMessage(`{"id":"first"}`)},
-				{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "generated"}, Status: "running", Generation: 4, Attempt: 2, StateSeq: 9, Spec: json.RawMessage(`{"id":"generated","deps":["first"]}`), CapabilityPrefix: "private-prefix", ClaimedBy: "private-holder"},
+			Run: store.RunRow{Team: "team", Execution: runstate.Execution{ID: "run"}}, StoreNow: b.snapshot.Now,
+			Nodes: []runstate.NodeRow{
+				{Ref: runspec.NodeRef{RunID: "run", NodeID: "first"}, Status: "pending", Generation: 2, Spec: json.RawMessage(`{"id":"first"}`)},
+				{Ref: runspec.NodeRef{RunID: "run", NodeID: "generated"}, Status: "running", Generation: 4, Attempt: 2, StateSeq: 9, Spec: json.RawMessage(`{"id":"generated","deps":["first"]}`), CapabilityPrefix: "private-prefix", ClaimedBy: "private-holder"},
 			},
 		},
 		graph: store.ScheduleSnapshot{
@@ -75,7 +76,7 @@ func snapshotServer(t *testing.T, b *credentialBoundary, f *snapshotTransactions
 		}
 		return f.graph, f.projectionErr
 	}
-	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(b), Bindings: b}).WithEngineController(e).Handler()
+	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(b), Bindings: b}).WithEngineController(e).Handler()
 }
 
 func snapshotRequest(h http.Handler, b *credentialBoundary, method, path string) *httptest.ResponseRecorder {
@@ -127,9 +128,9 @@ func TestEngineSnapshotHTTP(t *testing.T) {
 func TestEngineSnapshotRetainsAcceptedExpansionBodies(t *testing.T) {
 	b := ownerBoundary()
 	f := snapshotFixture(b)
-	f.snapshot.Expansions = []store.AcceptedExpansionRow{
-		{Source: controllerwire.NodeRef{RunID: "run", NodeID: "first"}, SourceGeneration: 2, Body: json.RawMessage(`{"jobs":[]}`), BodyHash: "empty-body-hash"},
-		{Source: controllerwire.NodeRef{RunID: "run", NodeID: "generated"}, SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[{"id":"nested"}]}`), BodyHash: "body-hash"},
+	f.snapshot.Expansions = []runstate.AcceptedExpansionRow{
+		{Source: runspec.NodeRef{RunID: "run", NodeID: "first"}, SourceGeneration: 2, Body: json.RawMessage(`{"jobs":[]}`), BodyHash: "empty-body-hash"},
+		{Source: runspec.NodeRef{RunID: "run", NodeID: "generated"}, SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[{"id":"nested"}]}`), BodyHash: "body-hash"},
 	}
 	w := snapshotRequest(snapshotServer(t, b, f), b, "GET", "/api/v1/runs/run/snapshot")
 	var got controllerwire.ScheduleSnapshot
@@ -286,7 +287,7 @@ func TestEngineSnapshotMissingDependencies(t *testing.T) {
 			}
 			s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e)
 			if state != "no policy" {
-				s.WithAuthorization(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(b), Bindings: b})
+				s.WithAuthorization(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(b), Bindings: b})
 			}
 			w := snapshotRequest(s.Handler(), b, "GET", "/api/v1/runs/run/snapshot")
 			assertEngineError(t, w, apierr.Status(code), code)

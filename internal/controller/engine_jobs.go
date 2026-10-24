@@ -7,7 +7,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -48,7 +50,7 @@ func (s *EngineController) handleJob(w http.ResponseWriter, r *http.Request, a c
 	read := s.ReadRunStatus
 	if read == nil {
 		if s.ResolveTenant == nil {
-			return missingEndpointPolicy()
+			return routepolicy.MissingEndpointPolicy()
 		}
 		read = func(ctx context.Context, team store.Team, run string) (RunStatusFacts, error) {
 			tenant, err := s.tenantForTeam(ctx, team)
@@ -76,7 +78,7 @@ func debugJobResponse(target capability.Target, view store.RunView) (controllerw
 	if run.ID != target.RunID || string(run.Team) != target.Team || view.Snapshot.StoreNow.IsZero() {
 		return controllerwire.DebugJob{}, errors.New("invalid persisted debug run")
 	}
-	var selected *store.NodeRow
+	var selected *runstate.NodeRow
 	for i := range view.Snapshot.Nodes {
 		row := &view.Snapshot.Nodes[i]
 		if row.Ref.RunID != runspec.RunID(run.ID) || row.Ref.NodeID == "" {
@@ -93,7 +95,7 @@ func debugJobResponse(target capability.Target, view store.RunView) (controllerw
 		return controllerwire.DebugJob{}, engineLookupError(store.ErrNotFound)
 	}
 	result := controllerwire.DebugJob{RunID: run.ID, Number: run.Number, Job: snapshotJob(*selected)}
-	if selected.Status == store.StatusRunning && selected.LeaseExpiresAt != nil && selected.LeaseExpiresAt.After(view.Snapshot.StoreNow) {
+	if selected.Status == runstate.StatusRunning && selected.LeaseExpiresAt != nil && selected.LeaseExpiresAt.After(view.Snapshot.StoreNow) {
 		found := false
 		for _, attempt := range view.Attempts {
 			id := attempt.Identity

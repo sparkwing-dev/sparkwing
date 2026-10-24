@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
@@ -64,7 +65,7 @@ func TestRolelessSessionsHaveNoTeamAuthorityProperty(t *testing.T) {
 		}
 		rewriteSchemaRefuses(t, s.db, `UPDATE sessions SET capability_prefix='forged' WHERE hash=?`, sessionDigest(raw))
 		rewriteSchemaRefuses(t, s.db, `UPDATE sessions SET account_id='' WHERE hash=?`, sessionDigest(raw))
-		if err := s.AsOperator().SelectAccountTeam(t.Context(), teamAuthorization(t, s, Actor{Authority: principal.Authority}, "", "POST", "/api/v1/me/active-team"), "a"); err != nil {
+		if err := s.AsOperator().SelectAccountTeam(t.Context(), teamAuthorization(t, s, runstate.Actor{Authority: principal.Authority}, "", "POST", "/api/v1/me/active-team"), "a"); err != nil {
 			t.Fatal(err)
 		}
 		got, err = s.AsOperator().LookupSession(t.Context(), raw)

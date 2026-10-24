@@ -6,8 +6,8 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string) error {
@@ -48,7 +48,7 @@ func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string)
 			return holderRefusal()
 		}
 		if claim.Kind == capability.UnitNode {
-			node, err := readNodeTx(ctx, tx, claim.Team, controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)})
+			node, err := readNodeTx(ctx, tx, claim.Team, runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)})
 			if err != nil {
 				return err
 			}
@@ -56,11 +56,11 @@ func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string)
 			if err != nil {
 				return err
 			}
-			if state != NodeClaimed || node.CancelRequestedAt != nil {
+			if state != runstate.NodeClaimed || node.CancelRequestedAt != nil {
 				return holderRefusal()
 			}
-			actor := Actor{Kind: ActorHolder, Authority: ref, CapabilityPrefix: prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: runspec.ClaimGeneration(generation)}}
-			_, err = transitionNodeTx(ctx, tx, claim.Team, nodeTransition{Ref: node.Ref, To: nodePending, Cause: CauseRelease, Actor: actor, SourceAttempt: &node.Attempt})
+			actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: ref, CapabilityPrefix: prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: runspec.ClaimGeneration(generation)}}
+			_, err = transitionNodeTx(ctx, tx, claim.Team, nodeTransition{Ref: node.Ref, To: nodePending, Cause: runstate.CauseRelease, Actor: actor, SourceAttempt: &node.Attempt})
 			return err
 		}
 		return releaseOwnerUnitTx(ctx, tx, claim, unit)
@@ -83,10 +83,10 @@ func releaseOwnerUnitTx(ctx context.Context, tx *storeTx, claim UnitClaim, unit 
 	if status != "claimed" || started.Valid {
 		return holderRefusal()
 	}
-	target := expiredUnit{team: claim.Team, ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, kind: claim.Kind, sourceGeneration: unit.SourceGeneration}
+	target := expiredUnit{team: claim.Team, ref: runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, kind: claim.Kind, sourceGeneration: unit.SourceGeneration}
 	owner := ownerRecovery{generation: int64(claim.Award.Generation), disruptions: disruptions}
 	if claim.Kind == capability.UnitEval {
 		return writeEvalRecoveryTx(ctx, tx, target, owner, "pending", tx.now(ctx))
 	}
-	return writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}, tx.now(ctx))
+	return writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}, tx.now(ctx))
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -113,7 +114,7 @@ func warmLocalPipeline(ctx context.Context, dir string, env []string, diagnostic
 	})
 }
 
-func resolveWarmEngine(ctx context.Context, dir string, sdk engine.SDKKind) (engine.Resolved, error) {
+func resolveWarmEngine(ctx context.Context, dir string, sdk engineid.SDKKind) (engine.Resolved, error) {
 	pin, err := engine.ReadPin(dir, sdk)
 	if err != nil {
 		return engine.Resolved{}, err
@@ -129,15 +130,15 @@ func resolveWarmEngine(ctx context.Context, dir string, sdk engine.SDKKind) (eng
 	return resolver.Resolve(ctx, pin, releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH})
 }
 
-func warmLocalPipelineWith(ctx context.Context, dir string, env []string, diagnostics io.Writer, resolve func(context.Context, string, engine.SDKKind) (engine.Resolved, error), install func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error)) (result cacheWarmResult, err error) {
+func warmLocalPipelineWith(ctx context.Context, dir string, env []string, diagnostics io.Writer, resolve func(context.Context, string, engineid.SDKKind) (engine.Resolved, error), install func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error)) (result cacheWarmResult, err error) {
 	result.Kind = "cache_warm"
 	ts, err := pipelineentry.IsTypeScript(dir)
 	if err != nil {
 		return result, err
 	}
-	sdk := engine.GoSDK
+	sdk := engineid.GoSDK
 	if ts {
-		sdk = engine.TypeScriptSDK
+		sdk = engineid.TypeScriptSDK
 	}
 	selected, err := resolve(ctx, dir, sdk)
 	if err != nil {

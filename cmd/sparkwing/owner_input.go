@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func ownerRunInput(run string, award controllerwire.ClaimedUnit, purpose capability.AwardPurpose) (nodehost.RunInput, error) {
@@ -18,8 +18,8 @@ func ownerRunInput(run string, award controllerwire.ClaimedUnit, purpose capabil
 	if run == "" || award.Unit != capability.UnitTrigger || award.Purpose != purpose || award.Delivery != capability.DeliveryDirect || award.RunID != run || award.UnitID == "" || award.JobID != "" || award.Capability == "" || award.Binding.Kind != capability.BindingTrigger || award.Binding.RunID != run || award.Binding.NodeID != "" || award.Binding.Holder == "" || award.Binding.Generation <= 0 || award.LeaseExpiresAt.IsZero() {
 		return input, localRunProtocolError("controller returned an invalid owner award")
 	}
-	input.Owner = store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{
-		Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(run), Holder: award.Binding.Holder, Generation: runspec.ClaimGeneration(award.Binding.Generation)},
+	input.Owner = runstate.Actor{Kind: runstate.ActorRunHost, Owner: runstate.OwnerLeaseRef{
+		Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(run), Holder: award.Binding.Holder, Generation: runspec.ClaimGeneration(award.Binding.Generation)},
 	}}
 	sealed := award.Request
 	hash, err := runspec.CanonicalHash(sealed)

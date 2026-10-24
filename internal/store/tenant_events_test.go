@@ -6,13 +6,15 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestTenantEventAppendIsolationProperty(t *testing.T) {
 	property := func(input string, offset int32, count uint8) bool {
 		tenant, now, _ := stateFixture(t)
 		other := &Tenant{s: tenant.s, team: "b"}
-		if err := other.TestOnlySeedRun(t.Context(), Run{ID: "foreign", Pipeline: "p", Status: "pending"}); err != nil {
+		if err := other.TestOnlySeedRun(t.Context(), Run{RunSummary: runstate.RunSummary{ID: "foreign", Pipeline: "p", Status: "pending"}}); err != nil {
 			t.Fatal(err)
 		}
 		*now = now.Add(time.Duration(offset))

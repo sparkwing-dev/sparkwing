@@ -5,6 +5,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestConcurrencyControllerDispatchedRunUsesBoundUnitKind(t *testing.T) {
@@ -26,9 +27,9 @@ func TestConcurrencyControllerDispatchedRunUsesBoundUnitKind(t *testing.T) {
 	claim.Billing = &capability.BillingProvenance{PayerTeam: "a", ReservationID: "award:node-holder", ExecutorClass: "runner", Start: capability.BillingAtStart, Unit: capability.BillingJob}
 	authorityPersist(t, tenant.s, claim)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET claimed_by='node',capability_prefix='node-holder',generation=1,lease_expires_at=? WHERE team='a' AND run_id=? AND node_id='job'`, now.Add(defaultConcurrencyLease).UnixNano(), plan.RunID)
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix}, CapabilityPrefix: claim.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(plan.RunID), NodeID: "job", Holder: "node", Generation: 1}}
-	got, err := tenant.MayStart(t.Context(), CapacityBinding{RunID: plan.RunID, NodeID: "job", Generation: 1}, actor)
-	if err != nil || got.Kind != AcquireGranted {
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix}, CapabilityPrefix: claim.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(plan.RunID), NodeID: "job", Holder: "node", Generation: 1}}
+	got, err := tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: plan.RunID, NodeID: "job", Generation: 1}, actor)
+	if err != nil || got.Kind != runstate.AcquireGranted {
 		t.Fatalf("controller-dispatched node admission: %+v %v", got, err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // ControllerRun identifies a visited run and carries its tenant into the next operation.
@@ -83,9 +84,9 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 			if err != nil {
 				return err
 			}
-			actor := Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation), RunID: runspec.RunID(ref.RunID)}}}
-			if run.State == RunPending && run.CancelRequestedAt == nil {
-				if _, err := transitionRunTx(ctx, tx, ref.Team, RunTransition{RunID: runspec.RunID(ref.RunID), To: RunRunning, Actor: actor, Cause: RunStart}); err != nil {
+			actor := runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation), RunID: runspec.RunID(ref.RunID)}}}
+			if run.State == runstate.RunPending && run.CancelRequestedAt == nil {
+				if _, err := transitionRunTx(ctx, tx, ref.Team, runstate.RunTransition{RunID: runspec.RunID(ref.RunID), To: runstate.RunRunning, Actor: actor, Cause: runstate.RunStart}); err != nil {
 					return err
 				}
 			}

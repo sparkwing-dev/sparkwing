@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 func TestSDKInstallUncachedUsesRealCompilerWithoutPublishingCacheEntry(t *testing.T) {
@@ -84,7 +85,7 @@ func realBuildPolicyFixture(t *testing.T) string {
 
 func runBuildPolicyInstall(t *testing.T, dir, policy string) engine.SDKCommand {
 	t.Helper()
-	body, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engine.GoSDK, ExecutableDirectory: t.TempDir()})
+	body, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engineid.GoSDK, ExecutableDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

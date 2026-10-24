@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // Team deletion states. A deletion is pending from the request until the
@@ -380,7 +380,7 @@ func (t *Tenant) cancelActiveRunsTx(ctx context.Context, tx *storeTx, now time.T
 	tx.cancelingTeam = t.team
 	defer func() { tx.cancelingTeam = previous }()
 	for _, id := range ids {
-		if _, err := transitionRunTx(ctx, tx, t.team, RunTransition{RunID: runspec.RunID(id), To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: "team_deleted"}); err != nil {
+		if _, err := transitionRunTx(ctx, tx, t.team, runstate.RunTransition{RunID: runspec.RunID(id), To: runstate.RunCancelled, Actor: runstate.Actor{Kind: runstate.ActorOperator}, Cause: runstate.RunCancel, Reason: "team_deleted"}); err != nil {
 			return err
 		}
 	}

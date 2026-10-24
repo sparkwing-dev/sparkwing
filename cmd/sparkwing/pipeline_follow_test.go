@@ -12,7 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 func TestTriggeredOutcomeUsesOnePublicRunDetail(t *testing.T) {
@@ -62,7 +62,7 @@ func TestTriggeredOutcomeReadAndWriteFailuresStayLoud(t *testing.T) {
 }
 
 func TestTriggeredOutcomeRetainsVersionPolicyNotices(t *testing.T) {
-	reader := &statusReader{details: []controllerwire.RunDetail{{ID: "run-outcome", Status: "success", Notices: []engine.Notice{{Reason: "release will be revoked", Hint: "sparkwing upgrade"}}}}}
+	reader := &statusReader{details: []controllerwire.RunDetail{{ID: "run-outcome", Status: "success", Notices: []engineid.Notice{{Reason: "release will be revoked", Hint: "sparkwing upgrade"}}}}}
 	var out bytes.Buffer
 	if _, err := triggeredRunOutcome(t.Context(), reader, "run-outcome", &out); err != nil {
 		t.Fatal(err)

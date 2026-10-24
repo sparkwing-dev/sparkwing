@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -36,16 +38,16 @@ type capabilityRotationResponse struct {
 func (s *Server) capabilityManager(ctx context.Context, team string) (CapabilityManager, error) {
 	if team == "" {
 		if s.operatorCapabilities == nil {
-			return nil, missingEndpointPolicy()
+			return nil, routepolicy.MissingEndpointPolicy()
 		}
 		return s.operatorCapabilities, nil
 	}
 	return tenantPort[CapabilityManager](ctx, s, store.Team(team))
 }
 
-func (s *Server) capabilityEndpoints() []Endpoint {
+func (s *Server) capabilityEndpoints() []controllerwire.Endpoint {
 	e := s.engineController
-	return []Endpoint{
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/overflow", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleReadOverflow},
 		{Method: "PUT", Pattern: "/api/v1/overflow", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSetOverflow},
 		{Method: "POST", Pattern: "/api/v1/runners", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleEnrollRunner},

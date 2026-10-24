@@ -10,9 +10,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
@@ -31,6 +31,11 @@ func TestAdmissionRefusesForeignAuthorityBeforePersistence(t *testing.T) {
 }
 
 type fakeIntakePolicy func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error)
+
+func (f fakeIntakePolicy) ResolveScheduleSource(_ context.Context, _ CronSchedule, request runspec.Request) (runspec.Request, error) {
+	request.Source.Ref = request.Git.SHA
+	return request, nil
+}
 
 func (f fakeIntakePolicy) ResolveIntake(ctx context.Context, r capability.AuthorityResolver, in IntakeRequest) (IntakePolicyFacts, error) {
 	facts, err := f(ctx, r, in)
@@ -102,7 +107,7 @@ func planFixtureWithInput(t *testing.T, dispatch runspec.Dispatch, change func(*
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: raw, Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}
+	request := PlanAcceptance{RunID: admitted.RunID, Actor: runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: raw, Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}
 	return tenant, request, now
 }
 
@@ -256,8 +261,8 @@ func TestPlanSealPersistsReplayAndExecutionSettings(t *testing.T) {
 	if first.Replayed || first.Spec.Hash == "" || first.PlanHash == "" || first.Owner == nil {
 		t.Fatalf("accepted=%+v", first)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
-	if err != nil || node.SpecHash == "" || node.StateSeq != 0 || node.Status != StatusPending || !reflect.DeepEqual(node.Execution, first.Spec.Resolved.Settings.Jobs["job"]) {
+	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
+	if err != nil || node.SpecHash == "" || node.StateSeq != 0 || node.Status != runstate.StatusPending || !reflect.DeepEqual(node.Execution, first.Spec.Resolved.Settings.Jobs["job"]) {
 		t.Fatalf("node=%+v %v", node, err)
 	}
 	request.Seal.Plan = []byte(` { "jobs": [ { "id": "job", "steps": [{"id":"step"}] } ] } `)
@@ -378,7 +383,7 @@ func TestPlanClassificationNeverShrinks(t *testing.T) {
 	seedTriggerClaim(t, tenant.s, admitted.RunID, "host", "planner", 1, tenant.s.now().Add(time.Hour))
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
 	resolved, _ := settings.ResolvePlan(settings.PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: plan})
-	request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
+	request := PlanAcceptance{RunID: admitted.RunID, Actor: runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "planner"}, CapabilityPrefix: "planner", Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
 	accepted, err := tenant.AcceptPlan(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -394,7 +399,7 @@ func TestPlanControllerHandoffKeepsExactReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.Owner == nil || accepted.Owner.Kind != OwnerController || accepted.Owner.Holder != "controller" {
+	if accepted.Owner == nil || accepted.Owner.Kind != runstate.OwnerController || accepted.Owner.Holder != "controller" {
 		t.Fatalf("owner=%+v", accepted.Owner)
 	}
 	var status string
@@ -405,7 +410,7 @@ func TestPlanControllerHandoffKeepsExactReplay(t *testing.T) {
 	if err := tenant.s.db.QueryRow(`SELECT COALESCE(claimed_by,''),capability_prefix FROM triggers WHERE id=?`, request.RunID).Scan(&holder, &prefix); err != nil || holder != "" || prefix != "" {
 		t.Fatalf("finished owner still held: %q %q %v", holder, prefix, err)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
+	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"})
 	if err != nil || node.ReadyAt == nil {
 		t.Fatalf("controller did not schedule: %+v %v", node, err)
 	}
@@ -459,8 +464,8 @@ func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 	if run.Spec == nil || !reflect.DeepEqual(*run.Spec, source.Spec) || !reflect.DeepEqual(run.Request, source.Spec.Request) || run.Lineage.RetryOf != plan.RunID || !run.Lineage.Retrier.Set || run.Lineage.Retrier.Value.ID != "retrier" || run.Request.Request.Actor.ID != "member" || !run.Request.Request.PullRequest.Set || run.Request.Request.PullRequest.Value.Number != 42 {
 		t.Fatalf("retry lost seals/lineage: %+v", run)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(retry.RunID), NodeID: "job"})
-	if err != nil || node.Generation != 0 || node.Status != StatusPending {
+	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(retry.RunID), NodeID: "job"})
+	if err != nil || node.Generation != 0 || node.Status != runstate.StatusPending {
 		t.Fatalf("retry job=%+v %v", node, err)
 	}
 	replay, err := tenant.AdmitRun(t.Context(), request)
@@ -616,7 +621,7 @@ func TestPlanPublishRequiresRunBoundPublisher(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "publisher"}, CapabilityPrefix: "publisher"}, Seal: runspec.SealInput{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: []byte(`{"jobs":[{"id":"imported","steps":[{"id":"step"}]}]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
+			request := PlanAcceptance{RunID: admitted.RunID, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "publisher"}, CapabilityPrefix: "publisher"}, Seal: runspec.SealInput{Declarations: runspec.CheckoutDeclarations{Version: 1}, Request: admitted.Request, Plan: []byte(`{"jobs":[{"id":"imported","steps":[{"id":"step"}]}]}`), Resolved: runspec.Resolved{Args: map[string]string{"message": "hello"}, SecretArgs: []string{}, Settings: resolved}}}
 			accepted, err := tenant.AcceptPlan(t.Context(), request)
 			if mode != "valid" {
 				if err == nil {
@@ -629,7 +634,7 @@ func TestPlanPublishRequiresRunBoundPublisher(t *testing.T) {
 				t.Fatalf("published plan=%+v %v", accepted, err)
 			}
 			rewriteSchemaCount(t, tenant.s.db, "triggers", 0)
-			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "imported"})
+			node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "imported"})
 			if err != nil || node.ClaimedBy != "" || node.Generation != 0 {
 				t.Fatalf("published job=%+v %v", node, err)
 			}
@@ -669,7 +674,7 @@ func TestPlanControllerEmptyPlanReplayAfterSettlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	run, err := tenant.ReadRun(t.Context(), request.RunID)
-	if err != nil || run.State != RunSuccess {
+	if err != nil || run.State != runstate.RunSuccess {
 		t.Fatalf("settlement=%+v %v", run, err)
 	}
 	replay, err := tenant.AcceptPlan(t.Context(), request)
@@ -809,11 +814,11 @@ func TestPlanGuardRefusalPersistsSealWithoutOfferingJobs(t *testing.T) {
 				}
 			}
 			if dispatch == runspec.DispatchController {
-				if snapshot.Run.State != RunFailed || snapshot.Nodes[0].Outcome != NodeSkipped {
+				if snapshot.Run.State != runstate.RunFailed || snapshot.Nodes[0].Outcome != runstate.NodeSkipped {
 					t.Fatalf("guard refusal settlement=%s %+v", snapshot.Run.State, snapshot.Nodes)
 				}
 			} else {
-				_, err = tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}, To: NodeReady, Cause: CauseRelease, Actor: request.Actor})
+				_, err = tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}, To: runstate.NodeReady, Cause: runstate.CauseRelease, Actor: request.Actor})
 				if err == nil {
 					t.Fatal("guard-refused job became offerable")
 				}

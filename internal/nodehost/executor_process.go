@@ -8,15 +8,14 @@ import (
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec, retryAllowed bool) (result store.NodeResult, err error) {
+func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec, retryAllowed bool) (result runstate.NodeResult, err error) {
 	parent := ctx
 	ctx, cancel, err := h.deps.ChildContext(ctx, input.Execution.Timeout.Value, 0)
 	if err != nil {
@@ -110,12 +109,12 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			err = errors.New("recovery execution requires the persisted source failure")
 			return h.failure(err), err
 		}
-		source := controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(job.OnFailureOf)}
+		source := runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(job.OnFailureOf)}
 		row, readErr := h.deps.Store.ReadNode(ctx, source)
 		if readErr != nil {
 			return h.failure(readErr), readErr
 		}
-		if row.Ref != source || row.Status != store.StatusDone || row.Outcome != store.NodeFailed {
+		if row.Ref != source || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeFailed {
 			err = executorError(apierr.SpecDrift, "recovery source is not a failed job")
 			return h.failure(err), err
 		}
@@ -142,7 +141,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		err = cleanupErr
 	}
 	timeout := executorAttemptTimeout(ctx)
-	result = store.NodeResult{Outcome: store.NodeSuccess}
+	result = runstate.NodeResult{Outcome: runstate.NodeSuccess}
 	if bodyErr != nil {
 		result = h.failure(bodyErr)
 		var recordFailure *executorStepRecordError
@@ -163,20 +162,20 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			result = h.failureAt(verifyErr, stage)
 		}
 	}
-	if executorAttemptTimeout(ctx) == nil && (result.Outcome != store.NodeFailed || !retryAllowed) {
+	if executorAttemptTimeout(ctx) == nil && (result.Outcome != runstate.NodeFailed || !retryAllowed) {
 		stage = "action"
 		afterRun = true
 		if afterErr := h.afterRun(ctx, session, input, job, result); afterErr != nil {
 			return h.failure(afterErr), afterErr
 		}
 	}
-	if result.Outcome == store.NodeSuccess && len(output) > 0 && h.deps.Masker.Mask(string(output)) != string(output) {
+	if result.Outcome == runstate.NodeSuccess && len(output) > 0 && h.deps.Masker.Mask(string(output)) != string(output) {
 		output = nil
 		if err = h.withholdOutput(ctx, input); err != nil {
 			return h.failure(err), err
 		}
 	}
-	if result.Outcome == store.NodeSuccess && len(output) > 0 {
+	if result.Outcome == runstate.NodeSuccess && len(output) > 0 {
 		if h.deps.PublishOutput == nil {
 			err = errors.New("job output requires a record publisher")
 			return h.failure(err), err
@@ -193,9 +192,9 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	return result, err
 }
 
-func (h *nodeExecutor) afterRun(ctx context.Context, session *executorSession, input NodeInput, job nodeproto.JobSpec, result store.NodeResult) error {
+func (h *nodeExecutor) afterRun(ctx context.Context, session *executorSession, input NodeInput, job nodeproto.JobSpec, result runstate.NodeResult) error {
 	after := nodeproto.RunResult{Outcome: string(result.Outcome)}
-	if result.Outcome == store.NodeFailed {
+	if result.Outcome == runstate.NodeFailed {
 		code := apierr.SDKError
 		if result.Reason == string(apierr.DeadlineExceeded) {
 			code = apierr.DeadlineExceeded

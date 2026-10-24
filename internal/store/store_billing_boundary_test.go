@@ -13,8 +13,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestStoreBillingRetention(t *testing.T) {
@@ -154,7 +154,7 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	}
 	claim, actor := meteredUnitClaim(t, s, demand)
 	admitExecution(t, tenant, actor)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, Cause: CauseStart, To: NodeRunning, SourceAttempt: sourceAttempt(0)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, Cause: runstate.CauseStart, To: runstate.NodeRunning, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	attempt := runspec.AttemptIdentity{Team: "a", RunID: claim.RunID, NodeID: claim.NodeID, Attempt: 1, Generation: int64(claim.Award.Generation)}
@@ -168,12 +168,12 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 		t.Fatal(err)
 	}
 	*now = now.Add(3 * time.Second)
-	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, Cause: CauseReport, To: NodeFailed, SourceAttempt: sourceAttempt(1)}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, Cause: runstate.CauseReport, To: runstate.NodeFailed, SourceAttempt: sourceAttempt(1)}); err != nil {
 		t.Fatal(err)
 	}
 	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(claim.RunID)}
 	ownerClaim, owner := meteredUnitClaim(t, s, demand)
-	if _, err := tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Transition: RunCompletion{RunID: runspec.RunID(claim.RunID), Actor: owner, Cause: RunFinish}, Unit: owner.Owner}); err != nil {
+	if _, err := tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: runspec.RunID(claim.RunID), Actor: owner, Cause: runstate.RunFinish}, Unit: owner.Owner}); err != nil {
 		t.Fatalf("finish %s: %v", ownerClaim.RunID, err)
 	}
 	if _, err := op.TestOnlyReversePayment(t.Context(), "payment-a", "refund", "provider", 0); err != nil {

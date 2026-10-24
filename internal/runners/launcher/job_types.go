@@ -4,13 +4,14 @@ import (
 	"context"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+
 	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // CloudUnitKind selects host work without weakening the common Cloud isolation contract.
@@ -61,13 +62,13 @@ func (binding CloudJobBinding) LeaseRef() capability.LeaseRef {
 
 // CloudJobAward carries only a single-use bootstrap, never the launcher's root credential.
 type CloudJobAward struct {
-	LeaseExpiresAt time.Time        `json:"lease_expires_at"`
-	Engine         *engine.Identity `json:"engine,omitempty"`
-	Source         source.Spec      `json:"source"`
-	Binding        CloudJobBinding  `json:"binding"`
-	Bootstrap      []byte           `json:"-"`
-	CPUCores       float64          `json:"cpu_cores"`
-	Memory         int64            `json:"memory_bytes"`
+	LeaseExpiresAt time.Time          `json:"lease_expires_at"`
+	Engine         *engineid.Identity `json:"engine,omitempty"`
+	Source         source.Spec        `json:"source"`
+	Binding        CloudJobBinding    `json:"binding"`
+	Bootstrap      []byte             `json:"-"`
+	CPUCores       float64            `json:"cpu_cores"`
+	Memory         int64              `json:"memory_bytes"`
 }
 
 // CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped.

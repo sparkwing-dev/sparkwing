@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
@@ -32,8 +33,8 @@ func TestConcurrencyFirstArrivalLocksEntryBeforeHolders(t *testing.T) {
 	}
 	actor := controllerJobAward(t, tenant, request.RunID)
 	recorder.reset()
-	result, err := tenant.MayStart(t.Context(), CapacityBinding{RunID: request.RunID, NodeID: "job", Generation: int64(actor.Generation)}, actor)
-	if err != nil || result.Kind != AcquireGranted {
+	result, err := tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: request.RunID, NodeID: "job", Generation: int64(actor.Generation)}, actor)
+	if err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("MayStart: %+v %v", result, err)
 	}
 	created, locked, holders := -1, -1, -1

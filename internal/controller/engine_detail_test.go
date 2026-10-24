@@ -10,10 +10,12 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -28,7 +30,7 @@ func TestEngineRunDetailHidesPrivateInputs(t *testing.T) {
 		if classified {
 			request.Request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"secret"}}
 		}
-		view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{ID: "run", Team: "a", Request: request, PlanHash: secret + "-plan"}}}
+		view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{Team: "a", Execution: runstate.Execution{ID: "run", Request: request, PlanHash: secret + "-plan"}}}}
 		if sealed {
 			view.Snapshot.Run.Spec = &runspec.Spec{Request: request, Hash: runspec.Hash(secret + "-spec"), Resolved: runspec.Resolved{Args: map[string]string{"secret": secret, "public": "visible"}}}
 			if classified {
@@ -56,7 +58,7 @@ func TestEngineRunDetailHidesPrivateInputs(t *testing.T) {
 func TestEngineRunDetailUsesCurrentInvocationLineage(t *testing.T) {
 	request := runspec.SealedRequest{RunID: "original", Request: runspec.Request{Team: "a", Lineage: runspec.Lineage{RetryOf: "earlier"}}}
 	lineage := runspec.Lineage{RetryOf: "original", Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: runspec.Actor{Kind: "account", ID: "retrier"}}}
-	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{ID: "retry", Team: "a", Request: request, Lineage: lineage, Spec: &runspec.Spec{Request: request}}}}
+	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{Team: "a", Execution: runstate.Execution{ID: "retry", Request: request, Lineage: lineage, Spec: &runspec.Spec{Request: request}}}}}
 	got, err := runDetailResponse(capability.Target{Team: "a", RunID: "retry"}, RunStatusFacts{Snapshot: view.Snapshot})
 	if err != nil || got.ID != "retry" || !reflect.DeepEqual(got.Inputs.Lineage, lineage) || request.RunID != "original" || request.Request.Lineage.RetryOf != "earlier" {
 		t.Fatalf("retry lineage: %+v", got)
@@ -76,7 +78,7 @@ func TestEngineRunDetailReadsPersistedHistoryAndTaggedLogs(t *testing.T) {
 	server, tenant := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitNode)
 	now := time.Unix(1700000000, 0).UTC()
-	identity := engine.Identity{Version: "v1.2.3"}
+	identity := engineid.Identity{Version: "v1.2.3"}
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +92,7 @@ func TestEngineRunDetailReadsPersistedHistoryAndTaggedLogs(t *testing.T) {
 	engineSQL(t, server.Store, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason) VALUES ('a','run','job',1,1,'runner','old-capability','runner','runner','remote',?,?,'failed','agent_lost'),('a','run','job',2,2,'runner','new-capability','runner','runner','remote',?,NULL,'','')`, now.UnixNano(), now.Add(time.Second).UnixNano(), now.Add(2*time.Second).UnixNano())
 	engineSQL(t, server.Store, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,prefix,retention_class,created_at,updated_at) VALUES ('a','run','job-log','job_attempt','job',1,1,'private-object-prefix','r30',1,1)`)
 	engineSQL(t, server.Store, `INSERT INTO log_streams(team,run_id,id,subject_kind,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES ('a','run','plan-log','owner_unit',3,'plan',NULL,NULL,'private-plan-prefix','r30',2,2),('a','run','eval-log','owner_unit',4,'eval','job',2,'private-eval-prefix','r30',3,3)`)
-	policy := &engineVersionFake{notices: []engine.Notice{{Kind: engine.NoticeSupportEnding, Version: identity.Version, Reason: "signed warning"}}}
+	policy := &engineVersionFake{notices: []engineid.Notice{{Kind: engineid.NoticeSupportEnding, Version: identity.Version, Reason: "signed warning"}}}
 	server.VersionPolicy = engineVersionPolicy(policy)
 	got, err := server.RunDetail(t.Context(), owner)
 	if err != nil {

@@ -5,9 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // StartGate asks the store for permission before acquiring optional host compute.
@@ -15,7 +14,7 @@ type StartGate struct {
 	state    CapacityStore
 	compute  *LocalAdmission
 	required bool
-	Queued   func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error
+	Queued   func(context.Context, runspec.NodeRef, runstate.AcquireSlotResponse) error
 }
 
 func ComposeStartGate(state CapacityStore, compute *LocalAdmission, required bool) StartGate {
@@ -29,19 +28,19 @@ func (g StartGate) claimedNode(ctx context.Context, input NodeInput, body func(c
 	if g.required && g.compute == nil {
 		return errors.New("local execution requires machine admission")
 	}
-	binding := store.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}
-	if err := awaitStart(ctx, g.state, binding, executorActor(input), func(response store.AcquireSlotResponse) error {
+	binding := runstate.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}
+	if err := awaitStart(ctx, g.state, binding, executorActor(input), func(response runstate.AcquireSlotResponse) error {
 		if g.Queued == nil {
 			return nil
 		}
-		return g.Queued(ctx, controllerwire.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)}, response)
+		return g.Queued(ctx, runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)}, response)
 	}); err != nil {
 		return err
 	}
 	if g.compute == nil {
 		return body(ctx)
 	}
-	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Generation: runspec.ClaimGeneration(input.Generation), Execution: input.Execution}
+	row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Generation: runspec.ClaimGeneration(input.Generation), Execution: input.Execution}
 	var spec runspec.Spec
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 		return err

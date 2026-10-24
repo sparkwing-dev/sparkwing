@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
 func TestObjectStoreBreaker_RouteReportsEveryClass(t *testing.T) {
@@ -261,7 +262,7 @@ func breakerRequest(t *testing.T, method string, authenticated bool) *http.Respo
 		Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
 		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorObjectStore},
 	}}
-	s := controller.New(nil, nil).WithAuthorization(controller.RouteAuthorization{
+	s := controller.New(nil, nil).WithAuthorization(routepolicy.Authorization{
 		Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
 	})
 	path := "/api/v1/operator/object-store/breaker"

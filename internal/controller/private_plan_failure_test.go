@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -27,15 +28,15 @@ func privatePlanFailureFixture(t *testing.T) (*engineFixture, *store.Tenant, str
 }
 
 func TestPrivatePlanFailureClosesPlanAndRunWithBoundedStage(t *testing.T) {
-	for _, outcome := range []store.RunState{store.RunFailed, store.RunCancelled} {
+	for _, outcome := range []runstate.RunState{runstate.RunFailed, runstate.RunCancelled} {
 		t.Run(string(outcome), func(t *testing.T) {
 			e, tenant, raw := privatePlanFailureFixture(t)
 			message, reason := "run preparation failed", string(apierr.PlanFailed)
-			if outcome == store.RunCancelled {
+			if outcome == runstate.RunCancelled {
 				message, reason = "cancellation requested", string(apierr.ReasonCancelled)
 				engineSQL(t, e.Store, `UPDATE runs SET cancel_requested_at=created_at,cancel_reason='cancel_requested' WHERE team='a' AND id='run'`)
 			}
-			body, err := json.Marshal(localhostwire.LocalRunCompletion{Cause: store.RunFinish, Reason: "untrusted-stage", MaskedError: "unmasked-secret"})
+			body, err := json.Marshal(localhostwire.LocalRunCompletion{Cause: runstate.RunFinish, Reason: "untrusted-stage", MaskedError: "unmasked-secret"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -66,13 +67,13 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, mutation uint8, message string) {
 		e, tenant, raw := privatePlanFailureFixture(t)
-		body := localhostwire.LocalRunCompletion{Cause: store.RunFinish, MaskedError: message}
+		body := localhostwire.LocalRunCompletion{Cause: runstate.RunFinish, MaskedError: message}
 		path := "/api/v1/runs/run/local-host/finish"
 		switch mutation % 6 {
 		case 0:
 			// The typed store request cannot carry a requested verdict.
 		case 1:
-			body.Cause = store.RunStart
+			body.Cause = runstate.RunStart
 		case 2:
 			engineSQL(t, e.Store, `UPDATE runs SET spec_json=?,spec_hash='accepted',plan_json=?,plan_hash='plan',sealed_at=1,plan_accepted_generation=1`, []byte(`{}`), []byte(`{"jobs":[]}`))
 		case 3:
@@ -80,7 +81,7 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 		case 4:
 			path = "/api/v1/runs/foreign/local-host/finish"
 		case 5:
-			body.OwnerPolicy = &store.OwnerPolicyResult{}
+			body.OwnerPolicy = &runstate.OwnerPolicyResult{}
 		}
 		before, err := tenant.ReadSnapshot(t.Context(), "run")
 		if err != nil {
@@ -91,13 +92,13 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 			t.Fatalf("test did not use a persisted plan: %v", err)
 		}
 		binding := principal.Capability.Binding
-		actor := store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Owner: store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(binding.RunID), Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}
-		change := store.RunCompletion{RunID: "run", Actor: actor, Cause: body.Cause, OwnerPolicy: body.OwnerPolicy, MaskedError: body.MaskedError}
+		actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(binding.RunID), Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}
+		change := runstate.RunCompletion{RunID: "run", Actor: actor, Cause: body.Cause, OwnerPolicy: body.OwnerPolicy, MaskedError: body.MaskedError}
 		if mutation%6 == 4 {
 			change.RunID = "foreign"
 		}
 		if mutation%6 != 0 {
-			if _, err := tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: actor.Owner, Transition: change}); err == nil {
+			if _, err := tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: actor.Owner, Transition: change}); err == nil {
 				t.Fatal("direct store call escaped plan failure authority")
 			}
 		}
@@ -136,7 +137,7 @@ func TestPrivateRetryPlanFailureClosesCopiedJobs(t *testing.T) {
 	e, tenant, raw := privatePlanFailureFixture(t)
 	engineSQL(t, e.Store, `UPDATE runs SET spec_json=?,spec_hash='carried',plan_json=?,plan_hash='plan',sealed_at=1,plan_accepted_generation=0`, []byte(`{}`), []byte(`{"jobs":[{"id":"job"}]}`))
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','job','pending',?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-	body, err := json.Marshal(localhostwire.LocalRunCompletion{Cause: store.RunFinish, Reason: "untrusted-stage", MaskedError: "unmasked-secret"})
+	body, err := json.Marshal(localhostwire.LocalRunCompletion{Cause: runstate.RunFinish, Reason: "untrusted-stage", MaskedError: "unmasked-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,11 +146,11 @@ func TestPrivateRetryPlanFailureClosesCopiedJobs(t *testing.T) {
 		engineClaimHTTP(t, h, raw, http.MethodPost, "/api/v1/runs/run/local-host/finish", string(body), http.StatusOK)
 	}
 	row, err := tenant.ReadSnapshot(t.Context(), "run")
-	if err != nil || row.Run.State != store.RunFailed || row.Run.Spec == nil || len(row.Nodes) != 1 {
+	if err != nil || row.Run.State != runstate.RunFailed || row.Run.Spec == nil || len(row.Nodes) != 1 {
 		t.Fatalf("retry preparation failure did not finish run: %+v, %v", row.Run, err)
 	}
 	node := row.Nodes[0]
-	if node.Status != store.StatusDone || node.Outcome != store.NodeCancelled || node.StateActor.Result != nil {
+	if node.Status != runstate.StatusDone || node.Outcome != runstate.NodeCancelled || node.StateActor.Result != nil {
 		t.Fatalf("retry failure left copied job executable: %+v", node)
 	}
 }

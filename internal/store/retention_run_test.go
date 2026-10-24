@@ -4,11 +4,13 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestRetentionUsesFinishTimeForLongRunningWork(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
-	maintenanceRun(t, s, "recent", 1, RunSuccess)
+	maintenanceRun(t, s, "recent", 1, runstate.RunSuccess)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET started_at=? WHERE id='recent'`, now.Add(-120*24*time.Hour).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)`, []byte(`90`))
 	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "worker", time.Minute)
@@ -27,7 +29,7 @@ func TestRetentionUsesFinishTimeForLongRunningWork(t *testing.T) {
 func TestRetentionRollsBackAllRunDeletesAfterLaterFailure(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
 	for i, id := range []string{"first", "second"} {
-		maintenanceRun(t, s, id, i+1, RunFailed)
+		maintenanceRun(t, s, id, i+1, runstate.RunFailed)
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET finished_at=?,event_bytes=17 WHERE id=?`, now.Add(-120*24*time.Hour).UnixNano(), id)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)`, []byte(`90`))

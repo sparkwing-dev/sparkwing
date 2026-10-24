@@ -7,7 +7,7 @@ import (
 )
 
 func TestLauncherObservationChecksAwardAndState(t *testing.T) {
-	observation := LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitPlan, ID: "unit", Holder: "launcher", Generation: 1}, Reservation: true}
+	observation := capability.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitPlan, ID: "unit", Holder: "launcher", Generation: 1}, Reservation: true}
 	if err := observation.Validate(); err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 const nativeInstallFixtureSource = `package main
@@ -36,15 +37,15 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 	installNativeToolFixture(t)
 	secret := "proxy-secret-native-installer"
 	t.Setenv("HTTPS_PROXY", "http://user:"+secret+"@proxy.example")
-	for _, sdk := range []engine.SDKKind{engine.GoSDK, engine.TypeScriptSDK} {
+	for _, sdk := range []engineid.SDKKind{engineid.GoSDK, engineid.TypeScriptSDK} {
 		t.Run(string(sdk), func(t *testing.T) {
 			dir := t.TempDir()
-			if sdk == engine.GoSDK {
+			if sdk == engineid.GoSDK {
 				writeInput(t, dir, "go.mod", []byte("module fixture\ngo 1.26\nrequire "+engine.GoModule+" v0.20.0\n"))
 			} else {
 				writeInput(t, dir, "package-lock.json", []byte(`{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"0.20.0"}},"node_modules/@sparkwing/sdk":{"version":"0.20.0"}}}`))
 			}
-			if sdk == engine.TypeScriptSDK {
+			if sdk == engineid.TypeScriptSDK {
 				writeInput(t, dir, "package.json", []byte(`{"main":"main.ts","dependencies":{"@sparkwing/sdk":"0.20.0"}}`))
 				writeInput(t, dir, "main.ts", []byte("export {}"))
 			} else {
@@ -65,7 +66,7 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 			if command.Directory != dir || len(command.Command) == 0 || !filepath.IsAbs(command.Command[0]) || strings.Contains(stderr.String(), secret) {
 				t.Fatalf("command=%+v stderr=%s", command, stderr.String())
 			}
-			if sdk == engine.TypeScriptSDK {
+			if sdk == engineid.TypeScriptSDK {
 				if len(command.Command) != 2 || command.Command[1] != filepath.Join(dir, "main.ts") {
 					t.Fatalf("TypeScript retained a preload: %+v", command)
 				}

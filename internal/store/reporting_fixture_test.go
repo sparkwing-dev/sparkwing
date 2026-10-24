@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -65,7 +67,7 @@ func (t *Tenant) TestOnlySeedTrigger(ctx context.Context, v Trigger) error {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	if err := t.TestOnlySeedRun(ctx, Run{ID: v.ID, Pipeline: v.Pipeline, Status: "pending", CreatedAt: now, Args: v.Args, DeclaredRepo: v.Repo, RepoURL: v.RepoURL, GitBranch: v.GitBranch, GitSHA: v.GitSHA, TriggerSource: v.TriggerSource, ParentRunID: v.ParentRunID, RetryOf: v.RetryOf}); err != nil {
+	if err := t.TestOnlySeedRun(ctx, Run{RunSummary: runstate.RunSummary{ID: v.ID, Pipeline: v.Pipeline, Status: "pending", CreatedAt: now, Args: v.Args, DeclaredRepo: v.Repo, RepoURL: v.RepoURL, GitBranch: v.GitBranch, GitSHA: v.GitSHA, TriggerSource: v.TriggerSource, ParentRunID: v.ParentRunID, RetryOf: v.RetryOf}}); err != nil {
 		return err
 	}
 	return t.s.inTx(ctx, func(tx *storeTx) error {

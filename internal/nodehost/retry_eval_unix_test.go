@@ -12,13 +12,13 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -37,11 +37,11 @@ func retryWithRecordedExpansion(t *testing.T) (*storeHostFixture, NodeInput) {
 	plan.Jobs, plan.Jobs[1].Needs = plan.Jobs[:2], nil
 	f := newStoreHostFixture(t, plan)
 	source := claimedFixtureNode(t, f, "targets")
-	if err := f.report(t.Context(), source, store.NodeSuccess); err != nil {
+	if err := f.report(t.Context(), source, runstate.NodeSuccess); err != nil {
 		t.Fatal(err)
 	}
 	acceptedFixtureExpansion(t, f, source, retryGeneratedJobs()...)
-	if err := f.report(t.Context(), claimedFixtureNode(t, f, "good"), store.NodeSuccess); err != nil {
+	if err := f.report(t.Context(), claimedFixtureNode(t, f, "good"), runstate.NodeSuccess); err != nil {
 		t.Fatal(err)
 	}
 	return f, source
@@ -55,9 +55,9 @@ func TestRetryTargetSchedulesOnlyUnfinishedGeneratedWork(t *testing.T) {
 		mu.Lock()
 		bodies = append(bodies, input.NodeID)
 		mu.Unlock()
-		return f.report(ctx, input, store.NodeSuccess)
+		return f.report(ctx, input, runstate.NodeSuccess)
 	})
-	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+	f.Host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		t.Fatal("recorded expansion evaluated again")
 		return nil, runspec.SecretRegistration{}, nil, nil
 	}
@@ -73,20 +73,20 @@ type retryMissingOutput struct{ OwnerStore }
 
 func (s retryMissingOutput) ReadSnapshot(ctx context.Context, runID string) (store.RunSnapshot, error) {
 	snapshot, err := s.OwnerStore.ReadSnapshot(ctx, runID)
-	snapshot.Run.Retry = &store.RetrySelection{Mode: "failed", Results: map[string]store.MaterializedResultSource{"targets": {Ref: controllerwire.NodeRef{RunID: "previous", NodeID: "targets"}, StateSeq: 8}}}
+	snapshot.Run.Retry = &runstate.RetrySelection{Mode: "failed", Results: map[string]runstate.MaterializedResultSource{"targets": {Ref: runspec.NodeRef{RunID: "previous", NodeID: "targets"}, StateSeq: 8}}}
 	return snapshot, err
 }
 
-func (s retryMissingOutput) ReconcileNode(ctx context.Context, request store.ReconcileRequest) (store.ReconciledNode, error) {
-	if request.Policy != store.SourceManualRetry {
+func (s retryMissingOutput) ReconcileNode(ctx context.Context, request store.ReconcileRequest) (runstate.ReconciledNode, error) {
+	if request.Policy != runstate.SourceManualRetry {
 		return s.OwnerStore.ReconcileNode(ctx, request)
 	}
 	snapshot, err := s.OwnerStore.ReadSnapshot(ctx, string(request.Ref.RunID))
 	row, ok := ownerNode(snapshot, string(request.Ref.NodeID))
 	if !request.MaterializeOnly || !ok || request.Source == nil {
-		return store.ReconciledNode{}, executorError(apierr.BadRequest, "retry miss requires a materialization probe")
+		return runstate.ReconciledNode{}, executorError(apierr.BadRequest, "retry miss requires a materialization probe")
 	}
-	return store.ReconciledNode{Kind: store.Dispatch, Node: row}, err
+	return runstate.ReconciledNode{Kind: runstate.Dispatch, Node: row}, err
 }
 
 func TestRetryReuseMissExecutesGeneratorAndChildren(t *testing.T) {
@@ -101,9 +101,9 @@ func TestRetryReuseMissExecutesGeneratorAndChildren(t *testing.T) {
 		mu.Lock()
 		bodies = append(bodies, input.NodeID)
 		mu.Unlock()
-		return f.report(ctx, input, store.NodeSuccess)
+		return f.report(ctx, input, runstate.NodeSuccess)
 	})
-	f.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+	f.Host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		body, err := json.Marshal(nodeproto.PlanDoc{Jobs: retryGeneratedJobs()})
 		return body, runspec.SecretRegistration{Version: 1}, nil, err
 	}
@@ -119,7 +119,7 @@ func TestRetryReuseMissExecutesGeneratorAndChildren(t *testing.T) {
 func TestMaterializedGeneratorEvaluationKeepsTheJobTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		input, state, deps, process := evaluationFixture(t)
-		state.row.Outcome = store.NodeMemoized
+		state.row.Outcome = runstate.NodeMemoized
 		state.row.Execution.Timeout.Value = 400 * time.Millisecond
 		deps.ChildContext = nil
 		process.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
@@ -152,7 +152,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 	f, sourceInput := retryWithRecordedExpansion(t)
 	input := claimedFixtureNode(t, f, "bad")
 	input.Entry = &source.Entry{Engine: input.Engine}
-	if result, err := f.Tenant.MayStart(t.Context(), store.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, executorActor(input)); err != nil || result.Kind != store.AcquireGranted {
+	if result, err := f.Tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, executorActor(input)); err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("execution admission: %+v %v", result, err)
 	}
 	before, err := f.Tenant.ReadSnapshot(t.Context(), f.Accepted.RunID)
@@ -172,12 +172,12 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 	host, err := NewNodeExecutor(ExecutorDependencies{
 		Store: f.State,
 		Start: func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) { return process, nil },
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return input.Engine, nil
 		},
 		Masker:     secrets.NewMasker(),
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
-		ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
+		ReadOutput: func(_ context.Context, ref runspec.NodeRef, generation int64) (json.RawMessage, error) {
 			if ref.RunID != runspec.RunID(f.Accepted.RunID) || ref.NodeID != "targets" || runspec.ClaimGeneration(generation) != sourceInput.Generation {
 				t.Fatal("reconstruction read outside its accepted source")
 			}
@@ -204,7 +204,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 	}
 	good, ok := ownerNode(after, "good")
 	bad, failed := ownerNode(after, "bad")
-	if !ok || good.Outcome != store.NodeSuccess || !failed || bad.Outcome != store.NodeFailed || process.closed != 1 || process.cleaned != 1 {
+	if !ok || good.Outcome != runstate.NodeSuccess || !failed || bad.Outcome != runstate.NodeFailed || process.closed != 1 || process.cleaned != 1 {
 		t.Fatalf("good=%+v bad=%+v process=%+v", good, bad, process)
 	}
 }

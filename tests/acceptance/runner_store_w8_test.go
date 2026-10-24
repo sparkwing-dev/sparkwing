@@ -14,15 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -192,7 +191,7 @@ func revokeStoredRunnerW8(t *testing.T, s *store.Store, target capability.Author
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "runner-admin"}}, target); err != nil {
+	if err := tenant.RevokeAuthority(t.Context(), runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "runner-admin"}}, target); err != nil {
 		t.Fatal(err)
 	}
 }

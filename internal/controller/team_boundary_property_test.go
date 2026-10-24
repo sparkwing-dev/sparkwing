@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -85,7 +86,7 @@ func TestTeamBoundaryRunPrivacyProperty(t *testing.T) {
 			id := "private-" + strconv.FormatUint(value, 16) + "-" + strconv.Itoa(serial)
 			pipeline := "pipeline-" + id
 			private := "argument-" + id
-			if err := teststore.SeedRun(f.st, t.Context(), f.teamA.Team(), store.Run{ID: id, Pipeline: pipeline, Status: "running", Args: map[string]string{"private": private}}); err != nil {
+			if err := teststore.SeedRun(f.st, t.Context(), f.teamA.Team(), store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: pipeline, Status: "running", Args: map[string]string{"private": private}}}); err != nil {
 				t.Fatal(err)
 			}
 			path := "/api/v1/runs/" + id
@@ -115,7 +116,7 @@ func TestTeamBoundaryRunPrivacyProperty(t *testing.T) {
 				}
 			}
 			row, err := f.teamA.ReadRun(t.Context(), id)
-			if err != nil || row.State != store.RunRunning || row.CancelRequestedAt != nil || row.Request.Request.RequestedArgs["private"] != private {
+			if err != nil || row.State != runstate.RunRunning || row.CancelRequestedAt != nil || row.Request.Request.RequestedArgs["private"] != private {
 				t.Fatalf("foreign mutation: %+v: %v", row, err)
 			}
 			own, err := f.teamB.ListRuns(t.Context(), store.RunFilter{Limit: 100})
@@ -133,7 +134,7 @@ func TestTeamBoundaryOutputHidesRunExistenceProperty(t *testing.T) {
 		property := func(value uint64) bool {
 			serial++
 			id := "output-private-" + strconv.FormatUint(value, 16) + "-" + strconv.Itoa(serial)
-			if err := teststore.SeedRun(f.st, t.Context(), f.teamA.Team(), store.Run{ID: id, Pipeline: "private-pipeline-" + id, Status: "running"}); err != nil {
+			if err := teststore.SeedRun(f.st, t.Context(), f.teamA.Team(), store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: "private-pipeline-" + id, Status: "running"}}); err != nil {
 				t.Fatal(err)
 			}
 			for _, auth := range []string{f.ownerB, f.everyScopeB} {

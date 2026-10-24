@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -30,7 +30,7 @@ func TestNativeHostCapacityStoreCannotReplaceMachineAdmission(t *testing.T) {
 	executed := false
 	owner.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		executed = true
-		return fixture.report(ctx, input, store.NodeSuccess)
+		return fixture.report(ctx, input, runstate.NodeSuccess)
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -38,8 +38,8 @@ func TestNativeHostCapacityStoreCannotReplaceMachineAdmission(t *testing.T) {
 	if err != nil || executed || completion.Outcome != "failed" {
 		t.Fatalf("completion=%+v executed=%v error=%v", completion, executed, err)
 	}
-	row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "job"})
-	if err != nil || row.Status != store.StatusDone || row.Outcome != store.NodeFailed || row.ClaimedBy != "" {
+	row, err := fixture.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "job"})
+	if err != nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeFailed || row.ClaimedBy != "" {
 		t.Fatalf("failed machine requirement did not settle: row=%+v error=%v", row, err)
 	}
 }
@@ -60,7 +60,7 @@ func TestNativeHostBindsRealCapacityPerRun(t *testing.T) {
 			if err != nil || len(state.Holders) != 1 || state.Holders[0].RunID != fixture.Accepted.RunID || state.Holders[0].NodeID != "a" {
 				t.Errorf("executed without native store capacity: state=%+v err=%v", state, err)
 			}
-			return fixture.report(ctx, input, store.NodeSuccess)
+			return fixture.report(ctx, input, runstate.NodeSuccess)
 		})
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		completion, err := owner.Run(ctx, fixture.Input)
@@ -104,7 +104,7 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 			}
 			config.Admission = ComposeStartGate(fixture.Tenant, machine, false)
 			queued := make(chan struct{}, 1)
-			config.Admission.Queued = func(context.Context, controllerwire.NodeRef, store.AcquireSlotResponse) error {
+			config.Admission.Queued = func(context.Context, runspec.NodeRef, runstate.AcquireSlotResponse) error {
 				queued <- struct{}{}
 				return nil
 			}
@@ -129,7 +129,7 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 						return context.Cause(ctx)
 					}
 				}
-				return fixture.report(ctx, input, store.NodeSuccess)
+				return fixture.report(ctx, input, runstate.NodeSuccess)
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			var workers sync.WaitGroup
@@ -230,7 +230,7 @@ func TestNativeClaimedJobsContendWithOptionalCompute(t *testing.T) {
 			}
 			config.Admission = ComposeStartGate(fixture.Tenant, machine, false)
 			queued := make(chan struct{}, 1)
-			config.Admission.Queued = func(_ context.Context, ref controllerwire.NodeRef, _ store.AcquireSlotResponse) error {
+			config.Admission.Queued = func(_ context.Context, ref runspec.NodeRef, _ runstate.AcquireSlotResponse) error {
 				if ref.NodeID == "b" {
 					queued <- struct{}{}
 				}
@@ -263,7 +263,7 @@ func TestNativeClaimedJobsContendWithOptionalCompute(t *testing.T) {
 					}
 				}
 				active.Add(-1)
-				return fixture.report(ctx, input, store.NodeSuccess)
+				return fixture.report(ctx, input, runstate.NodeSuccess)
 			})
 			inputs := make([]NodeInput, 0, 2)
 			for _, id := range []string{"a", "b"} {

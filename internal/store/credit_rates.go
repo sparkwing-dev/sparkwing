@@ -143,7 +143,7 @@ func (t CreditRateTable) Validate() error {
 	return nil
 }
 
-// Sorted returns the table ordered from the smallest class to the largest, which is the order [CreditRateTable.ClassFor] reads it in.
+// Sorted returns a copy of the table ordered from the smallest class to the largest.
 func (t CreditRateTable) Sorted() CreditRateTable {
 	out := append(CreditRateTable(nil), t...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Cores < out[j].Cores })

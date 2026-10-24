@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestMachineEnrollmentTeamSettingProperty(t *testing.T) {
@@ -17,9 +17,9 @@ func TestMachineEnrollmentTeamSettingProperty(t *testing.T) {
 		role := []Role{RoleOwner, RoleEditor, RoleReader}[roleIndex%3]
 		member := authorityMember(t, s, "member", role)
 		tenant := &Tenant{s: s, team: "a"}
-		owner := Actor{Authority: *spec.Authority}
+		owner := runstate.Actor{Authority: *spec.Authority}
 		a := teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings")
-		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: &enabled}); err != nil {
+		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MembersCanAddMachines: &enabled}); err != nil {
 			t.Fatal(err)
 		}
 		spec.Authority, spec.Personal, spec.ReservedPools = &member.Authority, personal, nil
@@ -44,7 +44,7 @@ func TestSharedMachineManagementRequiresCurrentAdministration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			owner := Actor{Authority: *spec.Authority}
+			owner := runstate.Actor{Authority: *spec.Authority}
 			tenant := &Tenant{s: s, team: "a"}
 			a := inventoryAuthorization(t, s, owner, "a", issued.Capability.Prefix)
 			rewriteSchemaExec(t, s.db, `UPDATE memberships SET role='editor' WHERE account_id='owner'`)
@@ -72,10 +72,10 @@ func TestTeamSettingAuditsOnlyCommittedChanges(t *testing.T) {
 	if err != nil || !initial.MembersCanAddMachines {
 		t.Fatalf("default settings: %+v %v", initial, err)
 	}
-	owner := Actor{Authority: *spec.Authority}
+	owner := runstate.Actor{Authority: *spec.Authority}
 	a := teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings")
 	for _, enabled := range []bool{false, false, true} {
-		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: &enabled}); err != nil {
+		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MembersCanAddMachines: &enabled}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -89,7 +89,7 @@ func TestTeamSettingAuditsOnlyCommittedChanges(t *testing.T) {
 		}
 	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_setting_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
-	if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: new(bool)}); err == nil {
+	if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MembersCanAddMachines: new(bool)}); err == nil {
 		t.Fatal("committed setting without its audit")
 	}
 	current, err := tenant.TeamSettings(t.Context())
@@ -101,7 +101,7 @@ func TestTeamSettingAuditsOnlyCommittedChanges(t *testing.T) {
 func TestTeamSettingRechecksAuthorityProperty(t *testing.T) {
 	property := func(change uint8, suffix uint32) bool {
 		s, spec := machineEnrollment(t)
-		a := teamAuthorization(t, s, Actor{Authority: *spec.Authority}, "a", "PUT", "/api/v1/team/settings")
+		a := teamAuthorization(t, s, runstate.Actor{Authority: *spec.Authority}, "a", "PUT", "/api/v1/team/settings")
 		switch change % 4 {
 		case 0:
 			rewriteSchemaExec(t, s.db, `UPDATE memberships SET role='editor' WHERE account_id='owner'`)
@@ -113,7 +113,7 @@ func TestTeamSettingRechecksAuthorityProperty(t *testing.T) {
 			a.Principal.Authority.ID = fmt.Sprintf("absent-%d", suffix)
 		}
 		tenant := &Tenant{s: s, team: "a"}
-		err := tenant.SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: new(bool)})
+		err := tenant.SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MembersCanAddMachines: new(bool)})
 		current, readErr := tenant.TeamSettings(t.Context())
 		events, auditErr := tenant.BusinessEvents(t.Context(), "team.settings_changed", 1000, "")
 		return err != nil && readErr == nil && current.MembersCanAddMachines && auditErr == nil && len(events) == 0

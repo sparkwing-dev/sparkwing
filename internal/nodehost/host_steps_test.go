@@ -16,10 +16,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -125,7 +127,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 				binding.Routes = nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "process-fixture"}
 				return ProcessGrant{Binding: binding, Revoke: func() error { revoked = true; return nil }}, nil
 			}
-			deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			deps.EnsureEngine = func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return input.Engine, nil
 			}
 			var child *scriptedSDK
@@ -168,9 +170,9 @@ func TestNativeExecutorSteps(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = host.Execute(ctx, input)
-			want := store.NodeSuccess
+			want := runstate.NodeSuccess
 			if id == "failfast" || id == "finally-chain" || id == "collect" || id == "continue" || id == "skippanic" || id == "panics" {
-				want = store.NodeFailed
+				want = runstate.NodeFailed
 			}
 			final := st.reports[len(st.reports)-1]
 			if final.To != want || err != nil && id != "skippanic" {

@@ -47,7 +47,7 @@ func loadSpawnPackages(repo string, visit func(*packages.Package)) ([]string, er
 		}
 		return nil
 	}
-	for _, target := range []string{"linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64", "windows/amd64", "windows/arm64"} {
+	for _, target := range supportedPlatforms {
 		platform, arch, _ := strings.Cut(target, "/")
 		if err := load(platform, arch, "0", "", []string{"./..."}); err != nil {
 			return nil, err

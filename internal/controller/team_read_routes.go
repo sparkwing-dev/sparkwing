@@ -4,10 +4,11 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-func (s *Server) teamReadEndpoints() []Endpoint {
-	endpoints := []Endpoint{
+func (s *Server) teamReadEndpoints() []controllerwire.Endpoint {
+	endpoints := []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/team/settings", Decode: authorityTarget, Handle: s.handleTeamSettings},
 		{Method: "GET", Pattern: "/api/v1/schedules", Decode: authorityTarget, Handle: s.handleListCrons},
 		{Method: "GET", Pattern: "/api/v1/schedules/{schedule}", Decode: authorityTarget, Handle: s.handleGetCron},
@@ -29,8 +30,8 @@ func (s *Server) teamReadEndpoints() []Endpoint {
 	return endpoints
 }
 
-func metricsEndpoint() Endpoint {
-	return Endpoint{
+func metricsEndpoint() controllerwire.Endpoint {
+	return controllerwire.Endpoint{
 		Method: "GET", Pattern: "/metrics", Authentication: capability.AuthCapability,
 		Decode: authorityTarget,
 		Handle: func(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {

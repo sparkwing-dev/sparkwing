@@ -19,7 +19,7 @@ func TestQueueState_NamesBudgetSource(t *testing.T) {
 	startDaemon(t, wingd.Config{
 		Home:         home,
 		Budget:       budget,
-		BudgetSource: wingd.BudgetSourceConfig,
+		BudgetSource: wingwire.BudgetSourceConfig,
 		BudgetOrigin: "/home/op/.config/sparkwing/config.yaml admission.budget",
 	})
 

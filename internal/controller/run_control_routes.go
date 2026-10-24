@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -15,7 +16,7 @@ import (
 type RunControlWriter interface {
 	Team() store.Team
 	CreateAuthorizedDebugPause(context.Context, capability.Authorized, string, string, time.Time, string) error
-	ResolveAuthorizedApproval(context.Context, capability.Authorized, controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error)
+	ResolveAuthorizedApproval(context.Context, capability.Authorized, store.ApprovalDecision) (store.ApprovalResult, error)
 }
 
 // DebugPauseResumer closes an authorized job pause in its committing transaction.
@@ -28,9 +29,9 @@ func (s *Server) runControlWriter(r *http.Request, a capability.Authorized) (Run
 	return tenantPort[RunControlWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
-func (s *Server) runControlEndpoints() []Endpoint {
+func (s *Server) runControlEndpoints() []controllerwire.Endpoint {
 	engine := s.engineController
-	return []Endpoint{
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/resume", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleResumeDebugPause},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/debug-pauses", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleCreateDebugPause},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/approvals/{job}", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleResolveApproval},
@@ -101,14 +102,14 @@ func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request, a
 	if err != nil {
 		return err
 	}
-	out, err := writer.ResolveAuthorizedApproval(r.Context(), a, body)
+	out, err := writer.ResolveAuthorizedApproval(r.Context(), a, store.ApprovalDecision(body))
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if out.Approval.RunID != a.Target.RunID || out.Approval.JobID != a.Target.NodeID {
-		return missingEndpointPolicy()
+	if out.Approval.RunID != a.Target.RunID || out.Approval.NodeID != a.Target.NodeID {
+		return routepolicy.MissingEndpointPolicy()
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, controllerwire.ApprovalResult{Approval: approvalView(out.Approval), Replayed: out.Replayed})
 	return nil
 }
 

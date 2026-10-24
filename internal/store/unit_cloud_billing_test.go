@@ -6,13 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func cloudRenewalBillingFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitClaim, Actor, *time.Time) {
+func cloudRenewalBillingFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitClaim, runstate.Actor, *time.Time) {
 	t.Helper()
 	s, demand, now := meteredUnitFixture(t, true)
 	if kind != capability.UnitNode {
@@ -56,12 +55,12 @@ func TestCloudRenewalBillsHeldTimeRegardlessOfActivityProperty(t *testing.T) {
 				*now = now.Add(5 * time.Second)
 				if kind == capability.UnitNode && reports != 0 {
 					admitExecution(t, &Tenant{s: s, team: claim.Team}, actor)
-					if _, err := (&Tenant{s: s, team: claim.Team}).TransitionNode(t.Context(), nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+					if _, err := (&Tenant{s: s, team: claim.Team}).TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 						t.Fatal(err)
 					}
 				}
 				start := *now
-				var beat LeaseBeat
+				var beat runstate.LeaseBeat
 				for renewal := range 8 {
 					executing := reports&(1<<renewal) != 0
 					var err error

@@ -22,10 +22,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
-func composedClaimants(t *testing.T, version string, policy *http.Client) map[string]controllerwire.Controller {
+func composedClaimants(t *testing.T, version string, policy engine.Config) map[string]controllerwire.Controller {
 	t.Helper()
 	root := t.TempDir()
 	st, err := openControllerStore(t.Context(), deployment.Config{}, filepath.Join(root, "state.db"))
@@ -97,7 +97,7 @@ func claimAs(t *testing.T, claims controllerwire.Controller, version string) err
 }
 
 func TestControllerCompositionAdmitsLauncherAndRunnerClaims(t *testing.T) {
-	for name, claims := range composedClaimants(t, "commit-0123456", nil) {
+	for name, claims := range composedClaimants(t, "commit-0123456", engine.Config{}) {
 		if err := claimAs(t, claims, "commit-0123456"); err != nil {
 			t.Fatalf("%s claim: %v", name, err)
 		}
@@ -119,16 +119,13 @@ func TestControllerCompositionEnforcesSignedRunnerPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := releaseauth.TrustedPublicKeys
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Now().UTC().Truncate(time.Second)
-	release := func(version string) engine.VersionInfo {
-		return engine.VersionInfo{Version: version, PublishedAt: now.Add(-time.Hour), SupportUntil: now.Add(-time.Hour).AddDate(0, 12, 0)}
+	release := func(version string) engineid.VersionInfo {
+		return engineid.VersionInfo{Version: version, PublishedAt: now.Add(-time.Hour), SupportUntil: now.Add(-time.Hour).AddDate(0, 12, 0)}
 	}
 	policy := engine.VersionIndex{
 		Format: 1, PublishedAt: now, Latest: "v0.30.0",
-		Versions: []engine.VersionInfo{release("v0.10.0"), release("v0.25.0"), release("v0.30.0")},
+		Versions: []engineid.VersionInfo{release("v0.10.0"), release("v0.25.0"), release("v0.30.0")},
 		Minimum:  engine.Restriction{Version: "v0.20.0", Reason: "minimum fixture", Security: true, AnnouncedAt: now, EffectiveAt: now},
 		Revoked:  []engine.Restriction{{Version: "v0.25.0", Reason: "revocation fixture", Security: true, AnnouncedAt: now, EffectiveAt: now}},
 	}
@@ -138,7 +135,7 @@ func TestControllerCompositionEnforcesSignedRunnerPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &http.Client{Transport: signedPolicyTransport{body: body, signature: ed25519.Sign(key, body)}}
-	for name, claims := range composedClaimants(t, "v0.30.0", transport) {
+	for name, claims := range composedClaimants(t, "v0.30.0", engine.Config{HTTPClient: transport, TrustedKeys: []ed25519.PublicKey{public}}) {
 		for version, want := range map[string]apierr.Code{"v0.10.0": apierr.VersionUnsupported, "v0.25.0": apierr.VersionRevoked, "v0.40.0": apierr.VersionUnsupported, "v0.30.0": ""} {
 			err := claimAs(t, claims, version)
 			var failure *apierr.Error

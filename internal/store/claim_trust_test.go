@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -56,7 +55,7 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 	if _, err := tenant.AcceptPlan(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "job"}, Actor: plan.Actor}); err != nil {
+	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "job"}, Actor: plan.Actor}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET allowed_pools=? WHERE team=? AND id=?`, []byte(`["prod"]`), tenant.Team(), plan.RunID); err != nil {

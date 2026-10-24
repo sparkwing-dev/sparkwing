@@ -9,8 +9,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -134,7 +134,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		return profile, match.Demand{}, authorityError(apierr.Forbidden, "work is reserved for its here claimant")
 	}
 	if sealed := run.spec; sealed != nil {
-		if (unit.Kind == capability.UnitNode || unit.Kind == capability.UnitEval) && runGuardRefusal(RunRow{Spec: sealed}) != "" {
+		if (unit.Kind == capability.UnitNode || unit.Kind == capability.UnitEval) && runGuardRefusal(RunRow{Execution: runstate.Execution{Spec: sealed}}) != "" {
 			return profile, match.Demand{}, authorityError(apierr.Forbidden, "run guard refused execution")
 		}
 		options = sealed.Resolved.Settings.Options
@@ -221,7 +221,7 @@ func launcherClaimant(c capability.Capability) bool {
 	return capability.Launcher(c)
 }
 
-func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref controllerwire.NodeRef) (UnitClaim, error) {
+func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, ref runspec.NodeRef) (UnitClaim, error) {
 	if err := checkOwnerTx(ctx, tx, team, actor, string(ref.RunID)); err != nil {
 		return UnitClaim{}, err
 	}

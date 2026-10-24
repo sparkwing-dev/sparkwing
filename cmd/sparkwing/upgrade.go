@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
@@ -59,9 +60,9 @@ func (c upgradeCommand) run(ctx context.Context, inv clisurface.Invocation) erro
 	if err != nil {
 		return err
 	}
-	sdk := engine.GoSDK
+	sdk := engineid.GoSDK
 	if typescript {
-		sdk = engine.TypeScriptSDK
+		sdk = engineid.TypeScriptSDK
 	}
 	resolver, err := c.newResolver()
 	if err != nil {
@@ -82,20 +83,20 @@ func (c upgradeCommand) run(ctx context.Context, inv clisurface.Invocation) erro
 }
 
 type upgradeReport struct {
-	Before   engine.Pin      `json:"before"`
-	After    engine.Pin      `json:"after"`
-	Engine   engine.Identity `json:"engine"`
-	Files    []string        `json:"files"`
-	Notices  []engine.Notice `json:"notices"`
-	Applied  bool            `json:"applied"`
-	Verified bool            `json:"verified"`
-	DryRun   bool            `json:"dry_run"`
+	Before   engineid.Pin      `json:"before"`
+	After    engineid.Pin      `json:"after"`
+	Engine   engineid.Identity `json:"engine"`
+	Files    []string          `json:"files"`
+	Notices  []engineid.Notice `json:"notices"`
+	Applied  bool              `json:"applied"`
+	Verified bool              `json:"verified"`
+	DryRun   bool              `json:"dry_run"`
 }
 
 func writeUpgradeReport(out io.Writer, format string, result engine.UpgradeResult) error {
 	report := upgradeReport{Before: result.Plan.Before, After: result.Plan.After, Engine: result.Plan.Engine, Files: []string{}, Notices: result.Plan.Notices, Applied: result.Applied, Verified: result.Verified, DryRun: result.DryRun}
 	if report.Notices == nil {
-		report.Notices = []engine.Notice{}
+		report.Notices = []engineid.Notice{}
 	}
 	for _, edit := range result.Plan.Edits {
 		report.Files = append(report.Files, edit.Path)

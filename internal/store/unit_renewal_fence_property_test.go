@@ -10,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestRenewUnitCannotMutateAStaleJobProperty(t *testing.T) {
@@ -34,7 +33,7 @@ func TestRenewUnitCannotMutateAStaleJobProperty(t *testing.T) {
 				prefix = fmt.Sprintf("forged-%x", random.Uint64())
 			}
 			tenant := &Tenant{s: s, team: claim.Team}
-			ref := controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}
+			ref := runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}
 			before, err := tenant.ReadNode(t.Context(), ref)
 			if err != nil {
 				t.Fatal(err)

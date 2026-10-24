@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -100,7 +101,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 			t.Log("local peer committed a foreign team request")
 			return false
 		}
-		if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: ref}, ref); err != nil {
+		if err := tenant.RevokeAuthority(t.Context(), runstate.Actor{Authority: ref}, ref); err != nil {
 			t.Fatal(err)
 		}
 		for _, key := range []string{"", body.IdempotencyKey} {

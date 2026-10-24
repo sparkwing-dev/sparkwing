@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -54,7 +55,7 @@ func (f *concurrencyTransactions) ReadAuthorizedGroup(_ context.Context, a capab
 	}
 	return &store.ConcurrencyState{
 		Key: group, Capacity: 2, EffectiveCapacity: 1, UsedCost: 1,
-		Holders: []store.ConcurrencyHolder{{HolderID: "other-holder", RunID: "run", NodeID: "sibling", Superseded: true, Cost: 1, ClaimedAt: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), LeaseExpiresAt: time.Date(2026, 10, 14, 12, 1, 0, 0, time.UTC)}},
+		Holders: []store.ConcurrencyHolder{{ConcurrencyHolder: runstate.ConcurrencyHolder{HolderID: "other-holder", RunID: "run", NodeID: "sibling", Superseded: true, Cost: 1, ClaimedAt: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), LeaseExpiresAt: time.Date(2026, 10, 14, 12, 1, 0, 0, time.UTC)}}},
 		Waiters: []store.ConcurrencyWaiter{{RunID: "next", NodeID: "next-job", Position: 0, Policy: "queue", ArrivedAt: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)}},
 	}, f.entered(a)
 }

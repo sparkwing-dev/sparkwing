@@ -9,11 +9,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // NewNodeInput constructs execution from an authenticated row, selected engine and granted runner.
-func NewNodeInput(accepted AcceptedRun, row store.NodeRow, selected engine.Resolved, granted nodeproto.RunnerIdentity) (NodeInput, error) {
+func NewNodeInput(accepted AcceptedRun, row runstate.NodeRow, selected engine.Resolved, granted nodeproto.RunnerIdentity) (NodeInput, error) {
 	var spec runspec.Spec
 	if accepted.RunID == "" || accepted.SpecHash == "" || accepted.PlanHash == "" || json.Unmarshal(accepted.Spec, &spec) != nil || string(spec.Hash) != accepted.SpecHash || string(spec.PlanHash) != accepted.PlanHash {
 		return NodeInput{}, executorError(apierr.SpecDrift, "execution requires the accepted run seal")
@@ -27,7 +27,7 @@ func NewNodeInput(accepted AcceptedRun, row store.NodeRow, selected engine.Resol
 	if row.Ref.RunID != runspec.RunID(accepted.RunID) || row.Ref.NodeID == "" || row.ClaimedBy == "" || row.CapabilityPrefix == "" || row.Generation < 1 || row.Attempt < 0 {
 		return NodeInput{}, executorError(apierr.LockHeld, "execution requires a persisted job award")
 	}
-	if row.Status != store.StatusPending || row.Outcome != "" {
+	if row.Status != runstate.StatusPending || row.Outcome != "" {
 		return NodeInput{}, executorError(apierr.IllegalTransition, "execution requires a claimed, unstarted job")
 	}
 	if row.SpecHash == "" {

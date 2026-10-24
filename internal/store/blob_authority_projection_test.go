@@ -5,9 +5,10 @@ import (
 	"math/rand/v2"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestDataProjectionAndChargeUseLiveAuthorityProperty(t *testing.T) {
@@ -108,7 +109,7 @@ func TestDataCancellationClosesSensitiveAccessWithoutEndingHolder(t *testing.T) 
 				t.Fatal("cancelled work committed signed-byte usage")
 			}
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
-				row, err := readNodeTx(t.Context(), tx, tenant.team, controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+				row, err := readNodeTx(t.Context(), tx, tenant.team, runspec.NodeRef{RunID: "run", NodeID: "job"})
 				if err != nil {
 					return err
 				}

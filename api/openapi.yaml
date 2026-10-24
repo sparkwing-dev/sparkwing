@@ -421,6 +421,34 @@ components:
         - verified_default_only
       type: object
       x-sparkwing-go-type: capability.DataScope
+    internal.capability.LauncherActivation:
+      additionalProperties: true
+      properties:
+        award:
+          $ref: '#/components/schemas/internal.capability.LeaseRef'
+        node_uid:
+          type: string
+        reservation_id:
+          type: string
+      required:
+        - award
+        - node_uid
+        - reservation_id
+      type: object
+      x-sparkwing-go-type: capability.LauncherActivation
+    internal.capability.LauncherObservation:
+      additionalProperties: true
+      properties:
+        award:
+          $ref: '#/components/schemas/internal.capability.LeaseRef'
+        rejected:
+          type: boolean
+        reservation:
+          type: boolean
+      required:
+        - award
+      type: object
+      x-sparkwing-go-type: capability.LauncherObservation
     internal.capability.LeaseRef:
       additionalProperties: true
       properties:
@@ -833,7 +861,7 @@ components:
           type: string
         engine:
           anyOf:
-            - $ref: '#/components/schemas/internal.engine.Identity'
+            - $ref: '#/components/schemas/internal.engineid.Identity'
             - type: "null"
         execution:
           anyOf:
@@ -1972,21 +2000,6 @@ components:
         - cause
       type: object
       x-sparkwing-go-type: controllerwire.JobTransitionRequest
-    internal.controllerwire.LauncherActivation:
-      additionalProperties: true
-      properties:
-        award:
-          $ref: '#/components/schemas/internal.capability.LeaseRef'
-        node_uid:
-          type: string
-        reservation_id:
-          type: string
-      required:
-        - award
-        - node_uid
-        - reservation_id
-      type: object
-      x-sparkwing-go-type: controllerwire.LauncherActivation
     internal.controllerwire.LauncherCapacityObservation:
       additionalProperties: true
       properties:
@@ -1996,19 +2009,6 @@ components:
         - award
       type: object
       x-sparkwing-go-type: controllerwire.LauncherCapacityObservation
-    internal.controllerwire.LauncherObservation:
-      additionalProperties: true
-      properties:
-        award:
-          $ref: '#/components/schemas/internal.capability.LeaseRef'
-        rejected:
-          type: boolean
-        reservation:
-          type: boolean
-      required:
-        - award
-      type: object
-      x-sparkwing-go-type: controllerwire.LauncherObservation
     internal.controllerwire.LauncherPreparation:
       additionalProperties: true
       properties:
@@ -2037,7 +2037,7 @@ components:
         activations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.LauncherActivation'
+                $ref: '#/components/schemas/internal.capability.LauncherActivation'
               type: array
             - type: "null"
         capacity:
@@ -2049,7 +2049,7 @@ components:
         observed:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.LauncherObservation'
+                $ref: '#/components/schemas/internal.capability.LauncherObservation'
               type: array
             - type: "null"
         preparing:
@@ -2198,18 +2198,6 @@ components:
         - state_seq
       type: object
       x-sparkwing-go-type: controllerwire.MaterializedResultSource
-    internal.controllerwire.NodeRef:
-      additionalProperties: true
-      properties:
-        job_id:
-          type: string
-        run_id:
-          type: string
-      required:
-        - run_id
-        - job_id
-      type: object
-      x-sparkwing-go-type: controllerwire.NodeRef
     internal.controllerwire.ObjectStoreBreaker:
       additionalProperties: true
       properties:
@@ -2603,7 +2591,7 @@ components:
         notices:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.engine.Notice'
+                $ref: '#/components/schemas/internal.engineid.Notice'
               type: array
             - type: "null"
         plan: {}
@@ -3135,7 +3123,7 @@ components:
             - type: "null"
         engine:
           anyOf:
-            - $ref: '#/components/schemas/internal.engine.Identity'
+            - $ref: '#/components/schemas/internal.engineid.Identity'
             - type: "null"
         finished_at:
           anyOf:
@@ -3161,7 +3149,7 @@ components:
         notices:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.engine.Notice'
+                $ref: '#/components/schemas/internal.engineid.Notice'
               type: array
             - type: "null"
         number:
@@ -3344,32 +3332,6 @@ components:
         - runners
       type: object
       x-sparkwing-go-type: controllerwire.Runners
-    internal.controllerwire.ScheduleDeclaration:
-      additionalProperties: true
-      properties:
-        args:
-          anyOf:
-            - additionalProperties:
-                type: string
-              type: object
-            - type: "null"
-        catch_up:
-          type: string
-        cron:
-          type: string
-        name:
-          type: string
-        overlap:
-          type: string
-        pipeline:
-          type: string
-        tz:
-          type: string
-      required:
-        - pipeline
-        - cron
-      type: object
-      x-sparkwing-go-type: controllerwire.ScheduleDeclaration
     internal.controllerwire.ScheduleDeletion:
       additionalProperties: true
       properties:
@@ -3471,35 +3433,6 @@ components:
         - claimed
       type: object
       x-sparkwing-go-type: controllerwire.ScheduleJob
-    internal.controllerwire.ScheduleOverride:
-      additionalProperties: true
-      properties:
-        args:
-          anyOf:
-            - anyOf:
-                - additionalProperties:
-                    type: string
-                  type: object
-                - type: "null"
-            - type: "null"
-        catch_up:
-          anyOf:
-            - type: string
-            - type: "null"
-        cron:
-          anyOf:
-            - type: string
-            - type: "null"
-        overlap:
-          anyOf:
-            - type: string
-            - type: "null"
-        tz:
-          anyOf:
-            - type: string
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: controllerwire.ScheduleOverride
     internal.controllerwire.ScheduleOverview:
       additionalProperties: true
       properties:
@@ -3549,7 +3482,7 @@ components:
         schedules:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.ScheduleDeclaration'
+                $ref: '#/components/schemas/internal.runspec.ScheduleDeclaration'
               type: array
             - type: "null"
         sha:
@@ -4255,13 +4188,42 @@ components:
         - detail
       type: object
       x-sparkwing-go-type: controllerwire.TimerStateView
-    internal.engine.Identity:
+    internal.cronspec.Override:
+      additionalProperties: true
+      properties:
+        args:
+          anyOf:
+            - anyOf:
+                - additionalProperties:
+                    type: string
+                  type: object
+                - type: "null"
+            - type: "null"
+        catch_up:
+          anyOf:
+            - type: string
+            - type: "null"
+        cron:
+          anyOf:
+            - type: string
+            - type: "null"
+        overlap:
+          anyOf:
+            - type: string
+            - type: "null"
+        tz:
+          anyOf:
+            - type: string
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: cronspec.Override
+    internal.engineid.Identity:
       additionalProperties: true
       properties:
         manifest_digest:
           type: string
         pin:
-          $ref: '#/components/schemas/internal.engine.Pin'
+          $ref: '#/components/schemas/internal.engineid.Pin'
         version:
           type: string
       required:
@@ -4269,8 +4231,8 @@ components:
         - version
         - manifest_digest
       type: object
-      x-sparkwing-go-type: engine.Identity
-    internal.engine.Notice:
+      x-sparkwing-go-type: engineid.Identity
+    internal.engineid.Notice:
       additionalProperties: true
       properties:
         enforce_at:
@@ -4295,8 +4257,8 @@ components:
         - kind
         - reason
       type: object
-      x-sparkwing-go-type: engine.Notice
-    internal.engine.Pin:
+      x-sparkwing-go-type: engineid.Notice
+    internal.engineid.Pin:
       additionalProperties: true
       properties:
         inputs_digest:
@@ -4317,12 +4279,12 @@ components:
         - manifest
         - inputs_digest
       type: object
-      x-sparkwing-go-type: engine.Pin
+      x-sparkwing-go-type: engineid.Pin
     internal.localhostwire.LocalCapacityRequest:
       additionalProperties: true
       properties:
         binding:
-          $ref: '#/components/schemas/internal.store.CapacityBinding'
+          $ref: '#/components/schemas/internal.runstate.CapacityBinding'
       required:
         - binding
       type: object
@@ -4342,17 +4304,17 @@ components:
         Expansions:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.store.AcceptedExpansionRow'
+                $ref: '#/components/schemas/internal.runstate.AcceptedExpansionRow'
               type: array
             - type: "null"
         Nodes:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.store.NodeRow'
+                $ref: '#/components/schemas/internal.runstate.NodeRow'
               type: array
             - type: "null"
         Run:
-          $ref: '#/components/schemas/internal.store.RunRow'
+          $ref: '#/components/schemas/internal.runstate.RunRow'
         StoreNow:
           format: date-time
           type: string
@@ -5308,6 +5270,18 @@ components:
         - retrier
       type: object
       x-sparkwing-go-type: runspec.Lineage
+    internal.runspec.NodeRef:
+      additionalProperties: true
+      properties:
+        job_id:
+          type: string
+        run_id:
+          type: string
+      required:
+        - run_id
+        - job_id
+      type: object
+      x-sparkwing-go-type: runspec.NodeRef
     internal.runspec.Optional...string.:
       additionalProperties: true
       properties:
@@ -5715,7 +5689,7 @@ components:
         default_branch_source:
           type: string
         engine:
-          $ref: '#/components/schemas/internal.engine.Identity'
+          $ref: '#/components/schemas/internal.engineid.Identity'
         entrypoint:
           type: string
         env:
@@ -5764,6 +5738,32 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.RunnerSelection
+    internal.runspec.ScheduleDeclaration:
+      additionalProperties: true
+      properties:
+        args:
+          anyOf:
+            - additionalProperties:
+                type: string
+              type: object
+            - type: "null"
+        catch_up:
+          type: string
+        cron:
+          type: string
+        name:
+          type: string
+        overlap:
+          type: string
+        pipeline:
+          type: string
+        tz:
+          type: string
+      required:
+        - pipeline
+        - cron
+      type: object
+      x-sparkwing-go-type: runspec.ScheduleDeclaration
     internal.runspec.SealedRequest:
       additionalProperties: true
       properties:
@@ -6135,7 +6135,7 @@ components:
         - sealed_at
       type: object
       x-sparkwing-go-type: runspec.Spec
-    internal.store.AcceptedExpansionRow:
+    internal.runstate.AcceptedExpansionRow:
       additionalProperties: true
       properties:
         Body: {}
@@ -6144,7 +6144,7 @@ components:
         Registration:
           $ref: '#/components/schemas/internal.runspec.SecretRegistration'
         Source:
-          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
+          $ref: '#/components/schemas/internal.runspec.NodeRef'
         SourceGeneration:
           type: integer
       required:
@@ -6154,8 +6154,8 @@ components:
         - BodyHash
         - Registration
       type: object
-      x-sparkwing-go-type: store.AcceptedExpansionRow
-    internal.store.AcquireSlotResponse:
+      x-sparkwing-go-type: runstate.AcceptedExpansionRow
+    internal.runstate.AcquireSlotResponse:
       additionalProperties: true
       properties:
         DriftNote:
@@ -6167,7 +6167,7 @@ components:
         Holders:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.store.ConcurrencyHolder'
+                $ref: '#/components/schemas/internal.runstate.ConcurrencyHolder'
               type: array
             - type: "null"
         Kind:
@@ -6199,8 +6199,8 @@ components:
         - QueueLength
         - Holders
       type: object
-      x-sparkwing-go-type: store.AcquireSlotResponse
-    internal.store.Actor:
+      x-sparkwing-go-type: runstate.AcquireSlotResponse
+    internal.runstate.Actor:
       additionalProperties: true
       properties:
         Authority:
@@ -6220,7 +6220,7 @@ components:
         NodeID:
           type: string
         Owner:
-          $ref: '#/components/schemas/internal.store.OwnerLeaseRef'
+          $ref: '#/components/schemas/internal.runstate.OwnerLeaseRef'
         Result:
           anyOf:
             - $ref: '#/components/schemas/internal.capability.RecordedResult'
@@ -6239,8 +6239,8 @@ components:
         - Generation
         - Owner
       type: object
-      x-sparkwing-go-type: store.Actor
-    internal.store.Applied:
+      x-sparkwing-go-type: runstate.Actor
+    internal.runstate.Applied:
       additionalProperties: true
       properties:
         Attempt:
@@ -6269,8 +6269,8 @@ components:
         - Generation
         - Attempt
       type: object
-      x-sparkwing-go-type: store.Applied
-    internal.store.CapacityBinding:
+      x-sparkwing-go-type: runstate.Applied
+    internal.runstate.CapacityBinding:
       additionalProperties: true
       properties:
         Generation:
@@ -6284,8 +6284,8 @@ components:
         - NodeID
         - Generation
       type: object
-      x-sparkwing-go-type: store.CapacityBinding
-    internal.store.ConcurrencyHolder:
+      x-sparkwing-go-type: runstate.CapacityBinding
+    internal.runstate.ConcurrencyHolder:
       additionalProperties: true
       properties:
         ClaimedAt:
@@ -6323,24 +6323,24 @@ components:
         - Cost
         - DeclaredCapacity
       type: object
-      x-sparkwing-go-type: store.ConcurrencyHolder
-    internal.store.LocalPublication:
+      x-sparkwing-go-type: runstate.ConcurrencyHolder
+    internal.runstate.LocalPublication:
       additionalProperties: true
       properties:
         Expansions:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.store.AcceptedExpansionRow'
+                $ref: '#/components/schemas/internal.runstate.AcceptedExpansionRow'
               type: array
             - type: "null"
         Nodes:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.store.NodeRow'
+                $ref: '#/components/schemas/internal.runstate.NodeRow'
               type: array
             - type: "null"
         Run:
-          $ref: '#/components/schemas/internal.store.RunRow'
+          $ref: '#/components/schemas/internal.runstate.RunRow'
         StoreNow:
           format: date-time
           type: string
@@ -6353,7 +6353,7 @@ components:
         publication_results:
           anyOf:
             - additionalProperties:
-                $ref: '#/components/schemas/internal.store.NodeResult'
+                $ref: '#/components/schemas/internal.runstate.NodeResult'
               type: object
             - type: "null"
       required:
@@ -6362,20 +6362,20 @@ components:
         - Expansions
         - StoreNow
       type: object
-      x-sparkwing-go-type: store.LocalPublication
-    internal.store.MaterializedResultSource:
+      x-sparkwing-go-type: runstate.LocalPublication
+    internal.runstate.MaterializedResultSource:
       additionalProperties: true
       properties:
         Ref:
-          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
+          $ref: '#/components/schemas/internal.runspec.NodeRef'
         StateSeq:
           type: integer
       required:
         - Ref
         - StateSeq
       type: object
-      x-sparkwing-go-type: store.MaterializedResultSource
-    internal.store.NodeResult:
+      x-sparkwing-go-type: runstate.MaterializedResultSource
+    internal.runstate.NodeResult:
       additionalProperties: true
       properties:
         ExitCode:
@@ -6409,8 +6409,8 @@ components:
         - ManifestRecord
         - Failure
       type: object
-      x-sparkwing-go-type: store.NodeResult
-    internal.store.NodeRow:
+      x-sparkwing-go-type: runstate.NodeResult
+    internal.runstate.NodeRow:
       additionalProperties: true
       properties:
         ApplicationRetries:
@@ -6462,7 +6462,7 @@ components:
           type: string
         OwnerExecution:
           anyOf:
-            - $ref: '#/components/schemas/internal.store.OwnerExecution'
+            - $ref: '#/components/schemas/internal.runstate.OwnerExecution'
             - type: "null"
         QueueStartedAt:
           anyOf:
@@ -6475,7 +6475,7 @@ components:
               type: string
             - type: "null"
         Ref:
-          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
+          $ref: '#/components/schemas/internal.runspec.NodeRef'
         Spec: {}
         SpecHash:
           type: string
@@ -6485,7 +6485,7 @@ components:
               type: string
             - type: "null"
         StateActor:
-          $ref: '#/components/schemas/internal.store.Actor'
+          $ref: '#/components/schemas/internal.runstate.Actor'
         StateDigest:
           type: string
         StateSeq:
@@ -6524,8 +6524,8 @@ components:
         - OutputRecord
         - ManifestRecord
       type: object
-      x-sparkwing-go-type: store.NodeRow
-    internal.store.OwnerExecution:
+      x-sparkwing-go-type: runstate.NodeRow
+    internal.runstate.OwnerExecution:
       additionalProperties: true
       properties:
         Allowed:
@@ -6533,7 +6533,7 @@ components:
         Generation:
           type: integer
         Node:
-          $ref: '#/components/schemas/internal.controllerwire.NodeRef'
+          $ref: '#/components/schemas/internal.runspec.NodeRef'
         NodeGeneration:
           type: integer
         Owner:
@@ -6551,8 +6551,8 @@ components:
         - SpecHash
         - Allowed
       type: object
-      x-sparkwing-go-type: store.OwnerExecution
-    internal.store.OwnerLeaseRef:
+      x-sparkwing-go-type: runstate.OwnerExecution
+    internal.runstate.OwnerLeaseRef:
       additionalProperties: true
       properties:
         Generation:
@@ -6578,8 +6578,8 @@ components:
         - Holder
         - Generation
       type: object
-      x-sparkwing-go-type: store.OwnerLeaseRef
-    internal.store.RetrySelection:
+      x-sparkwing-go-type: runstate.OwnerLeaseRef
+    internal.runstate.RetrySelection:
       additionalProperties: true
       properties:
         mode:
@@ -6587,15 +6587,15 @@ components:
         results:
           anyOf:
             - additionalProperties:
-                $ref: '#/components/schemas/internal.store.MaterializedResultSource'
+                $ref: '#/components/schemas/internal.runstate.MaterializedResultSource'
               type: object
             - type: "null"
       required:
         - mode
         - results
       type: object
-      x-sparkwing-go-type: store.RetrySelection
-    internal.store.RunRow:
+      x-sparkwing-go-type: runstate.RetrySelection
+    internal.runstate.RunRow:
       additionalProperties: true
       properties:
         AllowedPools:
@@ -6629,7 +6629,7 @@ components:
           type: integer
         Owner:
           anyOf:
-            - $ref: '#/components/schemas/internal.store.OwnerLeaseRef'
+            - $ref: '#/components/schemas/internal.runstate.OwnerLeaseRef'
             - type: "null"
         Pipeline:
           type: string
@@ -6640,7 +6640,7 @@ components:
           $ref: '#/components/schemas/internal.runspec.SealedRequest'
         Retry:
           anyOf:
-            - $ref: '#/components/schemas/internal.store.RetrySelection'
+            - $ref: '#/components/schemas/internal.runstate.RetrySelection'
             - type: "null"
         Spec:
           anyOf:
@@ -6654,7 +6654,7 @@ components:
         State:
           type: string
         StateActor:
-          $ref: '#/components/schemas/internal.store.Actor'
+          $ref: '#/components/schemas/internal.runstate.Actor'
         StateDigest:
           type: string
         StateSeq:
@@ -6662,9 +6662,9 @@ components:
         Team:
           type: string
       required:
+        - Team
         - ID
         - Number
-        - Team
         - Pipeline
         - State
         - Request
@@ -6685,7 +6685,7 @@ components:
         - StateDigest
         - StateActor
       type: object
-      x-sparkwing-go-type: store.RunRow
+      x-sparkwing-go-type: runstate.RunRow
     pkg.match.Resources:
       additionalProperties: true
       properties:
@@ -12864,7 +12864,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.store.AcquireSlotResponse'
+                $ref: '#/components/schemas/internal.runstate.AcquireSlotResponse'
           description: Successful response.
         default:
           content:
@@ -13180,7 +13180,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.store.Applied'
+                $ref: '#/components/schemas/internal.runstate.Applied'
           description: Successful response.
         default:
           content:
@@ -13252,7 +13252,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.store.LocalPublication'
+                $ref: '#/components/schemas/internal.runstate.LocalPublication'
           description: Successful response.
         default:
           content:
@@ -14045,7 +14045,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.controllerwire.ScheduleOverride'
+              $ref: '#/components/schemas/internal.cronspec.Override'
         required: true
       responses:
         2XX:

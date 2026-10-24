@@ -9,13 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
 func TestReplacementSelectsInstalledEngineWithoutNetwork(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, "go.mod", []byte("module fixture\nrequire "+GoModule+" v0.0.0\nreplace "+GoModule+" => ../sdk\n"))
-	pin, err := ReadPin(dir, GoSDK)
+	pin, err := ReadPin(dir, engineid.GoSDK)
 	if err != nil || pin.Replacement != "../sdk" || pin.Version != "v0.0.0" {
 		t.Fatalf("replacement pin: %+v %v", pin, err)
 	}
@@ -38,7 +39,7 @@ func TestReplacementSelectsInstalledEngineWithoutNetwork(t *testing.T) {
 	if selected.Executable != path || selected.Identity.Pin != pin || !validDigest(selected.AssetDigest) || selected.Identity.ManifestDigest != selected.AssetDigest {
 		t.Fatalf("installed identity: %+v", selected)
 	}
-	if len(selected.Notices) != 1 || selected.Notices[0].Kind != NoticePinDisabled || !strings.Contains(selected.Notices[0].Reason, "engine pinning is off") {
+	if len(selected.Notices) != 1 || selected.Notices[0].Kind != engineid.NoticePinDisabled || !strings.Contains(selected.Notices[0].Reason, "engine pinning is off") {
 		t.Fatalf("missing replacement warning: %+v", selected.Notices)
 	}
 	ensured, err := r.Ensure(t.Context(), selected.Identity, target)
@@ -60,7 +61,7 @@ func FuzzReplacementEngineCannotSubstituteAcceptedBinary(f *testing.F) {
 	f.Add("", "", "", uint8(1))
 	f.Fuzz(func(t *testing.T, executable, digest, version string, mutation uint8) {
 		target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
-		current, err := installedEngine(t.Context(), Pin{SDK: GoSDK, Version: "v0.0.0", Replacement: "../sdk"}, target)
+		current, err := installedEngine(t.Context(), engineid.Pin{SDK: engineid.GoSDK, Version: "v0.0.0", Replacement: "../sdk"}, target)
 		if err != nil {
 			t.Fatal(err)
 		}

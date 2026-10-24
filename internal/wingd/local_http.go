@@ -6,32 +6,17 @@ import (
 	"net"
 	"net/http"
 	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
-// LocalHTTP serves the shared controller handlers inside the elected local runtime.
-type LocalHTTP struct {
-	API, Dashboard http.Handler
-	// Shell serves the dashboard's static pages to a TCP browser that holds no session.
-	Shell http.Handler
-}
-
-type localPeerKey struct{}
-
-// LocalPeer reads the peer identity api.sock verified for this request: the
-// connection's own peer, or on the TCP dashboard the peer that minted the
-// bearer session. It does not prove the request arrived on the private socket.
-func LocalPeer(ctx context.Context) (LocalPeerIdentity, bool) {
-	peer, ok := ctx.Value(localPeerKey{}).(LocalPeerIdentity)
-	return copyPeerIdentity(peer), ok
-}
-
 // ServeAPI carries verified transport identity to the shared route authorizer.
-func (s LocalHTTP) ServeAPI(ctx context.Context, listener net.Listener) error {
+func ServeAPI(ctx context.Context, listener net.Listener, s localhostwire.LocalHTTP) error {
 	if listener == nil {
 		return errors.New("wingd: controller HTTP requires a listener")
 	}
 	return ServeLocalHTTP(ctx, localAPIListener{listener}, s.API, func(ctx context.Context, connection net.Conn) context.Context {
-		return context.WithValue(ctx, localPeerKey{}, connection.(APIConn).PeerIdentity())
+		return localhostwire.WithLocalPeer(ctx, connection.(APIConn).PeerIdentity())
 	}, nil)
 }
 
@@ -94,11 +79,11 @@ func (c *localHTTPConn) Close() error {
 	return c.err
 }
 
-func (c *localHTTPConn) PeerIdentity() LocalPeerIdentity {
+func (c *localHTTPConn) PeerIdentity() localhostwire.LocalPeerIdentity {
 	if peer, ok := c.Conn.(APIConn); ok {
 		return peer.PeerIdentity()
 	}
-	return LocalPeerIdentity{}
+	return localhostwire.LocalPeerIdentity{}
 }
 
 // ServeLocalHTTP cancels and joins handlers and connections before returning.

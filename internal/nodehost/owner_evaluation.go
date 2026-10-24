@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -21,7 +22,7 @@ import (
 
 // EvaluationStore exposes accepted declarations without granting state writes.
 type EvaluationStore interface {
-	ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
+	ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 }
 
@@ -52,10 +53,10 @@ type evaluationDependencies struct {
 	Store        EvaluationStore
 	Bind         func(context.Context, EvaluationInput) (ProcessGrant, error)
 	Start        func(context.Context, EvaluationInput) (ExecutorProcess, error)
-	EnsureEngine func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
+	EnsureEngine func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error)
 	ChildContext func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	Validation   nodeproto.ValidationContext
-	ReadOutput   func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	ReadOutput   func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error)
 	Masker       *secrets.Masker
 	Masks        *MaskRegistry
 }
@@ -99,7 +100,7 @@ func (h *OwnerEvaluator) evaluateExpansion(ctx context.Context, input Evaluation
 	if err != nil {
 		return nil, runspec.SecretRegistration{}, nil, err
 	}
-	if row.Generation < 0 || row.Status != store.StatusDone || (row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized) || row.Expansion != store.ExpansionExpected || len(job.Closures.Generate) == 0 {
+	if row.Generation < 0 || row.Status != runstate.StatusDone || (row.Outcome != runstate.NodeSuccess && row.Outcome != runstate.NodeMemoized) || row.Expansion != runstate.ExpansionExpected || len(job.Closures.Generate) == 0 {
 		return nil, runspec.SecretRegistration{}, nil, executorError(apierr.IllegalTransition, "expansion requires a successful source with expected generators")
 	}
 	bounded, cancel, err := h.deps.ChildContext(ctx, row.Execution.Timeout.Value, 0)
@@ -131,9 +132,9 @@ func (h *OwnerEvaluator) evaluateExpansion(ctx context.Context, input Evaluation
 	return body, registration, nil, nil
 }
 
-func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (runspec.Spec, store.NodeRow, nodeproto.JobSpec, error) {
+func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (runspec.Spec, runstate.NodeRow, nodeproto.JobSpec, error) {
 	var spec runspec.Spec
-	var row store.NodeRow
+	var row runstate.NodeRow
 	var job nodeproto.JobSpec
 	if err := h.deps.Masks.initializeAccepted(ctx, h.Store, input.Accepted); err != nil {
 		return spec, row, job, err
@@ -157,7 +158,7 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 	if string(hash) != input.Accepted.PlanHash {
 		return spec, row, job, executorError(apierr.PlanDrift, "evaluation plan does not match its accepted hash")
 	}
-	row, err = h.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
+	row, err = h.Store.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)})
 	if err != nil {
 		return spec, row, job, err
 	}

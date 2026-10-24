@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -58,7 +60,7 @@ func TestLocalRuntimeConstructionRetainsAdmissionPolicyAndBudget(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := config.Admission
-			if got.Home != home || got.AdmissionPolicy == nil || string(got.AdmissionPolicy.Mode) != mode || got.Budget.CoresFraction != .5 || !got.Budget.IgnoreExternal || got.BudgetSource != wingd.BudgetSourceConfig || got.BudgetOrigin != path+" admission.budget" {
+			if got.Home != home || got.AdmissionPolicy == nil || string(got.AdmissionPolicy.Mode) != mode || got.Budget.CoresFraction != .5 || !got.Budget.IgnoreExternal || got.BudgetSource != wingwire.BudgetSourceConfig || got.BudgetOrigin != path+" admission.budget" {
 				t.Fatalf("lost admission configuration: %+v", got)
 			}
 			if (mode == "custom") && (got.AdmissionPolicy.Scheduling.ClassWeight["batch"] != 37 || got.AdmissionPolicy.Scheduling.AgingEvery != 5) {
@@ -210,7 +212,7 @@ func TestProductionLocalSchedulesShareCapturedControllerHome(t *testing.T) {
 func TestProductionLocalQueueBindsRunnerPolicy(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
-	var runner runners.StoreRunnerConfig
+	var runner localcontroller.StoreRunnerConfig
 	owner, err := (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
 		services, err := bindLocalController(ctx, binding)
 		if err == nil {
@@ -261,7 +263,7 @@ func TestProductionLocalQueueChecksVersionWithoutNetwork(t *testing.T) {
 		binding.Controller.RunnerPolicy = &controller.SignedRunnerAdmission{Resolver: strict}
 		binding.Controller.LocalRunnerPolicy = &controller.SignedEngineVersionPolicy{Resolver: local}
 		services.Runner.Loop.Kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
-		queue, err = runners.NewStoreRunner(binding.Controller, services.Runner)
+		queue, err = localcontroller.NewStoreRunner(binding.Controller, services.Runner)
 		return services, err
 	}}).Open(t.Context(), home)
 	if err != nil {

@@ -9,8 +9,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -20,9 +22,9 @@ import (
 // the public display projection.
 type RunStatusFacts struct {
 	Snapshot store.RunSnapshot
-	Attempts []store.NodeAttempt
+	Attempts []runstate.NodeAttempt
 	Logs     []blob.LogSubject
-	Notices  []engine.Notice
+	Notices  []engineid.Notice
 }
 
 func (s *EngineController) handleRunDetail(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -38,12 +40,12 @@ func (s *EngineController) handleRunDetail(w http.ResponseWriter, r *http.Reques
 // execution seals. Local, remote and dashboard reads use the same projection.
 func (s *EngineController) RunDetail(ctx context.Context, a capability.Authorized) (controllerwire.RunDetail, error) {
 	if a.Target.Team == "" || a.Target.RunID == "" {
-		return controllerwire.RunDetail{}, missingEndpointPolicy()
+		return controllerwire.RunDetail{}, routepolicy.MissingEndpointPolicy()
 	}
 	read := s.ReadRunStatus
 	if read == nil {
 		if s.ResolveTenant == nil {
-			return controllerwire.RunDetail{}, missingEndpointPolicy()
+			return controllerwire.RunDetail{}, routepolicy.MissingEndpointPolicy()
 		}
 		read = s.readStoredRunStatus
 	}
@@ -67,7 +69,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		ID: run.ID, Number: run.Number, Team: string(run.Team), Status: string(run.State), StateSeq: run.StateSeq,
 		Inputs: runspec.DisplayRequest(run.Request), Jobs: make([]controllerwire.JobDetail, 0, len(facts.Snapshot.Nodes)),
 		Logs:    append([]blob.LogSubject{}, facts.Logs...),
-		Notices: append([]engine.Notice{}, facts.Notices...), StartedAt: run.StartedAt,
+		Notices: append([]engineid.Notice{}, facts.Notices...), StartedAt: run.StartedAt,
 		FinishedAt: run.FinishedAt, CancelRequestedAt: run.CancelRequestedAt,
 	}
 	if run.Spec != nil {
@@ -78,7 +80,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		identity := run.Spec.Resolved.Engine
 		detail.Engine = &identity
 	}
-	nodes := make(map[string]store.NodeRow, len(facts.Snapshot.Nodes))
+	nodes := make(map[string]runstate.NodeRow, len(facts.Snapshot.Nodes))
 	for _, row := range facts.Snapshot.Nodes {
 		if row.Ref.RunID != runspec.RunID(run.ID) || row.Ref.NodeID == "" {
 			return controllerwire.RunDetail{}, errors.New("invalid persisted status job")
@@ -115,7 +117,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 	return detail, nil
 }
 
-func statusAttempts(target capability.Target, nodes map[string]store.NodeRow, rows []store.NodeAttempt) ([]controllerwire.AttemptDetail, error) {
+func statusAttempts(target capability.Target, nodes map[string]runstate.NodeRow, rows []runstate.NodeAttempt) ([]controllerwire.AttemptDetail, error) {
 	result := make([]controllerwire.AttemptDetail, 0, len(rows))
 	type attemptKey struct {
 		job     string

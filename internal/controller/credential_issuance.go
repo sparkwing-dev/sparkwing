@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -47,7 +48,7 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 		return err
 	}
 	if s.credentialIssuer == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	p := a.Principal
 	var issued capability.Issued

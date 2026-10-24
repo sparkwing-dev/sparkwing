@@ -16,13 +16,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
@@ -32,10 +32,10 @@ import (
 type nativeState struct {
 	NativeHostStore
 	snapshot store.RunSnapshot
-	node     store.NodeRow
+	node     runstate.NodeRow
 }
 
-func (s *nativeState) ReadNode(ctx context.Context, _ controllerwire.NodeRef) (store.NodeRow, error) {
+func (s *nativeState) ReadNode(ctx context.Context, _ runspec.NodeRef) (runstate.NodeRow, error) {
 	return s.node, context.Cause(ctx)
 }
 
@@ -44,17 +44,17 @@ func (s *nativeState) ReadSnapshot(ctx context.Context, _ string) (store.RunSnap
 }
 
 type nativeEngine struct {
-	resolve func(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error)
+	resolve func(context.Context, engineid.Pin, releaseasset.Target) (engine.Resolved, error)
 }
 
-func (e nativeEngine) Resolve(ctx context.Context, pin engine.Pin, target releaseasset.Target) (engine.Resolved, error) {
+func (e nativeEngine) Resolve(ctx context.Context, pin engineid.Pin, target releaseasset.Target) (engine.Resolved, error) {
 	if e.resolve != nil {
 		return e.resolve(ctx, pin, target)
 	}
 	return engine.Resolved{}, errors.New("source boundary")
 }
 
-func (nativeEngine) Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+func (nativeEngine) Ensure(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("engine boundary")
 }
 
@@ -71,14 +71,11 @@ func nativeConfigFixture(t testing.TB) (NativeConfig, *nativeState) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := &nativeState{snapshot: store.RunSnapshot{Run: store.RunRow{
-		ID: "run", Team: store.DefaultTeam,
-		Request: runspec.SealedRequest{Request: runspec.Request{Team: string(store.DefaultTeam), Env: seal}},
-	}}}
+	state := &nativeState{snapshot: store.RunSnapshot{Run: store.RunRow{Team: store.DefaultTeam, Execution: runstate.Execution{ID: "run", Request: runspec.SealedRequest{Request: runspec.Request{Team: string(store.DefaultTeam), Env: seal}}}}}}
 	return NativeConfig{
-		Local: func(store.NodeRow) bool { return true }, Home: home, Admission: ComposeStartGate(nil, &LocalAdmission{}, false), Store: state, Parent: authority, Bindings: authority,
+		Local: func(runstate.NodeRow) bool { return true }, Home: home, Admission: ComposeStartGate(nil, &LocalAdmission{}, false), Store: state, Parent: authority, Bindings: authority,
 		Principal: principal, Refresh: func(context.Context) (capability.Principal, error) { return principal, nil },
-		Renew:    func(context.Context, string, bool) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil },
+		Renew:    func(context.Context, string, bool) (runstate.LeaseBeat, error) { return runstate.LeaseBeat{}, nil },
 		Source:   source.Options{Engines: nativeEngine{}, Base: procenv.Base{Local: true}},
 		Services: completeServiceFixture,
 		Storage: func(context.Context, capability.Principal) (StorageBinding, error) {
@@ -255,14 +252,14 @@ func TestNativeOwnerClassifiesAcquiredCodeInsteadOfLiveCheckout(t *testing.T) {
 			}
 			boundary := errors.New("verified engine resolution boundary")
 			resolved := false
-			cfg.Source.SDK = engine.GoSDK
+			cfg.Source.SDK = engineid.GoSDK
 			cfg.Source.Target = releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: "linux", GOARCH: "amd64"}
 			cfg.Source.BuildEnvironment = sourcetest.BuildEnvironment
-			cfg.Source.Engines = nativeEngine{resolve: func(_ context.Context, pin engine.Pin, _ releaseasset.Target) (engine.Resolved, error) {
+			cfg.Source.Engines = nativeEngine{resolve: func(_ context.Context, pin engineid.Pin, _ releaseasset.Target) (engine.Resolved, error) {
 				resolved = true
-				sdk, version, manifest := engine.TypeScriptSDK, "1.2.3", "package.json"
+				sdk, version, manifest := engineid.TypeScriptSDK, "1.2.3", "package.json"
 				if selectedGo {
-					sdk, version, manifest = engine.GoSDK, "v1.2.3", "go.mod"
+					sdk, version, manifest = engineid.GoSDK, "v1.2.3", "go.mod"
 				}
 				if pin.SDK != sdk || pin.Version != version || pin.Manifest != manifest || pin.InputsDigest == "" {
 					t.Fatalf("owner selected a different SDK pin: %+v", pin)
@@ -298,14 +295,14 @@ func TestNativeSDKSelectionDefersUnacceptedClassification(t *testing.T) {
 	for _, test := range []struct {
 		name, manifest, pipeline string
 		accepted                 bool
-		want                     engine.SDKKind
+		want                     engineid.SDKKind
 		refused                  bool
 	}{
 		{name: "go", pipeline: ".sparkwing"},
 		{name: "typescript", manifest: `{"devDependencies":{"@sparkwing/sdk":"1.2.3"}}`, pipeline: "pipelines"},
 		{name: "malformed", manifest: `{"dependencies":`, pipeline: ".sparkwing", refused: true},
 		{name: "escape", pipeline: "../outside", refused: true},
-		{name: "accepted", manifest: `{"dependencies":`, pipeline: ".sparkwing", accepted: true, want: engine.TypeScriptSDK},
+		{name: "accepted", manifest: `{"dependencies":`, pipeline: ".sparkwing", accepted: true, want: engineid.TypeScriptSDK},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cfg, state := nativeConfigFixture(t)
@@ -323,7 +320,7 @@ func TestNativeSDKSelectionDefersUnacceptedClassification(t *testing.T) {
 			state.snapshot.Run.Request.Request.Git.Repository.Key = runspec.RepoKey("local:" + root)
 			state.snapshot.Run.Request.Request.Source.Location = runspec.SourceLocation{LocalCheckout: root, PipelineDir: test.pipeline}
 			if test.accepted {
-				state.snapshot.Run.Spec = &runspec.Spec{Resolved: runspec.Resolved{Engine: engine.Identity{Pin: engine.Pin{SDK: test.want}}}}
+				state.snapshot.Run.Spec = &runspec.Spec{Resolved: runspec.Resolved{Engine: engineid.Identity{Pin: engineid.Pin{SDK: test.want}}}}
 			}
 			opened := false
 			services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) {
@@ -447,7 +444,7 @@ func TestNativeOwnerEvaluationHasProductionBinder(t *testing.T) {
 		data := &nativeStorageFixture{}
 		return StorageBinding{Bytes: data, Records: data, Authority: blob.Authority{CapabilityRef: principal.Capability.Prefix}}, nil
 	}
-	state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Spec: []byte(`{"id":"job"}`), SpecHash: "source-hash"}
+	state.node = runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Spec: []byte(`{"id":"job"}`), SpecHash: "source-hash"}
 	listener := &processListener{closed: make(chan struct{})}
 	services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })
 	if err != nil {

@@ -13,13 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -169,7 +168,7 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if trigger.IdempotencyKey == "" || trigger.Status != "pending" || run.State != store.RunPending || run.Request.Hash == "" {
+	if trigger.IdempotencyKey == "" || trigger.Status != "pending" || run.State != runstate.RunPending || run.Request.Hash == "" {
 		t.Errorf("unsealed or unqueued schedule: trigger=%+v run=%+v", trigger, run)
 	}
 }

@@ -12,6 +12,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
@@ -34,7 +36,7 @@ func seedRun(t *testing.T, runID, jobID, message string) *logPageFixture {
 }
 
 func (f *logPageFixture) GetRun(context.Context, string) (*store.Run, error) {
-	return &store.Run{ID: f.runID, Pipeline: "ci", Status: "success"}, nil
+	return &store.Run{RunSummary: runstate.RunSummary{ID: f.runID, Pipeline: "ci", Status: "success"}}, nil
 }
 
 func (f *logPageFixture) ListNodes(context.Context, string) ([]*store.Node, error) {

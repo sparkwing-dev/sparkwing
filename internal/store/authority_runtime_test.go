@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func authorityStore(t *testing.T) *Store {
@@ -99,7 +100,7 @@ func TestAuthorityResolutionRechecksCrossTeamAncestor(t *testing.T) {
 	if got.Capability.Parent == nil || got.Capability.Parent.ID != root.Prefix {
 		t.Fatalf("ancestry = %#v", got.Capability.Parent)
 	}
-	actor := Actor{Authority: *child.Parent, CapabilityPrefix: root.Prefix}
+	actor := runstate.Actor{Authority: *child.Parent, CapabilityPrefix: root.Prefix}
 	if err := s.AsOperator().RevokeAuthority(t.Context(), actor, *child.Parent); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +109,7 @@ func TestAuthorityResolutionRechecksCrossTeamAncestor(t *testing.T) {
 	}
 }
 
-func authorityMember(t *testing.T, s *Store, id string, role Role, teams ...Team) Actor {
+func authorityMember(t *testing.T, s *Store, id string, role Role, teams ...Team) runstate.Actor {
 	t.Helper()
 	team := Team("a")
 	if len(teams) != 0 {
@@ -118,7 +119,7 @@ func authorityMember(t *testing.T, s *Store, id string, role Role, teams ...Team
 	rewriteSchemaExec(t, s.db, "INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,?,?,1)", team, id, role)
 	rewriteSchemaExec(t, s.db, "INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,?,1,?,?,?)", id, id, "runs.read,runs.write,runs.control,team.admin", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano(), team, id)
 	rewriteSchemaExec(t, s.db, "INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,?,0)", id, team)
-	return Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
+	return runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: id}}
 }
 
 func TestAuthorityMembershipChangesInvalidateSessionDescendants(t *testing.T) {
@@ -335,7 +336,7 @@ func issueFixtureAward(t *testing.T, s *Store, tx *storeTx, spec capability.Awar
 	if spec.Unit == capability.UnitNode {
 		_, err = tx.ExecContext(t.Context(), `UPDATE nodes SET status='running',claimed_by='machine',capability_prefix=?,lease_expires_at=?,generation=7,attempt=2,started_at=1 WHERE run_id=? AND node_id=?`, issued.Capability.Prefix, expiry, unit.RunID, unit.NodeID)
 	} else {
-		err = writeOwnerClaimTx(t.Context(), tx, UnitClaim{Team: "a", Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{Holder: "machine", CapabilityPrefix: issued.Capability.Prefix, Generation: 7, LeaseExpiresAt: time.Unix(0, expiry)}})
+		err = writeOwnerClaimTx(t.Context(), tx, UnitClaim{Team: "a", Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: runstate.ClaimAward{Holder: "machine", CapabilityPrefix: issued.Capability.Prefix, Generation: 7, LeaseExpiresAt: time.Unix(0, expiry)}})
 	}
 	return issued, err
 }

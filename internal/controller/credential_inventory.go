@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -18,8 +19,8 @@ func (s *Server) credentialInventory(ctx context.Context, team string) (Credenti
 	return tenantPort[CredentialInventoryReader](ctx, s, store.Team(team))
 }
 
-func (s *Server) credentialEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) credentialEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/secrets", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleListSecrets},
 		{Method: "POST", Pattern: "/api/v1/secrets", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreateSecret},
 		{Method: "GET", Pattern: "/api/v1/secrets/{name}", Authentication: capability.AuthCapability, Decode: secretReadTarget, Handle: s.handleReadSecret},

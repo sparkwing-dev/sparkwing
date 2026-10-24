@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-type nodeResultRecordsFunc func(context.Context, *storeTx, Team, Actor, NodeRow, NodeResult) error
+type nodeResultRecordsFunc func(context.Context, *storeTx, Team, runstate.Actor, runstate.NodeRow, runstate.NodeResult) error
 
-func (f nodeResultRecordsFunc) AttachResultRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, row NodeRow, result NodeResult) error {
+func (f nodeResultRecordsFunc) AttachResultRecords(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, row runstate.NodeRow, result runstate.NodeResult) error {
 	return f(ctx, tx, team, actor, row, result)
 }
 
@@ -25,7 +26,7 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 			if scenario == "event_failure" {
 				rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_result_event BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'refuse result event'); END`)
 			}
-			tenant.s.resultRecords = nodeResultRecordsFunc(func(ctx context.Context, tx *storeTx, team Team, got Actor, row NodeRow, result NodeResult) error {
+			tenant.s.resultRecords = nodeResultRecordsFunc(func(ctx context.Context, tx *storeTx, team Team, got runstate.Actor, row runstate.NodeRow, result runstate.NodeResult) error {
 				if team != "a" || got != actor || row.Attempt != 3 || row.Generation != 2 || result.OutputRecord == nil || *result.OutputRecord != record {
 					t.Fatal("attachment lost the attempt fence")
 				}
@@ -40,7 +41,7 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 				}
 				return nil
 			})
-			change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &record}}}
+			change := nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, To: runstate.NodeSuccess, Cause: runstate.CauseReport, Actor: actor, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess, OutputRecord: &record}}}
 			_, err := tenant.TransitionNode(t.Context(), change)
 			if (scenario == "success") != (err == nil) {
 				t.Fatalf("%s: %v", scenario, err)
@@ -51,14 +52,14 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 			}
 			if scenario != "success" {
 				assertResultSelectors(t, node, materializedRecords{})
-				if node.Status != StatusRunning || node.StateSeq != 0 {
+				if node.Status != runstate.StatusRunning || node.StateSeq != 0 {
 					t.Fatalf("failed attachment ended job: %+v", node)
 				}
 				rewriteSchemaCount(t, tenant.s.db, "settings", 0)
 				rewriteSchemaCount(t, tenant.s.db, "events", 0)
 				return
 			}
-			if node.Status != StatusDone || node.Outcome != NodeSuccess {
+			if node.Status != runstate.StatusDone || node.Outcome != runstate.NodeSuccess {
 				t.Fatalf("successful attachment: %+v", node)
 			}
 			assertResultSelectors(t, node, materializedRecords{Output: &record})
@@ -75,7 +76,7 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 func TestResultRecordsFromAnEarlierAttemptCannotFinishARetry(t *testing.T) {
 	s, records, finish := blobResultFixture(t)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"retry":{"set":true,"value":1}}`))
-	retry := nodeTransition{Ref: finish.Ref, Actor: finish.Actor, To: NodeRunning, Cause: CauseRetry, SourceAttempt: sourceAttempt(2), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}}
+	retry := nodeTransition{Ref: finish.Ref, Actor: finish.Actor, To: runstate.NodeRunning, Cause: runstate.CauseRetry, SourceAttempt: sourceAttempt(2), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: "verify"}}}
 	if applied, err := records.tenant.TransitionNode(t.Context(), retry); err != nil || applied.Attempt != 3 {
 		t.Fatalf("retry: %+v, %v", applied, err)
 	}
@@ -94,7 +95,7 @@ func TestResultRecordsFromAnEarlierAttemptCannotFinishARetry(t *testing.T) {
 		}
 	}
 	rewriteSchemaCount(t, s.db, "events", 1)
-	finish.Extra.Result = &NodeResult{Outcome: NodeSuccess}
+	finish.Extra.Result = &runstate.NodeResult{Outcome: runstate.NodeSuccess}
 	if _, err := records.tenant.TransitionNode(t.Context(), finish); err != nil {
 		t.Fatalf("clean retry result refused: %v", err)
 	}

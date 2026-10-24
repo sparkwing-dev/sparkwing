@@ -10,20 +10,19 @@ import (
 	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 type sdkCode struct {
 	Store      EvaluationStore
-	ReadOutput func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error)
+	ReadOutput func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error)
 	Validation nodeproto.ValidationContext
 }
 
-func (h *sdkCode) readResult(ctx context.Context, row store.NodeRow, storage StorageBinding) (json.RawMessage, error) {
+func (h *sdkCode) readResult(ctx context.Context, row runstate.NodeRow, storage StorageBinding) (json.RawMessage, error) {
 	if storage.Bytes != nil || storage.Records != nil {
 		var job nodeproto.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
@@ -118,7 +117,7 @@ func (h *sdkCode) hello(ctx context.Context, session *executorSession, input Nod
 	return sdkHello(ctx, session, input.Engine.Identity, input.GrantedRunner, &input.RouteBinding)
 }
 
-func sdkHello(ctx context.Context, session *executorSession, identity engine.Identity, runner nodeproto.RunnerIdentity, binding *nodeproto.ProcessBinding) error {
+func sdkHello(ctx context.Context, session *executorSession, identity engineid.Identity, runner nodeproto.RunnerIdentity, binding *nodeproto.ProcessBinding) error {
 	var hello nodeproto.HelloResult
 	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: identity.Version}, Runner: &runner, Binding: binding}, &hello, "")
 	if err != nil {

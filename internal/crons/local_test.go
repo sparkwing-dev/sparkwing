@@ -27,11 +27,11 @@ func localRegistrationFixture(t *testing.T) (*harness, controllerwire.LocalSched
 	if err != nil {
 		t.Fatal(err)
 	}
-	var entries []controllerwire.ScheduleDeclaration
+	var entries []runspec.ScheduleDeclaration
 	for _, p := range project.Registry().Pipelines {
 		for _, e := range p.On.Schedule {
 			if e.Where == "local" {
-				entries = append(entries, controllerwire.ScheduleDeclaration{Pipeline: p.Name, Name: e.EffectiveName(), Cron: e.Cron, TZ: e.TZ, Overlap: e.Overlap, CatchUp: e.CatchUp, Args: e.Args})
+				entries = append(entries, runspec.ScheduleDeclaration{Pipeline: p.Name, Name: e.EffectiveName(), Cron: e.Cron, TZ: e.TZ, Overlap: e.Overlap, CatchUp: e.CatchUp, Args: e.Args})
 			}
 		}
 	}

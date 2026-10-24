@@ -6,9 +6,10 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func poolAdminFixture(t *testing.T) (*Store, *Tenant, Actor) {
+func poolAdminFixture(t *testing.T) (*Store, *Tenant, runstate.Actor) {
 	t.Helper()
 	s := authorityStore(t)
 	actor := authorityMember(t, s, "owner", RoleOwner)

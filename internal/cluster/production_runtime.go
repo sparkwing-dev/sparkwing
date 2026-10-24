@@ -15,11 +15,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -148,9 +150,9 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 			Admission:    nodehost.ComposeStartGate(state, machineAdmission, false),
 			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: submitted,
 			Home: home, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
-			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engine.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: procenv.Base{OwnerMachine: unit.OwnerMachine, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},
-			Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
-				return state.RenewOwner(ctx, store.Actor{}, computing)
+			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engineid.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: procenv.Base{OwnerMachine: unit.OwnerMachine, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},
+			Renew: func(ctx context.Context, _ string, computing bool) (runstate.LeaseBeat, error) {
+				return state.RenewOwner(ctx, runstate.Actor{}, computing)
 			},
 		}, private))
 		if err != nil {
@@ -177,7 +179,7 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 		}
 		if unit.Unit == capability.UnitTrigger {
 			adopt := services.Config.Owner.AdoptClaim
-			services.Config.Owner.AdoptClaim = func(ctx context.Context, claim store.ReconciledNode) error {
+			services.Config.Owner.AdoptClaim = func(ctx context.Context, claim runstate.ReconciledNode) error {
 				if err := private.AdoptClaim(ctx, claim); err != nil {
 					return err
 				}

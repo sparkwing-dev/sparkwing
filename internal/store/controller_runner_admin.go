@@ -6,9 +6,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func checkTeamAdministrationTx(ctx context.Context, tx *storeTx, team Team, actor Actor) (capability.Principal, error) {
+func checkTeamAdministrationTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor) (capability.Principal, error) {
 	p, err := resolveActorTx(ctx, tx, actor)
 	if err != nil {
 		return p, err
@@ -27,7 +28,7 @@ type RunnerRevocation struct {
 }
 
 // DeleteRunner revokes every root registered under this tenant's machine identity.
-func (t *Tenant) DeleteRunner(ctx context.Context, actor Actor, name string) (*RunnerRevocation, error) {
+func (t *Tenant) DeleteRunner(ctx context.Context, actor runstate.Actor, name string) (*RunnerRevocation, error) {
 	if name == "" {
 		return nil, authorityError(apierr.BadRequest, "runner name is required")
 	}

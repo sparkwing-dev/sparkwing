@@ -5,11 +5,11 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 type blobRecordMutation struct {
@@ -18,7 +18,7 @@ type blobRecordMutation struct {
 	members []blob.Member
 }
 
-func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobActor, batch []blobRecordMutation, copied bool, target *NodeRow) ([]blob.Record, error) {
+func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobActor, batch []blobRecordMutation, copied bool, target *runstate.NodeRow) ([]blob.Record, error) {
 	var digests []blob.Digest
 	seen := map[blob.RecordKey]blob.Record{}
 	for _, change := range batch {
@@ -99,7 +99,7 @@ func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobAc
 	return result, nil
 }
 
-func checkRecordMutationKey(a blobActor, key blob.RecordKey, target *NodeRow) error {
+func checkRecordMutationKey(a blobActor, key blob.RecordKey, target *runstate.NodeRow) error {
 	if target == nil {
 		return checkBlobWriteKey(a, key)
 	}

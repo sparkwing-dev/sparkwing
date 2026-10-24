@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestStoreReachabilityRetention(t *testing.T) {
@@ -52,10 +53,10 @@ func TestStoreReachabilityRetention(t *testing.T) {
 	}
 	_, tenant, request := materializationTarget(t, s, records.tenant, change.Ref)
 	copied, err := tenant.ReconcileNode(t.Context(), request)
-	if err != nil || copied.Kind != Materialize {
+	if err != nil || copied.Kind != runstate.Materialize {
 		t.Fatalf("copy: %+v: %v", copied, err)
 	}
-	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "target", Actor: request.Actor, Cause: RunFinish, To: RunSuccess}); err != nil {
+	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: "target", Actor: request.Actor, Cause: runstate.RunFinish, To: runstate.RunSuccess}); err != nil {
 		t.Fatal(err)
 	}
 	path := blobAccountingDiskStore(t, s)

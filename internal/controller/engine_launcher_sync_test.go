@@ -16,7 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-type launcherSyncFunc func(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
+type launcherSyncFunc func(context.Context, capability.AuthorityRef, []capability.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 
 func (f launcherSyncFunc) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
 	return f(ctx, ref, body.Observed)
@@ -38,7 +38,7 @@ func TestEngineLauncherSyncNativeFenceProperty(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &claim); err != nil || claim.Claim == nil {
 		t.Fatalf("claim: %s, %v", w.Body.String(), err)
 	}
-	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitPlan, ID: claim.Claim.UnitID, Holder: claim.Claim.Binding.Holder, Generation: claim.Claim.Binding.Generation}}
+	observation := capability.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitPlan, ID: claim.Claim.UnitID, Holder: claim.Claim.Binding.Holder, Generation: claim.Claim.Binding.Generation}}
 	random := rand.New(rand.NewPCG(410, 291))
 	for range 64 {
 		input := observation
@@ -53,7 +53,7 @@ func TestEngineLauncherSyncNativeFenceProperty(t *testing.T) {
 		case 3:
 			input.Award.ID += "-other"
 		}
-		body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{input}})
+		body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{input}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +67,7 @@ func TestEngineLauncherSyncNativeFenceProperty(t *testing.T) {
 		}
 	}
 	engineClaimHTTP(t, h, claim.Claim.Capability, "POST", "/api/v1/claims/exchange", `{}`, 200)
-	body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{observation}})
+	body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{observation}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,9 +93,9 @@ func TestEngineLauncherSyncHTTPUsesAuthenticatedRootAndNeverDeliversBearer(t *te
 	engineClaimHTTP(t, h, "", "POST", "/api/v1/launcher/sync", body, 401)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", body, 200)
 	called := 0
-	e.Launcher = launcherSyncFunc(func(_ context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
+	e.Launcher = launcherSyncFunc(func(_ context.Context, ref capability.AuthorityRef, observed []capability.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
 		called++
-		if ref != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "launcher"}) || !reflect.DeepEqual(observed, []controllerwire.LauncherObservation{{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit", Holder: "launcher", Generation: 1}}}) {
+		if ref != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "launcher"}) || !reflect.DeepEqual(observed, []capability.LauncherObservation{{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit", Holder: "launcher", Generation: 1}}}) {
 			t.Fatalf("sync inputs: %v %+v", ref, observed)
 		}
 		return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{{UnitID: "unit", Capability: "private-bootstrap"}}, Retired: []capability.LeaseRef{{Kind: capability.UnitNode, ID: "unit", Holder: "launcher", Generation: 1}}}, nil
@@ -105,7 +105,7 @@ func TestEngineLauncherSyncHTTPUsesAuthenticatedRootAndNeverDeliversBearer(t *te
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || len(got.Awards) != 1 || got.Awards[0].Capability != "" || len(got.Retired) != 1 || called != 1 || strings.Contains(w.Body.String(), "private-bootstrap") {
 		t.Fatalf("unsafe sync response: %s (%v)", w.Body.String(), err)
 	}
-	e.Launcher = launcherSyncFunc(func(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
+	e.Launcher = launcherSyncFunc(func(context.Context, capability.AuthorityRef, []capability.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
 		return controllerwire.LauncherSyncResponse{}, errors.New("private-snapshot-failure")
 	})
 	w = engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", body, 500)
@@ -119,7 +119,7 @@ func FuzzEngineLauncherSyncOmitsBearer(f *testing.F) {
 	f.Add("")
 	f.Fuzz(func(t *testing.T, raw string) {
 		original := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{{UnitID: "unit", Capability: raw}}}
-		e := &EngineController{Launcher: launcherSyncFunc(func(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
+		e := &EngineController{Launcher: launcherSyncFunc(func(context.Context, capability.AuthorityRef, []capability.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
 			return original, nil
 		})}
 		got, err := e.SyncLauncher(t.Context(), capability.Authorized{}, controllerwire.LauncherSyncRequest{})
@@ -131,19 +131,19 @@ func FuzzEngineLauncherSyncOmitsBearer(f *testing.F) {
 
 type launcherAwardSnapshot []store.LauncherAward
 
-func (s launcherAwardSnapshot) ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []controllerwire.LauncherActivation) ([]store.LauncherAward, []store.LauncherPreparation, error) {
+func (s launcherAwardSnapshot) ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LauncherActivation) ([]store.LauncherAward, []store.LauncherPreparation, error) {
 	return s, nil, nil
 }
 
 func TestLauncherCleanupRequiresPositiveAbsence(t *testing.T) {
-	observed := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit", Holder: "launcher", Generation: 1}}
+	observed := capability.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit", Holder: "launcher", Generation: 1}}
 	for _, gone := range []bool{false, true} {
 		var snapshot launcherAwardSnapshot
 		if gone {
 			snapshot = append(snapshot, store.LauncherAward{Fence: observed.Award, Gone: true})
 		}
 		reader := storeLauncherSync{store: snapshot}
-		response, err := reader.ReadLauncherSync(t.Context(), capability.AuthorityRef{}, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{observed}})
+		response, err := reader.ReadLauncherSync(t.Context(), capability.AuthorityRef{}, controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{observed}})
 		if err != nil || len(response.Awards) != 0 || len(response.Retired) != btoi(gone) || len(response.Deferred) != btoi(!gone) {
 			t.Fatalf("gone=%v: %+v, %v", gone, response, err)
 		}

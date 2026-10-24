@@ -2,7 +2,3 @@
 # <importing package dir><TAB><imported package>.
 # Only delete lines: guardcheck fails a finding missing here and a line no
 # finding matches. See .guards/README.md.
-internal/store	github.com/sparkwing-dev/sparkwing/internal/controllerwire
-internal/store	github.com/sparkwing-dev/sparkwing/internal/githubapp
-internal/store	github.com/sparkwing-dev/sparkwing/internal/source
-internal/store/teststore	github.com/sparkwing-dev/sparkwing/internal/controllerwire

@@ -80,7 +80,7 @@ unborn local checkout semantics. No wire, schema or credential grant changed.
 No contract change in another area remains requested. The lead-owned handoffs
 and amendment files were not edited.
 
-Shared files touched are internal/runners/store_runner.go,
+Shared files touched are internal/wingd/localcontroller/store_runner.go,
 internal/controller/engine_claim.go, internal/controller/review_oidc_native_test.go,
 cmd/sparkwing/local_services_test.go, cmd/sparkwing/run_offline_unix_test.go,
 internal/wingd/LOCAL-CONTROLLER.md and the two C3 contract files. The production

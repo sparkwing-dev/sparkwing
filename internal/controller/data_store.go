@@ -5,6 +5,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -13,7 +14,7 @@ type dataStoreAccess struct {
 }
 
 func (d dataStoreAccess) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error {
-	tenant, err := ScopedTenantPort[capability.DataAccessChecker](ctx, store.Team(authorized.Principal.Capability.Team), d.resolveTenant)
+	tenant, err := scopedTenantPort[capability.DataAccessChecker](ctx, store.Team(authorized.Principal.Capability.Team), d.resolveTenant)
 	if err != nil {
 		return err
 	}
@@ -61,11 +62,11 @@ func (s *Server) configureDataStore(d *DataController) {
 
 func (d *DataController) authorityTenant(ctx context.Context, authority blob.Authority) (*store.Tenant, error) {
 	if d.authority == nil {
-		return nil, missingEndpointPolicy()
+		return nil, routepolicy.MissingEndpointPolicy()
 	}
 	p, err := d.authority.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef})
 	if err != nil {
 		return nil, err
 	}
-	return ScopedTenantPort[*store.Tenant](ctx, store.Team(p.Capability.Team), d.ResolveTenant)
+	return scopedTenantPort[*store.Tenant](ctx, store.Team(p.Capability.Team), d.ResolveTenant)
 }

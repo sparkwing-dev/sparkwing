@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // BlobManifestReader separates bounded admission verification from admitted-member reads.
@@ -224,7 +225,7 @@ func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
 	return nil
 }
 
-func persistBlobRecordTx(ctx context.Context, tx *storeTx, record blob.Record, scope string, destination blob.UploadIdentity, target *NodeRow) error {
+func persistBlobRecordTx(ctx context.Context, tx *storeTx, record blob.Record, scope string, destination blob.UploadIdentity, target *runstate.NodeRow) error {
 	sourceJSON, err := json.Marshal(record.Source)
 	if err != nil {
 		return err

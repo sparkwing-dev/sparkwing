@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 func TestRunGoSDKNeedsOnlyThePipelineDependencyArchives(t *testing.T) {
@@ -33,7 +34,7 @@ func TestRunGoSDKNeedsOnlyThePipelineDependencyArchives(t *testing.T) {
 	writeInput(t, sdk, "go.mod", []byte("module "+engine.GoModule+"\ngo 1.26\n"))
 	writeInput(t, dir, "go.mod", []byte("module fixture\ngo 1.26\nrequire (\n"+engine.GoModule+" v0.20.0\nexample.test/unused v1.0.0\n)\nreplace "+engine.GoModule+" => "+filepath.ToSlash(sdk)+"\n"))
 	writeInput(t, dir, "main.go", []byte("package main\nfunc main(){print(\"built offline\")}\n"))
-	request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engine.GoSDK, ExecutableDirectory: t.TempDir()})
+	request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engineid.GoSDK, ExecutableDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +88,7 @@ func TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable(t *testing.T) {
 	writeInput(t, dir, "main.go", []byte("package main\nimport (\"fmt\"; sdk \""+engine.GoModule+"\"; \"example.com/spark\")\nfunc main(){fmt.Print(sdk.Value+spark.Value)}\n"))
 	install := func() engine.SDKCommand {
 		t.Helper()
-		request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engine.GoSDK, ExecutableDirectory: t.TempDir()})
+		request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engineid.GoSDK, ExecutableDirectory: t.TempDir()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -137,7 +138,7 @@ func TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable(t *testing.T) {
 	writeInput(t, dir, ".resolved.mod", []byte(overlay))
 	property := func(value string) bool {
 		writeInput(t, replacement, "entry.go", []byte(fmt.Sprintf("package sdk\nconst Value=%q\n", value)))
-		request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engine.GoSDK, ExecutableDirectory: t.TempDir()})
+		request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engineid.GoSDK, ExecutableDirectory: t.TempDir()})
 		if err != nil {
 			t.Fatal(err)
 		}

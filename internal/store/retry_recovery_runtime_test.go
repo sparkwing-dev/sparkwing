@@ -7,15 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestRecoveryPreservesTheAcceptedJobInItsTeam(t *testing.T) {
 	tenant, now, _ := liveHolderFixture(t)
-	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+	ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET spec_hash='accepted-spec',lease_expires_at=? WHERE team='a' AND run_id='run'`, now.Add(-time.Second).UnixNano())
 	before, err := tenant.ReadNode(t.Context(), ref)
 	if err != nil {
@@ -38,7 +37,7 @@ func TestRecoveryPreservesTheAcceptedJobInItsTeam(t *testing.T) {
 
 func TestReapedClaimCannotReportAfterReclaim(t *testing.T) {
 	tenant, now, oldHolder := liveHolderFixture(t)
-	ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+	ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=? WHERE team='a' AND run_id='run'`, now.Add(-time.Second).UnixNano())
 	lease := SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}
 	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
@@ -49,7 +48,7 @@ func TestReapedClaimCannotReportAfterReclaim(t *testing.T) {
 	if err != nil || row.Generation != 2 || row.Attempt != 3 || row.Disruptions != 1 {
 		t.Fatalf("requeued row = %+v, %v", row, err)
 	}
-	oldReport := nodeTransition{Ref: ref, To: NodeSuccess, Actor: oldHolder, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
+	oldReport := nodeTransition{Ref: ref, To: runstate.NodeSuccess, Actor: oldHolder, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(3), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess}}}
 	if _, err := tenant.TransitionNode(t.Context(), oldReport); err == nil {
 		t.Fatal("reaped holder reported into pending work")
 	}
@@ -66,12 +65,12 @@ func TestReapedClaimCannotReportAfterReclaim(t *testing.T) {
 		t.Fatal("reaped holder reported into a later generation")
 	}
 	oldReport.SourceAttempt = sourceAttempt(4)
-	oldReport.Actor = Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix}, CapabilityPrefix: claim.Prefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "next-runner", Generation: 3}}
+	oldReport.Actor = runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix}, CapabilityPrefix: claim.Prefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "next-runner", Generation: 3}}
 	if _, err := tenant.TransitionNode(t.Context(), oldReport); err != nil {
 		t.Fatal(err)
 	}
 	var outcome, reason string
-	if err := tenant.s.db.QueryRow(`SELECT outcome,failure_reason FROM node_attempts WHERE team='a' AND run_id='run' AND attempt=3`).Scan(&outcome, &reason); err != nil || outcome != string(NodeFailed) || reason != FailureAgentLost {
+	if err := tenant.s.db.QueryRow(`SELECT outcome,failure_reason FROM node_attempts WHERE team='a' AND run_id='run' AND attempt=3`).Scan(&outcome, &reason); err != nil || outcome != string(runstate.NodeFailed) || reason != FailureAgentLost {
 		t.Fatalf("old attempt = %s/%s, %v", outcome, reason, err)
 	}
 }
@@ -88,16 +87,16 @@ func TestRecoveryNeverResetsTerminalJobs(t *testing.T) {
 			if err != nil || len(reaped) != 1 || reaped[0].Requeued {
 				t.Fatalf("reaped = %+v, %v", reaped, err)
 			}
-			ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+			ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
 			before, err := tenant.ReadNode(t.Context(), ref)
-			want := NodeFailed
+			want := runstate.NodeFailed
 			if cancel {
-				want = NodeCancelled
+				want = runstate.NodeCancelled
 			}
-			if err != nil || before.Status != StatusDone || before.Outcome != want {
+			if err != nil || before.Status != runstate.StatusDone || before.Outcome != want {
 				t.Fatalf("terminal = %+v, %v", before, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, To: nodePending, Actor: reaper, Cause: CauseLeaseLapse}); err == nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, To: nodePending, Actor: reaper, Cause: runstate.CauseLeaseLapse}); err == nil {
 				t.Fatal("terminal job reopened")
 			}
 			after, err := tenant.ReadNode(t.Context(), ref)

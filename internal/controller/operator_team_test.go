@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -274,7 +275,7 @@ func TestOperatorCreateTeamHTTPRechecksBeforeCommit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := e.Store.AsOperator().RevokeAuthority(t.Context(), store.Actor{Authority: p.Authority}, p.Authority); err != nil {
+		if err := e.Store.AsOperator().RevokeAuthority(t.Context(), runstate.Actor{Authority: p.Authority}, p.Authority); err != nil {
 			t.Fatal(err)
 		}
 	}}

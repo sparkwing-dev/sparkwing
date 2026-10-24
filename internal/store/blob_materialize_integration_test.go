@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -128,13 +129,13 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 	request.MaterializeOnly = true
 	result, err := remote.ReconcileNode(t.Context(), request)
 	if damage != "none" {
-		if err != nil || result.Kind != store.Dispatch || result.Node.OutputRecord != nil || result.Node.ManifestRecord != nil {
+		if err != nil || result.Kind != runstate.Dispatch || result.Node.OutputRecord != nil || result.Node.ManifestRecord != nil {
 			t.Fatalf("bad bytes materialized: %+v: %v", result, err)
 		}
 		return
 	}
 
-	if err != nil || result.Kind != store.Materialize || result.Node.Outcome != store.NodeMemoized || result.Node.Attempt != 0 || result.Node.OutputRecord == nil || result.Node.ManifestRecord == nil {
+	if err != nil || result.Kind != runstate.Materialize || result.Node.Outcome != runstate.NodeMemoized || result.Node.Attempt != 0 || result.Node.OutputRecord == nil || result.Node.ManifestRecord == nil {
 		t.Fatalf("controller materialization: %+v: %v", result, err)
 	}
 	if _, err := s.DB().Exec("DELETE FROM runs WHERE team='a' AND id='run'"); err != nil {
@@ -144,16 +145,16 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 		t.Fatal(err)
 	}
 	selectedOutput, selectedManifest := *result.Node.OutputRecord, *result.Node.ManifestRecord
-	request.Policy, request.Source = store.SourceNone, nil
+	request.Policy, request.Source = runstate.SourceNone, nil
 	result, err = remote.ReconcileNode(t.Context(), request)
-	if err != nil || result.Kind != store.KeepTerminal || result.Node.OutputRecord == nil || result.Node.ManifestRecord == nil || *result.Node.OutputRecord != selectedOutput || *result.Node.ManifestRecord != selectedManifest {
+	if err != nil || result.Kind != runstate.KeepTerminal || result.Node.OutputRecord == nil || result.Node.ManifestRecord == nil || *result.Node.OutputRecord != selectedOutput || *result.Node.ManifestRecord != selectedManifest {
 		t.Fatalf("persisted destination selectors: %+v: %v", result, err)
 	}
 	nodes, err := tenant.ListNodes(t.Context(), "target")
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := receipt.BuildReceipt(&store.Run{ID: "target"}, nodes, 0, "")
+	rec := receipt.BuildReceipt(&store.Run{RunSummary: runstate.RunSummary{ID: "target"}}, nodes, 0, "")
 	if got := rec.Identity.OutputsHash["job"]; got != "sha256:"+string(digest) {
 		t.Fatalf("materialized receipt output = %q", got)
 	}

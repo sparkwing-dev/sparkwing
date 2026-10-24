@@ -1144,5 +1144,5 @@ var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 ```
 
 ```
-var ErrSecretMissing = secretname.ErrMissing
+var ErrSecretMissing = secrets.ErrSecretMissing
 ```

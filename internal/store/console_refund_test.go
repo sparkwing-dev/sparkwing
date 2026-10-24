@@ -6,7 +6,6 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
@@ -17,7 +16,7 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 	owner := authorityMember(t, s, "operator", RoleReader)
 	c := s.AsConsole(func(id string) bool { return id == "operator" })
 	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
-	req := controllerwire.OperatorRefund{PaymentID: event.PaymentID, RefundID: "re_console", AmountCents: 1, Reason: "support"}
+	req := OperatorRefund{PaymentID: event.PaymentID, RefundID: "re_console", AmountCents: 1, Reason: "support"}
 	property := func(noise string, dimension uint8) bool {
 		changed := a
 		switch dimension % 4 {

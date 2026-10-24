@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -34,10 +36,10 @@ func TestControllerPipelines_ListIsTheCallersTeamOnly(t *testing.T) {
 		t.Fatalf("ForTeam default: %v", err)
 	}
 	started := time.Now().Add(-time.Minute)
-	if err := teststore.SeedRun(f.store, ctx, own.Team(), store.Run{ID: "run-own", Pipeline: "own-build", Status: "success", StartedAt: started}); err != nil {
+	if err := teststore.SeedRun(f.store, ctx, own.Team(), store.Run{RunSummary: runstate.RunSummary{ID: "run-own", Pipeline: "own-build", Status: "success", StartedAt: started}}); err != nil {
 		t.Fatalf("CreateRun own: %v", err)
 	}
-	if err := teststore.SeedRun(f.store, ctx, tenantB.Team(), store.Run{ID: "run-b", Pipeline: "b-deploy", Status: "failed", StartedAt: started}); err != nil {
+	if err := teststore.SeedRun(f.store, ctx, tenantB.Team(), store.Run{RunSummary: runstate.RunSummary{ID: "run-b", Pipeline: "b-deploy", Status: "failed", StartedAt: started}}); err != nil {
 		t.Fatalf("CreateRun team B: %v", err)
 	}
 

@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -52,7 +51,7 @@ func TestBurstPersonalMachineOwnershipProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			a := teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings")
-			if err := (&Tenant{s: s, team: "a"}).SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettingsUpdate{MembersCanAddMachines: new(bool)}); err != nil {
+			if err := (&Tenant{s: s, team: "a"}).SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MembersCanAddMachines: new(bool)}); err != nil {
 				t.Fatal(err)
 			}
 			if i%4 == 0 {

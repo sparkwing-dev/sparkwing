@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestOwnerFinishRaceRejectsStaleAwardProperty(t *testing.T) {
@@ -32,9 +32,9 @@ func TestOwnerFinishRaceRejectsStaleAwardProperty(t *testing.T) {
 				t.Fatalf("successor: %+v, %v", second, err)
 			}
 			tenant := &Tenant{s: s, team: first.Team}
-			finish := func(claim UnitClaim) (Applied, error) {
-				actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-				return tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Unit: claim.Owner, Transition: RunCompletion{RunID: runspec.RunID(claim.RunID), Cause: RunFinish, Actor: actor}})
+			finish := func(claim UnitClaim) (runstate.Applied, error) {
+				actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+				return tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: claim.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(claim.RunID), Cause: runstate.RunFinish, Actor: actor}})
 			}
 			start := make(chan struct{})
 			var wg sync.WaitGroup
@@ -53,7 +53,7 @@ func TestOwnerFinishRaceRejectsStaleAwardProperty(t *testing.T) {
 			close(start)
 			wg.Wait()
 			before, err := tenant.ReadSnapshot(t.Context(), first.RunID)
-			if err != nil || before.Run.State != RunFailed || before.Run.FinishedAt == nil {
+			if err != nil || before.Run.State != runstate.RunFailed || before.Run.FinishedAt == nil {
 				t.Fatalf("successor verdict: %+v, %v", before.Run, err)
 			}
 			if _, err := finish(first); err == nil {

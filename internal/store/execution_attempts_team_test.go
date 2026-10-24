@@ -6,10 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
@@ -18,9 +17,9 @@ func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
 			s, demand, _ := meteredUnitFixture(t, i&1 != 0)
 			claim, actor := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: claim.Team}
-			ref := controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}
+			ref := runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}
 			admitExecution(t, tenant, actor)
-			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
+			started, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -32,7 +31,7 @@ func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
 			if err := s.AsOperator().TestOnlyCreateTeam(t.Context(), foreign.team); err != nil {
 				t.Fatal(err)
 			}
-			for _, target := range []controllerwire.NodeRef{ref, {RunID: ref.RunID + "' OR 1=1 --", NodeID: ref.NodeID}} {
+			for _, target := range []runspec.NodeRef{ref, {RunID: ref.RunID + "' OR 1=1 --", NodeID: ref.NodeID}} {
 				if got, err := foreign.ListNodeExecutionAttempts(t.Context(), string(target.RunID), string(target.NodeID)); !errors.Is(err, ErrNotFound) || got != nil {
 					t.Fatalf("foreign history=%+v, %v", got, err)
 				}
@@ -40,7 +39,7 @@ func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
 			if after, err := tenant.ListNodeExecutionAttempts(t.Context(), string(ref.RunID), string(ref.NodeID)); err != nil || !reflect.DeepEqual(own, after) {
 				t.Fatalf("refused reads changed history=%+v, %v", after, err)
 			}
-			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(int64(started.Attempt))}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(int64(started.Attempt))}); err != nil {
 				t.Fatal(err)
 			}
 			finished, err := tenant.ListNodeExecutionAttempts(t.Context(), string(ref.RunID), string(ref.NodeID))

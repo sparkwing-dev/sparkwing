@@ -15,7 +15,7 @@ tests. Installed controller/schedule refresh remains in `ManagedUnitManager`.
 Admission election, takeover and drain remain in their existing owners.
 
 Deleted `Binding.NewQueue`. `Config.Open` now checks the owned store directly and
-calls `runners.NewStoreRunner`. Its foreign-store refusal and partial-service
+calls `localcontroller.NewStoreRunner`. Its foreign-store refusal and partial-service
 cleanup still pass. The two queue fixtures call the same runner constructor.
 
 Deleted `BootstrapHost.RunFile`. `cluster.BootstrapRuntime` owns loading the

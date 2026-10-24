@@ -3,9 +3,9 @@ package nodehost
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -17,16 +17,16 @@ func capacityPlan(policy string, timeout int64, ids ...string) nodeproto.PlanDoc
 	return doc
 }
 
-func capacityRow(t *testing.T, fixture *storeHostFixture, id string) store.NodeRow {
+func capacityRow(t *testing.T, fixture *storeHostFixture, id string) runstate.NodeRow {
 	t.Helper()
-	row, err := fixture.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: runspec.NodeID(id)})
+	row, err := fixture.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: runspec.NodeID(id)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return row
 }
 
-func cancelCapacityNode(t *testing.T, fixture *storeHostFixture, row store.NodeRow) {
+func cancelCapacityNode(t *testing.T, fixture *storeHostFixture, row runstate.NodeRow) {
 	t.Helper()
 	if _, err := fixture.Tenant.TransitionNode(t.Context(), store.CancelNode{Ref: row.Ref, Actor: fixture.Actor}); err != nil {
 		t.Fatal(err)

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 // GitHubAppDeliveryRetention is how long a completed or failed delivery is bound to
@@ -324,8 +323,8 @@ func (o *Operator) FinishGitHubDelivery(ctx context.Context, claimed GitHubDeliv
 }
 
 // ListFailedGitHubDeliveries exposes processing failures under current team administration.
-func (t *Tenant) ListFailedGitHubDeliveries(ctx context.Context, a capability.Authorized) ([]controllerwire.FailedGitHubDelivery, error) {
-	out := []controllerwire.FailedGitHubDelivery{}
+func (t *Tenant) ListFailedGitHubDeliveries(ctx context.Context, a capability.Authorized) ([]FailedGitHubDelivery, error) {
+	out := []FailedGitHubDelivery{}
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 			return err
@@ -336,7 +335,7 @@ func (t *Tenant) ListFailedGitHubDeliveries(ctx context.Context, a capability.Au
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var d controllerwire.FailedGitHubDelivery
+			var d FailedGitHubDelivery
 			var received int64
 			if err := rows.Scan(&d.ID, &d.Event, &received, &d.LastError); err != nil {
 				return err

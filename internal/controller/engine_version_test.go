@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 type engineVersionFake struct {
@@ -19,8 +20,8 @@ type engineVersionFake struct {
 	policy        engine.VersionIndex
 	indexErr      error
 	evaluateErr   error
-	notices       []engine.Notice
-	release       engine.VersionInfo
+	notices       []engineid.Notice
+	release       engineid.VersionInfo
 	evaluated     string
 	indexTime     time.Time
 	evaluatedTime time.Time
@@ -34,12 +35,12 @@ func (f *engineVersionFake) Index(_ context.Context, _ *engine.Resolver, now tim
 
 func (f *engineVersionFake) Policy(engine.VerifiedIndex) engine.VersionIndex { return f.policy }
 
-func (f *engineVersionFake) Evaluate(_ engine.VerifiedIndex, version string, now time.Time) ([]engine.Notice, error) {
+func (f *engineVersionFake) Evaluate(_ engine.VerifiedIndex, version string, now time.Time) ([]engineid.Notice, error) {
 	f.evaluated, f.evaluatedTime = version, now
 	return f.notices, f.evaluateErr
 }
 
-func (f *engineVersionFake) CompatibilityFor(release engine.VersionInfo) controllerwire.Compatibility {
+func (f *engineVersionFake) CompatibilityFor(release engineid.VersionInfo) controllerwire.Compatibility {
 	f.release = release
 	return f.compatibility
 }
@@ -50,9 +51,9 @@ func engineVersionPolicy(f *engineVersionFake) *SignedEngineVersionPolicy {
 
 func TestEngineCompatibilityUsesExactVerifiedRelease(t *testing.T) {
 	published := time.Date(2024, time.February, 29, 12, 0, 0, 0, time.UTC)
-	release := engine.VersionInfo{Version: "v1.2.3", PublishedAt: published, SupportUntil: published.AddDate(1, 0, 0)}
+	release := engineid.VersionInfo{Version: "v1.2.3", PublishedAt: published, SupportUntil: published.AddDate(1, 0, 0)}
 	want := controllerwire.Compatibility{APIMajor: 1, EngineRelease: release.Version, ReleasedAt: published, GuaranteedUntil: release.SupportUntil}
-	fake := &engineVersionFake{policy: engine.VersionIndex{Versions: []engine.VersionInfo{{Version: "v9.0.0"}, release}, Revoked: []engine.Restriction{{Version: release.Version}}}, compatibility: want}
+	fake := &engineVersionFake{policy: engine.VersionIndex{Versions: []engineid.VersionInfo{{Version: "v9.0.0"}, release}, Revoked: []engine.Restriction{{Version: release.Version}}}, compatibility: want}
 	server := EngineController{VersionPolicy: engineVersionPolicy(fake)}
 	got, err := server.Compatibility(t.Context(), release.Version)
 	if err != nil || got != want || fake.release != release || fake.evaluated != "" || fake.indexTime.IsZero() {
@@ -64,9 +65,9 @@ func TestEngineCompatibilityCannotSubstituteAnotherRelease(t *testing.T) {
 	property := func(value string, known bool) bool {
 		target := "v1.2.3"
 		foreign := "foreign-" + value
-		fake := &engineVersionFake{policy: engine.VersionIndex{Versions: []engine.VersionInfo{{Version: foreign}}}}
+		fake := &engineVersionFake{policy: engine.VersionIndex{Versions: []engineid.VersionInfo{{Version: foreign}}}}
 		if known {
-			fake.policy.Versions = append(fake.policy.Versions, engine.VersionInfo{Version: target, PublishedAt: time.Unix(1, 0)})
+			fake.policy.Versions = append(fake.policy.Versions, engineid.VersionInfo{Version: target, PublishedAt: time.Unix(1, 0)})
 			fake.compatibility = controllerwire.Compatibility{APIMajor: 1, EngineRelease: target}
 		}
 		got, err := (&EngineController{VersionPolicy: engineVersionPolicy(fake)}).Compatibility(t.Context(), target)
@@ -85,7 +86,7 @@ func TestEngineVersionPolicyRefusesMissingOrFailedMetadata(t *testing.T) {
 	failed := errors.New("signed index unavailable")
 	for _, problem := range []string{"configuration", "resolver", "index", "version"} {
 		t.Run(problem, func(t *testing.T) {
-			fake := &engineVersionFake{policy: engine.VersionIndex{Versions: []engine.VersionInfo{{Version: "v1.2.3"}}}}
+			fake := &engineVersionFake{policy: engine.VersionIndex{Versions: []engineid.VersionInfo{{Version: "v1.2.3"}}}}
 			policy := engineVersionPolicy(fake)
 			server := EngineController{VersionPolicy: policy}
 			version := "v1.2.3"
@@ -114,11 +115,11 @@ func TestEngineVersionPolicyRefusesMissingOrFailedMetadata(t *testing.T) {
 }
 
 func TestEngineVersionNoticesPreserveSignedWarningsAndFallback(t *testing.T) {
-	fallback := engine.Notice{Kind: engine.NoticeIndexFallback, Reason: "using verified cached index"}
-	warning := engine.Notice{Kind: engine.NoticeSupportEnded, Version: "v1.2.3", Reason: "support window ended"}
-	fake := &engineVersionFake{index: engine.IndexResult{Fallback: true, Notices: []engine.Notice{fallback}}, notices: []engine.Notice{warning}}
+	fallback := engineid.Notice{Kind: engineid.NoticeIndexFallback, Reason: "using verified cached index"}
+	warning := engineid.Notice{Kind: engineid.NoticeSupportEnded, Version: "v1.2.3", Reason: "support window ended"}
+	fake := &engineVersionFake{index: engine.IndexResult{Fallback: true, Notices: []engineid.Notice{fallback}}, notices: []engineid.Notice{warning}}
 	got, err := engineVersionPolicy(fake).Notices(t.Context(), "v1.2.3")
-	if err != nil || !reflect.DeepEqual(got, []engine.Notice{fallback, warning}) || fake.evaluated != "v1.2.3" || !fake.indexTime.Equal(fake.evaluatedTime) {
+	if err != nil || !reflect.DeepEqual(got, []engineid.Notice{fallback, warning}) || fake.evaluated != "v1.2.3" || !fake.indexTime.Equal(fake.evaluatedTime) {
 		t.Fatalf("notices=%+v err=%v", got, err)
 	}
 	got[0].Reason, got[1].Reason = "changed", "changed"
@@ -134,7 +135,7 @@ func TestEngineVersionNoticesKeepEnforcementVisibleOnStoredRuns(t *testing.T) {
 			fake := &engineVersionFake{evaluateErr: fmt.Errorf("evaluate: %w", failure)}
 			got, err := engineVersionPolicy(fake).Notices(t.Context(), "v1.2.3")
 			if code == apierr.VersionRevoked || code == apierr.VersionUnsupported {
-				want := []engine.Notice{{Kind: engine.NoticeEnforcement, Version: "v1.2.3", Reason: failure.Message, Hint: failure.Hint}}
+				want := []engineid.Notice{{Kind: engineid.NoticeEnforcement, Version: "v1.2.3", Reason: failure.Message, Hint: failure.Hint}}
 				if err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("enforcement notices=%+v err=%v", got, err)
 				}

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
@@ -21,7 +22,7 @@ func (f verifyFunc) Verify(ctx context.Context, dir string, resolved Resolved) e
 }
 
 func TestUpgradeStagesNativePinsAndLocksBeforeApplying(t *testing.T) {
-	for _, sdk := range []SDKKind{GoSDK, TypeScriptSDK} {
+	for _, sdk := range []engineid.SDKKind{engineid.GoSDK, engineid.TypeScriptSDK} {
 		t.Run(string(sdk), func(t *testing.T) {
 			r, transport, key, _, _ := fixtureResolver(t)
 			target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
@@ -35,7 +36,7 @@ func TestUpgradeStagesNativePinsAndLocksBeforeApplying(t *testing.T) {
 				if stage == repo {
 					t.Fatal("native resolver ran in original checkout")
 				}
-				if sdk == GoSDK {
+				if sdk == engineid.GoSDK {
 					if name != "go" {
 						t.Fatalf("wrong native tool %s", name)
 					}
@@ -120,14 +121,14 @@ func TestUpgradeStagesNativePinsAndLocksBeforeApplying(t *testing.T) {
 	}
 }
 
-func createUpgradeRepo(t *testing.T, dir string, sdk SDKKind) {
+func createUpgradeRepo(t *testing.T, dir string, sdk engineid.SDKKind) {
 	t.Helper()
 	writeFixture(t, dir, "unrelated.txt", []byte("keep me"))
 	dir = filepath.Join(dir, ".sparkwing")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if sdk == GoSDK {
+	if sdk == engineid.GoSDK {
 		writeFixture(t, dir, "go.mod", []byte("module fixture\ngo 1.26\nrequire github.com/sparkwing-dev/sparkwing v0.10.2\n"))
 		writeFixture(t, dir, "go.sum", []byte("original native checksums\n"))
 	} else {
@@ -147,7 +148,7 @@ func TestFailedOrConcurrentUpgradeLeavesOriginalPins(t *testing.T) {
 	for _, concurrent := range []bool{false, true} {
 		t.Run(fmt.Sprintf("concurrent_%v", concurrent), func(t *testing.T) {
 			repo := t.TempDir()
-			createUpgradeRepo(t, repo, GoSDK)
+			createUpgradeRepo(t, repo, engineid.GoSDK)
 			original, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.mod"))
 			if err != nil {
 				t.Fatal(err)
@@ -159,7 +160,7 @@ func TestFailedOrConcurrentUpgradeLeavesOriginalPins(t *testing.T) {
 				writeFixture(t, filepath.Join(repo, ".sparkwing"), "go.mod", append(original, []byte("// concurrent user edit\n")...))
 				return nil
 			})
-			result, err := r.Upgrade(context.Background(), UpgradeRequest{Checkout: repo, SDK: GoSDK}, verifier)
+			result, err := r.Upgrade(context.Background(), UpgradeRequest{Checkout: repo, SDK: engineid.GoSDK}, verifier)
 			if err == nil || result.Applied {
 				t.Fatalf("failed upgrade applied: %+v %v", result, err)
 			}

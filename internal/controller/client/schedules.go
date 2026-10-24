@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -98,7 +100,7 @@ func (c *engineClient) SetSchedulePaused(ctx context.Context, name string, pause
 	return row, err
 }
 
-func (c *engineClient) OverrideSchedule(ctx context.Context, name string, input controllerwire.ScheduleOverride) (controllerwire.ScheduleView, error) {
+func (c *engineClient) OverrideSchedule(ctx context.Context, name string, input cronspec.Override) (controllerwire.ScheduleView, error) {
 	if err := input.Validate(); err != nil {
 		return controllerwire.ScheduleView{}, scheduleInputError(err.Error())
 	}
@@ -202,7 +204,7 @@ func (c *engineClient) WriteSchedules(ctx context.Context, input controllerwire.
 			return result, scheduleInputError("invalid or repeated schedule declaration")
 		}
 		seen[key] = true
-		override := controllerwire.ScheduleOverride{Cron: &declaration.Cron}
+		override := cronspec.Override{Cron: &declaration.Cron}
 		if declaration.TZ != "" {
 			override.TZ = &declaration.TZ
 		}
@@ -246,7 +248,7 @@ func (c *engineClient) DeleteSchedulesForRepo(ctx context.Context, repo string) 
 	return result, err
 }
 
-func confirmsScheduleOverride(got controllerwire.OverrideView, want controllerwire.ScheduleOverride) bool {
+func confirmsScheduleOverride(got controllerwire.OverrideView, want cronspec.Override) bool {
 	fields := map[string]bool{}
 	for _, field := range got.Fields {
 		fields[field] = true

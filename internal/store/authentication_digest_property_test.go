@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestAuthenticationDigestSelectsOnlyLiveAuthorityProperty(t *testing.T) {
@@ -62,7 +63,7 @@ func TestAuthenticationDigestSelectsOnlyLiveAuthorityProperty(t *testing.T) {
 		}
 		if i%2 == 0 {
 			tenant := &Tenant{s: s, team: "a"}
-			actor := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix}
+			actor := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix}
 			if err := tenant.RevokeAuthority(t.Context(), actor, actor.Authority); err != nil {
 				t.Fatal(err)
 			}

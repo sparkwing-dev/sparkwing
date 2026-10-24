@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func bindingExpansionTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
@@ -17,14 +16,14 @@ func bindingExpansionTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 	if b.Kind != capability.BindingNode || b.Expansion == nil || b.RunID == "" || b.RunID != target.RunID || b.NodeID == "" || b.NodeID != target.NodeID || b.Generation != target.SourceGeneration {
 		return bindingRefusal()
 	}
-	row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})
+	row, err := readNodeTx(ctx, tx, Team(c.Team), runspec.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})
 	if err != nil {
 		return err
 	}
 	if c.Unit == capability.UnitEval && row.Generation == runspec.ClaimGeneration(b.Generation) && pendingApprovalPredicate(row) {
 		return nil
 	}
-	if row.Status != StatusDone || row.Generation != runspec.ClaimGeneration(b.Generation) || row.Outcome != NodeSuccess && row.Outcome != NodeMemoized || row.Expansion == ExpansionAbsent || row.Expansion == ExpansionNone {
+	if row.Status != runstate.StatusDone || row.Generation != runspec.ClaimGeneration(b.Generation) || row.Outcome != runstate.NodeSuccess && row.Outcome != runstate.NodeMemoized || row.Expansion == runstate.ExpansionAbsent || row.Expansion == runstate.ExpansionNone {
 		return bindingRefusal()
 	}
 	return nil
@@ -46,11 +45,11 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		if err != nil {
 			return err
 		}
-		row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)})
+		row, err := readNodeTx(ctx, tx, Team(c.Team), runspec.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)})
 		if err != nil {
 			return err
 		}
-		if run.FinishedAt == nil || row.Status != StatusDone || row.Outcome != NodeSuccess && row.Outcome != NodeMemoized || runspec.ClaimGeneration(target.SourceGeneration) != 0 && row.Generation != runspec.ClaimGeneration(target.SourceGeneration) {
+		if run.FinishedAt == nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeSuccess && row.Outcome != runstate.NodeMemoized || runspec.ClaimGeneration(target.SourceGeneration) != 0 && row.Generation != runspec.ClaimGeneration(target.SourceGeneration) {
 			return bindingRefusal()
 		}
 		return bindingPipelineReferenceTx(ctx, tx, c, capability.PipelineReferenceTarget{Pipeline: run.Request.Request.Pipeline, JobID: target.NodeID})
@@ -62,7 +61,7 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 	if err != nil {
 		return err
 	}
-	var source *NodeRow
+	var source *runstate.NodeRow
 	for i := range snapshot.Nodes {
 		if snapshot.Nodes[i].Ref.NodeID == runspec.NodeID(target.NodeID) {
 			source = &snapshot.Nodes[i]
@@ -176,7 +175,7 @@ func bindingSourceTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 		return bindingRefusal()
 	}
 	if b.Kind == capability.BindingNode {
-		row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})
+		row, err := readNodeTx(ctx, tx, Team(c.Team), runspec.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})
 		if err != nil {
 			return err
 		}

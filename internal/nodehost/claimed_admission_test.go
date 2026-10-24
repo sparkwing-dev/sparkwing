@@ -5,18 +5,17 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestClaimedNodeAdmissionCoversSourceAndJoinedExecution(t *testing.T) {
 	input, _, host, processes := claimedNodeFixture(t)
 	daemon := newFakeDaemon()
-	host.Admission = ComposeStartGate(&capacityProbe{admit: func(context.Context) (store.AcquireSlotResponse, error) {
-		return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+	host.Admission = ComposeStartGate(&capacityProbe{admit: func(context.Context) (runstate.AcquireSlotResponse, error) {
+		return runstate.AcquireSlotResponse{Kind: runstate.AcquireGranted}, nil
 	}}, &LocalAdmission{Daemon: daemon}, false)
 	acquire := host.Acquire
 	host.Acquire = func(ctx context.Context, spec source.Spec, options source.Options) (*source.Entry, error) {
@@ -40,12 +39,12 @@ func TestClaimedNodeCancellationWhileQueuedNeverAcquiresSource(t *testing.T) {
 	input, state, host, processes := claimedNodeFixture(t)
 	daemon := newFakeDaemon()
 	daemon.hostGate = make(chan struct{})
-	host.Admission = ComposeStartGate(&capacityProbe{admit: func(context.Context) (store.AcquireSlotResponse, error) {
-		return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+	host.Admission = ComposeStartGate(&capacityProbe{admit: func(context.Context) (runstate.AcquireSlotResponse, error) {
+		return runstate.AcquireSlotResponse{Kind: runstate.AcquireGranted}, nil
 	}}, &LocalAdmission{Daemon: daemon}, false)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	host.Admission.compute.Queued = func(context.Context, controllerwire.NodeRef, wingwire.Queued) { cancel() }
+	host.Admission.compute.Queued = func(context.Context, runspec.NodeRef, wingwire.Queued) { cancel() }
 	host.Acquire = func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
 		t.Error("acquired source before admission")
 		return nil, errors.New("unadmitted source acquisition")
@@ -57,7 +56,7 @@ func TestClaimedNodeCancellationWhileQueuedNeverAcquiresSource(t *testing.T) {
 		t.Fatal("cancelled claim retained machine resources or started execution")
 	}
 	for _, change := range state.changes {
-		if change.Cause == store.CauseStart {
+		if change.Cause == runstate.CauseStart {
 			t.Fatal("queued claim started an execution attempt")
 		}
 	}

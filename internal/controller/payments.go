@@ -9,6 +9,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -38,12 +40,12 @@ type paymentProof struct {
 }
 
 func (s *Server) paymentHandler() http.Handler {
-	router := NewPolicyRouter(RouteAuthorization{})
-	if err := router.Register(Endpoint{
+	router := routepolicy.New(routepolicy.Authorization{})
+	if err := router.Register(controllerwire.Endpoint{
 		Method: http.MethodPost, Pattern: "/webhooks/stripe", Authentication: capability.AuthPaymentWebhook,
 		Verify: s.verifyPaymentRequest, Handle: s.settlePaymentRequest,
 	}); err != nil {
-		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writePolicyError(w, err) })
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { routepolicy.WritePolicyError(w, err) })
 	}
 	return router
 }
@@ -85,7 +87,7 @@ func (s *Server) verifyPaymentRequest(r *http.Request) error {
 func (s *Server) settlePaymentRequest(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	proof, ok := r.Context().Value(paymentProofKey{}).(paymentProof)
 	if !ok {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	if proof.event == nil {
 		s.logger.Debug("stripe event acknowledged without settlement")

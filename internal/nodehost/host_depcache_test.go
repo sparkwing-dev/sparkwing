@@ -16,8 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestRemoteDepcache(t *testing.T) {
@@ -50,7 +50,7 @@ func TestRemoteDepcache(t *testing.T) {
 				}
 				writePublishedFile(t, input.Entry.Directory, "vendor/module/file", "local dependency", 0o644)
 			}
-			result := store.NodeResult{Outcome: store.NodeSuccess}
+			result := runstate.NodeResult{Outcome: runstate.NodeSuccess}
 			if err := finish(t.Context(), input, &result); err != nil {
 				t.Fatal(err)
 			}
@@ -129,7 +129,7 @@ func TestExecutorDepcache(t *testing.T) {
 				t.Fatalf("processes=%d lookups=%d puts=%d", len(processes), backend.lookups, len(backend.puts))
 			}
 			last := state.reports[len(state.reports)-1]
-			if last.Extra.Result == nil || (last.Extra.Result.Outcome == store.NodeSuccess) != (behavior != "failed") {
+			if last.Extra.Result == nil || (last.Extra.Result.Outcome == runstate.NodeSuccess) != (behavior != "failed") {
 				t.Fatalf("result=%+v", last)
 			}
 			for _, put := range backend.puts {
@@ -176,7 +176,7 @@ func TestDepcacheRecords(t *testing.T) {
 			t.Fatalf("prepare=%v finalizer=%t", err, finish != nil)
 		}
 		writePublishedFile(t, input.Entry.Directory, "vendor/module/file", "downloaded dependency", 0o644)
-		result := store.NodeResult{Outcome: store.NodeSuccess}
+		result := runstate.NodeResult{Outcome: runstate.NodeSuccess}
 		if err := finish(t.Context(), input, &result); err != nil || backend.commit == nil || backend.commit.Key.Kind != blob.KindDepcache {
 			t.Fatalf("save=%v commit=%+v", err, backend.commit)
 		}
@@ -270,11 +270,11 @@ func TestDepcacheRecords(t *testing.T) {
 			if mode == "changed_key" {
 				writePublishedFile(t, input.Entry.Directory, "lockfile", "changed during execution", 0o600)
 			}
-			result := store.NodeResult{Outcome: store.NodeSuccess}
+			result := runstate.NodeResult{Outcome: runstate.NodeSuccess}
 			if mode == "failed_job" {
-				result.Outcome = store.NodeFailed
+				result.Outcome = runstate.NodeFailed
 			}
-			if err := finish(t.Context(), input, &result); err != nil || (result.Outcome == store.NodeSuccess) != (mode != "failed_job") {
+			if err := finish(t.Context(), input, &result); err != nil || (result.Outcome == runstate.NodeSuccess) != (mode != "failed_job") {
 				t.Fatalf("cache save changed the job verdict: %v %+v", err, result)
 			}
 			if mode == "changed_key" && (backend.commit == nil || backend.commit.Key.Scope.Key != backend.lookup.Key.Key) {
@@ -301,7 +301,7 @@ func seedDepcache(t *testing.T, input NodeInput, adapter DepcacheRecords, backen
 		t.Fatalf("prepare seed=%v", err)
 	}
 	writePublishedFile(t, input.Entry.Directory, "vendor/module/file", "downloaded dependency", 0o644)
-	result := store.NodeResult{Outcome: store.NodeSuccess}
+	result := runstate.NodeResult{Outcome: runstate.NodeSuccess}
 	if err := finish(t.Context(), input, &result); err != nil || backend.commit == nil {
 		t.Fatalf("seed=%v commit=%+v", err, backend.commit)
 	}
@@ -412,7 +412,7 @@ func checkDepcacheCaptureConfinement(t *testing.T, spelling string, keyfile bool
 			t.Fatalf("prepare=%v", err)
 		}
 	}
-	result := store.NodeResult{Outcome: store.NodeSuccess}
+	result := runstate.NodeResult{Outcome: runstate.NodeSuccess}
 	if err := finish(t.Context(), input, &result); err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +465,7 @@ func checkDepcacheUploadBinding(t *testing.T, field uint8, value string) {
 		t.Fatalf("prepare=%v", err)
 	}
 	writePublishedFile(t, input.Entry.Directory, "vendor/module/file", "dependency", 0o600)
-	result := store.NodeResult{Outcome: store.NodeSuccess}
+	result := runstate.NodeResult{Outcome: runstate.NodeSuccess}
 	if err := finish(t.Context(), input, &result); err != nil {
 		t.Fatal(err)
 	}

@@ -5,7 +5,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/sparkwing-dev/sparkwing/internal/source/gitcmd"
+	"github.com/sparkwing-dev/sparkwing/internal/gitcmd"
 )
 
 // CloneOption configures a clone.

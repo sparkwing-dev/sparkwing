@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 type offlinePolicyTransport struct{ calls int }
@@ -26,7 +27,7 @@ func TestLocalVersionPolicyDoesNotNeedNetwork(t *testing.T) {
 	}
 	now := time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
 	index, err := local.Index(t.Context(), now)
-	if err != nil || !index.Index.Offline() || len(index.Notices) != 1 || index.Notices[0].Kind != engine.NoticePolicyUnavailable || transport.calls != 0 {
+	if err != nil || !index.Index.Offline() || len(index.Notices) != 1 || index.Notices[0].Kind != engineid.NoticePolicyUnavailable || transport.calls != 0 {
 		t.Fatalf("local policy dependency: %+v calls=%d: %v", index, transport.calls, err)
 	}
 	if _, err := engine.Evaluate(index.Index, "v1.2.3", now); err != nil {

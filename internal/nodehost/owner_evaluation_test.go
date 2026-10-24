@@ -11,11 +11,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, evaluationDependencies, *executorProcess) {
@@ -36,12 +35,12 @@ func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, evaluatio
 	hash, _ = runspec.CanonicalHash(job)
 	st.row.SpecHash = string(hash)
 	st.accepted = &input.Accepted
-	st.row.Status, st.row.Outcome, st.row.Expansion = store.StatusDone, store.NodeSuccess, store.ExpansionExpected
+	st.row.Status, st.row.Outcome, st.row.Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionExpected
 	st.row.ClaimedBy, st.row.CapabilityPrefix = "", ""
 	p := &executorProcess{plan: input.Accepted.Plan}
 	in := EvaluationInput{Engine: input.Engine, Accepted: input.Accepted, NodeID: input.NodeID, Generation: int64(input.Generation), SpecHash: string(hash), Entry: input.Entry, GrantedRunner: input.GrantedRunner, RouteBinding: input.RouteBinding}
 	deps := evaluationDependencies{
-		Store: st, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return p, nil }, EnsureEngine: exec.EnsureEngine, ChildContext: exec.ChildContext, Masker: testMasker("private"), ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
+		Store: st, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return p, nil }, EnsureEngine: exec.EnsureEngine, ChildContext: exec.ChildContext, Masker: testMasker("private"), ReadOutput: func(_ context.Context, ref runspec.NodeRef, generation int64) (json.RawMessage, error) {
 			if ref != st.row.Ref || runspec.ClaimGeneration(generation) != st.row.Generation {
 				t.Fatal("read output without source fence")
 			}
@@ -55,7 +54,7 @@ func evaluationFixture(t *testing.T) (EvaluationInput, *executorStore, evaluatio
 }
 
 func TestOwnerEvaluationCombinesAllGenerators(t *testing.T) {
-	for _, outcome := range []store.NodeState{store.NodeSuccess, store.NodeMemoized} {
+	for _, outcome := range []runstate.NodeState{runstate.NodeSuccess, runstate.NodeMemoized} {
 		t.Run(string(outcome), func(t *testing.T) {
 			in, st, deps, p := evaluationFixture(t)
 			st.row.Outcome = outcome
@@ -169,7 +168,7 @@ func TestOwnerEvaluationFailuresNeverReturnPartialTopology(t *testing.T) {
 			case "drift":
 				p.plan.Jobs = []nodeproto.JobSpec{{ID: "changed", Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 			case "output":
-				deps.ReadOutput = func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) { return nil, cause }
+				deps.ReadOutput = func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error) { return nil, cause }
 			case "close":
 				p.closeErr = cause
 			case "cleanup":
@@ -220,11 +219,11 @@ func TestOwnerEvaluationRequiresCurrentSuccessfulSource(t *testing.T) {
 			case "generation":
 				in.Generation++
 			case "failed":
-				st.row.Outcome = store.NodeFailed
+				st.row.Outcome = runstate.NodeFailed
 			case "live":
-				st.row.Status = store.StatusRunning
+				st.row.Status = runstate.StatusRunning
 			case "accepted":
-				st.row.Expansion = store.ExpansionAccepted
+				st.row.Expansion = runstate.ExpansionAccepted
 			case "cancelled":
 				ctx, cancel := context.WithCancel(t.Context())
 				cancel()
@@ -307,10 +306,10 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 	expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{source}}
 	hash, _ = runspec.CanonicalHash(expansion)
 	raw, _ := json.Marshal(expansion)
-	st.expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 0, Body: raw, BodyHash: string(hash)}}
+	st.expansions = []runstate.AcceptedExpansionRow{{Source: runspec.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 0, Body: raw, BodyHash: string(hash)}}
 	rootBody, _ := json.Marshal(root)
 	rootHash, _ := runspec.CanonicalHash(root)
-	st.nodes = map[string]store.NodeRow{"root": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "root"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Spec: rootBody, SpecHash: string(rootHash)}}
+	st.nodes = map[string]runstate.NodeRow{"root": {Ref: runspec.NodeRef{RunID: "run", NodeID: "root"}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Spec: rootBody, SpecHash: string(rootHash)}}
 	deps.Store = recordedReplayStore{st}
 	rootKey := blob.MaterializedRecordKey("a", "run", "root", 0, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
 	sourceKey := blob.MaterializedRecordKey("a", "run", in.NodeID, 0, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
@@ -365,7 +364,7 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 
 func TestOwnerEvaluationUnclaimedMemoSourceKeepsGenerationZero(t *testing.T) {
 	in, st, deps, p := evaluationFixture(t)
-	in.Generation, st.row.Generation, st.row.Outcome = 0, 0, store.NodeMemoized
+	in.Generation, st.row.Generation, st.row.Outcome = 0, 0, runstate.NodeMemoized
 	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
 		if r.Op == nodeproto.OpEval {
 			return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil

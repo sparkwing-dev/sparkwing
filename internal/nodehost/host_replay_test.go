@@ -9,16 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestGeneratorReplay(t *testing.T) {
@@ -64,13 +63,13 @@ func TestGeneratorReplay(t *testing.T) {
 			}
 			body, _ := json.Marshal(accepted)
 			bodyHash, _ := runspec.CanonicalHash(accepted)
-			persisted.snapshot.Expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 0, Body: body, BodyHash: string(bodyHash)}}
+			persisted.snapshot.Expansions = []runstate.AcceptedExpansionRow{{Source: runspec.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 0, Body: body, BodyHash: string(bodyHash)}}
 			peerHash, _ := runspec.CanonicalHash(peer)
 			peerBody, _ := json.Marshal(peer)
 			s := persisted
-			s.nodes = map[string]store.NodeRow{"peer": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "peer"}, Spec: peerBody, SpecHash: string(peerHash)}}
+			s.nodes = map[string]runstate.NodeRow{"peer": {Ref: runspec.NodeRef{RunID: "run", NodeID: "peer"}, Spec: peerBody, SpecHash: string(peerHash)}}
 			read := s.readNode
-			s.readNode = func(ctx context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
+			s.readNode = func(ctx context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
 				if row, ok := s.nodes[string(ref.NodeID)]; ok && row.Ref == ref {
 					return row, nil
 				}
@@ -81,7 +80,7 @@ func TestGeneratorReplay(t *testing.T) {
 				body := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{peer}}
 				raw, _ := json.Marshal(body)
 				hash, _ := runspec.CanonicalHash(body)
-				persisted.snapshot.Expansions = append(persisted.snapshot.Expansions, store.AcceptedExpansionRow{Source: controllerwire.NodeRef{RunID: "run", NodeID: "other-source"}, SourceGeneration: 2, Body: raw, BodyHash: string(hash)})
+				persisted.snapshot.Expansions = append(persisted.snapshot.Expansions, runstate.AcceptedExpansionRow{Source: runspec.NodeRef{RunID: "run", NodeID: "other-source"}, SourceGeneration: 2, Body: raw, BodyHash: string(hash)})
 				persisted.snapshot.Nodes = append(persisted.snapshot.Nodes, s.nodes["peer"])
 				input.Replay = append(input.Replay, GeneratorReplay{SourceJob: "other-source", SourceGeneration: 2, GeneratorID: "peers", Output: json.RawMessage(`{"value":7}`)})
 			}
@@ -89,17 +88,17 @@ func TestGeneratorReplay(t *testing.T) {
 				expansion := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{sourceJob}}
 				raw, _ := json.Marshal(expansion)
 				hash, _ := runspec.CanonicalHash(expansion)
-				persisted.snapshot.Expansions = append(persisted.snapshot.Expansions, store.AcceptedExpansionRow{Source: controllerwire.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 2, Body: raw, BodyHash: string(hash)})
+				persisted.snapshot.Expansions = append(persisted.snapshot.Expansions, runstate.AcceptedExpansionRow{Source: runspec.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 2, Body: raw, BodyHash: string(hash)})
 				raw, _ = json.Marshal(sourceJob)
 				hash, _ = runspec.CanonicalHash(sourceJob)
-				s.nodes["source"] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, Spec: raw, SpecHash: string(hash)}
+				s.nodes["source"] = runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "source"}, Spec: raw, SpecHash: string(hash)}
 				persisted.snapshot.Nodes = append(persisted.snapshot.Nodes, s.nodes["source"], s.nodes["peer"])
 				input.Replay = append([]GeneratorReplay{{SourceJob: "root", SourceGeneration: 2, GeneratorID: "ancestors", Output: json.RawMessage(`{"value":7}`)}}, input.Replay...)
 			}
 			var recovery *nodeproto.JobFailure
 			if mode == "recovery_ancestry" {
 				row := s.nodes["peer"]
-				row.Status, row.Outcome = store.StatusDone, store.NodeFailed
+				row.Status, row.Outcome = runstate.StatusDone, runstate.NodeFailed
 				s.nodes["peer"] = row
 				recovery = &nodeproto.JobFailure{Job: "peer", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded failure"}}
 			}
@@ -157,11 +156,11 @@ func TestGeneratorReplay(t *testing.T) {
 					sdk.input = in
 					return process, nil
 				},
-				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+				EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return input.Engine, nil
 				},
 				Masker: secrets.NewMasker(),
-				ReadFailure: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+				ReadFailure: func(_ context.Context, ref runspec.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
 					if recovery == nil || ref != s.nodes["peer"].Ref || runspec.ClaimGeneration(generation) != s.nodes["peer"].Generation {
 						return nil, errors.New("undeclared recovery read")
 					}

@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -45,8 +45,8 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 			t.Run(operation+"/"+name, func(t *testing.T) {
 				b := newCredentialBoundary()
 				f := &engineTransactions{
-					applied:  store.Applied{Replayed: true, CancelRequested: true, StateSeq: 8, Generation: 4, Attempt: 2},
-					beat:     store.LeaseBeat{ExpiresAt: b.snapshot.Now.Add(time.Minute), CancelRequested: true, CancelReason: "requested", Watched: true, WatchedNodes: []string{"job"}},
+					applied:  runstate.Applied{Replayed: true, CancelRequested: true, StateSeq: 8, Generation: 4, Attempt: 2},
+					beat:     runstate.LeaseBeat{ExpiresAt: b.snapshot.Now.Add(time.Minute), CancelRequested: true, CancelReason: "requested", Watched: true, WatchedNodes: []string{"job"}},
 					admitted: store.AdmissionResult{RunID: "retry", Replayed: true},
 				}
 				path, body := "/api/v1/runs/run/jobs/job/transition", `{"to":"failed","cause":"report","source_attempt":0,"result":{"outcome":"failed","reason":"exit","failure":{"job":"job","stage":"body","error":{"code":"sdk_error","message":"masked"}},"exit_code":1}}`
@@ -108,20 +108,20 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 					if !ok {
 						t.Fatalf("report command=%T", f.nodeChange)
 					}
-					if change.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Authority != p.Authority || change.Actor.Kind != store.ActorHolder || change.Actor.Generation != 4 || change.Actor.Holder != "runner" || change.SourceAttempt == nil || *change.SourceAttempt != 0 || change.Outcome != store.NodeFailed || change.Result.MaskedError != "masked" {
+					if change.Ref != (runspec.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Authority != p.Authority || change.Actor.Kind != runstate.ActorHolder || change.Actor.Generation != 4 || change.Actor.Holder != "runner" || change.SourceAttempt == nil || *change.SourceAttempt != 0 || change.Outcome != runstate.NodeFailed || change.Result.MaskedError != "masked" {
 						t.Fatalf("node transition = %+v", change)
 					}
 				case "owner finish":
 					finish := f.finish
-					if finish.Unit != finish.Transition.Actor.Owner || finish.Unit != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "runner", Generation: 4}}) || finish.Transition.Actor.Authority != p.Authority || finish.Transition.Cause != store.RunFinish {
+					if finish.Unit != finish.Transition.Actor.Owner || finish.Unit != (runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "runner", Generation: 4}}) || finish.Transition.Actor.Authority != p.Authority || finish.Transition.Cause != runstate.RunFinish {
 						t.Fatalf("finish = %+v", finish)
 					}
 				case "published finish":
-					if f.runChange.Actor.Kind != store.ActorOperator || f.runChange.Cause != store.RunPublish || f.runChange.Actor.Owner != (store.OwnerLeaseRef{}) || f.runChange.MaskedError != "masked" {
+					if f.runChange.Actor.Kind != runstate.ActorOperator || f.runChange.Cause != runstate.RunPublish || f.runChange.Actor.Owner != (runstate.OwnerLeaseRef{}) || f.runChange.MaskedError != "masked" {
 						t.Fatalf("published finish = %+v", f.runChange)
 					}
 				case "cancel":
-					if f.runChange.Actor.Authority != p.Authority || f.runChange.Actor.Kind != store.ActorOperator || f.runChange.Cause != store.RunCancel || f.runChange.To != store.RunCancelled || f.runChange.Reason != "user requested" {
+					if f.runChange.Actor.Authority != p.Authority || f.runChange.Actor.Kind != runstate.ActorOperator || f.runChange.Cause != runstate.RunCancel || f.runChange.To != runstate.RunCancelled || f.runChange.Reason != "user requested" {
 						t.Fatalf("cancel = %+v", f.runChange)
 					}
 				case "owner renewal", "job renewal":
@@ -189,7 +189,7 @@ func TestEngineResultReplayHTTP(t *testing.T) {
 				case "revoked ancestor":
 					b.snapshot.Authorities[1].Principal.Capability.RevokedAt = &b.snapshot.Now
 				}
-				f := &engineTransactions{applied: store.Applied{Replayed: true}}
+				f := &engineTransactions{applied: runstate.Applied{Replayed: true}}
 				w := engineHTTP(t, b, f, path, body)
 				if name != "exact" {
 					assertEngineError(t, w, 401, apierr.Unauthenticated)

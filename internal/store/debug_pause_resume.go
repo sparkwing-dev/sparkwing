@@ -6,7 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 // ResumeAuthorizedDebugPause closes open pauses without changing job lifecycle or execution fences.
@@ -21,7 +20,7 @@ func (t *Tenant) ResumeAuthorizedDebugPause(ctx context.Context, authorized capa
 			return err
 		}
 
-		row, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)})
+		row, err := readNodeTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(target.NodeID)})
 		if err != nil {
 			return err
 		}

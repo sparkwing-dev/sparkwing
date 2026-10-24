@@ -10,6 +10,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -133,10 +134,10 @@ func TestLocalControlAdmissionOnlyRefuses(t *testing.T) {
 
 func TestLocalControlCannotPromoteBeforeReadiness(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
-	f := &runtimeControllerFixture{http: func() LocalHTTP {
+	f := &runtimeControllerFixture{http: func() localhostwire.LocalHTTP {
 		close(entered)
 		<-release
-		return LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()}
+		return localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()}
 	}}
 	r := newRuntimeFixture(t, f)
 	lifecycle := NewLocalLifecycle(r, nil)

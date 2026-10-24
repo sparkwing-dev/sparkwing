@@ -4,11 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestIgnoredCancellationCannotRenewBeyondDrain(t *testing.T) {
@@ -29,18 +28,18 @@ func TestIgnoredCancellationCannotRenewBeyondDrain(t *testing.T) {
 					t.Fatal(err)
 				}
 				admitExecution(t, tenant, actor)
-				if _, err := tenant.TransitionNode(t.Context(), StartNode{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
+				if _, err := tenant.TransitionNode(t.Context(), StartNode{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 					t.Fatal(err)
 				}
 			} else if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
 				t.Fatal(err)
 			}
 			operator := authorityMember(t, s, "cancel-operator", RoleOwner)
-			operator.Kind = ActorOperator
+			operator.Kind = runstate.ActorOperator
 			started := *now
 			rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a','global:drain',1,1)`)
 			rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at) VALUES ('a','global:drain','held','run','',?,?)`, now.UnixNano(), now.Add(time.Hour).UnixNano())
-			if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunCancelled, Cause: RunCancel, Actor: operator, Reason: "user_cancelled"}); err != nil {
+			if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: "run", To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: operator, Reason: "user_cancelled"}); err != nil {
 				t.Fatal(err)
 			}
 			deadline := started.Add(5 * time.Minute)
@@ -51,7 +50,7 @@ func TestIgnoredCancellationCannotRenewBeyondDrain(t *testing.T) {
 			for elapsed := 30 * time.Second; elapsed < 5*time.Minute; elapsed += 30 * time.Second {
 				*now = started.Add(elapsed)
 				if elapsed == 2*time.Minute {
-					if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunCancelled, Cause: RunCancel, Actor: operator, Reason: "repeated cancellation"}); err != nil {
+					if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: "run", To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: operator, Reason: "repeated cancellation"}); err != nil {
 						t.Fatal(err)
 					}
 					if err := s.db.QueryRow(`SELECT drain_deadline_at FROM runs WHERE team='a' AND id='run'`).Scan(&persisted); err != nil || persisted != deadline.UnixNano() {
@@ -137,9 +136,9 @@ func TestControllerOwnerCannotRenewPastCancellationDrain(t *testing.T) {
 	if err != nil || row.Owner == nil {
 		t.Fatalf("controller owner: %+v %v", row.Owner, err)
 	}
-	owner := Actor{Kind: ActorController, Owner: *row.Owner}
+	owner := runstate.Actor{Kind: runstate.ActorController, Owner: *row.Owner}
 	operator := authorityMember(t, tenant.s, "cancel-controller", RoleOwner)
-	operator.Kind = ActorOperator
+	operator.Kind = runstate.ActorOperator
 	started := *now
 	for _, table := range []string{"holders", "waiters"} {
 		key := "global:drain-" + table
@@ -150,7 +149,7 @@ func TestControllerOwnerCannotRenewPastCancellationDrain(t *testing.T) {
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,node_id,arrived_at,policy,lease_expires_at) VALUES ('a',?,'waiting',?,'',?,'queue',?)`, key, row.ID, now.UnixNano(), now.Add(time.Hour).UnixNano())
 		}
 	}
-	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: runspec.RunID(row.ID), To: RunCancelled, Cause: RunCancel, Actor: operator}); err != nil {
+	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(row.ID), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: operator}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := started.Add(5 * time.Minute)

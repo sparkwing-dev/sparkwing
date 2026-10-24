@@ -12,9 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func mustRegisterCleanup(t *testing.T, cleanups *ProcessCleanups, argv ...string) string {

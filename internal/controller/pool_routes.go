@@ -13,11 +13,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func (s *Server) poolEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) poolEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/pools", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePools},
 		{Method: "POST", Pattern: "/api/v1/pools/{pool}/rules", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePoolRule},
 		{Method: "DELETE", Pattern: "/api/v1/pools/{pool}/rules/{rule}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeletePoolRule},
@@ -112,7 +113,7 @@ func (s *Server) handlePoolRule(w http.ResponseWriter, r *http.Request, a capabi
 	repos := []string{}
 	for _, repo := range body.Repos {
 		if s.githubApp == nil || s.githubApp.client == nil {
-			return missingEndpointPolicy()
+			return routepolicy.MissingEndpointPolicy()
 		}
 		installation, verified, err := s.resolveGitHubAppRepository(r.Context(), tenant, repo)
 		if err != nil {

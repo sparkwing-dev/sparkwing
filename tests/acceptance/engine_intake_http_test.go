@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -158,7 +160,7 @@ func TestEnginePlanHTTP(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := planBoundary()
 			f := &engineTransactions{
-				run:      store.RunRow{ID: "run", Team: "team", Request: runspec.SealedRequest{RunID: "run", Hash: "first-seal"}},
+				run:      store.RunRow{Team: "team", Execution: runstate.Execution{ID: "run", Request: runspec.SealedRequest{RunID: "run", Hash: "first-seal"}}},
 				accepted: store.AcceptedPlan{PlanHash: "committed", Plan: json.RawMessage(`{"jobs":[]}`)},
 			}
 			path, body := "/api/v1/runs/run/plan", `{"plan":{"jobs":[]},"declarations":{"version":1,"file":"sparkwing.yaml"}}`

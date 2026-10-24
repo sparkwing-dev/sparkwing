@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestOwnerReaperUsesRenewedLeaseWithoutJobActivity(t *testing.T) {
@@ -42,7 +42,7 @@ func TestOwnerReaperUsesRenewedLeaseWithoutJobActivity(t *testing.T) {
 				t.Fatalf("expired local owner: %+v, %v", reaped, err)
 			}
 			run, err := (&Tenant{s: s, team: claim.Team}).ReadRun(t.Context(), claim.RunID)
-			if err != nil || run.State != RunFailed {
+			if err != nil || run.State != runstate.RunFailed {
 				t.Fatalf("lost local run: %+v, %v", run, err)
 			}
 		})
@@ -61,13 +61,13 @@ func TestOwnerReaperJobHeartbeatCannotReplaceOwnerLease(t *testing.T) {
 		}
 	}
 	for _, id := range []string{"build", "test", "deploy"} {
-		node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)})
-		if err != nil || node.Outcome != NodeCancelled || node.FinishedAt == nil || node.StateSeq != 1 {
+		node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)})
+		if err != nil || node.Outcome != runstate.NodeCancelled || node.FinishedAt == nil || node.StateSeq != 1 {
 			t.Fatalf("orphaned dependent %s: %+v, %v", id, node, err)
 		}
 	}
 	run, err := tenant.ReadRun(t.Context(), "run")
-	if err != nil || run.State != RunFailed {
+	if err != nil || run.State != runstate.RunFailed {
 		t.Fatalf("orphaned local run: %+v, %v", run, err)
 	}
 	events, err := tenant.ReadStateEvents(t.Context(), "run", 0, 100)

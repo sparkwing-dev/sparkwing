@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -27,9 +29,9 @@ func TestTenantListPipelines_OneTeamsPipelinesNewestFirst(t *testing.T) {
 	base := time.Now().Add(-time.Hour).Truncate(time.Second)
 
 	for _, r := range []store.Run{
-		{ID: "run-build-1", Pipeline: "build", Status: "success", StartedAt: base, FinishedAt: ptrTime(base.Add(time.Minute))},
-		{ID: "run-build-2", Pipeline: "build", Status: "failed", StartedAt: base.Add(10 * time.Minute), FinishedAt: ptrTime(base.Add(11 * time.Minute))},
-		{ID: "run-lint-1", Pipeline: "lint", Status: "success", StartedAt: base.Add(5 * time.Minute), FinishedAt: ptrTime(base.Add(6 * time.Minute))},
+		{RunSummary: runstate.RunSummary{ID: "run-build-1", Pipeline: "build", Status: "success", StartedAt: base, FinishedAt: ptrTime(base.Add(time.Minute))}},
+		{RunSummary: runstate.RunSummary{ID: "run-build-2", Pipeline: "build", Status: "failed", StartedAt: base.Add(10 * time.Minute), FinishedAt: ptrTime(base.Add(11 * time.Minute))}},
+		{RunSummary: runstate.RunSummary{ID: "run-lint-1", Pipeline: "lint", Status: "success", StartedAt: base.Add(5 * time.Minute), FinishedAt: ptrTime(base.Add(6 * time.Minute))}},
 	} {
 		if err := alpha.TestOnlySeedRun(ctx, r); err != nil {
 			t.Fatalf("CreateRun %s: %v", r.ID, err)
@@ -38,7 +40,7 @@ func TestTenantListPipelines_OneTeamsPipelinesNewestFirst(t *testing.T) {
 	if err := alpha.TestOnlySeedTrigger(ctx, store.Trigger{ID: "trg-deploy", Pipeline: "deploy", CreatedAt: base.Add(20 * time.Minute)}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	if err := bravo.TestOnlySeedRun(ctx, store.Run{ID: "run-bravo", Pipeline: "bravo-only", Status: "success", StartedAt: base.Add(30 * time.Minute)}); err != nil {
+	if err := bravo.TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: "run-bravo", Pipeline: "bravo-only", Status: "success", StartedAt: base.Add(30 * time.Minute)}}); err != nil {
 		t.Fatalf("CreateRun bravo: %v", err)
 	}
 

@@ -19,11 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -86,11 +86,16 @@ func (s *Server) githubAppUnavailable() error {
 	return fmt.Errorf("%w: not configured", errGitHubAppUnavailable)
 }
 
+func (s *Server) writeGitHubAppUnavailable(w http.ResponseWriter) error {
+	// safety: App configuration failures contain no credentials and must remain actionable.
+	return apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: s.githubAppUnavailable().Error()})
+}
+
 func (s *Server) githubAppEnabled(w http.ResponseWriter) bool {
 	if s.githubApp != nil {
 		return true
 	}
-	writePolicyError(w, s.githubAppUnavailable())
+	_ = s.writeGitHubAppUnavailable(w)
 	return false
 }
 
@@ -484,7 +489,7 @@ type githubAppResp struct {
 
 func (s *Server) handleGitHubAppShow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return s.githubAppUnavailable()
+		return s.writeGitHubAppUnavailable(w)
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -504,7 +509,7 @@ func (s *Server) handleGitHubAppShow(w http.ResponseWriter, r *http.Request, a c
 
 func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return s.githubAppUnavailable()
+		return s.writeGitHubAppUnavailable(w)
 	}
 	writer, err := s.githubAppWriter(r, a)
 	if err != nil {
@@ -526,7 +531,7 @@ func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request, a
 // owner of the new team connects once the old binding is gone.
 func (s *Server) handleOperatorGitHubAppUnbind(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	if s.githubApp == nil {
-		return s.githubAppUnavailable()
+		return s.writeGitHubAppUnavailable(w)
 	}
 	id, err := strconv.ParseInt(r.PathValue("installation"), 10, 64)
 	if err != nil || id <= 0 {
@@ -556,7 +561,7 @@ type githubAppRepositoryJSON struct {
 
 func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return s.githubAppUnavailable()
+		return s.writeGitHubAppUnavailable(w)
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -643,7 +648,7 @@ func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
 
 func (s *Server) handleListGitHubAppTriggers(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return s.githubAppUnavailable()
+		return s.writeGitHubAppUnavailable(w)
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -666,7 +671,7 @@ func (s *Server) handleListGitHubAppTriggers(w http.ResponseWriter, r *http.Requ
 // it controls.
 func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return s.githubAppUnavailable()
+		return s.writeGitHubAppUnavailable(w)
 	}
 	t, err := s.reportingTenant(r, a)
 	if err != nil {
@@ -740,7 +745,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleDeleteGitHubAppTrigger(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
-		return s.githubAppUnavailable()
+		return s.writeGitHubAppUnavailable(w)
 	}
 	writer, err := s.githubAppWriter(r, a)
 	if err != nil {
@@ -803,7 +808,7 @@ func (s *Server) githubAppCheckUpdate(ctx context.Context, tenant *store.Tenant,
 		return githubCheckUpdate{}, false, errInvalidGitHubCompletion
 	}
 	status := string(effect.State)
-	if effect.State == store.RunFailed && (effect.Reason == "timeout" || effect.Reason == "queue_timeout") {
+	if effect.State == runstate.RunFailed && (effect.Reason == "timeout" || effect.Reason == "queue_timeout") {
 		status = "timed_out"
 	}
 	return githubCheckUpdate{installation: app.Value.InstallationID, repository: provenance.RepositoryID(), sha: provenance.SHA(), pipeline: provenance.Pipeline(), runID: run.ID, runStatus: status, team: tenant.Team()}, true, nil

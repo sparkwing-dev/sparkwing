@@ -174,11 +174,11 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 		},
 		Maintain: server.MaintainStorage,
 		Complete: server.ReconcileRunEffects,
-		Runner: runners.StoreRunnerConfig{
+		Runner: localcontroller.StoreRunnerConfig{
 			Bearer:  claimant.Bearer,
 			Loop:    runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
 			OnError: func(err error) { slog.Error("local run host failed", "err", err) },
-			Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
+			Bind: func(ctx context.Context, binding localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 				return newLocalNativeServices(ctx, b.Home, b.Store, binding, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport})
 			},
 		},

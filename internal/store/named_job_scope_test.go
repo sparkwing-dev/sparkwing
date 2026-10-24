@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -36,7 +36,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sealed, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(job)})
+			sealed, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(job)})
 			if err != nil || sealed.SpecHash == "" {
 				t.Fatalf("accepted job has no spec hash: %v", err)
 			}
@@ -49,7 +49,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(job)}
+			ref := runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(job)}
 			demand := store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Labels: []string{label}}
 			refuse := func(request store.UnitDemand) {
 				t.Helper()
@@ -109,13 +109,13 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 				t.Fatalf("award lost stored identity: %+v", claim)
 			}
 			refuse(demand)
-			holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
-			if result, err := tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(holder.RunID), NodeID: string(holder.NodeID), Generation: int64(holder.Generation)}, holder); err != nil || result.Kind != store.AcquireGranted {
+			holder := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+			if result, err := tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: string(holder.RunID), NodeID: string(holder.NodeID), Generation: int64(holder.Generation)}, holder); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("execution admission: %+v, %v", result, err)
 			}
 			for _, change := range []store.NodeCommand{
 				store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)},
-				store.ReportNode{Ref: ref, Actor: holder, Outcome: store.NodeSuccess, SourceAttempt: acceptanceAttempt(1)},
+				store.ReportNode{Ref: ref, Actor: holder, Outcome: runstate.NodeSuccess, SourceAttempt: acceptanceAttempt(1)},
 			} {
 				if _, err := tenant.TransitionNode(t.Context(), change); err != nil {
 					t.Fatal(err)
@@ -126,7 +126,7 @@ func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
 			if err != nil || row.SpecHash != sealed.SpecHash {
 				t.Fatalf("award changed accepted spec: %s, %v", row.SpecHash, err)
 			}
-			if _, err := tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Unit: plan.Actor.Owner, Transition: store.RunCompletion{RunID: ref.RunID, Actor: plan.Actor, Cause: store.RunFinish}}); err != nil {
+			if _, err := tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Unit: plan.Actor.Owner, Transition: runstate.RunCompletion{RunID: ref.RunID, Actor: plan.Actor, Cause: runstate.RunFinish}}); err != nil {
 				t.Fatal(err)
 			}
 			refuse(demand)

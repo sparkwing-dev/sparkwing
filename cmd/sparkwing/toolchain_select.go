@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
@@ -28,9 +29,9 @@ var (
 )
 
 type pipelineEngineSwitcher struct {
-	readPin     func(string, engine.SDKKind) (engine.Pin, error)
-	versionFor  func(engine.Pin) (string, error)
-	resolve     func(context.Context, engine.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error)
+	readPin     func(string, engineid.SDKKind) (engineid.Pin, error)
+	versionFor  func(engineid.Pin) (string, error)
+	resolve     func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error)
 	execute     func(string, []string, []string) error
 	current     string
 	target      releaseasset.Target
@@ -44,9 +45,9 @@ func switchToolchain(dir string, beforeExec func()) error {
 	if err != nil {
 		return err
 	}
-	sdk := engine.GoSDK
+	sdk := engineid.GoSDK
 	if typescript {
-		sdk = engine.TypeScriptSDK
+		sdk = engineid.TypeScriptSDK
 	}
 	current, err := os.Executable()
 	if err != nil {
@@ -61,7 +62,7 @@ func switchToolchain(dir string, beforeExec func()) error {
 			}
 			return replayToolchain(binary, args, environment)
 		}, diagnostics: os.Stderr,
-		resolve: func(ctx context.Context, pin engine.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
+		resolve: func(ctx context.Context, pin engineid.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
 			resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, LocalOnly: true})
 			if err != nil {
 				return engine.Resolved{}, err
@@ -86,7 +87,7 @@ func replayToolchain(binary string, args, environment []string) (result error) {
 	return execToolchain(binary, args, environment)
 }
 
-func (c pipelineEngineSwitcher) run(ctx context.Context, dir string, sdk engine.SDKKind, rawMode string, args, environment []string) error {
+func (c pipelineEngineSwitcher) run(ctx context.Context, dir string, sdk engineid.SDKKind, rawMode string, args, environment []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

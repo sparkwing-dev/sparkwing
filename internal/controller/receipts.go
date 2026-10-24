@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -45,11 +47,7 @@ func receiptSnapshot(snapshot store.RunSnapshot) (*store.Run, []*store.Node, err
 			secrets = append(secrets, name)
 		}
 	}
-	run := &store.Run{
-		ID: row.ID, Pipeline: row.Pipeline, Status: string(row.State), GitSHA: display.Git.SHA,
-		StartedAt: row.CreatedAt, FinishedAt: row.FinishedAt, Args: args, PlanSnapshot: row.Plan,
-		Invocation: map[string]any{store.InvocationSecretArgsKey: secrets},
-	}
+	run := &store.Run{PlanSnapshot: row.Plan, RunSummary: runstate.RunSummary{ID: row.ID, Pipeline: row.Pipeline, Status: string(row.State), GitSHA: display.Git.SHA, StartedAt: row.CreatedAt, FinishedAt: row.FinishedAt, Args: args, Invocation: map[string]any{store.InvocationSecretArgsKey: secrets}}}
 	if row.StartedAt != nil {
 		run.StartedAt = *row.StartedAt
 	}

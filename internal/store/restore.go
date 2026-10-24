@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 const restoreStateKey = "restore.state"
@@ -92,7 +93,7 @@ func (o *Operator) cancelRestoredSchedulesTx(ctx context.Context, tx *storeTx) e
 	defer func() { tx.cancelingTeam = previous }()
 	for _, run := range runs {
 		tx.cancelingTeam = run.team
-		if _, err := transitionRunTx(ctx, tx, run.team, RunTransition{RunID: run.id, To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: "cancelled by restore; rerun if needed"}); err != nil {
+		if _, err := transitionRunTx(ctx, tx, run.team, runstate.RunTransition{RunID: run.id, To: runstate.RunCancelled, Actor: runstate.Actor{Kind: runstate.ActorOperator}, Cause: runstate.RunCancel, Reason: "cancelled by restore; rerun if needed"}); err != nil {
 			return err
 		}
 	}

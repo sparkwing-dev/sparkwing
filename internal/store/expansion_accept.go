@@ -7,15 +7,15 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
 type expansionAcceptance struct {
 	selection     secretSelection
-	state         ExpansionState
+	state         runstate.ExpansionState
 	hash          string
 	bodyHash      string
 	body, failure []byte
@@ -29,7 +29,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		if len(request.Registration.Defaults) > 0 || len(request.Registration.ListArgs) > 0 || len(request.Registration.Values) > 0 {
 			return result, authorityError(apierr.BadRequest, "failed expansion cannot register secrets")
 		}
-		result.state = ExpansionFailed
+		result.state = runstate.ExpansionFailed
 		var err error
 		result.failure, err = json.Marshal(request.Failure)
 		if err != nil {
@@ -116,14 +116,14 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 		Body         json.RawMessage
 		Registration runspec.SecretRegistration
 	}{result.body, registration})
-	result.hash, result.state = string(hash), ExpansionAccepted
+	result.hash, result.state = string(hash), runstate.ExpansionAccepted
 	return result, err
 }
 
-func acceptedExpansionNodes(snapshot RunSnapshot, plan nodeproto.PlanDoc) ([]NodeRow, error) {
-	var result []NodeRow
+func acceptedExpansionNodes(snapshot RunSnapshot, plan nodeproto.PlanDoc) ([]runstate.NodeRow, error) {
+	var result []runstate.NodeRow
 	for _, job := range plan.Jobs {
-		index := slices.IndexFunc(snapshot.Nodes, func(node NodeRow) bool { return node.Ref.NodeID == runspec.NodeID(job.ID) })
+		index := slices.IndexFunc(snapshot.Nodes, func(node runstate.NodeRow) bool { return node.Ref.NodeID == runspec.NodeID(job.ID) })
 		if index < 0 {
 			return nil, errors.New("accepted expansion job is missing")
 		}
@@ -132,7 +132,7 @@ func acceptedExpansionNodes(snapshot RunSnapshot, plan nodeproto.PlanDoc) ([]Nod
 	return result, nil
 }
 
-func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission, snapshot RunSnapshot, accepted expansionAcceptance) ([]NodeRow, error) {
+func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission, snapshot RunSnapshot, accepted expansionAcceptance) ([]runstate.NodeRow, error) {
 	executionSettings, err := settings.ResolveExpansion(settings.ExpansionInputs{Spec: *snapshot.Run.Spec, Plan: accepted.plan, Context: settings.Context{Local: RequestPlacement(snapshot.Run.Request.Request) == nodeproto.PlacementLocal}})
 	if err != nil {
 		return nil, err
@@ -143,7 +143,7 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 	if err := checkExpansionSecretPoolsTx(ctx, tx, team, *snapshot.Run.Spec, executionSettings, accepted.selection); err != nil {
 		return nil, err
 	}
-	var nodes []NodeRow
+	var nodes []runstate.NodeRow
 	for _, job := range accepted.plan.Jobs {
 		execution, exists := executionSettings[job.ID]
 		if !exists {
@@ -157,11 +157,11 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 		if err != nil {
 			return nil, err
 		}
-		expansion := ExpansionAbsent
+		expansion := runstate.ExpansionAbsent
 		if len(job.Closures.Generate) > 0 {
-			expansion = ExpansionExpected
+			expansion = runstate.ExpansionExpected
 		}
-		node := NodeRow{Ref: controllerwire.NodeRef{RunID: request.Source.RunID, NodeID: runspec.NodeID(job.ID)}, Status: StatusPending, Spec: spec, SpecHash: string(hash), Execution: execution, Expansion: expansion}
+		node := runstate.NodeRow{Ref: runspec.NodeRef{RunID: request.Source.RunID, NodeID: runspec.NodeID(job.ID)}, Status: runstate.StatusPending, Spec: spec, SpecHash: string(hash), Execution: execution, Expansion: expansion}
 		if err := insertNodeTx(ctx, tx, team, node); err != nil {
 			return nil, err
 		}
@@ -170,14 +170,14 @@ func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request Expa
 	snapshot.Nodes = append(snapshot.Nodes, nodes...)
 	for i := range snapshot.Nodes {
 		if snapshot.Nodes[i].Ref == request.Source {
-			snapshot.Nodes[i].Expansion, snapshot.Nodes[i].ExpansionDigest = ExpansionAccepted, accepted.hash
+			snapshot.Nodes[i].Expansion, snapshot.Nodes[i].ExpansionDigest = runstate.ExpansionAccepted, accepted.hash
 		}
 	}
 	var registration runspec.SecretRegistration
 	if err := json.Unmarshal(accepted.registration, &registration); err != nil {
 		return nil, err
 	}
-	snapshot.Expansions = append(snapshot.Expansions, AcceptedExpansionRow{Source: request.Source, SourceGeneration: int64(request.SourceGeneration), Body: accepted.body, BodyHash: accepted.bodyHash, Registration: registration})
+	snapshot.Expansions = append(snapshot.Expansions, runstate.AcceptedExpansionRow{Source: request.Source, SourceGeneration: int64(request.SourceGeneration), Body: accepted.body, BodyHash: accepted.bodyHash, Registration: registration})
 	if _, err := snapshot.Scheduling(); err != nil {
 		return nil, err
 	}

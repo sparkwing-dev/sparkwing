@@ -12,13 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -81,7 +80,7 @@ func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
 				return context.Cause(ctx)
 			}
 		}
-		return f.report(ctx, input, store.NodeSuccess)
+		return f.report(ctx, input, runstate.NodeSuccess)
 	})
 	completion, err := f.Host.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "success" {
@@ -91,8 +90,8 @@ func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
 		t.Fatalf("order=%v", order)
 	}
 	for _, id := range []string{"a", "b", "c", "d"} {
-		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
-		if err != nil || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess {
+		row, err := f.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
+		if err != nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeSuccess {
 			t.Errorf("%s row=%+v error=%v", id, row, err)
 		}
 	}
@@ -118,9 +117,9 @@ func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
 		mu.Lock()
 		ran[input.NodeID] = true
 		mu.Unlock()
-		outcome := store.NodeSuccess
+		outcome := runstate.NodeSuccess
 		if slices.Contains([]string{"build", "lint", "flaky", "maybe"}, input.NodeID) {
-			outcome = store.NodeFailed
+			outcome = runstate.NodeFailed
 		}
 		return f.report(ctx, input, outcome)
 	})
@@ -130,9 +129,9 @@ func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
 	if err != nil || completion.Outcome != "failed" {
 		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	for id, want := range map[string]store.NodeState{"build": store.NodeFailed, "test": store.NodeCancelled, "deploy": store.NodeCancelled, "build-recover": store.NodeSuccess, "docs-recover": store.NodeSkipped, "after-lint": store.NodeSuccess, "after-flaky": store.NodeCancelled, "maybe": store.NodeFailed} {
-		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
-		if err != nil || row.Outcome != want || row.Status != store.StatusDone {
+	for id, want := range map[string]runstate.NodeState{"build": runstate.NodeFailed, "test": runstate.NodeCancelled, "deploy": runstate.NodeCancelled, "build-recover": runstate.NodeSuccess, "docs-recover": runstate.NodeSkipped, "after-lint": runstate.NodeSuccess, "after-flaky": runstate.NodeCancelled, "maybe": runstate.NodeFailed} {
+		row, err := f.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
+		if err != nil || row.Outcome != want || row.Status != runstate.StatusDone {
 			t.Errorf("%s row=%+v error=%v, want %s", id, row, err, want)
 		}
 	}
@@ -149,9 +148,9 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 		{ID: "after", NeedsIfPresent: deps("absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}})
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
-		outcome := store.NodeSuccess
+		outcome := runstate.NodeSuccess
 		if input.NodeID == "maybe" {
-			outcome = store.NodeFailed
+			outcome = runstate.NodeFailed
 		}
 		return f.report(ctx, input, outcome)
 	})
@@ -161,16 +160,16 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 	if err != nil || completion.Outcome != "success" {
 		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "after"})
-	if err != nil || row.Outcome != store.NodeSuccess {
+	row, err := f.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "after"})
+	if err != nil || row.Outcome != runstate.NodeSuccess {
 		t.Fatalf("row=%+v error=%v", row, err)
 	}
-	optional, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "maybe"})
-	if err != nil || optional.Status != store.StatusDone || optional.Outcome != store.NodeFailed {
+	optional, err := f.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "maybe"})
+	if err != nil || optional.Status != runstate.StatusDone || optional.Outcome != runstate.NodeFailed {
 		t.Fatalf("optional row=%+v error=%v", optional, err)
 	}
 	run, err := f.Tenant.ReadRun(ctx, f.Accepted.RunID)
-	if err != nil || run.State != store.RunSuccess {
+	if err != nil || run.State != runstate.RunSuccess {
 		t.Fatalf("run=%+v error=%v", run, err)
 	}
 }
@@ -187,7 +186,7 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, row := range snapshot.Nodes {
-		if row.Status != store.StatusPending || row.StartedAt != nil {
+		if row.Status != runstate.StatusPending || row.StartedAt != nil {
 			t.Errorf("initial row=%+v", row)
 		}
 		if row.Ref.NodeID == "gpu" {
@@ -214,18 +213,18 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 		if input.NodeID != "slow" {
 			return errors.New("downstream body started during cancellation")
 		}
-		ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
-		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
+		ref := runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}
+		actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID), Holder: input.Authority.Holder, Generation: input.Generation}}
 		started, err := f.State.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: actor, SourceAttempt: new(input.Attempt)})
 		if err != nil {
 			return err
 		}
-		if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(f.Accepted.RunID), Actor: f.Control, To: store.RunCancelled, Cause: store.RunCancel, Reason: "interrupted by SIGINT"}); err != nil {
+		if _, err := f.Tenant.TransitionRun(ctx, runstate.RunTransition{RunID: runspec.RunID(f.Accepted.RunID), Actor: f.Control, To: runstate.RunCancelled, Cause: runstate.RunCancel, Reason: "interrupted by SIGINT"}); err != nil {
 			return err
 		}
 		reportCtx, stopReport := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 		defer stopReport()
-		_, err = f.State.TransitionNode(reportCtx, store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: new(started.Attempt), Outcome: store.NodeCancelled, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "interrupted by SIGINT"}})
+		_, err = f.State.TransitionNode(reportCtx, store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: new(started.Attempt), Outcome: runstate.NodeCancelled, Result: &runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: "interrupted by SIGINT"}})
 		return err
 	})
 	completion, err := f.Host.Run(ctx, f.Input)
@@ -236,11 +235,11 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Run.State != store.RunCancelled || snapshot.Run.CancelReason != "interrupted by SIGINT" || snapshot.Run.FinishedAt == nil {
+	if snapshot.Run.State != runstate.RunCancelled || snapshot.Run.CancelReason != "interrupted by SIGINT" || snapshot.Run.FinishedAt == nil {
 		t.Fatalf("run=%+v", snapshot.Run)
 	}
 	for _, row := range snapshot.Nodes {
-		if row.Status != store.StatusDone || row.Outcome != store.NodeCancelled || row.Ref.NodeID != "slow" && row.StartedAt != nil {
+		if row.Status != runstate.StatusDone || row.Outcome != runstate.NodeCancelled || row.Ref.NodeID != "slow" && row.StartedAt != nil {
 			t.Errorf("cancelled row=%+v", row)
 		}
 	}
@@ -268,7 +267,7 @@ func TestSchedulerCallerCancellationStopsDownstreamDispatch(t *testing.T) {
 			if !errors.Is(err, cause) {
 				t.Fatalf("error=%v, want %v", err, cause)
 			}
-			row, err := f.Tenant.ReadNode(bounded, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "next"})
+			row, err := f.Tenant.ReadNode(bounded, runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "next"})
 			if err != nil || row.StartedAt != nil || row.ClaimedBy != "" {
 				t.Fatalf("downstream row=%+v error=%v", row, err)
 			}
@@ -284,7 +283,7 @@ func TestSchedulerWithoutAnExecutorFailsLoudly(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "node host") {
 		t.Fatalf("error=%v", err)
 	}
-	row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "a"})
+	row, err := f.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "a"})
 	if err != nil || row.StartedAt != nil {
 		t.Fatalf("row=%+v error=%v", row, err)
 	}
@@ -315,8 +314,8 @@ func TestSchedulerARefusedOutputFailsTheNodeAndDependants(t *testing.T) {
 			if err != nil || completion.Outcome != "failed" {
 				t.Fatalf("completion=%+v error=%v", completion, err)
 			}
-			for id, outcome := range map[string]store.NodeState{"big": store.NodeFailed, "after": store.NodeCancelled} {
-				row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
+			for id, outcome := range map[string]runstate.NodeState{"big": runstate.NodeFailed, "after": runstate.NodeCancelled} {
+				row, err := f.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
 				if err != nil || row.Outcome != outcome {
 					t.Fatalf("%s row=%+v error=%v", id, row, err)
 				}
@@ -330,7 +329,7 @@ func TestSchedulerARefusedOutputFailsTheNodeAndDependants(t *testing.T) {
 				if event.NodeID != "big" || event.Kind != "job_failed" {
 					continue
 				}
-				var result store.NodeResult
+				var result runstate.NodeResult
 				if err := json.Unmarshal(event.Payload, &result); err != nil {
 					t.Fatal(err)
 				}

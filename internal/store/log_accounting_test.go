@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestLogPersistenceCompressedInventory(t *testing.T) {
@@ -47,7 +48,7 @@ func TestLogPersistenceCompressedInventory(t *testing.T) {
 	}
 	for _, field := range []string{"decoded", "stored"} {
 		bad := commit
-		bad.Segments = append([]Segment(nil), commit.Segments...)
+		bad.Segments = append([]runstate.Segment(nil), commit.Segments...)
 		if field == "decoded" {
 			bad.Segments[0].Size++
 		} else {
@@ -59,7 +60,7 @@ func TestLogPersistenceCompressedInventory(t *testing.T) {
 	}
 	for _, size := range []int64{-1, 0, limits.LogSegmentUploadBytes + 1} {
 		bad := commit
-		bad.Segments = append([]Segment(nil), commit.Segments...)
+		bad.Segments = append([]runstate.Segment(nil), commit.Segments...)
 		bad.Segments[0].StoredBytes = size
 		if err := tenant.RecordSegments(t.Context(), bad); err == nil {
 			t.Fatalf("invalid stored byte count %d accepted", size)

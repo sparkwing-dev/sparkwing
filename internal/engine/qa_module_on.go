@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 const qaModuleProxy = "https://qa-releases.sparkwing.dev/goproxy"
@@ -19,7 +21,7 @@ var qaPin = regexp.MustCompile(`-qa\.[1-9][0-9]*$`)
 // safety: only the QA host serves QA SDK versions and the public checksum database has never seen
 // them; go.sum still pins them. Settings come from go env so go env -w, GOPROXY=off and GOPRIVATE
 // hold. The host answers 403 for modules it lacks, so "|" falls through on any error.
-func QAModuleEnvironment(pin Pin, goEnv func(args ...string) ([]byte, error)) ([]string, error) {
+func QAModuleEnvironment(pin engineid.Pin, goEnv func(args ...string) ([]byte, error)) ([]string, error) {
 	if pin.Replacement != "" || !qaPin.MatchString(pin.Version) {
 		return nil, nil
 	}

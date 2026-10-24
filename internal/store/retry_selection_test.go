@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func FuzzRetryMaterializationUsesCommittedSelection(f *testing.F) {
@@ -18,10 +18,10 @@ func FuzzRetryMaterializationUsesCommittedSelection(f *testing.F) {
 		if len(mode)+len(run)+len(job) > 256 {
 			t.Skip()
 		}
-		tenant, request := materializationFixture(t, SourceManualRetry)
-		selection := &RetrySelection{Mode: mode, Results: map[string]MaterializedResultSource{}}
+		tenant, request := materializationFixture(t, runstate.SourceManualRetry)
+		selection := &runstate.RetrySelection{Mode: mode, Results: map[string]runstate.MaterializedResultSource{}}
 		if selected {
-			selection.Results["job"] = MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: "source", NodeID: "job"}, StateSeq: 1}
+			selection.Results["job"] = runstate.MaterializedResultSource{Ref: runspec.NodeRef{RunID: "source", NodeID: "job"}, StateSeq: 1}
 		}
 		lineage, err := json.Marshal(executionLineage{Lineage: runspec.Lineage{RetryOf: "source"}, Retry: selection})
 		if err != nil {
@@ -29,18 +29,18 @@ func FuzzRetryMaterializationUsesCommittedSelection(f *testing.F) {
 		}
 		rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET lineage_json=? WHERE id='run'`, lineage)
 		rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET state_seq=1 WHERE run_id='source'`)
-		tenant.s.materializations = materializationRecordsFunc(func(context.Context, *storeTx, Team, Actor, controllerwire.NodeRef, MaterializeSource) (materializedRecords, error) {
+		tenant.s.materializations = materializationRecordsFunc(func(context.Context, *storeTx, Team, runstate.Actor, runspec.NodeRef, runstate.MaterializeSource) (materializedRecords, error) {
 			return materializedRecords{}, nil
 		})
-		request.Source = &MaterializeSource{Kind: SourceManualRetry, Result: &MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)}, StateSeq: seq}}
+		request.Source = &runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &runstate.MaterializedResultSource{Ref: runspec.NodeRef{RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)}, StateSeq: seq}}
 		result, err := tenant.ReconcileNode(t.Context(), request)
 		want := mode == "failed" && selected && run == "source" && job == "job" && seq == 1
-		if (err == nil) != want || want && result.Kind != Materialize {
+		if (err == nil) != want || want && result.Kind != runstate.Materialize {
 			t.Fatalf("uncommitted source accepted: mode=%q selected=%t source=%+v result=%+v error=%v", mode, selected, request.Source, result, err)
 		}
 		if !want {
 			row, readErr := tenant.ReadNode(t.Context(), request.Ref)
-			if readErr != nil || row.StateSeq != 0 || row.Status != StatusPending {
+			if readErr != nil || row.StateSeq != 0 || row.Status != runstate.StatusPending {
 				t.Fatalf("refused selection changed work: %+v %v", row, readErr)
 			}
 		}

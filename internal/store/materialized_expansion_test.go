@@ -6,10 +6,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) {
-	tenant, request := materializationFixture(t, SourceMemo)
+	tenant, request := materializationFixture(t, runstate.SourceMemo)
 	owner := authorityRoot("owner", "a")
 	owner.Subject.ID = "host"
 	owner.Grants = []capability.Grant{capability.TriggerHost, capability.NodesClaim, capability.ExpansionSubmit}
@@ -31,7 +32,7 @@ func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) 
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=?,spec_hash='spec',plan_hash='plan',plan_json=?,sealed_at=1 WHERE id='run'`, spec, plan)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET spec_json=?,expansion='expected' WHERE run_id='run'`, []byte(`{"id":"job","closures":{"generate":["group"]}}`))
 	materialized, err := tenant.ReconcileNode(t.Context(), request)
-	if err != nil || materialized.Kind != Materialize || materialized.Node.Generation != 0 || materialized.Node.Outcome != NodeMemoized || materialized.Node.Expansion != ExpansionExpected {
+	if err != nil || materialized.Kind != runstate.Materialize || materialized.Node.Generation != 0 || materialized.Node.Outcome != runstate.NodeMemoized || materialized.Node.Expansion != runstate.ExpansionExpected {
 		t.Fatalf("materialized source=%+v error=%v", materialized, err)
 	}
 	issued, err := tenant.s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{
@@ -54,7 +55,7 @@ func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) 
 	actor := request.Actor
 	actor.Authority.ID, actor.CapabilityPrefix = issued.Capability.Prefix, issued.Capability.Prefix
 	accepted, err := tenant.AcceptExpansion(t.Context(), ExpansionSubmission{Source: request.Ref, SourceGeneration: 0, Actor: actor, Registration: runspec.SecretRegistration{Version: 1}, Body: []byte(`{"jobs":[]}`)})
-	if err != nil || accepted.State != ExpansionAccepted || accepted.SourceGeneration != 0 {
+	if err != nil || accepted.State != runstate.ExpansionAccepted || accepted.SourceGeneration != 0 {
 		t.Fatalf("accept materialized expansion=%+v error=%v", accepted, err)
 	}
 	snapshot, err := tenant.ReadSnapshot(t.Context(), "run")

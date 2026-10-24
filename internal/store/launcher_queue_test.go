@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func launcherQueueFixture(t *testing.T, unpaid, funded int) (*Store, UnitDemand) {
@@ -100,7 +101,7 @@ func TestMeteredPlanRenewalExcludesSchedulingWait(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunCompletion{RunID: "run", Cause: RunFinish, Actor: actor}}
+	finish := runstate.FinishRunRequest{Unit: actor.Owner, Transition: runstate.RunCompletion{RunID: "run", Cause: runstate.RunFinish, Actor: actor}}
 	if _, err := (&Tenant{s: s, team: "a"}).FinishRunAndUnit(t.Context(), finish); err != nil {
 		t.Fatal(err)
 	}

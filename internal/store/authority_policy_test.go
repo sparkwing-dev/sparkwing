@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestMemberIssuanceExpiryAndSessionParent(t *testing.T) {
@@ -131,7 +132,7 @@ func TestOIDCCeilingIncludesEveryAncestorGraceAndDeadline(t *testing.T) {
 func TestMemberTokenDemotionPermanentlyFencesAuthorityAfterSessionTimeout(t *testing.T) {
 	s, _, now := sessionRuntimeStore(t)
 	owner := authorityMember(t, s, "owner", RoleOwner)
-	member := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "member"}}
+	member := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "member"}}
 	rewriteSchemaExec(t, s.db, `UPDATE sessions SET expires_at=? WHERE hash=?`, now.Add(time.Hour).UnixNano(), member.Authority.ID)
 	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
@@ -156,7 +157,7 @@ func TestMemberTokenRotationEnforcesExpiryCeiling(t *testing.T) {
 	for _, excess := range []time.Duration{0, time.Nanosecond} {
 		t.Run(excess.String(), func(t *testing.T) {
 			s, _, now := sessionRuntimeStore(t)
-			member := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "member"}}
+			member := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "member"}}
 			old := inventoryMemberRoot(t, s, member)
 			expiry := now.Add(90*24*time.Hour + excess)
 			tenant := &Tenant{s: s, team: "a"}

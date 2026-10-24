@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -67,7 +66,7 @@ func TestOwnerLeaseAloneDeterminesLivenessProperty(t *testing.T) {
 			if err != nil || len(reaped) != 1 || !reaped[0].Requeued || reaped[0].RunID != owner.RunID || reaped[0].Disruptions != 0 {
 				t.Fatalf("remote activity retained lost owner: %+v, %v", reaped, err)
 			}
-			job, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(owner.RunID), NodeID: runspec.NodeID(remote.NodeID)})
+			job, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(owner.RunID), NodeID: runspec.NodeID(remote.NodeID)})
 			if err != nil || job.CapabilityPrefix != remote.Award.CapabilityPrefix || job.LeaseExpiresAt == nil || !job.LeaseExpiresAt.Equal(remoteBeat.ExpiresAt) {
 				t.Fatalf("owner recovery changed remote claim: %+v, %v", job, err)
 			}

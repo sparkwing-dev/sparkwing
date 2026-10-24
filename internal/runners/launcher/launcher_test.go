@@ -9,21 +9,28 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+
 	admissionv1 "k8s.io/api/admissionregistration/v1"
+
 	authenticationv1 "k8s.io/api/authentication/v1"
+
 	batchv1 "k8s.io/api/batch/v1"
+
 	corev1 "k8s.io/api/core/v1"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+
 	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
 )
 
 type boundaryFake struct {
@@ -81,7 +88,7 @@ func (c *controlFake) Sync(_ context.Context, observations []CloudJobObservation
 func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 	now := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 	image := "registry/runner@sha256:" + strings.Repeat("a", 64)
-	control := &controlFake{award: &CloudJobAward{LeaseExpiresAt: now.Add(time.Hour), Binding: CloudJobBinding{UnitID: "unit", Kind: CloudWork, Team: "team", RunID: "run", NodeID: "job", Holder: "holder", Generation: 1, Attempt: 1, OwnerDeadline: now.Add(time.Hour), AttemptDeadline: now, ParentCapabilityExpiry: now.Add(2 * time.Hour)}, Bootstrap: []byte("bootstrap-secret"), CPUCores: 1.5, Memory: 2 << 30, Engine: &engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}}}
+	control := &controlFake{award: &CloudJobAward{LeaseExpiresAt: now.Add(time.Hour), Binding: CloudJobBinding{UnitID: "unit", Kind: CloudWork, Team: "team", RunID: "run", NodeID: "job", Holder: "holder", Generation: 1, Attempt: 1, OwnerDeadline: now.Add(time.Hour), AttemptDeadline: now, ParentCapabilityExpiry: now.Add(2 * time.Hour)}, Bootstrap: []byte("bootstrap-secret"), CPUCores: 1.5, Memory: 2 << 30, Engine: &engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}}}
 	boundary := &boundaryFake{}
 	kube := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}})
 	firstJobName := jobName(control.award.Binding)
