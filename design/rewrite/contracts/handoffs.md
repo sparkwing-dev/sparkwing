@@ -1078,3 +1078,7 @@ separate operations; no database transaction stays open across a provider call.
 ## 2026-10-24 Korey decision 60: verified main work runs only on fresh pods
 
 - Persistent Kubernetes runners (long-lived pods that serve many jobs) never claim verified work for a repository's default branch; that work runs on a fresh, single-use pod (or a Cloud pod), so no earlier job can leave anything behind for it. Persistent runners keep serving all other work. Closes the executor re-review finding on persistent runners taking verified main work.
+
+## 2026-10-24 Korey decision 61: no plan-time child fan-out preflight
+
+- Amends decision 59. The plan-time refusal is dropped: a job's spec lists which targets it may start as children, not how many it will start, and retries bypass any count taken up front. The max_children_per_root refusal message (current limit, the 1,000 maximum, how to raise it or split the work) and the creation-time check remain the whole rule.
