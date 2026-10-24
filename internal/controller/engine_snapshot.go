@@ -65,7 +65,8 @@ func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot
 	}
 	out := controllerwire.ScheduleSnapshot{
 		RunID: snapshot.Run.ID, StoreNow: snapshot.StoreNow, CancelRequested: graph.CancelRequested, GuardRefusal: graph.GuardRefusal,
-		Jobs: make([]controllerwire.ScheduleJob, 0, len(graph.Nodes)), Generators: make([]controllerwire.ScheduleGenerator, 0, len(graph.Expansions)),
+		SelectionSkips: graph.SelectionSkips,
+		Jobs:           make([]controllerwire.ScheduleJob, 0, len(graph.Nodes)), Generators: make([]controllerwire.ScheduleGenerator, 0, len(graph.Expansions)),
 		Expansions: expansions,
 	}
 	for _, scheduled := range graph.Nodes {

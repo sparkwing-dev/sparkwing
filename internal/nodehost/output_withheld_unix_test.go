@@ -6,11 +6,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -85,5 +87,39 @@ func TestAnOutputHoldingASecretIsWithheldAndTheJobPasses(t *testing.T) {
 				t.Fatalf("logs = %s", logs.String())
 			}
 		})
+	}
+}
+
+func TestDynamicProcessMasksWithholdItsJobOutput(t *testing.T) {
+	_, input, deps := maskingExecutorFixture(t)
+	masks := NewMaskRegistry(deps.Masker).job(input.Accepted.RunID, input.NodeID)
+	deps.Bind = func(_ context.Context, in NodeInput) (ProcessGrant, error) {
+		return ProcessGrant{Binding: in.RouteBinding, Revoke: func() error { return nil }, masks: masks}, nil
+	}
+	start := deps.Start
+	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+		service := ProcessServices{Masks: masks}
+		request := httptest.NewRequest("POST", "/node/v1/masks", strings.NewReader(`{"value":"dynamic-output-secret"}`))
+		if err := service.write(request, capability.Authorized{}, "/node/v1/masks"); err != nil {
+			t.Fatal(err)
+		}
+		process, err := start(ctx, in, activity)
+		process.(*executorProcess).result.Output = json.RawMessage(`{"token":"dynamic-output-secret"}`)
+		return process, err
+	}
+	deps.PublishOutput = func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) {
+		t.Fatal("a dynamically masked job output was published")
+		return nil, nil
+	}
+	deps.Annotate = func(context.Context, NodeInput, nodeproto.AnnotationRequest) error { return nil }
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := host.Execute(t.Context(), input); err != nil {
+		t.Fatal(err)
+	}
+	if deps.Masker.ContainsSecret("dynamic-output-secret") {
+		t.Fatal("the job's dynamic mask entered run-wide output checks")
 	}
 }

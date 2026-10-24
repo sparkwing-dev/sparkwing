@@ -92,6 +92,9 @@ func (h *nodeExecutor) withProcess(ctx context.Context, input NodeInput, spec ru
 		if process != nil {
 			err = errors.Join(err, process.Close(), process.Cleanup(lease.ExecutionContext(ctx)))
 		}
+		if grant.masks != nil {
+			err = maskHostError(err, grant.masks.masker)
+		}
 	}()
 	resolved, err := h.deps.EnsureEngine(ctx, spec.Resolved.Engine, input.Engine.Target)
 	if err != nil {

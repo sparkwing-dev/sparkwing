@@ -73,7 +73,7 @@ func main() { sw.Register("check", func() sw.Pipeline[sw.NoInputs] { return pipe
 	if first.RunID == second.RunID || second.Replayed {
 		t.Fatal("tracing ID deduplicated separate submissions")
 	}
-	carried, err := runspec.CarryRetry(runspec.RetryInput{Request: claimed.Claim.Request, SourceRunID: first.RunID})
+	carried, err := runspec.CarryRetry(runspec.RetryInput{Request: claimed.Claim.Request, Retrier: runspec.Actor{Kind: "local", ID: "uid:1000"}, SourceRunID: first.RunID})
 	if err != nil {
 		t.Fatal(err)
 	}

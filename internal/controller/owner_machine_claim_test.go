@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -20,10 +21,7 @@ func TestClaimMarksOnlyTheRequestersPersonalMachineAsOwnerMachine(t *testing.T) 
 		personal bool
 	}{{"run-personal", true}, {"run-shared", false}} {
 		ctx := context.Background()
-		f.createRun(olga, tc.run, "https://github.com/acme/widgets.git", 701)
-		if _, err := teststore.SQL(t, f.store).ExecContext(ctx, `UPDATE runs SET created_principal=?,created_subject_kind='account' WHERE team=? AND id=?`, olga.id, olga.team, tc.run); err != nil {
-			t.Fatal(err)
-		}
+		f.createRun(olga, tc.run, "https://github.com/acme/widgets.git", 701, runspec.PrincipalWriter("account", olga.id))
 		if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: tc.run, NodeID: "compile", Status: "pending"}); err != nil {
 			t.Fatal(err)
 		}
@@ -57,10 +55,7 @@ func TestChildOfAPersonalMachineJobStaysOnItsOwnersMachines(t *testing.T) {
 		{"child-shared", "olga-shared", "olga-desktop-2", true, http.StatusForbidden},
 		{"child-shared-runner", "olga-laptop", "team-runner", false, http.StatusOK},
 	} {
-		f.createRun(olga, tc.run, "https://github.com/acme/widgets.git", 701)
-		if _, err := teststore.SQL(t, f.store).ExecContext(ctx, `UPDATE runs SET created_principal=?,created_subject_kind='machine' WHERE team=? AND id=?`, tc.submitter, olga.team, tc.run); err != nil {
-			t.Fatal(err)
-		}
+		f.createRun(olga, tc.run, "https://github.com/acme/widgets.git", 701, runspec.PrincipalWriter("machine", tc.submitter))
 		if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: tc.run, NodeID: "compile", Status: "pending"}); err != nil {
 			t.Fatal(err)
 		}

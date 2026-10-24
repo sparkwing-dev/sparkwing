@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -41,6 +42,25 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	provePush := func(run string, request *runspec.SealedRequest, repo int64) {
+		t.Helper()
+		request.Provenance, err = runspec.ActionsProvenance(repo, request.Request.Git.Ref, request.Request.Git.SHA, request.Request.Pipeline)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Hash, err = runspec.CanonicalHash(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET request_json=? WHERE team=? AND id=?`, body, tenant.Team(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	provePush(plan.RunID, &plan.Seal.Request, 42)
 	if _, err := tenant.AcceptPlan(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -67,12 +87,15 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	provePush(pending.RunID, &pending.Request, 42)
 	foreign := plan.Seal.Request.Request
 	foreign.Git.Repository.Key = "gh:43"
 	foreign.Git.Repository.Display = "https://github.com/acme/other"
-	if _, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: authority, Request: foreign}); err != nil {
+	other, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: authority, Request: foreign})
+	if err != nil {
 		t.Fatal(err)
 	}
+	provePush(other.RunID, &other.Request, 43)
 	demand := store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitTrigger}}
 	checkStoreQueueCounts(t, s, map[string]int{store.QueueStateReady: 3})
 	claim, err := s.AsOperator().ClaimUnit(ctx, demand)

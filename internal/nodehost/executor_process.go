@@ -85,6 +85,11 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		}
 		input.RouteBinding = grant.Binding
 		input.processRevoke = grant.Revoke
+		if grant.masks != nil {
+			scoped := *h
+			scoped.deps.Masks, scoped.deps.Masker = grant.masks, grant.masks.masker
+			h = &scoped
+		}
 	} else if input.RouteBinding.Routes.Bearer != "" {
 		err = errors.New("SDK execution requires a fresh process binding factory")
 		return h.failure(err), err
@@ -169,7 +174,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			return h.failure(afterErr), afterErr
 		}
 	}
-	if result.Outcome == runstate.NodeSuccess && len(output) > 0 && h.deps.Masker.Mask(string(output)) != string(output) {
+	if result.Outcome == runstate.NodeSuccess && len(output) > 0 && h.deps.Masks.ContainsSecret(string(output)) {
 		output = nil
 		if err = h.withholdOutput(ctx, input); err != nil {
 			return h.failure(err), err

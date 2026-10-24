@@ -3556,6 +3556,12 @@ components:
             - type: "null"
         run_id:
           type: string
+        selection_skips:
+          anyOf:
+            - additionalProperties:
+                type: string
+              type: object
+            - type: "null"
         store_now:
           format: date-time
           type: string
@@ -3563,6 +3569,7 @@ components:
         - run_id
         - store_now
         - cancel_requested
+        - selection_skips
         - jobs
         - generators
         - expansions
@@ -10184,9 +10191,14 @@ paths:
         owner: team
         authentication: capability
         access:
-          - credential: unbound_member_or_local
+          - credential: account_session
             grants:
-              - runs.read
+              - runs.write
+            binding: none
+            liveness: credential
+          - credential: account_session
+            grants:
+              - team.admin
             binding: none
             liveness: credential
         retry: never

@@ -49,7 +49,7 @@ func rootFixture(service bool) (*credentialBoundary, string, string) {
 	if service {
 		return deploymentBoundary(capability.OperatorTokens), "/api/v1/operator/tokens", `{"name":"launcher","grants":["claims.launch"]}`
 	}
-	b := authorityMember()
+	b := issuanceSession()
 	b.snapshot.Authorities[0].Principal.Capability.Grants = append(b.snapshot.Authorities[0].Principal.Capability.Grants, capability.RunsWrite)
 	return b, "/api/v1/runners", `{"name":"builder","repos":["GitHub.com/acme/*"],"reserved_pools":["trusted"]}`
 }
@@ -58,6 +58,10 @@ func TestRootProvisioningHTTPOrigin(t *testing.T) {
 	for _, service := range []bool{false, true} {
 		for _, session := range []bool{false, true} {
 			b, path, body := rootFixture(service)
+			if !session && !service {
+				b = authorityMember()
+				b.snapshot.Authorities[0].Principal.Capability.Grants = append(b.snapshot.Authorities[0].Principal.Capability.Grants, capability.RunsWrite)
+			}
 			if session {
 				if service {
 					b = consoleBoundary()
@@ -68,6 +72,13 @@ func TestRootProvisioningHTTPOrigin(t *testing.T) {
 			}
 			f := &rootIssuer{}
 			w := authorityHTTP(rootServer(b, f), b, "POST", path+"?team=foreign", body)
+			if !service && !session {
+				assertEngineError(t, w, http.StatusForbidden, apierr.Forbidden)
+				if len(f.specs) != 0 {
+					t.Fatal("bearer reached enrollment issuer")
+				}
+				continue
+			}
 			var got struct {
 				Capability, Prefix, Team string
 				Grants                   []capability.Grant
@@ -115,6 +126,9 @@ func TestRootProvisioningHTTPRefusals(t *testing.T) {
 				p.Capability.Grants = []capability.Grant{capability.RunsRead, capability.RunsWrite}
 			case "machine":
 				p.Capability.Subject.Kind = capability.SubjectMachine
+				if !service {
+					code = apierr.Unauthenticated
+				}
 			case "claim":
 				b = newCredentialBoundary()
 			case "nodehost":

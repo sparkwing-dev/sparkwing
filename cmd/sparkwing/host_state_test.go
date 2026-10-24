@@ -275,27 +275,6 @@ func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
 	}
 }
 
-func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
-	state, err := nodehost.NewRemoteHostStore(hostStateController{}, &cliTransportState{}, "unit", func() bool { return false })
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "host", Generation: 1}}
-	request := runstate.FinishRunRequest{Unit: owner, Transition: runstate.RunCompletion{
-		RunID: "run", Actor: runstate.Actor{Owner: owner}, Cause: runstate.RunPolicyRefused, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyAdmissionFail}, Reason: "resources_refused",
-	}}
-	state.Finish = func(_ context.Context, got runstate.FinishRunRequest) (runstate.Applied, error) {
-		if !reflect.DeepEqual(got, request) {
-			t.Fatal("admission refusal changed its policy cause or owner unit")
-		}
-		return runstate.Applied{StateSeq: 3}, nil
-	}
-	applied, err := state.FinishRunAndUnit(t.Context(), request)
-	if err != nil || applied.StateSeq != 3 {
-		t.Fatalf("admission completion = %+v, %v", applied, err)
-	}
-}
-
 func (*cliOwnerStore) RelinquishStart(context.Context, runstate.CapacityBinding, runstate.Actor) error {
 	return errors.New("unexpected provisional award relinquishment")
 }

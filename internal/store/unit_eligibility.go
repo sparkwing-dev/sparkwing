@@ -126,32 +126,14 @@ func localClaimant(c capability.Capability) bool {
 // so work from a run anyone can push must not reach a host that later holds a pool's
 // reserved secrets.
 func claimantTrustsRunTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability, launcher bool) (bool, error) {
-	if root.Trust == capability.TrustAny {
-		return true, nil
-	}
-	if root.Trust == "" {
-		reserved, err := poolsHoldSecretsTx(ctx, tx, team, root.ReservedPools)
-		if err != nil || !reserved {
-			return true, err
-		}
-	}
-	if len(root.ReservedPools) > 0 && !launcher {
-		return false, nil
-	}
-	seal, err := sealedRequestTx(ctx, tx, team, run)
+	q := claimSQL{dialect: tx.dialect}
+	pools, err := q.jsonParam(root.ReservedPools)
 	if err != nil {
 		return false, err
 	}
-	return seal.Provenance.TrustedDefault(), nil
-}
-
-func poolsHoldSecretsTx(ctx context.Context, tx *storeTx, team Team, pools []string) (bool, error) {
-	for _, pool := range pools {
-		var held int
-		err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM secrets WHERE team=? AND only_on=?`, team, pool).Scan(&held)
-		if err != nil || held > 0 {
-			return held > 0, err
-		}
-	}
-	return false, nil
+	// A relation names each argument once even when the rule references it twice.
+	query := `SELECT CASE WHEN ` + q.poolTrust("r.team", "c.pools", "c.trust", "c.launcher", q.at(q.blob("r.request_json"), "provenance")) + ` THEN 1 ELSE 0 END FROM runs r CROSS JOIN (SELECT ` + pools + ` AS pools,` + q.param(string(root.Trust)) + ` AS trust,CAST(` + q.param(boolInt(launcher)) + ` AS BIGINT) AS launcher) c WHERE r.team=? AND r.id=?`
+	var trusted int
+	err = tx.QueryRowContext(ctx, query, append(q.args, team, run)...).Scan(&trusted)
+	return trusted == 1, err
 }

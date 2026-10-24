@@ -113,7 +113,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 			return err
 		}
 		out = capability.Rotation{Issued: issued, Previous: previous, RevokesAt: deadline}
-		return nil
+		return tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: team, Actor: auditPrincipalActor(p)}, auditCredential{Operation: "token.rotated", Credential: digestAudit(issued.Capability.Prefix), Previous: digestAudit(c.Prefix)})
 	})
 	if err != nil {
 		return capability.Rotation{}, err

@@ -110,6 +110,16 @@ func PrincipalWriter(kind, id string) Writer {
 	return Writer(escapeWriter(kind) + "/" + escapeWriter(id))
 }
 
+// Principal returns the submitting principal of an asserted writer, or an empty actor
+// for writers scoped to a run or automation.
+func (w Writer) Principal() Actor {
+	kind, id, ok := strings.Cut(string(w), "/")
+	if !ok || kind != "account" && kind != "machine" && kind != "local" {
+		return Actor{}
+	}
+	return Actor{Kind: kind, ID: strings.NewReplacer("%2F", "/", "%3A", ":", "%25", "%").Replace(id)}
+}
+
 // RunWriter keys asserted data by one run's lineage when no principal chose it.
 func RunWriter(run string) Writer { return Writer("run/" + escapeWriter(run)) }
 

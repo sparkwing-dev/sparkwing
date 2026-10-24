@@ -451,7 +451,7 @@ func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 		for _, rejected := range []nodeTransition{
 			{To: runstate.NodeReady, Cause: runstate.CauseRelease},
 			{To: runstate.NodeSkipped, Cause: causeDependency},
-			{To: runstate.NodeFailed, Cause: causeOwnerPolicy, Extra: transitionExtra{OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyAdmissionFail}, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed}}},
+			{To: runstate.NodeFailed, Cause: causeOwnerPolicy, Extra: transitionExtra{OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.OwnerPolicyKind("admission_fail")}, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed}}},
 			{To: runstate.NodeApprovalPending, Cause: runstate.CauseApprovalOpen},
 		} {
 			rejected.Ref, rejected.Actor = runspec.NodeRef{RunID: runspec.RunID(retry.RunID), NodeID: "job"}, actor

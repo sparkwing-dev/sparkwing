@@ -8,6 +8,7 @@ import (
 
 // ProcessGrant transfers a delegated bearer and its idempotent revoker to the host.
 type ProcessGrant struct {
+	masks   *MaskRegistry
 	Binding nodeproto.ProcessBinding
 	Revoke  func() error
 }

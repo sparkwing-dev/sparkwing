@@ -4470,3 +4470,15 @@ admission metadata. Host snapshots use that execution value directly.
 [`runstate.RunSummary`](../../../internal/runstate/reporting.go) beside its
 private team and plan snapshot. Handlers serialize the summary, so persistence
 metadata cannot enter the response through a missing field mapping.
+
+## Asserted retry provenance
+
+Every retry preserves its source seal, including the writer, in both full and
+failed modes. This includes asserted account, run and armer writers. The retrier
+is recorded only in execution lineage as the actor who requested the retry.
+Personal placement, owner-machine checks and cache and memo authority read the
+same sealed writer because that principal chose the code.
+
+Dependency terminal transitions require the outcome that `Decide(graph)` returns
+for that node in the committing transaction. An owner cannot bypass an approval
+by asserting that its dependencies require a skip.

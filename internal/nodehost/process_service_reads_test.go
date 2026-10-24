@@ -262,3 +262,29 @@ func FuzzProcessServiceBinding(f *testing.F) {
 		}
 	})
 }
+
+func TestChildRequestRejectsSecretsInEveryOutboundField(t *testing.T) {
+	routes, service, auth := serviceFixture(t)
+	if err := service.Masks.registerValue("private-secret"); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	service.StartChild = func(context.Context, capability.Authorized, ChildRequest) (string, error) {
+		calls++
+		return "child", nil
+	}
+	for _, body := range []string{
+		`{"pipeline":"private-secret"}`,
+		`{"pipeline":"build","args":{"x":"private-secret"}}`,
+		`{"pipeline":"build","repo":"https://private-secret@example.com/repo"}`,
+		`{"pipeline":"build","branch":"private-secret"}`,
+	} {
+		response := registeredServiceRequest(t, routes, auth, http.MethodPost, "/node/v1/children", body)
+		if response.Code != http.StatusBadRequest || strings.Contains(response.Body.String(), "private-secret") {
+			t.Errorf("child secret escaped: %d %s", response.Code, response.Body)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("%d secret-bearing children left the host", calls)
+	}
+}
