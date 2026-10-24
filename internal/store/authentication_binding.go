@@ -6,8 +6,8 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func authenticationBindingTx(ctx context.Context, tx *storeTx, c capability.Capability) (capability.BindingState, error) {
@@ -78,7 +78,7 @@ func authenticationNodeTx(ctx context.Context, tx *storeTx, c capability.Capabil
 	if err != nil {
 		return err
 	}
-	if c.Unit == capability.UnitNode && status == string(StatusPending) && !started.Valid {
+	if c.Unit == capability.UnitNode && status == string(runstate.StatusPending) && !started.Valid {
 		out.Current.Attempt = 0
 	}
 	out.FinishedAt = stateTime(finished)
@@ -120,7 +120,7 @@ func authenticationExpansionTx(ctx context.Context, tx *storeTx, c capability.Ca
 			return err
 		}
 	} else if expansion.Lease.Kind == capability.UnitEval {
-		row, err := readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
+		row, err := readNodeTx(ctx, tx, Team(c.Team), runspec.NodeRef{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID)})
 		if err != nil {
 			return err
 		}

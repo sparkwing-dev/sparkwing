@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -51,15 +51,15 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 				mu.Lock()
 				ran = append(ran, input.NodeID)
 				mu.Unlock()
-				outcome := store.NodeSuccess
+				outcome := runstate.NodeSuccess
 				if input.NodeID == "build" && reason == store.PauseReasonOnFailure {
-					outcome = store.NodeFailed
+					outcome = runstate.NodeFailed
 				}
 				return f.report(ctx, input, outcome)
 			})
 			var paused []string
 			f.Host.Debug = debugWaitFunc(func(ctx context.Context, b DebugBoundary) error {
-				if b.Ref != (controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"}) || b.Reason != reason || b.Actor != f.Actor || b.Timeout != defaultDebugPauseTimeout {
+				if b.Ref != (runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"}) || b.Reason != reason || b.Actor != f.Actor || b.Timeout != defaultDebugPauseTimeout {
 					return errors.New("pause lost its selected policy or owner authority")
 				}
 				mu.Lock()
@@ -67,7 +67,7 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 				if slices.Contains(ran, "build") != (reason != store.PauseReasonBefore) || slices.Contains(ran, "deploy") {
 					t.Errorf("execution at pause: %v", ran)
 				}
-				row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "deploy"})
+				row, err := f.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "deploy"})
 				if err != nil || row.ReadyAt != nil || row.ClaimedBy != "" {
 					t.Errorf("downstream released during pause: %+v error=%v", row, err)
 				}
@@ -108,7 +108,7 @@ func TestDebugPauseUsesSealedTimeoutBeforeExecution(t *testing.T) {
 		if !expired {
 			t.Error("executed before the pause adapter released")
 		}
-		return f.report(ctx, input, store.NodeSuccess)
+		return f.report(ctx, input, runstate.NodeSuccess)
 	})
 	if completion, err := f.Host.Run(t.Context(), f.Input); err != nil || completion.Outcome != "success" || !expired {
 		t.Fatalf("completion=%+v expired=%v error=%v", completion, expired, err)
@@ -134,13 +134,13 @@ func TestDebugCancellationStopsOwnerWithoutChangingTerminalResult(t *testing.T) 
 				if input.NodeID == "deploy" {
 					t.Error("downstream executed during cancelled pause")
 				}
-				return f.report(ctx, input, store.NodeSuccess)
+				return f.report(ctx, input, runstate.NodeSuccess)
 			})
 			if _, err := f.Host.Run(ctx, f.Input); !errors.Is(err, stopped) {
 				t.Fatalf("error=%v, want cancellation cause", err)
 			}
-			row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"})
-			if err != nil || reason == store.PauseReasonAfter && row.Outcome != store.NodeSuccess || reason == store.PauseReasonBefore && row.Status != store.StatusPending {
+			row, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"})
+			if err != nil || reason == store.PauseReasonAfter && row.Outcome != runstate.NodeSuccess || reason == store.PauseReasonBefore && row.Status != runstate.StatusPending {
 				t.Fatalf("persisted result=%+v error=%v", row, err)
 			}
 		})
@@ -167,13 +167,13 @@ func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
 	})
 	wait := f.Host.Wait
 	f.Host.Wait = func(ctx context.Context, snapshot store.RunSnapshot) error {
-		if row, ok := ownerNode(snapshot, "gate"); ok && row.Status == store.StatusApprovalPending {
-			_, err := f.State.TransitionNode(ctx, store.ResolveApprovalNode{Ref: row.Ref, Actor: f.Control, Outcome: store.NodeSuccess, Approval: &store.ApprovalResolution{Decision: store.ApprovalResolutionApproved}})
+		if row, ok := ownerNode(snapshot, "gate"); ok && row.Status == runstate.StatusApprovalPending {
+			_, err := f.State.TransitionNode(ctx, store.ResolveApprovalNode{Ref: row.Ref, Actor: f.Control, Outcome: runstate.NodeSuccess, Approval: &runstate.ApprovalResolution{Decision: store.ApprovalResolutionApproved}})
 			return err
 		}
 		return wait(ctx, snapshot)
 	}
-	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeFailed) })
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, runstate.NodeFailed) })
 	completion, err := f.Host.Run(t.Context(), f.Input)
 	if err != nil || completion.Outcome != "failed" || !slices.Equal(paused, []string{"gate:" + store.PauseReasonBefore}) {
 		t.Fatalf("completion=%+v pauses=%v error=%v", completion, paused, err)

@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
@@ -33,7 +32,7 @@ func (c *LocalHostClient) nativeTransport(ctx context.Context, principal capabil
 	if principal.Capability.Unit != capability.UnitNode || principal.Capability.Team != owner.Capability.Team {
 		return nil, localHostClientRefusal()
 	}
-	transport, award, err := c.nodeTransport(ctx, controllerwire.NodeRef{RunID: runspec.RunID(c.run), NodeID: runspec.NodeID(principal.Capability.Binding.NodeID)})
+	transport, award, err := c.nodeTransport(ctx, runspec.NodeRef{RunID: runspec.RunID(c.run), NodeID: runspec.NodeID(principal.Capability.Binding.NodeID)})
 	if err != nil {
 		return nil, err
 	}

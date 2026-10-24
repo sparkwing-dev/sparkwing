@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 )
 
@@ -18,7 +19,7 @@ type LocalController interface {
 	RunStore
 	Reconcile(context.Context) (LocalActivity, error)
 	Run(context.Context, func(LocalActivity) error) error
-	HTTP() LocalHTTP
+	HTTP() localhostwire.LocalHTTP
 	Close() error
 }
 
@@ -197,7 +198,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		serve("controller API", func() error {
 			local := controller.HTTP()
 			local.API = logins.socketRoutes(local.API)
-			return local.ServeAPI(ctx, &readyListener{Listener: ln, ready: apiReady})
+			return ServeAPI(ctx, &readyListener{Listener: ln, ready: apiReady}, local)
 		})
 	}
 	var dashboardListener net.Listener
@@ -478,7 +479,7 @@ func (r *localRuntime) Drain(ctx context.Context) error {
 // safety: TCP carries no peer identity, so only the dashboard's own loopback
 // origin may reach it, and only with a session from a link api.sock minted; a
 // rebound DNS name or another site's page is refused before the session check.
-func guardDashboard(local LocalHTTP, addr string, logins *dashboardLogins) http.Handler {
+func guardDashboard(local localhostwire.LocalHTTP, addr string, logins *dashboardLogins) http.Handler {
 	if local.Dashboard == nil {
 		return nil
 	}

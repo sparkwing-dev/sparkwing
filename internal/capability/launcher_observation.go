@@ -1,8 +1,7 @@
-package controllerwire
+package capability
 
 import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // Validate checks the award fence without granting authority to its reported state.
@@ -11,7 +10,7 @@ func (o LauncherObservation) Validate() error {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "launcher observation requires a complete award fence"}
 	}
 	switch o.Award.Kind {
-	case capability.UnitPlan, capability.UnitEval, capability.UnitNode:
+	case UnitPlan, UnitEval, UnitNode:
 		if o.Reservation && o.Rejected {
 			return &apierr.Error{Code: apierr.BadRequest, Message: "launcher reservation cannot report a rejected Job"}
 		}
@@ -30,4 +29,18 @@ func (a LauncherActivation) Validate() error {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "launcher activation requires an execution node reservation"}
 	}
 	return nil
+}
+
+// LauncherObservation reports one award's preparation state without Kubernetes identities.
+type LauncherObservation struct {
+	Award       LeaseRef `json:"award"`
+	Reservation bool     `json:"reservation,omitempty"`
+	Rejected    bool     `json:"rejected,omitempty"`
+}
+
+// LauncherActivation binds a verified execution reservation before its Job is unsuspended.
+type LauncherActivation struct {
+	Award         LeaseRef `json:"award"`
+	NodeUID       string   `json:"node_uid"`
+	ReservationID string   `json:"reservation_id"`
 }

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // ErrSecretMissing classifies a missing stored value separately from transport
 // and authorization failures. Use errors.Is to recognize a miss from any backend.
-var ErrSecretMissing = secretname.ErrMissing
+var ErrSecretMissing = secrets.ErrSecretMissing
 
 // Secrets are declared during describe and resolved lazily during execution.
 // The host registers masked values before releasing them. Secret and Variable reject classification drift.

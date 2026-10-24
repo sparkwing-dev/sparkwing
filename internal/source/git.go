@@ -10,8 +10,8 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/gitcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/source/gitcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 

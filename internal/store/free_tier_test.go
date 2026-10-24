@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -78,9 +80,7 @@ func appendBytes(tenant *store.Tenant, runID string, n int) error {
 
 func teamRun(t *testing.T, tenant *store.Tenant, runID string) {
 	t.Helper()
-	if err := tenant.TestOnlySeedRun(context.Background(), store.Run{
-		ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
+	if err := tenant.TestOnlySeedRun(context.Background(), store.Run{RunSummary: runstate.RunSummary{ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatalf("create run %s for %s: %v", runID, tenant.Team(), err)
 	}
 }

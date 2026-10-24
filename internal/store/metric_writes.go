@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // WriteMetric records a resource sample under the current reporting authority.
@@ -25,7 +25,7 @@ func (t *Tenant) WriteMetric(ctx context.Context, a capability.Authorized, sampl
 		if err := t.metricAuthorityTx(ctx, tx, a, "metrics"); err != nil {
 			return err
 		}
-		return insertMetricTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, sample)
+		return insertMetricTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, sample)
 	})
 }
 
@@ -38,7 +38,7 @@ func (t *Tenant) WriteUsage(ctx context.Context, a capability.Authorized, usage 
 		if err := t.metricAuthorityTx(ctx, tx, a, "usage"); err != nil {
 			return err
 		}
-		return addUsageTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, usage)
+		return addUsageTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, usage)
 	})
 }
 
@@ -72,11 +72,11 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 			continue
 		}
 		if rule.Credential == capability.CredentialClaim {
-			actor := Actor{Authority: p.Authority, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}
+			actor := runstate.Actor{Authority: p.Authority, CapabilityPrefix: c.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}
 			switch rule.Binding {
 			case capability.BindOwnNode:
-				actor.Kind = ActorHolder
-				row, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
+				actor.Kind = runstate.ActorHolder
+				row, err := readNodeTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
 				if err != nil {
 					return err
 				}
@@ -88,8 +88,8 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 				}
 				b.Attempt = int64(row.Attempt)
 			case capability.BindRunOfTrigger:
-				actor.Kind = ActorRunHost
-				actor.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(b.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}
+				actor.Kind = runstate.ActorRunHost
+				actor.Owner = runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(b.RunID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}
 				if err := checkOwnerTx(ctx, tx, t.team, actor, a.Target.RunID); err != nil {
 					return err
 				}
@@ -117,7 +117,7 @@ type NodeUsage struct {
 	Wall        time.Duration
 }
 
-func addUsageTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.NodeRef, u NodeUsage) error {
+func addUsageTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, u NodeUsage) error {
 	runID, nodeID := ref.RunID, ref.NodeID
 	var cpu, wall int64
 	err := tx.QueryRowContext(ctx, `SELECT cpu_nanos, process_wall_nanos FROM nodes

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -16,7 +17,7 @@ func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
 	if _, err := foreign.TransitionNode(t.Context(), start); err == nil {
 		t.Fatal("foreign tenant started the job")
 	}
-	if result, err := f.tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(f.holder.RunID), NodeID: string(f.holder.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || result.Kind != store.AcquireGranted {
+	if result, err := f.tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: string(f.holder.RunID), NodeID: string(f.holder.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("execution admission: %+v, %v", result, err)
 	}
 	if _, err := f.tenant.TransitionNode(t.Context(), start); err != nil {
@@ -86,7 +87,7 @@ func TestTenantMetricsStayInTheRunsTeam(t *testing.T) {
 func TestTenantFinishRejectsForeignAndMissingJobs(t *testing.T) {
 	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
 	foreign := tenantFor(t, f.s, "foreign")
-	change := store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: store.NodeSuccess}
+	change := store.ReportNode{Ref: f.ref, Actor: f.holder, SourceAttempt: acceptanceAttempt(1), Outcome: runstate.NodeSuccess}
 	before, err := f.tenant.ReadNode(t.Context(), f.ref)
 	if err != nil {
 		t.Fatal(err)

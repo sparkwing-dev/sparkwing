@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -23,9 +24,9 @@ func (s *Server) teamWriter(r *http.Request, a capability.Authorized) (TeamWrite
 	return tenantPort[TeamWriter](r.Context(), s, store.Team(a.Target.Team))
 }
 
-func (s *Server) teamWriteEndpoints() []Endpoint {
+func (s *Server) teamWriteEndpoints() []controllerwire.Endpoint {
 	engine := s.engineController
-	return []Endpoint{
+	return []controllerwire.Endpoint{
 		{Method: "PUT", Pattern: "/api/v1/team/settings", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamSettings},
 		{Method: "PATCH", Pattern: "/api/v1/team", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleRenameTeam},
 		{Method: "DELETE", Pattern: "/api/v1/team", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteTeam},

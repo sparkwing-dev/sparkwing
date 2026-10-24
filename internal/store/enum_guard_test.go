@@ -22,8 +22,8 @@ var enumGroups = map[string]struct {
 			"Success", "Failed", "Skipped", "Cancelled", "Superseded",
 		},
 	},
-	"store.AcquireKind": {
-		file: "internal/store/concurrency.go",
+	"runstate.AcquireKind": {
+		file: "internal/runstate/state.go",
 		values: []string{
 			"AcquireGranted", "AcquireQueued",
 			"AcquireSkipped", "AcquireFailed",

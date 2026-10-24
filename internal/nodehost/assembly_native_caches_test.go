@@ -12,11 +12,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestNativeServicesSavesAndRestoresDeclaredCache(t *testing.T) {
@@ -67,7 +65,7 @@ func nativeCacheRoundTrip(t *testing.T, name, value string, field, delta uint8, 
 			t.Fatal(err)
 		}
 		input.SpecHash = "job-hash"
-		state.node = store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Generation: input.Generation, SpecHash: input.SpecHash, Spec: body}
+		state.node = runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Generation: input.Generation, SpecHash: input.SpecHash, Spec: body}
 		var spec runspec.Spec
 		if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 			t.Fatal(err)
@@ -118,7 +116,7 @@ func nativeCacheRoundTrip(t *testing.T, name, value string, field, delta uint8, 
 	case 6:
 		input.Storage.Authority.Ref.Scope.Ref += "-foreign"
 	}
-	if err := finish(t.Context(), input, &store.NodeResult{Outcome: store.NodeSuccess}); err != nil {
+	if err := finish(t.Context(), input, &runstate.NodeResult{Outcome: runstate.NodeSuccess}); err != nil {
 		t.Fatal(err)
 	}
 	if field < 7 {

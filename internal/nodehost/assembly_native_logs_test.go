@@ -15,11 +15,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -39,16 +38,16 @@ func (s completingUnitStore) AcceptExpansion(ctx context.Context, _ store.Expans
 	return store.AcceptedExpansion{}, s.commit(ctx)
 }
 
-func (s completingUnitStore) FinishRunAndUnit(ctx context.Context, _ store.FinishRunRequest) (store.Applied, error) {
-	return store.Applied{}, s.commit(ctx)
+func (s completingUnitStore) FinishRunAndUnit(ctx context.Context, _ runstate.FinishRunRequest) (runstate.Applied, error) {
+	return runstate.Applied{}, s.commit(ctx)
 }
 
-func (s completingUnitStore) TransitionNode(ctx context.Context, _ store.NodeCommand) (store.Applied, error) {
-	return store.Applied{}, s.commit(ctx)
+func (s completingUnitStore) TransitionNode(ctx context.Context, _ store.NodeCommand) (runstate.Applied, error) {
+	return runstate.Applied{}, s.commit(ctx)
 }
 
 type nativeLogRecords struct {
-	view    store.LogSegments
+	view    runstate.LogSegments
 	objects map[string][]byte
 }
 
@@ -61,7 +60,7 @@ func (r *nativeLogRecords) PutSegment(_ context.Context, segment logseg.Segment,
 	for _, row := range r.view.Segments {
 		offset += row.Size
 	}
-	r.view.Segments = append(r.view.Segments, store.Segment{Index: int64(segment.N), Offset: offset, Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key})
+	r.view.Segments = append(r.view.Segments, runstate.Segment{Index: int64(segment.N), Offset: offset, Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key})
 	r.objects[key] = bytes.Clone(body)
 	return nil
 }
@@ -72,7 +71,7 @@ func (r *nativeLogRecords) PutManifest(_ context.Context, manifest logseg.Manife
 	return nil
 }
 
-func (r *nativeLogRecords) ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error) {
+func (r *nativeLogRecords) ReadLogSegments(context.Context, runstate.Actor, blob.LogReadRequest) (runstate.LogSegments, error) {
 	return r.view, nil
 }
 
@@ -120,7 +119,7 @@ func FuzzLocalNativeLogsPreserveAuthorityAndMasking(f *testing.F) {
 			return
 		}
 		var body bytes.Buffer
-		read, err := (logseg.CommittedReader{Records: records, Objects: records}).Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: records.view.Subject}, &body)
+		read, err := (logseg.CommittedReader{Records: records, Objects: records}).Read(t.Context(), runstate.Actor{}, blob.LogReadRequest{Subject: records.view.Subject}, &body)
 		if err != nil || !read.Complete || bytes.Contains(body.Bytes(), []byte(secret)) || !json.Valid(bytes.TrimSpace(body.Bytes())) {
 			t.Fatalf("shared read roundtrip exposed private or invalid output: %s %v", body.Bytes(), err)
 		}
@@ -228,7 +227,7 @@ func TestLogLifecycleDetachesFlush(t *testing.T) {
 				}}, logs: logs}
 				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 				defer cancel()
-				ref := controllerwire.NodeRef{RunID: "run", NodeID: "job"}
+				ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
 				switch operation {
 				case "plan":
 					state.unit = capability.UnitPlan
@@ -237,7 +236,7 @@ func TestLogLifecycleDetachesFlush(t *testing.T) {
 					state.unit = capability.UnitEval
 					_, err = state.AcceptExpansion(ctx, store.ExpansionSubmission{})
 				case "finish":
-					_, err = state.FinishRunAndUnit(ctx, store.FinishRunRequest{})
+					_, err = state.FinishRunAndUnit(ctx, runstate.FinishRunRequest{})
 				case "release":
 					_, err = state.TransitionNode(ctx, store.ReleaseNode{Ref: ref})
 				}
@@ -313,9 +312,9 @@ type unavailableLogMetadata struct {
 	calls int
 }
 
-func (s *unavailableLogMetadata) ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error) {
+func (s *unavailableLogMetadata) ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error) {
 	s.calls++
-	return store.NodeRow{}, errors.New("node lookup unavailable")
+	return runstate.NodeRow{}, errors.New("node lookup unavailable")
 }
 
 func TestLogUploadsDoNotHoldOtherJobs(t *testing.T) {
@@ -325,7 +324,7 @@ func TestLogUploadsDoNotHoldOtherJobs(t *testing.T) {
 			if subject.Attempt.NodeID == "slow" {
 				return up, nil
 			}
-			return &nativeLogRecords{view: store.LogSegments{Subject: subject}, objects: map[string][]byte{}}, nil
+			return &nativeLogRecords{view: runstate.LogSegments{Subject: subject}, objects: map[string][]byte{}}, nil
 		}}
 		for _, node := range []string{"slow", "healthy"} {
 			logs.bind(capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitNode, Binding: capability.Binding{RunID: "run", NodeID: node, Generation: 1}}}, 1)
@@ -351,18 +350,18 @@ func TestStalledLogUploaderInitializationDoesNotDelayAnotherJobsReport(t *testin
 	synctest.Test(t, func(t *testing.T) {
 		now := time.Now()
 		f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "healthy", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
-		actors := map[string]store.Actor{}
+		actors := map[string]runstate.Actor{}
 		for _, node := range []string{"slow", "healthy"} {
-			ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(node)}
+			ref := runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(node)}
 			if _, err := f.Tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 				t.Fatal(err)
 			}
-			award, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
-			if err != nil || award.Kind != store.Execute {
+			award, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: runstate.SourceNone})
+			if err != nil || award.Kind != runstate.Execute {
 				t.Fatalf("award: %+v %v", award, err)
 			}
-			actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}}
-			if err := awaitStart(t.Context(), f.Tenant, store.CapacityBinding{RunID: string(ref.RunID), NodeID: node, Generation: int64(actor.Generation)}, actor, nil); err != nil {
+			actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}}
+			if err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: node, Generation: int64(actor.Generation)}, actor, nil); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &award.Node.Attempt}); err != nil {
@@ -391,13 +390,13 @@ func TestStalledLogUploaderInitializationDoesNotDelayAnotherJobsReport(t *testin
 		state := logHostStore{NativeHostStore: f.Tenant, logs: logs}
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
-		ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "healthy"}
+		ref := runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: "healthy"}
 		attempt := runspec.AttemptOrdinal(1)
-		if _, err := state.TransitionNode(ctx, store.ReportNode{Ref: ref, Actor: actors["healthy"], SourceAttempt: &attempt, Outcome: store.NodeSuccess}); err != nil {
+		if _, err := state.TransitionNode(ctx, store.ReportNode{Ref: ref, Actor: actors["healthy"], SourceAttempt: &attempt, Outcome: runstate.NodeSuccess}); err != nil {
 			t.Errorf("another job's stalled uploader blocked terminal commit: %v", err)
 		}
 		row, err := f.Tenant.ReadNode(t.Context(), ref)
-		if err != nil || row.Outcome != store.NodeSuccess || row.Status != store.StatusDone {
+		if err != nil || row.Outcome != runstate.NodeSuccess || row.Status != runstate.StatusDone {
 			t.Errorf("terminal result was not committed: %+v %v", row, err)
 		}
 		<-wrote
@@ -433,7 +432,7 @@ func TestNativeServiceCloseJoinsLogsAfterTerminalCommit(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
-		if _, err := services.Config.Store.TransitionNode(ctx, store.ReportNode{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}}); err != nil || !committed {
+		if _, err := services.Config.Store.TransitionNode(ctx, store.ReportNode{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}}); err != nil || !committed {
 			t.Fatalf("terminal commit depended on logs: %v", err)
 		}
 		if err := services.Close(); err != nil {
@@ -525,9 +524,9 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 				now := time.Now()
 				f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
 				input := storedExecutionInput(t, f, &ClaimedNodeHost{})
-				ref := controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"}
+				ref := runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"}
 				actor := executorActor(input)
-				if err := awaitStart(t.Context(), f.Tenant, store.CapacityBinding{RunID: string(ref.RunID), NodeID: "job", Generation: int64(actor.Generation)}, actor, nil); err != nil {
+				if err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: "job", Generation: int64(actor.Generation)}, actor, nil); err != nil {
 					t.Fatal(err)
 				}
 				started, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &input.Attempt})
@@ -568,9 +567,9 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 				state := logHostStore{NativeHostStore: f.Tenant, logs: logs}
 				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 				defer cancel()
-				var command store.NodeCommand = store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: &started.Attempt, Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}
+				var command store.NodeCommand = store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: &started.Attempt, Outcome: runstate.NodeSuccess, Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess}}
 				if operation == "retry" {
-					command = store.RetryNode{Ref: ref, Actor: actor, SourceAttempt: &started.Attempt, Result: &store.NodeResult{Outcome: store.NodeFailed}}
+					command = store.RetryNode{Ref: ref, Actor: actor, SourceAttempt: &started.Attempt, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed}}
 				}
 				if _, err := state.TransitionNode(ctx, command); err != nil {
 					t.Fatalf("stalled logs blocked %s: %v", operation, err)
@@ -578,7 +577,7 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 				close(gate) // The flush cannot reach the store until the lifecycle write has committed.
 				logs.flushes.Wait()
 				row, err := f.Tenant.ReadNode(t.Context(), ref)
-				if err != nil || operation == "report" && row.Outcome != store.NodeSuccess || operation == "retry" && row.Attempt != started.Attempt+1 {
+				if err != nil || operation == "report" && row.Outcome != runstate.NodeSuccess || operation == "retry" && row.Attempt != started.Attempt+1 {
 					t.Fatalf("lifecycle result changed: %+v %v", row, err)
 				}
 				if operation == "report" {
@@ -603,7 +602,7 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				stream, err := f.Tenant.ReadLogSegments(t.Context(), store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: reader.Prefix}}, blob.LogReadRequest{Subject: registered})
+				stream, err := f.Tenant.ReadLogSegments(t.Context(), runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: reader.Prefix}}, blob.LogReadRequest{Subject: registered})
 				if err != nil || stream.Complete || stream.IncompleteReason != "writer_lost" || len(stream.Segments) != 0 {
 					t.Fatalf("retry hid incomplete logs: %+v %v", stream, err)
 				}
@@ -631,7 +630,7 @@ func (u *fencedLogUploader) PutSegment(ctx context.Context, segment logseg.Segme
 		return err
 	}
 	commit := u.commit
-	commit.Segments = []store.Segment{{Index: int64(segment.N), Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key}}
+	commit.Segments = []runstate.Segment{{Index: int64(segment.N), Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key}}
 	err = u.tenant.RecordSegments(ctx, commit)
 	u.refused = err != nil
 	return err

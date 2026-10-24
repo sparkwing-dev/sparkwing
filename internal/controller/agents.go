@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -33,14 +34,14 @@ func (s *Server) runnerInventory(ctx context.Context, team string) (capability.R
 		return capability.RunnerSnapshot{}, engineLookupError(err)
 	}
 	if snapshot.Now.IsZero() {
-		return capability.RunnerSnapshot{}, missingEndpointPolicy()
+		return capability.RunnerSnapshot{}, routepolicy.MissingEndpointPolicy()
 	}
 	for _, row := range snapshot.Runners {
 		if row.Team != team || row.Runner.Name == "" || row.Runner.Type == "" || row.MaxConcurrent < 0 || row.LastSeen.After(snapshot.Now) {
-			return capability.RunnerSnapshot{}, missingEndpointPolicy()
+			return capability.RunnerSnapshot{}, routepolicy.MissingEndpointPolicy()
 		}
 		if h := row.Headroom; h != nil && (math.IsNaN(h.Cores) || math.IsInf(h.Cores, 0) || h.Cores < 0 || h.MemoryBytes < 0 || h.QueueDepth < 0 || h.ObservedAt.IsZero() || h.ObservedAt.After(snapshot.Now)) {
-			return capability.RunnerSnapshot{}, missingEndpointPolicy()
+			return capability.RunnerSnapshot{}, routepolicy.MissingEndpointPolicy()
 		}
 	}
 	return snapshot, nil

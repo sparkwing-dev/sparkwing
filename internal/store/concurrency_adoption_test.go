@@ -5,17 +5,18 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func capacityFixture(t *testing.T) (*Tenant, *time.Time, Actor) {
+func capacityFixture(t *testing.T) (*Tenant, *time.Time, runstate.Actor) {
 	t.Helper()
 	s, tenant, now := maintenanceStore(t)
-	maintenanceRun(t, s, "run", 1, RunRunning)
+	maintenanceRun(t, s, "run", 1, runstate.RunRunning)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch = 'controller',plan_accepted_generation=1,sealed_at=1,spec_json=?,spec_hash='spec',plan_json=?,plan_hash='plan' WHERE team = 'a' AND id = 'run'`, []byte(`{}`), []byte(`{"jobs":[{"id":"job"}]}`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','owner',?,2)`, now.Add(time.Hour).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,generation,claimed_by,capability_prefix,lease_expires_at) VALUES ('a','run','job','pending',?,?,3,'machine','machine',?)`, []byte(`{"id":"job"}`), []byte(`{"concurrency":[{"group":"key","scope":"global","capacity":1,"cost":1,"on_limit":"queue"}]}`), now.Add(time.Minute).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a','job:global:key',1,1),('a','key',1,1)`)
-	actor := Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{Holder: "owner", Generation: 2}}}
+	actor := runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{Holder: "owner", Generation: 2}}}
 	return tenant, now, actor
 }
 

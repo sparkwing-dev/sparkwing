@@ -10,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 // WithLocalSessions binds the private controller's step session ledger.
@@ -20,7 +19,7 @@ func (s *Server) WithLocalSessions(directory string) *Server {
 }
 
 func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	_, peer := wingd.LocalPeer(r.Context())
+	_, peer := localhostwire.LocalPeer(r.Context())
 	if !peer || a.Principal.Class != capability.CredentialPeer || a.Target.Team != string(store.DefaultTeam) {
 		return apierr.Authorization(apierr.ReasonBinding, "session sweep requires the verified local owner")
 	}
@@ -40,9 +39,9 @@ func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capabilit
 	s.localSessionMu.Lock()
 	defer s.localSessionMu.Unlock()
 	outcomes, sweepErr := s.localSessions.Sweep(r.Context(), sessionledger.SweepOptions{DryRun: request.DryRun})
-	findings := []wingd.LocalDoctorFinding{}
+	findings := []localhostwire.LocalDoctorFinding{}
 	if s.githubAppProblem != nil {
-		findings = append(findings, wingd.LocalDoctorFinding{Code: "github_app_unavailable", Message: s.githubAppProblem.Error()})
+		findings = append(findings, localhostwire.LocalDoctorFinding{Code: "github_app_unavailable", Message: s.githubAppProblem.Error()})
 	}
 	failure := sweepErr
 	for _, outcome := range outcomes {
@@ -50,15 +49,15 @@ func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capabilit
 		case sessionledger.VerdictLive:
 			continue
 		case sessionledger.VerdictWouldReap:
-			findings = append(findings, wingd.LocalDoctorFinding{Code: "stray_step_session", Message: "step session would be reaped", Unit: outcome.Run})
+			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "stray_step_session", Message: "step session would be reaped", Unit: outcome.Run})
 			continue
 		}
 		for _, recordErr := range sessionledger.RecordOutcomes(r.Context(), tenant, "doctor", []sessionledger.Outcome{outcome}) {
-			findings = append(findings, wingd.LocalDoctorFinding{Code: "unrecorded_step_outcome", Unit: outcome.Run, Message: fmt.Sprintf("step cleanup %s could not be recorded: %v", outcome.Verdict, recordErr)})
+			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "unrecorded_step_outcome", Unit: outcome.Run, Message: fmt.Sprintf("step cleanup %s could not be recorded: %v", outcome.Verdict, recordErr)})
 		}
 		if outcome.Err != nil {
 			failure = errors.Join(failure, outcome.Err)
-			findings = append(findings, wingd.LocalDoctorFinding{Code: "step_cleanup_failed", Unit: outcome.Run, Message: outcome.Err.Error()})
+			findings = append(findings, localhostwire.LocalDoctorFinding{Code: "step_cleanup_failed", Unit: outcome.Run, Message: outcome.Err.Error()})
 		}
 	}
 	result := localhostwire.LocalDoctor{Findings: findings}

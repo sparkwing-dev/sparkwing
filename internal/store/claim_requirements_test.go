@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestClaimRequirementsCanonicalSetsAndUnsatisfiableTerms(t *testing.T) {
@@ -104,8 +105,8 @@ func TestClaimIndexedRequirementsPreserveLabelSemantics(t *testing.T) {
 
 func TestRetentionRemovesOnlyUnreferencedClaimRequirements(t *testing.T) {
 	s, _, now := maintenanceStore(t)
-	maintenanceRun(t, s, "old", 1, RunFailed)
-	maintenanceRun(t, s, "retained", 2, RunFailed)
+	maintenanceRun(t, s, "old", 1, runstate.RunFailed)
+	maintenanceRun(t, s, "retained", 2, runstate.RunFailed)
 	old := now.Add(-120 * 24 * time.Hour).UnixNano()
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET finished_at=? WHERE id='old'`, old)
 	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)`, []byte(`90`))

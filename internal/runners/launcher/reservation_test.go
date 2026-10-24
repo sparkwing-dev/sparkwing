@@ -29,7 +29,7 @@ func FuzzControllerReservationRetirementMatchesObservation(f *testing.F) {
 		observation := CloudJobObservation{Binding: binding, JobName: jobName(binding), NodeUID: "node", ReservationID: "reservation"}
 		fence := binding.LeaseRef()
 		control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-			if len(request.Observed) != 1 || request.Observed[0] != (controllerwire.LauncherObservation{Award: binding.LeaseRef(), Reservation: true}) {
+			if len(request.Observed) != 1 || request.Observed[0] != (capability.LauncherObservation{Award: binding.LeaseRef(), Reservation: true}) {
 				t.Fatalf("reservation changed: %+v", request)
 			}
 			switch mode {

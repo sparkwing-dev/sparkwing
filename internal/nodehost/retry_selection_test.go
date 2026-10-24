@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -30,9 +30,9 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 				{ID: "broken", Needs: []string{"setup"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 			}}, runspec.Options{})
 			original.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
-				outcome := store.NodeSuccess
+				outcome := runstate.NodeSuccess
 				if input.NodeID == "broken" {
-					outcome = store.NodeFailed
+					outcome = runstate.NodeFailed
 				}
 				return original.report(ctx, input, outcome)
 			})
@@ -41,7 +41,7 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := original.Host.execute(ctx, original.Input, original.Accepted, entry, store.ReconcileRequest{Ref: controllerwire.NodeRef{RunID: runspec.RunID(original.Input.RunID), NodeID: "setup"}, Actor: original.Actor, Policy: store.SourceNone}); err != nil {
+				if err := original.Host.execute(ctx, original.Input, original.Accepted, entry, store.ReconcileRequest{Ref: runspec.NodeRef{RunID: runspec.RunID(original.Input.RunID), NodeID: "setup"}, Actor: original.Actor, Policy: runstate.SourceNone}); err != nil {
 					t.Fatal(err)
 				}
 			} else if result, err := original.Host.Run(ctx, original.Input); err != nil || result.Outcome != "failed" {
@@ -62,7 +62,7 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 			}
 			if scenario.lateSuccess {
 				original.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
-					return original.report(ctx, input, store.NodeSuccess)
+					return original.report(ctx, input, runstate.NodeSuccess)
 				})
 				if result, err := original.Host.Run(ctx, original.Input); err != nil || result.Outcome != "success" {
 					t.Fatalf("late source completion=%+v error=%v", result, err)
@@ -80,7 +80,7 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 			executed := make(chan string, 2)
 			retry.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				executed <- input.NodeID
-				return retry.report(ctx, input, store.NodeSuccess)
+				return retry.report(ctx, input, runstate.NodeSuccess)
 			})
 			if result, err := retry.Host.Run(ctx, retry.Input); err != nil || result.Outcome != "success" {
 				t.Fatalf("retry completion=%+v error=%v", result, err)
@@ -97,7 +97,7 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 			if !slices.Equal(got, want) {
 				t.Fatalf("%s executed %v, want %v", mode, got, want)
 			}
-			setup, err := retry.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(retry.Input.RunID), NodeID: "setup"})
+			setup, err := retry.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(retry.Input.RunID), NodeID: "setup"})
 			if err != nil || mode == "failed" && setup.Attempt != 0 || mode == "all" && setup.Attempt != 1 {
 				t.Fatalf("retry execution/materialization attempts=%d error=%v", setup.Attempt, err)
 			}

@@ -1,13 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -24,10 +20,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	enginepolicy "github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -55,10 +53,10 @@ func (*policyListener) Addr() net.Addr { return &net.UnixAddr{Name: "api.sock", 
 
 type policyConnection struct {
 	net.Conn
-	peer wingd.LocalPeerIdentity
+	peer localhostwire.LocalPeerIdentity
 }
 
-func (c policyConnection) PeerIdentity() wingd.LocalPeerIdentity { return c.peer }
+func (c policyConnection) PeerIdentity() localhostwire.LocalPeerIdentity { return c.peer }
 
 func productionLocalPolicyClient(t *testing.T) client.EngineOptions {
 	t.Helper()
@@ -77,18 +75,18 @@ func productionLocalPolicyClient(t *testing.T) client.EngineOptions {
 		t.Fatal(err)
 	}
 	uid := uint32(os.Getuid())
-	peer := wingd.LocalPeerIdentity{GOOS: runtime.GOOS, UID: &uid}
+	peer := localhostwire.LocalPeerIdentity{GOOS: runtime.GOOS, UID: &uid}
 	if runtime.GOOS == "windows" {
 		subject, err := wingd.CurrentLocalSubject()
 		if err != nil {
 			t.Fatal(err)
 		}
-		peer = wingd.LocalPeerIdentity{GOOS: runtime.GOOS, SID: strings.TrimPrefix(subject, "local:")}
+		peer = localhostwire.LocalPeerIdentity{GOOS: runtime.GOOS, SID: strings.TrimPrefix(subject, "local:")}
 	}
 	listener := &policyListener{connections: make(chan net.Conn), closed: make(chan struct{})}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- owner.HTTP().ServeAPI(ctx, listener) }()
+	go func() { done <- wingd.ServeAPI(ctx, listener, owner.HTTP()) }()
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		client, server := net.Pipe()
 		select {
@@ -198,10 +196,10 @@ func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 		t.Fatal(err)
 	}
 	page, err := reader.ListRuns(t.Context(), controllerwire.RunQuery{Limit: 20})
-	if err != nil || len(page.Runs) != 1 || page.Runs[0].Status != string(store.RunSuccess) {
+	if err != nil || len(page.Runs) != 1 || page.Runs[0].Status != string(runstate.RunSuccess) {
 		t.Fatalf("development run page: %+v: %v", page, err)
 	}
-	if Version == "v1.2.3" && (len(page.Runs[0].Notices) != 1 || page.Runs[0].Notices[0].Kind != enginepolicy.NoticePolicyUnavailable) {
+	if Version == "v1.2.3" && (len(page.Runs[0].Notices) != 1 || page.Runs[0].Notices[0].Kind != engineid.NoticePolicyUnavailable) {
 		t.Fatalf("offline policy warning missing from local status: %+v", page.Runs[0].Notices)
 	}
 	compatibility, err := engine.Compatibility(t.Context(), "v1.2.3")
@@ -211,35 +209,6 @@ func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 	if requests != 0 {
 		t.Fatalf("local controller fetched policy %d times", requests)
 	}
-}
-
-func signedLocalPolicy(t *testing.T) {
-	t.Helper()
-	public, private, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	previousKeys, previousHTTP := releaseauth.TrustedPublicKeys, http.DefaultClient
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys, http.DefaultClient = previousKeys, previousHTTP })
-	now := time.Now().UTC().Add(-time.Minute)
-	body, err := json.Marshal(enginepolicy.VersionIndex{Format: 1, PublishedAt: now, Latest: "v1.2.3", Versions: []enginepolicy.VersionInfo{{Version: "v1.2.3", PublishedAt: now, SupportUntil: now.AddDate(1, 0, 0)}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	signature := ed25519.Sign(private, body)
-	http.DefaultClient = &http.Client{Transport: queueHostTransport(func(r *http.Request) (*http.Response, error) {
-		var data []byte
-		switch r.URL.String() {
-		case enginepolicy.VersionIndexURL:
-			data = body
-		case enginepolicy.VersionIndexSignatureURL:
-			data = signature
-		default:
-			return nil, fmt.Errorf("unexpected policy request %s", r.URL)
-		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(data)), Header: make(http.Header)}, nil
-	})}
 }
 
 func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted controllerwire.CreateRunResponse, expected ...runspec.Request) {
@@ -287,14 +256,14 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := ownerEngine.AcceptPlan(ctx, admitted.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Engine: enginepolicy.Identity{Version: "v1.2.3", Pin: enginepolicy.Pin{SDK: enginepolicy.GoSDK, Version: "v1.2.3"}}, Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
+	accepted, err := ownerEngine.AcceptPlan(ctx, admitted.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Engine: engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}}, Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
 	if err != nil || accepted.Spec.Hash == "" {
 		t.Fatalf("plan acceptance: %v", err)
 	}
-	if _, err := host.TransitionRun(ctx, store.RunTransition{RunID: runspec.RunID(admitted.RunID), To: store.RunRunning, Cause: store.RunStart}); err != nil {
+	if _, err := host.TransitionRun(ctx, runstate.RunTransition{RunID: runspec.RunID(admitted.RunID), To: runstate.RunRunning, Cause: runstate.RunStart}); err != nil {
 		t.Fatal("run start:", err)
 	}
-	claim, err := ownerEngine.ReconcileJob(ctx, admitted.RunID, "build", controllerwire.ReconcileRequest{Policy: string(store.SourceNone)})
+	claim, err := ownerEngine.ReconcileJob(ctx, admitted.RunID, "build", controllerwire.ReconcileRequest{Policy: string(runstate.SourceNone)})
 	if err != nil || claim.Claim == nil {
 		t.Fatalf("node claim: %+v: %v", claim, err)
 	}
@@ -309,11 +278,11 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 			t.Error(err)
 		}
 	})
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "build"}
-	if decision, err := node.MayStart(ctx, store.CapacityBinding{RunID: admitted.RunID, NodeID: "build", Generation: claim.Claim.Binding.Generation}, store.Actor{}); err != nil || decision.Kind != store.AcquireGranted {
+	ref := runspec.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "build"}
+	if decision, err := node.MayStart(ctx, runstate.CapacityBinding{RunID: admitted.RunID, NodeID: "build", Generation: claim.Claim.Binding.Generation}, runstate.Actor{}); err != nil || decision.Kind != runstate.AcquireGranted {
 		t.Fatalf("node admission: %+v: %v", decision, err)
 	}
-	started, err := node.TransitionNode(ctx, store.StartNode{Ref: ref, SourceAttempt: new(runspec.AttemptOrdinal)})
+	started, err := node.TransitionNode(ctx, ref, runstate.Actor{}, runstate.NodeCommandPayload{To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: new(runspec.AttemptOrdinal)})
 	if err != nil {
 		t.Fatal("node start:", err)
 	}
@@ -362,14 +331,14 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	if err != nil || closeErr != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(data), "production local log") {
 		t.Fatalf("log read: HTTP %d %s: %v %v", response.StatusCode, data, err, closeErr)
 	}
-	if _, err := node.TransitionNode(ctx, store.ReportNode{Ref: ref, SourceAttempt: new(started.Attempt), Outcome: store.NodeSuccess, Result: &store.NodeResult{Outcome: store.NodeSuccess}}); err != nil {
+	if _, err := node.TransitionNode(ctx, ref, runstate.Actor{}, runstate.NodeCommandPayload{To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: new(started.Attempt), Extra: runstate.NodeCommandExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess}}}); err != nil {
 		t.Fatal("node finish:", err)
 	}
-	if _, err := host.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: store.RunCompletion{RunID: runspec.RunID(admitted.RunID), Cause: store.RunFinish}}); err != nil {
+	if _, err := host.FinishRunAndUnit(ctx, runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: runspec.RunID(admitted.RunID), Cause: runstate.RunFinish}}); err != nil {
 		t.Fatal("run finish:", err)
 	}
 	detail, err := engine.ReadRun(ctx, admitted.RunID)
-	if err != nil || detail.Status != string(store.RunSuccess) || detail.FinishedAt == nil || len(detail.Jobs) != 1 || detail.Jobs[0].Outcome != string(store.NodeSuccess) {
+	if err != nil || detail.Status != string(runstate.RunSuccess) || detail.FinishedAt == nil || len(detail.Jobs) != 1 || detail.Jobs[0].Outcome != string(runstate.NodeSuccess) {
 		t.Fatalf("completed run: %+v: %v", detail, err)
 	}
 	if _, err := host.Principal(ctx); err == nil {

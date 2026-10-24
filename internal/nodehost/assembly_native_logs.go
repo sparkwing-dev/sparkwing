@@ -11,9 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -51,12 +51,12 @@ func (s logHostStore) AcceptExpansion(ctx context.Context, request store.Expansi
 	return s.NativeHostStore.AcceptExpansion(ctx, request)
 }
 
-func (s logHostStore) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
+func (s logHostStore) FinishRunAndUnit(ctx context.Context, request runstate.FinishRunRequest) (runstate.Applied, error) {
 	s.logs.finish(context.WithoutCancel(ctx), "")
 	return s.NativeHostStore.FinishRunAndUnit(ctx, request)
 }
 
-func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeCommand) (store.Applied, error) {
+func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeCommand) (runstate.Applied, error) {
 	switch request.(type) {
 	case store.ReportNode, store.RetryNode, store.ReleaseNode:
 		ref, _ := store.NodeCommandAuthority(request)

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -59,7 +60,7 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 		return fmt.Errorf("service root inherited its authorizer's revocation: %w", err)
 	}
 	serviceRef := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: service.Capability.Prefix}
-	serviceActor := store.Actor{Authority: serviceRef, CapabilityPrefix: serviceRef.ID}
+	serviceActor := runstate.Actor{Authority: serviceRef, CapabilityPrefix: serviceRef.ID}
 	if err := s.AsOperator().RevokeAuthority(ctx, serviceActor, serviceRef); err != nil {
 		return fmt.Errorf("revoke service: %w", err)
 	}

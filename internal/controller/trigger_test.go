@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -40,7 +41,7 @@ func TestEventListClampsItsLimit(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := t.Context()
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run-1", Pipeline: "push", Status: "running"}}); err != nil {
 		t.Fatal(err)
 	}
 	for range store.MaxRunListLimit + 5 {
@@ -76,7 +77,7 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	created := floodRun(t, f.submit(f.token, "demo", fortyHex(1)), 201)
 	tenant := teststore.ForTeam(t, f.st, store.DefaultTeam)
 	run, err := tenant.ReadRun(t.Context(), created.RunID)
-	if err != nil || run.State != store.RunPending || run.Pipeline != "demo" || run.Request.Request.Git.SHA != fortyHex(1) || run.CreatedAt.IsZero() {
+	if err != nil || run.State != runstate.RunPending || run.Pipeline != "demo" || run.Request.Request.Git.SHA != fortyHex(1) || run.CreatedAt.IsZero() {
 		t.Fatalf("run: %+v: %v", run, err)
 	}
 	rows, err := tenant.ListRuns(t.Context(), store.RunFilter{Limit: 10})

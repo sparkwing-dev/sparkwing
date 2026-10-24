@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -58,7 +57,7 @@ func (s *Server) localHostReleaseEvaluation(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		return err
 	}
-	result, err := tenant.ReleaseEvaluation(r.Context(), controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(body.NodeID)}, engineActor(a))
+	result, err := tenant.ReleaseEvaluation(r.Context(), runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(body.NodeID)}, engineActor(a))
 	if err != nil {
 		return engineLookupError(err)
 	}

@@ -7,7 +7,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
@@ -48,7 +48,7 @@ VALUES (?,'live',?,'done',?,1,?,?)`, b.Tenant.Team(), outcome, outcome, []byte(`
 	if err := c.Ready(); err != nil {
 		t.Fatal(err)
 	}
-	for id, want := range map[string]store.RunState{"started": store.RunFailed, "remote": store.RunRunning, "live": store.RunRunning} {
+	for id, want := range map[string]runstate.RunState{"started": runstate.RunFailed, "remote": runstate.RunRunning, "live": runstate.RunRunning} {
 		run, err := binding.Tenant.ReadRun(t.Context(), id)
 		if err != nil || run.State != want {
 			t.Fatalf("%s: %+v: %v", id, run, err)

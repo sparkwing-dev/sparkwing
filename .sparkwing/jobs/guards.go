@@ -6,9 +6,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// perf: the push tier judges only the depguard rules, which parse imports and
-// finish in about two seconds over the whole tree. The F1 forbidigo rule and
-// the unexport census load every package with types, so they wait for gate.
+// perf: the push tier checks imports and SDK dependency closures on supported
+// platforms. Whole-tree type analysis waits for gate.
 func checkGuardsFast(ctx context.Context) error {
 	return runGuardcheck(ctx, "-fast")
 }

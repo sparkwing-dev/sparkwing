@@ -7,7 +7,8 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestMeteredUnpricedClaimFailsWorkWithoutBilling(t *testing.T) {
@@ -30,8 +31,8 @@ func TestMeteredUnpricedClaimFailsWorkWithoutBilling(t *testing.T) {
 			if !errors.As(err, &unpriced) || unpriced.Cores != wantClass || unpriced.MaxCores != 1 {
 				t.Fatalf("cloud=%t queued=%t: unpriced claim=%v", cloud, queued, err)
 			}
-			row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-			if err != nil || row.Status != StatusDone || row.Outcome != NodeFailed || row.ClaimedBy != "" || row.CapabilityPrefix != "" || row.Attempt != 0 || row.FinishedAt == nil {
+			row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+			if err != nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeFailed || row.ClaimedBy != "" || row.CapabilityPrefix != "" || row.Attempt != 0 || row.FinishedAt == nil {
 				t.Fatalf("unpriced claim did not fail work: %+v: %v", row, err)
 			}
 			for _, name := range []string{"credit_charges", "billing_awards", "billable_intervals", "node_attempts"} {
@@ -52,8 +53,8 @@ func TestUnpricedFailureRequiresCurrentClaimScopeProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		tenant := &Tenant{s: s, team: "a"}
-		actor := Actor{Kind: ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}
-		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, To: NodeFailed, Cause: CauseUnpriced, Actor: actor, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass}}}
+		actor := runstate.Actor{Kind: runstate.ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}
+		change := nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, To: runstate.NodeFailed, Cause: runstate.CauseUnpriced, Actor: actor, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: FailureUnpricedCPUClass}}}
 		switch variant % 4 {
 		case 0:
 			change.Actor.Authority.ID = fmt.Sprintf("missing-%x", seed)
@@ -74,7 +75,7 @@ func TestUnpricedFailureRequiresCurrentClaimScopeProperty(t *testing.T) {
 		}
 		_, err := tenant.TransitionNode(t.Context(), change)
 		row, readErr := tenant.ReadNode(t.Context(), change.Ref)
-		return err != nil && readErr == nil && row.Status == StatusPending && row.Outcome == "" && row.StateSeq == 0 && row.FinishedAt == nil
+		return err != nil && readErr == nil && row.Status == runstate.StatusPending && row.Outcome == "" && row.StateSeq == 0 && row.FinishedAt == nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
 		t.Fatal(err)
@@ -90,8 +91,8 @@ func TestUnpricedFailureKeepsThePollersMatchingEvidence(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["team-4cpu","tool:terraform"]}}`))
 	demand.Labels = []string{"team-4cpu", "tool:terraform"}
 	_, err := s.AsOperator().ClaimUnit(t.Context(), demand)
-	row, readErr := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if !errors.Is(err, ErrUnpricedCPUClass) || readErr != nil || row.Outcome != NodeFailed {
+	row, readErr := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if !errors.Is(err, ErrUnpricedCPUClass) || readErr != nil || row.Outcome != runstate.NodeFailed {
 		t.Fatalf("matching poller left unpriced work pending: %+v %v %v", row, err, readErr)
 	}
 }

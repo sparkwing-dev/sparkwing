@@ -13,12 +13,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -35,20 +36,20 @@ func (f *jobViewTransactions) ReadStatus(_ context.Context, team store.Team, run
 		return controller.RunStatusFacts{}, errors.New("unexpected tenant")
 	}
 	snapshot := f.snapshot
-	snapshot.Nodes = []store.NodeRow{f.node}
+	snapshot.Nodes = []runstate.NodeRow{f.node}
 	return controller.RunStatusFacts{Snapshot: snapshot}, f.readErr
 }
 
 func jobViewFixture(b *credentialBoundary) *jobViewTransactions {
 	f := &jobViewTransactions{snapshotTransactions: *snapshotFixture(b)}
 	f.snapshot.Run.Number = 1
-	f.node = store.NodeRow{
-		Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusRunning,
-		Generation: 4, Attempt: 2, StateSeq: 9, Expansion: store.ExpansionExpected,
+	f.node = runstate.NodeRow{
+		Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusRunning,
+		Generation: 4, Attempt: 2, StateSeq: 9, Expansion: runstate.ExpansionExpected,
 		Spec: json.RawMessage(`{"id":"job","env":{"TOKEN":"private-secret"}}`), SpecHash: "private-spec-hash",
 		CapabilityPrefix: "private-prefix", ClaimedBy: "private-holder", StartedAt: &b.snapshot.Now,
 	}
-	f.snapshot.Nodes = []store.NodeRow{f.node}
+	f.snapshot.Nodes = []runstate.NodeRow{f.node}
 	return f
 }
 
@@ -63,7 +64,7 @@ func jobViewServer(t *testing.T, b *credentialBoundary, f *jobViewTransactions) 
 		return f, nil
 	}
 	return controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).
-		WithAuthorization(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(b), Bindings: b}).
+		WithAuthorization(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(b), Bindings: b}).
 		WithEngineController(e).Handler()
 }
 
@@ -233,9 +234,9 @@ func TestEngineJobsMemberReadsFinishedJobs(t *testing.T) {
 	b := jobViewBoundary("member")
 	f := jobViewFixture(b)
 	b.snapshot.Binding.RunCancelled, b.snapshot.Binding.RunFinished = true, true
-	f.node.Status, f.node.Outcome, f.node.StatusDetail = store.StatusDone, store.NodeCancelled, "user requested"
+	f.node.Status, f.node.Outcome, f.node.StatusDetail = runstate.StatusDone, runstate.NodeCancelled, "user requested"
 	f.node.FinishedAt, f.node.CancelRequestedAt = &b.snapshot.Now, &b.snapshot.Now
-	f.snapshot.Nodes = []store.NodeRow{f.node}
+	f.snapshot.Nodes = []runstate.NodeRow{f.node}
 	for _, path := range []string{"/api/v1/runs/run/jobs", "/api/v1/runs/run/jobs/job"} {
 		w := snapshotRequest(jobViewServer(t, b, f), b, "GET", path)
 		if w.Code != 200 || !strings.Contains(w.Body.String(), `"outcome":"cancelled"`) || !strings.Contains(w.Body.String(), `"status_detail":"user requested"`) || !strings.Contains(w.Body.String(), `"finished_at":`) || !strings.Contains(w.Body.String(), `"cancel_requested_at":`) {

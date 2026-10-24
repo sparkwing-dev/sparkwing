@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestExpansionRequiresExplicitVersionedRegistration(t *testing.T) {
@@ -23,7 +24,7 @@ func TestExpansionRequiresExplicitVersionedRegistration(t *testing.T) {
 				t.Fatalf("unversioned expansion was not refused: %v", err)
 			}
 			row, err := tenant.ReadNode(t.Context(), request.Source)
-			if err != nil || row.Expansion != ExpansionExpected {
+			if err != nil || row.Expansion != runstate.ExpansionExpected {
 				t.Fatalf("refusal changed expansion state: %+v, %v", row, err)
 			}
 		})

@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
@@ -148,7 +148,7 @@ func TestSourceInitCapturesSourceBeforeBinding(t *testing.T) {
 	depth := 1
 	award.Source.Checkout.Policy.Depth = &depth
 	initializer := SourceInit{Bind: func(_ context.Context, input CloudJobAward) (source.Options, func() error, error) {
-		*input.Source.Engine = engine.Identity{}
+		*input.Source.Engine = engineid.Identity{}
 		*input.Source.Checkout.Policy.Depth = -1
 		return options, nil, nil
 	}}

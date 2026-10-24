@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
@@ -18,7 +18,7 @@ func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
 		{ID: "build", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}})
 	claimedFixtureNode(t, f, "held")
-	if err := f.report(t.Context(), claimedFixtureNode(t, f, "lost"), store.NodeFailed); err != nil {
+	if err := f.report(t.Context(), claimedFixtureNode(t, f, "lost"), runstate.NodeFailed); err != nil {
 		t.Fatal(err)
 	}
 	before, err := f.Tenant.ReadSnapshot(t.Context(), f.Input.RunID)

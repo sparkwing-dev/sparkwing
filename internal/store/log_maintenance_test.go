@@ -10,9 +10,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestLogPersistenceMaintenanceRespectsFinalTailGrace(t *testing.T) {
@@ -55,8 +55,8 @@ func TestLogPersistenceMaintenanceRespectsFinalTailGrace(t *testing.T) {
 	if n, err := op.SealAbandonedLogStreams(t.Context(), lease, 10); err != nil || n != 0 {
 		t.Fatalf("maintenance replay: %d, %v", n, err)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || node.Status != StatusDone || node.Outcome != NodeSuccess {
+	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || node.Status != runstate.StatusDone || node.Outcome != runstate.NodeSuccess {
 		t.Fatalf("log loss changed execution result: %+v, %v", node, err)
 	}
 }
@@ -69,7 +69,7 @@ func TestLogPersistenceMaintenancePreservesWritableSubjects(t *testing.T) {
 			var tenant *Tenant
 			var commit SegmentCommit
 			if kind%4 == 0 {
-				var actor Actor
+				var actor runstate.Actor
 				var attempt runspec.AttemptIdentity
 				s, tenant, actor, attempt = resultFixture(t)
 				commit = logCommit(actor, attempt)
@@ -94,7 +94,7 @@ func TestLogPersistenceMaintenancePreservesWritableSubjects(t *testing.T) {
 				t.Fatal(err)
 			}
 			writable := tenant.RecordSegments(t.Context(), commit) == nil
-			before, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			before, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,7 +105,7 @@ func TestLogPersistenceMaintenancePreservesWritableSubjects(t *testing.T) {
 			if writable && (n != 0 || tenant.RecordSegments(t.Context(), commit) != nil) {
 				t.Fatal("maintenance sealed a writable subject")
 			}
-			after, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			after, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("maintenance changed execution: %+v, %v", after, err)
 			}
@@ -237,7 +237,7 @@ func TestLogPersistenceMaintenanceBoundsAndRollsBackTheBatch(t *testing.T) {
 func maintenanceOwnerLogFixture(t *testing.T, kind capability.UnitKind) (*Store, *Tenant, SegmentCommit) {
 	t.Helper()
 	s, claim := releaseFixture(t, kind)
-	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
 	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogUnitKind(kind), Generation: int64(claim.Award.Generation)}}
 	if kind == capability.UnitEval {
 		subject.Unit.Source = &blob.LogSource{NodeID: "job", Generation: claim.SourceGeneration}

@@ -8,67 +8,53 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-// GitHubSourceProvider verifies coverage and mints repository-ID-scoped read tokens.
-type GitHubSourceProvider interface {
-	InstallationTokenByIDs(context.Context, int64, []int64, map[string]string) (githubapp.Token, error)
+// GitHubSourceGrant captures the repositories authorized before a token is minted.
+type GitHubSourceGrant struct {
+	Installation int64
+	Repositories []int64
+	Names        []string
 }
 
-// ReleaseGitHubSourceCredential rechecks live consent and commits an audit after minting outside database transactions.
-func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized capability.Authorized, provider GitHubSourceProvider) (source.Credential, error) {
-	if provider == nil {
-		return source.Credential{}, ErrNotFound
-	}
-	var before githubSourceRelease
+// PrepareGitHubSourceRelease checks live consent before the controller mints a token.
+func (t *Tenant) PrepareGitHubSourceRelease(ctx context.Context, authorized capability.Authorized) (GitHubSourceGrant, error) {
+	var grant GitHubSourceGrant
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		before, err = t.githubSourceReleaseTx(ctx, tx, authorized)
+		current, err := t.githubSourceReleaseTx(ctx, tx, authorized)
+		if err == nil {
+			grant = GitHubSourceGrant{current.installation, current.ids, current.names}
+		}
 		return err
 	})
-	if err != nil {
-		return source.Credential{}, err
-	}
-	token, err := provider.InstallationTokenByIDs(ctx, before.installation, before.ids, map[string]string{"contents": "read"})
-	if errors.Is(err, githubapp.ErrNotInstalled) {
-		return source.Credential{}, authorityError(apierr.Conflict, "install the team's GitHub App on the approved repositories or update the owner's extras: "+strings.Join(before.names, ", "))
-	}
-	if err != nil {
-		return source.Credential{}, errors.Join(authorityError(apierr.Unavailable, "GitHub source token mint failed"), err)
-	}
-	var credential source.Credential
-	err = t.s.inTx(ctx, func(tx *storeTx) error {
+	return grant, err
+}
+
+// CommitGitHubSourceRelease rechecks consent and commits the release audit.
+func (t *Tenant) CommitGitHubSourceRelease(ctx context.Context, authorized capability.Authorized, before GitHubSourceGrant, expires time.Time) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
 		current, err := t.githubSourceReleaseTx(ctx, tx, authorized)
 		if err != nil {
 			return err
 		}
-		if current.installation != before.installation || !slices.Equal(current.ids, before.ids) || !slices.Equal(current.names, before.names) {
+		if current.installation != before.Installation || !slices.Equal(current.ids, before.Repositories) || !slices.Equal(current.names, before.Names) {
 			return bindingRefusal()
 		}
-		if token.Token == "" || !token.ExpiresAt.After(tx.now(ctx)) {
+		if !expires.After(tx.now(ctx)) {
 			return authorityError(apierr.Unavailable, "GitHub returned no live source token")
 		}
 		audit, err := capability.AuthorizeSourceRelease(current.request, tx.now(ctx))
 		if err != nil {
 			return err
 		}
-		if err := insertSourceReleaseAuditTx(ctx, tx, audit, auditPrincipalActor(current.request.Authorization.Principal)); err != nil {
-			return err
-		}
-		credential = source.Credential{Kind: "github_app", Host: "github.com", Secret: token.Token, ExtraRepositories: slices.Clone(current.names[1:])}
-		return nil
+		return insertSourceReleaseAuditTx(ctx, tx, audit, auditPrincipalActor(current.request.Authorization.Principal))
 	})
-	if err != nil {
-		return source.Credential{}, err
-	}
-	return credential, nil
 }
 
 type githubSourceRelease struct {

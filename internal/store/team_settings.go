@@ -7,13 +7,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // TeamSettings reads the team's enrollment, placement and child-run settings.
-func (t *Tenant) TeamSettings(ctx context.Context) (controllerwire.TeamSettings, error) {
-	var out controllerwire.TeamSettings
+func (t *Tenant) TeamSettings(ctx context.Context) (TeamSettings, error) {
+	var out TeamSettings
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
 		out, err = teamSettingsTx(ctx, tx, t.team)
@@ -22,8 +21,8 @@ func (t *Tenant) TeamSettings(ctx context.Context) (controllerwire.TeamSettings,
 	return out, err
 }
 
-func teamSettingsTx(ctx context.Context, tx *storeTx, team Team) (controllerwire.TeamSettings, error) {
-	var out controllerwire.TeamSettings
+func teamSettingsTx(ctx context.Context, tx *storeTx, team Team) (TeamSettings, error) {
+	var out TeamSettings
 	if err := tx.QueryRowContext(ctx, `SELECT members_can_add_machines,max_children_per_root FROM teams WHERE name=?`, team).Scan(&out.MembersCanAddMachines, &out.MaxChildrenPerRoot); err != nil {
 		return out, err
 	}
@@ -33,7 +32,7 @@ func teamSettingsTx(ctx context.Context, tx *storeTx, team Team) (controllerwire
 }
 
 // SetAuthorizedTeamSettings commits a policy change and its audit under current administration.
-func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, update controllerwire.TeamSettingsUpdate) error {
+func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Authorized, update TeamSettingsUpdate) error {
 	if update.MaxChildrenPerRoot != nil && (*update.MaxChildrenPerRoot <= 0 || *update.MaxChildrenPerRoot > limits.MaxChildrenPerRoot) {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "max_children_per_root must be an integer from 1 to 1000"}
 	}

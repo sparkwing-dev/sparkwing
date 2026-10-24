@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // LocalHostClient binds private host state and authority reads to one awarded run.
@@ -33,12 +33,12 @@ type localNodeBearer struct {
 }
 
 // ReadLocalPublication exports terminal local state under operating-system peer authority.
-func ReadLocalPublication(ctx context.Context, options EngineOptions, run string) (store.LocalPublication, error) {
+func ReadLocalPublication(ctx context.Context, options EngineOptions, run string) (runstate.LocalPublication, error) {
 	c, err := newEngineClient(options)
 	if err != nil {
-		return store.LocalPublication{}, err
+		return runstate.LocalPublication{}, err
 	}
-	var result store.LocalPublication
+	var result runstate.LocalPublication
 	err = c.request(ctx, "GET", "/api/v1/runs/{run}/local-host/snapshot", "/api/v1/runs/"+url.PathEscape(run)+"/local-host/snapshot", "", nil, &result)
 	if err == nil && result.Run.ID != run {
 		err = localHostClientRefusal()
@@ -113,23 +113,23 @@ func (c *LocalHostClient) live() error {
 }
 
 // ReadSnapshot reads the private execution snapshot under the current owner fence.
-func (c *LocalHostClient) ReadSnapshot(ctx context.Context, run string) (store.RunSnapshot, error) {
-	var result store.RunSnapshot
+func (c *LocalHostClient) ReadSnapshot(ctx context.Context, run string) (runstate.RunSnapshot, error) {
+	var result runstate.RunSnapshot
 	if run != c.run {
 		return result, localHostClientRefusal()
 	}
 	if err := c.request(ctx, "GET", "/snapshot", "", nil, &result); err != nil {
-		return store.RunSnapshot{}, err
+		return runstate.RunSnapshot{}, err
 	}
 	if result.Run.ID != c.run {
-		return store.RunSnapshot{}, errors.New("local host snapshot names another run")
+		return runstate.RunSnapshot{}, errors.New("local host snapshot names another run")
 	}
 	return result, nil
 }
 
 // ReadNode reads private execution state for one node of the awarded run.
-func (c *LocalHostClient) ReadNode(ctx context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
-	var result store.NodeRow
+func (c *LocalHostClient) ReadNode(ctx context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
+	var result runstate.NodeRow
 	if ref.RunID != runspec.RunID(c.run) || ref.NodeID == "" {
 		return result, localHostClientRefusal()
 	}
@@ -142,22 +142,22 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref controllerwire.NodeR
 			return result, localHostClientRefusal()
 		}
 		if key, ok := snapshot.ArtifactSources[string(ref.NodeID)]; ok {
-			return store.NodeRow{Ref: ref, Status: store.StatusDone, ManifestRecord: &key}, nil
+			return runstate.NodeRow{Ref: ref, Status: runstate.StatusDone, ManifestRecord: &key}, nil
 		}
 		return result, localHostClientRefusal()
 	}
 	if err := c.request(ctx, "GET", "", string(ref.NodeID), nil, &result); err != nil {
-		return store.NodeRow{}, err
+		return runstate.NodeRow{}, err
 	}
 	if result.Ref != ref {
-		return store.NodeRow{}, errors.New("local host node names another execution")
+		return runstate.NodeRow{}, errors.New("local host node names another execution")
 	}
 	return result, nil
 }
 
 // TransitionRun submits an edge while the server derives its actor and fence.
-func (c *LocalHostClient) TransitionRun(ctx context.Context, change store.RunTransition) (store.Applied, error) {
-	var result store.Applied
+func (c *LocalHostClient) TransitionRun(ctx context.Context, change runstate.RunTransition) (runstate.Applied, error) {
+	var result runstate.Applied
 	if c.node != "" || change.RunID != runspec.RunID(c.run) {
 		return result, localHostClientRefusal()
 	}
@@ -167,8 +167,8 @@ func (c *LocalHostClient) TransitionRun(ctx context.Context, change store.RunTra
 }
 
 // FinishRunAndUnit commits the terminal policy verdict and owner completion atomically.
-func (c *LocalHostClient) FinishRunAndUnit(ctx context.Context, finish store.FinishRunRequest) (store.Applied, error) {
-	var result store.Applied
+func (c *LocalHostClient) FinishRunAndUnit(ctx context.Context, finish runstate.FinishRunRequest) (runstate.Applied, error) {
+	var result runstate.Applied
 	change := finish.Transition
 	if c.node != "" || change.RunID != runspec.RunID(c.run) || finish.Unit != change.Actor.Owner {
 		return result, localHostClientRefusal()
@@ -179,14 +179,13 @@ func (c *LocalHostClient) FinishRunAndUnit(ctx context.Context, finish store.Fin
 }
 
 // TransitionNode selects retained holder credentials without sending actor authority.
-func (c *LocalHostClient) TransitionNode(ctx context.Context, change store.NodeCommand) (store.Applied, error) {
-	var result store.Applied
-	ref, actor := store.NodeCommandAuthority(change)
+func (c *LocalHostClient) TransitionNode(ctx context.Context, ref runspec.NodeRef, actor runstate.Actor, body runstate.NodeCommandPayload) (runstate.Applied, error) {
+	var result runstate.Applied
 	if ref.RunID != runspec.RunID(c.run) || ref.NodeID == "" {
 		return result, localHostClientRefusal()
 	}
 	selected := c
-	if actor.Kind == store.ActorHolder && c.node == "" {
+	if actor.Kind == runstate.ActorHolder && c.node == "" {
 		transport, award, err := c.nodeTransport(ctx, ref)
 		if err != nil {
 			return result, err
@@ -196,11 +195,7 @@ func (c *LocalHostClient) TransitionNode(ctx context.Context, change store.NodeC
 		}
 		selected = &LocalHostClient{transport: transport, run: c.run}
 	}
-	body, err := store.NodeCommandPayloadFor(change)
-	if err != nil {
-		return result, err
-	}
-	err = selected.request(ctx, "POST", "/transition", string(ref.NodeID), body, &result)
+	err := selected.request(ctx, "POST", "/transition", string(ref.NodeID), body, &result)
 	return result, err
 }
 
@@ -251,8 +246,8 @@ func (c *LocalHostClient) Principal(ctx context.Context) (capability.Principal, 
 }
 
 // AdoptClaim retains a separately awarded node bearer after fresh ownership checks.
-func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.ReconciledNode) error {
-	if c.node != "" || claim.Kind != store.Execute || claim.Claim == nil || len(claim.Bearer) == 0 || claim.Node.Ref.RunID != runspec.RunID(c.run) || claim.Node.Ref.NodeID == "" {
+func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim runstate.ReconciledNode) error {
+	if c.node != "" || claim.Kind != runstate.Execute || claim.Claim == nil || len(claim.Bearer) == 0 || claim.Node.Ref.RunID != runspec.RunID(c.run) || claim.Node.Ref.NodeID == "" {
 		return localHostClientRefusal()
 	}
 	owner, err := c.Principal(ctx)
@@ -289,7 +284,7 @@ func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.Reconciled
 	return nil
 }
 
-func (c *LocalHostClient) nodeTransport(ctx context.Context, ref controllerwire.NodeRef) (*engineClient, localNodeBearer, error) {
+func (c *LocalHostClient) nodeTransport(ctx context.Context, ref runspec.NodeRef) (*engineClient, localNodeBearer, error) {
 	if c.node != "" {
 		if ref.RunID != runspec.RunID(c.run) || ref.NodeID != runspec.NodeID(c.node) {
 			return nil, localNodeBearer{}, localHostClientRefusal()
@@ -319,27 +314,27 @@ func (c *LocalHostClient) nodeTransport(ctx context.Context, ref controllerwire.
 }
 
 // RenewNode renews the node award independently of its hosting owner.
-func (c *LocalHostClient) RenewNode(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor, executing bool) (store.LeaseBeat, error) {
+func (c *LocalHostClient) RenewNode(ctx context.Context, ref runspec.NodeRef, actor runstate.Actor, executing bool) (runstate.LeaseBeat, error) {
 	transport, award, err := c.nodeTransport(ctx, ref)
 	if err != nil {
-		return store.LeaseBeat{}, err
+		return runstate.LeaseBeat{}, err
 	}
 	if c.node != "" {
 		principal, err := c.Principal(ctx)
 		if err != nil {
-			return store.LeaseBeat{}, err
+			return runstate.LeaseBeat{}, err
 		}
 		award.prefix, award.generation, award.unit = principal.Capability.Prefix, principal.Capability.Binding.Generation, principal.Capability.UnitID
 	}
 	if award.unit == "" || actor.CapabilityPrefix != award.prefix || actor.Generation != runspec.ClaimGeneration(award.generation) {
-		return store.LeaseBeat{}, localHostClientRefusal()
+		return runstate.LeaseBeat{}, localHostClientRefusal()
 	}
 	response, err := transport.Renew(ctx, award.unit, controllerwire.RenewalRequest{Executing: executing})
-	return store.LeaseBeat{ExpiresAt: response.ExpiresAt, CancelRequested: response.CancelRequested, CancelReason: response.CancelReason, Watched: response.Watched, WatchedNodes: response.WatchedJobs}, err
+	return runstate.LeaseBeat{ExpiresAt: response.ExpiresAt, CancelRequested: response.CancelRequested, CancelReason: response.CancelReason, Watched: response.Watched, WatchedNodes: response.WatchedJobs}, err
 }
 
 // NodeController selects a retained current node bearer for execution reports and renewal.
-func (c *LocalHostClient) NodeController(ctx context.Context, ref controllerwire.NodeRef) (controllerwire.Controller, error) {
+func (c *LocalHostClient) NodeController(ctx context.Context, ref runspec.NodeRef) (controllerwire.Controller, error) {
 	transport, _, err := c.nodeTransport(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -364,22 +359,22 @@ var (
 	_ capability.AuthenticationReader = (*LocalHostClient)(nil)
 	_ capability.BindingChecker       = (*LocalHostClient)(nil)
 	_ interface {
-		ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
+		ReadSnapshot(context.Context, string) (runstate.RunSnapshot, error)
 	} = (*LocalHostClient)(nil)
 	_ interface {
-		ReadNode(context.Context, controllerwire.NodeRef) (store.NodeRow, error)
+		ReadNode(context.Context, runspec.NodeRef) (runstate.NodeRow, error)
 	} = (*LocalHostClient)(nil)
 	_ interface {
-		TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
+		TransitionRun(context.Context, runstate.RunTransition) (runstate.Applied, error)
 	} = (*LocalHostClient)(nil)
 	_ interface {
-		TransitionNode(context.Context, store.NodeCommand) (store.Applied, error)
+		TransitionNode(context.Context, runspec.NodeRef, runstate.Actor, runstate.NodeCommandPayload) (runstate.Applied, error)
 	} = (*LocalHostClient)(nil)
 )
 
 // MayStart admits exactly the unit's persisted concurrency declarations.
-func (c *LocalHostClient) MayStart(ctx context.Context, binding store.CapacityBinding, actor store.Actor) (store.AcquireSlotResponse, error) {
-	var result store.AcquireSlotResponse
+func (c *LocalHostClient) MayStart(ctx context.Context, binding runstate.CapacityBinding, actor runstate.Actor) (runstate.AcquireSlotResponse, error) {
+	var result runstate.AcquireSlotResponse
 	if binding.RunID != c.run || c.node != "" && binding.NodeID != c.node {
 		return result, localHostClientRefusal()
 	}
@@ -387,9 +382,9 @@ func (c *LocalHostClient) MayStart(ctx context.Context, binding store.CapacityBi
 		return result, err
 	}
 	transport := c.transport
-	if c.node != "" || actor.Kind == store.ActorHolder {
+	if c.node != "" || actor.Kind == runstate.ActorHolder {
 		var err error
-		transport, _, err = c.nodeTransport(ctx, controllerwire.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
+		transport, _, err = c.nodeTransport(ctx, runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
 		if err != nil {
 			return result, err
 		}
@@ -399,22 +394,22 @@ func (c *LocalHostClient) MayStart(ctx context.Context, binding store.CapacityBi
 }
 
 // RelinquishStart returns a provisional burst award when local compute is busy.
-func (c *LocalHostClient) RelinquishStart(ctx context.Context, binding store.CapacityBinding, actor store.Actor) error {
+func (c *LocalHostClient) RelinquishStart(ctx context.Context, binding runstate.CapacityBinding, actor runstate.Actor) error {
 	if binding.RunID != c.run || binding.NodeID == "" || c.node != "" && binding.NodeID != c.node {
 		return localHostClientRefusal()
 	}
 	if err := c.live(); err != nil {
 		return err
 	}
-	transport, _, err := c.nodeTransport(ctx, controllerwire.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
+	transport, _, err := c.nodeTransport(ctx, runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
 	if err != nil {
 		return err
 	}
 	return transport.request(ctx, "POST", "/api/v1/runs/{run}/local-host/relinquish-start", "/api/v1/runs/"+url.PathEscape(c.run)+"/local-host/relinquish-start", "", localhostwire.LocalCapacityRequest{Binding: binding}, nil)
 }
 
-func (c *LocalHostClient) ReleaseEvaluation(ctx context.Context, ref controllerwire.NodeRef, actor store.Actor) (store.Applied, error) {
-	var result store.Applied
+func (c *LocalHostClient) ReleaseEvaluation(ctx context.Context, ref runspec.NodeRef, actor runstate.Actor) (runstate.Applied, error) {
+	var result runstate.Applied
 	if string(ref.RunID) != c.run || c.node != "" || ref.NodeID == "" {
 		return result, localHostClientRefusal()
 	}

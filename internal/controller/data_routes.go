@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -43,8 +44,8 @@ func (s *Server) WithDataController(data *DataController) *Server {
 	return s
 }
 
-func (s *Server) dataEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) dataEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/data/upload", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataUpload},
 		{Method: "POST", Pattern: "/api/v1/data/commit", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataCommit},
 		{Method: "POST", Pattern: "/api/v1/data/records", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataRecordCommit},

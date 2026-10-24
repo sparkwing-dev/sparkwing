@@ -2,17 +2,19 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
-func (s *Server) claimEndpoints() []Endpoint {
+func (s *Server) claimEndpoints() []controllerwire.Endpoint {
 	e := s.engineController
-	return []Endpoint{
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runners/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: s.claimHandler(e)},
 		{Method: "POST", Pattern: "/api/v1/launcher/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: s.claimHandler(e)},
 		{Method: "POST", Pattern: "/api/v1/launcher/sync", Authentication: capability.AuthCapability, Decode: launcherSyncTarget, Handle: e.handleSyncLauncher},
@@ -149,9 +151,12 @@ func (s *EngineController) handleSyncLauncher(w http.ResponseWriter, r *http.Req
 }
 
 // ClaimPolicyRouter shares the HTTP claim inventory with embedded claimants.
-func (s *EngineController) ClaimPolicyRouter() (*PolicyRouter, error) {
-	router := NewPolicyRouter(s.authorization)
-	router.resolveTenant = s.ResolveTenant
+func (s *EngineController) ClaimPolicyRouter() (*routepolicy.Router, error) {
+	if s == nil {
+		return nil, errors.New("store hosting requires the owned store and native services")
+	}
+	router := routepolicy.New(controllerAuthorization(s.authorization, s.ResolveTenant))
+
 	server := &Server{engineController: s}
 	for _, endpoint := range server.claimEndpoints() {
 		if err := router.Register(endpoint); err != nil {

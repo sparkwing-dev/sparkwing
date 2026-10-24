@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -66,7 +67,7 @@ func (s *Store) TestOnlyOwnerSnapshotFunding(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT ordinal FROM claim_awards WHERE singleton=1`).Scan(&after); err != nil || after != ordinal {
 		t.Fatalf("snapshot changed scheduling: ordinal=%d -> %d error=%v", ordinal, after, err)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 	if err != nil || node.ReadyAt != nil || node.ClaimedBy != "" || node.CapabilityPrefix != "" {
 		t.Fatalf("snapshot released or awarded the job: %+v error=%v", node, err)
 	}

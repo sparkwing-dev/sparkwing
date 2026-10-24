@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -84,7 +85,7 @@ func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, clas
 	}
 	s.logger.Warn("egress refused", append(requestLogAttrs(r), "reason", reason, "class", string(class))...)
 	w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds(retryAfter), 10))
-	writePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: "too many concurrent downloads or log streams", Details: map[string]any{"reason": reason}})
+	routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: "too many concurrent downloads or log streams", Details: map[string]any{"reason": reason}})
 }
 
 func retryAfterSeconds(d time.Duration) int64 {

@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -102,8 +103,8 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(compressed.Bytes())
-	first := store.Segment{Index: 1, Size: int64(len(plain)), StoredBytes: int64(compressed.Len()), Digest: hex.EncodeToString(digest[:])}
-	second := store.Segment{Index: 2, Offset: int64(len(plain)), Size: int64(len(plain)), StoredBytes: int64(compressed.Len()), Digest: first.Digest}
+	first := runstate.Segment{Index: 1, Size: int64(len(plain)), StoredBytes: int64(compressed.Len()), Digest: hex.EncodeToString(digest[:])}
+	second := runstate.Segment{Index: 2, Offset: int64(len(plain)), Size: int64(len(plain)), StoredBytes: int64(compressed.Len()), Digest: first.Digest}
 	sign := func(index, size int64, status int) blob.LogUploadURL {
 		encoded, err := json.Marshal(blob.LogSigningRequest{Subject: subject, Index: index, Size: size, Digest: blob.Digest(first.Digest)})
 		if err != nil {
@@ -139,14 +140,14 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 			t.Fatalf("log PUT = %d", code)
 		}
 	}
-	for _, segment := range []store.Segment{first, second} {
-		encoded, err := json.Marshal(logCommitRequest{Subject: subject, Segments: []store.Segment{segment}})
+	for _, segment := range []runstate.Segment{first, second} {
+		encoded, err := json.Marshal(logCommitRequest{Subject: subject, Segments: []runstate.Segment{segment}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(encoded), 200)
 	}
-	commit := logCommitRequest{Subject: subject, Segments: []store.Segment{first, second}, Final: true}
+	commit := logCommitRequest{Subject: subject, Segments: []runstate.Segment{first, second}, Final: true}
 	encoded, err := json.Marshal(commit)
 	if err != nil {
 		t.Fatal(err)

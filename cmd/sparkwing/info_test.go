@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 var (
@@ -88,10 +88,10 @@ func TestInfoReportsInvalidPipelineConfig(t *testing.T) {
 	projectAt(t, "pipelines: [invalid YAML\n")
 	previousPin, previousVersion := readEnginePin, enginePinVersion
 	t.Cleanup(func() { readEnginePin, enginePinVersion = previousPin, previousVersion })
-	readEnginePin = func(string, engine.SDKKind) (engine.Pin, error) {
-		return engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, nil
+	readEnginePin = func(string, engineid.SDKKind) (engineid.Pin, error) {
+		return engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}, nil
 	}
-	enginePinVersion = func(engine.Pin) (string, error) { return "v1.2.3", nil }
+	enginePinVersion = func(engineid.Pin) (string, error) { return "v1.2.3", nil }
 	for _, args := range [][]string{{"-o", "json"}, {"-o", "pretty"}, {"--for-agent", "-o", "plain"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			out := captureStdout(t, func() {

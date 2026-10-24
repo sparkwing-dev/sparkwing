@@ -33,7 +33,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 		return err
 	}
 	runID := plan.RunID
-	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: "alpha"}, Actor: plan.Actor}); err != nil {
+	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "alpha"}, Actor: plan.Actor}); err != nil {
 		return err
 	}
 	operator, err := s.AsOperator().ProvisionCapability(ctx, storeNativeBootstrapSpec())
@@ -69,12 +69,12 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	old := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: first.Award.Holder, Generation: int64(first.Award.Generation)}}
+	old := capability.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: first.Award.Holder, Generation: int64(first.Award.Generation)}}
 	for exchange := range 2 {
 		if err := reopen(); err != nil {
 			return err
 		}
-		response, err := (controller.NewEngineController(s, controller.EngineController{})).SyncLauncher(ctx, a, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{old}})
+		response, err := (controller.NewEngineController(s, controller.EngineController{})).SyncLauncher(ctx, a, controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{old}})
 		if err != nil {
 			return err
 		}
@@ -92,7 +92,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if err := s.ReleaseUnit(ctx, first, first.Award.CapabilityPrefix); err != nil {
 		return fmt.Errorf("release exchanged claim: %w", err)
 	}
-	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: "alpha"}, Actor: plan.Actor}); err != nil {
+	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "alpha"}, Actor: plan.Actor}); err != nil {
 		return fmt.Errorf("owner redispatch: %w", err)
 	}
 	second, err := s.AsOperator().ClaimUnit(ctx, demand)
@@ -105,14 +105,14 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if err := reopen(); err != nil {
 		return err
 	}
-	response, err := (controller.NewEngineController(s, controller.EngineController{})).SyncLauncher(ctx, a, controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{old, current}})
+	response, err := (controller.NewEngineController(s, controller.EngineController{})).SyncLauncher(ctx, a, controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{old, current}})
 	if err != nil {
 		return err
 	}
 	if len(response.Awards) != 1 || response.Awards[0].Capability != "" || response.Awards[0].Binding.Generation != int64(second.Award.Generation) || len(response.Retired) != 1 || response.Retired[0] != old.Award {
 		return errors.New("stale Job cleanup selected the replacement award")
 	}
-	row, err := tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(runID), NodeID: "alpha"})
+	row, err := tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "alpha"})
 	if err != nil {
 		return err
 	}

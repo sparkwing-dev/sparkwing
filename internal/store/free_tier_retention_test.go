@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestFreeSlotsReleaseAfterThirtyEmptyDays(t *testing.T) {
@@ -18,7 +19,7 @@ func TestFreeSlotsReleaseAfterThirtyEmptyDays(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	maintenanceRun(t, s, "busy", 1, RunSuccess)
+	maintenanceRun(t, s, "busy", 1, runstate.RunSuccess)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET team='bbb' WHERE id='busy'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO blobs(team,digest,size,created_at) VALUES ('bbb','stored',3,?)`, now.UnixNano())
 	lease, err := op.AcquireSingletonLease(ctx, "maintenance", "free-slots", 90*24*time.Hour)

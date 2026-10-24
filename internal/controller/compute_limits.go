@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -149,7 +150,7 @@ func (s *Server) writeComputeLimitRefusal(
 	if refused.Scope != "" {
 		details["scope"] = refused.Scope
 	}
-	writePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: refused.Error(), Details: details})
+	routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: refused.Error(), Details: details})
 	return true
 }
 

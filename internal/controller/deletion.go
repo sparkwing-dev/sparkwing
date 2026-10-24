@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -65,7 +66,7 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request, a capa
 		return accountMutationError(err)
 	}
 	if del.Team != store.Team(a.Target.Team) {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	s.logger.Info("team deletion requested", "team", string(del.Team), "by", a.Principal.Capability.Subject.ID)
 	writeJSON(w, http.StatusAccepted, teamDeletionBody(del))

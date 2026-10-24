@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 func TestRunGoSDKReplacementBuildsWithInstalledEngine(t *testing.T) {
@@ -33,7 +34,7 @@ func TestRunGoSDKReplacementBuildsWithInstalledEngine(t *testing.T) {
 			t.Fatal(err)
 		}
 		writeInput(t, sdk, "sdk.go", append([]byte("package sdk\nconst Value="), body...))
-		request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engine.GoSDK, ExecutableDirectory: t.TempDir()})
+		request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engineid.GoSDK, ExecutableDirectory: t.TempDir()})
 		if err != nil {
 			t.Fatal(err)
 		}

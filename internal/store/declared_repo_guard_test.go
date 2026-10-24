@@ -13,6 +13,7 @@ import (
 // authorization may read it. Every file naming the field is listed with its
 // reason, because a new reader has to be argued for in a diff.
 var declaredRepoReaders = map[string]string{
+	"internal/runstate/reporting.go":      "the shared response projection exposes repository display metadata without granting authority",
 	"internal/store/latest_run.go":        "the tenant reporting query filters the sealed repository projection",
 	"internal/store/runfilter_http.go":    "the HTTP filter parser selects repository display metadata",
 	"internal/store/store.go":             "the sealed run reporting projection exposes repository metadata without granting authority",

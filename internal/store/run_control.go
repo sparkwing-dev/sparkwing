@@ -11,9 +11,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // CreateAuthorizedDebugPause commits a masked pause under live run-control authority.
@@ -46,11 +46,11 @@ func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Au
 		if err != nil {
 			return err
 		}
-		row, err := readNodeTx(ctx, tx, t.team, controllerwire.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(job)})
+		row, err := readNodeTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(target.RunID), NodeID: runspec.NodeID(job)})
 		if err != nil {
 			return err
 		}
-		if run.FinishedAt != nil || run.CancelRequestedAt != nil || row.Status == StatusDone || row.CancelRequestedAt != nil {
+		if run.FinishedAt != nil || run.CancelRequestedAt != nil || row.Status == runstate.StatusDone || row.CancelRequestedAt != nil {
 			return authorityError(apierr.IllegalTransition, "job cannot be paused")
 		}
 		now := tx.now(ctx)
@@ -79,13 +79,13 @@ func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Au
 }
 
 // ResolveAuthorizedApproval commits one human decision and its replay under current authority.
-func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Authorized, decision controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error) {
-	var out controllerwire.ApprovalResult
+func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Authorized, decision ApprovalDecision) (ApprovalResult, error) {
+	var out ApprovalResult
 	if decision.Resolution != "approved" && decision.Resolution != "denied" {
 		return out, ErrInvalidInput
 	}
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		out = controllerwire.ApprovalResult{}
+		out = ApprovalResult{}
 		if a.Target.NodeID == "" {
 			return bindingRefusal()
 		}
@@ -116,11 +116,11 @@ func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Aut
 		if err != nil {
 			return err
 		}
-		to := NodeFailed
+		to := runstate.NodeFailed
 		if decision.Resolution == "approved" {
-			to = NodeSuccess
+			to = runstate.NodeSuccess
 		}
-		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, To: to, Cause: causeApprovalResolve, Actor: Actor{Kind: ActorOperator, Authority: p.Authority}, Extra: transitionExtra{Approval: &ApprovalResolution{Decision: decision.Resolution, Comment: comment}}}
+		change := nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, To: to, Cause: causeApprovalResolve, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: p.Authority}, Extra: transitionExtra{Approval: &runstate.ApprovalResolution{Decision: decision.Resolution, Comment: comment}}}
 
 		if _, err = transitionNodeTx(ctx, tx, t.team, change); err != nil {
 			return err
@@ -129,7 +129,7 @@ func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Aut
 		if err != nil {
 			return err
 		}
-		out.Approval = controllerwire.Approval{RunID: gate.RunID, JobID: gate.NodeID, RequestedAt: gate.RequestedAt, Message: gate.Message, TimeoutMS: gate.TimeoutMS, OnTimeout: gate.OnTimeout, ResolvedAt: gate.ResolvedAt, Resolution: gate.Resolution, Approver: p.Capability.Subject.ID, Comment: gate.Comment}
+		out.Approval = Approval{RunID: gate.RunID, NodeID: gate.NodeID, RequestedAt: gate.RequestedAt, Message: gate.Message, TimeoutMS: gate.TimeoutMS, OnTimeout: gate.OnTimeout, ResolvedAt: gate.ResolvedAt, Resolution: gate.Resolution, Approver: p.Capability.Subject.ID, Comment: gate.Comment}
 		encoded, err := json.Marshal(out)
 		if err != nil {
 			return err
@@ -141,7 +141,7 @@ func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Aut
 		return err
 	})
 	if err != nil {
-		return controllerwire.ApprovalResult{}, err
+		return ApprovalResult{}, err
 	}
 	return out, nil
 }

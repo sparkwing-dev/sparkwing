@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestPublicationImportsTerminalAttemptWithoutExecution(t *testing.T) {
 	tenant, now, terminal := publicationFixture(t)
 	attempt := runspec.PublishedAttempt{Attempt: 2, Generation: 3, StartedAt: now.Add(-time.Second), FinishedAt: *now, Outcome: "success", Executor: "desktop"}
-	change := nodeTransition{Ref: terminal.Ref, Actor: terminal.Actor, To: nodePending, Cause: CausePublishAttempt, Extra: transitionExtra{Publication: &attempt}}
+	change := nodeTransition{Ref: terminal.Ref, Actor: terminal.Actor, To: nodePending, Cause: runstate.CausePublishAttempt, Extra: transitionExtra{Publication: &attempt}}
 	for i := range 2 {
 		applied, err := tenant.TransitionNode(t.Context(), change)
 		if err != nil || applied.Replayed != (i == 1) || applied.Attempt != 2 || applied.Generation != 3 {
@@ -22,7 +23,7 @@ func TestPublicationImportsTerminalAttemptWithoutExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	row, err := tenant.ReadNode(t.Context(), terminal.Ref)
-	if err != nil || row.ClaimedBy != "" || row.CapabilityPrefix != "" || row.Attempt != 2 || row.Generation != 3 || row.Status != StatusDone {
+	if err != nil || row.ClaimedBy != "" || row.CapabilityPrefix != "" || row.Attempt != 2 || row.Generation != 3 || row.Status != runstate.StatusDone {
 		t.Fatalf("imported node: %+v %v", row, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "node_attempts", 1)
@@ -41,7 +42,7 @@ func TestPublicationAttemptNeverCreatesAnExecutableAward(t *testing.T) {
 	property := func(kind uint8, value int64) bool {
 		tenant, now, terminal := publicationFixture(t)
 		a := runspec.PublishedAttempt{Attempt: 1, Generation: 1, StartedAt: now.Add(-time.Second), FinishedAt: *now, Outcome: "success", Executor: "desktop"}
-		change := nodeTransition{Ref: terminal.Ref, Actor: terminal.Actor, To: nodePending, Cause: CausePublishAttempt, Extra: transitionExtra{Publication: &a}}
+		change := nodeTransition{Ref: terminal.Ref, Actor: terminal.Actor, To: nodePending, Cause: runstate.CausePublishAttempt, Extra: transitionExtra{Publication: &a}}
 		switch kind % 6 {
 		case 0:
 			a.Attempt = -(value & 0x7fffffff)
@@ -52,7 +53,7 @@ func TestPublicationAttemptNeverCreatesAnExecutableAward(t *testing.T) {
 		case 3:
 			a.Outcome = "running"
 		case 4:
-			change.Cause = CauseStart
+			change.Cause = runstate.CauseStart
 		case 5:
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET intake_mode='execute' WHERE id=?`, terminal.Ref.RunID)
 		}

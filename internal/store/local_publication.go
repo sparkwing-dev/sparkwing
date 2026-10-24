@@ -5,13 +5,14 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // LocalPublication exports terminal state and its selected result records to the local peer.
 type LocalPublication struct {
 	RunSnapshot
-	Records []blob.RecordLookupResult `json:"publication_records,omitempty"`
-	Results map[string]NodeResult     `json:"publication_results,omitempty"`
+	Records []blob.RecordLookupResult      `json:"publication_records,omitempty"`
+	Results map[string]runstate.NodeResult `json:"publication_results,omitempty"`
 }
 
 // ReadLocalPublication reads the local controller's completed result graph.
@@ -37,7 +38,7 @@ func (t *Tenant) readLocalPublication(ctx context.Context, run string, reads *bl
 	if snapshot.Run.FinishedAt == nil {
 		return LocalPublication{}, notFound("completed local run", run)
 	}
-	result := LocalPublication{RunSnapshot: snapshot, Records: []blob.RecordLookupResult{}, Results: map[string]NodeResult{}}
+	result := LocalPublication{RunSnapshot: snapshot, Records: []blob.RecordLookupResult{}, Results: map[string]runstate.NodeResult{}}
 	records := t.BlobRecords(nil).(*blobRecords)
 	pending := false
 	for _, node := range snapshot.Nodes {

@@ -27,6 +27,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // DefaultBusyTimeoutMS is the SQLite busy_timeout Open applies, in
@@ -405,49 +406,9 @@ const InvocationSecretArgsKey = "secret_args"
 
 // Run is the redacted reporting view of a persisted run.
 type Run struct {
-	team            Team
-	RepoInherited   bool              `json:"repo_inherited,omitempty"`
-	ID              string            `json:"id"`
-	Number          int64             `json:"number"`
-	Pipeline        string            `json:"pipeline"`
-	Status          string            `json:"status"`
-	TriggerSource   string            `json:"trigger_source,omitempty"`
-	GitBranch       string            `json:"git_branch,omitempty"`
-	GitSHA          string            `json:"git_sha,omitempty"`
-	Args            map[string]string `json:"args,omitempty"`
-	PlanSnapshot    []byte            `json:"-"`
-	Error           string            `json:"error,omitempty"`
-	CreatedAt       time.Time         `json:"created_at,omitempty"`
-	StartedAt       time.Time         `json:"started_at"`
-	FinishedAt      *time.Time        `json:"finished_at,omitempty"`
-	ParentRunID     string            `json:"parent_run_id,omitempty"`
-	Admission       string            `json:"admission,omitempty"`
-	DeclaredRepo    string            `json:"repo,omitempty"`
-	RepoURL         string            `json:"repo_url,omitempty"`
-	GithubOwner     string            `json:"github_owner,omitempty"`
-	GithubRepo      string            `json:"github_repo,omitempty"`
-	RetryOf         string            `json:"retry_of,omitempty"`
-	RetriedAs       string            `json:"retried_as,omitempty"`
-	RetrySource     string            `json:"retry_source,omitempty"`
-	ReplayOfRunID   string            `json:"replay_of_run_id,omitempty"`
-	ReplayOfNodeID  string            `json:"replay_of_node_id,omitempty"`
-	Invocation      map[string]any    `json:"invocation,omitempty"`
-	AnnotationCount int               `json:"annotation_count,omitempty"`
-	TopAnnotation   string            `json:"top_annotation,omitempty"`
-	Annotations     []string          `json:"annotations,omitempty"`
-	NeedsAttention  string            `json:"needs_attention,omitempty"`
-	TriggerUser     string            `json:"trigger_user,omitempty"`
-	PullRequest     *RunPullRequest   `json:"pull_request,omitempty"`
-}
-
-// RunPullRequest is the pull request a run's trigger fired for.
-type RunPullRequest struct {
-	Number  int    `json:"number"`
-	Action  string `json:"action,omitempty"`
-	BaseRef string `json:"base_ref,omitempty"`
-	BaseSHA string `json:"base_sha,omitempty"`
-	HeadRef string `json:"head_ref,omitempty"`
-	HeadSHA string `json:"head_sha,omitempty"`
+	runstate.RunSummary
+	team         Team
+	PlanSnapshot []byte `json:"-"`
 }
 
 // ErrIDOwnedByAnotherTeam reports a write whose key already names a row of
@@ -747,7 +708,7 @@ func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 	}
 	if display.PullRequest.Set {
 		pr := display.PullRequest.Value
-		r.PullRequest = &RunPullRequest{Number: int(pr.Number), Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}
+		r.PullRequest = &runstate.SummaryPullRequest{Number: int(pr.Number), Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}
 	}
 	if r.RetryOf != "" {
 		r.RetrySource = RetrySourceManual

@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
@@ -69,7 +70,7 @@ func (sample MetricSample) ValidateResourceValues() error {
 	return nil
 }
 
-func insertMetricTx(ctx context.Context, tx *storeTx, team Team, ref controllerwire.NodeRef, sample MetricSample) error {
+func insertMetricTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, sample MetricSample) error {
 	runID, nodeID := ref.RunID, ref.NodeID
 	result, err := tx.ExecContext(ctx, `
 INSERT INTO node_metrics (team, run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos, kind)

@@ -13,6 +13,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -21,7 +23,7 @@ import (
 type scheduleOptions struct {
 	format      string
 	fires, next int
-	override    controllerwire.ScheduleOverride
+	override    cronspec.Override
 	action      string
 }
 

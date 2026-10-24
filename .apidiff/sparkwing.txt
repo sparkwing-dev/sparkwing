@@ -94,7 +94,7 @@ type EnvVarDocer interface {
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
 var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
-var ErrSecretMissing = secretname.ErrMissing
+var ErrSecretMissing = secrets.ErrSecretMissing
 func Error(ctx context.Context, format string, args ...any)
 type Example struct {
 	Comment string

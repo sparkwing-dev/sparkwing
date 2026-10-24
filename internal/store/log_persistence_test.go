@@ -10,9 +10,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestLogPersistenceCannotCreateStream(t *testing.T) {
@@ -33,10 +33,10 @@ func TestLogPersistenceRetainedBytesCountSegmentsOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, change := range []func(*Segment){
-		func(s *Segment) { s.Digest = "b" + s.Digest[1:] },
-		func(s *Segment) { s.Size++ },
-		func(s *Segment) { s.Size = limits.LogSegmentUploadBytes + 1 },
+	for _, change := range []func(*runstate.Segment){
+		func(s *runstate.Segment) { s.Digest = "b" + s.Digest[1:] },
+		func(s *runstate.Segment) { s.Size++ },
+		func(s *runstate.Segment) { s.Size = limits.LogSegmentUploadBytes + 1 },
 	} {
 		bad := commit
 		bad.Segments = slices.Clone(commit.Segments)
@@ -50,7 +50,7 @@ func TestLogPersistenceRetainedBytesCountSegmentsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commit.Segments = []Segment{{Index: 2, Offset: 3, Size: 2, StoredBytes: 2, Digest: commit.Segments[0].Digest, ObjectKey: key}}
+	commit.Segments = []runstate.Segment{{Index: 2, Offset: 3, Size: 2, StoredBytes: 2, Digest: commit.Segments[0].Digest, ObjectKey: key}}
 	commit.Final = true
 	for range 2 {
 		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
@@ -121,7 +121,7 @@ func TestLogPersistenceAttemptByteLimitPreservesCommittedBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 		segment.ObjectKey = key
-		commit.Segments = []Segment{segment}
+		commit.Segments = []runstate.Segment{segment}
 		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 			t.Fatal(err)
 		}
@@ -133,7 +133,7 @@ func TestLogPersistenceAttemptByteLimitPreservesCommittedBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	segment.ObjectKey = key
-	commit.Segments = []Segment{segment}
+	commit.Segments = []runstate.Segment{segment}
 	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
 		t.Fatal("accepted a segment above the attempt byte limit")
 	}
@@ -190,8 +190,8 @@ func TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace(t *testing.T) {
 			t.Logf("offset=%d retained bytes=%d: %v", offset, size, err)
 			return false
 		}
-		row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-		if err != nil || row.Status != StatusDone || row.Outcome != NodeSuccess || row.FinishedAt == nil || !row.FinishedAt.Equal(nodeFinished) {
+		row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+		if err != nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeSuccess || row.FinishedAt == nil || !row.FinishedAt.Equal(nodeFinished) {
 			t.Logf("log mutation changed job: %+v: %v", row, err)
 			return false
 		}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -100,7 +101,7 @@ func TestServerPolicyUsesCurrentPersistedAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "member"}
-	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: ref, CapabilityPrefix: ref.ID}, ref); err != nil {
+	if err := tenant.RevokeAuthority(t.Context(), runstate.Actor{Authority: ref, CapabilityPrefix: ref.ID}, ref); err != nil {
 		t.Fatal(err)
 	}
 	if got := request(raw); got != http.StatusUnauthorized {

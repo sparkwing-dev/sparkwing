@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -40,12 +40,15 @@ func (r *statusReader) ReadRun(_ context.Context, id string) (controllerwire.Run
 	}
 	return d, nil
 }
+
 func (r *statusReader) ReadSteps(context.Context, string) (controllerwire.RunSteps, error) {
 	return r.steps, r.err
 }
+
 func (r *statusReader) ReadReceipt(context.Context, string) (controllerwire.Receipt, error) {
 	return r.receipt, r.err
 }
+
 func (r *statusReader) ListRuns(_ context.Context, q controllerwire.RunQuery) (controllerwire.RunPage, error) {
 	r.queries = append(r.queries, q)
 	return r.pages[q.ParentRunID+"/"+q.Cursor], r.err
@@ -65,11 +68,12 @@ func statusInvocation(t *testing.T, args ...string) clisurface.Invocation {
 }
 
 func TestRunStatusUsesAuthoritativeDetailForEveryConnection(t *testing.T) {
-	want := controllerwire.RunDetail{ID: "r1", Number: 412, Status: "success", StateSeq: 9,
+	want := controllerwire.RunDetail{
+		ID: "r1", Number: 412, Status: "success", StateSeq: 9,
 		Inputs:   runspec.Display{Pipeline: "check", Args: map[string]string{"password": "***"}},
 		Jobs:     []controllerwire.JobDetail{{ID: "build", Status: "finished", Outcome: "memoized", Generation: 3, Attempt: 2}},
 		Attempts: []controllerwire.AttemptDetail{{JobID: "build", Attempt: 2, Generation: 3, Outcome: "memoized", Executor: "runner-1"}},
-		Notices:  []engine.Notice{{Kind: engine.NoticeSupportEnding, Reason: "support ends soon", Hint: "sparkwing upgrade"}},
+		Notices:  []engineid.Notice{{Kind: engineid.NoticeSupportEnding, Reason: "support ends soon", Hint: "sparkwing upgrade"}},
 	}
 	for _, profile := range []string{"", "prod"} {
 		args := []string{}
@@ -198,7 +202,7 @@ func TestRunStatusFollowsDescendantsWithoutParentTransitions(t *testing.T) {
 func TestRunStatusFollowsReadTimeNotices(t *testing.T) {
 	r := &statusReader{details: []controllerwire.RunDetail{
 		{ID: "r1", Status: "running", StateSeq: 4},
-		{ID: "r1", Status: "running", StateSeq: 4, Notices: []engine.Notice{{Kind: engine.NoticeEnforcement, Reason: "policy changed"}}},
+		{ID: "r1", Status: "running", StateSeq: 4, Notices: []engineid.Notice{{Kind: engineid.NoticeEnforcement, Reason: "policy changed"}}},
 	}}
 	var out bytes.Buffer
 	waits := 0

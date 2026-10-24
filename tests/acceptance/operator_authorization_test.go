@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -58,8 +59,8 @@ func consoleBoundary() *credentialBoundary {
 	return b
 }
 
-func consoleAuthorization(b *credentialBoundary) controller.RouteAuthorization {
-	return controller.RouteAuthorization{
+func consoleAuthorization(b *credentialBoundary) routepolicy.Authorization {
+	return routepolicy.Authorization{
 		Authenticator: capability.NewAuthenticator(b), Bindings: b,
 		Identify: func(r *http.Request) (capability.Presentation, error) {
 			if p := b.snapshot.Authorities[0].Principal; p.Class == capability.CredentialPeer {

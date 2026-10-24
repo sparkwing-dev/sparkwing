@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -22,7 +21,7 @@ func approvalFixture(t *testing.T, gate nodeproto.ApprovalSpec) *storeHostFixtur
 		{ID: "deploy", Needs: []string{"gate"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "rollback", OnFailureOf: "gate", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}})
-	row, err := f.Tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"})
+	row, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,19 +42,19 @@ func approvalFixture(t *testing.T, gate nodeproto.ApprovalSpec) *storeHostFixtur
 func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 	for _, tc := range []struct {
 		name, resolution, policy string
-		outcome                  store.NodeState
+		outcome                  runstate.NodeState
 	}{
-		{"granted", "approved", "", store.NodeSuccess},
-		{"denied", "denied", "", store.NodeFailed},
-		{"timed out failing", "timed_out", "fail", store.NodeFailed},
-		{"timed out denying", "timed_out", "deny", store.NodeFailed},
-		{"timed out approving", "timed_out", "approve", store.NodeSuccess},
+		{"granted", "approved", "", runstate.NodeSuccess},
+		{"denied", "denied", "", runstate.NodeFailed},
+		{"timed out failing", "timed_out", "fail", runstate.NodeFailed},
+		{"timed out denying", "timed_out", "deny", runstate.NodeFailed},
+		{"timed out approving", "timed_out", "approve", runstate.NodeSuccess},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			timeout := int64(1000)
 			f := approvalFixture(t, nodeproto.ApprovalSpec{Message: "ship it?", TimeoutMS: &timeout, OnTimeout: tc.policy})
-			ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
-			var change store.NodeCommand = store.ResolveApprovalNode{Ref: ref, Actor: f.Control, Outcome: tc.outcome, Approval: &store.ApprovalResolution{Decision: tc.resolution, Comment: "looks good"}}
+			ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
+			var change store.NodeCommand = store.ResolveApprovalNode{Ref: ref, Actor: f.Control, Outcome: tc.outcome, Approval: &runstate.ApprovalResolution{Decision: tc.resolution, Comment: "looks good"}}
 			if tc.resolution == "timed_out" {
 				if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), "UPDATE approvals SET requested_at=? WHERE team=? AND run_id=? AND node_id=?", time.Now().Add(-time.Hour).UnixNano(), store.DefaultTeam, ref.RunID, ref.NodeID); err != nil {
 					t.Fatal(err)
@@ -66,7 +65,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 				t.Fatal(err)
 			}
 			row, err := f.Tenant.ReadNode(t.Context(), ref)
-			if err != nil || row.Status != store.StatusDone || row.Outcome != tc.outcome || row.Attempt != 0 || row.Generation != 0 {
+			if err != nil || row.Status != runstate.StatusDone || row.Outcome != tc.outcome || row.Attempt != 0 || row.Generation != 0 {
 				t.Fatalf("gate = %+v, error %v", row, err)
 			}
 			approval, err := f.Tenant.GetApproval(t.Context(), string(ref.RunID), string(ref.NodeID))
@@ -83,7 +82,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 			}
 			decision := store.Decide(graph)
 			ready := "deploy"
-			if tc.outcome == store.NodeFailed {
+			if tc.outcome == runstate.NodeFailed {
 				ready = "rollback"
 			}
 			found := false
@@ -101,12 +100,12 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 
 func TestApprovalGateCancelledWithTheRun(t *testing.T) {
 	f := approvalFixture(t, nodeproto.ApprovalSpec{})
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
 	if _, err := f.State.TransitionNode(t.Context(), store.CancelNode{Ref: ref, Actor: f.Control}); err != nil {
 		t.Fatal(err)
 	}
 	row, err := f.Tenant.ReadNode(t.Context(), ref)
-	if err != nil || row.Outcome != store.NodeCancelled || row.Attempt != 0 {
+	if err != nil || row.Outcome != runstate.NodeCancelled || row.Attempt != 0 {
 		t.Fatalf("gate = %+v, error %v", row, err)
 	}
 	approval, err := f.Tenant.GetApproval(t.Context(), string(ref.RunID), string(ref.NodeID))
@@ -118,11 +117,11 @@ func TestApprovalGateCancelledWithTheRun(t *testing.T) {
 func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 	timeout := int64(1000)
 	f := approvalFixture(t, nodeproto.ApprovalSpec{TimeoutMS: &timeout})
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
 	if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), "UPDATE approvals SET requested_at=? WHERE team=? AND run_id=? AND node_id=?", time.Now().Add(-time.Hour).UnixNano(), store.DefaultTeam, ref.RunID, ref.NodeID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.State.TransitionNode(t.Context(), store.ResolveApprovalNode{Ref: ref, Actor: f.Control, Outcome: store.NodeSuccess, Approval: &store.ApprovalResolution{Decision: "approved"}}); err != nil {
+	if _, err := f.State.TransitionNode(t.Context(), store.ResolveApprovalNode{Ref: ref, Actor: f.Control, Outcome: runstate.NodeSuccess, Approval: &runstate.ApprovalResolution{Decision: "approved"}}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := f.State.TransitionNode(t.Context(), store.TimeoutApprovalNode{Ref: ref, Actor: f.Actor})
@@ -131,7 +130,7 @@ func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 		t.Fatalf("late timeout = %v, want terminal refusal", err)
 	}
 	row, err := f.Tenant.ReadNode(t.Context(), ref)
-	if err != nil || row.Outcome != store.NodeSuccess {
+	if err != nil || row.Outcome != runstate.NodeSuccess {
 		t.Fatalf("gate = %+v, error %v", row, err)
 	}
 }
@@ -141,7 +140,7 @@ func TestApprovalGateFailsOnAStoreThatCannotRecover(t *testing.T) {
 	if _, err := teststore.SQL(t, f.Store).ExecContext(t.Context(), `CREATE TRIGGER refuse_approval BEFORE INSERT ON approvals BEGIN SELECT RAISE(ABORT,'locking protocol'); END`); err != nil {
 		t.Fatal(err)
 	}
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}
 	row, err := f.Tenant.ReadNode(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)

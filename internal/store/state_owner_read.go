@@ -5,37 +5,38 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // ReadOwnerSnapshot reads scheduling state and its current owner authority in one snapshot.
 // Cancellation remains observable while the owner drains its still-held lease.
 func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string) (RunSnapshot, error) {
-	return t.readOwnerSnapshot(ctx, authority, runID, func(controllerwire.NodeRef) bool { return true })
+	return t.readOwnerSnapshot(ctx, authority, runID, func(runspec.NodeRef) bool { return true })
 }
 
 // ReadOwnerNode reads one node of the owner's run with its private placement decision.
-func (t *Tenant) ReadOwnerNode(ctx context.Context, authority capability.AuthorityRef, ref controllerwire.NodeRef) (NodeRow, error) {
-	snapshot, err := t.readOwnerSnapshot(ctx, authority, string(ref.RunID), func(node controllerwire.NodeRef) bool { return node == ref })
+func (t *Tenant) ReadOwnerNode(ctx context.Context, authority capability.AuthorityRef, ref runspec.NodeRef) (runstate.NodeRow, error) {
+	snapshot, err := t.readOwnerSnapshot(ctx, authority, string(ref.RunID), func(node runspec.NodeRef) bool { return node == ref })
 	if err != nil {
-		return NodeRow{}, err
+		return runstate.NodeRow{}, err
 	}
 	for _, node := range snapshot.Nodes {
 		if node.Ref == ref {
 			return node, nil
 		}
 	}
-	return NodeRow{}, ErrNotFound
+	return runstate.NodeRow{}, ErrNotFound
 }
 
 // ReadOwnerNodes reads the owner's run under the same authority checks without
 // placement decisions, which cost one matching read per node.
-func (t *Tenant) ReadOwnerNodes(ctx context.Context, authority capability.AuthorityRef, runID string) ([]NodeRow, error) {
-	snapshot, err := t.readOwnerSnapshot(ctx, authority, runID, func(controllerwire.NodeRef) bool { return false })
+func (t *Tenant) ReadOwnerNodes(ctx context.Context, authority capability.AuthorityRef, runID string) ([]runstate.NodeRow, error) {
+	snapshot, err := t.readOwnerSnapshot(ctx, authority, runID, func(runspec.NodeRef) bool { return false })
 	return snapshot.Nodes, err
 }
 
-func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string, placement func(controllerwire.NodeRef) bool) (RunSnapshot, error) {
+func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string, placement func(runspec.NodeRef) bool) (RunSnapshot, error) {
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return RunSnapshot{}, err
@@ -90,7 +91,7 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 				return RunSnapshot{}, err
 			}
 		}
-		node.OwnerExecution = &OwnerExecution{Owner: authority, Team: t.team, Generation: c.Binding.Generation, Node: node.Ref, NodeGeneration: int64(node.Generation), SpecHash: node.SpecHash, Allowed: allowed}
+		node.OwnerExecution = &runstate.OwnerExecution{Owner: authority, Team: string(t.team), Generation: c.Binding.Generation, Node: node.Ref, NodeGeneration: int64(node.Generation), SpecHash: node.SpecHash, Allowed: allowed}
 	}
 	if err := tx.Commit(); err != nil {
 		return RunSnapshot{}, err

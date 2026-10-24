@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -91,17 +91,17 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		for _, row := range snapshot.Nodes {
 			stop := active[string(row.Ref.NodeID)]
-			if stop != nil && releasing[string(row.Ref.NodeID)] != nil && releasing[string(row.Ref.NodeID)].Load() && row.Status == store.StatusDone {
+			if stop != nil && releasing[string(row.Ref.NodeID)] != nil && releasing[string(row.Ref.NodeID)].Load() && row.Status == runstate.StatusDone {
 				stop(context.Canceled)
 			}
-			if row.CancelRequestedAt == nil || row.Status == store.StatusDone {
+			if row.CancelRequestedAt == nil || row.Status == runstate.StatusDone {
 				continue
 			}
 			if row.ClaimedBy != "" && row.OwnerCapabilityPrefix != input.Owner.CapabilityPrefix {
 				continue
 			}
 			if row.ClaimedBy == "" {
-				applied, err := h.Store.TransitionNode(ctx, store.CancelNode{Ref: row.Ref, Actor: input.Owner, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: row.CancelReason}})
+				applied, err := h.Store.TransitionNode(ctx, store.CancelNode{Ref: row.Ref, Actor: input.Owner, Result: &runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: row.CancelReason}})
 				if err != nil {
 					return RunCompletion{}, err
 				}
@@ -116,10 +116,10 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		selected := false
 		for _, row := range snapshot.Nodes {
 			reason, excluded := skips[string(row.Ref.NodeID)]
-			if !excluded || row.Status != store.StatusPending || row.ClaimedBy != "" || row.ReadyAt != nil || snapshot.Run.CancelRequestedAt != nil {
+			if !excluded || row.Status != runstate.StatusPending || row.ClaimedBy != "" || row.ReadyAt != nil || snapshot.Run.CancelRequestedAt != nil {
 				continue
 			}
-			if _, err := h.Store.TransitionNode(ctx, store.DependencyNode{Ref: row.Ref, Actor: input.Owner, Result: &store.NodeResult{Outcome: store.NodeSkipped, Reason: reason}, Outcome: store.NodeSkipped}); err != nil {
+			if _, err := h.Store.TransitionNode(ctx, store.DependencyNode{Ref: row.Ref, Actor: input.Owner, Result: &runstate.NodeResult{Outcome: runstate.NodeSkipped, Reason: reason}, Outcome: runstate.NodeSkipped}); err != nil {
 				return RunCompletion{}, err
 			}
 			selected = true
@@ -128,7 +128,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			continue
 		}
 		for _, row := range snapshot.Nodes {
-			if row.Status != store.StatusDone || active[string(row.Ref.NodeID)] != nil {
+			if row.Status != runstate.StatusDone || active[string(row.Ref.NodeID)] != nil {
 				continue
 			}
 			if generation, ok := debugged[string(row.Ref.NodeID)]; ok && runspec.ClaimGeneration(generation) == row.Generation {
@@ -148,8 +148,8 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			return RunCompletion{}, err
 		}
 		for i := range graph.Nodes {
-			if !graph.CancelRequested && active[graph.Nodes[i].ID] != nil && graph.Nodes[i].Status == string(store.StatusDone) {
-				graph.Nodes[i].Status, graph.Nodes[i].Outcome = string(store.StatusRunning), ""
+			if !graph.CancelRequested && active[graph.Nodes[i].ID] != nil && graph.Nodes[i].Status == string(runstate.StatusDone) {
+				graph.Nodes[i].Status, graph.Nodes[i].Outcome = string(runstate.StatusRunning), ""
 			}
 		}
 		decision := decide(graph)
@@ -200,7 +200,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		// safety: ready work and live holders can predate this owner; neither needs a second release event.
 		for _, row := range snapshot.Nodes {
-			if active[string(row.Ref.NodeID)] != nil || row.Status == store.StatusDone {
+			if active[string(row.Ref.NodeID)] != nil || row.Status == runstate.StatusDone {
 				continue
 			}
 			if h.Local == nil || !h.Local(row) {
@@ -208,7 +208,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			}
 			if row.ReadyAt != nil || row.ClaimedBy != "" {
 				launch(string(row.Ref.NodeID), func(ctx context.Context) error {
-					return h.execute(ctx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
+					return h.execute(ctx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: runstate.SourceNone})
 				})
 			}
 		}
@@ -251,28 +251,28 @@ func (h *OwnerHost) executionError(ctx context.Context, runID string, result own
 		return errors.Join(result.err, err)
 	}
 	row, ok := ownerNode(snapshot, result.nodeID)
-	if ok && row.Status == store.StatusDone && row.Outcome != "" {
+	if ok && row.Status == runstate.StatusDone && row.Outcome != "" {
 		return nil
 	}
 	return result.err
 }
 
-func ownerNode(snapshot store.RunSnapshot, id string) (store.NodeRow, bool) {
+func ownerNode(snapshot store.RunSnapshot, id string) (runstate.NodeRow, bool) {
 	for _, row := range snapshot.Nodes {
 		if row.Ref.NodeID == runspec.NodeID(id) && row.Ref.RunID == runspec.RunID(snapshot.Run.ID) {
 			return row, true
 		}
 	}
-	return store.NodeRow{}, false
+	return runstate.NodeRow{}, false
 }
 
-func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, action store.NodeDecision) error {
+func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row runstate.NodeRow, action store.NodeDecision) error {
 	var change store.NodeCommand
 	switch action.Kind {
 	case store.DecisionTerminal:
-		change = store.DependencyNode{Ref: row.Ref, Actor: input.Owner, Outcome: store.NodeState(action.Outcome), Result: &store.NodeResult{Outcome: store.NodeState(action.Outcome), Reason: action.Reason}}
+		change = store.DependencyNode{Ref: row.Ref, Actor: input.Owner, Outcome: runstate.NodeState(action.Outcome), Result: &runstate.NodeResult{Outcome: runstate.NodeState(action.Outcome), Reason: action.Reason}}
 	case store.DecisionCancelHolder:
-		change = store.CancelNode{Ref: row.Ref, Actor: input.Owner, Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: action.Reason}}
+		change = store.CancelNode{Ref: row.Ref, Actor: input.Owner, Result: &runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: action.Reason}}
 	default:
 		return fmt.Errorf("unknown scheduling decision %q", action.Kind)
 	}
@@ -281,14 +281,14 @@ func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted Accepted
 	return err
 }
 
-func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, kind store.DecisionKind, next func(context.Context, store.ReconcileRequest) error) error {
+func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row runstate.NodeRow, kind store.DecisionKind, next func(context.Context, store.ReconcileRequest) error) error {
 	if h.DebugPolicy == nil || h.SkipPolicy == nil {
 		return errors.New("run host requires owner layer policies before dispatch")
 	}
 	if err := h.debugBoundary(ctx, input, accepted, row, true); err != nil {
 		return err
 	}
-	request := store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone}
+	request := store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: runstate.SourceNone}
 	snapshot, err := h.Store.ReadSnapshot(ctx, input.RunID)
 	if err != nil {
 		return err
@@ -296,13 +296,13 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 	if selection := snapshot.Run.Retry; selection != nil {
 		if selected, ok := selection.Results[string(row.Ref.NodeID)]; ok {
 			probe := request
-			probe.Policy, probe.MaterializeOnly = store.SourceManualRetry, true
-			probe.Source = &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &selected}
+			probe.Policy, probe.MaterializeOnly = runstate.SourceManualRetry, true
+			probe.Source = &runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}
 			reused, err := followReconciliation(ctx, h.Store, probe, h.WaitNode)
 			if err != nil {
 				return err
 			}
-			if reused.Kind != store.Dispatch {
+			if reused.Kind != runstate.Dispatch {
 				return nil
 			}
 		}
@@ -370,13 +370,13 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 	if err != nil {
 		return err
 	}
-	if result.Kind != store.Execute {
+	if result.Kind != runstate.Execute {
 		return nil
 	}
 	return h.executeAward(ctx, run, accepted, entry, result)
 }
 
-func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, result store.ReconciledNode) error {
+func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, result runstate.ReconciledNode) error {
 	input, err := NewNodeInput(accepted, result.Node, entry.Engine, run.GrantedRunner)
 	if err != nil {
 		return err
@@ -409,7 +409,7 @@ func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted Acc
 	return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: errors.Join(err, context.Cause(workCtx))})
 }
 
-func ownerEvaluation(input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow) EvaluationInput {
+func ownerEvaluation(input RunInput, accepted AcceptedRun, entry *source.Entry, row runstate.NodeRow) EvaluationInput {
 	return EvaluationInput{
 		Engine: entry.Engine, Accepted: accepted, Entry: entry, GrantedRunner: input.GrantedRunner,
 		NodeID: string(row.Ref.NodeID), Generation: int64(row.Generation), SpecHash: row.SpecHash,
@@ -418,7 +418,7 @@ func ownerEvaluation(input RunInput, accepted AcceptedRun, entry *source.Entry, 
 	}
 }
 
-func (h *OwnerHost) expand(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow) error {
+func (h *OwnerHost) expand(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row runstate.NodeRow) error {
 	if h.Expand == nil {
 		return errors.New("run host requires a generator evaluator")
 	}
@@ -440,12 +440,12 @@ func (h *OwnerHost) finish(ctx context.Context, input RunInput, decision store.S
 	if err := context.Cause(ctx); err != nil {
 		return RunCompletion{}, err
 	}
-	switch store.RunState(decision.Outcome) {
-	case store.RunSuccess, store.RunFailed, store.RunCancelled:
+	switch runstate.RunState(decision.Outcome) {
+	case runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled:
 	default:
 		return RunCompletion{}, errors.New("schedule returned an invalid run verdict")
 	}
-	applied, err := h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunCompletion{RunID: runspec.RunID(input.RunID), Actor: input.Owner, Cause: store.RunFinish, Reason: decision.Reason}})
+	applied, err := h.Store.FinishRunAndUnit(ctx, runstate.FinishRunRequest{Unit: input.Owner.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(input.RunID), Actor: input.Owner, Cause: runstate.RunFinish, Reason: decision.Reason}})
 	if err != nil {
 		return RunCompletion{}, err
 	}

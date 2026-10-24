@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -105,7 +107,7 @@ func loadScheduleProject(root string) (*projectconfig.Config, error) {
 	return cfg, err
 }
 
-func selectScheduleDeclarations(cfg *projectconfig.Config, only []string, where string) ([]controllerwire.ScheduleDeclaration, []string, error) {
+func selectScheduleDeclarations(cfg *projectconfig.Config, only []string, where string) ([]runspec.ScheduleDeclaration, []string, error) {
 	wanted := map[string]bool{}
 	for _, name := range only {
 		name = strings.TrimSpace(name)
@@ -113,7 +115,7 @@ func selectScheduleDeclarations(cfg *projectconfig.Config, only []string, where 
 			wanted[name] = false
 		}
 	}
-	selected, skipped := []controllerwire.ScheduleDeclaration{}, []string{}
+	selected, skipped := []runspec.ScheduleDeclaration{}, []string{}
 	for _, pipeline := range cfg.Pipelines {
 		if pipeline.On == nil {
 			continue
@@ -137,7 +139,7 @@ func selectScheduleDeclarations(cfg *projectconfig.Config, only []string, where 
 				skipped = append(skipped, selector)
 				continue
 			}
-			selected = append(selected, controllerwire.ScheduleDeclaration{
+			selected = append(selected, runspec.ScheduleDeclaration{
 				Pipeline: pipeline.Name, Name: name,
 				Cron: schedule.Cron, TZ: scheduleString(schedule.TZ), Overlap: scheduleString(schedule.Overlap),
 				CatchUp: scheduleString(schedule.CatchUp), Args: maps.Clone(schedule.Args),

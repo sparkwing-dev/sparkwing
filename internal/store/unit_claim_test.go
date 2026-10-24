@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -116,7 +115,7 @@ func TestClaimUnitNamedAndQueuedUseLabelsAndIdentity(t *testing.T) {
 			if claim.Team != "a" || claim.Award.Holder != "runner" || claim.Award.Generation != 1 || len(claim.Bearer) == 0 {
 				t.Fatalf("claim = %+v", claim)
 			}
-			row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil || row.ClaimedBy != "runner" || row.StateSeq != 1 || row.Attempt != 0 {
 				t.Fatalf("row=%+v err=%v", row, err)
 			}
@@ -415,7 +414,7 @@ func TestClaimUnitMismatchPreservesQueueAndDoesNotHideEligibleWork(t *testing.T)
 			t.Fatalf("ineligible queue: %v", err)
 		}
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 	if err != nil || row.ReadyAt == nil || row.ReadyAt.UnixNano() != 1 || row.StateSeq != 0 || row.ClaimedBy != "" {
 		t.Fatalf("mismatch changed queue position: %+v, %v", row, err)
 	}

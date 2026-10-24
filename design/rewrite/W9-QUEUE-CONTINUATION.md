@@ -77,7 +77,7 @@ with an isolated HOME/state and release-version stamp.
 
 ## Scope and size
 
-The internal `runners.StoreBinding` implementation gains a transient `Bearer`
+The internal `localcontroller.StoreBinding` implementation gains a transient `Bearer`
 callback. This is the only shared production edit. It passes existing award
 bytes in memory, because reconstructing them from a digest is impossible. No
 frozen wire, policy, schema or foreign contract declaration changed. Removing

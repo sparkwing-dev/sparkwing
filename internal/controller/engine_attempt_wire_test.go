@@ -8,6 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -88,8 +89,8 @@ func TestEngineWireRetryOrdinalCannotConsumeNextAttempt(t *testing.T) {
 	if _, err := server.TransitionJob(t.Context(), actor, stale); err == nil {
 		t.Fatal("delayed report finished a later attempt")
 	}
-	row, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || row.Attempt != 3 || row.ApplicationRetries != 2 || row.Status != store.StatusRunning {
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || row.Attempt != 3 || row.ApplicationRetries != 2 || row.Status != runstate.StatusRunning {
 		t.Fatalf("refused write changed current execution: %+v %v", row, err)
 	}
 }
@@ -99,9 +100,9 @@ type transitionCapture struct {
 	change store.NodeCommand
 }
 
-func (c *transitionCapture) TransitionNode(_ context.Context, change store.NodeCommand) (store.Applied, error) {
+func (c *transitionCapture) TransitionNode(_ context.Context, change store.NodeCommand) (runstate.Applied, error) {
 	c.change = change
-	return store.Applied{}, nil
+	return runstate.Applied{}, nil
 }
 
 func captureEngineTransition(ctx context.Context, body controllerwire.JobTransitionRequest) (store.NodeCommand, error) {

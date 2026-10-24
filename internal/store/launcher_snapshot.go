@@ -12,8 +12,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -27,12 +27,12 @@ type LauncherAward struct {
 	Claim                  UnitClaim
 	Capability             capability.Capability
 	Run                    RunRow
-	Node                   NodeRow
+	Node                   runstate.NodeRow
 	ParentCapabilityExpiry *time.Time
 }
 
 // ReconcileLauncherAwards isolates each persisted award through renewal, rejection and snapshot validation.
-func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capability.AuthorityRef, hosts []controllerwire.LauncherObservation, reservations, preparing, rejected []capability.LeaseRef, activations []controllerwire.LauncherActivation) ([]LauncherAward, []LauncherPreparation, error) {
+func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capability.AuthorityRef, hosts []capability.LauncherObservation, reservations, preparing, rejected []capability.LeaseRef, activations []capability.LauncherActivation) ([]LauncherAward, []LauncherPreparation, error) {
 	var observed []capability.LeaseRef
 	if hosts != nil {
 		observed = make([]capability.LeaseRef, 0, len(hosts))
@@ -55,7 +55,7 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 		if err := activation.Validate(); err != nil {
 			return nil, nil, err
 		}
-		if !slices.ContainsFunc(hosts, func(o controllerwire.LauncherObservation) bool {
+		if !slices.ContainsFunc(hosts, func(o capability.LauncherObservation) bool {
 			return o.Award == activation.Award && !o.Reservation && !o.Rejected
 		}) {
 			return nil, nil, bindingRefusal()
@@ -349,14 +349,14 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 	if err != nil {
 		return LauncherAward{}, false, err
 	}
-	award := LauncherAward{Capability: c, Run: run, ParentCapabilityExpiry: root.Capability.ExpiresAt, Claim: UnitClaim{Team: Team(c.Team), Kind: c.Unit, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: prefix, Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation), LeaseExpiresAt: *stateTime(row.lease)}}}
+	award := LauncherAward{Capability: c, Run: run, ParentCapabilityExpiry: root.Capability.ExpiresAt, Claim: UnitClaim{Team: Team(c.Team), Kind: c.Unit, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: runstate.ClaimAward{CapabilityPrefix: prefix, Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation), LeaseExpiresAt: *stateTime(row.lease)}}}
 	if c.Unit == capability.UnitPlan {
-		award.Claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}
+		award.Claim.Owner = runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}
 	} else if c.Unit == capability.UnitEval {
-		award.Claim.Owner = OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: runspec.ClaimGeneration(unit.SourceGeneration), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}
+		award.Claim.Owner = runstate.OwnerLeaseRef{Kind: runstate.OwnerEval, EvalFence: runspec.EvalFence{RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: runspec.ClaimGeneration(unit.SourceGeneration), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}
 	}
 	if c.Unit == capability.UnitNode || c.Unit == capability.UnitEval {
-		award.Node, err = readNodeTx(ctx, tx, Team(c.Team), controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
+		award.Node, err = readNodeTx(ctx, tx, Team(c.Team), runspec.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID})
 		if errors.Is(err, ErrNotFound) {
 			err = authorityError(apierr.IntegrityFailure, "launcher award has no job")
 		}

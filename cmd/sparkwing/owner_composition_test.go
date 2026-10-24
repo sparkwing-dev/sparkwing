@@ -11,15 +11,17 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -30,20 +32,20 @@ type cliOwnerStore struct {
 	nodehost.CapacityStore
 	mu       sync.Mutex
 	snapshot store.RunSnapshot
-	actor    store.Actor
+	actor    runstate.Actor
 	renewed  int
-	finished *store.FinishRunRequest
+	finished *runstate.FinishRunRequest
 	failure  error
 }
 
-func (s *cliOwnerStore) RenewOwner(_ context.Context, actor store.Actor) (store.LeaseBeat, error) {
+func (s *cliOwnerStore) RenewOwner(_ context.Context, actor runstate.Actor) (runstate.LeaseBeat, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if actor != s.actor {
-		return store.LeaseBeat{}, errors.New("renewal changed the awarded owner")
+		return runstate.LeaseBeat{}, errors.New("renewal changed the awarded owner")
 	}
 	s.renewed++
-	return store.LeaseBeat{}, nil
+	return runstate.LeaseBeat{}, nil
 }
 
 func (s *cliOwnerStore) ReadSnapshot(_ context.Context, run string) (store.RunSnapshot, error) {
@@ -53,21 +55,21 @@ func (s *cliOwnerStore) ReadSnapshot(_ context.Context, run string) (store.RunSn
 	return s.snapshot, nil
 }
 
-func (s *cliOwnerStore) FinishRunAndUnit(_ context.Context, finish store.FinishRunRequest) (store.Applied, error) {
+func (s *cliOwnerStore) FinishRunAndUnit(_ context.Context, finish runstate.FinishRunRequest) (runstate.Applied, error) {
 	if finish.Transition.Actor != s.actor || finish.Unit != s.actor.Owner || finish.Transition.RunID != runspec.RunID(s.snapshot.Run.ID) {
-		return store.Applied{}, errors.New("completion changed the awarded owner")
+		return runstate.Applied{}, errors.New("completion changed the awarded owner")
 	}
 	s.finished = &finish
 	if s.failure != nil {
-		return store.Applied{}, s.failure
+		return runstate.Applied{}, s.failure
 	}
 	graph, err := s.snapshot.Scheduling()
 	if err != nil {
-		return store.Applied{}, err
+		return runstate.Applied{}, err
 	}
 	decision := store.Decide(graph)
-	s.snapshot.Run.State = store.RunState(decision.Outcome)
-	return store.Applied{Outcome: s.snapshot.Run.State, Reason: decision.Reason}, nil
+	s.snapshot.Run.State = runstate.RunState(decision.Outcome)
+	return runstate.Applied{Outcome: s.snapshot.Run.State, Reason: decision.Reason}, nil
 }
 
 func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
@@ -93,13 +95,10 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 						t.Fatal(err)
 					}
 					award.Accepted = &controllerwire.PlanAccepted{Spec: spec, Plan: plan, PlanHash: spec.PlanHash}
-					actor := store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{
-						Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(award.RunID), Holder: award.Binding.Holder, Generation: runspec.ClaimGeneration(award.Binding.Generation)},
+					actor := runstate.Actor{Kind: runstate.ActorRunHost, Owner: runstate.OwnerLeaseRef{
+						Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(award.RunID), Holder: award.Binding.Holder, Generation: runspec.ClaimGeneration(award.Binding.Generation)},
 					}}
-					state := &cliOwnerStore{actor: actor, snapshot: store.RunSnapshot{Run: store.RunRow{
-						ID: award.RunID, State: store.RunRunning, Request: award.Request, Spec: &spec,
-						Plan: plan, PlanHash: string(spec.PlanHash), Owner: &actor.Owner,
-					}}}
+					state := &cliOwnerStore{actor: actor, snapshot: store.RunSnapshot{Run: store.RunRow{Execution: runstate.Execution{ID: award.RunID, State: runstate.RunRunning, Request: award.Request, Spec: &spec, Plan: plan, PlanHash: string(spec.PlanHash), Owner: &actor.Owner}}}}
 					if failCompletion {
 						state.failure = errors.New("completion was not committed")
 					}
@@ -126,22 +125,22 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 							return controllerwire.RenewalResponse{}, err
 						},
 						finish: func(ctx context.Context, run string, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
-							applied, err := state.FinishRunAndUnit(ctx, store.FinishRunRequest{
-								Unit: state.actor.Owner, Transition: store.RunCompletion{
-									RunID: runspec.RunID(run), Actor: state.actor, Cause: store.RunFinish, Reason: body.Reason,
+							applied, err := state.FinishRunAndUnit(ctx, runstate.FinishRunRequest{
+								Unit: state.actor.Owner, Transition: runstate.RunCompletion{
+									RunID: runspec.RunID(run), Actor: state.actor, Cause: runstate.RunFinish, Reason: body.Reason,
 								},
 							})
 							return controllerwire.Applied{Outcome: string(applied.Outcome), Reason: applied.Reason, StateSeq: applied.StateSeq, Replayed: applied.Replayed}, err
 						},
 					}
-					adapter, err := nodehost.NewRemoteHostStore(transport, state, award.UnitID, func() bool { return false })
+					adapter, err := nodehost.NewRemoteHostStore(transport, &cliTransportState{state: state}, award.UnitID, func() bool { return false })
 					if err != nil {
 						t.Fatal(err)
 					}
 					owner.Renew = adapter.RenewOwner
 					host := cliNativeOwner(t, adapter, owner)
 					bind := func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error) {
-						return hereHostSession{host: host, input: nodehost.RunInput{Owner: store.Actor{Kind: store.ActorController, Owner: store.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "foreign-run"}}}}, close: func() error { closed++; return nil }}, nil
+						return hereHostSession{host: host, input: nodehost.RunInput{Owner: runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{EvalFence: runspec.EvalFence{RunID: "foreign-run"}}}}, close: func() error { closed++; return nil }}, nil
 					}
 					var completion nodehost.RunCompletion
 					if here {
@@ -175,11 +174,11 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 
 type cliNativeBoundaries struct{}
 
-func (cliNativeBoundaries) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
+func (cliNativeBoundaries) Resolve(context.Context, engineid.Pin, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("unexpected engine resolution")
 }
 
-func (cliNativeBoundaries) Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+func (cliNativeBoundaries) Ensure(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("unexpected engine verification")
 }
 
@@ -203,7 +202,7 @@ func cliNativeOwner(t *testing.T, state nodehost.NativeHostStore, owner nodehost
 			t.Error(err)
 		}
 	})
-	router := controller.NewPolicyRouter(controller.RouteAuthorization{})
+	router := routepolicy.New(routepolicy.Authorization{})
 	host, _, _, err := nodehost.NewNativeHost(nodehost.NativeHostConfig{
 		Store: state, Lease: owner.Lease, Owner: nodehost.OwnerOperations{Renew: owner.Renew, Wait: owner.Wait, WaitNode: owner.WaitNode, Local: owner.Local, Acquire: owner.Acquire, Prepare: owner.Prepare, AdoptClaim: owner.AdoptClaim, Expand: owner.Expand, Delegator: owner.Delegator},
 		Source: source.Options{Engines: boundary}, Masks: nodehost.NewMaskRegistry(secrets.NewMasker()), Router: router,
@@ -214,7 +213,7 @@ func cliNativeOwner(t *testing.T, state nodehost.NativeHostStore, owner nodehost
 		Executor: nodehost.ExecutionOperations{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 			return nodehost.ProcessGrant{}, errors.New("unexpected execution delegation")
 		}},
-		ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+		ReadOutput: func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error) {
 			return nil, errors.New("unexpected output read")
 		},
 		Evaluation: nodehost.EvaluationOperations{

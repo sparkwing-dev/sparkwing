@@ -8,8 +8,9 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func readRunnerInventory(t *testing.T, s *Store, team Team) capability.RunnerSnapshot {
@@ -190,7 +191,7 @@ func TestRunnerObservationFailureRollsBackAwardAndRenewal(t *testing.T) {
 				}
 			}
 			tenant := &Tenant{s: s, team: "a"}
-			before, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			before, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil {
 				t.Fatal(err)
 			}

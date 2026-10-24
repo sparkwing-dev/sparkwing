@@ -26,7 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -34,10 +34,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -204,7 +206,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 	}}
 	unit := controllerwire.ClaimedUnit{Unit: kind, UnitID: "unit", Purpose: purpose, Delivery: capability.DeliveryDirect, RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: raw, Request: request, LeaseExpiresAt: now.Add(time.Hour), Runner: nodeproto.RunnerIdentity{Name: "runner", Type: "runner", Labels: []string{}}}
 	if kind == capability.UnitNode || kind == capability.UnitEval {
-		unit.Engine = &engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}
+		unit.Engine = &engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}
 		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: *unit.Engine}}, Plan: json.RawMessage(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
 		unit.Execution = &runspec.JobExecutionSettings{}
 	}
@@ -232,11 +234,11 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		case "GET " + prefix + "/data-authority":
 			response = localhostwire.LocalDataAuthority{Authority: blob.Authority{CapabilityRef: "owner", Principal: "runner", Repo: "gh:42"}}
 		case "GET " + prefix + "/snapshot":
-			snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run", Team: "team", Request: request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}}}
+			snapshot := store.RunSnapshot{Run: store.RunRow{Team: "team", Execution: runstate.Execution{ID: "run", Request: request, Owner: &runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}}}}
 			if unit.Accepted != nil {
 				snapshot.Run.Spec, snapshot.Run.Plan = &unit.Accepted.Spec, unit.Accepted.Plan
 				snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
-				snapshot.Nodes = []store.NodeRow{productionAwardNode(unit, principal)}
+				snapshot.Nodes = []runstate.NodeRow{productionAwardNode(unit, principal)}
 			}
 			response = snapshot
 		case "GET /api/v1/runs/run/local-host/nodes/job":
@@ -250,10 +252,10 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", false, procenv.SubmitAccept{}, nil), unit
 }
 
-func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) store.NodeRow {
-	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Status: store.StatusPending, Generation: runspec.ClaimGeneration(unit.Binding.Generation), ClaimedBy: unit.Binding.Holder, CapabilityPrefix: principal.Capability.Prefix, Spec: json.RawMessage(`{"id":"job"}`), SpecHash: "job-hash", Execution: *unit.Execution}
+func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) runstate.NodeRow {
+	row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Status: runstate.StatusPending, Generation: runspec.ClaimGeneration(unit.Binding.Generation), ClaimedBy: unit.Binding.Holder, CapabilityPrefix: principal.Capability.Prefix, Spec: json.RawMessage(`{"id":"job"}`), SpecHash: "job-hash", Execution: *unit.Execution}
 	if unit.Unit == capability.UnitEval {
-		row.Status, row.Outcome, row.Expansion = store.StatusDone, store.NodeSuccess, store.ExpansionExpected
+		row.Status, row.Outcome, row.Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionExpected
 		row.ClaimedBy, row.CapabilityPrefix = "", ""
 	}
 	return row
@@ -486,12 +488,12 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 					}
 				})
 			}
-			identity := engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}
+			identity := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}
 			unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: identity}}, PlanHash: "plan-hash", Plan: json.RawMessage(`{"jobs":[{"id":"job","concurrency":[{"group":"serial","scope":"run","capacity":1,"cost":1,"on_limit":"queue"}]}]}`)}
 			group := runspec.Concurrency{Group: "serial", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"}
-			row := store.NodeRow{Execution: runspec.JobExecutionSettings{Concurrency: []runspec.Concurrency{group}}, Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash", Spec: json.RawMessage(`{"id":"job","concurrency":[{"group":"serial","scope":"run","capacity":1,"cost":1,"on_limit":"queue"}]}`)}
-			row.OwnerExecution = &store.OwnerExecution{Owner: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, Team: "team", Generation: unit.Binding.Generation, Node: row.Ref, NodeGeneration: int64(row.Generation), SpecHash: row.SpecHash, Allowed: true}
-			snapshot := store.RunSnapshot{Run: store.RunRow{ID: unit.RunID, Team: "team", State: store.RunRunning, Request: unit.Request, Spec: &unit.Accepted.Spec, Plan: unit.Accepted.Plan, PlanHash: string(unit.Accepted.PlanHash), Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)}}}, Nodes: []store.NodeRow{row}}
+			row := runstate.NodeRow{Execution: runspec.JobExecutionSettings{Concurrency: []runspec.Concurrency{group}}, Ref: runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: "job"}, Status: runstate.StatusPending, SpecHash: "job-hash", Spec: json.RawMessage(`{"id":"job","concurrency":[{"group":"serial","scope":"run","capacity":1,"cost":1,"on_limit":"queue"}]}`)}
+			row.OwnerExecution = &runstate.OwnerExecution{Owner: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, Team: "team", Generation: unit.Binding.Generation, Node: row.Ref, NodeGeneration: int64(row.Generation), SpecHash: row.SpecHash, Allowed: true}
+			snapshot := store.RunSnapshot{Run: store.RunRow{Team: "team", Execution: runstate.Execution{ID: unit.RunID, State: runstate.RunRunning, Request: unit.Request, Spec: &unit.Accepted.Spec, Plan: unit.Accepted.Plan, PlanHash: string(unit.Accepted.PlanHash), Owner: &runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(unit.RunID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation)}}}}, Nodes: []runstate.NodeRow{row}}
 			scheduled := make(chan struct{})
 			var once sync.Once
 			var capacity sync.Mutex
@@ -505,14 +507,14 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 				case "POST /api/v1/claims/unit/heartbeat":
 					response = controllerwire.RenewalResponse{ExpiresAt: unit.LeaseExpiresAt}
 				case "POST /api/v1/runs/run/local-host/nodes/job/transition":
-					var change store.NodeCommandPayload
+					var change runstate.NodeCommandPayload
 					if err := json.NewDecoder(r.Body).Decode(&change); err != nil {
 						return nil, err
 					}
-					if change.To != store.NodeReady {
+					if change.To != runstate.NodeReady {
 						return nil, fmt.Errorf("unexpected scheduled transition: %+v", change)
 					}
-					response = store.Applied{}
+					response = runstate.Applied{}
 				case "POST /api/v1/runs/run/local-host/may-start":
 					var request localhostwire.LocalCapacityRequest
 					decoder := json.NewDecoder(r.Body)
@@ -520,13 +522,13 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 					if err := decoder.Decode(&request); err != nil {
 						return nil, err
 					}
-					if request.Binding != (store.CapacityBinding{RunID: unit.RunID, NodeID: "job", Generation: int64(row.Generation)}) {
+					if request.Binding != (runstate.CapacityBinding{RunID: unit.RunID, NodeID: "job", Generation: int64(row.Generation)}) {
 						return nil, fmt.Errorf("capacity changed its job or group: %+v", request)
 					}
 					capacity.Lock()
 					defer capacity.Unlock()
 					held = true
-					response = store.AcquireSlotResponse{Kind: store.AcquireGranted, HolderID: "run/job", LeaseExpiresAt: unit.LeaseExpiresAt}
+					response = runstate.AcquireSlotResponse{Kind: runstate.AcquireGranted, HolderID: "run/job", LeaseExpiresAt: unit.LeaseExpiresAt}
 				case "POST /api/v1/runs/run/jobs/job/reconcile":
 					capacity.Lock()
 					admitted := held

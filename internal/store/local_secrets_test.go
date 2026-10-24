@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func localSecretFixture(t *testing.T, value string) (*Tenant, capability.Authorized) {
@@ -177,11 +178,11 @@ func FuzzLocalSecretsNeverPersistOrEscapeTheirRun(f *testing.F) {
 func TestLocalSecretsReleasedOnlyAfterCommittedRunCompletion(t *testing.T) {
 	tenant, a := localSecretFixture(t, "requester-private-value")
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1 WHERE team='a' AND run_id=?`, a.Binding.RunID)
-	actor := Actor{Kind: ActorRunHost, Authority: a.Principal.Authority, CapabilityPrefix: a.Principal.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(a.Binding.RunID), Holder: a.Binding.Holder, Generation: runspec.ClaimGeneration(a.Binding.Generation)}}}
-	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: runspec.RunID(a.Binding.RunID), To: RunRunning, Cause: RunStart, Actor: actor}); err != nil {
+	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: a.Principal.Authority, CapabilityPrefix: a.Principal.Capability.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(a.Binding.RunID), Holder: a.Binding.Holder, Generation: runspec.ClaimGeneration(a.Binding.Generation)}}}
+	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(a.Binding.RunID), To: runstate.RunRunning, Cause: runstate.RunStart, Actor: actor}); err != nil {
 		t.Fatal(err)
 	}
-	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunCompletion{RunID: runspec.RunID(a.Binding.RunID), Cause: RunFinish, Actor: actor}}
+	finish := runstate.FinishRunRequest{Unit: actor.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(a.Binding.RunID), Cause: runstate.RunFinish, Actor: actor}}
 	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_local_finish BEFORE UPDATE ON triggers BEGIN SELECT RAISE(ABORT,'failed'); END`)
 	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
 		t.Fatal("finish ignored failed owner write")

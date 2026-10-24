@@ -71,7 +71,7 @@ func TestTeamBoundary_ANodeCannotAdoptAnotherTeamsAttemptHistory(t *testing.T) {
 		if code, body := f.do("POST", path+"/plan", "Bearer "+claim.Capability, submission); code != 200 {
 			t.Fatalf("own plan = %d: %s", code, body)
 		}
-		node, err := f.teamB.ReadNode(t.Context(), controllerwire.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "n1"})
+		node, err := f.teamB.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(admitted.RunID), NodeID: "n1"})
 		if err != nil || node.Attempt != 0 || node.Generation != 0 {
 			t.Fatalf("own initial job = %+v: %v", node, err)
 		}

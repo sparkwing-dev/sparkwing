@@ -12,11 +12,12 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -48,11 +49,11 @@ func TestNativeExecutorMemoRecipeHitUsesClaimAndReleasesAdmission(t *testing.T) 
 			}
 			return &outputReader{Reader: bytes.NewReader(body)}, nil
 		}}
-		ref := controllerwire.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(job.ID)}
+		ref := runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: runspec.NodeID(job.ID)}
 		if _, err := f.State.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: f.Actor}); err != nil {
 			t.Fatal(err)
 		}
-		award, err := f.State.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
+		award, err := f.State.ReconcileNode(ctx, store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: runstate.SourceNone})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -79,7 +80,7 @@ func TestNativeExecutorMemoRecipeHitUsesClaimAndReleasesAdmission(t *testing.T) 
 		var started []NodeInput
 		host, err := NewNodeExecutor(ExecutorDependencies{
 			Store: f.State, Masker: testMasker(), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
-			EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return selected, nil
 			},
 			BindStorage: func(ctx context.Context, input NodeInput) (StorageBinding, error) {
@@ -109,11 +110,11 @@ func TestNativeExecutorMemoRecipeHitUsesClaimAndReleasesAdmission(t *testing.T) 
 			t.Fatal(err)
 		}
 		row, err := f.Tenant.ReadNode(ctx, ref)
-		want := store.NodeSuccess
+		want := runstate.NodeSuccess
 		if run == 1 {
-			want = store.NodeMemoized
+			want = runstate.NodeMemoized
 		}
-		if err != nil || row.Status != store.StatusDone || row.Outcome != want || row.Attempt != 1 || row.ClaimedBy != "" || row.OutputRecord == nil || row.ManifestRecord == nil || bodies != 1 {
+		if err != nil || row.Status != runstate.StatusDone || row.Outcome != want || row.Attempt != 1 || row.ClaimedBy != "" || row.OutputRecord == nil || row.ManifestRecord == nil || bodies != 1 {
 			t.Fatalf("run=%d row=%+v bodies=%d error=%v", run, row, bodies, err)
 		}
 		attempt := runspec.AttemptIdentity{Team: request.Team, RunID: f.Input.RunID, NodeID: job.ID, Attempt: int64(row.Attempt), Generation: int64(row.Generation)}

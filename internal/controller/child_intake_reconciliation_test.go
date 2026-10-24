@@ -9,6 +9,8 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -186,7 +188,7 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 		}
 		teststore.SeedTeam(t, e.Store, "foreign")
 		ancestor := fmt.Sprintf("ancestor-%x", seed)
-		if err := teststore.SeedRun(e.Store, t.Context(), "foreign", store.Run{ID: ancestor, Pipeline: private, Status: "running"}); err != nil {
+		if err := teststore.SeedRun(e.Store, t.Context(), "foreign", store.Run{RunSummary: runstate.RunSummary{ID: ancestor, Pipeline: private, Status: "running"}}); err != nil {
 			t.Fatal(err)
 		}
 		cycle := childIntakeBody(t, parent.Request.Request.Pipeline, parent.Request.Request.Git)

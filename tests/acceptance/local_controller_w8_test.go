@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
@@ -12,11 +13,11 @@ func TestLocalControllerW8Components(t *testing.T) {
 	t.Run("kernel_identity_required", func(t *testing.T) {
 		uid := uint32(1000)
 		for _, goos := range []string{"linux", "darwin", "windows"} {
-			owner := wingd.LocalPeerIdentity{GOOS: goos, UID: &uid, SID: "S-1-5-21-1000"}
+			owner := localhostwire.LocalPeerIdentity{GOOS: goos, UID: &uid, SID: "S-1-5-21-1000"}
 			if subject, err := wingd.LocalSubject(owner, owner); err != nil || subject == "" {
 				t.Fatalf("same-account identity refused: %q, %v", subject, err)
 			}
-			if _, err := wingd.LocalSubject(wingd.LocalPeerIdentity{GOOS: goos}, owner); err == nil {
+			if _, err := wingd.LocalSubject(localhostwire.LocalPeerIdentity{GOOS: goos}, owner); err == nil {
 				t.Fatalf("%s accepted missing kernel identity", goos)
 			}
 		}

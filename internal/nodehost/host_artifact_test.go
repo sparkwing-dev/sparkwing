@@ -12,8 +12,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func artifactFixture() (ArtifactRecords, blob.RecordLookup, *artifactBackendFixture) {
@@ -244,15 +244,15 @@ func TestExecutorArtifactStaging(t *testing.T) {
 			if (err == nil) != (mode == "verified") {
 				t.Fatalf("executor returned %v", err)
 			}
-			if len(state.reports) < 2 || state.reports[0].Cause != store.CauseStart {
+			if len(state.reports) < 2 || state.reports[0].Cause != runstate.CauseStart {
 				t.Fatalf("transitions=%+v", state.reports)
 			}
 			last := state.reports[len(state.reports)-1]
-			if last.Cause != store.CauseReport || last.Extra.Result == nil {
+			if last.Cause != runstate.CauseReport || last.Extra.Result == nil {
 				t.Fatalf("missing terminal report: %+v", last)
 			}
 			if mode == "verified" {
-				if len(processes) != 3 || len(backend.gets) != 2 || last.Extra.Result.Outcome != store.NodeSuccess {
+				if len(processes) != 3 || len(backend.gets) != 2 || last.Extra.Result.Outcome != runstate.NodeSuccess {
 					t.Fatalf("attempts=%d reads=%d result=%+v", len(processes), len(backend.gets), last.Extra.Result)
 				}
 				for _, process := range processes {
@@ -260,7 +260,7 @@ func TestExecutorArtifactStaging(t *testing.T) {
 						t.Fatal("executor leaked SDK resources")
 					}
 				}
-			} else if len(processes) != 0 || last.Extra.Result.Outcome != store.NodeFailed {
+			} else if len(processes) != 0 || last.Extra.Result.Outcome != runstate.NodeFailed {
 				t.Fatalf("failed stage started SDK or reported success: starts=%d, result=%+v", len(processes), last.Extra.Result)
 			}
 			if backend.request.Authority.Attempt.Value.Attempt != 1 {

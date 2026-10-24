@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -60,7 +60,7 @@ func checkStoreGeneratedDependencies(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	request := store.ExpansionSubmission{Registration: runspec.SecretRegistration{Version: 1}, Source: source.Ref, SourceGeneration: source.Generation, Actor: store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expander.Capability.Prefix}, CapabilityPrefix: expander.Capability.Prefix}, Body: []byte(`{"jobs":[{"id":"child","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]},{"id":"other","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]}]}`)}
+	request := store.ExpansionSubmission{Registration: runspec.SecretRegistration{Version: 1}, Source: source.Ref, SourceGeneration: source.Generation, Actor: runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expander.Capability.Prefix}, CapabilityPrefix: expander.Capability.Prefix}, Body: []byte(`{"jobs":[{"id":"child","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]},{"id":"other","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]}]}`)}
 	accepted, err := tenant.AcceptExpansion(ctx, request)
 	if err != nil || len(accepted.Nodes) != 2 {
 		return fmt.Errorf("accept expansion: %+v, %v", accepted, err)
@@ -110,7 +110,7 @@ func checkStoreGeneratedMembership(ctx context.Context, s *store.Store, plan sto
 		return err
 	}
 	replayed, err := tenant.AcceptExpansion(ctx, request)
-	if err != nil || !replayed.Replayed || len(replayed.Nodes) != 2 || replayed.Nodes[0].Outcome != store.NodeSuccess || replayed.Nodes[1].Outcome != store.NodeSuccess {
+	if err != nil || !replayed.Replayed || len(replayed.Nodes) != 2 || replayed.Nodes[0].Outcome != runstate.NodeSuccess || replayed.Nodes[1].Outcome != runstate.NodeSuccess {
 		return fmt.Errorf("replay reset generated state: %+v, %v", replayed, err)
 	}
 	snapshot, err = tenant.ReadSnapshot(ctx, plan.RunID)
@@ -139,25 +139,25 @@ func checkStoreGeneratedMembership(ctx context.Context, s *store.Store, plan sto
 	return nil
 }
 
-func finishGeneratedDependencyJob(ctx context.Context, s *store.Store, tenant *store.Tenant, plan store.PlanAcceptance, id string) (store.NodeRow, error) {
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(id)}
+func finishGeneratedDependencyJob(ctx context.Context, s *store.Store, tenant *store.Tenant, plan store.PlanAcceptance, id string) (runstate.NodeRow, error) {
+	ref := runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: runspec.NodeID(id)}
 	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: plan.Actor}); err != nil {
-		return store.NodeRow{}, err
+		return runstate.NodeRow{}, err
 	}
 	claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: plan.Actor.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}})
 	if err != nil {
-		return store.NodeRow{}, err
+		return runstate.NodeRow{}, err
 	}
-	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
-	if admitted, err := tenant.MayStart(ctx, store.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(holder.Generation)}, holder); err != nil || admitted.Kind != store.AcquireGranted {
-		return store.NodeRow{}, fmt.Errorf("execution admission: %+v, %v", admitted, err)
+	holder := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+	if admitted, err := tenant.MayStart(ctx, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: string(ref.NodeID), Generation: int64(holder.Generation)}, holder); err != nil || admitted.Kind != runstate.AcquireGranted {
+		return runstate.NodeRow{}, fmt.Errorf("execution admission: %+v, %v", admitted, err)
 	}
 	start, err := tenant.TransitionNode(ctx, store.StartNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil {
-		return store.NodeRow{}, err
+		return runstate.NodeRow{}, err
 	}
-	if _, err := tenant.TransitionNode(ctx, store.ReportNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(int64(start.Attempt)), Outcome: store.NodeSuccess}); err != nil {
-		return store.NodeRow{}, err
+	if _, err := tenant.TransitionNode(ctx, store.ReportNode{Ref: ref, Actor: holder, SourceAttempt: acceptanceAttempt(int64(start.Attempt)), Outcome: runstate.NodeSuccess}); err != nil {
+		return runstate.NodeRow{}, err
 	}
 	return tenant.ReadNode(ctx, ref)
 }

@@ -4,7 +4,7 @@ This continuation starts at e0d0348b5 with the integration merge in progress.
 
 ## Implemented
 
-`runners.StoreHosting` connects the managed claim loop to W3's real
+`localcontroller.StoreHosting` connects the managed claim loop to W3's real
 `NewNativeHost` and `NewNodeInput` over the controller's existing store handle.
 C2 authenticates and authorizes the award through its shared heartbeat policy.
 The host selects the authenticated tenant, checks the persisted request and

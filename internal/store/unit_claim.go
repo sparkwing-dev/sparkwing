@@ -10,8 +10,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -248,10 +248,10 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if until, err = leaseBoundTx(ctx, tx, issued.Capability.Prefix, now, until, funded); err != nil {
 		return UnitClaim{}, err
 	}
-	claim := UnitClaim{Team: team, Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: ClaimAward{CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation), LeaseExpiresAt: until}, Bearer: []byte(issued.Raw)}
+	claim := UnitClaim{Team: team, Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: runstate.ClaimAward{CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation), LeaseExpiresAt: until}, Bearer: []byte(issued.Raw)}
 	if unit.Kind == capability.UnitNode {
-		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: unit.RunID, NodeID: unit.NodeID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
-		_, err = transitionNodeTx(ctx, tx, team, nodeTransition{Ref: controllerwire.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, To: NodeClaimed, Cause: CauseAward, Actor: actor, Extra: transitionExtra{Claim: &claim.Award}})
+		actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: unit.RunID, NodeID: unit.NodeID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
+		_, err = transitionNodeTx(ctx, tx, team, nodeTransition{Ref: runspec.NodeRef{RunID: unit.RunID, NodeID: unit.NodeID}, To: runstate.NodeClaimed, Cause: runstate.CauseAward, Actor: actor, Extra: transitionExtra{Claim: &claim.Award}})
 		if err == nil {
 			_, err = tx.ExecContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement, team, unit.RunID, unit.NodeID)
 		}
@@ -276,10 +276,10 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		return UnitClaim{}, holderRefusal()
 	}
 	if unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan {
-		claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
+		claim.Owner = runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: unit.RunID, Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
 	}
 	if unit.Kind == capability.UnitEval {
-		claim.Owner = OwnerLeaseRef{Kind: OwnerEval, EvalFence: runspec.EvalFence{RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: runspec.ClaimGeneration(unit.SourceGeneration), Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
+		claim.Owner = runstate.OwnerLeaseRef{Kind: runstate.OwnerEval, EvalFence: runspec.EvalFence{RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: runspec.ClaimGeneration(unit.SourceGeneration), Holder: row.holder, Generation: runspec.ClaimGeneration(row.generation)}}
 	}
 	if p.Capability.Purpose == capability.PurposeHere && unit.Kind == capability.UnitTrigger {
 		observation := demand

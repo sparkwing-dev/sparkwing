@@ -6,13 +6,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -40,20 +40,20 @@ type evalUnitStore struct {
 
 func (s *evalUnitStore) AcceptExpansion(_ context.Context, submission store.ExpansionSubmission) (store.AcceptedExpansion, error) {
 	s.submitted = submission
-	return store.AcceptedExpansion{Source: submission.Source, SourceGeneration: submission.SourceGeneration, State: store.ExpansionAccepted}, nil
+	return store.AcceptedExpansion{Source: submission.Source, SourceGeneration: submission.SourceGeneration, State: runstate.ExpansionAccepted}, nil
 }
 
 func TestEvalUnitUsesIndependentLeaseAndSourceGeneration(t *testing.T) {
 	state, host, input := newOwnerFixture(t, true)
-	row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "source"}, Generation: 0, Spec: json.RawMessage(`{"id":"source"}`), SpecHash: "source-hash", Status: store.StatusDone, Outcome: store.NodeMemoized, Expansion: store.ExpansionExpected}
-	state.snapshot.Nodes = []store.NodeRow{row}
+	row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "source"}, Generation: 0, Spec: json.RawMessage(`{"id":"source"}`), SpecHash: "source-hash", Status: runstate.StatusDone, Outcome: runstate.NodeMemoized, Expansion: runstate.ExpansionExpected}
+	state.snapshot.Nodes = []runstate.NodeRow{row}
 	s := &evalUnitStore{ownerFixture: state}
 	host.Store = s
-	input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "eval"}, CapabilityPrefix: "eval", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "source-holder", Generation: 0}}
+	input.Owner = runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "eval"}, CapabilityPrefix: "eval", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "source-holder", Generation: 0}}
 	fence := capability.LeaseRef{Kind: capability.UnitEval, ID: "evaluation", Holder: "eval-holder", Generation: 7}
 	var spec struct {
 		Resolved struct {
-			Engine engine.Identity `json:"engine"`
+			Engine engineid.Identity `json:"engine"`
 		} `json:"resolved"`
 	}
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
@@ -63,7 +63,7 @@ func TestEvalUnitUsesIndependentLeaseAndSourceGeneration(t *testing.T) {
 		state.record("acquire")
 		return &source.Entry{Engine: engine.Resolved{Identity: spec.Resolved.Engine}}, context.Cause(ctx)
 	}
-	host.Expand = func(_ context.Context, evaluation EvaluationInput, observed store.NodeRow, _ StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+	host.Expand = func(_ context.Context, evaluation EvaluationInput, observed runstate.NodeRow, _ StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 		if evaluation.Generation != 0 || runspec.NodeID(evaluation.NodeID) != row.Ref.NodeID || evaluation.SpecHash != row.SpecHash || observed.Generation != 0 {
 			t.Fatal("eval replaced the source identity with its lease or a work attempt")
 		}
@@ -92,25 +92,25 @@ func TestEvalUnitApprovalPredicateHasNoJobCapacityOrCompute(t *testing.T) {
 			state, host, input := newOwnerFixture(t, true)
 			job := nodeproto.JobSpec{ID: "approval", Approval: &nodeproto.ApprovalSpec{Message: "ship?"}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"guard"}}}
 			spec, _ := json.Marshal(job)
-			row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "approval"}, Spec: spec, SpecHash: "approval-hash", Status: store.StatusPending}
-			state.snapshot.Nodes = []store.NodeRow{row}
-			input.Owner = store.Actor{Kind: store.ActorRunHost, CapabilityPrefix: "eval", Owner: store.OwnerLeaseRef{Kind: store.OwnerEval, EvalFence: runspec.EvalFence{RunID: runspec.RunID(input.RunID), SourceNodeID: "approval", SourceGeneration: 0, Holder: "evaluator", Generation: 7}}}
+			row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "approval"}, Spec: spec, SpecHash: "approval-hash", Status: runstate.StatusPending}
+			state.snapshot.Nodes = []runstate.NodeRow{row}
+			input.Owner = runstate.Actor{Kind: runstate.ActorRunHost, CapabilityPrefix: "eval", Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerEval, EvalFence: runspec.EvalFence{RunID: runspec.RunID(input.RunID), SourceNodeID: "approval", SourceGeneration: 0, Holder: "evaluator", Generation: 7}}}
 			fence := capability.LeaseRef{Kind: capability.UnitEval, ID: "evaluation", Holder: "evaluator", Generation: 7}
-			host.executionAdmission = ComposeStartGate(&capacityProbe{admit: func(context.Context) (store.AcquireSlotResponse, error) {
+			host.executionAdmission = ComposeStartGate(&capacityProbe{admit: func(context.Context) (runstate.AcquireSlotResponse, error) {
 				t.Fatal("approval acquired job capacity")
-				return store.AcquireSlotResponse{}, nil
+				return runstate.AcquireSlotResponse{}, nil
 			}}, &LocalAdmission{Daemon: admissionAcquireFunc(func(context.Context, wingwire.AdmissionRequest, func(wingwire.Queued)) (Lease, error) {
 				t.Fatal("approval acquired compute")
 				return nil, nil
 			})}, true)
-			host.SkipPolicy = func(_ context.Context, in EvaluationInput, observed store.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
+			host.SkipPolicy = func(_ context.Context, in EvaluationInput, observed runstate.NodeRow, _ StorageBinding) (ownerLayerResult, error) {
 				if in.NodeID != "approval" || in.Generation != 0 || observed.Ref != row.Ref {
 					t.Fatal("approval changed source identity")
 				}
 				if !skip {
 					return ownerLayerResult{}, nil
 				}
-				return ownerLayerResult{Transition: store.OwnerPolicyNode{Outcome: store.NodeSkipped, OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyApprovalBypass, Generation: 0}, Result: &store.NodeResult{Outcome: store.NodeSkipped, Reason: "skip_if"}}}, nil
+				return ownerLayerResult{Transition: store.OwnerPolicyNode{Outcome: runstate.NodeSkipped, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.PolicyApprovalBypass, Generation: 0}, Result: &runstate.NodeResult{Outcome: runstate.NodeSkipped, Reason: "skip_if"}}}, nil
 			}
 			if err := host.Evaluate(t.Context(), input, "approval", 0, fence); err != nil {
 				t.Fatal(err)
@@ -118,7 +118,7 @@ func TestEvalUnitApprovalPredicateHasNoJobCapacityOrCompute(t *testing.T) {
 			state.mu.Lock()
 			defer state.mu.Unlock()
 			after := state.snapshot.Nodes[0]
-			if skip && after.Outcome != store.NodeSkipped || !skip && after.Status != store.StatusApprovalPending {
+			if skip && after.Outcome != runstate.NodeSkipped || !skip && after.Status != runstate.StatusApprovalPending {
 				t.Fatalf("approval result=%+v", after)
 			}
 		})

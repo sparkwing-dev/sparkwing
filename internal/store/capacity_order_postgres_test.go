@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -49,7 +50,7 @@ func TestPostgresControllerAdmissionDefersContendedGroupWithoutWaitingOnRunLock(
 				if _, err := f.tenant.AcceptPlan(ctx, plan); err != nil {
 					t.Fatal(err)
 				}
-				if granted, err := f.tenant.MayStart(ctx, store.CapacityBinding{RunID: competitor, Generation: int64(owner.Owner.Generation)}, owner); err != nil || granted.Kind != store.AcquireGranted {
+				if granted, err := f.tenant.MayStart(ctx, runstate.CapacityBinding{RunID: competitor, Generation: int64(owner.Owner.Generation)}, owner); err != nil || granted.Kind != runstate.AcquireGranted {
 					t.Fatalf("competitor plan admission: %+v, %v", granted, err)
 				}
 

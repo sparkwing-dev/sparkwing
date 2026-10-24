@@ -11,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -119,7 +118,7 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 					request.Target, request.Kinds = nil, []capability.UnitKind{capability.UnitNode}
 				}
 				tenant := &Tenant{s: s, team: "a"}
-				before, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+				before, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -130,7 +129,7 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 					if !errors.Is(err, ErrNotFound) && (!errors.As(err, &denied) || denied.Code != apierr.LockHeld) {
 						t.Fatalf("live preferred runner did not hold work: %+v, %v", claim, err)
 					}
-					after, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+					after, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 					if err != nil || !reflect.DeepEqual(before, after) {
 						t.Fatalf("held poll changed job: %v", err)
 					}
@@ -213,7 +212,7 @@ func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *tes
 				request.Target, request.Kinds = nil, []capability.UnitKind{capability.UnitNode}
 			}
 			tenant := &Tenant{s: s, team: "a"}
-			before, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			before, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -223,7 +222,7 @@ func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *tes
 				if !errors.Is(err, ErrNotFound) && (!errors.As(err, &refused) || refused.Code != apierr.LockHeld) {
 					t.Fatalf("order=%v rank=%d elapsed=%s: %+v %v", order, rank, elapsed, claim, err)
 				}
-				after, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+				after, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 				if err != nil || !reflect.DeepEqual(before, after) {
 					t.Fatalf("held poll changed node: %v", err)
 				}

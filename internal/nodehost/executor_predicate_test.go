@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestNodeExecutorThrowingStepPredicateCannotRunBody(t *testing.T) {
@@ -49,7 +49,7 @@ func TestNodeExecutorThrowingStepPredicateCannotRunBody(t *testing.T) {
 		t.Fatalf("throwing predicate ran a body or became success: bodies=%d error=%v", bodies, err)
 	}
 	final := st.changes[len(st.changes)-1]
-	if final.Cause != store.CauseReport || final.To != store.NodeFailed {
+	if final.Cause != runstate.CauseReport || final.To != runstate.NodeFailed {
 		t.Fatalf("predicate failure did not fail its job: %+v", final)
 	}
 }

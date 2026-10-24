@@ -1,6 +1,7 @@
 // Command guardcheck holds the architecture guards to their allow-lists in
 // .guards/. It runs the depguard and forbidigo rules in .golangci-guards.yml
-// over the whole tree and counts the internal/ unexport candidates, then fails
+// over the whole tree, checks the SDK production dependency closure and counts
+// the internal/ unexport candidates, then fails
 // when a finding is missing from its allow-list, when an entry no longer
 // matches a finding, or when an allow-list grew against the base ref.
 package main
@@ -31,7 +32,7 @@ const (
 )
 
 func main() {
-	fast := flag.Bool("fast", false, "judge only the depguard rules, which need no type information (the pre-push tier)")
+	fast := flag.Bool("fast", false, "judge depguard rules and SDK production dependencies without type information (the pre-push tier)")
 	unexport := flag.Bool("unexport", true, "count internal/ unexport candidates (loads every package with types; about a minute)")
 	base := flag.String("base", envOr("SPARKWING_GUARD_BASE", "origin/main"), "git ref whose allow-lists bound growth; empty skips the growth check")
 	flag.Usage = func() {
@@ -79,7 +80,10 @@ func run(repo string, fast, unexport bool, base string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var problems []string
+	problems, err := sdkDependencyFindings(repo)
+	if err != nil {
+		return nil, err
+	}
 	for _, name := range unionKeys(findings, allows) {
 		lint := strings.HasPrefix(name, "depguard-") || (!fast && strings.HasPrefix(name, "forbidigo-"))
 		if !lint {

@@ -14,15 +14,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
@@ -41,7 +39,7 @@ type NativeServices struct {
 type NativeConfig struct {
 	SubmittedEnv   map[string][]byte
 	SubmitAccept   procenv.SubmitAccept
-	Local          func(store.NodeRow) bool
+	Local          func(runstate.NodeRow) bool
 	Home           string
 	Admission      StartGate
 	Store          NativeHostStore
@@ -49,13 +47,13 @@ type NativeConfig struct {
 	Bindings       capability.BindingChecker
 	Principal      capability.Principal
 	Refresh        func(context.Context) (capability.Principal, error)
-	Renew          func(context.Context, string, bool) (store.LeaseBeat, error)
+	Renew          func(context.Context, string, bool) (runstate.LeaseBeat, error)
 	Source         source.Options
 	Services       func(context.Context, capability.Principal, nodeproto.JobSpec) (ProcessServices, error)
 	Storage        func(context.Context, capability.Principal) (StorageBinding, error)
 	Logs           func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
 	Evaluate       func(context.Context, EvaluationInput) (ProcessGrant, error)
-	ExpansionActor func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
+	ExpansionActor func(context.Context, RunInput, runstate.NodeRow) (runstate.Actor, error)
 }
 
 // NewNativeServices constructs the shared host services without opening a state store.
@@ -146,7 +144,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	}()
 	claims := &nodeClaims{auth: capability.NewAuthenticator(cfg.Parent), bindings: cfg.Bindings, masker: masker, current: current, readNode: cfg.Store.ReadNode, services: cfg.Services}
 	masks := NewMaskRegistry(masker)
-	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
+	router := routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 	listener, err := listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return NativeServices{}, err
@@ -185,11 +183,11 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		upload.Key.Kind = blob.KindManifest
 		return upload, err
 	}, Producer: func(ctx context.Context, input NodeInput, producer string) (blob.RecordKey, error) {
-		row, err := cfg.Store.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(producer)})
+		row, err := cfg.Store.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(producer)})
 		if err != nil {
 			return blob.RecordKey{}, err
 		}
-		if row.Status != store.StatusDone || row.ManifestRecord == nil {
+		if row.Status != runstate.StatusDone || row.ManifestRecord == nil {
 			return blob.RecordKey{}, blob.ErrNotFound
 		}
 		return *row.ManifestRecord, nil

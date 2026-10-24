@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -26,11 +28,11 @@ func (s *Server) accountReader() (AccountReader, error) {
 	if s.accountReads != nil {
 		return s.accountReads, nil
 	}
-	return nil, missingEndpointPolicy()
+	return nil, routepolicy.MissingEndpointPolicy()
 }
 
-func (s *Server) accountEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) accountEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/me", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleMe},
 		{Method: "POST", Pattern: "/api/v1/me/active-team", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSetActiveTeam},
 		{Method: "GET", Pattern: "/api/v1/me/identities", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleIdentities},

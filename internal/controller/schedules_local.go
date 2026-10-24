@@ -10,9 +10,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 // LocalScheduleProver compiles selected checkout code with captured host inputs.
@@ -34,7 +34,7 @@ func (s *Server) WithLocalSchedules(service *crons.Service, prove LocalScheduleP
 func (s *Server) ScheduleLauncher() crons.Launcher { return cronLauncher{server: s} }
 
 func (s *Server) localScheduleService(r *http.Request, a capability.Authorized) (*crons.Service, error) {
-	_, peer := wingd.LocalPeer(r.Context())
+	_, peer := localhostwire.LocalPeer(r.Context())
 	if !peer || a.Principal.Capability.Subject.Kind != capability.SubjectLocal || a.Target.Team != string(store.DefaultTeam) {
 		return nil, &apierr.Error{Code: apierr.Forbidden, Message: "schedule operation requires the verified local peer"}
 	}

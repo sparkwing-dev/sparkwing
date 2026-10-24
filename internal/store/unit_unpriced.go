@@ -5,8 +5,8 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -23,14 +23,14 @@ func (o *Operator) failUnpricedClaim(ctx context.Context, demand UnitDemand, ref
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}}); err != nil {
 			return err
 		}
-		change := nodeTransition{Ref: controllerwire.NodeRef{RunID: runspec.RunID(refusal.RunID), NodeID: runspec.NodeID(refusal.NodeID)}, To: NodeFailed, Cause: CauseUnpriced, Actor: Actor{Kind: ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}, Extra: transitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: FailureUnpricedCPUClass, MaskedError: refusal.Error()}}}
+		change := nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(refusal.RunID), NodeID: runspec.NodeID(refusal.NodeID)}, To: runstate.NodeFailed, Cause: runstate.CauseUnpriced, Actor: runstate.Actor{Kind: runstate.ActorClaimant, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, CapabilityPrefix: demand.CapabilityPrefix}, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: FailureUnpricedCPUClass, MaskedError: refusal.Error()}}}
 
 		_, err := transitionNodeTx(ctx, tx, team, change)
 		return err
 	})
 }
 
-func checkUnpricedClaimTx(ctx context.Context, tx *storeTx, row NodeRow, change nodeTransition) error {
+func checkUnpricedClaimTx(ctx context.Context, tx *storeTx, row runstate.NodeRow, change nodeTransition) error {
 	if tx.unpricedDemand == nil || tx.unpricedDemand.CapabilityPrefix != change.Actor.CapabilityPrefix {
 		return holderRefusal()
 	}

@@ -25,7 +25,7 @@ func (s *Server) handleTeamSettings(w http.ResponseWriter, r *http.Request, a ca
 		if !s.deployment.Hosted() && request.ClaimRanking != nil && slices.Contains(*request.ClaimRanking, store.TierCloud) {
 			return invalidEngineBody("cloud is not a runner tier on a self-hosted controller, which has no Cloud launcher")
 		}
-		if err := tenant.SetAuthorizedTeamSettings(r.Context(), a, request); err != nil {
+		if err := tenant.SetAuthorizedTeamSettings(r.Context(), a, store.TeamSettingsUpdate(request)); err != nil {
 			return accountMutationError(err)
 		}
 	}
@@ -36,6 +36,6 @@ func (s *Server) handleTeamSettings(w http.ResponseWriter, r *http.Request, a ca
 	if !s.deployment.Hosted() {
 		settings.ClaimRanking = slices.DeleteFunc(settings.ClaimRanking, func(tier string) bool { return tier == store.TierCloud })
 	}
-	writeJSON(w, http.StatusOK, settings)
+	writeJSON(w, http.StatusOK, controllerwire.TeamSettings(settings))
 	return nil
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
@@ -185,12 +186,12 @@ func TestCacheWarmFlushesDiagnosticsBeforeSuccess(t *testing.T) {
 }
 
 func TestCacheWarmUsesSelectedEngineAndCapturedEnvironment(t *testing.T) {
-	for _, sdk := range []engine.SDKKind{engine.GoSDK, engine.TypeScriptSDK} {
+	for _, sdk := range []engineid.SDKKind{engineid.GoSDK, engineid.TypeScriptSDK} {
 		t.Run(string(sdk), func(t *testing.T) {
 			dir := t.TempDir()
 			manifest := "go.mod"
 			body := "module example.com/fixture\ngo 1.26\n"
-			if sdk == engine.TypeScriptSDK {
+			if sdk == engineid.TypeScriptSDK {
 				manifest, body = "package.json", `{"main":"pipeline.ts","dependencies":{"@sparkwing/sdk":"1.0.0"}}`
 			}
 			if err := os.WriteFile(filepath.Join(dir, manifest), []byte(body), 0o600); err != nil {
@@ -199,7 +200,7 @@ func TestCacheWarmUsesSelectedEngineAndCapturedEnvironment(t *testing.T) {
 			selected := engine.Resolved{Executable: filepath.Join(t.TempDir(), "engine")}
 			environment := []string{"CAPTURED=value"}
 			called := false
-			result, err := warmLocalPipelineWith(t.Context(), dir, environment, io.Discard, func(ctx context.Context, got string, language engine.SDKKind) (engine.Resolved, error) {
+			result, err := warmLocalPipelineWith(t.Context(), dir, environment, io.Discard, func(ctx context.Context, got string, language engineid.SDKKind) (engine.Resolved, error) {
 				if got != dir || language != sdk || ctx.Err() != nil {
 					t.Fatal("wrong engine selection inputs")
 				}
@@ -214,10 +215,10 @@ func TestCacheWarmUsesSelectedEngineAndCapturedEnvironment(t *testing.T) {
 			if err != nil || !called || result.Language != string(sdk) || result.Status != "prepared" {
 				t.Fatalf("result=%+v called=%v err=%v", result, called, err)
 			}
-			if sdk == engine.GoSDK && result.Path != filepath.Join(dir, "cache", "pipeline") {
+			if sdk == engineid.GoSDK && result.Path != filepath.Join(dir, "cache", "pipeline") {
 				t.Fatalf("warm reported temporary executable: %q", result.Path)
 			}
-			if sdk == engine.TypeScriptSDK && result.Path != filepath.Join(dir, "node_modules") {
+			if sdk == engineid.TypeScriptSDK && result.Path != filepath.Join(dir, "node_modules") {
 				t.Fatalf("TypeScript path=%q", result.Path)
 			}
 		})

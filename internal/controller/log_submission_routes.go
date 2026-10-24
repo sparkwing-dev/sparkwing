@@ -12,8 +12,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -24,8 +26,8 @@ type logSubmissionObjects interface {
 	LogClassReady(context.Context, string) error
 }
 
-func (s *Server) logSubmissionEndpoints(e *EngineController) []Endpoint {
-	return []Endpoint{
+func (s *Server) logSubmissionEndpoints(e *EngineController) []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/logs", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleLiveLogSubmission},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/log-segments", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleLogSigning},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/log-manifest", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleLogCommit},
@@ -76,7 +78,7 @@ func (s *Server) logSubmission(r *http.Request, a capability.Authorized, propose
 	return tenant, subject, err
 }
 
-func logActor(a capability.Authorized, subject blob.LogSubject) store.Actor {
+func logActor(a capability.Authorized, subject blob.LogSubject) runstate.Actor {
 	actor := engineActor(a)
 	if subject.Unit != nil && subject.Unit.Kind == blob.LogEval {
 		actor.Generation = runspec.ClaimGeneration(subject.Unit.Generation)
@@ -117,15 +119,15 @@ func (s *Server) handleLogSigning(w http.ResponseWriter, r *http.Request, a capa
 }
 
 type logCommitRequest struct {
-	Subject          blob.LogSubject `json:"subject"`
-	Segments         []store.Segment `json:"segments"`
-	Final            bool            `json:"final"`
-	IncompleteReason string          `json:"incomplete_reason,omitempty"`
+	Subject          blob.LogSubject    `json:"subject"`
+	Segments         []runstate.Segment `json:"segments"`
+	Final            bool               `json:"final"`
+	IncompleteReason string             `json:"incomplete_reason,omitempty"`
 }
 
-type proposedLogSegments struct{ view store.LogSegments }
+type proposedLogSegments struct{ view runstate.LogSegments }
 
-func (p proposedLogSegments) ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error) {
+func (p proposedLogSegments) ReadLogSegments(context.Context, runstate.Actor, blob.LogReadRequest) (runstate.LogSegments, error) {
 	return p.view, nil
 }
 
@@ -158,7 +160,7 @@ func (s *Server) handleLogCommit(w http.ResponseWriter, r *http.Request, a capab
 		if err != nil {
 			return err
 		}
-		reader := logseg.CommittedReader{Objects: objects, Records: proposedLogSegments{store.LogSegments{Subject: subject, Segments: body.Segments}}}
+		reader := logseg.CommittedReader{Objects: objects, Records: proposedLogSegments{runstate.LogSegments{Subject: subject, Segments: body.Segments}}}
 		offset := body.Segments[0].Offset
 		if _, err := reader.Read(r.Context(), actor, blob.LogReadRequest{Subject: subject, Offset: offset}, io.Discard); err != nil {
 			return err

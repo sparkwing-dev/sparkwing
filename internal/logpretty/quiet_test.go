@@ -6,27 +6,25 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func quietRun(t *testing.T, status string, nodes []any, noise ...sparkwing.LogRecord) string {
+func quietRun(t *testing.T, status string, nodes []any, noise ...Record) string {
 	t.Helper()
 	var buf bytes.Buffer
 	r := NewQuietRendererTo(&buf, false)
-	r.Emit(sparkwing.LogRecord{TS: time.Now(), Event: "run_start", Attrs: map[string]any{
+	r.emit(Record{TS: time.Now(), Event: "run_start", Attrs: map[string]any{
 		"pipeline": "pre-push",
 		"run_id":   "run-abc",
 	}})
 	for _, n := range noise {
-		r.Emit(n)
+		r.emit(n)
 	}
-	r.Emit(sparkwing.LogRecord{TS: time.Now(), Event: "run_summary", Attrs: map[string]any{
+	r.emit(Record{TS: time.Now(), Event: "run_summary", Attrs: map[string]any{
 		"status":      status,
 		"duration_ms": int64(12300),
 		"nodes":       nodes,
 	}})
-	r.Emit(sparkwing.LogRecord{TS: time.Now(), Event: "run_finish", Attrs: map[string]any{
+	r.emit(Record{TS: time.Now(), Event: "run_finish", Attrs: map[string]any{
 		"run_id": "run-abc",
 		"status": status,
 	}})
@@ -38,11 +36,11 @@ func TestQuiet_SuccessShowsProgressAndStatusOnly(t *testing.T) {
 	out := quietRun(t, "success", []any{
 		map[string]any{"id": "pre-push", "outcome": "success", "duration_ms": int64(12300)},
 	},
-		sparkwing.LogRecord{Event: "run_plan", Attrs: map[string]any{"plan_hash": "sha256:deadbeef"}},
-		sparkwing.LogRecord{Event: "node_start", JobID: "pre-push"},
-		sparkwing.LogRecord{Event: "step_start", JobID: "pre-push", Msg: "golangci-lint"},
-		sparkwing.LogRecord{Event: "exec_line", JobID: "pre-push", Msg: "linting 412 files"},
-		sparkwing.LogRecord{Event: "step_end", JobID: "pre-push", Msg: "golangci-lint", Attrs: map[string]any{"outcome": "success"}},
+		Record{Event: "run_plan", Attrs: map[string]any{"plan_hash": "sha256:deadbeef"}},
+		Record{Event: "node_start", JobID: "pre-push"},
+		Record{Event: "step_start", JobID: "pre-push", Msg: "golangci-lint"},
+		Record{Event: "exec_line", JobID: "pre-push", Msg: "linting 412 files"},
+		Record{Event: "step_end", JobID: "pre-push", Msg: "golangci-lint", Attrs: map[string]any{"outcome": "success"}},
 	)
 
 	if !strings.Contains(out, "pre-push running") {

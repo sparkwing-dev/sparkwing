@@ -12,11 +12,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -61,7 +61,7 @@ func acceptCapacityDocumentForRun(t *testing.T, server *serverFixture, tenant *s
 		t.Fatal(err)
 	}
 	actor := engineActor(capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: runID}})
-	_, err = tenant.AcceptPlan(t.Context(), store.PlanAcceptance{RunID: runID, Actor: actor, Seal: runspec.SealInput{Request: run.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Engine: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}, Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}})
+	_, err = tenant.AcceptPlan(t.Context(), store.PlanAcceptance{RunID: runID, Actor: actor, Seal: runspec.SealInput{Request: run.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Engine: engineid.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}, Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func acceptCapacityDocumentForRun(t *testing.T, server *serverFixture, tenant *s
 
 func seedOtherCapacityHolder(t *testing.T, server *serverFixture, key string) {
 	t.Helper()
-	if err := teststore.SeedRun(server.store, t.Context(), "a", store.Run{ID: "other", Pipeline: "ci", Status: "running"}); err != nil {
+	if err := teststore.SeedRun(server.store, t.Context(), "a", store.Run{RunSummary: runstate.RunSummary{ID: "other", Pipeline: "ci", Status: "running"}}); err != nil {
 		t.Fatal(err)
 	}
 	engineSQL(t, server.store, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE team='a' AND id='other'`)
@@ -99,7 +99,7 @@ func assertOtherCapacityUnchanged(t *testing.T, tenant *store.Tenant, key string
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("changed other run's capacity: before=%+v after=%+v error=%v", before, after, err)
 	}
-	other, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "other", NodeID: "build"})
+	other, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "other", NodeID: "build"})
 	if err != nil || other.CancelRequestedAt != nil {
 		t.Fatalf("cancelled other run: %+v %v", other, err)
 	}
@@ -115,15 +115,15 @@ func TestPrivateStartRequiresAwardAndUsesAcceptedGroupSet(t *testing.T) {
 		},
 	}}})
 	ownerActor := engineActor(capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}})
-	ref := controllerwire.NodeRef{RunID: "run", NodeID: "build"}
+	ref := runspec.NodeRef{RunID: "run", NodeID: "build"}
 	if _, err := tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: ownerActor}); err != nil {
 		t.Fatal(err)
 	}
-	award, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: ownerActor, Policy: store.SourceNone})
-	if err != nil || award.Kind != store.Execute {
+	award, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: ownerActor, Policy: runstate.SourceNone})
+	if err != nil || award.Kind != runstate.Execute {
 		t.Fatalf("award=%+v error=%v", award, err)
 	}
-	binding := store.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(award.Node.Generation)}
+	binding := runstate.CapacityBinding{RunID: "run", NodeID: "build", Generation: int64(award.Node.Generation)}
 	if code := privateCapacityRequest(t, server, ownerBearer, localhostwire.LocalCapacityRequest{Binding: binding}); code != http.StatusForbidden && code != http.StatusConflict {
 		t.Fatalf("owner obtained job permit: HTTP %d", code)
 	}
@@ -135,10 +135,10 @@ func TestPrivateStartRequiresAwardAndUsesAcceptedGroupSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer nodeClient.Close()
-	actor := store.Actor{Kind: store.ActorHolder, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "build", Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}, CapabilityPrefix: award.Node.CapabilityPrefix}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "build", Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}, CapabilityPrefix: award.Node.CapabilityPrefix}
 	for _, host := range []*client.LocalHostClient{ownerClient, nodeClient} {
 		response, err := host.MayStart(t.Context(), binding, actor)
-		if err != nil || response.Kind != store.AcquireGranted {
+		if err != nil || response.Kind != runstate.AcquireGranted {
 			t.Fatalf("start=%+v error=%v", response, err)
 		}
 	}
@@ -154,7 +154,7 @@ func TestPrivateStartRequiresAwardAndUsesAcceptedGroupSet(t *testing.T) {
 			t.Fatalf("caller selected %s: HTTP %d", change, code)
 		}
 	}
-	for _, changed := range []store.CapacityBinding{{RunID: "run", NodeID: "wrong", Generation: binding.Generation}, {RunID: "run", NodeID: "build", Generation: binding.Generation + 1}, {RunID: "run", Generation: binding.Generation}} {
+	for _, changed := range []runstate.CapacityBinding{{RunID: "run", NodeID: "wrong", Generation: binding.Generation}, {RunID: "run", NodeID: "build", Generation: binding.Generation + 1}, {RunID: "run", Generation: binding.Generation}} {
 		code := privateCapacityRequest(t, server, string(award.Bearer), localhostwire.LocalCapacityRequest{Binding: changed})
 		if code != http.StatusForbidden && code != http.StatusConflict && code != http.StatusNotFound {
 			t.Fatalf("award widened to %+v: HTTP %d", changed, code)

@@ -388,8 +388,8 @@ are part of this contract.
 | `store.ScheduleDecision` | Returns ordered graph actions and an optional final run verdict. |
 | `store.Decide` | Exposes the single pure `decide()` to run hosts. |
 | `store.RunSnapshot.Scheduling` | Projects accepted declarations and persisted state, including empty generator groups, into `ScheduleSnapshot`. |
-| `store.ReconcileRequest`, `store.SourcePolicy` | Carry typed resume, retry, memo or coalescing source authority. |
-| `store.ReconciledNode` | Returns the persisted node and any committed claim or authorized source. |
+| `store.ReconcileRequest`, `runstate.SourcePolicy` | Carry typed resume, retry, memo or coalescing source authority. |
+| `runstate.ReconciledNode` | Returns the persisted node and any committed claim or authorized source. |
 | `store.Tenant.ReconcileNode` | Chooses, self-claims or materializes in one transaction. |
 | `store.ExpansionSubmission` | Carries source generation, server-derived actor and exactly one success body or structured failure. |
 | `store.AcceptedExpansion` | Returns persisted nodes, body hash, barrier state and replay status. |
@@ -1121,7 +1121,8 @@ describe, planning and atomic acceptance. It returns after acceptance transfers
 scheduling to the controller. It cannot start or finish the run as its owner.
 `OwnerHost.Evaluate` keeps an independent eval lease and submits only the awarded
 source's expansion or structured failure. Source generation zero is retained for
-memoized results. Neither path invents a node attempt. `Hosting` and `StoreHosting`
+memoized results. Neither path invents a node attempt. [`runners.Hosting`](../../../internal/runners/hosting.go) and
+[`localcontroller.StoreHosting`](../../../internal/wingd/localcontroller/store_host.go)
 dispatch all four unit kinds through these shared hosts after award validation.
 
 Private plan/eval reads use the existing local-host snapshot, authentication and

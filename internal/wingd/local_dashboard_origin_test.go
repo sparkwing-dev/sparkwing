@@ -5,13 +5,15 @@ import (
 	"net"
 	"net/http"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 func TestLocalDashboardRefusesForeignHostsAndOrigins(t *testing.T) {
 	f := &runtimeControllerFixture{}
-	f.http = func() LocalHTTP {
+	f.http = func() localhostwire.LocalHTTP {
 		ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-		return LocalHTTP{API: ok, Dashboard: ok}
+		return localhostwire.LocalHTTP{API: ok, Dashboard: ok}
 	}
 	r := newRuntimeFixture(t, f)
 	bound := make(chan string, 1)

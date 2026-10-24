@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -292,7 +294,7 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	}
 	if err := shared.TestOnlySeedTriggerWithRun(ctx,
 		store.Trigger{ID: "run-l", Pipeline: "build", CreatedAt: now},
-		store.Run{ID: "run-l", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
+		store.Run{RunSummary: runstate.RunSummary{ID: "run-l", Pipeline: "build", Status: "pending", StartedAt: now}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.SeedSecret(st, shared.Team(), store.Secret{Name: "K", Value: "v", Principal: "leaver@example.com"}, now); err != nil {

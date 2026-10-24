@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
@@ -115,7 +115,7 @@ func start(t testing.TB) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
+	router := routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 	if err := RegisterProcessServices(router, authorities.Resolve); err != nil {
 		t.Fatal(err)
 	}

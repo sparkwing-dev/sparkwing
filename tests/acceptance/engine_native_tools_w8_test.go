@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engine/sdkinstall"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
@@ -57,7 +58,7 @@ func TestEngineNativeNPMW8Components(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	request, err := json.Marshal(engine.SDKInstallRequest{Directory: root, SDK: engine.TypeScriptSDK})
+	request, err := json.Marshal(engine.SDKInstallRequest{Directory: root, SDK: engineid.TypeScriptSDK})
 	if err != nil {
 		t.Fatal(err)
 	}

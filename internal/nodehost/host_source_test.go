@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -71,11 +72,11 @@ type sourceBundleReader struct {
 
 func (r sourceBundleReader) Close() error { r.close(); return nil }
 
-func (a *sourceAdapters) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
+func (a *sourceAdapters) Resolve(context.Context, engineid.Pin, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("accepted source must restore its sealed engine")
 }
 
-func (a *sourceAdapters) Ensure(_ context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+func (a *sourceAdapters) Ensure(_ context.Context, identity engineid.Identity, target releaseasset.Target) (engine.Resolved, error) {
 	if identity != a.resolved.Identity || target != a.resolved.Target {
 		return engine.Resolved{}, errors.New("source changed sealed engine")
 	}
@@ -117,7 +118,7 @@ func sourceAcquisitionFixture(t *testing.T) (runspec.Spec, source.Options, *sour
 	ledger := sourcetest.Remote(t, map[string]string{sourceRemote: directory})
 	digest := sha256.Sum256(bundle)
 	a := &sourceAdapters{digest: hex.EncodeToString(digest[:]), tree: tree, bundle: bundle, resolved: engine.Resolved{
-		Identity: engine.Identity{Version: "v1.2.3", ManifestDigest: "verified-release", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}},
+		Identity: engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified-release", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}},
 		Target:   releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: "linux", GOARCH: "amd64"}, Executable: filepath.Join(t.TempDir(), "matched-engine"),
 	}}
 	spec := runspec.Spec{Request: runspec.SealedRequest{RunID: "original"}, Resolved: runspec.Resolved{Engine: a.resolved.Identity}}
@@ -127,7 +128,7 @@ func sourceAcquisitionFixture(t *testing.T) (runspec.Spec, source.Options, *sour
 	options := source.Options{
 		Workspace: t.TempDir(), Access: a, Engines: a, Target: a.resolved.Target, InstallSDK: a.Install,
 		Base: procenv.Base{Ambient: sourcetest.Environment(t), Masker: secrets.NewMasker()}, BuildEnvironment: sourcetest.BuildEnvironment,
-		ReadPin:         func(string, engine.SDKKind) (engine.Pin, error) { return a.resolved.Identity.Pin, nil },
+		ReadPin:         func(string, engineid.SDKKind) (engineid.Pin, error) { return a.resolved.Identity.Pin, nil },
 		BundleTransport: a,
 	}
 	return spec, options, a, ledger

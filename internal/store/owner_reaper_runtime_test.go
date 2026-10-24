@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func ownerReaperFixture(t *testing.T, started bool, disruptions int, origin runspec.Origin) (*Tenant, *time.Time, SingletonLease) {
 	t.Helper()
 	s, tenant, now := maintenanceStore(t)
-	maintenanceRun(t, s, "run", 1, RunRunning)
+	maintenanceRun(t, s, "run", 1, runstate.RunRunning)
 	request, err := json.Marshal(runspec.SealedRequest{Version: 1, AdmittedAt: now.Add(-time.Hour), Request: runspec.Request{Origin: origin}})
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestOwnerReaperRecoversSameRun(t *testing.T) {
 				t.Fatalf("owner = %s %d %d %d %v %v %v, %v", status, generation, created, disruptions, holder, expiry, start, err)
 			}
 			run, err := tenant.ReadRun(t.Context(), "run")
-			if err != nil || run.State != RunRunning || run.CancelRequestedAt != nil {
+			if err != nil || run.State != runstate.RunRunning || run.CancelRequestedAt != nil {
 				t.Fatalf("run = %+v, %v", run, err)
 			}
 			repeated, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
@@ -87,9 +87,9 @@ func TestOwnerReaperTerminalPolicies(t *testing.T) {
 				t.Fatalf("reap = %+v, %v", reaped, err)
 			}
 			run, err := tenant.ReadRun(t.Context(), "run")
-			want := RunFailed
+			want := runstate.RunFailed
 			if mode == "cancel" {
-				want = RunCancelled
+				want = runstate.RunCancelled
 			}
 			if err != nil || run.State != want || run.FinishedAt == nil {
 				t.Fatalf("run = %+v, %v", run, err)
@@ -111,12 +111,12 @@ func TestOwnerReaperPreservesRemoteClaimAndDrainsBeforeFailure(t *testing.T) {
 			if _, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
 				t.Fatal(err)
 			}
-			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "remote"})
-			if err != nil || node.Status != StatusRunning || node.ClaimedBy != "remote-runner" || (node.CancelRequestedAt != nil) != (disruptions == 2) {
+			node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "remote"})
+			if err != nil || node.Status != runstate.StatusRunning || node.ClaimedBy != "remote-runner" || (node.CancelRequestedAt != nil) != (disruptions == 2) {
 				t.Fatalf("remote claim = %+v, %v", node, err)
 			}
 			run, err := tenant.ReadRun(t.Context(), "run")
-			if err != nil || run.State != RunRunning {
+			if err != nil || run.State != runstate.RunRunning {
 				t.Fatalf("undrained run = %+v, %v", run, err)
 			}
 			if disruptions == 2 {
@@ -125,7 +125,7 @@ func TestOwnerReaperPreservesRemoteClaimAndDrainsBeforeFailure(t *testing.T) {
 					t.Fatal(err)
 				}
 				run, err = tenant.ReadRun(t.Context(), "run")
-				if err != nil || run.State != RunFailed {
+				if err != nil || run.State != runstate.RunFailed {
 					t.Fatalf("drained run = %+v, %v", run, err)
 				}
 			}
@@ -187,15 +187,15 @@ func TestOwnerReaperEvalRecoveryAndBarrier(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantStatus, wantExpansion := "pending", ExpansionExpected
+			wantStatus, wantExpansion := "pending", runstate.ExpansionExpected
 			if mode == "cap" {
-				wantStatus, wantExpansion = "failed", ExpansionFailed
+				wantStatus, wantExpansion = "failed", runstate.ExpansionFailed
 			}
 			if mode == "cancel" {
-				wantStatus, wantExpansion = "cancelled", ExpansionNone
+				wantStatus, wantExpansion = "cancelled", runstate.ExpansionNone
 			}
 			if mode == "already_accepted" {
-				wantStatus, wantExpansion = "done", ExpansionAccepted
+				wantStatus, wantExpansion = "done", runstate.ExpansionAccepted
 			}
 			if status != wantStatus || node.Expansion != wantExpansion {
 				t.Fatalf("eval = %s, expansion = %s", status, node.Expansion)
@@ -214,7 +214,7 @@ func TestOwnerReaperEvalRecoveryAndBarrier(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if mode == "cap" && run.State != RunFailed || mode == "cancel" && run.State != RunCancelled || mode == "controller_lapse" && run.State != RunRunning {
+			if mode == "cap" && run.State != runstate.RunFailed || mode == "cancel" && run.State != runstate.RunCancelled || mode == "controller_lapse" && run.State != runstate.RunRunning {
 				t.Fatalf("run state = %s", run.State)
 			}
 		})
@@ -235,7 +235,7 @@ func TestOwnerReaperLeavesControllerOwnershipToElection(t *testing.T) {
 		t.Fatalf("controller-owned reap = %+v, %v", reaped, err)
 	}
 	run, err := tenant.ReadRun(t.Context(), "run")
-	if err != nil || run.State != RunRunning {
+	if err != nil || run.State != runstate.RunRunning {
 		t.Fatalf("controller run = %s, %v", run.State, err)
 	}
 	*now = now.Add(time.Minute)
@@ -274,7 +274,7 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request.Actor = Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Owner: claim.Owner}
+			request.Actor = runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Owner: claim.Owner}
 			if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 				t.Fatal(err)
 			}
@@ -288,7 +288,7 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
+			actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
 			// safety: another pass can commit recovery and plan acceptance
 			// between candidate selection and the per-unit transaction.
 			err = s.inTx(t.Context(), func(tx *storeTx) error {
@@ -318,8 +318,8 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 
 func TestRunOwnerLostRefusesUnstartedLocalOwner(t *testing.T) {
 	tenant, _, lease := ownerReaperFixture(t, false, 0, runspec.OriginLocal)
-	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
-	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunFailed, Cause: RunOwnerLost, Actor: actor}); err == nil {
+	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
+	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: "run", To: runstate.RunFailed, Cause: runstate.RunOwnerLost, Actor: actor}); err == nil {
 		t.Fatal("unstarted local owner failed as an orphan")
 	}
 	if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
@@ -339,7 +339,7 @@ func TestOwnerRequeueEmitsOneCommittedEvent(t *testing.T) {
 		t.Fatalf("owner recovery events: %+v, %v", events, err)
 	}
 	run, err := tenant.ReadRun(t.Context(), "run")
-	if err != nil || run.State != RunRunning || run.StateSeq != events[0].StateSeq {
+	if err != nil || run.State != runstate.RunRunning || run.StateSeq != events[0].StateSeq {
 		t.Fatalf("owner recovery state: %+v, %v", run, err)
 	}
 }
@@ -370,7 +370,7 @@ func TestOwnerReaperRecoversEveryTeamWithoutFailingRemoteRuns(t *testing.T) {
 	s, _, now := maintenanceStore(t)
 	for i, team := range []Team{"a", "b"} {
 		id := "run-" + string(team)
-		maintenanceRun(t, s, id, i+1, RunRunning)
+		maintenanceRun(t, s, id, i+1, runstate.RunRunning)
 		request := []byte(`{"request":{"origin":"local"}}`)
 		if team == "b" {
 			request = []byte(`{"request":{"origin":"trigger"}}`)
@@ -388,9 +388,9 @@ func TestOwnerReaperRecoversEveryTeamWithoutFailingRemoteRuns(t *testing.T) {
 	}
 	for _, team := range []Team{"a", "b"} {
 		run, err := (&Tenant{s: s, team: team}).ReadRun(t.Context(), "run-"+string(team))
-		want := RunFailed
+		want := runstate.RunFailed
 		if team == "b" {
-			want = RunRunning
+			want = runstate.RunRunning
 		}
 		if err != nil || run.State != want {
 			t.Fatalf("team %s: %+v, %v", team, run, err)

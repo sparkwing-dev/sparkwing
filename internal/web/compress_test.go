@@ -14,6 +14,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -214,7 +216,9 @@ func TestEventStreamsAreNeverEncoded(t *testing.T) {
 	}
 
 	backend := &fakeBackend{
-		getRun:     func(string) (*store.Run, error) { return &store.Run{ID: "r1", Status: "success"}, nil },
+		getRun: func(string) (*store.Run, error) {
+			return &store.Run{RunSummary: runstate.RunSummary{ID: "r1", Status: "success"}}, nil
+		},
 		listEvents: func(string, int64, int) ([]store.Event, error) { return nil, nil },
 	}
 	mux := http.NewServeMux()

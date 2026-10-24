@@ -18,15 +18,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type nativeLogUploader struct {
 	transport     *engineClient
 	subject       blob.LogSubject
 	pattern, path string
-	segments      []store.Segment
+	segments      []runstate.Segment
 }
 
 // LogUploader publishes shared log segments through authenticated signing and record commits.
@@ -130,8 +130,8 @@ func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segme
 	if err != nil {
 		return err
 	}
-	row := store.Segment{Index: int64(segment.N), Offset: offset, Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key}
-	if err := u.commit(ctx, []store.Segment{row}, false, ""); err != nil {
+	row := runstate.Segment{Index: int64(segment.N), Offset: offset, Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key}
+	if err := u.commit(ctx, []runstate.Segment{row}, false, ""); err != nil {
 		return err
 	}
 	u.segments = append(u.segments, row)
@@ -160,15 +160,15 @@ func (u *nativeLogUploader) PutManifest(ctx context.Context, manifest logseg.Man
 	return u.commit(ctx, u.segments, true, reason)
 }
 
-func (u *nativeLogUploader) commit(ctx context.Context, segments []store.Segment, final bool, reason string) error {
+func (u *nativeLogUploader) commit(ctx context.Context, segments []runstate.Segment, final bool, reason string) error {
 	var result struct {
 		Recorded bool `json:"recorded"`
 	}
 	body := struct {
-		Subject          blob.LogSubject `json:"subject"`
-		Segments         []store.Segment `json:"segments"`
-		Final            bool            `json:"final"`
-		IncompleteReason string          `json:"incomplete_reason,omitempty"`
+		Subject          blob.LogSubject    `json:"subject"`
+		Segments         []runstate.Segment `json:"segments"`
+		Final            bool               `json:"final"`
+		IncompleteReason string             `json:"incomplete_reason,omitempty"`
 	}{u.subject, segments, final, reason}
 	err := u.transport.request(ctx, "POST", u.pattern+"/log-manifest", u.path+"/log-manifest", "", body, &result)
 	if err == nil && !result.Recorded {

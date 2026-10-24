@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -336,7 +337,7 @@ func TestSizingHTTPMissingStoreAndMethods(t *testing.T) {
 				})
 				code = apierr.Internal
 			case "no policy":
-				s.WithAuthorization(controller.RouteAuthorization{})
+				s.WithAuthorization(routepolicy.Authorization{})
 			}
 			for _, method := range []string{"GET", "PUT"} {
 				path := "/api/v1/pipelines/build/sizing"

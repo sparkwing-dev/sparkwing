@@ -17,7 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -89,7 +89,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 	base.Authority = capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(base.Capability.Digest[:])}
 	base.Capability.Prefix = ""
 	base.Capability.Grants = []capability.Grant{capability.OperatorConsole}
-	s.WithAuthorization(RouteAuthorization{
+	s.WithAuthorization(routepolicy.Authorization{
 		Authenticator: capability.NewAuthenticator(authority), Bindings: authority,
 		Identify: func(*http.Request) (capability.Presentation, error) {
 			return capability.Presentation{Class: authority.principal.Class, Raw: authority.raw}, nil
@@ -180,6 +180,6 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 	}
 }
 
-func (f *consoleWritesFake) ConsoleRefund(_ context.Context, a capability.Authorized, req controllerwire.OperatorRefund, key string) (store.CreditReversal, error) {
+func (f *consoleWritesFake) ConsoleRefund(_ context.Context, a capability.Authorized, req store.OperatorRefund, key string) (store.CreditReversal, error) {
 	return store.CreditReversal{}, f.record(a, req)
 }

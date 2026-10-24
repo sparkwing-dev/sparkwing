@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -54,8 +55,8 @@ func slotAuthorization(t *testing.T, f *storeRecoveryFixture) capability.Authori
 
 func TestConcurrencyGroupReadsSharedAdmissionAndRetiresSlotRoutes(t *testing.T) {
 	f := slotFixture(t)
-	admitted, err := f.tenant.MayStart(t.Context(), store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
-	if err != nil || admitted.Kind != store.AcquireGranted {
+	admitted, err := f.tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)
+	if err != nil || admitted.Kind != runstate.AcquireGranted {
 		t.Fatalf("admission: %+v %v", admitted, err)
 	}
 	handler := controller.New(f.s, nil).Handler()

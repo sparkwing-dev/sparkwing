@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -16,7 +18,7 @@ type scheduleFixture struct {
 	controllerwire.ScheduleManager
 	rows     map[string]controllerwire.DetailView
 	calls    []string
-	override controllerwire.ScheduleOverride
+	override cronspec.Override
 	keys     []string
 	query    controllerwire.ScheduleQuery
 }
@@ -37,7 +39,7 @@ func (f *scheduleFixture) SetSchedulePaused(_ context.Context, name string, paus
 	return row, nil
 }
 
-func (f *scheduleFixture) OverrideSchedule(_ context.Context, name string, input controllerwire.ScheduleOverride) (controllerwire.ScheduleView, error) {
+func (f *scheduleFixture) OverrideSchedule(_ context.Context, name string, input cronspec.Override) (controllerwire.ScheduleView, error) {
 	f.calls = append(f.calls, "override:"+name)
 	f.override = input
 	return f.rows[name].Schedule, nil

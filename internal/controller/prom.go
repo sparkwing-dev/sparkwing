@@ -13,10 +13,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -253,9 +254,9 @@ func (s *Server) metricsServer() *http.Server {
 		return nil
 	}
 	metricsMux := newRegisteredMux()
-	s.registerControllerEndpoints(metricsMux, []Endpoint{metricsEndpoint()})
+	s.registerControllerEndpoints(metricsMux, []controllerwire.Endpoint{metricsEndpoint()})
 	metricsMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		writeRouteMiss(w, allowedRouteMethods(metricsMux.ServeMux, r, routeProbeMethods))
+		routepolicy.WriteRouteMiss(w, routepolicy.AllowedRouteMethods(metricsMux.ServeMux, r, routeProbeMethods))
 	})
 	return &http.Server{
 		Addr:              s.metricsAddr,

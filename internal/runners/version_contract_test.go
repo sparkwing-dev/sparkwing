@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 )
 
 type installationFixture struct {
@@ -46,9 +44,6 @@ func runnerReleaseFixture(t *testing.T) engine.VerifiedRelease {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := releaseauth.TrustedPublicKeys
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	dir := t.TempDir()
 	for path, body := range map[string]string{"go.mod": "module github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner\ngo 1.26\n", "main.go": "package main\nvar Version=\"dev\"\nfunc main(){println(Version)}\n"} {
 		if err := os.WriteFile(filepath.Join(dir, path), []byte(body), 0o600); err != nil {
@@ -84,7 +79,7 @@ func runnerReleaseFixture(t *testing.T) engine.VerifiedRelease {
 		lines = append(lines, fmt.Sprintf("%x  %s", hash, item))
 	}
 	manifest := []byte(strings.Join(lines, "\n") + "\n")
-	release, err := engine.VerifyRelease("v0.20.0", target, engine.ReleaseBundle{Asset: body, AssetSignature: ed25519.Sign(key, body), Manifest: manifest, ManifestSignature: ed25519.Sign(key, manifest)})
+	release, err := engine.VerifyRelease("v0.20.0", target, engine.ReleaseBundle{Asset: body, AssetSignature: ed25519.Sign(key, body), Manifest: manifest, ManifestSignature: ed25519.Sign(key, manifest)}, []ed25519.PublicKey{public})
 	if err != nil {
 		t.Fatal(err)
 	}

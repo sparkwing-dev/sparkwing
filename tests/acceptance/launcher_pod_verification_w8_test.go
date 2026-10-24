@@ -4,19 +4,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	batchv1 "k8s.io/api/batch/v1"
+
 	corev1 "k8s.io/api/core/v1"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	ktesting "k8s.io/client-go/testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	ktesting "k8s.io/client-go/testing"
 )
 
 // hack: the fake tracker has no finalizers or garbage collection; the API server keeps
@@ -105,8 +110,8 @@ func TestLauncherPodRejectionCommitsFailedAwardW8(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-			if err != nil || node.Outcome != store.NodeFailed || node.ClaimedBy != "" {
+			node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+			if err != nil || node.Outcome != runstate.NodeFailed || node.ClaimedBy != "" {
 				t.Fatalf("award survived rejection: %+v %v", node, err)
 			}
 		})

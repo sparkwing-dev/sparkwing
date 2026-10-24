@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -25,7 +26,7 @@ func TestEngineJobCancelHTTP(t *testing.T) {
 					b = intakeBoundary()
 					b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl}
 				}
-				f := &engineTransactions{applied: store.Applied{CancelRequested: true, StateSeq: 9, Generation: 4, Attempt: 2}}
+				f := &engineTransactions{applied: runstate.Applied{CancelRequested: true, StateSeq: 9, Generation: 4, Attempt: 2}}
 				body := `{"reason":"user requested"}`
 				status, code, writes := 200, apierr.Code(""), 1
 				switch state {
@@ -70,14 +71,14 @@ func TestEngineJobCancelHTTP(t *testing.T) {
 					t.Fatalf("cancel command=%T", f.nodeChange)
 				}
 				p := b.snapshot.Authorities[0].Principal
-				kind := store.ActorRunHost
+				kind := runstate.ActorRunHost
 				if identity == "member" {
-					kind = store.ActorOperator
+					kind = runstate.ActorOperator
 				}
-				if change.Ref != (controllerwire.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Kind != kind || change.Actor.Authority != p.Authority || !reflect.DeepEqual(change.Result, &store.NodeResult{Outcome: store.NodeCancelled, Reason: "user requested"}) {
+				if change.Ref != (runspec.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Kind != kind || change.Actor.Authority != p.Authority || !reflect.DeepEqual(change.Result, &runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: "user requested"}) {
 					t.Fatalf("change=%+v", change)
 				}
-				if identity == "owner" && (change.Actor.Holder != p.Capability.Binding.Holder || change.Actor.Generation != runspec.ClaimGeneration(p.Capability.Binding.Generation) || change.Actor.Owner != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}})) {
+				if identity == "owner" && (change.Actor.Holder != p.Capability.Binding.Holder || change.Actor.Generation != runspec.ClaimGeneration(p.Capability.Binding.Generation) || change.Actor.Owner != (runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}})) {
 					t.Fatalf("owner fence=%+v", change.Actor)
 				}
 			})
@@ -139,7 +140,7 @@ func TestEngineFailureHTTP(t *testing.T) {
 			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || !reflect.DeepEqual(got, f.failure) {
 				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 			}
-			if f.failureRef != (controllerwire.NodeRef{RunID: "run", NodeID: "source"}) || f.failureGeneration != 7 || f.failureActor.Authority != b.snapshot.Authorities[0].Principal.Authority || f.failureActor.Generation != 4 || f.failureActor.Holder != "runner" {
+			if f.failureRef != (runspec.NodeRef{RunID: "run", NodeID: "source"}) || f.failureGeneration != 7 || f.failureActor.Authority != b.snapshot.Authorities[0].Principal.Authority || f.failureActor.Generation != 4 || f.failureActor.Holder != "runner" {
 				t.Fatalf("read=%+v gen=%d actor=%+v", f.failureRef, f.failureGeneration, f.failureActor)
 			}
 			if b.bindingRule != capability.BindReadSet || b.bindingTarget.SourceGeneration != 7 || b.bindingTarget.NodeID != "source" {
@@ -176,7 +177,7 @@ func TestEngineJobCancelBodyRace(t *testing.T) {
 	if !ok {
 		t.Fatalf("cancel command=%T", f.nodeChange)
 	}
-	if f.writes != 1 || change.Actor.Generation != 4 || change.Actor.Owner.Generation != 4 || !reflect.DeepEqual(change.Result, &store.NodeResult{Outcome: store.NodeCancelled, Reason: "user requested"}) {
+	if f.writes != 1 || change.Actor.Generation != 4 || change.Actor.Owner.Generation != 4 || !reflect.DeepEqual(change.Result, &runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: "user requested"}) {
 		t.Fatalf("calls=%d change=%+v", f.writes, f.nodeChange)
 	}
 }

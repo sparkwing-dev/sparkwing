@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 type selectedOutputRecords struct {
@@ -32,7 +32,7 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 	for _, missing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "recorded", true: "missing"}[missing], func(t *testing.T) {
 			input, state, deps, process := evaluationFixture(t)
-			input.Generation, state.row.Generation, state.row.Attempt, state.row.Outcome = 0, 0, 0, store.NodeMemoized
+			input.Generation, state.row.Generation, state.row.Attempt, state.row.Outcome = 0, 0, 0, runstate.NodeMemoized
 			key := blob.MaterializedRecordKey("a", string(state.row.Ref.RunID), string(state.row.Ref.NodeID), 4, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
 			state.row.OutputRecord = &key
 			if missing {

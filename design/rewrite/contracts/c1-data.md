@@ -620,8 +620,9 @@ object-purge contract. Tenant purge keeps its scoped inventory checks.
 
 Machine registration adds `teams.members_can_add_machines`, a checked 0/1
 column defaulting to 1. Baseline version 7 refuses older stores without migration.
-The native Tenant.TeamSettings and SetAuthorizedTeamSettings methods share
-controllerwire.TeamSettings with HTTP and CLI. Setting writes use the existing
+The native Tenant.TeamSettings and SetAuthorizedTeamSettings methods use
+[`store.TeamSettings`](../../../internal/store/controller_requests.go). HTTP and CLI
+use the controller wire projection. Setting writes use the existing
 team administration transaction and atomically record `team.settings_changed`.
 Root issuance checks the setting under the same team lock. Current administration
 is always required for shared-runner enrollment, rotation and revocation.
@@ -2008,11 +2009,9 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
   registered team and cannot widen itself to the raw store. `OperatorStore`
   exposes named deployment operations. `Store` keeps opening, handle creation,
   capability-derived claims and cross-team reaping.
-- `internal/storage.StateStore` is the final host-facing interface implemented by
-  `*store.Tenant`. The replaced interface and its old consumers have the `Old`
-  suffix solely to compile the old implementation beside the contract. There
-  is no forwarding alias or compatibility adapter. Retained account, billing,
-  approval and schedule implementations are not ported by this contract step.
+- `internal/nodehost` defines the host-facing ports. `OwnerStore` and
+  `ClaimStore` are implemented by `*store.Tenant`; `NativeHostStore` combines
+  them. Hosts borrow these tenant handles and never close the shared store.
 - `internal/runspec` owns immutable inputs and identity. It resolves no settings,
   authenticates no credential and validates no plan.
 - `internal/blob` owns byte integrity and reference-edge types. The controller
@@ -2381,7 +2380,7 @@ local publication transport and physical bytes remain integration obligations.
 | `blob.LogUploadCheck`, `blob.LogTransport.VerifyUpload` | Verify the exact stored payload after an uncertain PUT under current writer authority. |
 | `logseg.UploadVerifier` | Derive one authorized object's key and check its stored size and digest after successful close. |
 | `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads, verify uncertain writes and proxy authenticated reads through the controller. |
-| `SegmentCommit`, `LogSegments`, `Tenant.ReadLogSegments` | Commit and read persisted segments under the same subject fence. |
+| `SegmentCommit`, `runstate.LogSegments`, `Tenant.ReadLogSegments` | Commit and read persisted segments under the same subject fence. |
 | `Operator.SealAbandonedLogStreams` | Seal abandoned execution streams under the maintenance lease without changing execution results. |
 
 ## Capability persistence, authority and payment settlement
@@ -2908,15 +2907,15 @@ already pass. Each should run on SQLite and PostgreSQL where a store is involved
 
 | C1 type or surface | Other area must match |
 |---|---|
-| `Actor`, `OwnerLeaseRef`, `capability.UnitKind`, `UnitClaim.Bearer`, `AdmissionResult.HereBearer`, schema capabilities | C2 resolves references in the transaction, matches actor/fence and fixed award kinds trigger/plan/eval/node; here is a trigger Award case. Bearers return in memory once through C2's transport, never in persisted snapshots or generic JSON. |
+| `runstate.Actor`, `runstate.OwnerLeaseRef`, `capability.UnitKind`, `UnitClaim.Bearer`, `AdmissionResult.HereBearer`, schema capabilities | C2 resolves references in the transaction, matches actor/fence and fixed award kinds trigger/plan/eval/node; here is a trigger Award case. Bearers return in memory once through C2's transport, never in persisted snapshots or generic JSON. |
 | `ErrIllegalTransition`, blob errors | C2 maps holder_rights/stale_generation to lock_held; illegal_edge/terminal to illegal_transition; unreadable digest to forbidden with digest_not_readable. |
 | `PlanAcceptance`, `ExpansionSubmission`, `RunSnapshot` | C3 validates plan declarations. C1 projects a consistent snapshot and shares Decide between both owners. |
 | `AcceptedExpansion`, `NodeRow.SpecHash`, `AttemptIdentity` | C3 preserves source vs eval generations, exact node-wide attempt ordinal and persisted generated topology. |
-| `runspec.Setting`, `RunnerSelection`, `Ceilings`, `SealInput` | C4 applies the frozen precedence and refuses over-ceiling settings at the correct seal; the store supplies time, not the requester. |
+| `runspec.Setting`, `RunnerSelection`, `Ceilings`, `SealInput` | C4 applies the frozen precedence and refuses over-ceiling settings at the correct seal. Authority checks use the store transaction clock. Delivery inbox operations accept controller timestamps; deadlines, due times and query cursors remain caller inputs. |
 | `RetentionRequest`, `SegmentCommit` | C4 owns numeric limits and log class settings; C3 emits immutable attributed segments and terminal completeness. |
 | `blob.Authority`, upload identity, publication edge | C2 derives run/repo/ref/publisher scope; job receipts never transfer through possession of a digest or same-run membership. |
 | `billing_awards`, `billable_intervals` | C2 billing provenance and settlement use immutable award facts, exclude customer-runner wait and survive run/capability pruning. |
-| `StateStore`, `OperatorStore`, `blob.RecordStore` | C3 host seams consume these final interfaces; old implementation consumers are removed when ported, not adapted. |
+| `nodehost.OwnerStore`, `nodehost.ClaimStore`, `OperatorStore`, `blob.RecordStore` | Hosts use tenant-scoped ports; deployment maintenance uses the operator handle and blob records use their own port. |
 | C1-01 through C1-27 | T1 supplies executable cross-placement scenarios and aligns names with its independent catalog. |
 
 ## Intake replay
@@ -3029,7 +3028,7 @@ schema version is added.
 | Change | `internal/store/tenant.go` |
 | Create | `internal/blob/contracts.go` |
 | Create | `internal/runspec/contracts.go` |
-| Create | `internal/storage/state_contract.go` |
+| Change | `internal/nodehost/owner.go`, `claimed_node.go`, `native_host.go` |
 | Create | `internal/store/claim_contract.go` |
 | Create | `internal/store/completion.go` |
 | Delete | `internal/store/capacity_adoption.go` |
@@ -3044,10 +3043,10 @@ schema version is added.
 | Create | `internal/store/source_release.go` |
 | Create | `internal/store/state_contract.go` |
 
-The existing host, orchestrator, storage and client edits are mechanical
-`StateStore` to `StateStoreOld` renames. Store startup changes only its schema
-source and translator call. The existing dialect-shape test retains its purpose;
-its comment now describes translation. `c1-data.md` is this contract document.
+The host ports live in `internal/nodehost`; the replaced storage interfaces
+are removed. Store startup uses the neutral schema and dialect translator.
+The dialect-shape test compares translated schemas. `c1-data.md` is this
+contract document.
 
 ## Export inventory
 
@@ -3072,7 +3071,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `IntakeMode` | IntakeMode prevents published history from obtaining executable owner claims. |
 | `Dispatch` | Dispatch selects the owner of scheduling after acceptance. |
 | `Origin` | Origin identifies the intake path without making it a trust assertion. |
-| `Actor` | Actor preserves the original actor when a different person retries a run. |
+| `runstate.Actor` | Actor preserves the original actor when a different person retries a run. |
 | `PullRequest` | PullRequest keeps base and head facts so intake can refuse forks before award. |
 | `AppFacts` | AppFacts is server-populated only after HMAC verification and replay-key dedup. No current-head lookup changes these facts, including on a retry of an older SHA. |
 | `Git` | Git pins checkout to the sealed SHA, never the later head of Ref. |
@@ -3267,9 +3266,9 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 
 | Export | Purpose |
 |---|---|
-| `Segment` | Separates decoded ranges from stored bytes and digest. |
+| `runstate.Segment` | Separates decoded ranges from stored bytes and digest. |
 | `SegmentCommit` | Binds a contiguous batch and optional seal to its writer and tagged subject. |
-| `LogSegments` | Returns authorized persisted ranges and seal state. |
+| `runstate.LogSegments` | Returns authorized persisted ranges and seal state. |
 | `Tenant.RecordSegments` | Commits immutable segments and seals under the current writer fence. |
 | `Tenant.ReadLogSegments` | Rechecks authority for the exact subject before selecting byte ranges. |
 
@@ -3295,11 +3294,11 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 |---|---|
 | `RunRow` | RunRow is the immutable request/spec plus the mutable lifecycle read model used by hosts. |
 | `RunSnapshot` | Reads persisted state and accepted expansion declarations for the shared scheduling projection. |
-| `SourcePolicy` | SourcePolicy keeps resume, retry, memo and coalescing authority distinct at reconciliation. |
-| `ReconcileKind` | ReconcileKind tells a host whether it may execute; only Execute carries a newly fenced claim. |
+| `runstate.SourcePolicy` | SourcePolicy keeps resume, retry, memo and coalescing authority distinct at reconciliation. |
+| `runstate.ReconcileKind` | ReconcileKind tells a host whether it may execute; only Execute carries a newly fenced claim. |
 | `ReconcileRequest` | ReconcileRequest names a possible source; the store checks it rather than trusting the host's cache hit. |
-| `ReconciledNode` | ReconciledNode is decided with any self-claim in the same transaction. |
-| `LeaseBeat` | LeaseBeat delivers cancellation and watched jobs without changing the owner heartbeat cadence. |
+| `runstate.ReconciledNode` | ReconciledNode is decided with any self-claim in the same transaction. |
+| `runstate.LeaseBeat` | LeaseBeat delivers cancellation and watched jobs without changing the owner heartbeat cadence. |
 | `StateEvent` | StateEvent uses a single per-run sequence and a unique node state sequence for lifecycle writes. |
 | `Tenant.ReadRun` | ReadRun returns only the Tenant's run, including both seals and the stable team number. |
 | `Tenant.ReadNode` | ReadNode returns persisted state without interpreting an elapsed lease as an implicit requeue. |
@@ -3315,25 +3314,25 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 
 | Export | Purpose |
 |---|---|
-| `NodeState` | NodeState separates offerability and claim ownership from the persisted status. |
-| `NodeStatus` | NodeStatus is the persisted status; ready and claimed are derived by nodeState. |
-| `ExpansionState` | ExpansionState prevents settlement before generated jobs have been accepted. |
-| `ActorKind` | ActorKind identifies which store-verified authority may take an edge. |
-| `OwnerLeaseKind` | OwnerLeaseKind selects the persisted liveness row; local hosts use a trigger lease too. |
-| `OwnerLeaseRef` | OwnerLeaseRef identifies a fence to re-read under the store clock, never a caller's liveness assertion. |
-| `Actor` | Actor carries references to authenticated authority; C2 resolves the capability inside each write transaction. |
-| `NodeRow` | NodeRow contains the state facts consumed by the shared decision and reconciliation functions. |
-| `NodeAttempt` | NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal. |
-| `TransitionCause` | TransitionCause selects edge-specific validation rather than accepting arbitrary column updates. |
+| `runstate.NodeState` | NodeState separates offerability and claim ownership from the persisted status. |
+| `runstate.NodeStatus` | NodeStatus is the persisted status; ready and claimed are derived by nodeState. |
+| `runstate.ExpansionState` | ExpansionState prevents settlement before generated jobs have been accepted. |
+| `runstate.ActorKind` | ActorKind identifies which store-verified authority may take an edge. |
+| `runstate.OwnerLeaseKind` | OwnerLeaseKind selects the persisted liveness row; local hosts use a trigger lease too. |
+| `runstate.OwnerLeaseRef` | OwnerLeaseRef identifies a fence to re-read under the store clock, never a caller's liveness assertion. |
+| `runstate.Actor` | Actor carries references to authenticated authority; C2 resolves the capability inside each write transaction. |
+| `runstate.NodeRow` | NodeRow contains the state facts consumed by the shared decision and reconciliation functions. |
+| `runstate.NodeAttempt` | NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal. |
+| `runstate.TransitionCause` | TransitionCause selects edge-specific validation rather than accepting arbitrary column updates. |
 | `EdgeGuard` | EdgeGuard names predicates that the transition re-checks after locking the row. |
 | `NodeEdge` | NodeEdge is a complete legal edge family; absence from the table means refusal. |
 | `NodeTransitions` | NodeTransitions returns fresh data so callers cannot mutate the store's legal transition table. Insertions start at pending with state_seq=0 through AcceptPlan or AcceptExpansion and are not edges. |
-| `NodeResult` | NodeResult references authorized records; raw digests alone never authorize output attachment. |
-| `MaterializeSource` | MaterializeSource preserves the read edge that permits copying another result. |
-| `ApprovalResolution` | ApprovalResolution records the resolver and policy result in the same transaction as the node edge. |
-| `ClaimAward` | ClaimAward identifies an award already derived by the store; callers cannot choose its team or grants. |
+| `runstate.NodeResult` | NodeResult references authorized records; raw digests alone never authorize output attachment. |
+| `runstate.MaterializeSource` | MaterializeSource preserves the read edge that permits copying another result. |
+| `runstate.ApprovalResolution` | ApprovalResolution records the resolver and policy result in the same transaction as the node edge. |
+| `runstate.ClaimAward` | ClaimAward identifies an award already derived by the store; callers cannot choose its team or grants. |
 | `NodeCommand` | A closed set of named operations fixes each edge and its payload before normalization. |
-| `Applied` | Applied distinguishes an identical replay from a state change or a cooperative cancellation request. |
+| `runstate.Applied` | Applied distinguishes an identical replay from a state change or a cooperative cancellation request. |
 | `IllegalTransitionReason` | IllegalTransitionReason maps stale authority to lock_held and invalid edges to illegal_transition. |
 | `ErrIllegalTransition` | ErrIllegalTransition refuses a failed write loudly; a zero-row mutation is never success. |
 | `ErrIllegalTransition.Error` | Error supplies a stable reason without exposing a capability or result payload. |
@@ -3343,12 +3342,12 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 
 | Export | Purpose |
 |---|---|
-| `RunState` | RunState is both the persisted status and the logical state; terminal states never reopen. |
-| `RunCause` | RunCause distinguishes replay-safe lifecycle writes from trigger recovery that keeps the same run alive. |
+| `runstate.RunState` | RunState is both the persisted status and the logical state; terminal states never reopen. |
+| `runstate.RunCause` | RunCause distinguishes replay-safe lifecycle writes from trigger recovery that keeps the same run alive. |
 | `RunEdge` | RunEdge records all legal run-state families; a cancel of live work is initially request-only. |
 | `RunTransitions` | RunTransitions keeps publication, owner recovery and cooperative cancellation visible to implementers. |
-| `RunTransition` | RunTransition never accepts a client clock or effect payload; those derive from committed state. |
-| `FinishRunRequest` | FinishRunRequest binds the terminal verdict to the owner unit that must end in the same transaction. |
+| `runstate.RunTransition` | RunTransition never accepts a client clock or effect payload; those derive from committed state. |
+| `runstate.FinishRunRequest` | FinishRunRequest binds the terminal verdict to the owner unit that must end in the same transaction. |
 | `Tenant.TransitionRun` | TransitionRun applies the run edge, its event and revisioned completion intents together. |
 | `Tenant.FinishRunAndUnit` | FinishRunAndUnit prevents a terminal run from leaving an executable owner claim behind. |
 
@@ -3378,7 +3377,7 @@ and committed output-record selector. The controller verifies the selected
 physical bytes through its configured blob store. The obsolete claim-input
 policy is removed with the retired C1 reader.
 
-Console.ConsoleRefund accepts capability.Authorized, controllerwire.OperatorRefund
+Console.ConsoleRefund accepts capability.Authorized, [`store.OperatorRefund`](../../../internal/store/controller_requests.go)
 and the request key, returning CreditReversal. It runs through consoleWrite,
 resolves the persisted paid grant before any reversal and checks its team
 against the path. Its reference matches verified refund settlement. A receipt
@@ -3996,15 +3995,14 @@ Controller schedules reach the same sealed intake through the adapter below.
 
 ## Integration amendment: audited GitHub source release
 
-`Tenant.ReleaseGitHubSourceCredential(ctx, Authorized, GitHubSourceProvider)`
-returns a `source.Credential` only after the existing source-release audit commits.
-Its `ExtraRepositories` contains the approved extra repository names read in that
-transaction. The primary repository is excluded.
-The provider interface contains only `InstallationTokenByIDs`, matching the
-existing GitHub client and store test fake. A short transaction resolves and
-validates source authority and consent. Minting runs with no transaction open.
-A second short transaction repeats authority, enrollment, consent and fence
-checks, requires the same installation, approved IDs and names, and writes the audit.
+[`store.Tenant.PrepareGitHubSourceRelease`](../../../internal/store/github_source_release.go)
+resolves source authority and consent in a short transaction. The controller
+mints through [`controller.GitHubSourceProvider`](../../../internal/controller/source_controller.go)
+with no transaction open. [`store.Tenant.CommitGitHubSourceRelease`](../../../internal/store/github_source_release.go)
+rechecks authority, enrollment, consent and fences, requires the same installation,
+approved IDs and names, and commits the audit before the controller returns
+the token. The grant carries approved extra repository names, excluding the
+primary repository.
 GitHub verifies coverage while minting that ID set. Source release never lists
 installation repositories, so the listing's 1,000-repository bound cannot turn
 an authorized source into not_found. Refused coverage returns conflict; other
@@ -4428,7 +4426,7 @@ reads its verdict from the persisted policy. Each command exposes only its own
 payload. `BindNodeCommand` supplies authenticated transport authority without
 changing the operation. The private normalizer retains the transition table as
 the single state owner. Controller and local transports decode through
-`NodeCommandPayload`, which rejects fields that the selected command cannot
+[`store.NodeCommandFromPayload`](../../../internal/store/node_commands.go), which rejects fields that the selected command cannot
 carry. Materialization and publication command types remain private to the store.
 Node rows and execution inputs keep claim generations and
 attempt ordinals distinct. Actor generations and command source attempts use
@@ -4477,3 +4475,13 @@ pipeline require at least four characters, including each nonempty normalized
 list item. Empty and unselected defaults do not refuse a run. Short derived
 values are skipped. Secrets containing `***` are accepted. Plain config variables
 remain available for shorter values.
+
+## Shared execution and reporting projections
+
+[`store.RunRow`](../../../internal/store/state_contract.go) embeds
+[`runstate.Execution`](../../../internal/runstate/transport.go) beside private
+admission metadata. Host snapshots use that execution value directly.
+[`store.Run`](../../../internal/store/store.go) embeds
+[`runstate.RunSummary`](../../../internal/runstate/reporting.go) beside its
+private team and plan snapshot. Handlers serialize the summary, so persistence
+metadata cannot enter the response through a missing field mapping.

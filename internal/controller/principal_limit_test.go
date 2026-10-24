@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -56,7 +57,7 @@ func TestRequestBudgetHeartbeatUsesAuthenticatedHolderProperty(t *testing.T) {
 		s := New(nil, nil).WithRequestBudget(RequestBudget{HeartbeatsPerMinute: 1})
 		a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}}, Binding: capability.Binding{Holder: "bound"}}
 		calls := 0
-		endpoint := s.budgetEndpoint(Endpoint{Pattern: "/api/v1/claims/{claim}/heartbeat", Authentication: capability.AuthCapability, Handle: func(w http.ResponseWriter, _ *http.Request, _ capability.Authorized) error {
+		endpoint := s.budgetEndpoint(controllerwire.Endpoint{Pattern: "/api/v1/claims/{claim}/heartbeat", Authentication: capability.AuthCapability, Handle: func(w http.ResponseWriter, _ *http.Request, _ capability.Authorized) error {
 			calls++
 			w.WriteHeader(204)
 			return nil

@@ -8,6 +8,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
 func TestControllerRegistersDeclaredLogSubmissions(t *testing.T) {
@@ -29,7 +30,7 @@ func TestControllerRegistersDeclaredLogSubmissions(t *testing.T) {
 
 func TestMetricsServingRouterRequiresCredential(t *testing.T) {
 	property := func(input string, allowed bool) bool {
-		server := New(nil, nil).WithMetricsAddr("127.0.0.1:0").WithAuthorization(RouteAuthorization{
+		server := New(nil, nil).WithMetricsAddr("127.0.0.1:0").WithAuthorization(routepolicy.Authorization{
 			Authenticator: metricsRouteAuthority{allowed: allowed}, Bindings: metricsRouteAuthority{},
 		})
 		response := httptest.NewRecorder()

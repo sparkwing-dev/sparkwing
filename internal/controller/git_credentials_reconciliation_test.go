@@ -13,6 +13,8 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"golang.org/x/crypto/ssh"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -321,7 +323,7 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 		switch mode % 5 {
 		case 0:
 			teststore.SeedTeam(t, f.s.store, "foreign")
-			if err := teststore.SeedRun(f.s.store, t.Context(), "foreign", store.Run{ID: "foreign-run", Pipeline: "foreign-private", Status: "running"}); err != nil {
+			if err := teststore.SeedRun(f.s.store, t.Context(), "foreign", store.Run{RunSummary: runstate.RunSummary{ID: "foreign-run", Pipeline: "foreign-private", Status: "running"}}); err != nil {
 				t.Fatal(err)
 			}
 			path = "/api/v1/runs/foreign-run/source-credential"

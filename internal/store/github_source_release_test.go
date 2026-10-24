@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -48,6 +48,24 @@ func (f *githubSourceFake) InstallationTokenByIDs(_ context.Context, installatio
 		f.before()
 	}
 	return f.token, f.err
+}
+
+func releaseGitHubSourceForTest(ctx context.Context, tenant *Tenant, auth capability.Authorized, provider *githubSourceFake) (source.Credential, error) {
+	grant, err := tenant.PrepareGitHubSourceRelease(ctx, auth)
+	if err != nil {
+		return source.Credential{}, err
+	}
+	token, err := provider.InstallationTokenByIDs(ctx, grant.Installation, grant.Repositories, map[string]string{"contents": "read"})
+	if err != nil {
+		return source.Credential{}, err
+	}
+	if token.Token == "" {
+		return source.Credential{}, errors.New("empty token")
+	}
+	if err := tenant.CommitGitHubSourceRelease(ctx, auth, grant, token.ExpiresAt); err != nil {
+		return source.Credential{}, err
+	}
+	return source.Credential{Kind: "github_app", Host: "github.com", Secret: token.Token, ExtraRepositories: grant.Names[1:]}, nil
 }
 
 func githubSourceFixture(t *testing.T, extra int64) (*Tenant, capability.Authorized, *githubSourceFake) {
@@ -103,7 +121,7 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 		case 8:
 			provider.err = githubapp.ErrNotInstalled
 		case 9:
-			node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+			node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -123,7 +141,7 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 		case 15:
 			setMachineOrigin(t, s, "runner", &CapabilityOrigin{Personal: true, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
 		}
-		token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
+		token, err := releaseGitHubSourceForTest(t.Context(), tenant, auth, provider)
 		var count int
 		if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='git_credential.released'`).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -140,7 +158,7 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 
 func TestGitHubSourceReleaseAuditPrecedesReturn(t *testing.T) {
 	tenant, auth, provider := githubSourceFixture(t, 2)
-	token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
+	token, err := releaseGitHubSourceForTest(t.Context(), tenant, auth, provider)
 	if err != nil || token.Secret == "" || !reflect.DeepEqual(token.ExtraRepositories, []string{"acme/approved"}) {
 		t.Fatalf("release: %v", err)
 	}
@@ -199,7 +217,7 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, body)
-			token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
+			token, err := releaseGitHubSourceForTest(t.Context(), tenant, auth, provider)
 			var audits int
 			if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='git_credential.released'`).Scan(&audits); err != nil {
 				t.Fatal(err)
@@ -234,7 +252,7 @@ func TestGitHubSourceReleaseRequiresMatchingSameTeamMachineProperty(t *testing.T
 			case 2:
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET team='b' WHERE prefix='runner'`)
 			}
-			token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
+			token, err := releaseGitHubSourceForTest(t.Context(), tenant, auth, provider)
 			if err == nil || token.Secret != "" || provider.calls != 0 {
 				t.Logf("mode=%d token=%+v calls=%d err=%v", mode, token, provider.calls, err)
 				return false
@@ -293,7 +311,7 @@ func TestGitHubSourceReleaseMintsOutsideTransactionsAndRechecksProperty(t *testi
 				}
 			}
 			provider.listErr = errors.New("repository listing unavailable")
-			token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
+			token, err := releaseGitHubSourceForTest(t.Context(), tenant, auth, provider)
 			if provider.lists != 0 {
 				t.Errorf("enumerated repository coverage %d times", provider.lists)
 				return false

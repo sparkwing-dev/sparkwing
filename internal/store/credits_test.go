@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -20,9 +22,7 @@ var unpinnedNodeRateMicro = store.DefaultCreditRateTable(store.DefaultCreditRate
 func seedClaimedNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
-		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	if err := teststore.SeedNode(s, ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {

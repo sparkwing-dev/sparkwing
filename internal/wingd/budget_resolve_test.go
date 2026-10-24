@@ -20,12 +20,12 @@ func TestConfigResolvedBudget_UnrecordedSourceIsUnknown(t *testing.T) {
 	}
 
 	got = Config{}.resolvedBudget()
-	if got.Source != BudgetSourceUnset {
-		t.Errorf("source with no budget = %q, want %q", got.Source, BudgetSourceUnset)
+	if got.Source != wingwire.BudgetSourceUnset {
+		t.Errorf("source with no budget = %q, want %q", got.Source, wingwire.BudgetSourceUnset)
 	}
 
-	got = Config{Budget: b, BudgetSource: BudgetSourceConfig, BudgetOrigin: "/etc/x"}.resolvedBudget()
-	if got.Source != BudgetSourceConfig || got.Origin != "/etc/x" {
+	got = Config{Budget: b, BudgetSource: wingwire.BudgetSourceConfig, BudgetOrigin: "/etc/x"}.resolvedBudget()
+	if got.Source != wingwire.BudgetSourceConfig || got.Origin != "/etc/x" {
 		t.Errorf("source/origin = %q/%q, want config//etc/x", got.Source, got.Origin)
 	}
 }
@@ -34,16 +34,16 @@ func TestResolveBudgetUsesSharedMachineConfig(t *testing.T) {
 	path := writeAdmissionConfig(t, "budget: 50%,ignore-external")
 	t.Setenv("SPARKWING_BUDGET", "100")
 	got, err := ResolveBudget("")
-	if err != nil || got.Source != BudgetSourceConfig || got.Origin != path+" admission.budget" || got.Budget.CoresFraction != 0.5 || !got.Budget.IgnoreExternal {
+	if err != nil || got.Source != wingwire.BudgetSourceConfig || got.Origin != path+" admission.budget" || got.Budget.CoresFraction != 0.5 || !got.Budget.IgnoreExternal {
 		t.Fatalf("configured budget=%+v error=%v", got, err)
 	}
 	got, err = ResolveBudget("6")
-	if err != nil || got.Source != BudgetSourceFlag || got.Origin != "--budget" || got.Budget.Cores != 6 {
+	if err != nil || got.Source != wingwire.BudgetSourceFlag || got.Origin != "--budget" || got.Budget.Cores != 6 {
 		t.Fatalf("explicit budget=%+v error=%v", got, err)
 	}
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
 	got, err = ResolveBudget("")
-	if err != nil || got.Source != BudgetSourceUnset || got.Budget.IsSet() || got.Origin != "" {
+	if err != nil || got.Source != wingwire.BudgetSourceUnset || got.Budget.IsSet() || got.Origin != "" {
 		t.Fatalf("absent budget=%+v error=%v", got, err)
 	}
 	path = writeAdmissionConfig(t, "budget: invalid")

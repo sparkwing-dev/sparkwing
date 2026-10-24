@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +20,9 @@ import (
 	"time"
 
 	"golang.org/x/mod/module"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+
 	modzip "golang.org/x/mod/zip"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -28,7 +30,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
@@ -48,9 +49,6 @@ func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := releaseauth.TrustedPublicKeys
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	binary := filepath.Join(t.TempDir(), "engine")
 	build := exec.Command("go", "build", "-p", "4", "-ldflags", "-X main.Version="+version, "-o", binary, "./cmd/sparkwing")
 	build.Dir = root
@@ -79,7 +77,7 @@ func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
 		fmt.Fprintf(&manifest, "%x  %s\n", sha256.Sum256(body), entry)
 	}
 	now := time.Now().UTC().Add(-time.Minute)
-	policy, err := json.Marshal(engine.VersionIndex{Format: 1, PublishedAt: now, Latest: version, Versions: []engine.VersionInfo{{Version: version, PublishedAt: now, SupportUntil: now.AddDate(1, 0, 0)}}})
+	policy, err := json.Marshal(engine.VersionIndex{Format: 1, PublishedAt: now, Latest: version, Versions: []engineid.VersionInfo{{Version: version, PublishedAt: now, SupportUntil: now.AddDate(1, 0, 0)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +97,7 @@ func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
 	})}
 	cache := t.TempDir()
-	resolver, err := engine.NewResolver(engine.Config{CacheDirectory: cache, BuildVersion: version, HTTPClient: online})
+	resolver, err := engine.NewResolver(engine.Config{TrustedKeys: []ed25519.PublicKey{public}, CacheDirectory: cache, BuildVersion: version, HTTPClient: online})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +131,7 @@ func main(){sw.Register("offline",func()sw.Pipeline[sw.NoInputs]{return pipeline
 	if out, err := tidy.CombinedOutput(); err != nil {
 		t.Fatalf("warm released SDK: %v\n%s", err, out)
 	}
-	options := source.Options{SDK: engine.GoSDK, Engines: resolver, Target: target, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}}
+	options := source.Options{SDK: engineid.GoSDK, Engines: resolver, Target: target, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}}
 	spec := source.Spec{RepoKey: "local:released-fixture", LocalCheckout: repo, PipelineDir: ".sparkwing"}
 	selected := inspectReleasedOffline(t, spec, options)
 	if selected.Identity.Pin.Replacement != "" || selected.Identity.Version != version || downloads != 6 {
@@ -141,7 +139,7 @@ func main(){sw.Register("offline",func()sw.Pipeline[sw.NoInputs]{return pipeline
 	}
 	attempts := 0
 	offline := &http.Client{Transport: logRoundTrip(func(*http.Request) (*http.Response, error) { attempts++; return nil, fmt.Errorf("network denied") })}
-	resolver, err = engine.NewResolver(engine.Config{CacheDirectory: cache, BuildVersion: version, HTTPClient: offline, LocalOnly: true})
+	resolver, err = engine.NewResolver(engine.Config{TrustedKeys: []ed25519.PublicKey{public}, CacheDirectory: cache, BuildVersion: version, HTTPClient: offline, LocalOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}

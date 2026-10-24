@@ -66,7 +66,7 @@ type githubCheckReporter struct {
 }
 
 func (r *githubCheckReporter) deliver(ctx context.Context, u githubCheckUpdate) error {
-	tenant, err := ScopedTenantPort[*store.Tenant](ctx, u.team, r.resolveTenant)
+	tenant, err := scopedTenantPort[*store.Tenant](ctx, u.team, r.resolveTenant)
 	if err != nil {
 		return err
 	}

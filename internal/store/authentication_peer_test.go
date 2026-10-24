@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestPeerAuthorityPersistsAndRevocationEndsDelegation(t *testing.T) {
@@ -58,7 +59,7 @@ func TestPeerAuthorityPersistsAndRevocationEndsDelegation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.RevokeAuthority(t.Context(), Actor{Authority: p.Authority}, p.Authority); err != nil {
+	if err := tenant.RevokeAuthority(t.Context(), runstate.Actor{Authority: p.Authority}, p.Authority); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := capability.NewAuthenticator(s.AsOperator()).Authenticate(t.Context(), presentation, route); err == nil {

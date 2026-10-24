@@ -12,12 +12,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // SegmentLookup returns the currently authorized, persisted ranges of one subject.
 type SegmentLookup interface {
-	ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error)
+	ReadLogSegments(context.Context, runstate.Actor, blob.LogReadRequest) (runstate.LogSegments, error)
 }
 
 // SegmentObjects opens exact persisted object keys; listings cannot authorize logs.
@@ -41,7 +41,7 @@ type ReadResult struct {
 }
 
 // Read reauthorizes and verifies each committed segment before emitting its requested suffix.
-func (r CommittedReader) Read(ctx context.Context, actor store.Actor, request blob.LogReadRequest, out io.Writer) (result ReadResult, err error) {
+func (r CommittedReader) Read(ctx context.Context, actor runstate.Actor, request blob.LogReadRequest, out io.Writer) (result ReadResult, err error) {
 	if err := request.Subject.Validate(); err != nil {
 		return result, err
 	}
@@ -109,7 +109,7 @@ func (r CommittedReader) Read(ctx context.Context, actor store.Actor, request bl
 	return result, nil
 }
 
-func validateRanges(request blob.LogReadRequest, view store.LogSegments) error {
+func validateRanges(request blob.LogReadRequest, view runstate.LogSegments) error {
 	want, err := blob.LogSubjectPrefix(ClassStandard, request.Subject)
 	got, gotErr := blob.LogSubjectPrefix(ClassStandard, view.Subject)
 	if err != nil || gotErr != nil || got != want || (view.Complete && view.IncompleteReason != "") {

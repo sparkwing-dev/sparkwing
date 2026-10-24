@@ -7,7 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -22,7 +22,7 @@ type RuntimeConfig struct {
 	Versions      SoftwarePolicy
 	Installation  RunnerInstallation
 	Target        releaseasset.Target
-	Notices       func([]engine.Notice)
+	Notices       func([]engineid.Notice)
 	OnError       func(error)
 }
 

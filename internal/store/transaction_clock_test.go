@@ -108,11 +108,14 @@ func TestTransactionCommitCancellationAfterAutomaticRollback(t *testing.T) {
 }
 
 func TestTransactionResultRequiresCommit(t *testing.T) {
-	for _, failure := range []string{"", "body", "clock", "commit"} {
+	for _, failure := range []string{"", "body", "clock", "commit", "done"} {
 		t.Run(failure, func(t *testing.T) {
 			refused := errors.New("transaction refused")
 			connector := &clockFailureConnector{}
-			if failure == "commit" {
+			if failure == "done" {
+				refused = sql.ErrTxDone
+			}
+			if failure == "commit" || failure == "done" {
 				connector.commitErr = refused
 			}
 			db := sql.OpenDB(connector)

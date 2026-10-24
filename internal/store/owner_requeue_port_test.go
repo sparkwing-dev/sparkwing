@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
@@ -51,8 +51,8 @@ func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
 					if _, err := s.AsOperator().RenewUnit(t.Context(), stale.Award.CapabilityPrefix, false); err == nil {
 						t.Fatal("former holder renewed a replacement")
 					}
-					actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: stale.Award.CapabilityPrefix}, CapabilityPrefix: stale.Award.CapabilityPrefix, Owner: stale.Owner}
-					finish := FinishRunRequest{Unit: stale.Owner, Transition: RunCompletion{RunID: "run", Cause: RunFinish, Actor: actor}}
+					actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: stale.Award.CapabilityPrefix}, CapabilityPrefix: stale.Award.CapabilityPrefix, Owner: stale.Owner}
+					finish := runstate.FinishRunRequest{Unit: stale.Owner, Transition: runstate.RunCompletion{RunID: "run", Cause: runstate.RunFinish, Actor: actor}}
 					if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
 						t.Fatal("former holder finished a replacement's run")
 					}
@@ -96,7 +96,7 @@ func checkRecoveredOwnerFinish(t *testing.T, s *Store, demand UnitDemand, lease 
 	t.Helper()
 	claim, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: claim.Team}
-	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunCompletion{RunID: runspec.RunID(claim.RunID), Cause: RunFinish, Actor: actor}}
+	finish := runstate.FinishRunRequest{Unit: actor.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(claim.RunID), Cause: runstate.RunFinish, Actor: actor}}
 
 	for replay := range 2 {
 		applied, err := tenant.FinishRunAndUnit(t.Context(), finish)
@@ -119,7 +119,7 @@ func checkRecoveredOwnerFinish(t *testing.T, s *Store, demand UnitDemand, lease 
 		t.Fatal("terminal run awarded again")
 	}
 	after, err := tenant.ReadSnapshot(t.Context(), claim.RunID)
-	if err != nil || !reflect.DeepEqual(before, after) || after.Run.State != RunFailed {
+	if err != nil || !reflect.DeepEqual(before, after) || after.Run.State != runstate.RunFailed {
 		t.Fatalf("terminal recovery changed the verdict: %v", err)
 	}
 	unitBillingTotal(t, s, charged, true)

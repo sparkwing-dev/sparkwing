@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -83,7 +84,7 @@ func checkStoreSessions(t *testing.T) (err error) {
 		return err
 	}
 	ownerDigest := sha256.Sum256([]byte(ownerRaw))
-	owner := store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(ownerDigest[:])}}
+	owner := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(ownerDigest[:])}}
 	tenant, err = s.ForTeam(ctx, team)
 	if err != nil {
 		return err

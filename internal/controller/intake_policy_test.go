@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -141,7 +142,7 @@ func TestControllerIntakePublishesCapturedLocalHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := tenant.AcceptPlan(t.Context(), store.PlanAcceptance{RunID: admitted.RunID, Actor: store.Actor{Kind: store.ActorOperator, Authority: authority, CapabilityPrefix: credential.Prefix}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}})
+	accepted, err := tenant.AcceptPlan(t.Context(), store.PlanAcceptance{RunID: admitted.RunID, Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: authority, CapabilityPrefix: credential.Prefix}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}})
 	if err != nil || accepted.Owner != nil || accepted.Spec.Resolved.Settings.Jobs["historical"].Timeout.Value != 12*time.Hour {
 		t.Fatalf("historical plan gained remote execution bounds: %v", err)
 	}

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -16,11 +18,11 @@ func displayFilterRuns() []store.Run {
 	base := time.Unix(1700000000, 0)
 	finished := func(sec int) *time.Time { t := base.Add(time.Duration(sec) * time.Second); return &t }
 	return []store.Run{
-		{ID: "r-push-main", Pipeline: "build", Status: "success", TriggerSource: "push", GitBranch: "main", GitSHA: "aaaaaaa111", DeclaredRepo: "acme/web", StartedAt: base.Add(1 * time.Second), FinishedAt: finished(5)},
-		{ID: "r-cron-main", Pipeline: "nightly", Status: "failed", TriggerSource: "cron", GitBranch: "main", GitSHA: "bbbbbbb222", DeclaredRepo: "acme/api", StartedAt: base.Add(2 * time.Second), FinishedAt: finished(9)},
-		{ID: "r-manual-feat", Pipeline: "build", Status: "running", TriggerSource: "manual", GitBranch: "feat/x", GitSHA: "ccccccc333", DeclaredRepo: "web", StartedAt: base.Add(3 * time.Second)},
-		{ID: "r-norepo", Pipeline: "deploy", Status: "cancelled", GitBranch: "main", GitSHA: "aaaaaaa999", StartedAt: base.Add(4 * time.Second), FinishedAt: finished(20)},
-		{ID: "r-pct_literal", Pipeline: "deploy", Status: "success", TriggerSource: "push", DeclaredRepo: "100%_done", StartedAt: base.Add(5 * time.Second), FinishedAt: finished(30)},
+		{RunSummary: runstate.RunSummary{ID: "r-push-main", Pipeline: "build", Status: "success", TriggerSource: "push", GitBranch: "main", GitSHA: "aaaaaaa111", DeclaredRepo: "acme/web", StartedAt: base.Add(1 * time.Second), FinishedAt: finished(5)}},
+		{RunSummary: runstate.RunSummary{ID: "r-cron-main", Pipeline: "nightly", Status: "failed", TriggerSource: "cron", GitBranch: "main", GitSHA: "bbbbbbb222", DeclaredRepo: "acme/api", StartedAt: base.Add(2 * time.Second), FinishedAt: finished(9)}},
+		{RunSummary: runstate.RunSummary{ID: "r-manual-feat", Pipeline: "build", Status: "running", TriggerSource: "manual", GitBranch: "feat/x", GitSHA: "ccccccc333", DeclaredRepo: "web", StartedAt: base.Add(3 * time.Second)}},
+		{RunSummary: runstate.RunSummary{ID: "r-norepo", Pipeline: "deploy", Status: "cancelled", GitBranch: "main", GitSHA: "aaaaaaa999", StartedAt: base.Add(4 * time.Second), FinishedAt: finished(20)}},
+		{RunSummary: runstate.RunSummary{ID: "r-pct_literal", Pipeline: "deploy", Status: "success", TriggerSource: "push", DeclaredRepo: "100%_done", StartedAt: base.Add(5 * time.Second), FinishedAt: finished(30)}},
 	}
 }
 
@@ -88,7 +90,7 @@ func TestListRuns_BeforeCursorWalksBackToTheNewestRunExactlyOnce(t *testing.T) {
 	const total = 23
 	instant := time.Unix(1700000000, 0)
 	for i := range total {
-		r := store.Run{ID: "run-" + strconv.Itoa(100+i), Pipeline: "build", Status: "success", StartedAt: instant.Add(time.Duration(i/3) * time.Second)}
+		r := store.Run{RunSummary: runstate.RunSummary{ID: "run-" + strconv.Itoa(100+i), Pipeline: "build", Status: "success", StartedAt: instant.Add(time.Duration(i/3) * time.Second)}}
 		if err := alpha.TestOnlySeedRun(ctx, r); err != nil {
 			t.Fatal(err)
 		}
@@ -198,9 +200,9 @@ func TestListRuns_RepoNamesMatchCaseSensitively(t *testing.T) {
 	alpha := tenantFor(t, st, "alpha")
 	base := time.Unix(1700000000, 0)
 	runs := []store.Run{
-		{ID: "lower", Pipeline: "build", Status: "success", DeclaredRepo: "owner/web", StartedAt: base},
-		{ID: "upper", Pipeline: "build", Status: "success", DeclaredRepo: "owner/Web", StartedAt: base.Add(time.Second)},
-		{ID: "bare", Pipeline: "build", Status: "success", DeclaredRepo: "Web", StartedAt: base.Add(2 * time.Second)},
+		{RunSummary: runstate.RunSummary{ID: "lower", Pipeline: "build", Status: "success", DeclaredRepo: "owner/web", StartedAt: base}},
+		{RunSummary: runstate.RunSummary{ID: "upper", Pipeline: "build", Status: "success", DeclaredRepo: "owner/Web", StartedAt: base.Add(time.Second)}},
+		{RunSummary: runstate.RunSummary{ID: "bare", Pipeline: "build", Status: "success", DeclaredRepo: "Web", StartedAt: base.Add(2 * time.Second)}},
 	}
 	for _, r := range runs {
 		if err := alpha.TestOnlySeedRun(context.Background(), r); err != nil {
@@ -218,8 +220,8 @@ func TestListRuns_TextFoldsASCIICaseOnly(t *testing.T) {
 	alpha := tenantFor(t, st, "alpha")
 	base := time.Unix(1700000000, 0)
 	runs := []store.Run{
-		{ID: "accented", Pipeline: "build", Status: "success", GitBranch: "ÉTAPE", StartedAt: base},
-		{ID: "plain", Pipeline: "build", Status: "success", GitBranch: "etape", StartedAt: base.Add(time.Second)},
+		{RunSummary: runstate.RunSummary{ID: "accented", Pipeline: "build", Status: "success", GitBranch: "ÉTAPE", StartedAt: base}},
+		{RunSummary: runstate.RunSummary{ID: "plain", Pipeline: "build", Status: "success", GitBranch: "etape", StartedAt: base.Add(time.Second)}},
 	}
 	for _, r := range runs {
 		if err := alpha.TestOnlySeedRun(context.Background(), r); err != nil {

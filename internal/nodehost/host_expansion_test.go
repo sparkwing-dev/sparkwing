@@ -12,12 +12,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -64,7 +65,7 @@ func TestOwnerExpansion(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 9}}
+			owner := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 9}}
 			job := nodeproto.JobSpec{ID: "source", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"first", "second"}}}
 			job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "capacity", Capacity: new(3)}}
 			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
@@ -73,13 +74,13 @@ func TestOwnerExpansion(t *testing.T) {
 			}
 			planHash, _ := runspec.CanonicalHash(plan)
 			jobHash, _ := runspec.CanonicalHash(job)
-			identity := engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
+			identity := engineid.Identity{Version: "v1.0.0", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}
 			resolved := engine.Resolved{Identity: identity}
 			request := runspec.SealedRequest{RunID: "run", Hash: "request", Request: runspec.Request{Pipeline: "pipeline"}}
 			spec := runspec.Spec{Request: request, Hash: "spec", PlanHash: planHash, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}, Engine: identity}}
 			rawPlan, _ := json.Marshal(plan)
 			rawJob, _ := json.Marshal(job)
-			s := newExpansionHostStore(store.RunRow{ID: "run", State: store.RunRunning, Owner: &owner, Request: request, Spec: &spec, Plan: rawPlan, PlanHash: string(planHash)}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: 4, Expansion: store.ExpansionExpected, Spec: rawJob, SpecHash: string(jobHash)})
+			s := newExpansionHostStore(store.RunRow{Execution: runstate.Execution{ID: "run", State: runstate.RunRunning, Owner: &owner, Request: request, Spec: &spec, Plan: rawPlan, PlanHash: string(planHash)}}, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "source"}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Generation: 4, Expansion: runstate.ExpansionExpected, Spec: rawJob, SpecHash: string(jobHash)})
 			var mu sync.Mutex
 			changed := make(chan struct{}, 1)
 			readSnapshot, acceptExpansion := s.readSnapshot, s.acceptExpansion
@@ -102,16 +103,16 @@ func TestOwnerExpansion(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				s.nodes = []store.NodeRow{{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "consumer"}, Status: store.StatusPending, Spec: raw}}
+				s.nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: "run", NodeID: "consumer"}, Status: runstate.StatusPending, Spec: raw}}
 			}
 			refused := errors.New("expansion transaction refused")
 			if mode == "refused" {
 				s.reject = refused
 			}
 			process := newExpansionSDK(plan, mode)
-			evaluator, err := newOwnerEvaluator(evaluationDependencies{Store: s, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil }, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			evaluator, err := newOwnerEvaluator(evaluationDependencies{Store: s, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil }, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return resolved, nil
-			}, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ReadOutput: func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
+			}, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ReadOutput: func(_ context.Context, ref runspec.NodeRef, generation int64) (json.RawMessage, error) {
 				if ref != s.node.Ref || generation != 4 {
 					t.Fatal("output read lost source fence")
 				}
@@ -129,7 +130,7 @@ func TestOwnerExpansion(t *testing.T) {
 				case <-ctx.Done():
 					return context.Cause(ctx)
 				}
-			}, Expand: func(ctx context.Context, input EvaluationInput, row store.NodeRow, binding StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+			}, Expand: func(ctx context.Context, input EvaluationInput, row runstate.NodeRow, binding StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 				if s.finished.Transition.RunID != "" || s.count != 0 {
 					t.Fatal("owner settled before expansion")
 				}
@@ -138,9 +139,9 @@ func TestOwnerExpansion(t *testing.T) {
 				}
 				return evaluator.evaluateExpansion(ctx, input)
 			}}
-			host.Delegator = ownerDelegatorFixture{actor: store.Actor{Kind: store.ActorRunHost, Owner: owner}}
+			host.Delegator = ownerDelegatorFixture{actor: runstate.Actor{Kind: runstate.ActorRunHost, Owner: owner}}
 			sealed, _ := json.Marshal(request.Request)
-			result, err := host.Run(ctx, RunInput{RunID: "run", SealedRequest: sealed, RequestHash: "request", GrantedRunner: runner, Owner: store.Actor{Kind: store.ActorRunHost, Owner: owner}})
+			result, err := host.Run(ctx, RunInput{RunID: "run", SealedRequest: sealed, RequestHash: "request", GrantedRunner: runner, Owner: runstate.Actor{Kind: runstate.ActorRunHost, Owner: owner}})
 			if mode == "refused" {
 				if !errors.Is(err, refused) || s.finished.Transition.RunID != "" {
 					t.Fatalf("refused expansion finished: %+v, %v", s.finished, err)

@@ -7,9 +7,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func blobIntent(actor Actor, attempt runspec.AttemptIdentity) blob.UploadIntent {
+func blobIntent(actor runstate.Actor, attempt runspec.AttemptIdentity) blob.UploadIntent {
 	authority := blob.Authority{CapabilityRef: actor.CapabilityPrefix, Principal: "machine", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: attempt}}
 	return blob.UploadIntent{Authority: authority, Identity: blob.UploadIdentity{Kind: blob.UploadJob, Team: attempt.Team, RunID: attempt.RunID, Principal: "machine", CapabilityRef: actor.CapabilityPrefix, Attempt: authority.Attempt}, Digest: blob.Digest(strings.Repeat("a", 64)), Size: 3}
 }

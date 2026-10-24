@@ -6,6 +6,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -20,8 +21,8 @@ func TestCapacitySupersessionCancelsCurrentAwardAfterReclaim(t *testing.T) {
 			f := newStoreRecoveryFixtureAt(t, false, dialect.target(t), func(plan *nodeproto.PlanDoc) {
 				plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("cancel_others")}}
 			})
-			binding := store.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
-			if result, err := f.tenant.MayStart(ctx, binding, f.holder); err != nil || result.Kind != store.AcquireGranted {
+			binding := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+			if result, err := f.tenant.MayStart(ctx, binding, f.holder); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("first award admission: %+v, %v", result, err)
 			}
 			type reservation struct {
@@ -44,14 +45,14 @@ func TestCapacitySupersessionCancelsCurrentAwardAfterReclaim(t *testing.T) {
 			if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 				t.Fatalf("unstarted award recovery: %+v, %v", reaped, err)
 			}
-			next, err := f.tenant.ReconcileNode(ctx, store.ReconcileRequest{Ref: f.ref, Actor: f.owner, Policy: store.SourceResume})
-			if err != nil || next.Kind != store.Execute || next.Claim == nil || int64(next.Claim.Generation) != binding.Generation+1 {
+			next, err := f.tenant.ReconcileNode(ctx, store.ReconcileRequest{Ref: f.ref, Actor: f.owner, Policy: runstate.SourceResume})
+			if err != nil || next.Kind != runstate.Execute || next.Claim == nil || int64(next.Claim.Generation) != binding.Generation+1 {
 				t.Fatalf("replacement award: %+v, %v", next, err)
 			}
 			claim := next.Claim
-			f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix}, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: f.ref.RunID, NodeID: f.ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
+			f.holder = runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix}, CapabilityPrefix: claim.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: f.ref.RunID, NodeID: f.ref.NodeID, Holder: claim.Holder, Generation: claim.Generation}}
 			binding.Generation = int64(claim.Generation)
-			if result, err := f.tenant.MayStart(ctx, binding, f.holder); err != nil || result.Kind != store.AcquireGranted {
+			if result, err := f.tenant.MayStart(ctx, binding, f.holder); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("replacement award admission: %+v, %v", result, err)
 			}
 			if retained := readReservation(); retained != before || retained.generation == binding.Generation {
@@ -61,11 +62,11 @@ func TestCapacitySupersessionCancelsCurrentAwardAfterReclaim(t *testing.T) {
 				t.Fatal(err)
 			}
 			competitorBinding, competitor := admissionPolicyBlocker(t, f)
-			if result, err := f.tenant.MayStart(ctx, competitorBinding, competitor); err != nil || result.Kind != store.AcquireGranted {
+			if result, err := f.tenant.MayStart(ctx, competitorBinding, competitor); err != nil || result.Kind != runstate.AcquireGranted {
 				t.Fatalf("superseding admission: %+v, %v", result, err)
 			}
 			row, err := f.tenant.ReadNode(ctx, f.ref)
-			if err != nil || row.Generation != claim.Generation || row.Status != store.StatusRunning || row.CancelRequestedAt == nil || row.CancelReason != "concurrency superseded" {
+			if err != nil || row.Generation != claim.Generation || row.Status != runstate.StatusRunning || row.CancelRequestedAt == nil || row.CancelReason != "concurrency superseded" {
 				t.Fatalf("supersession: generation=%d status=%s cancelled_at=%v reason=%q: %v", row.Generation, row.Status, row.CancelRequestedAt, row.CancelReason, err)
 			}
 			var granted bool

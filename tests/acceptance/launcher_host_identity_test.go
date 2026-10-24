@@ -82,7 +82,7 @@ func TestLauncherCapacityWaitDoesNotSealExecutionHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	fence := demand.Binding.LeaseRef()
-	if _, err := service.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{Capacity: []controllerwire.LauncherCapacityObservation{{Award: fence}}, Activations: []controllerwire.LauncherActivation{{Award: fence, NodeUID: "capacity-pod", ReservationID: "invented"}}}); err == nil {
+	if _, err := service.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{Capacity: []controllerwire.LauncherCapacityObservation{{Award: fence}}, Activations: []capability.LauncherActivation{{Award: fence, NodeUID: "capacity-pod", ReservationID: "invented"}}}); err == nil {
 		t.Fatal("capacity observation activated a provisional host")
 	}
 	host("")

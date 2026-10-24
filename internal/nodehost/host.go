@@ -8,6 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -33,7 +34,7 @@ type RunInput struct {
 	RunID         string
 	SealedRequest json.RawMessage
 	RequestHash   string
-	Owner         store.Actor
+	Owner         runstate.Actor
 	Accepted      *AcceptedRun
 }
 
@@ -112,7 +113,7 @@ type NodeHost interface {
 // reconciler follows an existing holder until terminal or requeued, then calls
 // the store's atomic ReconcileNode again. A wait result is never a final result.
 type reconciler interface {
-	ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error)
+	ReconcileNode(context.Context, store.ReconcileRequest) (runstate.ReconciledNode, error)
 }
 
 // expansionStore is the owner/eval host's persistence boundary. The Tenant

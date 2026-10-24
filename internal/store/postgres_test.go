@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"testing"
 	"time"
 
@@ -22,12 +24,7 @@ func TestPostgresOpenAndMigrate(t *testing.T) {
 		t.Errorf("Dialect = %v, want %v", got, want)
 	}
 	ctx := context.Background()
-	r := store.Run{
-		ID:        "pg-open-test",
-		Pipeline:  "p",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
+	r := store.Run{RunSummary: runstate.RunSummary{ID: "pg-open-test", Pipeline: "p", Status: "running", StartedAt: time.Now()}}
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, r); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -48,7 +49,7 @@ func TestNativeClosureFailures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			selected := engine.Resolved{Identity: engine.Identity{Version: "fixture", ManifestDigest: "fixture", Pin: engine.Pin{SDK: engine.GoSDK, Version: hello.SDK.Version}}}
+			selected := engine.Resolved{Identity: engineid.Identity{Version: "fixture", ManifestDigest: "fixture", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: hello.SDK.Version}}}
 			spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "eval"}}, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}, Engine: selected.Identity, Entrypoint: "eval"}}
 			spec.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"PATH": os.Getenv("PATH")}, strings.Repeat("5", 64))
 			if err != nil {
@@ -56,9 +57,9 @@ func TestNativeClosureFailures(t *testing.T) {
 			}
 			spec.Resolved.Settings.Options.NoMemo.Value = id == "memo_no_read"
 			accepted := AcceptedRun{RunID: "run", Spec: marshalEventFixture(t, spec), SpecHash: string(spec.Hash), Plan: plan, PlanHash: string(planHash)}
-			st := newExpansionHostStore(store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: marshalEventFixture(t, plan)}, store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobID)}, Spec: marshalEventFixture(t, job), SpecHash: string(jobHash), Status: store.StatusPending})
+			st := newExpansionHostStore(store.RunRow{Execution: runstate.Execution{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: marshalEventFixture(t, plan)}}, runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(jobID)}, Spec: marshalEventFixture(t, job), SpecHash: string(jobHash), Status: runstate.StatusPending})
 			if id == "source" {
-				st.node.Status, st.node.Outcome, st.node.Expansion = store.StatusDone, store.NodeSuccess, store.ExpansionExpected
+				st.node.Status, st.node.Outcome, st.node.Expansion = runstate.StatusDone, runstate.NodeSuccess, runstate.ExpansionExpected
 			}
 			input := EvaluationInput{Accepted: accepted, NodeID: jobID, SpecHash: string(jobHash), Engine: selected, Entry: &source.Entry{Engine: selected, Command: []string{bin}, Directory: t.TempDir()}, GrantedRunner: runner, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: jobID}}
 			revoked, cleaned := false, false
@@ -86,10 +87,10 @@ func TestNativeClosureFailures(t *testing.T) {
 			host, err := newOwnerEvaluator(evaluationDependencies{
 				Store: st, Start: cfg.StartEvaluation, Masker: masker, Masks: masks,
 				Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}},
-				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+				EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return selected, nil
 				},
-				ReadOutput: func(context.Context, controllerwire.NodeRef, int64) (json.RawMessage, error) {
+				ReadOutput: func(context.Context, runspec.NodeRef, int64) (json.RawMessage, error) {
 					return json.RawMessage("null"), nil
 				},
 				Bind: func(_ context.Context, input EvaluationInput) (ProcessGrant, error) {
@@ -113,7 +114,7 @@ func TestNativeClosureFailures(t *testing.T) {
 				executor, err := NewNodeExecutor(ExecutorDependencies{
 					Store: st, Start: cfg.startNode, Masker: testMasker(),
 					Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}},
-					EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+					EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 						return selected, nil
 					},
 					Bind: func(_ context.Context, input NodeInput) (ProcessGrant, error) {

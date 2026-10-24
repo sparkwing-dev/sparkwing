@@ -6,10 +6,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -148,14 +151,14 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	if err != nil {
 		return controllerwire.ClaimedUnit{}, err
 	}
-	var node store.NodeRow
+	var node runstate.NodeRow
 	if claim.Kind == capability.UnitNode {
-		node, err = tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)})
+		node, err = tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)})
 		if err != nil {
 			return controllerwire.ClaimedUnit{}, err
 		}
 	}
-	unit := engineReconciledClaim(principal.Capability, store.ReconciledNode{Node: node, Claim: &claim.Award, Bearer: claim.Bearer}, run)
+	unit := engineReconciledClaim(principal.Capability, runstate.ReconciledNode{Node: node, Claim: &claim.Award, Bearer: claim.Bearer}, run)
 	unit.RunID, unit.JobID, unit.SourceGeneration = claim.RunID, claim.NodeID, claim.SourceGeneration
 	if unit.OwnerMachine, err = tenant.OwnerMachineClaimant(ctx, principal, claim.RunID); err != nil {
 		return controllerwire.ClaimedUnit{}, err
@@ -193,7 +196,7 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 
 func (s *EngineController) exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error) {
 	if s.authority == nil {
-		return controllerwire.ExchangeResponse{}, missingEndpointPolicy()
+		return controllerwire.ExchangeResponse{}, routepolicy.MissingEndpointPolicy()
 	}
 	ref := authorized.Principal.Authority
 	if ref.Kind != capability.AuthorityCapability || ref.ID == "" || ref.ID != authorized.Principal.Capability.Prefix {
@@ -208,7 +211,7 @@ func (s *EngineController) exchange(ctx context.Context, authorized capability.A
 	if err != nil {
 		return controllerwire.ExchangeResponse{}, err
 	}
-	claim := store.UnitClaim{Team: store.Team(c.Team), Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Bearer: []byte(issued.Raw), Award: store.ClaimAward{CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation), LeaseExpiresAt: snapshot.Binding.LeaseExpiresAt}}
+	claim := store.UnitClaim{Team: store.Team(c.Team), Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Bearer: []byte(issued.Raw), Award: runstate.ClaimAward{CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation), LeaseExpiresAt: snapshot.Binding.LeaseExpiresAt}}
 	if c.Unit == capability.UnitEval {
 		if snapshot.Binding.Expansion == nil {
 			return controllerwire.ExchangeResponse{}, invalidEngineBody("exchanged evaluation has no lease")

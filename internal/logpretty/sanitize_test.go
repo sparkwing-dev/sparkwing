@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const (
@@ -119,7 +117,7 @@ func TestPrettyRendererSanitizesPipelineOutput(t *testing.T) {
 
 	var color bytes.Buffer
 	pc := NewPrettyRendererTo(&color, true)
-	pc.Emit(sparkwing.LogRecord{Event: "exec_line", JobID: "build", Msg: hostile})
+	pc.Emit(Record{Event: "exec_line", JobID: "build", Msg: hostile})
 	pc.Flush()
 	got := color.String()
 	if strings.Contains(got, "\x1b]") || strings.Contains(got, "\x1bc") || strings.Contains(got, "\x1b[2J") {
@@ -136,7 +134,7 @@ func TestPrettyRendererSanitizesPipelineOutput(t *testing.T) {
 
 	var plain bytes.Buffer
 	pp := NewPrettyRendererTo(&plain, false)
-	pp.Emit(sparkwing.LogRecord{Event: "exec_line", JobID: "build", Msg: hostile})
+	pp.Emit(Record{Event: "exec_line", JobID: "build", Msg: hostile})
 	pp.Flush()
 	if strings.ContainsRune(plain.String(), 0x1b) {
 		t.Fatalf("plain output kept an escape: %q", plain.String())
@@ -149,7 +147,7 @@ func TestPrettyRendererSanitizesPipelineOutput(t *testing.T) {
 func TestPrettyRendererKeepsMultiLineCommandEcho(t *testing.T) {
 	var buf bytes.Buffer
 	pr := NewPrettyRendererTo(&buf, false)
-	pr.Emit(sparkwing.LogRecord{Event: "exec_start", JobID: "build", Msg: "$ set -e\necho hello\nmake build"})
+	pr.Emit(Record{Event: "exec_start", JobID: "build", Msg: "$ set -e\necho hello\nmake build"})
 	pr.Flush()
 	got := buf.String()
 	for _, want := range []string{"$ set -e\n", "\n    echo hello\n", "\n    make build\n"} {
@@ -162,16 +160,16 @@ func TestPrettyRendererKeepsMultiLineCommandEcho(t *testing.T) {
 func TestPrettyRendererSanitizesBreadcrumbFields(t *testing.T) {
 	var buf bytes.Buffer
 	pr := NewPrettyRendererTo(&buf, true)
-	pr.Emit(sparkwing.LogRecord{
+	pr.Emit(Record{
 		Event: "exec_line",
 		JobID: "node\x1b]0;JOBID-PWNED\a",
 		Step:  "step\x1bc" + c1CSIs + "2J",
 		Msg:   "ok",
 	})
-	pr.Emit(sparkwing.LogRecord{Event: "step_skipped", JobID: "node", Msg: "s", Attrs: map[string]any{
+	pr.Emit(Record{Event: "step_skipped", JobID: "node", Msg: "s", Attrs: map[string]any{
 		"reason": "cached\x1b]0;REASON-PWNED\a",
 	}})
-	pr.Emit(sparkwing.LogRecord{Event: "approval_resolved", JobID: "node", Msg: "gate", Attrs: map[string]any{
+	pr.Emit(Record{Event: "approval_resolved", JobID: "node", Msg: "gate", Attrs: map[string]any{
 		"resolution": "approved",
 		"via":        "cli\x1bc",
 	}})
@@ -190,10 +188,10 @@ func TestPrettyRendererSanitizesBreadcrumbFields(t *testing.T) {
 func TestPrettyRendererSanitizesStepError(t *testing.T) {
 	var buf bytes.Buffer
 	pr := NewPrettyRendererTo(&buf, true)
-	pr.Emit(sparkwing.LogRecord{Event: "step_end", JobID: "build", Msg: "test", Attrs: map[string]any{
+	pr.Emit(Record{Event: "step_end", JobID: "build", Msg: "test", Attrs: map[string]any{
 		"error": "boom\x1b]0;pwned\a\x1bc",
 	}})
-	pr.Emit(sparkwing.LogRecord{Event: "node_end", JobID: "build", Attrs: map[string]any{"outcome": "failed"}})
+	pr.Emit(Record{Event: "node_end", JobID: "build", Attrs: map[string]any{"outcome": "failed"}})
 	pr.Flush()
 	if strings.Contains(buf.String(), "\x1b]") || strings.Contains(buf.String(), "\x1bc") {
 		t.Fatalf("step error kept a non-SGR escape: %q", buf.String())

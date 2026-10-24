@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
@@ -178,7 +179,7 @@ func accountMutationInvitation(t *testing.T, s *Store) Invitation {
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)}}
+	actor := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)}}
 	a := teamAuthorization(t, s, actor, owner.PersonalTeam, "POST", "/api/v1/team/invitations")
 	tenant, err := s.ForTeam(t.Context(), owner.PersonalTeam)
 	if err != nil {
@@ -352,7 +353,7 @@ func TestSessionCannotSelectRemovedTeamAfterFreshSessionRejoins(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			owner := Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(ownerRaw)}}
+			owner := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(ownerRaw)}}
 			tenant := &Tenant{s: s, team: invitation.Team}
 			if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: accountID}); err != nil {
 				t.Fatal(err)
@@ -395,7 +396,7 @@ func TestSessionCannotSelectRemovedTeamAfterFreshSessionRejoins(t *testing.T) {
 			if old, err := s.AsOperator().LookupSession(t.Context(), raw); err != nil || old.Team != personal {
 				t.Fatalf("refused selection moved session: %+v %v", old, err)
 			}
-			deletion := teamAuthorization(t, s, Actor{Authority: member.Principal.Authority}, personal, "DELETE", "/api/v1/team")
+			deletion := teamAuthorization(t, s, runstate.Actor{Authority: member.Principal.Authority}, personal, "DELETE", "/api/v1/team")
 			if _, err := (&Tenant{s: s, team: personal}).DeleteAuthorizedTeam(t.Context(), deletion); err != nil {
 				t.Fatal(err)
 			}
@@ -422,7 +423,7 @@ func TestSessionFallsBackToTeamJoinedThroughAnotherSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deletion := teamAuthorization(t, s, Actor{Authority: original.Principal.Authority}, personal, "DELETE", "/api/v1/team")
+	deletion := teamAuthorization(t, s, runstate.Actor{Authority: original.Principal.Authority}, personal, "DELETE", "/api/v1/team")
 	if _, err := (&Tenant{s: s, team: personal}).DeleteAuthorizedTeam(t.Context(), deletion); err != nil {
 		t.Fatal(err)
 	}

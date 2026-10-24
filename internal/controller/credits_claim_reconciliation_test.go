@@ -10,6 +10,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -39,8 +41,8 @@ func TestCredits_AnUnpricedSizeIsRefusedAtomically(t *testing.T) {
 	if !strings.Contains(w.Body.String(), UnpricedCPUClassCode) {
 		t.Fatalf("unpriced refusal: %s", w.Body)
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || node.Status != store.StatusDone || node.Outcome != store.NodeFailed || node.ClaimedBy != "" || node.FinishedAt == nil {
+	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || node.Status != runstate.StatusDone || node.Outcome != runstate.NodeFailed || node.ClaimedBy != "" || node.FinishedAt == nil {
 		t.Fatalf("unpriced work did not fail fast: %+v: %v", node, err)
 	}
 	projected, err := tenant.GetNode(t.Context(), "run", "job")
@@ -91,8 +93,8 @@ func TestCredits_MissingLabelCannotClaimByNameOrQueue(t *testing.T) {
 			t.Fatalf("label bypass: %s: %v", w.Body, err)
 		}
 	}
-	node, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || node.ClaimedBy != "" || node.Status != store.StatusPending {
+	node, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || node.ClaimedBy != "" || node.Status != runstate.StatusPending {
 		t.Fatalf("label refusal mutated node=%+v: %v", node, err)
 	}
 

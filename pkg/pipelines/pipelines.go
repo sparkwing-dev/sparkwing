@@ -21,7 +21,7 @@ type Config struct {
 }
 
 // Pipeline is one registry entry. A pipeline binds a Go entrypoint
-// (declared via [sparkwing.RegisterEntrypoint]) to one named
+// (declared via the SDK's RegisterEntrypoint function) to one named
 // deployment shape: defaults, guards, dispatch metadata, and triggers.
 // One Go entrypoint can back many pipelines, each with its own policy.
 type Pipeline struct {

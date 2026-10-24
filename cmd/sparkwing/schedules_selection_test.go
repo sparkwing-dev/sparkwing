@@ -6,18 +6,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 type installedScheduleSet struct {
 	controllerwire.ScheduleRepositoryManager
-	rows map[string]controllerwire.ScheduleDeclaration
+	rows map[string]runspec.ScheduleDeclaration
 }
 
 func (s *installedScheduleSet) WriteSchedules(_ context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error) {
 	if input.Mode == controllerwire.ScheduleReplace {
-		s.rows = map[string]controllerwire.ScheduleDeclaration{}
+		s.rows = map[string]runspec.ScheduleDeclaration{}
 	}
 	for _, row := range input.Schedules {
 		s.rows[row.Pipeline+"/"+row.Name] = row
@@ -29,7 +31,7 @@ func TestSelectiveScheduleInstallPreservesUnselectedDeclarations(t *testing.T) {
 	for _, selector := range []string{"sweep/cloud", "sweep/host"} {
 		t.Run(selector, func(t *testing.T) {
 			f := newScheduleCommandFixture(t)
-			owner := &installedScheduleSet{rows: map[string]controllerwire.ScheduleDeclaration{
+			owner := &installedScheduleSet{rows: map[string]runspec.ScheduleDeclaration{
 				"sweep/cloud": {Pipeline: "sweep", Name: "cloud", Cron: "0 1 * * *"},
 				"sweep/other": {Pipeline: "sweep", Name: "other", Cron: "0 2 * * *"},
 			}}

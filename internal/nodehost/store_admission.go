@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -14,13 +15,13 @@ var errQueueTimeout = errors.New("queue timeout")
 
 // CapacityStore returns durable start decisions for authenticated job awards.
 type CapacityStore interface {
-	MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse, error)
-	RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error
+	MayStart(context.Context, runstate.CapacityBinding, runstate.Actor) (runstate.AcquireSlotResponse, error)
+	RelinquishStart(context.Context, runstate.CapacityBinding, runstate.Actor) error
 }
 
 // admissionFailure carries a refusal committed by the store before execution.
 type admissionFailure struct {
-	Outcome   store.NodeState
+	Outcome   runstate.NodeState
 	Reason    string
 	Err       error
 	committed bool
@@ -29,7 +30,7 @@ type admissionFailure struct {
 func (e *admissionFailure) Error() string { return e.Err.Error() }
 func (e *admissionFailure) Unwrap() error { return e.Err }
 
-func awaitStart(ctx context.Context, state CapacityStore, binding store.CapacityBinding, actor store.Actor, queued func(store.AcquireSlotResponse) error) error {
+func awaitStart(ctx context.Context, state CapacityStore, binding runstate.CapacityBinding, actor runstate.Actor, queued func(runstate.AcquireSlotResponse) error) error {
 	tick := time.NewTicker(waiterPoll)
 	defer tick.Stop()
 	for {
@@ -41,17 +42,17 @@ func awaitStart(ctx context.Context, state CapacityStore, binding store.Capacity
 			return err
 		}
 		switch response.Kind {
-		case store.AcquireGranted, store.AcquireCancellingOthers:
+		case runstate.AcquireGranted, runstate.AcquireCancellingOthers:
 			return nil
-		case store.AcquireSkipped:
-			return &admissionFailure{Outcome: store.NodeSkipped, Err: errors.New("concurrency capacity is full"), committed: true}
-		case store.AcquireFailed:
+		case runstate.AcquireSkipped:
+			return &admissionFailure{Outcome: runstate.NodeSkipped, Err: errors.New("concurrency capacity is full"), committed: true}
+		case runstate.AcquireFailed:
 			failure := errors.New("concurrency capacity is full")
 			if response.FailureReason == store.FailureQueueTimeout {
 				failure = errQueueTimeout
 			}
-			return &admissionFailure{Outcome: store.NodeFailed, Reason: string(response.FailureReason), Err: failure, committed: true}
-		case store.AcquireQueued:
+			return &admissionFailure{Outcome: runstate.NodeFailed, Reason: string(response.FailureReason), Err: failure, committed: true}
+		case runstate.AcquireQueued:
 			if queued != nil {
 				if err := queued(response); err != nil {
 					return err

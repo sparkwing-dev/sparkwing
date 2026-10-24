@@ -15,20 +15,21 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 type inspectionEngines struct {
-	resolve func(engine.Pin, releaseasset.Target) (engine.Resolved, error)
-	ensure  func(engine.Identity, releaseasset.Target) (engine.Resolved, error)
+	resolve func(engineid.Pin, releaseasset.Target) (engine.Resolved, error)
+	ensure  func(engineid.Identity, releaseasset.Target) (engine.Resolved, error)
 }
 
-func (e inspectionEngines) Resolve(_ context.Context, pin engine.Pin, target releaseasset.Target) (engine.Resolved, error) {
+func (e inspectionEngines) Resolve(_ context.Context, pin engineid.Pin, target releaseasset.Target) (engine.Resolved, error) {
 	return e.resolve(pin, target)
 }
 
-func (e inspectionEngines) Ensure(_ context.Context, id engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+func (e inspectionEngines) Ensure(_ context.Context, id engineid.Identity, target releaseasset.Target) (engine.Resolved, error) {
 	return e.ensure(id, target)
 }
 
@@ -56,13 +57,13 @@ func TestInspectionAcquiresSelectedCodeAndEngine(t *testing.T) {
 	writeRepoFile(t, hello, `"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v1.2.3"},"features":[]}}`)
 	home := t.TempDir()
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
-	pin := engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}
-	selected := engine.Resolved{Identity: engine.Identity{Pin: pin, Version: "v1.2.3", ManifestDigest: "verified-selected"}, Target: target, Executable: bin}
+	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}
+	selected := engine.Resolved{Identity: engineid.Identity{Pin: pin, Version: "v1.2.3", ManifestDigest: "verified-selected"}, Target: target, Executable: bin}
 	var operations []string
 	options := source.Options{
-		Target: target, Workspace: filepath.Join(home, "workspaces"), SDK: engine.TypeScriptSDK,
+		Target: target, Workspace: filepath.Join(home, "workspaces"), SDK: engineid.TypeScriptSDK,
 		Engines: inspectionEngines{
-			resolve: func(got engine.Pin, gotTarget releaseasset.Target) (engine.Resolved, error) {
+			resolve: func(got engineid.Pin, gotTarget releaseasset.Target) (engine.Resolved, error) {
 				if got.SDK != pin.SDK || got.Version != pin.Version || gotTarget != target {
 					t.Fatalf("engine selected from invoking code: %+v %+v", got, gotTarget)
 				}
@@ -70,7 +71,7 @@ func TestInspectionAcquiresSelectedCodeAndEngine(t *testing.T) {
 				operations = append(operations, "resolve")
 				return selected, nil
 			},
-			ensure: func(id engine.Identity, gotTarget releaseasset.Target) (engine.Resolved, error) {
+			ensure: func(id engineid.Identity, gotTarget releaseasset.Target) (engine.Resolved, error) {
 				if id != selected.Identity || gotTarget != target {
 					t.Fatal("inspection changed selected engine")
 				}
@@ -79,7 +80,7 @@ func TestInspectionAcquiresSelectedCodeAndEngine(t *testing.T) {
 			},
 		},
 		InstallSDK: func(_ context.Context, got engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
-			if got.Identity != selected.Identity || request.SDK != engine.GoSDK {
+			if got.Identity != selected.Identity || request.SDK != engineid.GoSDK {
 				t.Fatal("installer used invoking engine or SDK")
 			}
 			pipelineDir, err := request.PipelineDirectory()
@@ -121,13 +122,13 @@ func TestInspectionPolicyRefusalPreventsInstallationProperty(t *testing.T) {
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	property := func(reason uint64) bool {
 		denied := fmt.Errorf("selected engine revoked: %d", reason)
-		var pin engine.Pin
+		var pin engineid.Pin
 		options := source.Options{Workspace: filepath.Join(home, "workspaces"), Target: target, Engines: inspectionEngines{
-			resolve: func(got engine.Pin, _ releaseasset.Target) (engine.Resolved, error) {
+			resolve: func(got engineid.Pin, _ releaseasset.Target) (engine.Resolved, error) {
 				pin = got
 				return engine.Resolved{}, denied
 			},
-			ensure: func(engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			ensure: func(engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 				t.Fatal("ensured revoked engine")
 				return engine.Resolved{}, nil
 			},
@@ -136,7 +137,7 @@ func TestInspectionPolicyRefusalPreventsInstallationProperty(t *testing.T) {
 			return engine.SDKCommand{}, nil
 		}}
 		err := withLocalPipelineEntry(t.Context(), home, dir, "demo", runFlags{}, os.Environ(), options, func(context.Context, pipelineInspection, string) error { t.Fatal("executed revoked code"); return nil })
-		return errors.Is(err, denied) && pin.SDK == engine.GoSDK && pin.Version == "v1.2.3"
+		return errors.Is(err, denied) && pin.SDK == engineid.GoSDK && pin.Version == "v1.2.3"
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
 		t.Fatal(err)

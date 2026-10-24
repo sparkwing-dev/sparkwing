@@ -18,9 +18,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -117,7 +117,7 @@ type githubCompletionFixture struct {
 	api    *completionGitHub
 	cfg    githubapp.Config
 	now    time.Time
-	finish func(store.RunState)
+	finish func(runstate.RunState)
 }
 
 func newGitHubCompletion(t *testing.T) *githubCompletionFixture {
@@ -187,7 +187,7 @@ func (f *githubCompletionFixture) revision() (desired, delivered, attempts, next
 }
 
 func TestGitHubCompletionFromRealTerminalTransition(t *testing.T) {
-	for outcome, conclusion := range map[store.RunState]string{store.RunSuccess: "success", store.RunFailed: "failure", store.RunCancelled: "cancelled"} {
+	for outcome, conclusion := range map[runstate.RunState]string{runstate.RunSuccess: "success", runstate.RunFailed: "failure", runstate.RunCancelled: "cancelled"} {
 		t.Run(string(outcome), func(t *testing.T) {
 			f := newGitHubCompletion(t)
 			f.finish(outcome)
@@ -211,7 +211,7 @@ func TestGitHubCompletionFromRealTerminalTransition(t *testing.T) {
 				t.Fatalf("revisions=%d/%d attempts=%d", delivered, desired, attempts)
 			}
 			p, err := f.tenant.GetPipelineProfile(t.Context(), "ci", "build")
-			if err != nil || outcome == store.RunSuccess && (p == nil || p.SampleCount != 1) || outcome != store.RunSuccess && p != nil {
+			if err != nil || outcome == runstate.RunSuccess && (p == nil || p.SampleCount != 1) || outcome != runstate.RunSuccess && p != nil {
 				t.Fatalf("profile=%+v: %v", p, err)
 			}
 		})
@@ -220,7 +220,7 @@ func TestGitHubCompletionFromRealTerminalTransition(t *testing.T) {
 
 func TestGitHubCompletionRetriesAfterControllerReplacement(t *testing.T) {
 	f := newGitHubCompletion(t)
-	f.finish(store.RunSuccess)
+	f.finish(runstate.RunSuccess)
 	f.api.failWrites = 2
 	var logs bytes.Buffer
 	f.server.logger = slog.New(slog.NewJSONHandler(&logs, nil))
@@ -240,7 +240,7 @@ func TestGitHubCompletionRetriesAfterControllerReplacement(t *testing.T) {
 		t.Fatalf("second failure=%d attempts=%d next=%d", delivered, attempts, next)
 	}
 	run, err := f.tenant.ReadRun(t.Context(), "run")
-	if err != nil || run.State != store.RunSuccess || strings.Count(logs.String(), "deliver run effect") != 2 {
+	if err != nil || run.State != runstate.RunSuccess || strings.Count(logs.String(), "deliver run effect") != 2 {
 		t.Fatalf("GitHub failure changed run=%s: %v logs=%s", run.State, err, logs.String())
 	}
 	f.server.Server = New(f.server.store, nil).WithGitHubApp(f.cfg)
@@ -259,7 +259,7 @@ func TestGitHubCompletionAcknowledgesOnlyRevisionSent(t *testing.T) {
 	f.api.before = func(r *http.Request) {
 		if !sent && r.Method == "POST" && r.URL.Path == "/repos/acme/app/check-runs" {
 			sent = true
-			f.finish(store.RunFailed)
+			f.finish(runstate.RunFailed)
 		}
 	}
 	f.reconcile()
@@ -276,7 +276,7 @@ func TestGitHubCompletionAcknowledgesOnlyRevisionSent(t *testing.T) {
 
 func TestGitHubCompletionAdoptsUnrecordedCreate(t *testing.T) {
 	f := newGitHubCompletion(t)
-	f.finish(store.RunSuccess)
+	f.finish(runstate.RunSuccess)
 	engineSQL(t, f.server.store, `CREATE TRIGGER refuse_check_record BEFORE UPDATE OF github_check_run_id ON triggers WHEN NEW.github_check_run_id>0 BEGIN SELECT RAISE(ABORT,'record refused'); END`)
 	f.reconcile()
 	if len(f.api.checks) != 1 || f.api.existing != 101 {
@@ -309,7 +309,7 @@ func TestGitHubCompletionFallbackSurvivesReplacement(t *testing.T) {
 	engineSQL(t, f.server.store, `UPDATE runs SET status='running' WHERE team='a' AND id='run'`)
 	f.server.Server = New(f.server.store, nil).WithGitHubApp(f.cfg)
 	f.api.checksGranted = true
-	f.finish(store.RunSuccess)
+	f.finish(runstate.RunSuccess)
 	f.reconcile()
 	if len(f.api.checks) != 0 || len(f.api.statuses) != 2 || f.api.statuses[1].State != "success" {
 		t.Fatalf("fallback changed after replacement: checks=%+v statuses=%+v", f.api.checks, f.api.statuses)
@@ -320,7 +320,7 @@ func TestGitHubCompletionUsesCurrentNumericRepository(t *testing.T) {
 	f := newGitHubCompletion(t)
 	f.api.name = "renamed/new-name"
 	f.changeRequest(func(input *runspec.Request) { input.Git.Repository.Display = "reused/old-name" })
-	f.finish(store.RunSuccess)
+	f.finish(runstate.RunSuccess)
 	f.reconcile()
 	if len(f.api.checks) != 1 {
 		t.Fatalf("renamed repository checks=%+v paths=%v", f.api.checks, f.api.paths)
@@ -373,7 +373,7 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 				}
 			}
 		}
-		f.finish(store.RunSuccess)
+		f.finish(runstate.RunSuccess)
 		var logs bytes.Buffer
 		f.server.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 		f.reconcile()
@@ -402,13 +402,13 @@ func TestGitHubCompletionStalePhasesNeverRegressProperty(t *testing.T) {
 	property := func(outcome uint8, phase, statuses bool) bool {
 		f := newGitHubCompletion(t)
 		f.api.checksGranted = !statuses
-		state := []store.RunState{store.RunSuccess, store.RunFailed, store.RunCancelled}[outcome%3]
+		state := []runstate.RunState{runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled}[outcome%3]
 		f.finish(state)
 		f.reconcile()
 		currentChecks, currentStatuses := len(f.api.checks), len(f.api.statuses)
-		old := store.RunPending
+		old := runstate.RunPending
 		if phase {
-			old = store.RunRunning
+			old = runstate.RunRunning
 		}
 		u, relevant, err := f.server.githubAppCheckUpdate(t.Context(), f.tenant, store.DesiredRunEffect{RunID: "run", State: old})
 		if err != nil || !relevant {
@@ -437,10 +437,10 @@ func TestGitHubCompletionSummaryPrivacyProperty(t *testing.T) {
 		if err := teststore.SeedNode(f.server.store, t.Context(), store.Node{RunID: "run", NodeID: private, Status: "pending", Error: private}); err != nil {
 			t.Fatal(err)
 		}
-		if err := teststore.SeedNodeFinish(f.server.store, t.Context(), f.tenant.Team(), controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(private)}, store.NodeResult{Outcome: store.NodeFailed, MaskedError: private}); err != nil {
+		if err := teststore.SeedNodeFinish(f.server.store, t.Context(), f.tenant.Team(), runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(private)}, runstate.NodeResult{Outcome: runstate.NodeFailed, MaskedError: private}); err != nil {
 			t.Fatal(err)
 		}
-		f.finish(store.RunFailed)
+		f.finish(runstate.RunFailed)
 		engineSQL(t, f.server.store, `UPDATE runs SET error=? WHERE team='a' AND id='run'`, private)
 		run, err := f.tenant.GetRun(t.Context(), "run")
 		if err != nil || run.Error != private {
@@ -464,7 +464,7 @@ func TestGitHubCompletionSummaryPrivacyProperty(t *testing.T) {
 
 func TestGitHubCompletionCancellationLeavesDurableWork(t *testing.T) {
 	f := newGitHubCompletion(t)
-	f.finish(store.RunSuccess)
+	f.finish(runstate.RunSuccess)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := f.server.ReconcileRunEffects(ctx); err == nil {
@@ -482,7 +482,7 @@ func TestGitHubCompletionCancellationLeavesDurableWork(t *testing.T) {
 
 func TestGitHubCompletionTwoControllersDeliverOnce(t *testing.T) {
 	f := newGitHubCompletion(t)
-	f.finish(store.RunSuccess)
+	f.finish(runstate.RunSuccess)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var unblock sync.Once
 	t.Cleanup(func() { unblock.Do(func() { close(release) }) })
@@ -541,7 +541,7 @@ func TestGitHubCompletionReaperPreservesTimeoutConclusion(t *testing.T) {
 			if len(f.api.checks) != 1 || f.api.checks[0].Conclusion != "timed_out" {
 				t.Fatalf("reaped run checks=%+v", f.api.checks)
 			}
-			u, _, err := f.server.githubAppCheckUpdate(t.Context(), f.tenant, store.DesiredRunEffect{RunID: "run", State: store.RunPending})
+			u, _, err := f.server.githubAppCheckUpdate(t.Context(), f.tenant, store.DesiredRunEffect{RunID: "run", State: runstate.RunPending})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -563,7 +563,7 @@ func TestGitHubCompletionDelayedPendingLeavesRunningCheck(t *testing.T) {
 	if len(f.api.checks) != 1 || f.api.checks[0].Status != "in_progress" {
 		t.Fatalf("running check=%+v", f.api.checks)
 	}
-	u, _, err := f.server.githubAppCheckUpdate(t.Context(), f.tenant, store.DesiredRunEffect{RunID: "run", State: store.RunPending})
+	u, _, err := f.server.githubAppCheckUpdate(t.Context(), f.tenant, store.DesiredRunEffect{RunID: "run", State: runstate.RunPending})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -578,12 +578,12 @@ func TestGitHubCompletionDelayedPendingLeavesRunningCheck(t *testing.T) {
 
 func TestGitHubCompletionRejectsForeignTenant(t *testing.T) {
 	f := newGitHubCompletion(t)
-	f.finish(store.RunSuccess)
+	f.finish(runstate.RunSuccess)
 	foreign, err := f.server.store.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, relevant, err := f.server.githubAppCheckUpdate(t.Context(), foreign, store.DesiredRunEffect{RunID: "run", State: store.RunSuccess}); err == nil || relevant {
+	if _, relevant, err := f.server.githubAppCheckUpdate(t.Context(), foreign, store.DesiredRunEffect{RunID: "run", State: runstate.RunSuccess}); err == nil || relevant {
 		t.Fatalf("foreign run resolution=%t, %v", relevant, err)
 	}
 	if len(f.api.paths) != 0 {
@@ -595,7 +595,7 @@ func TestGitHubCompletionUnverifiedRunReportsNothing(t *testing.T) {
 	f := newGitHubCompletion(t)
 	// The App facts stay, so only the asserted provenance keeps the run from reporting.
 	f.attach(assertedProvenance(t, "ci", "refs/heads/main", strings.Repeat("a", 40)))
-	f.finish(store.RunSuccess)
+	f.finish(runstate.RunSuccess)
 	f.reconcile()
 	_, delivered, attempts, _ := f.revision()
 	if delivered != 1 || attempts != 0 || len(f.api.paths) != 0 {
@@ -605,7 +605,7 @@ func TestGitHubCompletionUnverifiedRunReportsNothing(t *testing.T) {
 
 func TestGitHubCompletionMissingAppKeepsTerminalDue(t *testing.T) {
 	f := newGitHubCompletion(t)
-	f.finish(store.RunSuccess)
+	f.finish(runstate.RunSuccess)
 	f.server.Server = New(f.server.store, nil)
 	f.reconcile()
 	_, delivered, attempts, _ := f.revision()

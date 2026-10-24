@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -35,7 +36,7 @@ func TestReaperRecoversExpiredOwnerAndKeepsLiveOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 			started := time.Unix(0, 1)
-			if err := teststore.SeedTriggerClaim(st, ctx, store.DefaultTeam, "run", store.Actor{CapabilityPrefix: "owner-cap", NodeFence: runspec.NodeFence{RunID: "run", Holder: "owner", Generation: 7}}, until, &started); err != nil {
+			if err := teststore.SeedTriggerClaim(st, ctx, store.DefaultTeam, "run", runstate.Actor{CapabilityPrefix: "owner-cap", NodeFence: runspec.NodeFence{RunID: "run", Holder: "owner", Generation: 7}}, until, &started); err != nil {
 				t.Fatal(err)
 			}
 			srv := New(st, slog.New(slog.DiscardHandler))
@@ -49,7 +50,7 @@ func TestReaperRecoversExpiredOwnerAndKeepsLiveOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 			run, err := tenant.ReadRun(ctx, "run")
-			if err != nil || run.State != store.RunRunning || run.FinishedAt != nil {
+			if err != nil || run.State != runstate.RunRunning || run.FinishedAt != nil {
 				t.Fatalf("owner recovery ended its run: state=%s, %v", run.State, err)
 			}
 			var status string

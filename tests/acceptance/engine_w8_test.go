@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,8 +15,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 )
 
 type engineTransportW8 struct {
@@ -32,16 +31,13 @@ func runnerVersionPolicyW8(t *testing.T, version string) *engine.Resolver {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := releaseauth.TrustedPublicKeys
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Now().UTC()
-	body, err := json.Marshal(engine.VersionIndex{Format: 1, PublishedAt: now, Latest: version, Versions: []engine.VersionInfo{{Version: version, PublishedAt: now, SupportUntil: now.AddDate(0, 12, 0)}}})
+	body, err := json.Marshal(engine.VersionIndex{Format: 1, PublishedAt: now, Latest: version, Versions: []engineid.VersionInfo{{Version: version, PublishedAt: now, SupportUntil: now.AddDate(0, 12, 0)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	transport := &engineTransportW8{body: body, signature: ed25519.Sign(key, body)}
-	resolver, err := engine.NewResolver(engine.Config{CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}})
+	resolver, err := engine.NewResolver(engine.Config{TrustedKeys: []ed25519.PublicKey{public}, CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,14 +49,11 @@ func TestEngineW8IndexFailureComponents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := releaseauth.TrustedPublicKeys
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	published := now.AddDate(0, -9, 0)
 	policy := engine.VersionIndex{
 		Format: 1, PublishedAt: now, Latest: "v0.20.0",
-		Versions: []engine.VersionInfo{
+		Versions: []engineid.VersionInfo{
 			{Version: "v0.10.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)},
 			{Version: "v0.20.0", PublishedAt: now.Add(-time.Hour), SupportUntil: now.Add(-time.Hour).AddDate(0, 12, 0)},
 		},
@@ -74,7 +67,7 @@ func TestEngineW8IndexFailureComponents(t *testing.T) {
 	for _, failure := range []string{"signature", "malformed", "unavailable"} {
 		t.Run(failure, func(t *testing.T) {
 			transport := &engineTransportW8{body: body, signature: ed25519.Sign(key, body)}
-			config := engine.Config{CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}}
+			config := engine.Config{TrustedKeys: []ed25519.PublicKey{public}, CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}}
 			resolver, err := engine.NewResolver(config)
 			if err != nil {
 				t.Fatal(err)
@@ -149,13 +142,10 @@ func TestEngineW8FallbackHonorsSharedMachineRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := releaseauth.TrustedPublicKeys
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	for _, failure := range []string{"unavailable", "signed_replay"} {
 		t.Run(failure, func(t *testing.T) {
-			policy := engine.VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0", Versions: []engine.VersionInfo{
+			policy := engine.VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0", Versions: []engineid.VersionInfo{
 				{Version: "v0.10.0", PublishedAt: now.AddDate(0, -9, 0), SupportUntil: now.AddDate(0, 3, 0)},
 				{Version: "v0.20.0", PublishedAt: now, SupportUntil: now.AddDate(1, 0, 0)},
 			}}
@@ -164,7 +154,7 @@ func TestEngineW8FallbackHonorsSharedMachineRevocation(t *testing.T) {
 				t.Fatal(err)
 			}
 			transport := &engineTransportW8{body: body, signature: ed25519.Sign(key, body)}
-			config := engine.Config{CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}}
+			config := engine.Config{TrustedKeys: []ed25519.PublicKey{public}, CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}}
 			first, err := engine.NewResolver(config)
 			if err != nil {
 				t.Fatal(err)
@@ -210,11 +200,8 @@ func TestEngineW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := releaseauth.TrustedPublicKeys
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
-	policy := engine.VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0", Versions: []engine.VersionInfo{
+	policy := engine.VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0", Versions: []engineid.VersionInfo{
 		{Version: "v0.10.0", PublishedAt: now.AddDate(-2, 0, 0), SupportUntil: now.AddDate(-1, 0, 0)},
 		{Version: "v0.20.0", PublishedAt: now.AddDate(0, -1, 0), SupportUntil: now.AddDate(0, 11, 0)},
 	}}
@@ -223,7 +210,7 @@ func TestEngineW8Components(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &engineTransportW8{body: body, signature: ed25519.Sign(key, body)}
-	resolver, err := engine.NewResolver(engine.Config{CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}})
+	resolver, err := engine.NewResolver(engine.Config{TrustedKeys: []ed25519.PublicKey{public}, CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +233,7 @@ func TestEngineW8Components(t *testing.T) {
 		if err != nil || !result.Fallback || len(result.Notices) != 1 {
 			t.Fatalf("verified fallback: %+v %v", result, err)
 		}
-		empty, err := engine.NewResolver(engine.Config{CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}})
+		empty, err := engine.NewResolver(engine.Config{TrustedKeys: []ed25519.PublicKey{public}, CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -257,12 +244,12 @@ func TestEngineW8Components(t *testing.T) {
 		}
 	})
 	t.Run("expiry_warns_security_revocation_blocks", func(t *testing.T) {
-		verified, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: ed25519.Sign(key, body)}, now)
+		verified, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: ed25519.Sign(key, body)}, now, []ed25519.PublicKey{public})
 		if err != nil {
 			t.Fatal(err)
 		}
 		notices, err := engine.Evaluate(verified, "v0.10.0", now)
-		if err != nil || len(notices) != 1 || notices[0].Kind != engine.NoticeSupportEnded {
+		if err != nil || len(notices) != 1 || notices[0].Kind != engineid.NoticeSupportEnded {
 			t.Fatalf("expiry refused: %+v %v", notices, err)
 		}
 		policy.Revoked = []engine.Restriction{{Version: "v0.10.0", Reason: "fixture security revocation", Security: true, AnnouncedAt: now, EffectiveAt: now}}
@@ -270,7 +257,7 @@ func TestEngineW8Components(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verified, err = engine.VerifyIndex(engine.SignedIndex{Body: revoked, Signature: ed25519.Sign(key, revoked)}, now)
+		verified, err = engine.VerifyIndex(engine.SignedIndex{Body: revoked, Signature: ed25519.Sign(key, revoked)}, now, []ed25519.PublicKey{public})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -16,13 +17,13 @@ func TestBurstBusyComputeRelinquishesPermitCapacityAndAward(t *testing.T) {
 	request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}, {Target: "cloud"}}}}
 	request.Options.OwnerExecutionTimeout = runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}
 	fixture := newStoreHostFixtureForRequest(t, openStore(t), capacityPlan("queue", 0, "job"), request)
-	ref := controllerwire.NodeRef{RunID: runspec.RunID(fixture.Input.RunID), NodeID: "job"}
+	ref := runspec.NodeRef{RunID: runspec.RunID(fixture.Input.RunID), NodeID: "job"}
 	if _, err := fixture.Tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: fixture.Actor}); err != nil {
 		t.Fatal(err)
 	}
 	before := capacityRow(t, fixture, "job")
-	award, err := fixture.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: fixture.Actor, Policy: store.SourceNone})
-	if err != nil || award.Kind != store.Execute {
+	award, err := fixture.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: fixture.Actor, Policy: runstate.SourceNone})
+	if err != nil || award.Kind != runstate.Execute {
 		t.Fatalf("provisional award=%+v error=%v", award, err)
 	}
 	entry, err := fixture.Host.Acquire(t.Context(), fixture.Input)

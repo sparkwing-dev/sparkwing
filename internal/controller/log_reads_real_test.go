@@ -17,8 +17,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -37,7 +37,7 @@ func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLog
 	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 	actor := engineActor(authorized)
 	engineAdmitExecution(t, engine.Store, authorized.Principal)
-	started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
+	started, err := tenant.TransitionNode(t.Context(), store.StartNode{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLog
 			t.Error(err)
 		}
 	})
-	var segments []store.Segment
+	var segments []runstate.Segment
 	var offset int64
 	for i, payload := range payloads {
 		var compressed bytes.Buffer
@@ -75,7 +75,7 @@ func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLog
 		if response.Code != http.StatusCreated {
 			t.Fatalf("signed log PUT: %d %s", response.Code, response.Body)
 		}
-		segments = append(segments, store.Segment{Index: int64(i + 1), Offset: offset, Size: int64(len(payload)), StoredBytes: int64(compressed.Len()), Digest: fmt.Sprintf("%x", sha256.Sum256(compressed.Bytes())), ObjectKey: key})
+		segments = append(segments, runstate.Segment{Index: int64(i + 1), Offset: offset, Size: int64(len(payload)), StoredBytes: int64(compressed.Len()), Digest: fmt.Sprintf("%x", sha256.Sum256(compressed.Bytes())), ObjectKey: key})
 		offset += int64(len(payload))
 	}
 	if err := tenant.RecordSegments(t.Context(), store.SegmentCommit{Actor: actor, Subject: subject, Segments: segments, Final: true, RetentionClass: "r30"}); err != nil {
@@ -127,7 +127,7 @@ func TestCommittedDashboardLogsNeverEmitForForeignOrRevokedActors(t *testing.T) 
 		logs, subject, st := committedDashboardLogs(t, []byte(fmt.Sprintf("%x\n", seed)))
 		foreign := logs.actor
 		foreign.CapabilityPrefix = "foreign-" + fmt.Sprintf("%x", seed)
-		for _, actor := range []store.Actor{foreign, {}} {
+		for _, actor := range []runstate.Actor{foreign, {}} {
 			var out bytes.Buffer
 			reader := logseg.CommittedReader{Records: logs.records, Objects: logs.objs}
 			result, err := reader.Read(t.Context(), actor, blob.LogReadRequest{Subject: subject}, &out)

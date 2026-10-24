@@ -4,18 +4,12 @@ import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-// RetrySelection records execution intent independently of the source seals.
-type RetrySelection struct {
-	Mode    string                              `json:"mode"`
-	Results map[string]MaterializedResultSource `json:"results"`
-}
-
-func selectRetryTx(ctx context.Context, tx *storeTx, team Team, source string, selection *RetrySelection) error {
-	selection.Results = map[string]MaterializedResultSource{}
+func selectRetryTx(ctx context.Context, tx *storeTx, team Team, source string, selection *runstate.RetrySelection) error {
+	selection.Results = map[string]runstate.MaterializedResultSource{}
 	if selection.Mode == "all" {
 		return nil
 	}
@@ -25,7 +19,7 @@ func selectRetryTx(ctx context.Context, tx *storeTx, team Team, source string, s
 	}
 	defer rows.Close()
 	for rows.Next() {
-		result := MaterializedResultSource{Ref: controllerwire.NodeRef{RunID: runspec.RunID(source)}}
+		result := runstate.MaterializedResultSource{Ref: runspec.NodeRef{RunID: runspec.RunID(source)}}
 		if err := rows.Scan(&result.Ref.NodeID, &result.StateSeq); err != nil {
 			return err
 		}
@@ -37,7 +31,7 @@ func selectRetryTx(ctx context.Context, tx *storeTx, team Team, source string, s
 type executionLineage struct {
 	runspec.Lineage
 	admissionIdentity
-	Retry *RetrySelection `json:"retry,omitempty"`
+	Retry *runstate.RetrySelection `json:"retry,omitempty"`
 }
 
 // admissionIdentity stays outside source seals and public display lineage.

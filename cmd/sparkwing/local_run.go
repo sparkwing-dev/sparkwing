@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -173,7 +174,7 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 		return source.Options{}, err
 	}
 	return source.Options{
-		Engines: engines, SDK: engine.GoSDK,
+		Engines: engines, SDK: engineid.GoSDK,
 		Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Ambient: captured, SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: masker},
 		GitAccess: gitAccess(local),

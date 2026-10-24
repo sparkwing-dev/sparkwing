@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 func TestReadPinRequiresExactRelease(t *testing.T) {
@@ -21,7 +23,7 @@ func TestReadPinRequiresExactRelease(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			writeFixture(t, dir, "go.mod", []byte(tc.goMod))
-			pin, err := ReadPin(dir, GoSDK)
+			pin, err := ReadPin(dir, engineid.GoSDK)
 			if (err != nil) != tc.bad {
 				t.Fatalf("pin=%+v error=%v", pin, err)
 			}
@@ -35,11 +37,11 @@ func TestReadPinRequiresExactRelease(t *testing.T) {
 func TestReadTypeScriptPinRejectsConflictAndRangeWithoutLock(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, "package.json", []byte(`{"dependencies":{"@sparkwing/sdk":"^0.10.0"}}`))
-	if _, err := ReadPin(dir, TypeScriptSDK); err == nil {
+	if _, err := ReadPin(dir, engineid.TypeScriptSDK); err == nil {
 		t.Fatal("range without lock accepted")
 	}
 	writeFixture(t, dir, "package-lock.json", []byte(`{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"^0.10.0"}},"node_modules/@sparkwing/sdk":{"version":"0.10.2"}}}`))
-	pin, err := ReadPin(dir, TypeScriptSDK)
+	pin, err := ReadPin(dir, engineid.TypeScriptSDK)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +50,7 @@ func TestReadTypeScriptPinRejectsConflictAndRangeWithoutLock(t *testing.T) {
 		t.Fatalf("%s %v", version, err)
 	}
 	writeFixture(t, dir, "package.json", []byte(`{"dependencies":{"@sparkwing/sdk":"0.11.0"}}`))
-	if _, err := ReadPin(dir, TypeScriptSDK); err == nil {
+	if _, err := ReadPin(dir, engineid.TypeScriptSDK); err == nil {
 		t.Fatal("conflicting manifest accepted")
 	}
 }
@@ -65,7 +67,7 @@ func TestReadPinSelectsOnlyApplicableSDKReplacement(t *testing.T) {
 		t.Run(tc.directive, func(t *testing.T) {
 			dir := t.TempDir()
 			writeFixture(t, dir, "go.mod", []byte("module fixture\nrequire "+GoModule+" v0.10.2\n"+tc.directive+"\n"))
-			pin, err := ReadPin(dir, GoSDK)
+			pin, err := ReadPin(dir, engineid.GoSDK)
 			if err != nil || pin.Replacement != tc.replacement {
 				t.Fatalf("replacement=%q want=%q: %v", pin.Replacement, tc.replacement, err)
 			}
@@ -73,7 +75,7 @@ func TestReadPinSelectsOnlyApplicableSDKReplacement(t *testing.T) {
 	}
 	dir := t.TempDir()
 	writeFixture(t, dir, "go.mod", []byte("module fixture\nreplace "+GoModule+" => ../sdk\n"))
-	if _, err := ReadPin(dir, GoSDK); err == nil {
+	if _, err := ReadPin(dir, engineid.GoSDK); err == nil {
 		t.Fatal("replacement without SDK requirement was accepted")
 	}
 }

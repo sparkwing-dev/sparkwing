@@ -6,14 +6,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -40,7 +40,7 @@ func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
 	}
 	admitStoredUnitW8(t, s, unit)
 	attempt := int64(0)
-	applied, err := tenant.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(p.Capability.Binding.RunID), NodeID: runspec.NodeID(p.Capability.Binding.NodeID), Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
+	applied, err := tenant.TransitionNode(ctx, store.StartNode{Ref: runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Actor: runstate.Actor{Kind: runstate.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(p.Capability.Binding.RunID), NodeID: runspec.NodeID(p.Capability.Binding.NodeID), Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
 	if err != nil {
 		t.Fatal("start:", err)
 	}
@@ -58,11 +58,11 @@ func TestStoreHostingW8RefreshesNodeAwardAfterStart(t *testing.T) {
 	s, unit := nativeStoreAwardW8(t, capability.UnitNode)
 	finished := errors.New("binding finished")
 	refreshed, closed := false, false
-	host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
+	host := localcontroller.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 		p := binding.Principal
 		admitStoredUnitW8(t, s, unit)
 		attempt := int64(0)
-		applied, err := binding.Tenant.TransitionNode(ctx, store.StartNode{Ref: controllerwire.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Actor: store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(p.Capability.Binding.RunID), NodeID: runspec.NodeID(p.Capability.Binding.NodeID), Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
+		applied, err := binding.Tenant.TransitionNode(ctx, store.StartNode{Ref: runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Actor: runstate.Actor{Kind: runstate.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(p.Capability.Binding.RunID), NodeID: runspec.NodeID(p.Capability.Binding.NodeID), Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
 		if err != nil {
 			return nodehost.NativeServices{}, err
 		}
@@ -93,7 +93,7 @@ func FuzzEmbeddedServiceBearerW9KeepsAwardAndLifetime(f *testing.F) {
 		defer cancelHost()
 		var retained func(context.Context) (string, error)
 		finalized := false
-		host := runners.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding runners.StoreBinding) (nodehost.NativeServices, error) {
+		host := localcontroller.StoreHosting{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 			retained = binding.Bearer
 			if retained == nil {
 				t.Fatal("embedded services have no awarded credential transport")
@@ -137,9 +137,9 @@ func admitStoredUnitW8(t *testing.T, s *store.Store, unit controllerwire.Claimed
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := store.Actor{Kind: store.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID), Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}}
-	result, err := tenant.MayStart(t.Context(), store.CapacityBinding{RunID: unit.RunID, NodeID: unit.JobID, Generation: p.Capability.Binding.Generation}, actor)
-	if err != nil || result.Kind != store.AcquireGranted {
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID), Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}}
+	result, err := tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: unit.RunID, NodeID: unit.JobID, Generation: p.Capability.Binding.Generation}, actor)
+	if err != nil || result.Kind != runstate.AcquireGranted {
 		t.Fatalf("job admission: %+v: %v", result, err)
 	}
 }

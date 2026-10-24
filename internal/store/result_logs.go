@@ -11,41 +11,22 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
-
-// Segment separates decoded byte offsets and size from the stored payload's bytes and digest.
-type Segment struct {
-	Index       int64
-	Offset      int64
-	Size        int64
-	StoredBytes int64
-	Digest      string
-	ObjectKey   string
-}
 
 // SegmentCommit fences attribution and completeness to a job attempt or owner unit.
 type SegmentCommit struct {
 	Subject          blob.LogSubject
-	Actor            Actor
-	Segments         []Segment
+	Actor            runstate.Actor
+	Segments         []runstate.Segment
 	Final            bool
 	IncompleteReason string
 	RetentionClass   string
-}
-
-// LogSegments is the persisted read model for one tagged subject, including an empty tail.
-type LogSegments struct {
-	Subject          blob.LogSubject
-	Segments         []Segment
-	Complete         bool
-	IncompleteReason string
 }
 
 type logStreamIdentity struct {
@@ -174,7 +155,7 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	return tx.Commit()
 }
 
-func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segments []Segment) error {
+func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segments []runstate.Segment) error {
 	var next, offset, stored int64
 	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,1),COALESCE(MAX(end_offset),0),COALESCE(SUM(stored_bytes),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset, &stored); err != nil {
 		return err
@@ -188,7 +169,7 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 			return authorityError(apierr.PayloadTooLarge, "log segment exceeds the byte limit")
 		}
 		if segment.Index < next {
-			var existing Segment
+			var existing runstate.Segment
 			err := tx.QueryRowContext(ctx, "SELECT n,start_offset,end_offset-start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND n = ?", team, run, identity.id, segment.Index).Scan(&existing.Index, &existing.Offset, &existing.Size, &existing.StoredBytes, &existing.Digest, &existing.ObjectKey)
 			if err != nil {
 				return err
@@ -221,7 +202,7 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 	return err
 }
 
-func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.LogSubject, actor Actor, sealedReplay bool) error {
+func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.LogSubject, actor runstate.Actor, sealedReplay bool) error {
 	p, err := resolveActorTx(ctx, tx, actor)
 	if err != nil {
 		return err
@@ -241,7 +222,7 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 		if a.Team != string(team) || a.RunID != subject.RunID || a.NodeID != c.Binding.NodeID || runspec.ClaimGeneration(a.Generation) != runspec.ClaimGeneration(c.Binding.Generation) || runspec.ClaimGeneration(a.Generation) != actor.Generation || (c.Binding.Attempt > 0 && c.Binding.Attempt != a.Attempt) {
 			return holderRefusal()
 		}
-		row, err := readNodeTx(ctx, tx, team, controllerwire.NodeRef{RunID: runspec.RunID(subject.RunID), NodeID: runspec.NodeID(a.NodeID)})
+		row, err := readNodeTx(ctx, tx, team, runspec.NodeRef{RunID: runspec.RunID(subject.RunID), NodeID: runspec.NodeID(a.NodeID)})
 		if err != nil {
 			return err
 		}
@@ -259,7 +240,7 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 			return holderRefusal()
 		}
 		if finished.Valid {
-			if row.Status != StatusDone || (!sealedReplay && tx.now(ctx).UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
+			if row.Status != runstate.StatusDone || (!sealedReplay && tx.now(ctx).UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
 				return holderRefusal()
 			}
 			return nil
@@ -273,7 +254,7 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 	return checkOwnerLogWriterTx(ctx, tx, team, subject, c, actor)
 }
 
-func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.LogSubject, c capability.Capability, actor Actor) error {
+func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.LogSubject, c capability.Capability, actor runstate.Actor) error {
 	unit := subject.Unit
 	var holder, prefix, status string
 	var generation int64
@@ -326,8 +307,8 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 }
 
 // ReadLogSegments reauthorizes the exact tagged subject and selects its persisted byte ranges.
-func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error) {
-	result := LogSegments{Subject: request.Subject}
+func (t *Tenant) ReadLogSegments(ctx context.Context, actor runstate.Actor, request blob.LogReadRequest) (runstate.LogSegments, error) {
+	result := runstate.LogSegments{Subject: request.Subject}
 	if request.Subject.Team != string(t.team) {
 		return result, authorityError(apierr.Forbidden, "log subject belongs to another team")
 	}
@@ -339,7 +320,7 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.
 		return result, err
 	}
 	// safety: authority rechecks take shared locks, which PostgreSQL forbids in read-only transactions.
-	return inTxResult(ctx, t.s, func(tx *storeTx) (LogSegments, error) {
+	return inTxResult(ctx, t.s, func(tx *storeTx) (runstate.LogSegments, error) {
 		principal, err := resolveActorTx(ctx, tx, actor)
 		if err != nil {
 			return result, err
@@ -353,7 +334,7 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.
 		}
 		if c.Unit == capability.UnitTrigger {
 			owner := actor
-			owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), Holder: actor.Holder, Generation: actor.Generation}}
+			owner.Owner = runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), Holder: actor.Holder, Generation: actor.Generation}}
 
 			if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID); err != nil {
 				return result, err
@@ -377,7 +358,7 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.
 			return result, err
 		}
 		for rows.Next() {
-			var segment Segment
+			var segment runstate.Segment
 			if err := rows.Scan(&segment.Index, &segment.Offset, &segment.Size, &segment.StoredBytes, &segment.Digest, &segment.ObjectKey); err != nil {
 				return result, errors.Join(err, rows.Close())
 			}

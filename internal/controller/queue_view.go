@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -22,8 +23,8 @@ func (s *Server) queueReader(ctx context.Context, team string) (QueueReader, err
 	return tenantPort[QueueReader](ctx, s, store.Team(team))
 }
 
-func (s *Server) queueEndpoints() []Endpoint {
-	return []Endpoint{
+func (s *Server) queueEndpoints() []controllerwire.Endpoint {
+	return []controllerwire.Endpoint{
 		{Method: "PUT", Pattern: "/api/v1/queue/groups/{group}/priority", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleQueuePriority},
 		{Method: "GET", Pattern: "/api/v1/queue", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleQueueStateView},
 	}

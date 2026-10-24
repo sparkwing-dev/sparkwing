@@ -18,12 +18,12 @@ func FuzzLauncherSyncPreservesAwardFence(f *testing.F) {
 	f.Add(int64(0), uint8(2), false)
 	f.Fuzz(func(t *testing.T, generation int64, kind uint8, reservation bool) {
 		kinds := []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}
-		observed := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: kinds[kind%3], ID: "unit", Holder: "launcher", Generation: generation}, Reservation: reservation}
+		observed := capability.LauncherObservation{Award: capability.LeaseRef{Kind: kinds[kind%3], ID: "unit", Holder: "launcher", Generation: generation}, Reservation: reservation}
 		calls := 0
 		c := testEngine(t, func(req *http.Request) (*http.Response, error) {
 			calls++
 			var body controllerwire.LauncherSyncRequest
-			if err := json.NewDecoder(req.Body).Decode(&body); err != nil || !reflect.DeepEqual(body.Observed, []controllerwire.LauncherObservation{observed}) {
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil || !reflect.DeepEqual(body.Observed, []capability.LauncherObservation{observed}) {
 				t.Fatalf("award changed: %+v %v", body, err)
 			}
 			response, err := json.Marshal(controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Retired: []capability.LeaseRef{observed.Award}})
@@ -32,7 +32,7 @@ func FuzzLauncherSyncPreservesAwardFence(f *testing.F) {
 			}
 			return engineResponse(200, string(response)), nil
 		})
-		result, err := c.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{observed}})
+		result, err := c.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{observed}})
 		if generation > 0 {
 			if err != nil || calls != 1 || len(result.Retired) != 1 || result.Retired[0] != observed.Award {
 				t.Fatalf("sync: %+v %v", result, err)
@@ -44,13 +44,13 @@ func FuzzLauncherSyncPreservesAwardFence(f *testing.F) {
 }
 
 func TestLauncherSyncRejectsIncompleteObservation(t *testing.T) {
-	valid := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit", Holder: "launcher", Generation: 2}}
-	for _, change := range []func(*controllerwire.LauncherObservation){
-		func(o *controllerwire.LauncherObservation) { o.Award.Kind = capability.UnitTrigger },
-		func(o *controllerwire.LauncherObservation) { o.Award.ID = "" },
-		func(o *controllerwire.LauncherObservation) { o.Award.Holder = "" },
-		func(o *controllerwire.LauncherObservation) { o.Award.Generation = 0 },
-		func(o *controllerwire.LauncherObservation) { o.Reservation = true; o.Rejected = true },
+	valid := capability.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit", Holder: "launcher", Generation: 2}}
+	for _, change := range []func(*capability.LauncherObservation){
+		func(o *capability.LauncherObservation) { o.Award.Kind = capability.UnitTrigger },
+		func(o *capability.LauncherObservation) { o.Award.ID = "" },
+		func(o *capability.LauncherObservation) { o.Award.Holder = "" },
+		func(o *capability.LauncherObservation) { o.Award.Generation = 0 },
+		func(o *capability.LauncherObservation) { o.Reservation = true; o.Rejected = true },
 	} {
 		observed := valid
 		change(&observed)
@@ -58,7 +58,7 @@ func TestLauncherSyncRejectsIncompleteObservation(t *testing.T) {
 			t.Fatal("invalid observation reached transport")
 			return nil, nil
 		})
-		_, err := c.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{observed}})
+		_, err := c.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{Observed: []capability.LauncherObservation{observed}})
 		var failure *apierr.Error
 		if !errors.As(err, &failure) || failure.Code != apierr.BadRequest {
 			t.Fatalf("invalid observation: %v", err)

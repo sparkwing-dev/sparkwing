@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -13,7 +15,7 @@ type selectorTransactions struct {
 }
 
 func (s selectorTransactions) ReadRun(_ context.Context, id string) (store.RunRow, error) {
-	return store.RunRow{ID: id, Team: s.team}, s.err
+	return store.RunRow{Team: s.team, Execution: runstate.Execution{ID: id}}, s.err
 }
 
 func selectorTenant(team store.Team, err error) func(context.Context, store.Team) (TenantHandle, error) {

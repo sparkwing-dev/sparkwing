@@ -19,8 +19,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -49,31 +50,26 @@ func runStatusFacts(b *credentialBoundary) controller.RunStatusFacts {
 	identity := runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "job", Attempt: 2, Generation: 4}
 	return controller.RunStatusFacts{
 		Snapshot: store.RunSnapshot{
-			Run: store.RunRow{
-				ID: "run", Team: "team", Number: 17, State: store.RunRunning, StateSeq: 9, Request: request,
-				StartedAt: &b.snapshot.Now, CancelRequestedAt: &b.snapshot.Now,
-				Spec: &runspec.Spec{Request: request, Hash: "private-second-seal", PlanHash: "private-plan-hash", Resolved: runspec.Resolved{
-					Args: map[string]string{"token": "private-secret", "count": "42"}, SecretArgs: []string{"token"},
-					Engine: engine.Identity{Version: "v1.2.3", ManifestDigest: "verified-manifest"},
-				}},
-				Plan: json.RawMessage(`{"env":{"TOKEN":"private-secret"}}`), StateDigest: "private-state-digest",
-			},
-			Nodes: []store.NodeRow{{
-				Ref: controllerwire.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusRunning, Attempt: 2, Generation: 4, StateSeq: 8,
+			Run: store.RunRow{Team: "team", Execution: runstate.Execution{ID: "run", Number: 17, State: runstate.RunRunning, StateSeq: 9, Request: request, StartedAt: &b.snapshot.Now, CancelRequestedAt: &b.snapshot.Now, Spec: &runspec.Spec{Request: request, Hash: "private-second-seal", PlanHash: "private-plan-hash", Resolved: runspec.Resolved{
+				Args: map[string]string{"token": "private-secret", "count": "42"}, SecretArgs: []string{"token"},
+				Engine: engineid.Identity{Version: "v1.2.3", ManifestDigest: "verified-manifest"},
+			}}, Plan: json.RawMessage(`{"env":{"TOKEN":"private-secret"}}`), StateDigest: "private-state-digest"}},
+			Nodes: []runstate.NodeRow{{
+				Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Status: runstate.StatusRunning, Attempt: 2, Generation: 4, StateSeq: 8,
 				ClaimedBy: "private-holder", CapabilityPrefix: "private-prefix", SpecHash: "private-spec-hash",
 				Spec: json.RawMessage(`{"id":"job","env":{"TOKEN":"private-secret"}}`),
 			}},
 			StoreNow: b.snapshot.Now,
 		},
-		Attempts: []store.NodeAttempt{
-			{Identity: runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "job", Attempt: 1, Generation: 3}, Holder: "private-old-holder", CapabilityPrefix: "private-old-prefix", ExecutorKind: "cloud", Outcome: store.NodeFailed, FailureReason: "disruption", StartedAt: b.snapshot.Now.Add(-time.Minute), FinishedAt: &b.snapshot.Now},
+		Attempts: []runstate.NodeAttempt{
+			{Identity: runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "job", Attempt: 1, Generation: 3}, Holder: "private-old-holder", CapabilityPrefix: "private-old-prefix", ExecutorKind: "cloud", Outcome: runstate.NodeFailed, FailureReason: "disruption", StartedAt: b.snapshot.Now.Add(-time.Minute), FinishedAt: &b.snapshot.Now},
 			{Identity: identity, Holder: "private-holder", CapabilityPrefix: "private-prefix", ExecutorKind: "customer", StartedAt: b.snapshot.Now},
 		},
 		Logs: []blob.LogSubject{
 			{Kind: blob.LogJobAttempt, Team: "team", RunID: "run", Attempt: &identity},
 			{Kind: blob.LogOwnerUnit, Team: "team", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogEval, Generation: 7, Source: &blob.LogSource{NodeID: "job", Generation: 3}}},
 		},
-		Notices: []engine.Notice{{Kind: engine.NoticeSupportEnding, Reason: "support ends soon", Hint: "sparkwing upgrade"}},
+		Notices: []engineid.Notice{{Kind: engineid.NoticeSupportEnding, Reason: "support ends soon", Hint: "sparkwing upgrade"}},
 	}
 }
 
@@ -165,7 +161,7 @@ func TestEngineRunDetailClassification(t *testing.T) {
 				b := jobViewBoundary("member")
 				f := &runStatusFixture{facts: runStatusFacts(b)}
 				run := &f.facts.Snapshot.Run
-				run.State = store.RunState(phase)
+				run.State = runstate.RunState(phase)
 				wantPublic := false
 				switch classification {
 				case "absent":

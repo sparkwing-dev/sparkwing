@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"testing"
 	"testing/synctest"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 func TestLocalHTTPListenerFailureCancelsAndJoinsRequests(t *testing.T) {
@@ -29,7 +31,7 @@ func TestLocalHTTPListenerFailureCancelsAndJoinsRequests(t *testing.T) {
 						t.Skip("Unix UID check")
 					}
 					uid := *owner.UID
-					listener.connections <- localHTTPConnection{Conn: server, peer: LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
+					listener.connections <- localHTTPConnection{Conn: server, peer: localhostwire.LocalPeerIdentity{GOOS: owner.GOOS, UID: &uid}}
 					entered, exited := make(chan struct{}), make(chan struct{})
 					handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						defer close(exited)
@@ -44,11 +46,11 @@ func TestLocalHTTPListenerFailureCancelsAndJoinsRequests(t *testing.T) {
 						close(entered)
 						<-r.Context().Done()
 					})
-					services := LocalHTTP{API: handler, Dashboard: handler}
+					services := localhostwire.LocalHTTP{API: handler, Dashboard: handler}
 					done := make(chan error, 1)
 					go func() {
 						if api {
-							done <- services.ServeAPI(ctx, listener)
+							done <- ServeAPI(ctx, listener, services)
 						} else {
 							done <- ServeLocalHTTP(ctx, listener, services.Dashboard, nil, nil)
 						}
@@ -89,8 +91,8 @@ func TestLocalRuntimeListenerFailureJoinsRequestsBeforeStoreClose(t *testing.T) 
 	entered, cancelled, exited := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	cleanup, finish := context.WithCancel(t.Context())
 	defer finish()
-	f.http = func() LocalHTTP {
-		return LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	f.http = func() localhostwire.LocalHTTP {
+		return localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer close(exited)
 			connection, _, err := w.(http.Hijacker).Hijack()
 			if err != nil {

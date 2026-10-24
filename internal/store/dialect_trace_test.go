@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -34,9 +35,9 @@ type dialectTraceState struct {
 type dialectTraceResult struct {
 	Accepted  store.AcceptedPlan
 	Grant     store.CreditGrantResult
-	Applied   store.Applied
-	Beat      store.LeaseBeat
-	Admission store.AcquireSlotResponse
+	Applied   runstate.Applied
+	Beat      runstate.LeaseBeat
+	Admission runstate.AcquireSlotResponse
 	Error     string
 }
 
@@ -153,12 +154,12 @@ func replayDialectTrace(t *testing.T, target *storetest.Target, commands []diale
 				identities = append(identities, result.Grant.Grant.ID, "grant:"+command.Reference)
 			}
 		case "admit":
-			result.Admission, commandErr = tenant.MayStart(t.Context(), store.CapacityBinding{RunID: plan.RunID, Generation: int64(plan.Actor.Owner.Generation)}, plan.Actor)
-			if commandErr == nil && result.Admission.Kind != store.AcquireGranted {
+			result.Admission, commandErr = tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: plan.RunID, Generation: int64(plan.Actor.Owner.Generation)}, plan.Actor)
+			if commandErr == nil && result.Admission.Kind != runstate.AcquireGranted {
 				t.Fatalf("capacity admission: %+v", result.Admission)
 			}
 		case "start":
-			result.Applied, commandErr = tenant.TransitionRun(t.Context(), store.RunTransition{RunID: runspec.RunID(plan.RunID), Actor: plan.Actor, To: store.RunRunning, Cause: store.RunStart})
+			result.Applied, commandErr = tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(plan.RunID), Actor: plan.Actor, To: runstate.RunRunning, Cause: runstate.RunStart})
 		case "renew":
 			result.Beat, commandErr = s.AsOperator().RenewUnit(t.Context(), plan.Actor.CapabilityPrefix, true)
 			if commandErr == nil {
@@ -177,9 +178,9 @@ func replayDialectTrace(t *testing.T, target *storetest.Target, commands []diale
 				}
 			}
 		case "cancel":
-			result.Applied, commandErr = tenant.TransitionRun(t.Context(), store.RunTransition{RunID: runspec.RunID(plan.RunID), Actor: store.Actor{Kind: store.ActorOperator, Authority: plan.Seal.Request.AuthorityRef}, To: store.RunCancelled, Cause: store.RunCancel, Reason: "trace"})
+			result.Applied, commandErr = tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(plan.RunID), Actor: runstate.Actor{Kind: runstate.ActorOperator, Authority: plan.Seal.Request.AuthorityRef}, To: runstate.RunCancelled, Cause: runstate.RunCancel, Reason: "trace"})
 		case "settle":
-			result.Applied, commandErr = tenant.FinishRunAndUnit(t.Context(), store.FinishRunRequest{Transition: store.RunCompletion{RunID: runspec.RunID(plan.RunID), Actor: plan.Actor, Cause: store.RunFinish}, Unit: plan.Actor.Owner})
+			result.Applied, commandErr = tenant.FinishRunAndUnit(t.Context(), runstate.FinishRunRequest{Transition: runstate.RunCompletion{RunID: runspec.RunID(plan.RunID), Actor: plan.Actor, Cause: runstate.RunFinish}, Unit: plan.Actor.Owner})
 		default:
 			t.Fatalf("unknown recorded command %q", command.Op)
 		}

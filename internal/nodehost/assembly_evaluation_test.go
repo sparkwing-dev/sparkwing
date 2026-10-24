@@ -6,10 +6,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestEvaluationBindingsSeparateApprovalDependenciesFromGeneratorSource(t *testing.T) {
@@ -25,13 +24,13 @@ func TestEvaluationBindingsSeparateApprovalDependenciesFromGeneratorSource(t *te
 				if err != nil {
 					t.Fatal(err)
 				}
-				row := store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "gate"}, Generation: 4, SpecHash: "hash", Spec: body}
-				binding := evaluationBindings{source: row.Ref, generation: 4, hash: row.SpecHash, readNode: func(_ context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
+				row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "gate"}, Generation: 4, SpecHash: "hash", Spec: body}
+				binding := evaluationBindings{source: row.Ref, generation: 4, hash: row.SpecHash, readNode: func(_ context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
 					if ref.NodeID == "gate" {
 						return row, nil
 					}
 					body, err := json.Marshal(nodeproto.JobSpec{ID: string(ref.NodeID)})
-					return store.NodeRow{Ref: ref, Spec: body}, err
+					return runstate.NodeRow{Ref: ref, Spec: body}, err
 				}}
 				p := capability.Principal{Capability: capability.Capability{Unit: unit, Binding: capability.Binding{RunID: "run"}}}
 				for _, target := range []capability.Target{{RunID: "run", NodeID: "build"}, {Reference: &capability.PipelineReferenceTarget{Pipeline: "upstream", JobID: "artifact"}}} {

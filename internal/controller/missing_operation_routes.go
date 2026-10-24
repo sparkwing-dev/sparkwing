@@ -4,16 +4,16 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func (s *Server) missingOperationEndpoints() []Endpoint {
+func (s *Server) missingOperationEndpoints() []controllerwire.Endpoint {
 	e := s.engineController
-	endpoints := []Endpoint{
+	endpoints := []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/debug-pause", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobDebugPause},
 		{Method: "DELETE", Pattern: "/api/v1/runners/{runner}", Decode: authorityTarget, Handle: s.handleDeleteRunner},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/attempts", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobAttempts},
@@ -39,7 +39,7 @@ func (s *Server) handleJobAttempts(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return engineLookupError(err)
 	}
-	nodes := make(map[string]store.NodeRow, len(view.Snapshot.Nodes))
+	nodes := make(map[string]runstate.NodeRow, len(view.Snapshot.Nodes))
 	attempts := make([]controllerwire.AttemptDetail, 0)
 	found := false
 	for _, row := range view.Snapshot.Nodes {
@@ -69,17 +69,17 @@ func (s *Server) handleJobSteps(w http.ResponseWriter, r *http.Request, a capabi
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if _, err := tenant.ReadNode(r.Context(), controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}); err != nil {
+	if _, err := tenant.ReadNode(r.Context(), runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}); err != nil {
 		return engineLookupError(err)
 	}
 	all, err := tenant.ListNodeSteps(r.Context(), a.Target.RunID)
 	if err != nil {
 		return engineLookupError(err)
 	}
-	steps := make([]*store.NodeStep, 0)
+	steps := make([]controllerwire.StepObservation, 0)
 	for _, step := range all {
 		if step.NodeID == a.Target.NodeID {
-			steps = append(steps, step)
+			steps = append(steps, controllerwire.StepObservation(*step))
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
@@ -97,7 +97,7 @@ func (s *Server) handleJobActivity(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if err := tenant.WriteActivity(r.Context(), controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a), body.Detail); err != nil {
+	if err := tenant.WriteActivity(r.Context(), runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, engineActor(a), body.Detail); err != nil {
 		return engineLookupError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -130,7 +130,7 @@ func (s *Server) handleJobDebugPause(w http.ResponseWriter, r *http.Request, a c
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if _, err := tenant.ReadNode(r.Context(), controllerwire.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}); err != nil {
+	if _, err := tenant.ReadNode(r.Context(), runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}); err != nil {
 		return engineLookupError(err)
 	}
 	pause, err := tenant.GetActiveDebugPause(r.Context(), a.Target.RunID, a.Target.NodeID)

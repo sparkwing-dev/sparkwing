@@ -16,6 +16,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -166,7 +168,7 @@ func TestDashboardReadsStayInsideTheTeamBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.SeedRun(f.st, ctx, store.DefaultTeam, store.Run{ID: "run-a", Pipeline: "private-team-pipeline", Status: "success", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run-a", Pipeline: "private-team-pipeline", Status: "success", StartedAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.SeedNode(f.st, ctx, store.Node{RunID: "run-a", NodeID: "n1", Status: "pending"}); err != nil {
@@ -204,7 +206,7 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 	}
 	f := newBrowserFixture(t, &controller.Dashboard{Paths: paths.PathsAt(t.TempDir())})
 	ctx := t.Context()
-	if err := teststore.SeedRun(f.st, ctx, store.DefaultTeam, store.Run{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.st, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 	ts := httptest.NewUnstartedServer(f.h)

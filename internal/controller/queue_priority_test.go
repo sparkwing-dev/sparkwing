@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -56,7 +57,7 @@ func TestQueuePriorityHTTPPreservesTenantAuthorityProperty(t *testing.T) {
 		fake.calls, fake.err, fake.team = 0, nil, "a"
 		testOnlyTenantPort[QueuePriorityWriter](s, func(_ context.Context, team store.Team) (QueuePriorityWriter, error) {
 			if team != "a" {
-				return nil, missingEndpointPolicy()
+				return nil, routepolicy.MissingEndpointPolicy()
 			}
 			return fake, nil
 		})

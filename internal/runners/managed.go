@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
@@ -25,7 +26,7 @@ type ManagedRunner struct {
 	Versions     SoftwarePolicy
 	Installation RunnerInstallation
 	Target       releaseasset.Target
-	Notices      func([]engine.Notice)
+	Notices      func([]engineid.Notice)
 }
 
 var errRunnerUpdate = errors.New("runner software update required")

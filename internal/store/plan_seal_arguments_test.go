@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
@@ -60,7 +61,7 @@ func TestPlanSealPreservesRawListInputsAcrossSubmissionSources(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := PlanAcceptance{RunID: admitted.RunID, Actor: Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{ArgumentDeclarations: []nodeproto.ArgumentDescription{{Name: "targets", Type: "[]string"}}, Args: map[string]string{"targets": "prod,dev"}, SecretArgs: []string{}, Settings: resolved}}}
+			request := PlanAcceptance{RunID: admitted.RunID, Actor: runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(admitted.RunID), Holder: "host", Generation: 1}}}, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{ArgumentDeclarations: []nodeproto.ArgumentDescription{{Name: "targets", Type: "[]string"}}, Args: map[string]string{"targets": "prod,dev"}, SecretArgs: []string{}, Settings: resolved}}}
 			accepted, err := tenant.AcceptPlan(t.Context(), request)
 			if err != nil {
 				t.Fatal(err)

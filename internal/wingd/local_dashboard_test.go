@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 func TestLocalDashboardStartsOnExistingController(t *testing.T) {
@@ -89,7 +91,7 @@ func TestLocalDashboardBindFailureLeavesControllerAvailable(t *testing.T) {
 }
 
 func TestLocalDashboardStartupFailureReachesCaller(t *testing.T) {
-	f := &runtimeControllerFixture{http: func() LocalHTTP { return LocalHTTP{API: http.NotFoundHandler()} }}
+	f := &runtimeControllerFixture{http: func() localhostwire.LocalHTTP { return localhostwire.LocalHTTP{API: http.NotFoundHandler()} }}
 	r := newRuntimeFixture(t, f)
 	lifecycle := NewLocalLifecycle(r, nil)
 	opts := LocalStartOptions{Home: f.home, Version: "v1", Stay: true}
@@ -113,12 +115,12 @@ func TestLocalDashboardReadinessAndJoinedShutdown(t *testing.T) {
 		entered, accept, closing, release := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
 		f := &runtimeControllerFixture{}
 		var calls atomic.Int32
-		f.http = func() LocalHTTP {
+		f.http = func() localhostwire.LocalHTTP {
 			if calls.Add(1) == 2 {
 				close(entered)
 				<-accept
 			}
-			return LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()}
+			return localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()}
 		}
 		r := newRuntimeFixture(t, f)
 		r.listen = func(network, _ string) (net.Listener, error) {

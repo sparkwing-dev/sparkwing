@@ -3,15 +3,15 @@ package controller
 import (
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/store"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (s *Server) handleReadOverflow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.operator == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
@@ -31,7 +31,7 @@ func (s *Server) handleSetOverflow(w http.ResponseWriter, r *http.Request, a cap
 		return err
 	}
 	if s.operator == nil {
-		return missingEndpointPolicy()
+		return routepolicy.MissingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {

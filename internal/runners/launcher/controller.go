@@ -136,7 +136,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if observation.Capacity == nil && (observation.NodeUID == "" || observation.ReservationID == "" && (observation.JobNamespace == "" || observation.JobUID == "") || observation.ReservationID != "" && (observation.JobNamespace != "" || observation.JobUID != "")) {
 			return nil, errors.New("Cloud observation requires its local Job or reservation identity")
 		}
-		observed := controllerwire.LauncherObservation{Award: observation.Binding.LeaseRef(), Reservation: observation.ReservationID != "", Rejected: observation.Rejected}
+		observed := capability.LauncherObservation{Award: observation.Binding.LeaseRef(), Reservation: observation.ReservationID != "", Rejected: observation.Rejected}
 		if err := observed.Validate(); err != nil {
 			return nil, err
 		}
@@ -155,7 +155,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 				if r.Award != observed.Award || r.NodeUID != observation.NodeUID || r.JobName != observation.JobName || r.Team != observation.Binding.Team || r.NodeName == "" || r.ReservationID == "" || observation.ReservationID != "" || observation.Rejected {
 					return nil, errors.New("activation does not match the execution reservation")
 				}
-				request.Activations = append(request.Activations, controllerwire.LauncherActivation{Award: r.Award, NodeUID: r.NodeUID, ReservationID: r.ReservationID})
+				request.Activations = append(request.Activations, capability.LauncherActivation{Award: r.Award, NodeUID: r.NodeUID, ReservationID: r.ReservationID})
 			}
 		}
 		if !observation.Unheld {

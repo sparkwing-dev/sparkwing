@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func bootstrapSpec(secret [32]byte) capability.ProvisionSpec {
@@ -55,7 +56,7 @@ func TestBootstrapSeedIsOnceOnlyProperty(t *testing.T) {
 			if created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), other); err == nil || created {
 				t.Fatal("a different seed bypassed the gate")
 			}
-			if err := s.AsOperator().RevokeAuthority(t.Context(), Actor{Authority: p.Authority}, p.Authority); err != nil {
+			if err := s.AsOperator().RevokeAuthority(t.Context(), runstate.Actor{Authority: p.Authority}, p.Authority); err != nil {
 				t.Fatal(err)
 			}
 			if created, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec); err == nil || created {

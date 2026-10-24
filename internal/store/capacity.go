@@ -835,7 +835,7 @@ func nearestRank(n int, q float64) int {
 }
 
 // ProfileSample is one run's persisted contribution to a profile window:
-// what that run took and drew, as folded by [Store.RecordProfileObservation].
+// what that run took and drew, as folded by [Tenant.RecordProfileObservation].
 // It is the evidence behind a pipeline's price, exported read-only so a
 // reader can recompute the charge from the same rows admission charged from.
 type ProfileSample struct {

@@ -6,7 +6,8 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestResumeDebugPauseCurrentAuthorityProperty(t *testing.T) {
@@ -40,11 +41,11 @@ func TestResumeDebugPauseCurrentAuthorityProperty(t *testing.T) {
 		if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM debug_pauses WHERE released_at IS NOT NULL`).Scan(&released); err != nil {
 			t.Fatal(err)
 		}
-		before, err := tenant.ReadNode(t.Context(), controllerwire.NodeRef{RunID: "run", NodeID: "job"})
+		before, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if before.Status != StatusRunning || before.Generation != 2 || before.Attempt != 3 || before.ClaimedBy != "runner" || before.CapabilityPrefix != "claim" {
+		if before.Status != runstate.StatusRunning || before.Generation != 2 || before.Attempt != 3 || before.ClaimedBy != "runner" || before.CapabilityPrefix != "claim" {
 			t.Log(fmt.Sprintf("execution fence changed: %+v", before))
 			return false
 		}

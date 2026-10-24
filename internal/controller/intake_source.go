@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -143,7 +144,7 @@ func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID str
 
 func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string, supplied runspec.RepoKey) (int64, error) {
 	if team == "" || s.operator == nil {
-		return 0, missingEndpointPolicy()
+		return 0, routepolicy.MissingEndpointPolicy()
 	}
 	if s.githubApp != nil {
 		tenant, err := s.tenantForTeam(ctx, store.Team(team))

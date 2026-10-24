@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func publishedLogFixture(t *testing.T) (*Store, *Tenant, SegmentCommit) {
@@ -36,7 +37,7 @@ func publishedLogFixture(t *testing.T) (*Store, *Tenant, SegmentCommit) {
 	rewriteSchemaExec(t, s.db, "DELETE FROM triggers WHERE team='a' AND id='run'")
 	rewriteSchemaExec(t, s.db, "UPDATE nodes SET status='done',outcome='success',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,finished_at=2 WHERE team='a' AND run_id='run'")
 	rewriteSchemaExec(t, s.db, "UPDATE node_attempts SET started_at=1,finished_at=2,outcome='success',executor_location='local' WHERE team='a' AND run_id='run'")
-	actor := Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: publisher.Prefix}, CapabilityPrefix: publisher.Prefix}
+	actor := runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: publisher.Prefix}, CapabilityPrefix: publisher.Prefix}
 	return s, tenant, logCommit(actor, attempt)
 }
 

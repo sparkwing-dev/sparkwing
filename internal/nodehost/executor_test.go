@@ -14,30 +14,31 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 type executorStore struct {
 	accepted   *AcceptedRun
-	row        store.NodeRow
+	row        runstate.NodeRow
 	changes    []capturedNodeCommand
-	fail       store.TransitionCause
-	expansions []store.AcceptedExpansionRow
-	nodes      map[string]store.NodeRow
+	fail       runstate.TransitionCause
+	expansions []runstate.AcceptedExpansionRow
+	nodes      map[string]runstate.NodeRow
 }
 
 func (*executorStore) RecordStep(context.Context, store.StepReport) error { return nil }
 
 func (s *executorStore) ReadSnapshot(_ context.Context, runID string) (store.RunSnapshot, error) {
-	row := store.RunRow{ID: runID}
+	row := store.RunRow{Execution: runstate.Execution{ID: runID}}
 	if s.accepted != nil {
 		var spec runspec.Spec
 		if err := json.Unmarshal(s.accepted.Spec, &spec); err != nil {
@@ -48,35 +49,35 @@ func (s *executorStore) ReadSnapshot(_ context.Context, runID string) (store.Run
 		row.PlanHash = s.accepted.PlanHash
 		row.Plan, _ = json.Marshal(s.accepted.Plan)
 	}
-	return store.RunSnapshot{Run: row, Nodes: []store.NodeRow{s.row}, Expansions: s.expansions}, nil
+	return store.RunSnapshot{Run: row, Nodes: []runstate.NodeRow{s.row}, Expansions: s.expansions}, nil
 }
 
-func (s *executorStore) ReadNode(_ context.Context, ref controllerwire.NodeRef) (store.NodeRow, error) {
+func (s *executorStore) ReadNode(_ context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
 	if ref == s.row.Ref {
 		return s.row, nil
 	}
 	if row, ok := s.nodes[string(ref.NodeID)]; ok {
 		return row, nil
 	}
-	return store.NodeRow{}, errors.New("node absent")
+	return runstate.NodeRow{}, errors.New("node absent")
 }
 
-func (s *executorStore) TransitionNode(_ context.Context, command store.NodeCommand) (store.Applied, error) {
+func (s *executorStore) TransitionNode(_ context.Context, command store.NodeCommand) (runstate.Applied, error) {
 	c := captureNodeCommand(command)
 	s.changes = append(s.changes, c)
-	if c.Actor.Kind == store.ActorHolder && (c.SourceAttempt == nil || *c.SourceAttempt != s.row.Attempt) {
-		return store.Applied{}, executorError(apierr.LockHeld, "source attempt differs from current attempt")
+	if c.Actor.Kind == runstate.ActorHolder && (c.SourceAttempt == nil || *c.SourceAttempt != s.row.Attempt) {
+		return runstate.Applied{}, executorError(apierr.LockHeld, "source attempt differs from current attempt")
 	}
 	if c.Cause == s.fail {
-		return store.Applied{}, errors.New("transition refused")
+		return runstate.Applied{}, errors.New("transition refused")
 	}
-	if c.Cause == store.CauseRetry || c.Cause == store.CauseStart {
+	if c.Cause == runstate.CauseRetry || c.Cause == runstate.CauseStart {
 		s.row.Attempt++
-		if c.Cause == store.CauseRetry {
+		if c.Cause == runstate.CauseRetry {
 			s.row.ApplicationRetries++
 		}
 	}
-	return store.Applied{Generation: s.row.Generation, Attempt: s.row.Attempt}, nil
+	return runstate.Applied{Generation: s.row.Generation, Attempt: s.row.Attempt}, nil
 }
 
 type executorProcess struct {
@@ -136,7 +137,7 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
 	planHash, _ := runspec.CanonicalHash(plan)
 	jobHash, _ := runspec.CanonicalHash(job)
-	identity := engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
+	identity := engineid.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.0.0"}}
 	resolved := engine.Resolved{Identity: identity, Executable: "/verified/engine"}
 	execution := runspec.JobExecutionSettings{}
 	spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "ci"}}, Resolved: runspec.Resolved{Engine: identity, SecretRegistration: runspec.SecretRegistration{Version: 1}, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"build": execution}}}}
@@ -144,14 +145,14 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 	input := NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: raw, SpecHash: "seal", Plan: plan, PlanHash: string(planHash)}, Engine: resolved, Entry: &source.Entry{Engine: resolved}, NodeID: "build", Generation: 3, Attempt: 4, SpecHash: string(jobHash), Execution: execution, Authority: ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "build"}}
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 	jobJSON, _ := json.Marshal(job)
-	s := &executorStore{accepted: &input.Accepted, row: store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: "build"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 4, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
+	s := &executorStore{accepted: &input.Accepted, row: runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "build"}, Status: runstate.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 4, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
 	processes := []*executorProcess{}
 	deps := ExecutorDependencies{
 		Store: s, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Start: func(_ context.Context, _ NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
 			p := &executorProcess{plan: plan, result: nodeproto.RunResult{Outcome: "success"}}
 			processes = append(processes, p)
 			return p, nil
-		}, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		}, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 			return resolved, nil
 		},
 
@@ -192,8 +193,8 @@ func TestNodeExecutorRetriesRetainGenerationAndAdvanceOrdinal(t *testing.T) {
 	if err = host.Execute(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	want := []store.TransitionCause{store.CauseStart, store.CauseRetry, store.CauseRetry, store.CauseReport}
-	var got []store.TransitionCause
+	want := []runstate.TransitionCause{runstate.CauseStart, runstate.CauseRetry, runstate.CauseRetry, runstate.CauseReport}
+	var got []runstate.TransitionCause
 	for _, c := range s.changes {
 		got = append(got, c.Cause)
 		if c.Actor.Generation != 3 {
@@ -241,7 +242,7 @@ func FuzzNodeExecutorCapturesSourceAttempt(f *testing.F) {
 			if change.SourceAttempt == nil || *change.SourceAttempt != runspec.AttemptOrdinal(ordinal) {
 				t.Fatalf("%s lost source ordinal %d: %+v", change.Cause, ordinal, change)
 			}
-			if change.Cause == store.CauseStart || change.Cause == store.CauseRetry {
+			if change.Cause == runstate.CauseStart || change.Cause == runstate.CauseRetry {
 				ordinal++
 			}
 		}
@@ -323,7 +324,7 @@ func TestNodeExecutorDriftPreventsBody(t *testing.T) {
 			}
 		}
 	}
-	if len(s.changes) != 2 || s.changes[0].Cause != store.CauseStart || s.changes[1].Cause != store.CauseReport || s.changes[1].To != store.NodeFailed {
+	if len(s.changes) != 2 || s.changes[0].Cause != runstate.CauseStart || s.changes[1].Cause != runstate.CauseReport || s.changes[1].To != runstate.NodeFailed {
 		t.Fatalf("changes = %+v", s.changes)
 	}
 }
@@ -344,7 +345,7 @@ func TestNodeExecutorLostLeaseNeverReports(t *testing.T) {
 	if err = host.Execute(ctx, input); !errors.Is(err, lease.ErrLeaseLost) {
 		t.Fatalf("error = %v", err)
 	}
-	if len(s.changes) != 1 || s.changes[0].Cause != store.CauseStart {
+	if len(s.changes) != 1 || s.changes[0].Cause != runstate.CauseStart {
 		t.Fatalf("changes = %+v", s.changes)
 	}
 	if len(*processes) != 1 || (*processes)[0].cleaned != 1 {
@@ -391,17 +392,17 @@ func executorChangeJob(t *testing.T, input *NodeInput, s *executorStore, job nod
 }
 
 func TestNodeExecutorTransitionRefusalStopsExecution(t *testing.T) {
-	for _, cause := range []store.TransitionCause{store.CauseStart, store.CauseRetry, store.CauseReport} {
+	for _, cause := range []runstate.TransitionCause{runstate.CauseStart, runstate.CauseRetry, runstate.CauseReport} {
 		t.Run(string(cause), func(t *testing.T) {
 			input, s, deps, processes := executorFixture(t)
 			s.fail = cause
-			if cause == store.CauseRetry {
+			if cause == runstate.CauseRetry {
 				executorRetryBudget(t, &input, s, 2)
 			}
 			start := deps.Start
 			deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 				process, err := start(ctx, in, p)
-				if cause == store.CauseRetry {
+				if cause == runstate.CauseRetry {
 					process.(*executorProcess).result.Outcome = "failed"
 				}
 				return process, err
@@ -414,14 +415,14 @@ func TestNodeExecutorTransitionRefusalStopsExecution(t *testing.T) {
 				t.Fatal("transition refusal was ignored")
 			}
 			wantProcesses := 1
-			if cause == store.CauseStart {
+			if cause == runstate.CauseStart {
 				wantProcesses = 0
 			}
 			if len(*processes) != wantProcesses {
 				t.Fatalf("process count = %d", len(*processes))
 			}
 			want := 2
-			if cause == store.CauseStart {
+			if cause == runstate.CauseStart {
 				want = 1
 			}
 			if len(s.changes) != want || s.changes[len(s.changes)-1].Cause != cause {
@@ -448,7 +449,7 @@ func TestNodeExecutorRetriesRespectPreviouslyConsumedBudget(t *testing.T) {
 	if err = host.Execute(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	if len(*processes) != 1 || len(s.changes) != 2 || s.changes[1].To != store.NodeFailed {
+	if len(*processes) != 1 || len(s.changes) != 2 || s.changes[1].To != runstate.NodeFailed {
 		t.Fatalf("retry budget reset: %+v", s.changes)
 	}
 }
@@ -469,7 +470,7 @@ func TestNodeExecutorCancellationWinsSuccessfulBody(t *testing.T) {
 	if err = host.Execute(ctx, input); err == nil {
 		t.Fatal("cancellation cause was lost")
 	}
-	if len(*processes) != 1 || len(s.changes) != 2 || s.changes[1].To != store.NodeCancelled {
+	if len(*processes) != 1 || len(s.changes) != 2 || s.changes[1].To != runstate.NodeCancelled {
 		t.Fatalf("changes = %+v", s.changes)
 	}
 }
@@ -480,7 +481,7 @@ func TestNodeExecutorStorageLayersWrapRetriesOnce(t *testing.T) {
 	var events []string
 	setTestExecutor(&deps, func(_ context.Context, layer testPolicyName, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		events = append(events, layer.Name+" in")
-		return func(context.Context, NodeInput, *store.NodeResult) error {
+		return func(context.Context, NodeInput, *runstate.NodeResult) error {
 			events = append(events, layer.Name+" out")
 			return nil
 		}, nil
@@ -525,7 +526,7 @@ func TestNodeExecutorCleanupFailureCannotReportSuccess(t *testing.T) {
 	if err = host.Execute(context.Background(), input); !errors.Is(err, cleanupErr) {
 		t.Fatalf("error = %v", err)
 	}
-	if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 || s.changes[len(s.changes)-1].To != store.NodeFailed {
+	if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 || s.changes[len(s.changes)-1].To != runstate.NodeFailed {
 		t.Fatal("cleanup failure reported success or leaked the process")
 	}
 }
@@ -556,7 +557,7 @@ func TestNodeExecutorTimeoutRetriesWithFreshBudget(t *testing.T) {
 	if err = host.Execute(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	if budgets != 2 || len(*processes) != 2 || s.changes[len(s.changes)-1].To != store.NodeSuccess {
+	if budgets != 2 || len(*processes) != 2 || s.changes[len(s.changes)-1].To != runstate.NodeSuccess {
 		t.Fatalf("budgets=%d, processes=%d, changes=%+v", budgets, len(*processes), s.changes)
 	}
 }
@@ -581,7 +582,7 @@ func TestNodeExecutorRejectsSDKMismatchBeforeBody(t *testing.T) {
 	if err = host.Execute(context.Background(), input); err == nil {
 		t.Fatal("SDK mismatch accepted")
 	}
-	if len(*processes) != 1 || len((*processes)[0].requests) != 1 || len(s.changes) != 2 || s.changes[1].To != store.NodeFailed {
+	if len(*processes) != 1 || len((*processes)[0].requests) != 1 || len(s.changes) != 2 || s.changes[1].To != runstate.NodeFailed {
 		t.Fatalf("body ran: %+v", s.changes)
 	}
 }
@@ -601,7 +602,7 @@ func TestNodeExecutorMissingOutputPublisherFailsLoudly(t *testing.T) {
 	if err = host.Execute(context.Background(), input); err == nil {
 		t.Fatal("missing publisher silently dropped output")
 	}
-	if s.changes[len(s.changes)-1].To != store.NodeFailed {
+	if s.changes[len(s.changes)-1].To != runstate.NodeFailed {
 		t.Fatal("unpublished output was reported successful")
 	}
 }
@@ -670,11 +671,11 @@ func TestNodeExecutorGeneratorReplayChecksCompleteAcceptedMembership(t *testing.
 			other := nodeproto.JobSpec{ID: "other", Groups: []string{"generator"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 			otherHash, _ := runspec.CanonicalHash(other)
 			otherJSON, _ := json.Marshal(other)
-			s.nodes = map[string]store.NodeRow{"other": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "other"}, Spec: otherJSON, SpecHash: string(otherHash)}}
+			s.nodes = map[string]runstate.NodeRow{"other": {Ref: runspec.NodeRef{RunID: "run", NodeID: "other"}, Spec: otherJSON, SpecHash: string(otherHash)}}
 			accepted := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{generated, other}}
 			body, _ := json.Marshal(accepted)
 			bodyHash, _ := runspec.CanonicalHash(accepted)
-			s.expansions = []store.AcceptedExpansionRow{{Source: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 2, Body: body, BodyHash: string(bodyHash)}}
+			s.expansions = []runstate.AcceptedExpansionRow{{Source: runspec.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 2, Body: body, BodyHash: string(bodyHash)}}
 			input.Replay = []GeneratorReplay{{SourceJob: "source", SourceGeneration: 2, GeneratorID: "generator", Output: json.RawMessage(`{"seed":1}`)}}
 			s.accepted = &input.Accepted
 			start := deps.Start
@@ -742,21 +743,21 @@ func recordedReplayFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDep
 	_ = json.Unmarshal(input.Accepted.Spec, &spec)
 	spec.PlanHash = hash
 	input.Accepted.Spec, _ = json.Marshal(spec)
-	state.nodes = map[string]store.NodeRow{}
+	state.nodes = map[string]runstate.NodeRow{}
 	for i, declaration := range []nodeproto.JobSpec{root, parent, unrelated} {
 		body, _ := json.Marshal(declaration)
 		hash, _ := runspec.CanonicalHash(declaration)
-		state.nodes[declaration.ID] = store.NodeRow{Ref: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID(declaration.ID)}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: runspec.ClaimGeneration(i + 2), Spec: body, SpecHash: string(hash)}
+		state.nodes[declaration.ID] = runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(declaration.ID)}, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Generation: runspec.ClaimGeneration(i + 2), Spec: body, SpecHash: string(hash)}
 	}
 	for i, declaration := range []nodeproto.JobSpec{parent, job, {ID: "unused", Groups: []string{"other"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}} {
 		body := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{declaration}}
 		raw, _ := json.Marshal(body)
 		hash, _ := runspec.CanonicalHash(body)
-		state.expansions = append(state.expansions, store.AcceptedExpansionRow{Source: controllerwire.NodeRef{RunID: "run", NodeID: runspec.NodeID([]string{"root", "parent", "unrelated"}[i])}, SourceGeneration: int64(i + 2), Body: raw, BodyHash: string(hash)})
+		state.expansions = append(state.expansions, runstate.AcceptedExpansionRow{Source: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID([]string{"root", "parent", "unrelated"}[i])}, SourceGeneration: int64(i + 2), Body: raw, BodyHash: string(hash)})
 	}
 	reads := []string{}
 	deps.Store = recordedReplayStore{state}
-	deps.ReadOutput = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (json.RawMessage, error) {
+	deps.ReadOutput = func(_ context.Context, ref runspec.NodeRef, generation int64) (json.RawMessage, error) {
 		if ref.RunID != "run" || ref.NodeID != "root" && ref.NodeID != "parent" || runspec.ClaimGeneration(generation) != state.nodes[string(ref.NodeID)].Generation {
 			t.Fatal("read outside the persisted ancestor generations")
 		}
@@ -829,7 +830,7 @@ func FuzzRecordedReplayValidatesLineageBeforeOutputReads(f *testing.F) {
 		case 3:
 			state.expansions[0].Source.RunID = runspec.RunID("changed:" + value)
 		case 4:
-			row.Status = store.StatusPending
+			row.Status = runstate.StatusPending
 		case 5:
 			state.expansions = state.expansions[1:]
 		case 6:
@@ -883,9 +884,9 @@ func TestNodeExecutorRecoveryReceivesPersistedFailure(t *testing.T) {
 	job := input.Accepted.Plan.Jobs[0]
 	job.OnFailureOf = "source"
 	executorChangeJob(t, &input, s, job, nodeproto.JobSpec{ID: "source", Steps: []nodeproto.StepSpec{{ID: "body"}}})
-	s.nodes = map[string]store.NodeRow{"source": {Ref: controllerwire.NodeRef{RunID: "run", NodeID: "source"}, Status: store.StatusDone, Outcome: store.NodeFailed}}
+	s.nodes = map[string]runstate.NodeRow{"source": {Ref: runspec.NodeRef{RunID: "run", NodeID: "source"}, Status: runstate.StatusDone, Outcome: runstate.NodeFailed}}
 	failure := nodeproto.JobFailure{Job: "source", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded failure"}}
-	deps.ReadFailure = func(_ context.Context, ref controllerwire.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+	deps.ReadFailure = func(_ context.Context, ref runspec.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
 		if runspec.ClaimGeneration(generation) != s.nodes[string(ref.NodeID)].Generation {
 			t.Fatal("failure reader lost the source generation")
 		}
@@ -923,7 +924,7 @@ func TestNodeExecutorAcceptedDriftReportsWithoutStarting(t *testing.T) {
 	if err = host.Execute(context.Background(), input); err == nil {
 		t.Fatal("drift accepted")
 	}
-	if len(*processes) != 0 || len(s.changes) != 1 || s.changes[0].To != store.NodeFailed {
+	if len(*processes) != 0 || len(s.changes) != 1 || s.changes[0].To != runstate.NodeFailed {
 		t.Fatalf("changes = %+v", s.changes)
 	}
 }
@@ -933,7 +934,7 @@ func TestNodeExecutorFirstStartAllocatesOrdinal(t *testing.T) {
 	input.Attempt, s.row.Attempt = 0, 0
 	original := deps.Start
 	deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
-		if input.Attempt != 1 || len(s.changes) != 1 || s.changes[0].Cause != store.CauseStart {
+		if input.Attempt != 1 || len(s.changes) != 1 || s.changes[0].Cause != runstate.CauseStart {
 			t.Fatal("SDK started without the committed ordinal")
 		}
 		return original(ctx, input, activity)
@@ -968,7 +969,7 @@ func TestNodeExecutorRefreshesStorageAndFinalizesLastAttempt(t *testing.T) {
 		if in.Storage.Authority.Attempt.Value.Attempt != 1 {
 			t.Fatal("layer preparation did not receive first bound attempt")
 		}
-		return func(_ context.Context, latest NodeInput, _ *store.NodeResult) error {
+		return func(_ context.Context, latest NodeInput, _ *runstate.NodeResult) error {
 			finalized = append(finalized, latest.Storage.Authority.Attempt.Value.Attempt)
 			return nil
 		}, nil
@@ -1007,7 +1008,7 @@ func TestNodeExecutorStorageRefreshFailureSuppressesStaleFinalizers(t *testing.T
 		return StorageBinding{Bytes: executorStorageBytes{}, Records: executorStorageRecords{}, Authority: blob.Authority{CapabilityRef: "claim", Principal: "executor", Repo: "repo", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{RunID: in.Accepted.RunID, NodeID: in.NodeID, Attempt: int64(in.Attempt), Generation: int64(in.Generation)}}}}, nil
 	}
 	setTestExecutor(&deps, func(context.Context, testPolicyName, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
-		return func(context.Context, NodeInput, *store.NodeResult) error { finalized++; return nil }, nil
+		return func(context.Context, NodeInput, *runstate.NodeResult) error { finalized++; return nil }, nil
 	})
 	start := deps.Start
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
@@ -1020,7 +1021,7 @@ func TestNodeExecutorStorageRefreshFailureSuppressesStaleFinalizers(t *testing.T
 		t.Fatal(err)
 	}
 	err = host.Execute(t.Context(), input)
-	if !errors.Is(err, sentinel) || len(*processes) != 1 || finalized != 0 || st.changes[len(st.changes)-1].To != store.NodeFailed {
+	if !errors.Is(err, sentinel) || len(*processes) != 1 || finalized != 0 || st.changes[len(st.changes)-1].To != runstate.NodeFailed {
 		t.Fatalf("error=%v processes=%d finalizers=%d", err, len(*processes), finalized)
 	}
 }
@@ -1042,10 +1043,10 @@ func TestNodeExecutorReportsOnlyBoundedMaskedFailureText(t *testing.T) {
 	}
 }
 
-func (*executorStore) MayStart(context.Context, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse, error) {
-	return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
+func (*executorStore) MayStart(context.Context, runstate.CapacityBinding, runstate.Actor) (runstate.AcquireSlotResponse, error) {
+	return runstate.AcquireSlotResponse{Kind: runstate.AcquireGranted}, nil
 }
 
-func (*executorStore) RelinquishStart(context.Context, store.CapacityBinding, store.Actor) error {
+func (*executorStore) RelinquishStart(context.Context, runstate.CapacityBinding, runstate.Actor) error {
 	return errors.New("unexpected provisional award relinquishment")
 }

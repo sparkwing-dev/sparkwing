@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -35,7 +35,7 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 	executed := make(chan string, len(doc.Jobs))
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		executed <- input.NodeID
-		return f.report(ctx, input, store.NodeSuccess)
+		return f.report(ctx, input, runstate.NodeSuccess)
 	})
 	completion, err := f.Host.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "success" {
@@ -54,20 +54,20 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"setup", "build-linux", "build-mac", "deploy", "notify"} {
-		row, err := f.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
+		row, err := f.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(f.Accepted.RunID), NodeID: runspec.NodeID(id)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		want, reason := store.NodeSuccess, ""
+		want, reason := runstate.NodeSuccess, ""
 		if selected, ok := skips[id]; ok {
-			want, reason = store.NodeSkipped, selected
+			want, reason = runstate.NodeSkipped, selected
 		} else if id == "notify" {
-			want, reason = store.NodeSkipped, "parent_did_not_fail"
+			want, reason = runstate.NodeSkipped, "parent_did_not_fail"
 		}
-		if row.Status != store.StatusDone || row.Outcome != want {
+		if row.Status != runstate.StatusDone || row.Outcome != want {
 			t.Errorf("%s: status=%s outcome=%s, want %s", id, row.Status, row.Outcome, want)
 		}
-		if want != store.NodeSkipped {
+		if want != runstate.NodeSkipped {
 			continue
 		}
 		ends := 0
@@ -76,7 +76,7 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 				continue
 			}
 			ends++
-			var result store.NodeResult
+			var result runstate.NodeResult
 			if err := json.Unmarshal(event.Payload, &result); err != nil || result.Reason != reason {
 				t.Errorf("%s: event=%s error=%v, want reason %q", id, event.Payload, err, reason)
 			}
@@ -114,11 +114,11 @@ func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
 				doc.Jobs[1].NeedsGenerated = []string{"children"}
 			}
 			fixture := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "consumer"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}})
-			fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+			fixture.Host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
 				return json.RawMessage(`{"jobs":[{"id":"child","deps":["prerequisite"],"groups":["children"],"steps":[{"id":"body"}]}]}`), runspec.SecretRegistration{Version: 1}, nil, nil
 			}
 			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
-				return fixture.report(ctx, input, store.NodeSuccess)
+				return fixture.report(ctx, input, runstate.NodeSuccess)
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
@@ -127,18 +127,18 @@ func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
 				t.Fatalf("completion=%+v error=%v", completion, err)
 			}
 			for _, id := range []string{"prerequisite", "consumer", "outside"} {
-				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: runspec.NodeID(id)})
-				want := store.NodeSuccess
+				row, err := fixture.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: runspec.NodeID(id)})
+				want := runstate.NodeSuccess
 				if id == "outside" {
-					want = store.NodeSkipped
+					want = runstate.NodeSkipped
 				}
-				if err != nil || row.Status != store.StatusDone || row.Outcome != want {
+				if err != nil || row.Status != runstate.StatusDone || row.Outcome != want {
 					t.Errorf("%s: row=%+v error=%v, want %s", id, row, err, want)
 				}
 			}
 			if generated {
-				row, err := fixture.Tenant.ReadNode(ctx, controllerwire.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "child"})
-				if err != nil || row.Outcome != store.NodeSuccess {
+				row, err := fixture.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(fixture.Accepted.RunID), NodeID: "child"})
+				if err != nil || row.Outcome != runstate.NodeSuccess {
 					t.Errorf("generated child: row=%+v error=%v", row, err)
 				}
 			}

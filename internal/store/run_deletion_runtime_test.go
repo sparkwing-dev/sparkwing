@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -34,7 +35,7 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 			if err := tenant.DeleteAuthorizedRun(t.Context(), a); !errors.As(err, &conflict) || conflict.Code != apierr.Conflict {
 				t.Fatalf("active deletion: %v", err)
 			}
-			if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: finish.Transition.RunID, Actor: finish.Transition.Actor, Cause: store.RunFinish}); err != nil {
+			if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: finish.Transition.RunID, Actor: finish.Transition.Actor, Cause: runstate.RunFinish}); err != nil {
 				t.Fatal(err)
 			}
 			if err := tenant.DeleteAuthorizedRun(t.Context(), a); err == nil {
@@ -119,7 +120,7 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 					t.Fatalf("billing rows=%d, want=%d: %v", kept, want, err)
 				}
 			}
-			if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: a.Principal.Authority}, a.Principal.Authority); err != nil {
+			if err := tenant.RevokeAuthority(t.Context(), runstate.Actor{Authority: a.Principal.Authority}, a.Principal.Authority); err != nil {
 				t.Fatal(err)
 			}
 			if err := tenant.DeleteAuthorizedRun(t.Context(), a); err == nil {

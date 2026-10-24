@@ -9,7 +9,7 @@ Import as `swinputs "github.com/sparkwing-dev/sparkwing/sparkwing/inputs"`. The 
 ## Functions
 
 - `func Compose(inputs ...sparkwing.MemoInput) sparkwing.MemoInput` -- Compose combines recipes in order.
-- `func Const(value string) sparkwing.MemoInput` -- Const declares a literal part.
+- `func Const(value string) sparkwing.MemoInput` -- Const declares a nonempty literal string, validated by the host.
 - `func Env(names ...string) sparkwing.MemoInput` -- Env declares effective job environment names.
 - `func Files(patterns ...string) sparkwing.MemoInput` -- Files declares tracked files matching patterns, using the same rules as Ignore.
 - `func Parts(parts ...any) sparkwing.MemoInput` -- Parts declares ordered JSON values for host hashing.

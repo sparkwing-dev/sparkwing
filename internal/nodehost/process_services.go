@@ -14,7 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -43,7 +43,7 @@ type ProcessServices struct {
 
 // ProcessEndpointRegistrar is implemented by the common policy router.
 type ProcessEndpointRegistrar interface {
-	Register(controller.Endpoint) error
+	Register(controllerwire.Endpoint) error
 }
 
 // RegisterProcessServices installs actual capability-authenticated service handlers.
@@ -66,7 +66,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 		{http.MethodDelete, "/node/v1/cleanups/{cleanup}"},
 	} {
 		path := route.path
-		endpoint := controller.Endpoint{Method: route.method, Pattern: path, Authentication: capability.AuthCapability, Decode: func(request *http.Request) (capability.RequestEvidence, error) {
+		endpoint := controllerwire.Endpoint{Method: route.method, Pattern: path, Authentication: capability.AuthCapability, Decode: func(request *http.Request) (capability.RequestEvidence, error) {
 			return serviceEvidence(request, path)
 		}, ResolveTarget: processServiceTarget}
 		endpoint.Handle = func(w http.ResponseWriter, request *http.Request, auth capability.Authorized) error {

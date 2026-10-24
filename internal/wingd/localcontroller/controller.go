@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -36,8 +37,8 @@ type Binding struct {
 type Services struct {
 	Policies store.Policies
 	State    State
-	HTTP     wingd.LocalHTTP
-	Runner   runners.StoreRunnerConfig
+	HTTP     localhostwire.LocalHTTP
+	Runner   StoreRunnerConfig
 	Close    func() error
 	Maintain func(context.Context)
 	Complete func(context.Context) error
@@ -96,7 +97,7 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	if services.State == nil || services.HTTP.API == nil || services.HTTP.Dashboard == nil {
 		return nil, errors.New("wingd: local services require state and shared HTTP handlers")
 	}
-	queue, err := runners.NewStoreRunner(binding.Controller, services.Runner)
+	queue, err := NewStoreRunner(binding.Controller, services.Runner)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +119,7 @@ type localController struct {
 	closeErr error
 }
 
-func (c *localController) HTTP() wingd.LocalHTTP { return c.services.HTTP }
+func (c *localController) HTTP() localhostwire.LocalHTTP { return c.services.HTTP }
 
 func (c *localController) Reconcile(ctx context.Context) (wingd.LocalActivity, error) {
 	c.mu.Lock()

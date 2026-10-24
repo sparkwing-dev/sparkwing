@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -135,7 +136,7 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 		Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
 		Grants: []capability.Grant{capability.OperatorLimits}, Binding: capability.Binding{Kind: capability.BindingNone},
 	}}
-	srv := controller.New(st, nil).WithEngineController(controller.NewEngineController(st, controller.EngineController{RunnerPolicy: &controller.SignedRunnerAdmission{}})).WithMetricsAddr(metricsAddr).WithAuthorization(controller.RouteAuthorization{
+	srv := controller.New(st, nil).WithEngineController(controller.NewEngineController(st, controller.EngineController{RunnerPolicy: &controller.SignedRunnerAdmission{}})).WithMetricsAddr(metricsAddr).WithAuthorization(routepolicy.Authorization{
 		Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
 	})
 
@@ -275,7 +276,7 @@ func newMetricsHTTPHandler(t *testing.T, grant capability.Grant) http.Handler {
 		Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
 		Grants: []capability.Grant{grant}, Binding: capability.Binding{Kind: capability.BindingNone},
 	}}
-	return controller.New(st, nil).WithAuthorization(controller.RouteAuthorization{
+	return controller.New(st, nil).WithAuthorization(routepolicy.Authorization{
 		Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
 	}).Handler()
 }

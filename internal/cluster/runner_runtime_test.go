@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -15,9 +14,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -193,17 +192,14 @@ func cliVersionIndex(t *testing.T) engine.VerifiedIndex {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := releaseauth.TrustedPublicKeys
-	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
-	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Now().UTC()
 	published := now.AddDate(0, -1, 0)
-	policy := engine.VersionIndex{Format: engine.VersionIndexFormat, PublishedAt: now, Latest: "v1.2.3", Versions: []engine.VersionInfo{{Version: "v1.2.3", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}}}
+	policy := engine.VersionIndex{Format: engine.VersionIndexFormat, PublishedAt: now, Latest: "v1.2.3", Versions: []engineid.VersionInfo{{Version: "v1.2.3", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}}}
 	body, err := json.Marshal(policy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	index, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: ed25519.Sign(private, body)}, now)
+	index, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: ed25519.Sign(private, body)}, now, []ed25519.PublicKey{public})
 	if err != nil {
 		t.Fatal(err)
 	}
