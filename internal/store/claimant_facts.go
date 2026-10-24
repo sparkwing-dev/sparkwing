@@ -9,8 +9,8 @@ import (
 )
 
 type claimantFacts struct {
-	Launcher, Personal, Shared, Cloud, Observable bool
-	OwnerAccount, Tier, OIDCKind, ExecutorClass   string
+	Launcher, Personal, Shared, Cloud, Observable, SingleUse bool
+	OwnerAccount, Tier, OIDCKind, ExecutorClass              string
 }
 
 func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, request runspec.Request) (claimantFacts, error) {
@@ -20,6 +20,7 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 	}
 	leaf, root := chain[0].principal.Capability, chain[len(chain)-1].principal.Capability
 	facts.Launcher = capability.Launcher(leaf)
+	facts.SingleUse = capability.Launcher(root)
 	facts.Observable = registeredClaimant(leaf) || actionsClaimant(leaf) || facts.Launcher || localClaimant(leaf)
 	facts.ExecutorClass, facts.OIDCKind = "runner", "user"
 	switch leaf.Subject.Kind {
@@ -53,6 +54,7 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 		c := ancestor.principal.Capability
 		facts.Cloud = facts.Cloud || capability.CloudLauncher(c)
 		if c.Binding.Kind == capability.BindingPush {
+			facts.SingleUse = true
 			facts.Tier, facts.OIDCKind = tierActions, tierActions
 		}
 	}

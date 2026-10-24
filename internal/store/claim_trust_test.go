@@ -13,9 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// A pool runner runs one job after another in shared host state, so a pool that a secret
-// is reserved to takes only verified default-branch work unless an admin registered it
-// with another trust class. The class lives on the runner's root credential.
+// Reserved secrets require launcher enrollment; trust stays on the root credential.
 func TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

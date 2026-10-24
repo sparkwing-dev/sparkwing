@@ -177,6 +177,11 @@ only pools whose rules allow the default branch. A typed repository grants no
 pool. Owner-approved extra repositories join the source token only for a
 verified push to the default branch.
 
+Verified default-branch work runs only on fresh, single-use capacity: launcher-created
+pool pods, Sparkwing Cloud pods or GitHub Actions job runners. Persistent runners
+serve other work. With only persistent runners, this work waits; add a launcher
+pool or use Sparkwing Cloud.
+
 Child runs nest at most 10 levels deep counting the root, and one root run
 uses the team-set descendant ceiling, from 1 to 1000, default 50 at every depth, retries excluded.
 Team admins change the ceiling in Team settings or with

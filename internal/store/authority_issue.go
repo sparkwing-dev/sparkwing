@@ -303,6 +303,15 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if err := checkPushClaimScope(ctx, tx, chain, row.repo, sealed.Provenance); err != nil {
 		return capability.Capability{}, err
 	}
+	facts, err := claimantFactsTx(ctx, tx, chain, sealed.Request)
+	if err != nil {
+		return capability.Capability{}, err
+	}
+	if reason, err := claimantTrustRefusalTx(ctx, tx, Team(row.team), row.run, chain[len(chain)-1].principal.Capability, facts.Launcher, facts.SingleUse); err != nil {
+		return capability.Capability{}, err
+	} else if reason != "" {
+		return capability.Capability{}, authorityError(apierr.Forbidden, reason)
+	}
 	if prospective != nil {
 		// safety: the locked row supplies scope; the claim transaction supplies only its next fence.
 		if prospective.team != row.team || prospective.run != row.run || prospective.node != row.node || row.holder != "" || row.prefix != "" || prospective.generation != row.generation+1 {
@@ -408,10 +417,6 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		c.Grants = slices.Clone(capability.BootstrapGrants())
 	}
 	reservation, err := newCreditID("award")
-	if err != nil {
-		return capability.Capability{}, err
-	}
-	facts, err := claimantFactsTx(ctx, tx, chain, sealed.Request)
 	if err != nil {
 		return capability.Capability{}, err
 	}

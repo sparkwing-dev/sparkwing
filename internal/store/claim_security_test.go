@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -21,6 +22,7 @@ func ClaimSecurityRegressions(t *testing.T, open func(*testing.T) *Store) {
 	}
 	t.Run("editor asserted main", func(t *testing.T) { actionsClaimRefusesEditorAssertedMain(t, fixture) })
 	t.Run("pool trust parity", func(t *testing.T) { reservedPoolTrustClaimAndExplanationParity(t, fixture) })
+	t.Run("fresh default branch", func(t *testing.T) { verifiedDefaultRequiresFreshPod(t, fixture) })
 	t.Run("push provenance parity", func(t *testing.T) { pushClaimProvenanceParity(t, fixture) })
 }
 
@@ -84,7 +86,7 @@ func reservedPoolTrustClaimAndExplanationParity(t *testing.T, open func(*testing
 							s.testOnlyExec(t, `UPDATE runs SET request_json=?`, body)
 						}
 						indexFixtureUnit(t, s, "a", *demand.Target)
-						want := (!secret || launcher) && (trust == capability.TrustAny || trust == "" && !secret || verified && launcher)
+						want := (!verified || launcher) && (!secret || launcher) && (trust == capability.TrustAny || trust == "" && !secret || verified && launcher)
 						err := s.inTx(t.Context(), func(tx *storeTx) error {
 							explained, err := explainUnitPlacementTx(t.Context(), tx, "a", *demand.Target, demand)
 							if err != nil {
@@ -157,5 +159,96 @@ func pushClaimProvenanceParity(t *testing.T, open func(*testing.T) *Store) {
 				t.Fatalf("queued claim error=%v, want allowed=%v", err, tc.allowed)
 			}
 		})
+	}
+}
+
+func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store) {
+	const why = "verified default-branch work runs only on fresh pods; add a launcher pool or use Sparkwing Cloud"
+	for _, source := range []string{"verified-default", "verified-main", "verified-feature", "asserted-main"} {
+		for _, runner := range []string{"persistent", "launcher", "cloud", "actions"} {
+			for _, named := range []bool{false, true} {
+				t.Run(fmt.Sprint(source, "/", runner, "/", named), func(t *testing.T) {
+					s, demand := unitClaimFixtureStore(t, open(t))
+					ctx := t.Context()
+					ref := *demand.Target
+					seal := runspec.SealedRequest{Request: runspec.Request{Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}
+					branch := "main"
+					if source == "verified-feature" {
+						branch = "feature"
+					}
+					seal.Provenance = assertedProvenance(t, "ci", "refs/heads/main", referenceMain)
+					if source != "asserted-main" {
+						var err error
+						seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/" + branch, SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: source == "verified-default"}, runspec.Optional[runspec.PullRequest]{}, "ci")
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					body, err := json.Marshal(seal)
+					if err != nil {
+						t.Fatal(err)
+					}
+					s.testOnlyExec(t, `UPDATE runs SET request_json=?,dispatch='controller' WHERE id='run'`, body)
+					s.testOnlyExec(t, `UPDATE triggers SET status='done',finished_at=1 WHERE id='run'`)
+					root := authorityRoot(runner, "a")
+					root.Trust = capability.TrustAny
+					if runner == "launcher" {
+						root.Grants, root.ReservedPools = []capability.Grant{capability.ClaimsLaunch}, []string{"prod"}
+						s.testOnlyExec(t, `UPDATE runs SET allowed_pools=? WHERE id='run'`, []byte(`["prod"]`))
+						s.testOnlyExec(t, `UPDATE nodes SET execution_json=? WHERE run_id='run'`, []byte(`{"requires":{"value":["pool=prod","team-4cpu"]}}`))
+					}
+					if runner == "cloud" {
+						root.Team, root.Subject.Kind, root.Grants = "", capability.SubjectService, []capability.Grant{capability.ClaimsLaunch}
+						s.testOnlyExec(t, `UPDATE nodes SET execution_json=? WHERE run_id='run'`, []byte(`{"requires":{"value":["sparkwing-4cpu"]}}`))
+						fundUnitClaim(t, s)
+					}
+					if runner == "actions" {
+						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/" + branch, SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/" + branch}}
+					}
+					authorityPersist(t, s, root)
+					demand.CapabilityPrefix = root.Prefix
+					// Advertisements cannot turn a persistent enrollment into a fresh pod.
+					demand.Labels = append(demand.Labels, "single-use", "launcher", "class=cloud")
+					indexFixtureUnit(t, s, "a", ref)
+					want := runner != "persistent" || source == "asserted-main" || source == "verified-feature"
+					if runner == "actions" && source == "asserted-main" {
+						want = false
+					}
+					if runner == "persistent" && !want {
+						if err := s.AsOperator().RecordRunnerPoll(ctx, demand); err != nil {
+							t.Fatal(err)
+						}
+						view, err := (&Tenant{s: s, team: "a"}).ReadRunView(ctx, "run")
+						if err != nil || view.Waiting == nil || view.Waiting.NoEligible != why {
+							t.Errorf("waiting explanation = %+v, %v", view.Waiting, err)
+						}
+						unitID, err := encodeAwardUnit(ref)
+						if err != nil {
+							t.Fatal(err)
+						}
+						err = s.inTx(ctx, func(tx *storeTx) error {
+							_, err := awardCapabilityTx(ctx, tx, capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}, Unit: capability.UnitNode, UnitID: unitID, Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect}, &awardRow{team: "a", run: "run", node: "job", holder: runner, generation: 1, lease: sql.NullInt64{Valid: true, Int64: s.now().Add(time.Minute).UnixNano()}})
+							return err
+						})
+						if !refusal(err) || err.Error() != why {
+							t.Errorf("direct award refusal = %v", err)
+						}
+					}
+					if !named {
+						demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}
+					}
+					claim, err := s.AsOperator().ClaimUnit(ctx, demand)
+					if (err == nil) != want {
+						t.Fatalf("claimed run = %q, %v; want eligible=%v", claim.RunID, err, want)
+					}
+					if !want && named && (!refusal(err) || runner == "persistent" && err.Error() != why) {
+						t.Fatalf("named refusal = %v", err)
+					}
+					if !want && !named && !errors.Is(err, ErrNotFound) {
+						t.Fatalf("queued refusal = %v", err)
+					}
+				})
+			}
+		}
 	}
 }

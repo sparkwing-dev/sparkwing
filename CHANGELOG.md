@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **runners:** Verified default-branch work requires fresh launcher pods, Cloud pods or Actions job runners; teams with only persistent runners see a waiting notice explaining how to add fresh capacity
+
 - **cache:** Retries preserve the source writer's memo and dependency-cache scope in full and failed modes. Personal placement reads the same sealed writer. Only that writer's principal can retry `--runner here` and other local runs. Other members must start a new run
 - **runtime:** Owners refuse `--only` when the controller omits the selection projection, with an error asking for a controller update
 - **security:** Deleting another member's run requires `team.admin` on the credential. Member schedule edits and deletion exclude GitHub App declarations. Runner enrollment routes require the same direct account session and grants as the store

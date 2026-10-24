@@ -137,7 +137,8 @@ func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObser
 	out := provenanceObservation{Subject: subject, SHA: facts.SHA, Write: scope.WriteRef, Reads: scope.ReadRefs, Pools: slices.Clone(row.Request.AllowedPools), Secrets: []string{}}
 	err = tenant.s.inTx(t.Context(), func(tx *storeTx) error {
 		var err error
-		out.DefaultClaimant, err = claimantTrustsRunTx(t.Context(), tx, tenant.team, run, capability.Capability{Trust: capability.TrustVerifiedDefault, ReservedPools: []string{"deploy-pool"}}, true)
+		reason, err := claimantTrustRefusalTx(t.Context(), tx, tenant.team, run, capability.Capability{Trust: capability.TrustVerifiedDefault, ReservedPools: []string{"deploy-pool"}}, true, true)
+		out.DefaultClaimant = reason == ""
 		if err != nil {
 			return err
 		}

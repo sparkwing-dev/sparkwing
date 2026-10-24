@@ -67,6 +67,10 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 				return &unit, err
 			}
 		}
+		if slices.ContainsFunc(standings, func(e eligibility) bool { return e.failed == stepFreshPod }) {
+			unit.NoEligible = freshPodReason
+			return &unit, nil
+		}
 		if runAnywhere(run.Request.Request) {
 			unit.NoEligible, err = noEligibleCauseTx(ctx, tx, team, run, ref, standings)
 		}

@@ -43,11 +43,16 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 			LocalForeground bool   `json:"local_foreground"`
 		} `json:"request"`
 		Provenance struct {
-			Trust runspec.TrustClass `json:"trust"`
+			Trust         runspec.TrustClass `json:"trust"`
+			Ref           string             `json:"ref"`
+			DefaultBranch string             `json:"default_branch"`
 		} `json:"provenance"`
 	}
 	if err := json.Unmarshal(request, &sealed); err != nil {
 		return "", err
+	}
+	if sealed.Provenance.Trust != runspec.TrustVerified && sealed.Provenance.Trust != runspec.TrustVerifiedDefault {
+		sealed.Provenance.Ref, sealed.Provenance.DefaultBranch = "", ""
 	}
 	var accepted struct {
 		Resolved struct {
