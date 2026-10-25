@@ -17,12 +17,26 @@ push records a terminal run that did not start. Adding credits later does not
 start that delivery's run. Use Run now after funding.
 
 A store can switch once from test to live payment mode using `--payment-mode`
-at startup, even after test activity. The first live start persists the switch;
+at controller startup, after draining test work. The first live start persists the switch;
 restarting live preserves it. Switching from live to test is refused, including
 after team deletion. Live balances, standing, limits, refills and payment decisions
 use only live records. Test rows remain in the store for history; they never fund
 live work. The switch clears saved test cards and card pins and disables automatic
 refills; save a live card and opt in again to use live refills.
+
+## Test-to-live cutover runbook
+
+1. Stop new test work and let awarded work finish or cancel it. Let test refills
+   reach a final provider result before stopping the test controller.
+2. Stop the test controller and start with `--payment-mode live` and live Stripe
+   credentials. Startup refuses unsettled test awards, reservations and open
+   refills with "drain metered work before switching to live; see the cutover runbook".
+   If refused, restart in test mode and finish draining.
+3. Add live funds, save a live card, and enable live refills if needed.
+
+The switch commits before requests or background workers start. It restarts
+storage accounting at the cutover instant, so time spent in test mode cannot
+become a live debit. Later live starts preserve the accounting watermarks.
 
 Operator free grants require an explicit idempotency key. A mistaken free grant
 can be corrected with a negative reversal naming its reference. Corrections
@@ -180,8 +194,9 @@ with "out of credits", naming the balance and what the slice needs. Each lease
 renewal charges the time used and reserves the next slice in the same
 transaction. A metered lease never runs past its funded horizon. When the
 balance cannot pay the next slice, the renewal records
-the stop and cancels the metered job in the same transaction. Placing a hold
-does the same for active metered work. The reason names the shortfall or hold
+the stop and cancels the metered job in the same transaction. A hold records
+its drain deadline with the financial obligation. The next renewal applies
+that deadline and cancels the metered job. The reason names the shortfall or hold
 and what resolves it. The owner and keeper stop execution when they receive that
 cancellation. The lease ends at the earlier of its paid horizon and a drain deadline at most one slice away. The host kills the SDK
 process tree at that bound, including commands that ignore cancellation, and
@@ -193,8 +208,8 @@ Kubernetes Jobs enforce the last funded duration plus at most one extra
 StartTime, so the pod can also outlive the funded bound by its activation-to-start
 delay, which has no fixed upper bound. This extra runtime is never charged to
 the customer. Only an acknowledged renewal extends the funded deadline.
-Renewals cannot move a funding stop's deadline. There is no grace period,
-and lifting the hold or adding funds does not resume the stopped job.
+Renewals cannot move a funding stop's deadline. Lifting the hold or adding
+funds does not resume the stopped job.
 Final settlement refunds the unused part of the last slice.
 
 When a funding stop or hold stops a metered job, only that job stops. The run's

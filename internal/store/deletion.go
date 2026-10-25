@@ -136,7 +136,6 @@ func discoverTeamDeletionLocks(ctx context.Context, tx *storeTx, set lockSet, te
 	if set.err != nil {
 		return set
 	}
-	set.add(lockLedger, true, string(team))
 	set.add(lockTeam, true, string(team))
 	ids, err := (&Tenant{s: tx.store, team: team}).memberIDsTx(ctx, tx)
 	if err != nil {
@@ -208,7 +207,6 @@ func (op *Operator) discoverAccountDeletionLocks(ctx context.Context, tx *storeT
 			return set
 		}
 		for _, team := range teams {
-			set.add(lockLedger, true, team)
 			set.add(lockTeam, true, team)
 		}
 	}
@@ -323,7 +321,31 @@ func (op *Operator) revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeT
 	return prefixes, nil
 }
 
+func lockTeamWorkTx(ctx context.Context, tx *storeTx, team Team) error {
+	rows, err := tx.queryContext(ctx, `SELECT 'trigger',id,'',0 FROM runs WHERE team=? AND finished_at IS NULL
+ UNION ALL SELECT 'node',run_id,node_id,0 FROM nodes WHERE team=?
+ UNION ALL SELECT 'eval',run_id,source_node_id,source_generation FROM eval_units WHERE team=?`, team, team, team)
+	if err != nil {
+		return err
+	}
+	var units []UnitRef
+	for rows.Next() {
+		var unit UnitRef
+		if err := rows.Scan(&unit.Kind, &unit.RunID, &unit.NodeID, &unit.SourceGeneration); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		units = append(units, unit)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	return tx.operator.lockUnitsTx(ctx, tx, units)
+}
+
 func (t *Tenant) cancelActiveRunsTx(ctx context.Context, tx *storeTx, now time.Time) error {
+	if err := lockTeamWorkTx(ctx, tx, t.team); err != nil {
+		return err
+	}
 	rows, err := tx.queryContext(ctx, `SELECT id FROM runs WHERE team=? AND finished_at IS NULL ORDER BY id`, t.team)
 	if err != nil {
 		return err
@@ -455,6 +477,9 @@ func requireDeletionLeaseTx(ctx context.Context, tx *storeTx, team Team, holder,
 // Run dependents go first to avoid a large cascade; requirement sets follow
 // the work rows that reference them.
 func deleteTenantRowsTx(ctx context.Context, tx *storeTx, team Team) error {
+	if err := scrubTeamPaymentDataTx(ctx, tx, team); err != nil {
+		return err
+	}
 	tables := []string{"capabilities", "sessions"}
 	for _, table := range schemaTables {
 		if table.Owner == schemaTenant && !table.RetainOnTeamDeletion {
@@ -469,8 +494,29 @@ func deleteTenantRowsTx(ctx context.Context, tx *storeTx, team Team) error {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}
 	}
-	// Receipt addresses serve delivery, not financial reconciliation.
-	_, err := tx.execContext(ctx, `UPDATE credit_checkouts SET receipt_email='' WHERE team=?`, team)
+	return nil
+}
+
+func scrubTeamPaymentDataTx(ctx context.Context, tx *storeTx, team Team) error {
+	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET receipt_email='', payment_method='' WHERE team=?`, team); err != nil {
+		return err
+	}
+	if _, err := tx.execContext(ctx, `DELETE FROM payment_setups WHERE EXISTS
+	    (SELECT 1 FROM payment_correlations c WHERE c.team=? AND c.payment_mode=payment_setups.payment_mode AND c.provider_id=payment_setups.intent_id)`, team); err != nil {
+		return err
+	}
+	// Event identity and financial facts survive; saved-card copies do not.
+	scrub := `json_remove(event_json, '$.MethodID', '$.Fingerprint', '$.Brand', '$.Last4')`
+	if tx.dialect == DialectPostgres {
+		scrub = `(event_json::jsonb - 'MethodID' - 'Fingerprint' - 'Brand' - 'Last4')::text`
+	}
+	_, err := tx.execContext(ctx, `UPDATE payment_events SET event_json=`+scrub+` WHERE team=? OR EXISTS
+	    (SELECT 1 FROM payment_correlations c WHERE c.team=? AND c.payment_mode=payment_events.payment_mode AND c.provider_id=payment_events.object_id)`, team, team)
+	if err != nil {
+		return err
+	}
+	_, err = tx.execContext(ctx, `UPDATE payment_states SET outcome_json=`+strings.ReplaceAll(scrub, "event_json", "outcome_json")+` WHERE EXISTS
+	    (SELECT 1 FROM credit_checkouts c WHERE c.team=? AND c.payment_mode=payment_states.payment_mode AND c.payment_id=payment_states.payment_id)`, team)
 	return err
 }
 
@@ -484,6 +530,9 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, rech
 			return err
 		}
 		if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
+			return err
+		}
+		if err := settleTeamAwardsTx(ctx, tx, team); err != nil {
 			return err
 		}
 		if err := deleteTenantRowsTx(ctx, tx, team); err != nil {
@@ -607,6 +656,11 @@ func (o *Operator) deleteAccountTx(ctx context.Context, tx *storeTx, accountID s
 		return AccountDeletion{}, &LastOwnerError{Teams: blocked}
 	}
 	res := AccountDeletion{AccountID: accountID}
+	for _, team := range sole {
+		if err := lockTeamWorkTx(ctx, tx, team); err != nil {
+			return AccountDeletion{}, err
+		}
+	}
 	for _, team := range sole {
 		t := &Tenant{s: o.s, team: team}
 		revoked, err := t.markForDeletionTx(ctx, tx, accountID, now)

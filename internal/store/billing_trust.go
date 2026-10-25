@@ -107,11 +107,6 @@ func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTr
 	if after, err = trustStandingTx(ctx, tx, t.team, now); err != nil {
 		return before, after, err
 	}
-	if c.Trust == billingTrustRevoked {
-		if err = stopHeldAwardsTx(ctx, tx, t.team); err != nil {
-			return before, after, err
-		}
-	}
 	subject, err := newCreditID("trust")
 	if err != nil {
 		return before, after, err

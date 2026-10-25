@@ -32,7 +32,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err := lockPaymentTx(ctx, tx, mode, req.PaymentID); err != nil {
 			return CreditReversal{}, err
 		}
-		if err := lockPaymentTeamTx(ctx, tx, Team(a.Target.Team)); err != nil {
+		if err := lockFinancialTeamsTx(ctx, tx, Team(a.Target.Team)); err != nil {
 			return CreditReversal{}, err
 		}
 		if _, err := lockLedgerTx(ctx, tx, Team(a.Target.Team)); err != nil {

@@ -700,7 +700,9 @@ the payment identity lock. A changed binding restarts the transaction.
 Concurrency maintenance takes the same team locks before capacity entries
 because its funding checks acquire the ledger.
 Owner claims and reapers use the same helper to lock the team before trigger or
-evaluation rows. Raw owner-row locks are confined to `lock_order.go` by the guard.
+evaluation rows. Raw owner-row locks are confined to `lock_order.go` by the guard. Work locks
+reuse their transaction's held keys. New work locks after the ledger are refused.
+Warnings record financial holds and drain deadlines without touching work.
 
 `lock_order.go` defines the canonical tiers and comparator. Authority and unit
 batch locking use it. The acquisition-sequence test checks actual SQL against
@@ -758,11 +760,6 @@ Justified exceptions:
   team because global service authority mutations do not wait for tenant rows.
 - GitHub source release locks its installation after work rows. No transaction
   holds an installation and then waits on work.
-- Work billing takes the ledger advisory after work locks, opposite team and
-  account deletion. Tenant and operator revocation, membership changes, team
-  deletion requests, account deletion, purge finalization, leased retention,
-  sign-in and console mutations run their complete transaction bodies through
-  `inTx` because their admin lock order can conflict with live work.
 
 `inTx` reruns its whole function in a fresh transaction when PostgreSQL reports
 a deadlock (`40P01`) or serialization failure (`40001`): at most five attempts,

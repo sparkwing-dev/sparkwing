@@ -100,9 +100,9 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 					}
 				} else {
 					rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=120`)
-					if beat, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true); err != nil || !beat.CancelRequested {
-						t.Fatalf("owner funding refusal = %+v, %v", beat, err)
-					}
+				}
+				if beat, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, true); err != nil || !beat.CancelRequested {
+					t.Fatalf("owner funding refusal = %+v, %v", beat, err)
 				}
 				run, err := tenant.ReadRun(t.Context(), "run")
 				if err != nil || run.CancelRequestedAt == nil || run.CancelReason == "" {

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -10,6 +11,48 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
+
+func TestFinancialLockOrderRejectsNewWorkAfterLedger(t *testing.T) {
+	for _, name := range []string{"trigger", "eval", "run", "node"} {
+		t.Run(name, func(t *testing.T) {
+			s := authorityStore(t)
+			unitClaimFixtureStore(t, s)
+			rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+			acquire := func(ctx context.Context, tx *storeTx) error {
+				switch name {
+				case "trigger":
+					return lockOwnerUnitTx(ctx, tx, "a", UnitRef{Kind: capability.UnitTrigger, RunID: "run"})
+				case "eval":
+					return lockOwnerUnitTx(ctx, tx, "a", UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 7})
+				case "run":
+					return lockStateRunTx(ctx, tx, "a", "run")
+				default:
+					return tx.operator.lockUnitsTx(ctx, tx, []UnitRef{{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}})
+				}
+			}
+			err := s.inTx(t.Context(), func(tx *storeTx) error {
+				if _, err := lockLedgerTx(t.Context(), tx, "a"); err != nil {
+					return err
+				}
+				return acquire(t.Context(), tx)
+			})
+			if err == nil || !strings.Contains(err.Error(), "work must precede the ledger") {
+				t.Fatalf("new work lock after ledger: %v", err)
+			}
+			if err := s.inTx(t.Context(), func(tx *storeTx) error {
+				if err := acquire(t.Context(), tx); err != nil {
+					return err
+				}
+				if _, err := lockLedgerTx(t.Context(), tx, "a"); err != nil {
+					return err
+				}
+				return acquire(t.Context(), tx)
+			}); err != nil {
+				t.Fatalf("reuse preheld work: %v", err)
+			}
+		})
+	}
+}
 
 func TestOwnerReapersLockTeamBeforeOwner(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {

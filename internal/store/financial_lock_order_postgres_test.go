@@ -36,12 +36,13 @@ func TestPostgresOwnerReaperAndClaimerLockTeamBeforeOwner(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand, ctx := lockOrderStore(t)
+			demand.Target = &store.UnitRef{Kind: kind, RunID: "run"}
 			table, ownerQuery := "triggers", `SELECT id FROM triggers WHERE team='a' AND id='run' FOR UPDATE`
 			if kind == capability.UnitEval {
 				s.TestOnlyEvaluations(t, "job")
 				table = "eval_units"
 				ownerQuery = `SELECT run_id FROM eval_units WHERE team='a' AND run_id='run' AND source_node_id='job' AND source_generation=7 FOR UPDATE`
-				demand.Target = &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
+				demand.Target = &store.UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 7}
 			} else if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET unit_kind=$1`, kind); err != nil {
 				t.Fatal(err)
 			}
@@ -71,6 +72,9 @@ func TestPostgresOwnerReaperAndClaimerLockTeamBeforeOwner(t *testing.T) {
 				claim, err := s.AsOperator().ClaimUnit(ctx, demand)
 				if err == nil && claim.Award.CapabilityPrefix == "" {
 					return fmt.Errorf("claim has no award: %+v", claim)
+				}
+				if err == nil && claim.Kind != kind {
+					return fmt.Errorf("claimed kind %s, want %s", claim.Kind, kind)
 				}
 				return err
 			})

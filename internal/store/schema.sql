@@ -929,7 +929,7 @@ CREATE TABLE credit_checkouts (
     CHECK(paid_at IS NULL OR (closed_at IS NOT NULL AND payment_id <> '')),
     CHECK(failure = '' OR (closed_at IS NOT NULL AND paid_at IS NULL)),
     CHECK(refill_blocked = 0 OR (kind = 'refill' AND failure <> '')),
-    CHECK(kind = 'checkout' OR (session_id = id AND customer_id <> '' AND payment_method <> ''))
+    CHECK(kind = 'checkout' OR (session_id = id AND customer_id <> ''))
 );
 
 -- safety: provider-event deduplication and credit settlement survive operational run pruning.
@@ -983,6 +983,7 @@ CREATE TABLE credit_freezes (
     payment_id TEXT NOT NULL DEFAULT '',
     reason TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL,
+    drain_deadline_at BIGINT GENERATED ALWAYS AS (created_at + 60000000000) STORED,
     released_at BIGINT,
     cause TEXT NOT NULL CHECK(cause IN ('operator','dispute','early_fraud_warning')),
     no_fault BIGINT NOT NULL DEFAULT 0 CHECK(no_fault IN (0,1)),

@@ -156,9 +156,6 @@ func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paym
 		freezeID, string(team), paymentIntent, "early fraud warning "+warning, HoldCauseWarning, now.UnixNano(), mode); err != nil {
 		return err
 	}
-	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
-		return err
-	}
 	return tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: auditActor{system: auditController}}, auditHold{HoldID: digestAudit(freezeID), PaymentID: digestAudit(paymentIntent), WarningID: digestAudit(warning)})
 }
 

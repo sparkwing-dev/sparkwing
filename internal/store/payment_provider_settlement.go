@@ -78,7 +78,17 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 			checkoutID = result.CheckoutID
 		}
 		_, err = tx.execContext(ctx, `INSERT INTO payment_events(team,payment_mode,event_id,checkout_id,payment_id,event_kind,event_digest,grant_id,processed_at,object_id,event_json,settlement_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, optionalString(string(result.Team)), event.Mode, event.EventID, checkoutID, event.PaymentID, event.Kind, digest, optionalString(result.GrantID), tx.now(ctx).UnixNano(), event.ObjectID, string(body), string(encoded))
-		return err
+		if err != nil {
+			return err
+		}
+		var deleting int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug=?`, result.Team).Scan(&deleting); err != nil {
+			return err
+		}
+		if deleting != 0 {
+			return scrubTeamPaymentDataTx(ctx, tx, result.Team)
+		}
+		return nil
 	})
 	if err != nil {
 		return PaymentSettlement{}, err

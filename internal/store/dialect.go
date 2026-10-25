@@ -130,6 +130,7 @@ type storeTx struct {
 	ctx                  context.Context
 	operator             *Operator
 	authorityLocks       []rowLock
+	workLocks            []storeLockKey
 	claimQueueLocked     bool
 	ledgerLocked         bool
 	insertedAuthorities  []capability.AuthorityRef

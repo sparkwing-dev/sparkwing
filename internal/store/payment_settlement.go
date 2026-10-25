@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func setPaymentModeTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode) error {
+func (op *Operator) setPaymentModeTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode) error {
 	if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
 		return err
 	}
@@ -32,6 +32,17 @@ func setPaymentModeTx(ctx context.Context, tx *storeTx, mode capability.PaymentM
 		return err
 	}
 	if err := lockFinancialTeamsTx(ctx, tx, teams...); err != nil {
+		return err
+	}
+	var open bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM billing_awards WHERE settled_at IS NULL)
+	    OR EXISTS(SELECT 1 FROM credit_checkouts WHERE payment_mode='test' AND kind='refill' AND closed_at IS NULL)`).Scan(&open); err != nil {
+		return err
+	}
+	if open {
+		return authorityError(apierr.Conflict, "drain metered work before switching to live; see the cutover runbook")
+	}
+	if _, err := tx.execContext(ctx, `UPDATE team_storage SET storage_charged_through=? WHERE store IN ('cache','logs')`, tx.now(ctx).UnixNano()); err != nil {
 		return err
 	}
 	if _, err := tx.execContext(ctx, `UPDATE teams SET card_customer='',card_payment_method='',card_fingerprint='',
@@ -150,7 +161,7 @@ func configuredPaymentModeTx(ctx context.Context, tx *storeTx, eventMode capabil
 }
 
 func paymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMode, error) {
-	mode, err := scanPaymentMode(tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"+tx.forShare()))
+	mode, err := scanPaymentMode(tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"))
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", authorityError(apierr.Unavailable, "payment mode is not configured")
 	}
@@ -339,6 +350,7 @@ func deploymentIDTx(ctx context.Context, tx *storeTx) (string, error) {
 }
 
 // ConfigureDeployment commits startup settings only after publish records the deployment.
+// Call before serving requests or starting workers; payment mode is fixed for that startup.
 // An empty mode preserves the existing payment mode. publish must not call the store.
 func (o *Operator) ConfigureDeployment(ctx context.Context, mode capability.PaymentMode, freeSlots int64, publish func() error) (string, error) {
 	if (mode != "" && mode != capability.PaymentTest && mode != capability.PaymentLive) || freeSlots < 0 || publish == nil {
@@ -350,7 +362,7 @@ func (o *Operator) ConfigureDeployment(ctx context.Context, mode capability.Paym
 			return "", err
 		}
 		if mode != "" {
-			if err := setPaymentModeTx(ctx, tx, mode); err != nil {
+			if err := tx.operator.setPaymentModeTx(ctx, tx, mode); err != nil {
 				return "", err
 			}
 		}

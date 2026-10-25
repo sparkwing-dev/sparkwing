@@ -32,6 +32,7 @@ func purgePaymentTeam(t *testing.T, s *Store, team Team) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM credit_checkouts WHERE team=? AND receipt_email<>''`, team).Scan(&sensitive); err != nil || sensitive != 0 {
 		t.Fatalf("checkout retained receipt address: %d: %v", sensitive, err)
 	}
+	assertPurgedFinancialPrivacy(t, s, team)
 	if _, err := s.ForTeam(t.Context(), team); !errors.Is(err, ErrUnknownTeam) {
 		t.Fatalf("tombstone reopened: %v", err)
 	}

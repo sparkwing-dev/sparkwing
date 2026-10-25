@@ -339,9 +339,6 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if _, err := ledgerPaymentModeTx(ctx, tx); err != nil {
-		return nil, err
-	}
 	if _, err := l.execContext(ctx, `INSERT INTO credit_checkouts (id, team, session_id, payment_mode, currency, amount_minor,
 	    amount_micro, opened_at, expires_at, kind, customer_id, payment_method, receipt_email)
 	    VALUES (?, ?, ?, ?, 'usd', ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -365,7 +362,7 @@ func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, pa
 		if err != nil {
 			return err
 		}
-		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
+		if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
 			return err
 		}
 		if err := lockPaymentTx(ctx, tx, mode, paymentIntent); err != nil {
@@ -479,7 +476,7 @@ func (o *Operator) RecordRefillAuthenticationRequired(ctx context.Context, r Ref
 		if err != nil {
 			return err
 		}
-		if err := lockPaymentTeamTx(ctx, tx, r.Team); err != nil {
+		if err := lockFinancialTeamsTx(ctx, tx, r.Team); err != nil {
 			return err
 		}
 		if err := lockPaymentTx(ctx, tx, mode, r.PaymentIntent); err != nil {

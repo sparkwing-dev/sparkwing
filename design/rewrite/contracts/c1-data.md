@@ -889,8 +889,8 @@ ordinal. Queue arbitration serializes holds and awards. Claims take the controll
 lease, queue arbitration, authority and unit rows, then the ledger. Taking queue
 arbitration or a new team lock after a ledger lock poisons the transaction before
 acquisition. Billing pages, standing decisions, and team and account deletion
-take team rows and authority before ledger locks. Team rows use no-key-update strength because their names never change;
-ledger writes can take foreign-key key-share locks without waiting for deletion. Award rechecks SQL eligibility and reserves the unit and funding atomically.
+take team rows and authority before ledger locks. Financial writers take team rows
+with `FOR UPDATE`. Award rechecks SQL eligibility and reserves the unit and funding atomically.
 For a ready job naming no runner, the existing placement-hold predicate holds
 work for the best-ranked tier with a live claimant on the same team, matching
 labels and a free slot in its latest poll. The hold ends when that claimant takes
@@ -1074,6 +1074,11 @@ Deletion never waits for financial finality. Purge removes operational data and
 saved card settings, keeping the team row as a tombstone. Checkouts, receipts,
 refunds, grants, charges, holds and payer associations survive both purge passes,
 so late settlement, refund callbacks and collateral fraud warnings still reconcile.
+Purge final-settles every award from its retained intervals before deleting work.
+Warnings and dispute holds write financial facts and a drain deadline only. Work
+renewal applies that deadline. Financial writers acquire no owner or work locks
+after the ledger. Refund binding uses the payer tombstone without an eligibility
+check. Purge and late callbacks remove saved-card copies from financial JSON.
 
 `TestPaymentMutationsRollBackWithReceipt` exercises eight mutations against a
 failing receipt boundary and checks their financial state after reopening.
@@ -2523,9 +2528,11 @@ The verified-event implementation and HTTP adapter remain W2 integrations.
 financial activity. The persisted `settings.payment_mode` records live on the
 first live start; later live starts preserve it. Live-to-test startup is refused.
 Balances, standing history, holds, refill windows and payment decisions select
-the configured mode. The switch clears test-provider card pins. Test financial
-rows remain for history, excluded from live ledger reports and decisions. A late refund of a test reservation stays in
-test mode.
+the configured mode. Startup refuses the switch while any test award or reservation
+is unsettled or a test refill is open. All test work settles before live accounting
+starts, so later charges need no reservation-mode carry-over. The switch restarts
+storage watermarks at the cutover instant and clears test-provider card pins.
+Test financial rows remain for history, excluded from live reports and decisions.
 
 `Operator.CreditLedgerTotals` owns deployment-wide ledger reports. Its raw Store
 method is removed. Reports use the same billing calculator as unit renewal and
@@ -3626,11 +3633,14 @@ unattached-checkout abort path and its legacy-only test are deleted. Ambiguous
 provider failures retain their reservation and replay identity.
 
 `Operator.ConfigureDeployment` persists validated `test`/`live` configuration
-under the payment-mode setting lock. Controller startup uses the same `--payment-mode` for
-the store and verifier. The first financial write defaults an unconfigured ledger
-to test. The first live start atomically records the one-way switch and clears
-saved test cards, card pins and refill opt-ins; publication failure rolls these back.
-Subsequent live starts preserve live cards and refills. Purging teams never clears
+in the startup transaction, before requests and workers start. Controller startup
+uses the same `--payment-mode` for the store and verifier. An unconfigured ledger
+uses test mode. The first live start refuses unsettled test awards and reservations
+or open test refills. It atomically records the switch, restarts storage watermarks
+at the cutover instant, and clears saved test cards, card pins and refill opt-ins.
+Publication failure rolls back the whole transaction. Subsequent live starts
+preserve live cards, refills and accounting watermarks. Payment mode stays fixed
+for that startup, so financial readers need no payment-mode row lock. Purging teams never clears
 the persisted mode. Live-to-test startup is refused. Reservations and verified
 settlement select the configured mode, and test rows never fund live work.
 

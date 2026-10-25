@@ -103,16 +103,13 @@ func holdCreditFreezeTx(ctx context.Context, tx *storeTx, team Team, disputeID, 
 	if actor == "" {
 		stored, cause = truncate(reason, 500), holdCauseDispute
 	}
-	mode, err := ledgerPaymentModeTx(ctx, tx)
+	mode, err := creditPaymentMode(ctx, tx)
 	if err != nil {
 		return false, err
 	}
 	if _, err := tx.execContext(ctx, `
 		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, placed_by, created_at, payment_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		disputeID, string(team), paymentID, stored, cause, actor, now.UnixNano(), mode); err != nil {
-		return false, err
-	}
-	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
 		return false, err
 	}
 	if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: provenance}, auditHold{HoldID: digestAudit(disputeID), PaymentID: digestAudit(paymentID)}); err != nil {

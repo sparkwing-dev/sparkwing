@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func (o *Operator) setPaymentMode(ctx context.Context, mode capability.PaymentMode) error {
@@ -56,6 +58,9 @@ func TestPaymentModeTestActivityCanSwitchToLive(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if activity == "refill" {
+				rewriteSchemaExec(t, s.db, `UPDATE credit_checkouts SET closed_at=? WHERE kind='refill'`, s.now().UnixNano())
 			}
 			if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
 				t.Fatalf("live startup after %s: %v", activity, err)
@@ -239,7 +244,7 @@ func TestLiveCutoverExcludesTestStandingHoldsRefillsAndCards(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='test-customer',card_payment_method='test-method',card_fingerprint='shared',refill_enabled=1,refill_threshold_cents=1000,refill_amount_cents=1000 WHERE name='a'`)
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at,customer_id,payment_method,kind) VALUES ('test-open','a','test-open','test','usd',1000,?, ?,?,'test-customer','test-method','refill')`, 1000*MicroCreditsPerCent, now.UnixNano(), now.Add(time.Hour).UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at,customer_id,payment_method,kind,closed_at) VALUES ('test-open','a','test-open','test','usd',1000,?, ?,?,'test-customer','test-method','refill',1)`, 1000*MicroCreditsPerCent, now.UnixNano(), now.Add(time.Hour).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at,customer_id,payment_method,kind,closed_at,failure,refill_blocked,payment_id) VALUES ('test-failed','a','test-failed','test','usd',1000,?, ?,?,'test-customer','test-method','refill',?,'declined',1,'test-payment')`, 1000*MicroCreditsPerCent, now.UnixNano(), now.Add(time.Hour).UnixNano(), now.UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO payment_cards(fingerprint,first_team,payment_intent,pinned_at) VALUES ('shared','b','test-payment',1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings(payment_mode,warning_id,payment_intent,fingerprint,actionable,created_at) VALUES ('test','test-warning','test-payment','shared',1,1)`)
@@ -285,6 +290,7 @@ func TestLiveCutoverRollsBackIfDeploymentPublicationFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='test-customer',card_payment_method='test-method',card_fingerprint='test-card' WHERE name='a'`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO team_storage(team,store,updated_at,storage_charged_through) VALUES ('a','cache',1,7),('a','logs',1,7)`)
 	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, DefaultFreeTeamSlots, func() error { return context.Canceled }); err != context.Canceled {
 		t.Fatalf("publication failure=%v", err)
 	}
@@ -292,11 +298,15 @@ func TestLiveCutoverRollsBackIfDeploymentPublicationFails(t *testing.T) {
 		t.Fatalf("failed cutover persisted live mode: %v", err)
 	}
 	rewriteSchemaCount(t, s.db, "teams WHERE name='a' AND card_customer='test-customer'", 1)
+	rewriteSchemaCount(t, s.db, "team_storage WHERE storage_charged_through=7", 2)
 }
 
-func TestLateTestReservationRefundNeverFundsLiveBalance(t *testing.T) {
+func TestSettledTestReservationRefundNeverFundsLiveBalance(t *testing.T) {
 	s, demand, _ := billingModelFixture(t)
 	claim, _ := meteredUnitClaim(t, s, demand)
+	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
 		t.Fatal(err)
 	}
@@ -304,17 +314,69 @@ func TestLateTestReservationRefundNeverFundsLiveBalance(t *testing.T) {
 	if err != nil || totals.BalanceMicro != 0 || totals.SettledSeconds != 0 {
 		t.Fatalf("live totals contain a test award: %+v: %v", totals, err)
 	}
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return checkCloudCapacityTx(t.Context(), ledgerView{tx: tx, team: "a"}, 8)
-	}); err != nil {
-		t.Fatalf("test award consumed live capacity: %v", err)
-	}
-	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
-		t.Fatal(err)
-	}
 	state, err := (&Tenant{s: s, team: "a"}).CreditState(t.Context(), time.Hour)
 	if err != nil || state.BalanceMicro != 0 || state.ChargedMicro != 0 {
-		t.Fatalf("late test refund changed live balance: %+v: %v", state, err)
+		t.Fatalf("test refund changed live balance: %+v: %v", state, err)
 	}
 	rewriteSchemaCount(t, s.db, "credit_charges WHERE kind='refund' AND payment_mode='test'", 1)
+}
+
+func TestLiveCutoverRequiresDrainedTestWork(t *testing.T) {
+	for _, activity := range []string{"reservation", "award", "refill"} {
+		t.Run(activity, func(t *testing.T) {
+			s, demand, _ := billingModelFixture(t)
+			if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+				t.Fatal(err)
+			}
+			if activity == "refill" {
+				rewriteSchemaExec(t, s.db, `UPDATE teams SET refill_enabled=1,refill_threshold_cents=1000,refill_amount_cents=1000 WHERE name='a'`)
+				refills, err := s.AsOperator().DueRefills(t.Context())
+				if err != nil || len(refills) != 1 {
+					t.Fatalf("refills=%+v: %v", refills, err)
+				}
+			} else {
+				if activity == "award" {
+					_, actor := meteredUnitClaim(t, s, demand)
+					tenant := &Tenant{s: s, team: "a"}
+					admitExecution(t, tenant, actor)
+					if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+						t.Fatal(err)
+					}
+				} else if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, DefaultFreeTeamSlots, func() error { t.Error("published before draining test work"); return nil })
+			if err == nil || !strings.Contains(err.Error(), "drain metered work before switching to live; see the cutover runbook") {
+				t.Fatalf("live startup with open %s: %v", activity, err)
+			}
+			mode, err := scanPaymentMode(s.db.QueryRowContext(t.Context(), `SELECT value FROM settings WHERE key='payment_mode'`))
+			if err != nil || mode != capability.PaymentTest {
+				t.Fatalf("refused startup changed mode: %s: %v", mode, err)
+			}
+		})
+	}
+}
+
+func TestLiveCutoverRestartsStorageAccounting(t *testing.T) {
+	s, lease, now := retainedBillingFixture(t)
+	retainedBlob(t, s, "a", "a", StorageBytesPerGB, now.Add(-time.Hour))
+	retainedBill(t, s, lease)
+	*now = now.Add(time.Hour)
+	cutover := *now
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
+		t.Fatal(err)
+	}
+	tenant := &Tenant{s: s, team: "a"}
+	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 1000000, Reference: "live", CreatedBy: "operator"}); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(time.Minute)
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
+		t.Fatal(err)
+	}
+	billed := retainedBill(t, s, lease)
+	if len(billed.Charges) != 1 || billed.Charges[0].Seconds != 60 {
+		t.Fatalf("live billing includes test time or restarted live watermark: %+v (cutover %s)", billed, cutover)
+	}
 }

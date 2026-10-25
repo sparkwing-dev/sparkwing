@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 const (
@@ -328,14 +326,6 @@ func creditGrantByReferenceTx(
 	g.Team = Team(owner)
 	g.CreatedAt = time.Unix(0, created).UTC()
 	return g, true, nil
-}
-
-// A provider-free ledger starts in test mode; only startup can switch it to live.
-func ledgerPaymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMode, error) {
-	if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
-		return "", err
-	}
-	return paymentModeTx(ctx, tx)
 }
 
 const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ?),

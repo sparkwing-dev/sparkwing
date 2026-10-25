@@ -230,18 +230,53 @@ func lockFinancialTeamsTx(ctx context.Context, tx *storeTx, teams ...Team) error
 }
 
 func lockOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
-	if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
-		return err
-	}
-	var id string
+	key := storeLockKey{keys: [3]string{string(team), string(unit.RunID), string(unit.NodeID)}, generation: unit.SourceGeneration}
 	switch unit.Kind {
 	case capability.UnitTrigger, capability.UnitPlan:
-		return tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), team, unit.RunID).Scan(&id)
+		key.tier = lockTrigger
 	case capability.UnitEval:
-		return tx.QueryRowContext(ctx, `SELECT run_id FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&id)
+		key.tier = lockEval
 	default:
 		return nil
 	}
+	return lockWorkRowTx(ctx, tx, key)
+}
+
+func lockWorkRowTx(ctx context.Context, tx *storeTx, key storeLockKey) error {
+	if slices.Contains(tx.workLocks, key) {
+		return nil
+	}
+	if tx.ledgerLocked {
+		tx.err = errors.New("financial lock order: work must precede the ledger")
+		return tx.err
+	}
+	if err := lockFinancialTeamsTx(ctx, tx, Team(key.keys[0])); err != nil {
+		return err
+	}
+	args := []any{key.keys[0], key.keys[1]}
+	mode := tx.forUpdate()
+	var query string
+	switch key.tier {
+	case lockTrigger:
+		query = `SELECT id FROM triggers WHERE team=? AND id=?`
+	case lockEval:
+		query = `SELECT run_id FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`
+		args = append(args, key.keys[2], key.generation)
+	case lockRun:
+		query = `SELECT id FROM runs WHERE team=? AND id=?`
+		mode = tx.forNoKeyUpdate()
+	case lockNode:
+		query = `SELECT node_id FROM nodes WHERE team=? AND run_id=? AND node_id=?`
+		args = append(args, key.keys[2])
+	default:
+		return errors.New("unsupported work lock tier")
+	}
+	var id string
+	if err := tx.QueryRowContext(ctx, query+mode, args...).Scan(&id); err != nil {
+		return err
+	}
+	tx.workLocks = append(tx.workLocks, key)
+	return nil
 }
 
 // Payment identity is locked after its discovered teams. Revalidation under

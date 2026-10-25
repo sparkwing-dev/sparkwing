@@ -28,8 +28,11 @@ Existing stores are refused rather than opened under the new schema.
 ## Payment ledgers and operator grants
 
 Start with `--payment-mode live` to switch a test store to live once, even after
-test activity. Later live starts preserve the switch; live-to-test startup is
-refused. Test credits, standing, holds, card pins and refill windows cannot affect
+test activity. First drain test awards, reservations and refills as described in
+the [cutover runbook](../billing.md#test-to-live-cutover-runbook). The switch commits
+before the controller serves requests and restarts storage accounting at the
+cutover instant. Later live starts preserve the switch and accounting watermarks.
+Live-to-test startup is refused. Test credits, standing, holds, card pins and refill windows cannot affect
 live decisions. Saved test cards, card pins and refill opt-ins are cleared at
 cutover; save a live card and opt in again. Test financial rows remain in the store.
 Grants, charges and holds retain mode tags. Reversals require an existing grant in
@@ -37,7 +40,9 @@ the same team and mode. The schema includes these columns and the reversal
 foreign key.
 Financial records and payer associations survive team deletion as tombstones.
 Deletion never waits for financial finality; late payments, refunds and fraud
-warnings reconcile against retained records.
+warnings reconcile against retained records. Purge final-settles awards and
+removes saved-card details from retained receipts. Holds retain their drain
+deadline independently of operational work.
 Operator grants require an explicit idempotency key. Use `admin grant --reverses`
 to correct a free grant, naming its full reference and using a fresh key.
 

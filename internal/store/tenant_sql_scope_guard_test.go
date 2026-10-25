@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).setPaymentModeTx":               "startup cutover checks all teams for open test work and restarts every storage watermark before serving",
 	"(*Operator).claimObserversTx":               "claim placement discovers live claimant observations across teams, then checks every pair against authenticated scope",
 	"(*Operator).claimOverflowAccountsTx":        "deployment claims gather each live team's overflow policy before the shared eligibility predicate filters pairs",
 	"(*Operator).claimTargetTeamTx":              "only the Cloud launcher resolves a globally named run; other claimants query their authenticated team before kind or trust diagnostics",
