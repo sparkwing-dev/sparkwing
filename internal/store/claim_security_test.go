@@ -23,6 +23,7 @@ func ClaimSecurityRegressions(t *testing.T, open func(*testing.T) *Store) {
 	t.Run("editor asserted main", func(t *testing.T) { actionsClaimRefusesEditorAssertedMain(t, fixture) })
 	t.Run("pool trust parity", func(t *testing.T) { reservedPoolTrustClaimAndExplanationParity(t, fixture) })
 	t.Run("fresh default branch", func(t *testing.T) { verifiedDefaultRequiresFreshPod(t, fixture) })
+	t.Run("fresh pod explanation", func(t *testing.T) { freshPodWaitingExplanation(t, fixture) })
 	t.Run("push provenance parity", func(t *testing.T) { pushClaimProvenanceParity(t, fixture) })
 }
 
@@ -164,7 +165,7 @@ func pushClaimProvenanceParity(t *testing.T, open func(*testing.T) *Store) {
 
 func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store) {
 	const why = "verified default-branch work on Kubernetes runs only on fresh pods; add a launcher pool or use Sparkwing Cloud"
-	for _, source := range []string{"verified-default", "verified-main", "verified-feature", "asserted-main"} {
+	for _, source := range []string{"verified-default", "verified-main", "schedule", "inherited-schedule", "verified-feature", "asserted-main"} {
 		for _, runner := range []string{"plain-machine", "persistent", "launcher", "cloud", "actions"} {
 			for _, named := range []bool{false, true} {
 				t.Run(fmt.Sprint(source, "/", runner, "/", named), func(t *testing.T) {
@@ -177,7 +178,17 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 						branch = "feature"
 					}
 					seal.Provenance = assertedProvenance(t, "ci", "refs/heads/main", referenceMain)
-					if source != "asserted-main" {
+					if source == "schedule" || source == "inherited-schedule" {
+						var err error
+						seal.Provenance, err = runspec.ScheduleProvenance("nightly", 1, "main", referenceMain, "ci")
+						if err != nil {
+							t.Fatal(err)
+						}
+						if source == "inherited-schedule" {
+							seal.Request.Lineage.ParentRunID = "parent"
+							seal.Request.Pipeline = "child"
+						}
+					} else if source != "asserted-main" {
 						var err error
 						seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/" + branch, SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: source == "verified-default"}, runspec.Optional[runspec.PullRequest]{}, "ci")
 						if err != nil {
@@ -224,7 +235,7 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					demand.Labels = append(demand.Labels, "single-use", "launcher", "class=cloud")
 					indexFixtureUnit(t, s, "a", ref)
 					want := runner != "persistent" || source == "asserted-main" || source == "verified-feature"
-					if runner == "actions" && source == "asserted-main" {
+					if runner == "actions" && (source == "asserted-main" || source == "schedule" || source == "inherited-schedule") {
 						want = false
 					}
 					if runner == "persistent" && !want {
@@ -259,6 +270,74 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					}
 					if !want && !named && !errors.Is(err, ErrNotFound) {
 						t.Fatalf("queued refusal = %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func freshPodWaitingExplanation(t *testing.T, open func(*testing.T) *Store) {
+	for _, dispatch := range []runspec.Dispatch{runspec.DispatchController, runspec.DispatchHost} {
+		for _, selection := range []runspec.RunnerSelection{{Kind: runspec.RunnerName, Value: "persistent"}, {Kind: runspec.RunnerLabel, Value: "gpu"}} {
+			for _, mismatch := range []string{"", "repository", "selector", "tier"} {
+				if mismatch == "tier" && dispatch == runspec.DispatchHost {
+					continue
+				}
+				t.Run(fmt.Sprint(dispatch, "/", selection.Kind, "/", mismatch), func(t *testing.T) {
+					s, demand := unitClaimFixtureStore(t, open(t))
+					ctx := t.Context()
+					if mismatch != "" {
+						ctx = WithClaimPlacement(ctx, ClaimPlacement{Liveness: time.Minute})
+					}
+					p, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/main", SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: true}, runspec.Optional[runspec.PullRequest]{}, "ci")
+					if err != nil {
+						t.Fatal(err)
+					}
+					request := runspec.Request{Mode: runspec.IntakeExecute, Dispatch: dispatch, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}
+					request.Options.Runner.Optional = runspec.Optional[runspec.RunnerSelection]{Set: true, Value: selection}
+					if mismatch == "tier" {
+						request.Options.Runner.Optional = runspec.Optional[runspec.RunnerSelection]{}
+						request.Dispatch = runspec.DispatchController
+						s.testOnlyExec(t, `UPDATE teams SET claim_ranking=? WHERE name='a'`, `["cloud"]`)
+					}
+					body := sealWith(t, runspec.SealedRequest{Request: request}, p)
+					s.testOnlyExec(t, `UPDATE runs SET request_json=?,dispatch=? WHERE id='run'`, body, request.Dispatch)
+					ref := *demand.Target
+					if dispatch == runspec.DispatchHost {
+						ref = UnitRef{Kind: capability.UnitTrigger, RunID: "run"}
+					} else {
+						s.testOnlyExec(t, `UPDATE triggers SET status='done',finished_at=1 WHERE id='run'`)
+					}
+					owner := referenceMember(t, s, "owner", RoleOwner)
+					repos := []string{"github.com/acme/*"}
+					if mismatch == "repository" {
+						repos = []string{"github.com/other/*"}
+					}
+					issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:persistent", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "persistent"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: repos, Trust: capability.TrustAny, Platform: "kubernetes"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					demand.CapabilityPrefix, demand.Target = issued.Capability.Prefix, &ref
+					demand.Labels = append(demand.Labels, "gpu")
+					if mismatch == "selector" {
+						if selection.Kind == runspec.RunnerName {
+							request.Options.Runner.Value.Value = "another-runner"
+							s.testOnlyExec(t, `UPDATE runs SET request_json=? WHERE id='run'`, sealWith(t, runspec.SealedRequest{Request: request}, p))
+						} else {
+							demand.Labels = []string{"team-4cpu"}
+						}
+					}
+					indexFixtureUnit(t, s, "a", ref)
+					if err := s.AsOperator().RecordRunnerPoll(ctx, demand); err != nil {
+						t.Fatal(err)
+					}
+					view, err := (&Tenant{s: s, team: "a"}).ReadRunView(ctx, "run")
+					if err != nil || view.Waiting == nil {
+						t.Fatalf("waiting unit = %+v, %v", view.Waiting, err)
+					}
+					if got := view.Waiting.NoEligible == freshPodReason; got != (mismatch == "") {
+						t.Fatalf("waiting explanation = %q, mismatch=%q", view.Waiting.NoEligible, mismatch)
 					}
 				})
 			}

@@ -178,8 +178,10 @@ pool. Owner-approved extra repositories join the source token only for a
 verified push to the default branch.
 
 On Kubernetes, verified default-branch work runs only on fresh, single-use pods.
-Persistent Kubernetes runners serve other work. With only persistent Kubernetes
-runners, verified work waits; add a launcher pool or use Sparkwing Cloud. The
+This includes admin-armed default-branch schedules, plus children and retries
+that inherit verified default-branch provenance. Persistent Kubernetes runners
+serve other work. With only persistent Kubernetes runners, verified work waits;
+add a launcher pool or use Sparkwing Cloud. The
 controller reads the platform from the admin-issued enrollment, never from job
 claims. Plain-machine runners (VMs and bare metal) keep serving verified work
 under the same OS user, so job code can read runner credentials and leave host

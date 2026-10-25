@@ -62,17 +62,6 @@ func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit Un
 		e.failed, e.refused = stepKinds, errors.Join(err, authorityError(apierr.Forbidden, "claimant does not take this kind of unit"))
 		return e, nil
 	}
-	facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
-	if err != nil {
-		return e, err
-	}
-	if reason, err := claimantTrustRefusalTx(ctx, tx, team, string(unit.RunID), chain[len(chain)-1].principal.Capability, e.launcher, facts.PersistentKubernetes); err != nil || reason != "" {
-		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, reason)
-		if reason == freshPodReason {
-			e.failed = stepFreshPod
-		}
-		return e, err
-	}
 	e.profile, e.demand, err = readMatchingInputsTx(ctx, tx, claimant, unit, false)
 	switch {
 	case errors.Is(err, errTierOutsideRanking):
@@ -94,6 +83,17 @@ func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit Un
 	if !verdict.OK() {
 		e.failed, e.refused = stepMatch, authorityError(apierr.Forbidden, "work does not match claimant: "+verdict.String())
 		return e, nil
+	}
+	facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
+	if err != nil {
+		return e, err
+	}
+	if reason, err := claimantTrustRefusalTx(ctx, tx, team, string(unit.RunID), chain[len(chain)-1].principal.Capability, e.launcher, facts.PersistentKubernetes); err != nil || reason != "" {
+		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, reason)
+		if reason == freshPodReason {
+			e.failed = stepFreshPod
+		}
+		return e, err
 	}
 	return e, nil
 }

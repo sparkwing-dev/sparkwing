@@ -22,7 +22,7 @@ type UnclaimedUnit struct {
 	// CreditHold names the balance shortfall or hold that keeps the launcher from claiming the unit, and its remedy;
 	// empty when nothing does.
 	CreditHold string
-	// NoEligible says why no claimant can take a run-anywhere unit; empty when one can.
+	// NoEligible says why no claimant can take a waiting unit; empty when one can.
 	NoEligible string
 }
 
@@ -56,32 +56,33 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
-	if run.Dispatch == string(runspec.DispatchController) {
-		ref := UnitRef{Kind: unit.Kind, RunID: runspec.RunID(run.ID), NodeID: runspec.NodeID(unit.NodeID)}
-		standings, err := unitStandingsTx(ctx, tx, team, ref, run.Request.Request)
-		if err != nil || slices.ContainsFunc(standings, func(e eligibility) bool { return e.ok() && !e.unobserved }) {
-			return &unit, err
-		}
-		if slices.ContainsFunc(standings, func(e eligibility) bool { return e.failed == stepBilling }) {
-			if unit.CreditHold, err = unitCreditHoldTx(ctx, tx, team, run, ref); err != nil || unit.CreditHold != "" {
-				return &unit, err
-			}
-		}
-		if slices.ContainsFunc(standings, func(e eligibility) bool { return e.failed == stepFreshPod }) {
-			unit.NoEligible = freshPodReason
-			return &unit, nil
-		}
-		if runAnywhere(run.Request.Request) {
-			unit.NoEligible, err = noEligibleCauseTx(ctx, tx, team, run, ref, standings)
-		}
+	ref := UnitRef{Kind: unit.Kind, RunID: runspec.RunID(run.ID), NodeID: runspec.NodeID(unit.NodeID)}
+	standings, err := unitStandingsTx(ctx, tx, team, ref, run.Request.Request)
+	if err != nil || slices.ContainsFunc(standings, func(e eligibility) bool { return e.ok() && !e.unobserved }) {
 		return &unit, err
 	}
-	return &unit, nil
+	if slices.ContainsFunc(standings, func(e eligibility) bool { return e.failed == stepBilling }) {
+		if unit.CreditHold, err = unitCreditHoldTx(ctx, tx, team, run, ref); err != nil || unit.CreditHold != "" {
+			return &unit, err
+		}
+	}
+	if slices.ContainsFunc(standings, func(e eligibility) bool { return e.failed == stepFreshPod }) {
+		unit.NoEligible = freshPodReason
+		return &unit, nil
+	}
+	if runAnywhere(run.Request.Request) {
+		unit.NoEligible, err = noEligibleCauseTx(ctx, tx, team, run, ref, standings)
+	}
+	return &unit, err
 }
 
 // safety: notices judge the live observations the ranking scans; an unpolled launcher only informs credit standing.
 func unitStandingsTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, request runspec.Request) ([]eligibility, error) {
-	polls, err := placementRunnersTx(ctx, tx, team, claimLiveness(ctx, request), true)
+	liveness := claimLiveness(ctx, request)
+	if liveness <= 0 {
+		liveness = time.Minute
+	}
+	polls, err := placementRunnersTx(ctx, tx, team, liveness, true)
 	if err != nil {
 		return nil, err
 	}

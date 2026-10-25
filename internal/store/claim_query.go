@@ -342,9 +342,14 @@ func (q *claimSQL) poolTrust(team, pools, trust, launcher, provenance string) st
 	return `((NOT (` + reserved + ` OR (` + trust + `='verified-default' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='any' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.at(provenance, "trust") + ` IN ('verified-default','schedule')))`
 }
 
-func (q *claimSQL) freshPod(persistentKubernetes, provenance string) string {
+// Context sharing and placement must agree, including seals inherited from schedules.
+func (q *claimSQL) verifiedDefaultWork(provenance string) string {
 	p := func(name string) string { return q.at(provenance, name) }
-	return `(` + persistentKubernetes + `=0 OR NOT COALESCE((` + p("trust") + ` IN ('verified','verified-default') AND ` + p("default_branch") + `<>'' AND ` + p("ref") + `='refs/heads/'||` + p("default_branch") + `),FALSE))`
+	return `COALESCE((` + p("trust") + ` IN ('verified','verified-default','schedule') AND ` + p("default_branch") + `<>'' AND ` + p("ref") + `='refs/heads/'||` + p("default_branch") + `),FALSE)`
+}
+
+func (q *claimSQL) freshPod(persistentKubernetes, provenance string) string {
+	return `(` + persistentKubernetes + `=0 OR NOT ` + q.verifiedDefaultWork(provenance) + `)`
 }
 
 func (q *claimSQL) predicate() string {
