@@ -147,7 +147,8 @@ func TestAuditPolicySkipsFinalEmptyPolls(t *testing.T) {
 	r.Header.Set(RequestIDHeader, "bad id")
 	w = httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
-	if w.Header().Get(RequestIDHeader) == "" || strings.Contains(w.Header().Get(RequestIDHeader), "bad") {
-		t.Fatalf("request id=%q", w.Header().Get(RequestIDHeader))
+	id := w.Header().Get(RequestIDHeader)
+	if _, err := hex.DecodeString(id); err != nil || len(id) != 24 {
+		t.Fatalf("request id=%q", id)
 	}
 }

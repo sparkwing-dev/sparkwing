@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -188,7 +189,10 @@ func TestPostgresDirectGrantRacingTeamPurge(t *testing.T) {
 			t.Errorf("%s rows=%d: %v", table, count, err)
 		}
 	}
-	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentLive, store.DefaultFreeTeamSlots, func() error { return nil }); err == nil {
-		t.Fatal("purge erased the payment mode freeze")
+	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentLive, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+		t.Fatalf("live startup after purge: %v", err)
+	}
+	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err == nil || !strings.Contains(err.Error(), "live to test") {
+		t.Fatalf("test startup after purge: %v", err)
 	}
 }
