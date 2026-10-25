@@ -69,7 +69,7 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 	now := time.Now()
 	processAgain := func(id string) {
 		t.Helper()
-		if next, err := s.processNextGitHubDelivery(t.Context(), now.Add(24*time.Hour)); err != nil || next != nil {
+		if next, err := s.processNextGitHubDelivery(t.Context()); err != nil || next != nil {
 			t.Fatalf("failed delivery retried automatically: %+v, %v", next, err)
 		}
 		engineSQL(t, e.Store, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id=? AND state='failed'`, id)
@@ -87,13 +87,13 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 		t.Fatalf("ingress = %d %s; GitHub calls = %d", response.Code, response.Body, calls)
 	}
 	engineSQL(t, e.Store, `ALTER TABLE github_app_triggers RENAME TO temporarily_unavailable_triggers`)
-	outcome, err := s.processNextGitHubDelivery(t.Context(), now.Add(time.Second))
+	outcome, err := s.processNextGitHubDelivery(t.Context())
 	if err != nil || outcome == nil || outcome.status != http.StatusInternalServerError || outcome.failureReason() == "" {
 		t.Fatalf("database blip lost delivery: %+v,%v", outcome, err)
 	}
 	engineSQL(t, e.Store, `ALTER TABLE temporarily_unavailable_triggers RENAME TO github_app_triggers`)
 	processAgain("delivery")
-	outcome, err = s.processNextGitHubDelivery(t.Context(), now.Add(10*time.Second))
+	outcome, err = s.processNextGitHubDelivery(t.Context())
 	if err != nil || outcome == nil || outcome.failureReason() == "" || calls == 0 {
 		t.Fatalf("unavailable GitHub = %+v, %v; calls = %d", outcome, err, calls)
 	}
@@ -105,7 +105,7 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 	// A controller restart preserves the failed delivery until manual processing.
 	restarted := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithGitHubApp(cfg)
 	processAgain("delivery")
-	outcome, err = restarted.processNextGitHubDelivery(t.Context(), now.Add(time.Minute))
+	outcome, err = restarted.processNextGitHubDelivery(t.Context())
 	if err != nil || outcome == nil || outcome.failureReason() != "" || outcome.status >= 400 {
 		t.Fatalf("retry = %+v, %v", outcome, err)
 	}
@@ -122,7 +122,7 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 	if found != 1 {
 		t.Fatalf("recovered build runs = %d; outcome = %s", found, outcome.body.String())
 	}
-	if next, err := restarted.processNextGitHubDelivery(t.Context(), now.Add(time.Hour)); err != nil || next != nil {
+	if next, err := restarted.processNextGitHubDelivery(t.Context()); err != nil || next != nil {
 		t.Fatalf("completed delivery replayed: %+v, %v", next, err)
 	}
 	restarted = s
@@ -133,13 +133,13 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 	if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), "partial-discovery", "push", []byte(secondBody), now); err != nil {
 		t.Fatal(err)
 	}
-	outcome, err = restarted.processNextGitHubDelivery(t.Context(), now.Add(2*time.Minute))
+	outcome, err = restarted.processNextGitHubDelivery(t.Context())
 	if err != nil || outcome == nil || outcome.status != http.StatusAccepted || outcome.failureReason() == "" || !strings.Contains(outcome.body.String(), `"dispatched"`) {
 		t.Fatalf("manual run with unavailable automation = %+v, %v", outcome, err)
 	}
 	previewUnavailable = false
 	processAgain("partial-discovery")
-	outcome, err = restarted.processNextGitHubDelivery(t.Context(), now.Add(3*time.Minute))
+	outcome, err = restarted.processNextGitHubDelivery(t.Context())
 	if err != nil || outcome == nil || outcome.failureReason() != "" || !strings.Contains(outcome.body.String(), `"duplicate"`) {
 		t.Fatalf("automation recovery = %+v, %v", outcome, err)
 	}
@@ -165,13 +165,13 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 	if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), "partial-admission", "push", []byte(thirdBody), now); err != nil {
 		t.Fatal(err)
 	}
-	outcome, err = restarted.processNextGitHubDelivery(t.Context(), now.Add(4*time.Minute))
+	outcome, err = restarted.processNextGitHubDelivery(t.Context())
 	if err != nil || outcome == nil || outcome.failureReason() == "" || !strings.Contains(outcome.body.String(), `"failed"`) {
 		t.Fatalf("partial budget admission = %+v, %v", outcome, err)
 	}
 	s.WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
 	processAgain("partial-admission")
-	outcome, err = restarted.processNextGitHubDelivery(t.Context(), now.Add(5*time.Minute))
+	outcome, err = restarted.processNextGitHubDelivery(t.Context())
 	if err != nil || outcome == nil || outcome.failureReason() != "" || !strings.Contains(outcome.body.String(), `"duplicate"`) {
 		t.Fatalf("partial budget retry = %+v, %v", outcome, err)
 	}
@@ -194,7 +194,7 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 			if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), test.id, "push", []byte(featureBody), now); err != nil {
 				t.Fatal(err)
 			}
-			outcome, err := s.processNextGitHubDelivery(t.Context(), now.Add(6*time.Minute))
+			outcome, err := s.processNextGitHubDelivery(t.Context())
 			if err != nil || outcome == nil || outcome.status != http.StatusAccepted || outcome.failureReason() == "" {
 				t.Fatalf("partial permanent discovery failure = %+v, %v", outcome, err)
 			}
@@ -207,7 +207,7 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT state,last_error,body FROM github_app_deliveries WHERE delivery_id=?`, test.id).Scan(&state, &reason, &retained); err != nil || state != "failed" || reason != outcome.failureReason() || string(retained) != featureBody {
 				t.Fatalf("partial failure lost payload or reason: state=%q reason=%q body=%q err=%v", state, reason, retained, err)
 			}
-			if next, err := s.processNextGitHubDelivery(t.Context(), now.Add(24*time.Hour)); err != nil || next != nil {
+			if next, err := s.processNextGitHubDelivery(t.Context()); err != nil || next != nil {
 				t.Fatalf("partial permanent discovery failure retried: %+v, %v", next, err)
 			}
 		})
@@ -229,7 +229,7 @@ func TestGitHubInboxLifecycleCrashBeforeCompletionKeepsNewerState(t *testing.T) 
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `CREATE TRIGGER fail_delivery_completion BEFORE UPDATE ON github_app_deliveries WHEN NEW.state='done' BEGIN SELECT RAISE(ABORT,'crash before completion'); END`)
-	if outcome, err := s.processNextGitHubDelivery(ctx, now); err == nil || outcome == nil || outcome.failureReason() != "" {
+	if outcome, err := s.processNextGitHubDelivery(ctx); err == nil || outcome == nil || outcome.failureReason() != "" {
 		t.Fatalf("completion failure: %+v, %v", outcome, err)
 	}
 	got, err := op.GitHubAppInstallationTeam(ctx, 7)
@@ -240,15 +240,16 @@ func TestGitHubInboxLifecycleCrashBeforeCompletionKeepsNewerState(t *testing.T) 
 	if err := op.EnqueueGitHubDelivery(ctx, "unsuspend", "installation", []byte(`{"action":"unsuspend","installation":{"id":7,"app_id":1}}`), now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if outcome, err := s.processNextGitHubDelivery(ctx, now.Add(time.Second)); err != nil || outcome == nil || outcome.failureReason() != "" {
+	if outcome, err := s.processNextGitHubDelivery(ctx); err != nil || outcome == nil || outcome.failureReason() != "" {
 		t.Fatalf("newer delivery: %+v, %v", outcome, err)
 	}
 	restarted := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook"})
-	if outcome, err := restarted.processNextGitHubDelivery(ctx, now.Add(3*time.Minute)); err != nil || outcome != nil {
+	engineSQL(t, e.Store, `UPDATE github_app_deliveries SET lease_until=0 WHERE state='leased'`)
+	if outcome, err := restarted.processNextGitHubDelivery(ctx); err != nil || outcome != nil {
 		t.Fatalf("expired delivery retried automatically: %+v, %v", outcome, err)
 	}
 	engineSQL(t, e.Store, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id='suspend' AND state='failed'`)
-	if outcome, err := restarted.processNextGitHubDelivery(ctx, now.Add(4*time.Minute)); err != nil || outcome == nil || outcome.failureReason() != "" {
+	if outcome, err := restarted.processNextGitHubDelivery(ctx); err != nil || outcome == nil || outcome.failureReason() != "" {
 		t.Fatalf("manual processing: %+v, %v", outcome, err)
 	}
 	got, err = op.GitHubAppInstallationTeam(ctx, 7)
@@ -269,7 +270,7 @@ func TestGitHubInboxPermanentFailureRetainsReasonWithoutRetry(t *testing.T) {
 	if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), "malformed", "push", []byte(`{`), now); err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := e.Server.processNextGitHubDelivery(t.Context(), now)
+	outcome, err := e.Server.processNextGitHubDelivery(t.Context())
 	if err != nil || outcome == nil || outcome.status != http.StatusBadRequest || outcome.failureReason() == "" {
 		t.Fatalf("permanent failure: %+v, %v", outcome, err)
 	}
@@ -277,7 +278,7 @@ func TestGitHubInboxPermanentFailureRetainsReasonWithoutRetry(t *testing.T) {
 	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT state,last_error FROM github_app_deliveries WHERE delivery_id='malformed'`).Scan(&state, &reason); err != nil || state != "failed" || reason != outcome.failureReason() {
 		t.Fatalf("permanent failure was not retained: state=%q reason=%q err=%v", state, reason, err)
 	}
-	if next, err := e.Server.processNextGitHubDelivery(t.Context(), now.Add(24*time.Hour)); err != nil || next != nil {
+	if next, err := e.Server.processNextGitHubDelivery(t.Context()); err != nil || next != nil {
 		t.Fatalf("permanent failure retried: %+v, %v", next, err)
 	}
 }

@@ -22,7 +22,7 @@ func (t *Tenant) billingMutationTx(ctx context.Context, a capability.Authorized,
 				return err
 			}
 			var deleting int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug=? AND state=?`, t.team, TeamDeletionPending).Scan(&deleting); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug=?`, t.team).Scan(&deleting); err != nil {
 				return err
 			}
 			if deleting > 0 {

@@ -231,14 +231,26 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 
 func settleAdmissionTx(ctx context.Context, tx *storeTx, team Team, b runstate.CapacityBinding, actor runstate.Actor, result runstate.AcquireSlotResponse) error {
 	if b.NodeID == "" {
-		kind := runstate.PolicyAdmissionFail
+		snapshot, err := readSnapshotTx(ctx, tx, team, b.RunID)
+		if err != nil {
+			return err
+		}
+		outcome := runstate.NodeFailed
 		if result.Kind == runstate.AcquireSkipped {
-			kind = runstate.PolicyAdmissionSkip
+			outcome = runstate.NodeSkipped
 		}
-		if result.FailureReason == FailureQueueTimeout {
-			kind = runstate.PolicyQueueTimeout
+		for _, node := range snapshot.Nodes {
+			if node.Status == runstate.StatusDone {
+				continue
+			}
+			if _, err := transitionNodeStateTx(ctx, tx, team, nodeTransition{Ref: node.Ref, Actor: actor, To: outcome, Cause: causeAdmissionRefused, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: outcome, Reason: result.FailureReason}}}); err != nil {
+				return err
+			}
 		}
-		_, err := transitionRunTx(ctx, tx, team, runstate.RunTransition{RunID: runspec.RunID(b.RunID), Actor: actor, To: runstate.RunFailed, Cause: runstate.RunPolicyRefused, Reason: result.FailureReason, OwnerPolicy: &runstate.OwnerPolicyResult{Kind: kind, Generation: actor.Owner.Generation}})
+		if _, err := tx.execContext(ctx, `UPDATE nodes SET expansion=CASE WHEN outcome IN ('success','memoized') THEN 'failed' ELSE 'none' END WHERE team=? AND run_id=? AND expansion='expected'`, team, b.RunID); err != nil {
+			return err
+		}
+		_, err = transitionRunTx(ctx, tx, team, runstate.RunTransition{RunID: runspec.RunID(b.RunID), Actor: actor, Cause: runstate.RunFinish, Reason: result.FailureReason})
 		return err
 	}
 	row, err := readNodeTx(ctx, tx, team, runspec.NodeRef{RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)})

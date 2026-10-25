@@ -15,7 +15,7 @@ import (
 func billingPageFixture(t *testing.T) (*Store, *Tenant, capability.Authorized) {
 	t.Helper()
 	s := authorityStore(t)
-	if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, DefaultFreeTeamSlots, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	actor := authorityMember(t, s, "owner", RoleOwner)
@@ -226,10 +226,10 @@ func TestBillingPaymentModeRefusesInvalidConfigurationProperty(t *testing.T) {
 	property := func(raw []byte) bool {
 		s, _, _ := billingPageFixture(t)
 		mode := capability.PaymentMode(raw)
-		if mode == capability.PaymentTest || mode == capability.PaymentLive {
+		if mode == "" || mode == capability.PaymentTest || mode == capability.PaymentLive {
 			return true
 		}
-		err := s.AsOperator().SetPaymentMode(t.Context(), mode)
+		_, err := s.AsOperator().ConfigureDeployment(t.Context(), mode, DefaultFreeTeamSlots, func() error { return nil })
 		var saved []byte
 		if readErr := s.db.QueryRow(`SELECT value FROM settings WHERE key='payment_mode'`).Scan(&saved); readErr != nil {
 			t.Fatal(readErr)

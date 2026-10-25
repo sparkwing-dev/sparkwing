@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"reflect"
 	"slices"
@@ -40,16 +41,14 @@ func TestAdminNeedsATeamAndAReason(t *testing.T) {
 		{"grant", "--team", "no-such-team", "--reason", "QA", "--cents", "500"},
 		{"freeze", "--team", "default", "--reason", "abuse", "--cents", "500"},
 		{"unfreeze", "--team", "default", "--reason", "abuse", "--key", "k"},
+		{"freeze", "--team", "default", "--reason", "abuse", "--allow-large"},
 	} {
-		if err := runAdmin(args, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		if err := runAdminFixture(args, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 			t.Errorf("admin %q succeeded, want a refusal", args)
 		}
 	}
 }
 
-// The break-glass command holds and releases a team through the store calls
-// the console makes, so each action writes the console's business event, with
-// the command as its actor, and an audit line.
 func TestAdminFreezesAndReleasesWithTheConsolesRecords(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	ctx := context.Background()
@@ -69,7 +68,7 @@ func TestAdminFreezesAndReleasesWithTheConsolesRecords(t *testing.T) {
 	admin := func(args ...string) (holds, string) {
 		t.Helper()
 		var out, audit bytes.Buffer
-		if err := runAdmin(args, &out, &audit); err != nil {
+		if err := runAdminFixture(args, &out, &audit); err != nil {
 			t.Fatalf("admin %q: %v", args, err)
 		}
 		var h holds
@@ -89,14 +88,14 @@ func TestAdminFreezesAndReleasesWithTheConsolesRecords(t *testing.T) {
 		}
 	}
 	for _, blank := range []string{"", "   "} {
-		if err := runAdmin([]string{"unfreeze", "--team", "default", "--reason", "x", "--hold", blank}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		if err := runAdminFixture([]string{"unfreeze", "--team", "default", "--reason", "x", "--hold", blank}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 			t.Errorf("unfreeze --hold %q succeeded, want a refusal", blank)
 		}
 	}
 	if released, _ := admin("unfreeze", "--team", "default", "--reason", "abuse stopped"); !slices.Equal(released.Holds, []string{"dp_1"}) {
 		t.Fatalf("after unfreeze = %+v, want only the dispute's hold left", released)
 	}
-	if err := runAdmin([]string{"unfreeze", "--team", "default", "--reason", "won", "--hold", "dp_9"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+	if err := runAdminFixture([]string{"unfreeze", "--team", "default", "--reason", "won", "--hold", "dp_9"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 		t.Error("releasing a hold the team does not hold succeeded")
 	}
 	if released, _ := admin("unfreeze", "--team", "default", "--reason", "dispute won", "--hold", "dp_1"); released.Frozen || len(released.Holds) != 0 {
@@ -123,9 +122,9 @@ func TestAdminFreezesAndReleasesWithTheConsolesRecords(t *testing.T) {
 		}
 	}
 	want := []string{
-		"team.unfrozen by sparkwing-controller admin",
-		"team.unfrozen by sparkwing-controller admin",
-		"team.frozen by sparkwing-controller admin",
+		"team.unfrozen by ops-admin",
+		"team.unfrozen by ops-admin",
+		"team.frozen by ops-admin",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("events = %q\nwant %q", got, want)
@@ -149,7 +148,7 @@ func TestAdminGrantsCreditsOnceWithTheConsolesRecord(t *testing.T) {
 	grant := func(args ...string) (granted, string) {
 		t.Helper()
 		var out, audit bytes.Buffer
-		if err := runAdmin(append([]string{"grant", "--team", "default", "--cents", "500", "--reason", "QA fixture"}, args...), &out, &audit); err != nil {
+		if err := runAdminFixture(append([]string{"grant", "--team", "default", "--cents", "500", "--reason", "QA fixture"}, args...), &out, &audit); err != nil {
 			t.Fatalf("admin grant %q: %v", args, err)
 		}
 		var g granted
@@ -171,18 +170,16 @@ func TestAdminGrantsCreditsOnceWithTheConsolesRecord(t *testing.T) {
 	if again, _ := grant("--key", "qa-1"); again.Created || again.GrantID != first.GrantID || again.BalanceMicro != first.BalanceMicro {
 		t.Fatalf("retried grant = %+v, want the first grant unchanged", again)
 	}
-	if err := runAdmin([]string{"grant", "--team", "default", "--cents", "700", "--reason", "QA", "--key", "qa-1"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+	if err := runAdminFixture([]string{"grant", "--team", "default", "--cents", "700", "--reason", "QA", "--key", "qa-1"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 		t.Fatal("a reused key with different terms granted")
 	}
-	if err := runAdmin([]string{"grant", "--team", "default", "--cents", "10001", "--reason", "QA", "--key", "big"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1") {
+	if err := runAdminFixture([]string{"grant", "--team", "default", "--cents", "10001", "--reason", "QA", "--key", "big"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "--allow-large") {
 		t.Fatalf("grant over $100 without the flag = %v", err)
 	}
-	t.Setenv("SPARKWING_ADMIN_GRANT_ALLOW_LARGE", "1")
-	if large, _ := grant("--key", "big", "--cents", "10001"); !large.Created || large.AmountMicro != 10001*store.MicroCreditsPerCent {
+	if large, _ := grant("--key", "big", "--cents", "10001", "--allow-large"); !large.Created || large.AmountMicro != 10001*store.MicroCreditsPerCent {
 		t.Fatalf("flagged large grant = %+v", large)
 	}
-	t.Setenv("SPARKWING_ADMIN_GRANT_ALLOW_LARGE", "")
-	if err := runAdmin([]string{"grant", "--team", "default", "--cents", "500", "--reason", "QA"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+	if err := runAdminFixture([]string{"grant", "--team", "default", "--cents", "500", "--reason", "QA"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 		t.Fatal("keyless grant succeeded")
 	}
 	st = openState(t)
@@ -196,7 +193,7 @@ func TestAdminGrantsCreditsOnceWithTheConsolesRecord(t *testing.T) {
 		t.Fatalf("grant events = %+v, %v", events, err)
 	}
 	for _, ev := range events {
-		if ev.Actor != breakGlassActor || ev.Attrs["reason"] != nil {
+		if ev.Actor != "ops-admin" || ev.Attrs["reason"] != nil {
 			t.Errorf("grant event = %+v", ev)
 		}
 	}
@@ -220,6 +217,9 @@ func openState(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	teststore.RegisterSQLite(st, p.StateDB())
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('ops-admin','admin@example.test',1,1) ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
 	if err := writeDeploymentRecord(t.Context(), p.StateDB(), deployment.Config{}, "", p.Root, st); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func openState(t *testing.T) *store.Store {
 func TestAdminActsOnlyOnTheRecordedStore(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	freeze := func() error {
-		return runAdmin([]string{"freeze", "--team", "default", "--reason", "abuse"}, &bytes.Buffer{}, &bytes.Buffer{})
+		return runAdminFixture([]string{"freeze", "--team", "default", "--reason", "abuse"}, &bytes.Buffer{}, &bytes.Buffer{})
 	}
 	if err := freeze(); err == nil || !strings.Contains(err.Error(), "deployment.json") {
 		t.Fatalf("admin on an empty home = %v, want a refusal naming the deployment record", err)
@@ -333,7 +333,7 @@ func TestSQLiteControllerLockPreservesAdminAccess(t *testing.T) {
 	defer func() { _ = lock.Close() }()
 	st := openState(t)
 	defer func() { _ = st.Close() }()
-	if err := runAdmin([]string{"freeze", "--team=default", "--reason=abuse"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+	if err := runAdminFixture([]string{"freeze", "--team=default", "--reason=abuse"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("admin while controller owns store: %v", err)
 	}
 }
@@ -360,7 +360,7 @@ func TestAdminGrantRefusesMissingIdempotencyKey(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	err := runAdmin([]string{"grant", "--team", "default", "--cents", "100", "--reason", "correction"}, &bytes.Buffer{}, &bytes.Buffer{})
+	err := runAdminFixture([]string{"grant", "--team", "default", "--cents", "100", "--reason", "correction"}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "key") {
 		t.Fatalf("missing grant key: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestAdminCorrectsFreeGrantWithIdempotentReversal(t *testing.T) {
 		{"--key", "correct", "--reverses", "admin:mistake"},
 		{"--key", "correct", "--reverses", "admin:mistake"},
 	} {
-		if err := runAdmin(append([]string{"grant", "--team", "default", "--cents", "100", "--reason", "correct a free grant"}, args...), &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		if err := runAdminFixture(append([]string{"grant", "--team", "default", "--cents", "100", "--reason", "correct a free grant"}, args...), &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -391,4 +391,8 @@ func TestAdminCorrectsFreeGrantWithIdempotentReversal(t *testing.T) {
 	if err != nil || balance != 0 {
 		t.Fatalf("corrected balance=%d: %v", balance, err)
 	}
+}
+
+func runAdminFixture(args []string, stdout, stderr io.Writer) error {
+	return runAdmin(append(args, "--operator", "ops-admin"), stdout, stderr)
 }

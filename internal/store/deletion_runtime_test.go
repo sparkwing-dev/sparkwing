@@ -43,8 +43,11 @@ func TestTeamPurgeIsolationProperty(t *testing.T) {
 					t.Fatalf("purge changed another owner: before=%v after=%v", before, after)
 				}
 			}
-			if _, err := s.db.Exec("DELETE FROM teams WHERE name = ?", target); err != nil {
-				t.Fatalf("purge left a tenant reference: %v", err)
+			for _, table := range []string{"credit_grants", "credit_charges", "billing_awards", "billable_intervals"} {
+				var count int
+				if err := s.db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE team=?", target).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("%s financial rows=%d: %v", table, count, err)
+				}
 			}
 		})
 	}
@@ -81,7 +84,7 @@ func purgeRows(t *testing.T, s *Store, team Team, target bool) []string {
 	t.Helper()
 	var out []string
 	for _, table := range schemaTables {
-		if table.Name == "teams" || table.Name == "audit_events" {
+		if table.Name == "teams" || table.Name == "audit_events" || table.RetainOnTeamDeletion || table.Name == "payment_events" {
 			continue
 		}
 		predicate := ""

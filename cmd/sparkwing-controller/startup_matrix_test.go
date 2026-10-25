@@ -91,3 +91,47 @@ func TestEmptyAPIAddressRefusesBeforeOpeningStore(t *testing.T) {
 		t.Fatalf("empty --addr opened the store: %v", err)
 	}
 }
+
+func TestStartupConfigurationValidationPrecedesRuntime(t *testing.T) {
+	key := string(oidcTestKey(t))
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		args  []string
+		want  string
+	}{
+		{"signup gate", nil, []string{"--signup-gate=invalid"}, "--signup-gate"},
+		{"Google client without secret", nil, []string{"--google-client-id=client"}, "Google sign-in"},
+		{"Google secret without client", map[string]string{credGoogleClientSecret: "secret"}, nil, "Google sign-in"},
+		{"Google without redirects", map[string]string{credGoogleClientSecret: "secret"}, []string{"--google-client-id=client"}, "--oauth-redirect-uris"},
+		{"invalid redirect without provider", nil, []string{"--oauth-redirect-uris=http://example.com/callback"}, "--oauth-redirect-uris"},
+		{"invalid lifetime without key", nil, []string{"--oidc-token-ttl=2h"}, "token lifetime"},
+		{"Google invalid redirect", map[string]string{credGoogleClientSecret: "secret"}, []string{"--google-client-id=client", "--oauth-redirect-uris=http://example.com/callback"}, "--oauth-redirect-uris"},
+		{"OIDC without origin", map[string]string{credOIDCKey: key}, nil, "--external-url"},
+		{"invalid OIDC lifetime", map[string]string{credOIDCKey: key}, []string{"--external-url=https://example.com", "--oidc-token-ttl=2h"}, "token lifetime"},
+		{"invalid log format", nil, []string{"--log-format=invalid"}, "--log-format"},
+		{"invalid log level", nil, []string{"--log-level=invalid"}, "--log-level"},
+		{"invalid OIDC key", map[string]string{credOIDCKey: "bad key"}, []string{"--external-url=https://example.com"}, "signing key"},
+		{"invalid bucket URL", nil, []string{"--bucket-store=fs://relative"}, "--bucket-store"},
+		{"invalid cache URL", nil, []string{"--cache-blob-store=s3://"}, "--cache-blob-store"},
+		{"partial CloudFront", nil, []string{"--cache-blob-store=s3://bucket", "--cloudfront-domain=downloads.example.com"}, "CloudFront"},
+		{"invalid object budget", nil, []string{"--object-store-budget=nope"}, "--object-store-budget"},
+		{"negative bucket ceiling", nil, []string{"--max-bucket-bytes=-1"}, "--max-bucket-bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "home")
+			epoch := filepath.Join(t.TempDir(), "epoch")
+			t.Setenv("SPARKWING_HOME", root)
+			dir := credentialsDir(t, tc.files)
+			args := append([]string{"--addr=127.0.0.1:0", "--credentials-dir=" + dir, "--credential-epoch-dir=" + epoch}, tc.args...)
+			if err := run(args); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("run(%q) = %v, want %q", args, err, tc.want)
+			}
+			for _, path := range []string{root, epoch} {
+				if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("invalid configuration touched %s: %v", path, err)
+				}
+			}
+		})
+	}
+}

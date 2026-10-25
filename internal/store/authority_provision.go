@@ -185,7 +185,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	if spec.Team != "" {
 		var team string
 		var membersCanAddMachines bool
-		err := tx.QueryRowContext(ctx, `SELECT name,members_can_add_machines FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`, spec.Team, TeamDeletionPending).Scan(&team, &membersCanAddMachines)
+		err := tx.QueryRowContext(ctx, `SELECT name,members_can_add_machines FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name)`, spec.Team).Scan(&team, &membersCanAddMachines)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrUnknownTeam
 		}

@@ -201,6 +201,14 @@ func storeCancelActor(tx *storeTx, team Team, actor runstate.Actor) bool {
 	return team != "" && tx.cancelingTeam == team && actor == (runstate.Actor{Kind: runstate.ActorOperator})
 }
 
+func stateAuditActorTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor) (auditActor, error) {
+	if storeCancelActor(tx, team, actor) || actor.Kind == runstate.ActorController || actor.Kind == runstate.ActorReaper {
+		return auditActor{system: auditController}, nil
+	}
+	p, err := tx.ResolveAuthority(ctx, actor.Authority)
+	return auditPrincipalActor(p), err
+}
+
 func planAcceptedTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
 	var accepted bool
 	err := tx.QueryRowContext(ctx, `SELECT plan_accepted_generation>0 FROM runs WHERE team=? AND id=?`, team, runID).Scan(&accepted)

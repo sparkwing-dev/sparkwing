@@ -436,10 +436,8 @@ func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, sele
 		if err != nil {
 			return err
 		}
-		if row.GitHubRepositoryID > 0 {
-			if err := bumpGitHubPublicationTx(ctx, tx, t.team, row.GitHubRepositoryID); err != nil {
-				return err
-			}
+		if !ownsSchedule(nil, row.RepoPath, row) {
+			return bindingRefusal()
 		}
 		id = row.ID
 		if err = edit(tx, row); err != nil {
@@ -563,10 +561,8 @@ func (t *Tenant) DeleteAuthorizedSchedules(ctx context.Context, a capability.Aut
 		}
 		for _, row := range rows {
 			if row.RepoPath == repo {
-				if row.GitHubRepositoryID > 0 {
-					if err := bumpGitHubPublicationTx(ctx, tx, t.team, row.GitHubRepositoryID); err != nil {
-						return err
-					}
+				if !ownsSchedule(nil, repo, row) {
+					return bindingRefusal()
 				}
 				if err = deleteScheduleTx(ctx, tx, t.team, row.ID); err != nil {
 					return err

@@ -22,7 +22,7 @@ func (o *Operator) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, er
 		SELECT t.name, t.display_name, COALESCE(a.email, '') FROM teams t
 		LEFT JOIN memberships m ON m.team = t.name AND m.role = 'owner'
 		LEFT JOIN accounts a ON a.id = m.account_id
-		WHERE t.name IN (
+		WHERE t.name IN (`+liveTeamsSQL+`) AND t.name IN (
 			SELECT t2.name FROM teams t2
 			LEFT JOIN memberships m2 ON m2.team = t2.name AND m2.role = 'owner'
 			LEFT JOIN accounts a2 ON a2.id = m2.account_id

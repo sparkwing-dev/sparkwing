@@ -686,8 +686,9 @@ capability-backed session retains its parent's team and ends with that parent.
 Revocation updates the envelope and authority generation. Descendants
 retain their ancestry check. Every effect rolls back after a failed write.
 
-`schemaTables` is the single table inventory in `schema.go`. Runtime purge,
-tenant SQL guards and shape tests use it. Operator-owned `audit_events`,
+`schemaTables` is the single table inventory in `schema.go`. Financial tenant
+tables set `RetainOnTeamDeletion` so both purge passes preserve them. Operational
+purge, tenant SQL guards and shape tests use the inventory. Operator-owned `audit_events`,
 `capabilities` and `sessions` may carry a nullable team. Audit rows are retained
 after team deletion and expire only by age. Human actors and account subjects use
 account IDs. Non-account claimants use capability and holder digests, with no
@@ -840,22 +841,41 @@ runner selection keeps its label-term alternatives.
 plan acceptance and expansion insertion. A context hash includes the request,
 provenance, resolved options and guards, job execution settings, repository
 scope, allowed pools and creator. Seal identities, source revisions, timestamps and unrelated job declarations
-do not split otherwise equal contexts. The context row stores
-only its identity, requirement set and unit kind; it duplicates no run policy.
+do not split otherwise equal contexts. The context row stores its identity,
+requirement set and unit kind, and copies the overflow account and minute limit
+for indexed budget checks. Finished sources clear their context reference in the
+finishing transaction. A context is deleted when its last source leaves. History
+reads the sealed run and job settings, not this search index.
 
-Label lookups select matching requirement sets, then context routes. Ready
-source indexes use team, requirement set, context, arrival and identity. A
-transaction-local merge selects one head per unit kind from each route and
-compares those heads in the award order. Nodes and triggers carry explicit
-contexts; only evaluations use the context-free route. Indexed requirement
-alternatives narrow the proof's observers; the SQL predicate checks every term.
-The shared eligibility and ranking predicate proves holds in a batch. A proof supplied by an unbound shared
-claimant skips that context: its earliest ready job is inside the ranking
-window, so every later ready job is held too. Personal, bound and Actions
-claimants cannot supply that proof because they can distinguish runs within a
-context. Selected heads still pass
-the complete predicate and atomic award recheck. Rejected heads advance only
-that transaction's route. Named rechecks seek the complete team and unit key.
+Push-bound Actions claims seek runs by team, repository key and sealed provenance
+SHA/ref and the shared verified-trust push predicate, then use the shared eligibility
+predicate. Run-bound and here claims seek
+the bound run directly. Intake writes the provenance index from the sealed identity.
+Named rechecks seek the complete team and unit key.
+
+Broad claimants examine teams by their last committed award ordinal. Exclusions
+filter the team list. Context routes apply the shared overflow budget predicate
+before node lookups. Pool trust, funding and standing use the canonical per-unit
+eligibility predicate, including its unpriced exception.
+Overflow usage is loaded only for the team being examined and accounts with ready
+work. Label lookups select matching requirement sets, then immutable context routes
+with ready work. Indexed heads prove shared-claimant ranking holds. Each remaining route selects its first eligible
+source through a correlated application of the canonical predicate. There is no
+rejected-head probe cap, cursor advancement or fallback batch.
+When neither the claimant nor its placement observers use Cloud, selection skips
+overflow funding preparation entirely.
+
+Candidate search uses a read snapshot without arbitration or row locks. It may
+visit multiple policies or ready sources. After search closes its snapshot, the
+award transaction takes queue arbitration and applies the same eligibility
+predicate to only the selected unit, with fresh authority, placement observers
+and funding. A broad-search candidate keeps the team's award ordinal from the
+snapshot. Recheck requires that ordinal to remain unchanged because another
+award can move the team behind other eligible work. A stale candidate returns
+not-found for this poll. It does not restart the search under the lock. Backlog
+and retained contexts cannot increase the number of candidate rows checked while
+arbitration is held.
+
 Local foreground intake seals `Request.LocalForeground`. An omitted dispatch
 is resolved from the request before checking foreground authority. The shared predicate
 reserves the original intake's generation-zero trigger for a named claim by the
@@ -1049,11 +1069,11 @@ precision, or receipt time when completion time is absent. Older timestamps
 cannot replace the saved card. The subsecond migration marker is removed.
 Collection amounts must fit the credit ledger's integer representation.
 Refund retry state is read and updated under one transaction and ledger lock.
-Payment settlement and refund reconciliation first lock the team row FOR UPDATE and
-refuse a team whose deletion has started. Purge takes the exclusive team lock,
-rechecks unfinished refunds, open checkouts and unfinished bound payments, then
-removes the team's SQL rows in that transaction. A refund's checkout survives
-until its refund finishes.
+Payment settlement, refund reconciliation and purge first lock team rows FOR UPDATE.
+Deletion never waits for financial finality. Purge removes operational data and
+saved card settings, keeping the team row as a tombstone. Checkouts, receipts,
+refunds, grants, charges, holds and payer associations survive both purge passes,
+so late settlement, refund callbacks and collateral fraud warnings still reconcile.
 
 `TestPaymentMutationsRollBackWithReceipt` exercises eight mutations against a
 failing receipt boundary and checks their financial state after reopening.
@@ -1076,8 +1096,9 @@ financial mutation. C2 owns provider payload/status verification. C1 owns payer
 association, supported ledger currency, integer arithmetic and settlement.
 
 The final `schema.sql` implements these local C1 requirements. Payment receipts
-are operator-owned because an unbound warning has no team. A team purge removes
-its bound receipts and correlations while retaining unbound warnings.
+are operator-owned because an unbound warning has no team. A team purge retains
+bound receipts and financial associations as well as unbound warnings. Card-setup
+correlations and hosted-page delivery details are removed.
 
 - `payment_events` keeps its existing columns and `(payment_mode,event_id)` key.
   Its kind check admits all `capability.PaymentEventKind` values. `checkout_id`
@@ -2708,7 +2729,7 @@ still need W7's hard cut. Legacy direct-upload and node-log writers and their
 internal reservation code are removed. Their old host/client and read surfaces
 remain pending final data and tagged-log bindings.
 
-`SetFreeTeamSlots` writes the final settings table through the existing checked
+`Operator.ConfigureDeployment` writes the final settings table through the existing checked
 writer. Negative or sealed updates fail without replacing the prior value.
 The persisted setting survives reopening. The controller reads slot availability
 and passes full or unreadable conditions to its signup gate without a counter RPC.
@@ -3565,7 +3586,8 @@ and member authority before the ledger, then recheck authority at commit. `billi
 is a tenant table with the reservation ID, caller account ID, request key,
 payment mode, immutable page facts and failed-delivery time. Its unique key is
 `(team, account_id, request_key)`. Changing kind or requested amount conflicts.
-Account removal preserves financial replay facts. Tenant purge removes them.
+Account removal and tenant purge preserve financial replay facts. Purge removes
+the hosted-page delivery details, retaining its checkout and payment association.
 
 Prepare commits a prepaid checkout or recovery attempt with the page reservation.
 Card setup reserves a new setup identity. Delivery failure retains the reservation
@@ -3600,7 +3622,7 @@ Store fixtures reach transaction helpers through test-only methods. The unused
 unattached-checkout abort path and its legacy-only test are deleted. Ambiguous
 provider failures retain their reservation and replay identity.
 
-`Operator.SetPaymentMode` persists validated `test`/`live` configuration under the
+`Operator.ConfigureDeployment` and `Operator.SetPaymentMode` persists validated `test`/`live` configuration under the
 payment-mode setting lock. Controller startup uses the same `--payment-mode` for
 the store and verifier. The first grant, charge, checkout or refill atomically
 persists an irreversible freeze marker. Purging teams never clears it. Switching
@@ -3700,12 +3722,12 @@ prepaid credits cover it (decision 26). An unpriced CPU class reports no hold.
 ## Break-glass credit grants
 
 Break-glass in-pod grants extend frozen §9's break-glass scope from freeze to
-grants; capped at $100 without the explicit flag. `sparkwing-controller admin
-grant` refuses more than 10,000 cents per grant unless the pod sets
-`SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1`. It grants once per key with reference
-`admin:<key>` and records `credit.granted` with fixed system actor
-`sparkwing-controller admin` and a digest of the reference. Audit rows exclude
-free-form reasons. No remote credential reaches it.
+grants. They are capped at $100 without the explicit flag. `sparkwing-controller admin
+grant` refuses more than 10,000 cents per grant unless `--allow-large` is supplied
+for that invocation. `--operator` names the operator's own account ID. It grants
+once per key with reference `admin:<key>` and records `credit.granted` with that
+account as the actor and a digest of the reference. Audit rows exclude free-form
+reasons. No remote credential reaches it.
 
 ## Integrated working-tree source uploads
 
@@ -4481,3 +4503,15 @@ admission metadata. Host snapshots use that execution value directly.
 [`runstate.RunSummary`](../../../internal/runstate/reporting.go) beside its
 private team and plan snapshot. Handlers serialize the summary, so persistence
 metadata cannot enter the response through a missing field mapping.
+
+## Asserted retry provenance
+
+Every retry preserves its source seal, including the writer, in both full and
+failed modes. This includes asserted account, run and armer writers. The retrier
+is recorded only in execution lineage as the actor who requested the retry.
+Personal placement, owner-machine checks and cache and memo authority read the
+same sealed writer because that principal chose the code.
+
+Dependency terminal transitions require the outcome that `Decide(graph)` returns
+for that node in the committing transaction. An owner cannot bypass an approval
+by asserting that its dependencies require a skip.

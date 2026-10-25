@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -268,6 +269,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 			if _, err := tx.execContext(ctx, `UPDATE triggers SET status='failed',finished_at=? WHERE team=? AND id=?`, now.UnixNano(), team, id); err != nil {
 				return AdmissionResult{}, err
 			}
+			if err := retireClaimContextTx(ctx, tx, team, UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(id)}); err != nil {
+				return AdmissionResult{}, err
+			}
 			result.OwnerUnit = nil
 		}
 	}
@@ -441,6 +445,18 @@ func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRe
 	}
 	if source.Request.Request.Mode != runspec.IntakeExecute {
 		return admittedSnapshot{}, authorityError(apierr.BadRequest, "published history cannot be retried")
+	}
+	placement := RequestPlacement(source.Request.Request)
+	if placement == nodeproto.PlacementHere || placement == nodeproto.PlacementLocal || placement == nodeproto.PlacementLocalTriggered {
+		writer := source.Request.Provenance.Writer()
+		principal, subject := writer.Principal(), p.Capability.Subject
+		if principal.Kind != string(subject.Kind) || principal.ID != subject.ID {
+			where := "local"
+			if placement == nodeproto.PlacementHere {
+				where = "--runner here"
+			}
+			return admittedSnapshot{}, authorityError(apierr.Forbidden, fmt.Sprintf("only %s can retry a %s run; start a new run instead", writer, where))
+		}
 	}
 	in := runspec.RetryInput{Request: source.Request, Plan: source.Plan, Retrier: runspec.Actor{Kind: string(p.Capability.Subject.Kind), ID: p.Capability.Subject.ID}, SourceRunID: source.ID}
 	if source.Spec != nil {

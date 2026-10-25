@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestAcceptedWorkIndexesItsImmutableClaimPolicy(t *testing.T) {
@@ -84,6 +85,7 @@ func TestClaimContextHoldsDoNotHideYoungerDifferentPolicies(t *testing.T) {
 		t.Run(difference, func(t *testing.T) {
 			s := authorityStore(t)
 			f := s.TestOnlyRankingFixture(t, true)
+			f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
 			observer := authorityRoot("restricted", "a")
 			observer.Repositories = []string{"github.com/acme/repo"}
 			authorityPersist(t, s, observer)
@@ -202,5 +204,29 @@ func TestClaimWithNoFreePollSlotDoesNotAward(t *testing.T) {
 	demand.FreeSlots = nil
 	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
 		t.Fatalf("default poll slot: %v", err)
+	}
+}
+
+func TestClaimContextRetiresWithItsLastUnfinishedNode(t *testing.T) {
+	s, _ := unitClaimFixture(t)
+	tenant := &Tenant{s: s, team: "a"}
+	actor := authorityMember(t, s, "operator", RoleOwner)
+	actor.Kind = runstate.ActorOperator
+	var context string
+	if err := s.db.QueryRow(`SELECT claim_context FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&context); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements,claim_context) SELECT team,run_id,'second',status,ready_at,spec_json,execution_json,claim_requirements,claim_context FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`)
+	for i, node := range []runspec.NodeID{"job", "second"} {
+		if _, err := tenant.TransitionNode(t.Context(), CancelNode{Ref: runspec.NodeRef{RunID: "run", NodeID: node}, Actor: actor}); err != nil {
+			t.Fatal(err)
+		}
+		var remaining int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM claim_contexts WHERE team='a' AND id=?`, context).Scan(&remaining); err != nil {
+			t.Fatal(err)
+		}
+		if remaining != 1-i {
+			t.Errorf("after %s: contexts=%d, want %d", node, remaining, 1-i)
+		}
 	}
 }

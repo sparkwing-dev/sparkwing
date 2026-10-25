@@ -25,10 +25,13 @@ func TestDeletionRetainsFailedRefundAfterCheckoutExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE credit_checkouts SET expires_at=1`)
-	if _, _, err := s.AsOperator().RequestTeamDeletion(t.Context(), "a"); err == nil {
-		t.Fatal("deletion discarded an unfinished refund after checkout expiry")
-	}
+	purgePaymentTeam(t, s, "a")
 	rewriteSchemaCount(t, s.db, "card_refunds", 1)
+	s.SetTestClock(t, func() time.Time { return now.Add(2 * time.Hour) })
+	due, err := s.AsOperator().DueCardRefunds(t.Context())
+	if err != nil || len(due) != 1 || due[0].Team != "a" || due[0].PaymentIntent != "payment" {
+		t.Fatalf("refund retry after purge=%+v: %v", due, err)
+	}
 }
 
 func TestRevokedStandingReportsCreditFreeze(t *testing.T) {
@@ -48,7 +51,7 @@ func TestRevokedStandingReportsCreditFreeze(t *testing.T) {
 func TestOperatorGrantRequiresKeyAndAllowsFreeCorrection(t *testing.T) {
 	s := authorityStore(t)
 	tenant := &Tenant{s: s, team: "a"}
-	req := CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 100}
+	req := CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 100, CreatedBy: "operator"}
 	if _, err := tenant.RecordCreditGrant(t.Context(), req); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("unkeyed grant: %v", err)
 	}
@@ -56,7 +59,7 @@ func TestOperatorGrantRequiresKeyAndAllowsFreeCorrection(t *testing.T) {
 	if _, err := tenant.RecordCreditGrant(t.Context(), req); err != nil {
 		t.Fatal(err)
 	}
-	correction := CreditGrantRequest{Kind: creditGrantReversal, AmountMicro: -100, Reference: "correction", Reverses: "mistake"}
+	correction := CreditGrantRequest{Kind: creditGrantReversal, AmountMicro: -100, Reference: "correction", Reverses: "mistake", CreatedBy: "operator"}
 	for replay := range 2 {
 		result, err := tenant.RecordCreditGrant(t.Context(), correction)
 		if err != nil || result.Created != (replay == 0) {
@@ -103,8 +106,8 @@ func TestPurgeRetainsRefundQueuedAfterDeletionRequest(t *testing.T) {
 	if ok, err := s.AsOperator().ClaimTeamDeletion(t.Context(), "a", "purger", time.Minute); err != nil || !ok {
 		t.Fatalf("claim=%v: %v", ok, err)
 	}
-	if err := s.AsOperator().PurgeTeam(t.Context(), "a", "purger", time.Hour); err == nil {
-		t.Fatal("purge discarded a late refund obligation")
+	if err := s.AsOperator().PurgeTeam(t.Context(), "a", "purger", time.Hour); err != nil {
+		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "card_refunds", 1)
 }

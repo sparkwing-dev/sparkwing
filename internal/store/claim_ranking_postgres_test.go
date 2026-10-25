@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
@@ -26,6 +27,7 @@ func testSimultaneousRankedClaims(t *testing.T, open func(*testing.T) *store.Sto
 			st := open(t)
 			st.DB().SetMaxOpenConns(24)
 			f := st.TestOnlyRankingFixture(t, true)
+			f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
 			second := f.SelfHosted(t, "second")
 			f.At(time.Second)
 			contenders := []string{f.Self, second, f.Launcher, f.Actions}

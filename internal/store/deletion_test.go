@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func seedTeam(t *testing.T, st *store.Store, tn *store.Tenant, ownerID, runID st
 	return tn.MemberCapabilityForTest(t, ownerID, now).Capability.Prefix
 }
 
-func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
+func TestTeamDeletionClosesTheTeamAndKeepsFinancialRecords(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
@@ -69,9 +70,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	}
 	acmeToken := seedTeam(t, st, acme, owner.Account.ID, "run-acme")
 	keepToken := seedTeam(t, st, tenant(t, st, "keep"), owner.Account.ID, "run-keep")
-	// safety: billing rows are tenant-owned, so an expired checkout and a
-	// released dispute hold go with the team rather than outliving it; open
-	// ones refuse the deletion, see TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds.
+	// Financial records survive the operational purge.
 	if _, err := acme.TestOnlyOpenCreditCheckout(ctx, 50*store.MicroCreditsPerCent, now.Add(-2*time.Hour), time.Hour); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +78,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.SetTestClock(t, func() time.Time { return now })
-	if _, err := teststore.ForTeam(t, st, "acme").ReleaseCreditFreezes(ctx, "dp_acme", "", ""); err != nil {
+	if _, err := teststore.ForTeam(t, st, "acme").ReleaseCreditFreezes(ctx, "dp_acme", "operator", ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"credit_checkouts", "credit_freezes"} {
@@ -135,12 +134,15 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	}
 	purge(t, st, "acme", now)
 	for _, table := range store.AllTenantTablesForTest() {
+		if slices.Contains(store.RetainedTenantTablesForTest(), table) {
+			continue
+		}
 		if n := countWhere(t, st, table, "team = 'acme'"); n != 0 {
 			t.Errorf("%s still holds %d acme rows after the purge", table, n)
 		}
 	}
-	if n := countWhere(t, st, "teams", "name = 'acme'"); n != 0 {
-		t.Fatal("the purge left the team registered")
+	if n := countWhere(t, st, "teams", "name = 'acme'"); n != 1 {
+		t.Fatal("the purge lost the financial tombstone")
 	}
 	for _, table := range []string{"runs", "secrets", "capabilities", "memberships", "invitations"} {
 		if n := countWhere(t, st, table, "team = 'keep'"); n == 0 {

@@ -18,7 +18,7 @@ start that delivery's run. Use Run now after funding.
 
 A store uses one payment mode for balances, standing and history. Once any grant,
 charge, checkout or refill has been written, changing the mode is refused even
-after those records are purged. Start a fresh store
+after team deletion. Start a fresh store
 to switch between test and live, including when changing `--payment-mode` at startup.
 
 Operator free grants require an explicit idempotency key. A mistaken free grant
@@ -305,8 +305,8 @@ A failed or canceled refund becomes retryable under a new attempt key. A
 terminal refund outcome survives a later pending delivery, and a conflicting
 terminal outcome is refused.
 
-Team deletion waits for every card refund to succeed, even after its checkout
-expires. Its checkout is retained until the refund finishes. Settlement and refund
-reconciliation refuse a team whose deletion has started. Purge checks unfinished
-refunds, open checkouts and unfinished bound payments before deleting any SQL rows,
-in one transaction under an exclusive team lock.
+Team deletion never waits for money to finish moving. Purge removes operational
+data and saved card settings, retaining the team id as a tombstone. Checkouts,
+payments, refunds, grants, charges, holds and their payer association survive.
+Late settlements, refund callbacks and fraud warnings continue to reconcile after
+purge under the same exclusive team lock used by other financial mutations.

@@ -60,7 +60,7 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request, a capa
 	}
 	del, err := writer.DeleteAuthorizedTeam(r.Context(), a)
 	if err != nil {
-		if errors.Is(err, store.ErrOnlyTeam) || moneyInFlight(err) {
+		if errors.Is(err, store.ErrOnlyTeam) {
 			return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
 		}
 		return accountMutationError(err)
@@ -103,8 +103,6 @@ func (s *Server) handleOperatorDeleteAccount(w http.ResponseWriter, r *http.Requ
 	res, err := writer.ConsoleDeleteAccount(r.Context(), authorized)
 	var lastOwner *store.LastOwnerError
 	switch {
-	case moneyInFlight(err):
-		return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
 	case errors.As(err, &lastOwner):
 		teams := make([]teamRefJSON, 0, len(lastOwner.Teams))
 		for _, t := range lastOwner.Teams {
@@ -138,8 +136,6 @@ func (s *Server) handleOperatorDeleteTeam(w http.ResponseWriter, r *http.Request
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return &apierr.Error{Code: apierr.NotFound, Message: "team is not registered"}
-	case moneyInFlight(err):
-		return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
 	case errors.Is(err, store.ErrInvalidInput):
 		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	case err != nil:
@@ -276,9 +272,4 @@ func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {
 		return fmt.Errorf("data backend cannot delete team objects")
 	}
 	return objects.DeleteTeamObjects(ctx, string(team))
-}
-
-// safety: An unsettled checkout or dispute hold blocks account deletion until money is resolved.
-func moneyInFlight(err error) bool {
-	return errors.Is(err, store.ErrOpenCheckout) || errors.Is(err, store.ErrTeamFrozen)
 }

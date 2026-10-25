@@ -419,7 +419,7 @@ func Registry() []Command {
 			{Name: "sw-run-handle-file", Argument: "PATH"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a runner holding a pool with a reserved secret takes only verified default-branch pushes. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools require launcher credentials. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a runner holding a pool with a reserved secret takes only verified default-branch pushes. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools and pools holding reserved secrets require launcher credentials, including with --trust=any. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an existing independent account session from stdin without saving it; required with --personal."},
@@ -807,12 +807,12 @@ func Registry() []Command {
 		{Path: "sparkwing-controller admin freeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass using controller database credentials; audit actor and reason. Not an admin-token console bypass."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},
-			{Name: "credentials-dir", Argument: "PATH"},
+			{Name: "operator", Argument: "ACCOUNT_ID", Required: true},
 		}},
 		{Path: "sparkwing-controller admin unfreeze", Authority: inPodBreakGlass, Rules: []string{"In-pod break-glass; audit actor and reason. --hold selects one hold; omission releases operator holds only."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},
-			{Name: "credentials-dir", Argument: "PATH"},
+			{Name: "operator", Argument: "ACCOUNT_ID", Required: true},
 			{Name: "hold", Argument: "HOLD"},
 		}},
 		{Path: "sparkwing-runner", Flags: []Flag{}},

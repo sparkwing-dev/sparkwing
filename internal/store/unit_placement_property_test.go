@@ -46,6 +46,49 @@ func TestCloudSizePreferenceIsRecordedOnAward(t *testing.T) {
 	}
 }
 
+func TestCloudPreferenceHoldUsesAllocatedSize(t *testing.T) {
+	for _, tc := range []struct {
+		name, requires, prefers string
+		held                    bool
+	}{
+		{"default cannot offer 16 CPUs", "", "sparkwing-16cpu", false},
+		{"default offers 2 CPUs", "", "sparkwing-2cpu", true},
+		{"required cannot offer 16 CPUs", "sparkwing-4cpu,team-4cpu", "sparkwing-16cpu", false},
+		{"required offers 4 CPUs", "sparkwing-4cpu,team-4cpu", "sparkwing-4cpu", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, cloud, now := meteredUnitFixture(t, true)
+			requires := []string{}
+			if tc.requires != "" {
+				requires = append(requires, tc.requires)
+			}
+			execution, err := json.Marshal(runspec.JobExecutionSettings{
+				Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Value: requires, Set: true}},
+				Prefers:  runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Value: []string{tc.prefers}, Set: true}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE teams SET claim_ranking='[]'`)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=?,execution_json=?`, now.UnixNano(), execution)
+			indexFixtureUnit(t, s, "a", *cloud.Target)
+			cloud.Target, cloud.Labels, cloud.Kinds = nil, nil, []capability.UnitKind{capability.UnitNode}
+			if err := s.AsOperator().RecordRunnerPoll(t.Context(), cloud); err != nil {
+				t.Fatal(err)
+			}
+			ctx := WithClaimPlacement(t.Context(), ClaimPlacement{Preferences: []PlacementPreference{{Hold: 20 * time.Second}, {}}, Liveness: time.Minute})
+			claim, err := s.AsOperator().ClaimUnit(ctx, UnitDemand{CapabilityPrefix: "runner", Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"team-4cpu"}})
+			if tc.held {
+				if !errors.Is(err, ErrNotFound) {
+					t.Fatalf("allocated preferred Cloud size did not hold work: %+v, %v", claim, err)
+				}
+			} else if err != nil || claim.NodeID != "job" {
+				t.Fatalf("unallocated Cloud size held work: %+v, %v", claim, err)
+			}
+		})
+	}
+}
+
 func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(213, 611))
 	for _, problem := range []string{"live", "stale", "stale_activity", "revoked", "expired", "foreign", "repository", "grant", "hard_selector", "deadline", "preferred_claimant", "granted_name"} {

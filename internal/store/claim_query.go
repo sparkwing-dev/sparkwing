@@ -50,12 +50,18 @@ type claimFacts struct {
 	Actions        int                        `json:"actions,omitempty"`
 	Kinds          []string                   `json:"kinds,omitempty"`
 	Labels         []string                   `json:"labels,omitempty"`
+	PlacementSizes []claimPlacementSize       `json:"placement_sizes,omitempty"`
 	Pools          []string                   `json:"pools,omitempty"`
 	Scopes         [][]claimRepositoryPattern `json:"scopes,omitempty"`
 	Accept         []claimRepositoryPattern   `json:"accept,omitempty"`
 	Filter         int                        `json:"filter,omitempty"`
 	Pushes         []capability.PushScope     `json:"pushes,omitempty"`
 	Excluded       []string                   `json:"excluded,omitempty"`
+}
+
+type claimPlacementSize struct {
+	Class  int64    `json:"class"`
+	Labels []string `json:"labels"`
 }
 
 func claimFactsForTeams(facts []claimFacts, teams map[string]bool) []claimFacts {
@@ -147,6 +153,11 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	if profile.Class == match.ClassCoordinator {
 		f.Labels = append(f.Labels, "local", "location=coordinator")
 	}
+	if f.Cloud == 1 {
+		for _, size := range match.CloudSizes() {
+			f.PlacementSizes = append(f.PlacementSizes, claimPlacementSize{Class: size.CreditClass, Labels: placementSizeLabels(f.Labels, size)})
+		}
+	}
 	f.Pools = slices.Clone(profile.ReservedPools)
 	if profile.Accept != nil {
 		f.Accept = claimPatterns(profile.Accept.Patterns())
@@ -198,8 +209,13 @@ type claimSQL struct {
 	projected       bool
 	target          *UnitRef
 	team            string
+	ordinal         *int64
 	route           bool
-	after           *claimHead
+	candidate       bool
+	search          bool
+	context         string
+	requirement     string
+	runScope        string
 	facts           []claimFacts
 	teams           []claimTeamFacts
 	rates           CreditRateTable
@@ -305,6 +321,25 @@ func (q *claimSQL) terms(selector string, alternative func(string) string) strin
 func (q *claimSQL) fact(name string) string { return q.at("c.facts", name) }
 func (q *claimSQL) flag(name string) string { return q.number(q.fact(name)) }
 
+func (q *claimSQL) pushScopeMatches(provenance, push, repo string) string {
+	p := func(name string) string { return q.at(provenance, name) }
+	b := func(name string) string { return q.at(push, name) }
+	return `COALESCE((` + p("trust") + ` IN ('actions','verified','verified-default') AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `='gh:'||CAST(` + p("repository_id") + ` AS TEXT) AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
+}
+
+func writerPrincipalSQL(writer, kind string) string {
+	prefix := kind + "/"
+	return `CASE WHEN substr(` + writer + `,1,` + fmt.Sprint(len(prefix)) + `)='` + prefix + `' THEN replace(replace(replace(substr(` + writer + `,` + fmt.Sprint(len(prefix)+1) + `),'%2F','/'),'%3A',':'),'%25','%') ELSE '' END`
+}
+
+// Both placement explanations and awards use these SQL rules so their trust
+// decisions cannot diverge when a new provenance or pool mode is added.
+func (q *claimSQL) poolTrust(team, pools, trust, launcher, provenance string) string {
+	reserved := `EXISTS (SELECT 1 FROM secrets s WHERE s.team=` + team + ` AND ` + q.contains(pools, "s.only_on") + `)`
+	hasPools := `EXISTS (SELECT 1 FROM ` + q.array(pools, "pool") + `)`
+	return `((NOT (` + reserved + ` OR (` + trust + `='verified-default' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='any' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.at(provenance, "trust") + ` IN ('verified-default','schedule')))`
+}
+
 func (q *claimSQL) predicate() string {
 	f := q.fact
 	n := q.flag
@@ -318,9 +353,9 @@ func (q *claimSQL) predicate() string {
 	reservation := `(` + f("pools") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + `) OR EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + ` WHERE ` + q.contains("w.allowed_pools", q.text("pool.value")) + ` AND ` + q.anyAlternative("w.selectors", func(alt string) string { return alt + `='pool='||` + q.text("pool.value") }) + `))`
 	scopes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("scopes"), "scope") + ` WHERE NOT EXISTS (SELECT 1 FROM ` + q.array("scope.value", "pattern") + ` WHERE (` + q.at("pattern.value", "key") + `=w.repo_key AND w.repo_key<>'') OR (` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `)))`
 	accepted := `(` + n("filter") + `=0 OR (w.kind IN ('node','eval') AND w.repo_display='' AND COALESCE(` + w("git", "repository", "display") + `,'')='') OR EXISTS (SELECT 1 FROM ` + q.array(f("accept"), "pattern") + ` WHERE ` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `))`
-	trust := `(` + f("trust") + `='any' OR (` + f("trust") + `='' AND NOT EXISTS (SELECT 1 FROM secrets s WHERE s.team=w.team AND ` + q.contains(f("pools"), "s.only_on") + `)) OR (` + q.at("w.request", "provenance", "trust") + ` IN ('verified-default','schedule') AND (` + f("pools") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + `) OR ` + n("launcher") + `=1)))`
+	trust := q.poolTrust("w.team", f("pools"), f("trust"), n("launcher"), q.at("w.request", "provenance"))
 	bind := `(` + f("bind_run") + `='' OR (w.run_id=` + f("bind_run") + ` AND (` + n("here") + `=0 OR (w.kind='trigger' AND EXISTS (SELECT 1 FROM triggers bt WHERE bt.team=w.team AND bt.id=w.run_id AND (bt.generation<>0 OR ` + n("claim_by") + `>clock.now))))))`
-	pushes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("pushes"), "push") + ` WHERE COALESCE(` + q.at("push.value", "workflow_run_id") + `,'')='' OR ` + q.at("push.value", "repo_key") + `<>w.repo_key OR ` + q.at("push.value", "ref") + `<>COALESCE(` + q.at("w.request", "provenance", "ref") + `,'') OR ` + q.at("push.value", "sha") + `<>COALESCE(` + q.at("w.request", "provenance", "sha") + `,''))`
+	pushes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("pushes"), "push") + ` WHERE NOT (` + q.pushScopeMatches(q.at("w.request", "provenance"), "push.value", "w.repo_key") + `))`
 	personal := `(` + n("personal") + `=0 OR (` + f("account") + `<>'' AND ` + f("account") + `=w.requester AND NOT EXISTS (SELECT 1 FROM ancestors a WHERE a.team=w.team AND a.child=w.run_id AND a.origin IN ('github_app','schedule'))))`
 	runnerKind := `COALESCE(` + w("options", "runner", "value", "kind") + `,'')`
 	runnerValue := `COALESCE(` + w("options", "runner", "value", "value") + `,'')`
@@ -342,7 +377,7 @@ func (q *claimSQL) predicate() string {
 	if !any(func(f claimFacts) bool { return f.Filter != 0 }) {
 		accepted = "1=1"
 	}
-	if !any(func(f claimFacts) bool { return f.Trust != "any" }) {
+	if !any(func(f claimFacts) bool { return f.Trust != "any" || len(f.Pools) > 0 }) {
 		trust = "1=1"
 	}
 	if !any(func(f claimFacts) bool { return f.BindRun != "" }) {
@@ -373,26 +408,27 @@ func (q *claimSQL) anyAlternative(selector string, test func(string) string) str
 
 type claimTeamFacts struct {
 	Team      string `json:"team"`
+	Ordinal   int64  `json:"-"`
 	Available int64  `json:"available"`
 	Balance   int64  `json:"balance"`
 	Held      int    `json:"held"`
 }
 
 func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]claimTeamFacts, error) {
-	query := liveTeamsSQL
+	query := `SELECT name,claim_award_ordinal FROM teams WHERE name IN (` + liveTeamsSQL + `)`
 	var args []any
 	if scopeTeam != "" {
 		query += ` AND name=?`
 		args = append(args, scopeTeam)
 	}
-	rows, err := tx.queryContext(ctx, query+` ORDER BY name`, args...)
+	rows, err := tx.queryContext(ctx, query+` ORDER BY claim_award_ordinal,name`, args...)
 	if err != nil {
 		return nil, err
 	}
-	var teams []Team
+	var teams []claimTeamFacts
 	for rows.Next() {
-		var team Team
-		if err := rows.Scan(&team); err != nil {
+		var team claimTeamFacts
+		if err := rows.Scan(&team.Team, &team.Ordinal); err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
 		teams = append(teams, team)
@@ -400,8 +436,8 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]cla
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
-	out := make([]claimTeamFacts, 0, len(teams))
-	for _, team := range teams {
+	for i := range teams {
+		team := Team(teams[i].Team)
 		standing, err := trustStandingTx(ctx, tx, team, tx.now(ctx))
 		if err != nil {
 			return nil, err
@@ -414,9 +450,11 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]cla
 		if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(c.cpu_class),0) FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE a.team=? AND a.executor_class='cloud' AND a.settled_at IS NULL`, team).Scan(&active); err != nil {
 			return nil, err
 		}
-		out = append(out, claimTeamFacts{Team: string(team), Available: standing.CloudVCPU - active, Balance: balance, Held: boolInt(standing.HoldCause != "" || standing.Tier == "Held")})
+		teams[i].Available = standing.CloudVCPU - active
+		teams[i].Balance = balance
+		teams[i].Held = boolInt(standing.HoldCause != "" || standing.Tier == "Held")
 	}
-	return out, nil
+	return teams, nil
 }
 
 func (o *Operator) claimObserversTx(ctx context.Context, tx *storeTx, current claimFacts, scopeTeam string) ([]claimFacts, error) {
@@ -521,6 +559,7 @@ func (q *claimSQL) source(kinds []capability.UnitKind) string {
 
 func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates CreditRateTable, kinds []capability.UnitKind, demand UnitDemand, now int64) (string, error) {
 	q.facts = facts
+	q.runScope = ""
 	q.target = demand.Target
 	q.team = ""
 	if len(facts) > 0 && facts[0].Cloud == 0 {
@@ -549,7 +588,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	if err != nil {
 		return "", err
 	}
-	overflowParam, err := q.jsonParam(q.overflow)
+	overflowCTE, err := q.overflowFactsSQL()
 	if err != nil {
 		return "", err
 	}
@@ -571,6 +610,14 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 			return "", err
 		}
 		headsCTE = `source_heads AS MATERIALIZED (SELECT ` + q.at("head.value", "Team") + ` AS team,` + q.at("head.value", "Unit", "RunID") + ` AS run_id,` + q.at("head.value", "Unit", "NodeID") + ` AS node_id,` + q.at("head.value", "Unit", "Kind") + ` AS kind,` + q.number(q.at("head.value", "Unit", "SourceGeneration")) + ` AS source_generation FROM ` + q.array(raw, "head") + `),`
+	}
+	runScopeCTE := ""
+	current := facts[0]
+	if scope := q.boundRunScope(current, demand.Target); scope != "" {
+		q.runScope = `SELECT br.id FROM runs br WHERE ` + scope
+	}
+	if q.runScope != "" {
+		runScopeCTE = `bound_runs AS MATERIALIZED (` + q.runScope + `),`
 	}
 	ready := q.source(kinds)
 	readyFilter := ""
@@ -610,15 +657,17 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 			return `(` + alt + `=size.label OR (NOT (substr(` + alt + `,1,10)='sparkwing-' AND substr(` + alt + `,-3)='cpu') AND ` + q.contains(q.at("unfunded.facts", "labels"), alt) + `))`
 		}) + ` ORDER BY size.ordinal LIMIT 1)`
 	}
+	writer := q.at(request, "provenance", "writer")
+	account, machine := writerPrincipalSQL(writer, "account"), writerPrincipalSQL(writer, "machine")
 	raw := `SELECT ready.team,ready.run_id,ready.node_id,ready.source_generation,ready.arrived,ready.kind,ready.requirements,r.repo_key,r.repo_display,` + repository + ` AS repository,` + request + ` AS request,` + spec + ` AS spec,` + selectors + ` AS selectors,` + prefers + ` AS preferences,` + q.blob("r.allowed_pools") + ` AS allowed_pools,r.created_principal,tm.claim_ranking,tm.claim_award_ordinal,
- CASE WHEN r.created_subject_kind='account' THEN r.created_principal WHEN r.created_subject_kind='machine' THEN (SELECT CASE WHEN COUNT(*)>0 AND COUNT(DISTINCT m.created_by)=1 AND MIN(CASE WHEN COALESCE(CAST(` + q.at(q.blob("m.authority_json"), "origin", "personal") + ` AS TEXT),'false') IN ('true','1') AND m.created_by<>'' THEN 1 ELSE 0 END)=1 THEN MIN(m.created_by) ELSE '' END FROM capabilities m WHERE m.team=r.team AND m.subject_id=r.created_principal AND m.subject_kind='machine' AND m.bind_kind='none' AND m.parent_id IS NULL) ELSE '' END AS requester
+ CASE WHEN (` + account + `)<>'' THEN ` + account + ` WHEN (` + machine + `)<>'' THEN (SELECT CASE WHEN COUNT(*)>0 AND COUNT(DISTINCT m.created_by)=1 AND MIN(CASE WHEN COALESCE(CAST(` + q.at(q.blob("m.authority_json"), "origin", "personal") + ` AS TEXT),'false') IN ('true','1') AND m.created_by<>'' THEN 1 ELSE 0 END)=1 THEN MIN(m.created_by) ELSE '' END FROM capabilities m WHERE m.team=r.team AND m.subject_id=(` + machine + `) AND m.subject_kind='machine' AND m.bind_kind='none' AND m.parent_id IS NULL) ELSE '' END AS requester
  FROM ready JOIN runs r ON r.team=ready.team AND r.id=ready.run_id JOIN teams tm ON tm.name=r.team,clock
  WHERE r.team IN (` + liveTeamsSQL + `) AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=clock.now)`
 	ancestorOrigin := q.at(q.blob("ar.request_json"), "request", "origin")
 	ancestorParent := `CASE WHEN ` + ancestorOrigin + `='retry' THEN ar.retry_of WHEN ` + ancestorOrigin + `='child' THEN COALESCE(ar.parent_run_id,'') ELSE '' END`
 	funded := `(` + q.number(q.at("sized.facts", "metered")) + `=0 OR (sized.cpu_class IS NOT NULL AND ((rates.price IS NULL AND ` + q.number(q.at("sized.facts", "current")) + `=1) OR (tf.held=0 AND tf.balance>=rates.price*` + fmt.Sprint(SliceSeconds) + ` AND (` + q.number(q.at("sized.facts", "cloud")) + `=0 OR tf.available>=sized.cpu_class)))))`
 
-	overflowAllowed := `(` + q.number(q.at("sized.facts", "cloud")) + `=0 OR ` + q.at("sized.request", "request", "burst") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM overflow_facts of WHERE of.team=sized.team AND of.account=sized.created_principal AND ((of.monthly_minutes IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number("of.monthly_minutes") + `*60) OR (` + q.at("sized.request", "request", "burst", "overflow_minutes") + ` IS NOT NULL AND of.used_seconds+` + fmt.Sprint(SliceSeconds) + `>` + q.number(q.at("sized.request", "request", "burst", "overflow_minutes")) + `*60))))`
+	overflowAllowed := q.overflowAllowedSQL("sized", q.number(q.at("sized.facts", "cloud")))
 	cloudObservers := slices.ContainsFunc(sqlFacts, func(f claimFacts) bool { return f.Cloud != 0 })
 	if q.holdProof && !cloudObservers {
 		overflowAllowed = `1=1`
@@ -651,14 +700,14 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	}
 	fundingCTEs := `,sized AS MATERIALIZED (SELECT unfunded.*,` + class + ` AS cpu_class FROM unfunded),eligible AS MATERIALIZED (SELECT sized.*,rates.price FROM sized LEFT JOIN rates ON rates.cpu_class=sized.cpu_class JOIN team_facts tf ON tf.team=sized.team WHERE ` + funded + ` AND ` + overflowAllowed + `)`
 	if !fundingNeeded {
-		fundingCTEs = `,eligible AS ` + materialized + ` (SELECT sized.*,NULL AS cpu_class,NULL AS price FROM unfunded sized WHERE ` + overflowAllowed + `)`
+		fundingCTEs = `,eligible AS ` + materialized + ` (SELECT sized.*,CAST(NULL AS BIGINT) AS cpu_class,CAST(NULL AS BIGINT) AS price FROM unfunded sized WHERE ` + overflowAllowed + `)`
 	}
 	ctes := `WITH RECURSIVE clock(now) AS (SELECT ` + clock + `),` + currentCTE + `claimants(facts,team,is_cloud) AS ` + claimantMaterialized + ` (` + claimants + `),
  team_facts AS MATERIALIZED (SELECT ` + q.at("tf.value", "team") + ` AS team,` + q.number(q.at("tf.value", "available")) + ` AS available,` + q.number(q.at("tf.value", "balance")) + ` AS balance,` + q.number(q.at("tf.value", "held")) + ` AS held FROM ` + q.array(teamsParam, "tf") + `),
  ` + claimantScopes + `,
- overflow_facts AS MATERIALIZED (SELECT ` + q.at("of.value", "team") + ` AS team,` + q.at("of.value", "account") + ` AS account,` + q.number(q.at("of.value", "used_seconds")) + ` AS used_seconds,` + q.at("of.value", "monthly_minutes") + ` AS monthly_minutes FROM ` + q.array(overflowParam, "of") + `),
+ ` + overflowCTE + `,
  rates AS MATERIALIZED (SELECT ` + q.number(q.at("rate.value", "cores")) + ` AS cpu_class,` + q.number(q.at("rate.value", "micro_per_second")) + ` AS price FROM ` + q.array(rateParam, "rate") + `),
- ` + headsCTE + `source(team,run_id,node_id,source_generation,arrived,kind,execution,requirements) AS MATERIALIZED (` + ready + `),ready AS NOT MATERIALIZED (SELECT * FROM source ` + readyFilter + `),work_input AS MATERIALIZED (` + raw + `),work AS MATERIALIZED (SELECT base.*,CASE WHEN ` + q.anywhere("base.request") + ` THEN 1 ELSE 0 END AS run_anywhere,CASE WHEN ` + q.pinned("base.selectors") + ` THEN 1 ELSE 0 END AS pinned FROM work_input base),
+ ` + runScopeCTE + headsCTE + `source(team,run_id,node_id,source_generation,arrived,kind,execution,requirements) AS MATERIALIZED (` + ready + `),ready AS NOT MATERIALIZED (SELECT * FROM source ` + readyFilter + `),work_input AS MATERIALIZED (` + raw + `),work AS MATERIALIZED (SELECT base.*,CASE WHEN ` + q.anywhere("base.request") + ` THEN 1 ELSE 0 END AS run_anywhere,CASE WHEN ` + q.pinned("base.selectors") + ` THEN 1 ELSE 0 END AS pinned FROM work_input base),
  ancestors(team,child,id,origin,parent) AS (SELECT ar.team,ar.id,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM runs ar JOIN work aw ON aw.team=ar.team AND aw.run_id=ar.id UNION SELECT a.team,a.child,ar.id,` + ancestorOrigin + `,` + ancestorParent + ` FROM ancestors a JOIN runs ar ON ar.team=a.team AND ar.id=a.parent),
  unfunded AS ` + materialized + ` (SELECT ` + workProjection + `,c.facts FROM work w JOIN claimant_scopes c ON c.team=w.team,clock WHERE ` + eligibility + `)` + fundingCTEs
 	placement, err := q.placementCTEs(q.policy)
@@ -674,6 +723,9 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	if demand.Target != nil {
 		target := demand.Target
 		final += ` AND w.run_id=` + q.param(string(target.RunID)) + ` AND w.node_id=` + q.param(string(target.NodeID)) + ` AND w.kind=` + q.param(string(target.Kind)) + ` AND w.source_generation=` + q.param(target.SourceGeneration)
+	}
+	if q.ordinal != nil {
+		final += ` AND w.claim_award_ordinal=` + q.param(*q.ordinal)
 	}
 	final += ` ORDER BY w.claim_award_ordinal,w.arrived,w.team,w.run_id,w.kind,w.node_id,w.source_generation LIMIT 1`
 	return ctes + final, nil
@@ -720,9 +772,14 @@ func claimInputsTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []
 	if err != nil {
 		return err
 	}
-	q.overflow, err = tx.operator.claimOverflowFactsTx(ctx, tx, scopeTeam, scopeTeam == "")
-	if err != nil {
-		return err
+	if slices.ContainsFunc(facts, func(f claimFacts) bool { return f.Cloud != 0 }) {
+		q.overflow, err = tx.operator.claimOverflowAccountsTx(ctx, tx, scopeTeam, current, demand.Target)
+		if err == nil && (demand.Target != nil || current.BindRun != "" || len(current.Pushes) > 0) {
+			q.overflow, err = claimOverflowUsageTx(ctx, tx, q.overflow)
+		}
+		if err != nil {
+			return err
+		}
 	}
 	q.dialect = tx.dialect
 	q.facts, q.teams, q.rates, q.kinds, q.now = facts, teams, rates, kinds, tx.now(ctx).UnixNano()
@@ -734,22 +791,6 @@ func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []c
 		return "", err
 	}
 	return q.query(q.facts, q.teams, q.rates, kinds, demand, q.now)
-}
-
-func queuedUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
-	q := claimSQL{}
-	err := claimInputsTx(ctx, tx, demand, kinds, &q)
-	if err != nil {
-		return UnitRef{}, err
-	}
-	if demand.Target == nil {
-		return searchClaimTx(ctx, tx, demand, &q)
-	}
-	query, err := q.query(q.facts, q.teams, q.rates, kinds, demand, q.now)
-	if err != nil {
-		return UnitRef{}, err
-	}
-	return queryClaimTx(ctx, tx, &q, query)
 }
 
 func queryClaimTx(ctx context.Context, tx *storeTx, q *claimSQL, query string) (UnitRef, error) {
@@ -824,8 +865,9 @@ func (q *claimSQL) placementCTEs(policy ClaimPlacement) (string, error) {
  UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,1,0,'[]','' FROM work w WHERE ` + burst + ` IS NULL AND w.preferences<>'[]'
  UNION ALL SELECT w.team,w.run_id,w.node_id,w.source_generation,w.kind,` + q.index("p") + `,` + q.number(q.at("p.value", "hold")) + `,'[]',` + q.at("p.value", "target") + ` FROM work w CROSS JOIN ` + q.indexed(burstPrefs, "p") + ` WHERE ` + burst + ` IS NOT NULL
  )`
-	stepLabels := q.anyAlternative("s.selectors", func(alt string) string { return q.contains(q.at("e.facts", "labels"), alt) })
-	stepMatch := `(s.target='' AND (s.selectors='[]' OR ` + stepLabels + `)) OR (s.target='cloud' AND ` + q.number(q.at("e.facts", "cloud")) + `=1) OR (s.target='here' AND ` + q.at("e.facts", "here_run") + `=e.run_id) OR (s.target='machines' AND ` + q.number(q.at("e.facts", "personal")) + `=1) OR ` + q.contains(q.at("e.facts", "labels"), "s.target")
+	labels := `CASE WHEN ` + q.number(q.at("e.facts", "cloud")) + `=1 THEN (SELECT ` + q.at("ps.value", "labels") + ` FROM ` + q.array(q.at("e.facts", "placement_sizes"), "ps") + ` WHERE ` + q.number(q.at("ps.value", "class")) + `=e.cpu_class) ELSE ` + q.at("e.facts", "labels") + ` END`
+	stepLabels := q.anyAlternative("s.selectors", func(alt string) string { return q.contains(labels, alt) })
+	stepMatch := `(s.target='' AND (s.selectors='[]' OR ` + stepLabels + `)) OR (s.target='cloud' AND ` + q.number(q.at("e.facts", "cloud")) + `=1) OR (s.target='here' AND ` + q.at("e.facts", "here_run") + `=e.run_id) OR (s.target='machines' AND ` + q.number(q.at("e.facts", "personal")) + `=1) OR ` + q.contains(labels, "s.target")
 	pairs := `pairs AS MATERIALIZED (SELECT e.*,` + ranked + ` AS ranked,` + ranking + ` AS claim_rank,COALESCE((SELECT MIN(s.step) FROM steps s WHERE ` + same("s", "e") + ` AND (` + stepMatch + `)),(SELECT COUNT(*) FROM steps s WHERE ` + same("s", "e") + `)) AS preference_rank FROM eligible e)`
 	prefHold := `EXISTS (SELECT 1 FROM admissible b JOIN steps s ON ` + same("s", "b") + ` AND s.step=b.preference_rank WHERE ` + same("b", "w") + ` AND b.preference_rank<w.preference_rank AND clock.now<w.arrived+(SELECT SUM(s2.hold) FROM steps s2 WHERE ` + same("s2", "w") + ` AND s2.step<=s.step))`
 	available := `available AS MATERIALIZED (SELECT w.* FROM admissible w,clock WHERE (w.ranked=0 OR NOT (` + rankHold + `)) AND (w.kind<>'node' OR NOT (` + prefHold + `)))`
@@ -842,4 +884,25 @@ func firstPreferenceHold(policy ClaimPlacement) int64 {
 func (q *claimSQL) rankingHold() string {
 	better := `EXISTS (SELECT 1 FROM admissible b WHERE ` + unitIdentitySQL("b", "w") + ` AND b.claim_rank>=0 AND b.claim_rank<w.claim_rank)`
 	return `w.claim_rank>0 AND clock.now<w.arrived+` + fmt.Sprint(int64(limits.RankingWindow)) + ` AND ` + better
+}
+
+func (q *claimSQL) overflowAllowedSQL(alias, cloud string) string {
+	return `(` + q.at(alias+".request", "request", "burst") + ` IS NULL OR ` + q.overflowBudgetAllowedSQL(alias+`.team`, alias+`.created_principal`, q.at(alias+".request", "request", "burst", "overflow_minutes"), cloud) + `)`
+}
+
+func (q *claimSQL) overflowBudgetAllowedSQL(team, account, minutes, cloud string) string {
+	minimum := q.overflowMinimumMinutesSQL("of.used_seconds")
+	return `(` + cloud + `=0 OR NOT EXISTS (SELECT 1 FROM overflow_facts of WHERE of.team=` + team + ` AND of.account=` + account + ` AND ((of.monthly_minutes IS NOT NULL AND ` + q.number("of.monthly_minutes") + `<` + minimum + `) OR (` + minutes + ` IS NOT NULL AND ` + q.number(minutes) + `<` + minimum + `))))`
+}
+
+func (q *claimSQL) overflowMinimumMinutesSQL(used string) string {
+	return `((` + q.number(used) + `+` + fmt.Sprint(SliceSeconds+59) + `)/60)`
+}
+
+func (q *claimSQL) overflowFactsSQL() (string, error) {
+	input, err := q.jsonParam(q.overflow)
+	if err != nil {
+		return "", err
+	}
+	return `overflow_facts AS MATERIALIZED (SELECT ` + q.at("of.value", "team") + ` AS team,` + q.at("of.value", "account") + ` AS account,` + q.number(q.at("of.value", "used_seconds")) + ` AS used_seconds,` + q.at("of.value", "monthly_minutes") + ` AS monthly_minutes FROM ` + q.array(input, "of") + `)`, nil
 }

@@ -2,13 +2,10 @@ package store_test
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
@@ -42,8 +39,8 @@ func TestPostgresWarningArrivingDuringPurgeCannotOrphanRefund(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = b.tx.Rollback() }()
-	// Pause after purge eligibility, before the checkout can be removed.
-	if _, err := b.tx.ExecContext(ctx, `LOCK TABLE credit_checkouts IN SHARE MODE`); err != nil {
+	// Pause the operational sweep while purge holds the team lock.
+	if _, err := b.tx.ExecContext(ctx, `LOCK TABLE billing_pages IN SHARE MODE`); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.tx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&b.pid); err != nil {
@@ -52,18 +49,12 @@ func TestPostgresWarningArrivingDuringPurgeCannotOrphanRefund(t *testing.T) {
 	b.start(func() error { return s.AsOperator().PurgeTeam(ctx, "a", "purger", time.Hour) })
 	b.waitBlocked(1)
 	warning := capability.PaymentEvent{EventID: "warning", ObjectID: "warning", PaymentID: "payment", Mode: capability.PaymentTest, Kind: capability.PaymentWarningEvent, Actionable: true, Created: time.Now().Unix()}
-	b.start(func() error {
-		err := s.TestOnlySettleRefund(ctx, warning)
-		if !errors.Is(err, store.ErrTeamBeingDeleted) {
-			return fmt.Errorf("warning during purge: %v", err)
-		}
-		return nil
-	})
+	b.start(func() error { return s.TestOnlySettleRefund(ctx, warning) })
 	b.waitBlocked(2)
 	b.release(2)
-	for _, table := range []string{"credit_checkouts", "credit_grants", "card_refunds", "payment_warnings"} {
+	for table, want := range map[string]int{"credit_checkouts": 1, "credit_grants": 2, "card_refunds": 1, "payment_warnings": 1} {
 		var count int
-		if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil || count != 0 {
+		if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil || count != want {
 			t.Errorf("%s retained %d rows: %v", table, count, err)
 		}
 	}

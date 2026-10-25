@@ -12,15 +12,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// AuditActorBreakGlass identifies trusted in-pod administration.
-const AuditActorBreakGlass = "sparkwing-controller admin"
-
 type auditSystem string
 
 const (
 	auditController      auditSystem = "controller"
 	auditPaymentProvider auditSystem = "payment_provider"
-	auditBreakGlass      auditSystem = AuditActorBreakGlass
+	auditBreakGlass      auditSystem = "sparkwing-controller admin"
 )
 
 type auditActor struct {
@@ -103,6 +100,31 @@ type auditFirstSuccess struct {
 type auditRunDeletion struct {
 	RunID string `json:"-"`
 }
+type auditApprovalDecision struct {
+	RunID    string               `json:"-"`
+	Node     auditDigest          `json:"node_digest"`
+	Decision auditRequestDecision `json:"decision"`
+}
+type (
+	auditRequestDecision string
+	auditCancellation    struct {
+		RunID string       `json:"-"`
+		Node  *auditDigest `json:"node_digest,omitempty"`
+	}
+)
+
+type auditCredential struct {
+	Operation  auditCredentialOperation `json:"-"`
+	Credential auditDigest              `json:"-"`
+	Previous   auditDigest              `json:"previous_digest"`
+}
+type (
+	auditCredentialOperation  string
+	auditInvitationAcceptance struct {
+		InvitationID string `json:"-"`
+	}
+)
+
 type auditMutation struct {
 	SubjectID string         `json:"-"`
 	Operation auditOperation `json:"operation"`
@@ -241,24 +263,28 @@ type auditRefund struct {
 // and its projection here; arbitrary attrs and caller prose cannot enter it.
 type auditPayload interface{ isAuditPayload() }
 
-func (auditAdmission) isAuditPayload()       {}
-func (auditTeamCreation) isAuditPayload()    {}
-func (auditFirstSuccess) isAuditPayload()    {}
-func (auditRunDeletion) isAuditPayload()     {}
-func (auditMutation) isAuditPayload()        {}
-func (auditCheckout) isAuditPayload()        {}
-func (auditGrant) isAuditPayload()           {}
-func (auditHold) isAuditPayload()            {}
-func (auditCard) isAuditPayload()            {}
-func (auditTrust) isAuditPayload()           {}
-func (auditStandingRequest) isAuditPayload() {}
-func (auditInstallation) isAuditPayload()    {}
-func (auditTeamSettings) isAuditPayload()    {}
-func (auditRefillSettings) isAuditPayload()  {}
-func (auditRefill) isAuditPayload()          {}
-func (auditSecretRelease) isAuditPayload()   {}
-func (auditSourceRelease) isAuditPayload()   {}
-func (auditRefund) isAuditPayload()          {}
+func (auditAdmission) isAuditPayload()            {}
+func (auditTeamCreation) isAuditPayload()         {}
+func (auditFirstSuccess) isAuditPayload()         {}
+func (auditRunDeletion) isAuditPayload()          {}
+func (auditApprovalDecision) isAuditPayload()     {}
+func (auditCancellation) isAuditPayload()         {}
+func (auditCredential) isAuditPayload()           {}
+func (auditInvitationAcceptance) isAuditPayload() {}
+func (auditMutation) isAuditPayload()             {}
+func (auditCheckout) isAuditPayload()             {}
+func (auditGrant) isAuditPayload()                {}
+func (auditHold) isAuditPayload()                 {}
+func (auditCard) isAuditPayload()                 {}
+func (auditTrust) isAuditPayload()                {}
+func (auditStandingRequest) isAuditPayload()      {}
+func (auditInstallation) isAuditPayload()         {}
+func (auditTeamSettings) isAuditPayload()         {}
+func (auditRefillSettings) isAuditPayload()       {}
+func (auditRefill) isAuditPayload()               {}
+func (auditSecretRelease) isAuditPayload()        {}
+func (auditSourceRelease) isAuditPayload()        {}
+func (auditRefund) isAuditPayload()               {}
 
 func auditOneOf[T ~string](value T, choices ...string) bool {
 	for _, choice := range choices {
@@ -291,6 +317,22 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 		ev.Kind, ev.RunID = businessEventFirstRunSucceeded, p.RunID
 	case auditRunDeletion:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "run.deletion_authorized", p.RunID, p.RunID, true
+	case auditApprovalDecision:
+		actorAllowed = actorAllowed || c.Actor.system == auditController
+		ev.Kind, ev.SubjectID, ev.RunID, repeat = "approval.decided", p.Node.String(), p.RunID, true
+		valid = auditOneOf(p.Decision, "approved", "denied", "timed_out")
+	case auditCancellation:
+		actorAllowed = actorAllowed || c.Actor.system == auditController
+		ev.Kind, ev.SubjectID, ev.RunID, repeat = "run.cancel_requested", p.RunID, p.RunID, true
+		if p.Node != nil {
+			ev.Kind, ev.SubjectID = "job.cancel_requested", p.Node.String()
+		}
+	case auditCredential:
+		actorAllowed = actorAllowed || c.Actor.system == auditController
+		ev.Kind, ev.SubjectID = string(p.Operation), p.Credential.String()
+		valid = auditOneOf(p.Operation, "token.minted", "token.rotated", "runner.enrolled")
+	case auditInvitationAcceptance:
+		ev.Kind, ev.SubjectID = "invitation.accepted", p.InvitationID
 	case auditMutation:
 		ev.Kind, ev.SubjectID, repeat = "team.mutated", p.SubjectID, true
 		valid = validAuditOperation(p.Operation)

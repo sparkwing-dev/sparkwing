@@ -35,7 +35,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	freshRanked := scenario == "fresh-ranked" || strings.HasPrefix(scenario, "fresh-broad-")
 	var db *sql.DB
 	var err error
-	var examined atomic.Int64
+	var examined, examinedContexts atomic.Int64
 	var trace claimBenchmarkTrace
 	probe := fmt.Sprintf("claim_probe_%x", time.Now().UnixNano())
 	if dialect == DialectSQLite {
@@ -45,11 +45,18 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		}); err != nil {
 			b.Fatal(err)
 		}
+		contextProbe := probe + "_context"
+		if err = sqlite.RegisterScalarFunction(contextProbe, 1, func(_ *sqlite.FunctionContext, _ []driver.Value) (driver.Value, error) {
+			examinedContexts.Add(1)
+			return int64(1), nil
+		}); err != nil {
+			b.Fatal(err)
+		}
 		base, openErr := sql.Open("sqlite", ":memory:")
 		if openErr != nil {
 			b.Fatal(openErr)
 		}
-		sql.Register(probe, &claimBenchmarkDriver{Driver: base.Driver(), probe: probe, trace: &trace})
+		sql.Register(probe, &claimBenchmarkDriver{Driver: base.Driver(), probe: probe, contextProbe: contextProbe, trace: &trace})
 		if err := base.Close(); err != nil {
 			b.Fatal(err)
 		}
@@ -207,8 +214,17 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	wrapped.tx = tx
+	poll := func(ctx context.Context) (claimHead, error) {
+		query := template
+		var err error
+		query.overflow, err = wrapped.operator.claimOverflowAccountsTx(ctx, wrapped, "", facts[0], nil)
+		if err != nil {
+			return claimHead{}, err
+		}
+		return searchClaimTx(ctx, wrapped, demand, &query)
+	}
 	for range 5 {
-		_, err = searchClaimTx(ctx, wrapped, demand, &template)
+		_, err = poll(ctx)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			b.Fatal(err)
 		}
@@ -220,7 +236,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		trace.enabled = dialect == DialectPostgres && iteration == b.N-1
 		start := time.Now()
 		queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		_, err = searchClaimTx(queryCtx, wrapped, demand, &template)
+		_, err = poll(queryCtx)
 		cancel()
 		trace.enabled = false
 		samples = append(samples, time.Since(start))
@@ -235,7 +251,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	b.StopTimer()
 	if dialect == DialectSQLite {
 		trace.examine = true
-		_, err := searchClaimTx(ctx, wrapped, demand, &template)
+		_, err := poll(ctx)
 		trace.examine = false
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			b.Fatal(err)
@@ -244,6 +260,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 			b.Fatalf("held queue examined %d ready candidates; want at most two indexed heads per team", examined.Load())
 		}
 		b.ReportMetric(float64(examined.Load()), "replayed_pending_predicate_evals/op")
+		b.ReportMetric(float64(examinedContexts.Load()), "replayed_context_predicate_evals/op")
 	}
 	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
 	b.ReportMetric(float64(samples[(len(samples)*95+99)/100-1].Nanoseconds()), "p95-ns/op")
@@ -264,16 +281,18 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 			visits += claimPlanVisits(plans[0]["Plan"].(map[string]any))
 			b.Logf("post-search EXPLAIN ANALYZE replay: %s", raw)
 		}
-		b.ReportMetric(visits, "replayed_node_rows/op")
+		b.ReportMetric(visits, "replayed_node_and_context_rows/op")
 	}
 }
 
-// Count readiness predicate evaluations across indexed and rejected route heads.
+// Count readiness and context predicate evaluations across discovery and search.
 // Latency excludes placement hydration and the post-timing instrumentation replay.
 type claimBenchmarkDriver struct {
 	driver.Driver
-	probe string
-	trace *claimBenchmarkTrace
+	probe        string
+	runProbe     string
+	contextProbe string
+	trace        *claimBenchmarkTrace
 }
 
 func (d *claimBenchmarkDriver) Open(name string) (driver.Conn, error) {
@@ -281,27 +300,51 @@ func (d *claimBenchmarkDriver) Open(name string) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &claimBenchmarkConn{Conn: conn, probe: d.probe, trace: d.trace}, nil
+	return &claimBenchmarkConn{Conn: conn, probe: d.probe, runProbe: d.runProbe, contextProbe: d.contextProbe, trace: d.trace}, nil
 }
 
 type claimBenchmarkConn struct {
+	queueLocked bool
 	driver.Conn
-	probe string
-	trace *claimBenchmarkTrace
+	probe        string
+	runProbe     string
+	contextProbe string
+	trace        *claimBenchmarkTrace
 }
 
 func (c *claimBenchmarkConn) instrument(query string) string {
-	if c.probe == "" || !c.trace.examine {
+	if c.probe == "" || !c.trace.examine || c.trace.lockedOnly && !c.queueLocked {
 		return query
 	}
-	return strings.ReplaceAll(query, `n.status='pending'`, c.probe+`(n.node_id)=1 AND n.status='pending'`)
+	query = strings.ReplaceAll(query, `n.status='pending'`, c.probe+`(n.node_id)=1 AND n.status='pending'`)
+	if c.contextProbe != "" {
+		query = strings.ReplaceAll(query, `FROM claim_contexts cc,clock WHERE`, `FROM claim_contexts cc,clock WHERE `+c.contextProbe+`(cc.id)=1 AND`)
+		query = strings.ReplaceAll(query, `WHERE cc.unit_kind IN`, `WHERE `+c.contextProbe+`(cc.id)=1 AND cc.unit_kind IN`)
+		query = strings.ReplaceAll(query, `FROM overflow_controls WHERE`, `FROM overflow_controls WHERE `+c.contextProbe+`(account_id)=1 AND`)
+		query = strings.ReplaceAll(query, `FROM claim_contexts WHERE`, `FROM claim_contexts WHERE `+c.contextProbe+`(overflow_account)=1 AND`)
+		query = strings.ReplaceAll(query, `cc.team=?`, c.contextProbe+`(cc.overflow_account)=1 AND cc.team=?`)
+	}
+	if c.runProbe != "" {
+		query = strings.ReplaceAll(query, `FROM runs WHERE`, `FROM runs WHERE `+c.runProbe+`(id)=1 AND`)
+		query = strings.ReplaceAll(query, `FROM runs br WHERE`, `FROM runs br WHERE `+c.runProbe+`(br.id)=1 AND`)
+		query = strings.ReplaceAll(query, `FROM runs r WHERE`, `FROM runs r WHERE `+c.runProbe+`(r.id)=1 AND`)
+	}
+	return query
 }
 
 func (c *claimBenchmarkConn) Prepare(query string) (driver.Stmt, error) {
 	return c.Conn.Prepare(c.instrument(query))
 }
 
+func (c *claimBenchmarkConn) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
+	c.queueLocked = false
+	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, options)
+}
+
 func (c *claimBenchmarkConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if strings.HasPrefix(query, "SELECT ordinal FROM claim_awards WHERE singleton=1") {
+		c.queueLocked = true
+	}
 	c.trace.record(query, args)
 	return c.Conn.(driver.QueryerContext).QueryContext(ctx, c.instrument(query), args)
 }
@@ -317,13 +360,14 @@ type claimBenchmarkStatement struct {
 }
 
 type claimBenchmarkTrace struct {
+	lockedOnly bool
 	examine    bool
 	enabled    bool
 	statements []claimBenchmarkStatement
 }
 
 func (trace *claimBenchmarkTrace) record(query string, args []driver.NamedValue) {
-	if trace == nil || !trace.enabled || !strings.Contains(query, "nodes n") {
+	if trace == nil || !trace.enabled || !strings.Contains(query, "nodes n") && !strings.Contains(query, "claim_contexts") && !strings.Contains(query, "overflow_controls") {
 		return
 	}
 	statement := claimBenchmarkStatement{query: query, args: make([]any, len(args))}
@@ -335,7 +379,7 @@ func (trace *claimBenchmarkTrace) record(query string, args []driver.NamedValue)
 
 func claimPlanVisits(plan map[string]any) float64 {
 	var visits float64
-	if relation, _ := plan["Relation Name"].(string); relation == "nodes" {
+	if relation, _ := plan["Relation Name"].(string); relation == "nodes" || relation == "claim_contexts" {
 		rows, _ := plan["Actual Rows"].(float64)
 		removed, _ := plan["Rows Removed by Filter"].(float64)
 		loops, _ := plan["Actual Loops"].(float64)

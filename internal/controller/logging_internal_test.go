@@ -97,7 +97,7 @@ func TestGitHubMutationLogsNeverContainCredentials(t *testing.T) {
 				if w.Code != 202 {
 					t.Fatalf("enqueue = %d %s", w.Code, w.Body)
 				}
-				outcome, err := s.processNextGitHubDelivery(t.Context(), time.Now())
+				outcome, err := s.processNextGitHubDelivery(t.Context())
 				if err != nil || outcome == nil || outcome.status != 200 {
 					t.Fatalf("uninstall = %+v %v", outcome, err)
 				}

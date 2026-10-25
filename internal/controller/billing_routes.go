@@ -79,8 +79,6 @@ func billingMutationError(err error) error {
 		return invalidEngineBody(err.Error())
 	case errors.Is(err, store.ErrNoCard):
 		return &apierr.Error{Code: apierr.Conflict, Message: err.Error(), Details: map[string]any{"reason": noCardCode}}
-	case moneyInFlight(err):
-		return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
 	default:
 		return accountMutationError(err)
 	}

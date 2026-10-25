@@ -70,6 +70,21 @@ func TestRankingSeesTheLocalQueue(t *testing.T) {
 	wantAward(t, f, local, capability.UnitPlan, "")
 }
 
+func TestUnmeteredPushClaimsWithoutCloudFunding(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
+		t.Run(string(kind), func(t *testing.T) {
+			f := rankingFixture(t, false)
+			f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
+			f.At(8 * time.Second)
+			job := ""
+			if kind == capability.UnitNode {
+				job = "job"
+			}
+			wantAward(t, f, f.Actions, kind, job)
+		})
+	}
+}
+
 func TestRankingCreditHoldOnlyWhenCloudCouldTakeTheUnit(t *testing.T) {
 	for name, test := range map[string]struct {
 		setup func(*testing.T, *store.RankingFixture)
@@ -279,7 +294,14 @@ func TestRankingNoEligibleRunnerNamesTheCause(t *testing.T) {
 			}
 			f.Poll(t, f.Personal)
 			f.Poll(t, f.Actions)
-		}, want: "Personal machines, GitHub Actions runners and Cloud are off in this team's runner ranking"},
+		}, want: "Personal machines and Cloud are off in this team's runner ranking"},
+		"automated dropped tiers": {setup: func(t *testing.T, f *store.RankingFixture) {
+			f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
+			if err := f.Rank(t, f.Admin, "self-hosted"); err != nil {
+				t.Fatal(err)
+			}
+			f.Poll(t, f.Actions)
+		}, want: "GitHub Actions runners and Cloud are off in this team's runner ranking"},
 		"a pinned job": {setup: func(t *testing.T, f *store.RankingFixture) {
 			f.RequireOnJobs(t, "pool=gpu")
 		}, want: "this job targets pool=gpu only"},
@@ -305,6 +327,7 @@ func TestRankingNoEligibleRunnerNamesTheCause(t *testing.T) {
 
 func TestCreditNoticeCountsAnActionsRunner(t *testing.T) {
 	f := rankingFixture(t, false)
+	f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
 	if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE capabilities SET revoked_at=1 WHERE subject_kind='machine' AND bind_kind='none'`); err != nil {
 		t.Fatal(err)
 	}
@@ -384,6 +407,7 @@ func TestRankingNoticeUsesTheClaimLivenessHorizon(t *testing.T) {
 
 func TestRankingHoldEndsAtTheWindowWithoutAwardGrace(t *testing.T) {
 	f := rankingFixture(t, true)
+	f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
 	livePolls(t, f, f.Actions)
 	f.At(limits.RankingWindow - time.Nanosecond)
 	wantNone(t, f, f.Self, capability.UnitPlan)

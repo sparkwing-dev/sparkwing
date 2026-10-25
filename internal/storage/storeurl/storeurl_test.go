@@ -1,7 +1,6 @@
 package storeurl
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +63,11 @@ func TestOpenMeasurementStoreFilesystem(t *testing.T) {
 	if err := os.WriteFile(path, []byte("payload"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := OpenMeasurementStore(t.Context(), "fs://"+dir, 0)
+	cfg, err := ParseMeasurementURL("fs://" + dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := cfg.Open(t.Context(), 0)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -79,11 +82,11 @@ func TestOpenMeasurementStoreFilesystem(t *testing.T) {
 
 func TestOpen_BadScheme(t *testing.T) {
 	t.Parallel()
-	if _, err := OpenMeasurementStore(context.Background(), "no-scheme", 0); err == nil {
+	if _, err := ParseMeasurementURL("no-scheme"); err == nil {
 		t.Error("expected err for missing scheme")
 	}
 	for _, scheme := range []string{"ftp", "http", "https"} {
-		_, err := OpenMeasurementStore(t.Context(), scheme+"://objects.invalid", 0)
+		_, err := ParseMeasurementURL(scheme + "://objects.invalid")
 		if err == nil || !strings.Contains(err.Error(), scheme) {
 			t.Errorf("%s: err = %v, want an unsupported scheme", scheme, err)
 		}

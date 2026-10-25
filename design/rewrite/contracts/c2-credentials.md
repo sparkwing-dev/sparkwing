@@ -462,6 +462,11 @@ trigger request. The unused reservation expires at its original claim_by.
 Target.ClaimKinds carries the requested set to BindClaimSelection, and ClaimUnit
 repeats every kind/grant check in its transaction.
 
+Named, here and run-bound claims read overflow funding inputs only for their run.
+Push-bound Actions claims use the repository, sealed SHA and ref index for both
+selection and funding inputs. These lookups share one scope builder, so funding
+preparation cannot scan unrelated runs.
+
 Mask registration first checks the accepted job/step/group/approval identifiers
 and subsequent generated declarations. A collision returns secret_in_identifier
 with the field path, never the identifier or value, before acknowledging success.
@@ -519,8 +524,9 @@ caller and response use the new route, grants and timestamp representation.
 
 ### Machine and deployment service provisioning
 
-POST `/api/v1/runners` uses PolicyRouter with member `runs.read` and
-BindNone. It accepts `name`, `repos`, optional `personal`, optional `reserved_pools`, optional
+POST `/api/v1/runners` uses PolicyRouter with a direct account session,
+`runs.write` or `team.admin`, and BindNone. The store requires `runs.write`
+for personal enrollment and `team.admin` for shared enrollment. It accepts `name`, `repos`, optional `personal`, optional `reserved_pools`, optional
 `grants` and optional absolute `expires_at`. The existing machine-name grammar
 and 32-pattern bound remain. Repository patterns use sourceurl's shared parser.
 Omitted grants select nodes.claim and triggers.claim. Explicit grants narrow
@@ -531,7 +537,7 @@ that the registering team admin may assign them.
 The approved machine-registration decision adds team `members_can_add_machines`,
 default true. A live independent account session may enroll its own personal
 machine when the setting permits it or the account has current `team.admin`.
-Any member role qualifies. Shared enrollment always requires current
+Personal enrollment requires current `runs.write`. Shared enrollment always requires current
 `team.admin`, as do shared-runner token rotation and revocation. The store
 rechecks the setting with current membership inside root issuance, under the
 same team lock as setting changes. Personal ownership and claim matching keep
@@ -1159,7 +1165,8 @@ All capability names below are in `internal/capability`.
 | `apierr.WriteHTTP` | Write the error envelope and Retry-After without plain-text fallbacks. |
 | `apierr.WriteJSON` | Write one JSON error line for CLI stderr. |
 | `blob.NewFilesystem`, `blob.NewS3` | Physical backends own object validation, transfer signing and byte verification. |
-| `controller.NewCloudFrontDataBackend` | Wrap S3 downloads with CloudFront for public-ingress requests. Direct requests and uploads retain the backend signer. Physical operations and log deletion remain on S3. |
+| `controller.ParseCloudFrontDataConfig` | Validate CloudFront download signing before opening object storage. |
+| `controller.CloudFrontDataConfig.Backend` | Wrap S3 downloads with CloudFront for public-ingress requests. Direct requests and uploads retain the backend signer. Physical operations and log deletion remain on S3. |
 | `controller.PaymentSettler`, `Server.WithPayments` | Supply C1 settlement to the signed Stripe callback. The server registers `/webhooks/stripe` through `PolicyRouter` and passes only verified events to the store. |
 | `controller.Server.WithAuthorization` | Configure the shared verifier, bindings, transport identity and CSRF adapters before constructing the server handler. Missing adapters fail closed. |
 | [`routepolicy.Authorization`](../../../internal/routepolicy/policy.go), [`controllerwire.Endpoint`](../../../internal/controllerwire/endpoint.go), [`routepolicy.Router`](../../../internal/routepolicy/policy.go) | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
@@ -3219,7 +3226,7 @@ guards govern funding. Cloud admissions own standing and budget enforcement.
 real sessions and CSRF, page commits, provider delivery and signed settlement.
 
 Controller startup commits its validated `--payment-mode` through
-`Operator.SetPaymentMode` before serving requests. Verifier configuration and
+`Operator.ConfigureDeployment` before serving requests. Verifier configuration and
 ledger configuration therefore share the operator's mode selection. Constructor
 proofs configure the ledger through that operator method instead of SQL seeding.
 

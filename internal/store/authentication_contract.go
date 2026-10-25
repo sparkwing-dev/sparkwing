@@ -60,7 +60,7 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 		if err := (&Tenant{s: s, team: DefaultTeam}).lockTeamTx(ctx, tx); err != nil {
 			return capability.AuthenticationSnapshot{}, err
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`, DefaultTeam, TeamDeletionPending).Scan(&team); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name)`, DefaultTeam).Scan(&team); err != nil {
 			return capability.AuthenticationSnapshot{}, err
 		}
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability}

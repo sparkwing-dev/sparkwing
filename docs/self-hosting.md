@@ -103,6 +103,10 @@ to exist, and it settles the answer once at startup.
 | `--external-url` | an `https` URL, an `http` URL on loopback or a Kubernetes Service (`*.svc`), or empty | The origin runners, OIDC tokens and GitHub Actions workflows name. Runners accept the same addresses. |
 | `--payment-mode` | `test`, `live` or empty | Which Stripe credentials settle payments. Switching modes after ledger activity requires a fresh store. |
 
+Configuration is validated before startup creates the home directory, credential
+epoch or store. This includes sign-up mode, Google sign-in and callback URLs,
+OIDC keys, storage URLs and download signing configuration.
+
 Startup refuses, before it opens the store or writes any setting, when:
 
 - `--deployment=team` or `cloud` has no license, or the license does not verify,
@@ -115,8 +119,10 @@ Startup refuses, before it opens the store or writes any setting, when:
   under another kind;
 - any other flag is invalid, or `--addr`, `--trusted-proxy-addr` or
   `--metrics-addr` cannot be bound. Every listener is bound before the store is
-  opened. The bootstrap seed, the payment mode and the free team slots are
-  written only after every check passes.
+  opened. The bootstrap seed is written after configuration checks pass. Payment
+  mode, deployment identity and free team slots commit together only after the
+  deployment record is written successfully. A failed database commit restores
+  the previous deployment record.
 
 A license that expires while the controller runs does not change the
 deployment. Metering, the free tier and sign-in keep working, and
@@ -253,8 +259,8 @@ regional S3 URL instead, so runner pods in the bucket's region can use the S3
 gateway endpoint. Without an S3 bucket, the standalone controller opens filesystem storage in
 its home directory's `data` directory and mounts signed data and log transfers.
 It uses `--external-url` when set, otherwise its listener address. Wildcard
-listener addresses use localhost in signed URLs. Set `--external-url` for remote
-runners. The key that signs these URLs is kept in `$SPARKWING_HOME/data-signing.key`,
+listeners require `--external-url` pointing at an address runners can reach;
+startup refuses them without it. The key that signs these URLs is kept in `$SPARKWING_HOME/data-signing.key`,
 so a restart does not invalidate transfers in flight. Filesystem storage needs
 no CloudFront signing keys.
 Controller embedders configure authenticated data routes through
@@ -398,15 +404,15 @@ A runner's credential fixes which runs it accepts:
 - A team admin sets a runner's trust class when registering it:
   `sparkwing runners add --profile prod --runner deploy-1 --trust=verified-default` applies the restriction to a
   runner without reserved secrets, and `--trust=any` lifts it from a pool with
-  reserved secrets. The class is stored with the runner's credential, so the
+  reserved secrets. Pools holding reserved secrets still require a launcher
+  with `--trust=any`. The class is stored with the runner's credential, so the
   runner, or anyone holding its token, cannot change it.
 
 For a verified-default pool, enroll a launcher-only credential with
 `--reserved-for deploy --trust verified-default --launcher` on `runners add`.
 On Kubernetes, set `launcher.enabled=true` and reference that credential in
-`launcher.tokenSecret` in the runner bundle chart. The server refuses verified
-pool work to persistent runner credentials, including when reserved secrets
-select verified-default by default. Pool and trust settings live on the
+`launcher.tokenSecret` in the runner bundle chart. The server requires launcher credentials for verified-default pools and for
+every pool holding reserved secrets, including with `--trust=any`. Pool and trust settings live on the
 credential. A run-level `--requires pool=deploy` uses controller dispatch so
 its plan and jobs can be claimed by the launcher.
 The launcher runs each plan, evaluation and job claim in a fresh pod through the

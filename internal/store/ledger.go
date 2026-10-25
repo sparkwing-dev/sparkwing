@@ -202,12 +202,3 @@ func (l *ledgerTx) relabelCreator(ctx context.Context, from, to string) error {
 	_, err := l.exec(ctx, `UPDATE credit_grants SET created_by=? WHERE team=? AND created_by=?`, to, l.team, from)
 	return err
 }
-
-func (l *ledgerTx) purge(ctx context.Context) error {
-	for _, q := range []string{`DELETE FROM credit_charges WHERE team=?`, `DELETE FROM credit_grants WHERE team=?`} {
-		if _, err := l.exec(ctx, q, l.team); err != nil {
-			return err
-		}
-	}
-	return nil
-}

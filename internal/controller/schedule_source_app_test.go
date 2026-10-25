@@ -45,7 +45,7 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lookups := map[string]int{}
-			cfg := githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
+			cfg := githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook", HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
 				body := ""
 				status := http.StatusOK
 				switch r.Method + " " + r.URL.Path {

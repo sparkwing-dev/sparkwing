@@ -95,8 +95,7 @@ func (op *Operator) loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, 
 	if run.err = checkRepositoryClaimScope(chain, capability.RepositoryIdentity{Key: repo, Display: display}); run.err != nil {
 		return run
 	}
-	speaksFor := run.request.Provenance
-	if run.err = checkPushClaimScope(chain, string(run.request.Request.Git.Repository.Key), speaksFor.Ref(), speaksFor.SHA()); run.err != nil {
+	if run.err = checkPushClaimScope(ctx, tx, chain, repo, run.request.Provenance); run.err != nil {
 		return run
 	}
 	if run.err = checkPersonalMachineTx(ctx, tx, chain, runID); run.err != nil {
@@ -203,14 +202,27 @@ func checkRepositoryClaimScope(chain []authorityNode, repository capability.Repo
 	return nil
 }
 
-func checkPushClaimScope(chain []authorityNode, repo, ref, sha string) error {
+func checkPushClaimScope(ctx context.Context, tx *storeTx, chain []authorityNode, repo string, provenance runspec.Provenance) error {
 	for _, node := range chain {
 		binding := node.principal.Capability.Binding
 		if binding.Kind != capability.BindingPush {
 			continue
 		}
-		push := binding.Push
-		if push == nil || push.WorkflowRunID == "" || push.RepositoryKey != repo || push.Ref != ref || push.SHA != sha {
+		q := claimSQL{dialect: tx.dialect}
+		p, err := q.jsonParam(provenance)
+		if err != nil {
+			return err
+		}
+		push, err := q.jsonParam(binding.Push)
+		if err != nil {
+			return err
+		}
+		query := `SELECT CASE WHEN ` + q.pushScopeMatches("c.provenance", "c.push", "c.repo") + ` THEN 1 ELSE 0 END FROM (SELECT ` + p + ` AS provenance,` + push + ` AS push,` + q.param(repo) + ` AS repo) c`
+		var matches int
+		if err := tx.QueryRowContext(ctx, query, q.args...).Scan(&matches); err != nil {
+			return err
+		}
+		if matches != 1 {
 			return authorityError(apierr.Forbidden, "work is outside the Actions push scope")
 		}
 	}
@@ -233,7 +245,7 @@ func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor runstate
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	claim, err := tx.operator.claimUnitTx(ctx, tx, demand, UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID})
+	claim, err := tx.operator.claimUnitTx(ctx, tx, demand, claimHead{Unit: UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}})
 	if err != nil {
 		return UnitClaim{}, err
 	}

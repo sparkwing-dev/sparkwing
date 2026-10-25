@@ -55,7 +55,7 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 		t.Fatal(err)
 	}
 	st.SetTestClock(t, func() time.Time { return now })
-	if n, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_1", "", ""); err != nil || n != 1 {
+	if n, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_1", "operator", ""); err != nil || n != 1 {
 		t.Fatalf("released = %d, %v", n, err)
 	}
 

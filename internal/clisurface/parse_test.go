@@ -120,3 +120,20 @@ func TestRunCacheProfileMayExplicitlyDisableMachineDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestControllerBreakGlassRequiresOperator(t *testing.T) {
+	for _, verb := range []string{"freeze", "unfreeze"} {
+		args := []string{"admin", verb, "--team=a", "--reason=investigation"}
+		if _, err := Parse("sparkwing-controller", args); err == nil {
+			t.Errorf("%s accepted no operator", verb)
+		}
+		args = append(args, "--operator=account-1")
+		inv, err := Parse("sparkwing-controller", args)
+		if err != nil || inv.Value("operator") != "account-1" {
+			t.Errorf("%s rejected operator identity: %v", verb, err)
+		}
+		if _, err := Parse("sparkwing-controller", append(args, "--credentials-dir=/old")); err == nil {
+			t.Errorf("%s accepted removed credentials-dir", verb)
+		}
+	}
+}

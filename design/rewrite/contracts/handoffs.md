@@ -1074,3 +1074,17 @@ separate operations; no database transaction stays open across a provider call.
 - The max_children_per_root refusal tells the user the team's current limit, the 1,000 maximum, and how to fix it (raise the team setting or split the work).
 - A run whose statically declared child fan-out already exceeds the team's limit is refused at plan acceptance, before any child starts. Children created dynamically mid-run keep the creation-time check.
 - Korey authorized carrying merges and deploys forward without waiting for approval; the release (merge to main and the v0.68.0 tag) still follows the release policy.
+
+## 2026-10-24 Korey decision 60: verified main work runs only on fresh pods
+
+- Persistent Kubernetes runners (long-lived pods that serve many jobs) never claim verified work for a repository's default branch; that work runs on a fresh, single-use pod (or a Cloud pod), so no earlier job can leave anything behind for it. Persistent runners keep serving all other work. Closes the executor re-review finding on persistent runners taking verified main work.
+
+## 2026-10-24 Korey decision 61: no plan-time child fan-out preflight
+
+- Amends decision 59. The plan-time refusal is dropped: a job's spec lists which targets it may start as children, not how many it will start, and retries bypass any count taken up front. The max_children_per_root refusal message (current limit, the 1,000 maximum, how to raise it or split the work) and the creation-time check remain the whole rule.
+
+## 2026-10-24 Korey decision 62: financial records outlive the team
+
+- Team deletion and purge never delete checkouts, payments, refunds (queued or provider-originated), credit grants, holds, reversals, ledger entries or their payer association; those rows keep the team id as a tombstone. Everything else (members, runs, logs, secrets, settings, saved card details) is removed as before.
+- Deletion no longer infers financial finality: it is never refused or delayed because money is still moving, and late settlements, refunds and fraud warnings always find their records. A deleted team's collateral card cleanup cannot veto another payer's financial consequence.
+- The retained rows hold no personal data (decision 39).

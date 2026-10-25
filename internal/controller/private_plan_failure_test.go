@@ -81,7 +81,7 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 		case 4:
 			path = "/api/v1/runs/foreign/local-host/finish"
 		case 5:
-			body.OwnerPolicy = &runstate.OwnerPolicyResult{}
+			body.Cause = runstate.RunCause("policy_refused")
 		}
 		before, err := tenant.ReadSnapshot(t.Context(), "run")
 		if err != nil {
@@ -93,7 +93,7 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 		}
 		binding := principal.Capability.Binding
 		actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(binding.RunID), Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: binding.Holder, Generation: runspec.ClaimGeneration(binding.Generation)}}
-		change := runstate.RunCompletion{RunID: "run", Actor: actor, Cause: body.Cause, OwnerPolicy: body.OwnerPolicy, MaskedError: body.MaskedError}
+		change := runstate.RunCompletion{RunID: "run", Actor: actor, Cause: body.Cause, MaskedError: body.MaskedError}
 		if mutation%6 == 4 {
 			change.RunID = "foreign"
 		}

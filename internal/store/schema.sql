@@ -62,6 +62,8 @@ CREATE TABLE runs (
     trigger_source TEXT NOT NULL DEFAULT '',
     git_branch TEXT NOT NULL DEFAULT '',
     git_sha TEXT NOT NULL DEFAULT '',
+    provenance_sha TEXT NOT NULL DEFAULT '',
+    provenance_ref TEXT NOT NULL DEFAULT '',
     repo_key TEXT NOT NULL,
     repo_display TEXT NOT NULL DEFAULT '',
     repo_identity TEXT NOT NULL DEFAULT '',
@@ -130,10 +132,15 @@ CREATE TABLE claim_contexts (
     requirements TEXT NOT NULL DEFAULT '',
     requirements_ref TEXT GENERATED ALWAYS AS (NULLIF(requirements,'')) STORED,
     unit_kind TEXT NOT NULL CHECK(unit_kind IN ('node','plan','trigger')),
+    overflow_account TEXT,
+    overflow_minutes BIGINT CHECK(overflow_minutes >= 0),
+    CHECK(overflow_minutes IS NULL OR overflow_account IS NOT NULL),
     PRIMARY KEY(team,id),
     FOREIGN KEY(team,requirements_ref) REFERENCES claim_requirements(team,id)
 );
 CREATE INDEX idx_claim_contexts_requirements ON claim_contexts(team,requirements,unit_kind,id);
+CREATE INDEX idx_claim_contexts_overflow ON claim_contexts(team,overflow_account,overflow_minutes);
+CREATE INDEX idx_claim_contexts_kind_overflow ON claim_contexts(team,unit_kind,overflow_account,overflow_minutes);
 
 CREATE TABLE nodes (
     run_id TEXT NOT NULL,
@@ -1838,3 +1845,5 @@ CREATE TABLE admission_work (
 
 CREATE INDEX idx_nodes_claim_context ON nodes(team,claim_requirements,claim_context,ready_at,run_id,node_id) WHERE status='pending' AND ready_at IS NOT NULL AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
 CREATE INDEX idx_triggers_claim_context ON triggers(team,claim_requirements,claim_context,unit_kind,available_at,id) WHERE status='pending' AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
+
+CREATE INDEX idx_runs_push_claim ON runs(team,repo_key,provenance_sha,provenance_ref,id);

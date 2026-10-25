@@ -18,35 +18,37 @@ func (o *Operator) SetPaymentMode(ctx context.Context, mode capability.PaymentMo
 	if mode != capability.PaymentTest && mode != capability.PaymentLive {
 		return ErrInvalidInput
 	}
-	return o.s.inTx(ctx, func(tx *storeTx) error {
-		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
-			return err
-		}
-		var encoded []byte
-		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='payment_mode'`+tx.forUpdate()).Scan(&encoded); err != nil {
-			return err
-		}
-		var current capability.PaymentMode
-		if err := json.Unmarshal(encoded, &current); err != nil {
-			return err
-		}
-		if current == mode {
-			return nil
-		}
-		var activity bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM settings WHERE key='payment_mode_frozen')`).Scan(&activity); err != nil {
-			return err
-		}
-		if activity {
-			return authorityError(apierr.Conflict, "payment mode cannot change after ledger activity; start a fresh store to switch modes")
-		}
-		data, err := json.Marshal(mode)
-		if err != nil {
-			return err
-		}
-		_, err = tx.execContext(ctx, `UPDATE settings SET value=? WHERE key='payment_mode'`, data)
+	return o.s.inTx(ctx, func(tx *storeTx) error { return setPaymentModeTx(ctx, tx, mode) })
+}
+
+func setPaymentModeTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode) error {
+	if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
 		return err
-	})
+	}
+	var encoded []byte
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='payment_mode'`+tx.forUpdate()).Scan(&encoded); err != nil {
+		return err
+	}
+	var current capability.PaymentMode
+	if err := json.Unmarshal(encoded, &current); err != nil {
+		return err
+	}
+	if current == mode {
+		return nil
+	}
+	var activity bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM settings WHERE key='payment_mode_frozen')`).Scan(&activity); err != nil {
+		return err
+	}
+	if activity {
+		return authorityError(apierr.Conflict, "payment mode cannot change after ledger activity; start a fresh store to switch modes")
+	}
+	data, err := json.Marshal(mode)
+	if err != nil {
+		return err
+	}
+	_, err = tx.execContext(ctx, `UPDATE settings SET value=? WHERE key='payment_mode'`, data)
+	return err
 }
 
 // PaymentSettlement reports committed credit without accepting caller-selected credits.
@@ -299,27 +301,46 @@ func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.Payment
 	return queueCardRefundTx(ctx, tx, team, event.PaymentID, event.AmountMinor, refusal.reason, now)
 }
 
-// DeploymentID returns this store's payment deployment identity, created once at first use and never changed by
-// configuration, so renaming the controller's host cannot turn its own in-flight payments foreign.
-func (o *Operator) DeploymentID(ctx context.Context) (string, error) {
+func deploymentIDTx(ctx context.Context, tx *storeTx) (string, error) {
+	fresh, err := newCreditID("dep")
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(fresh)
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_deployment',?) ON CONFLICT(key) DO NOTHING`, data); err != nil {
+		return "", err
+	}
+	var encoded []byte
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='payment_deployment'`).Scan(&encoded); err != nil {
+		return "", err
+	}
 	var id string
-	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		fresh, err := newCreditID("dep")
-		if err != nil {
-			return err
-		}
-		data, err := json.Marshal(fresh)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_deployment',?) ON CONFLICT(key) DO NOTHING`, data); err != nil {
-			return err
-		}
-		var encoded []byte
-		if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='payment_deployment'`).Scan(&encoded); err != nil {
-			return err
-		}
-		return json.Unmarshal(encoded, &id)
-	})
+	err = json.Unmarshal(encoded, &id)
 	return id, err
+}
+
+// ConfigureDeployment commits startup settings only after publish records the deployment.
+// An empty mode preserves the existing payment mode. publish must not call the store.
+func (o *Operator) ConfigureDeployment(ctx context.Context, mode capability.PaymentMode, freeSlots int64, publish func() error) (string, error) {
+	if (mode != "" && mode != capability.PaymentTest && mode != capability.PaymentLive) || freeSlots < 0 || publish == nil {
+		return "", ErrInvalidInput
+	}
+	return inTxResult(ctx, o.s, func(tx *storeTx) (string, error) {
+		id, err := deploymentIDTx(ctx, tx)
+		if err != nil {
+			return "", err
+		}
+		if mode != "" {
+			if err := setPaymentModeTx(ctx, tx, mode); err != nil {
+				return "", err
+			}
+		}
+		if err := setCreditSettingTx(ctx, tx, metaKeyFreeTeamSlots, formatCreditSetting(freeSlots)); err != nil {
+			return "", err
+		}
+		return id, publish()
+	})
 }

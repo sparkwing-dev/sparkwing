@@ -57,7 +57,7 @@ func (f *appFixture) sourceCredential(auth, runID string) (sourceAnswer, int) {
 	return out, code
 }
 
-func (f *appFixture) createRun(owner signedIn, runID, repoURL string, repoID int64) {
+func (f *appFixture) createRun(owner signedIn, runID, repoURL string, repoID int64, writers ...runspec.Writer) {
 	f.t.Helper()
 	key := githubFixtureKey(repoID)
 	if repoID == 0 {
@@ -66,7 +66,10 @@ func (f *appFixture) createRun(owner signedIn, runID, repoURL string, repoID int
 			key = "host:" + strings.TrimPrefix(strings.TrimSuffix(repoURL, ".git"), "https://")
 		}
 	}
-	seedSourceRun(f.t, f.store, owner.team, runID, repoURL, key, "refs/heads/main", headSHA, repoID, runspec.DispatchHost)
+	if repoID == 0 && len(writers) == 0 {
+		writers = []runspec.Writer{runspec.PrincipalWriter("account", owner.id)}
+	}
+	seedSourceRun(f.t, f.store, owner.team, runID, repoURL, key, "refs/heads/main", headSHA, repoID, runspec.DispatchHost, writers...)
 }
 
 func (f *appFixture) runWork(owner signedIn, runID, repoURL string) (auth, prefix string) {
@@ -87,12 +90,11 @@ func (f *appFixture) claimRunNode(owner signedIn, runID, repoURL string, repoID 
 func (f *appFixture) claimRunNodeOn(owner signedIn, runID, repoURL string, repoID int64, personal bool) (bearer, claim, prefix string) {
 	f.t.Helper()
 	ctx := context.Background()
-	f.createRun(owner, runID, repoURL, repoID)
+	var writers []runspec.Writer
 	if personal {
-		if _, err := teststore.SQL(f.t, f.store).ExecContext(ctx, `UPDATE runs SET created_principal=?,created_subject_kind='account' WHERE team=? AND id=?`, owner.id, owner.team, runID); err != nil {
-			f.t.Fatal(err)
-		}
+		writers = []runspec.Writer{runspec.PrincipalWriter("account", owner.id)}
 	}
+	f.createRun(owner, runID, repoURL, repoID, writers...)
 	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}

@@ -120,14 +120,15 @@ type Server struct {
 
 	githubRunners githubRunnerConfig
 
-	githubApp         *githubAppState
-	githubAppProblem  error
-	checkout          *billingCheckout
-	paymentDeployment string
-	paymentVerifier   capability.PaymentAuthenticator
-	paymentLedger     PaymentSettler
-	operators         atomic.Pointer[map[string]bool]
-	consoleWrites     consoleWriteTransactions
+	githubApp             *githubAppState
+	githubAppProblem      error
+	previousWebhookSecret bool
+	checkout              *billingCheckout
+	paymentDeployment     string
+	paymentVerifier       capability.PaymentAuthenticator
+	paymentLedger         PaymentSettler
+	operators             atomic.Pointer[map[string]bool]
+	consoleWrites         consoleWriteTransactions
 
 	dashboard                 *Dashboard
 	localHTTPOnce             sync.Once

@@ -39,14 +39,14 @@ func TestGitHubDeliveryReplayAndEventBinding(t *testing.T) {
 	if err := op.EnqueueGitHubDelivery(ctx, "third", "push", body, now); !errors.Is(err, store.ErrGitHubDeliveryConflict) {
 		t.Fatalf("digest rebound to an event: %v", err)
 	}
-	claimed, err := op.ClaimGitHubDelivery(ctx, now)
+	claimed, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || claimed == nil || claimed.ID != "first" || claimed.Event != "pull_request" || !bytes.Equal(claimed.Body, body) || !claimed.ReceivedAt.Equal(now) {
 		t.Fatalf("claim = %+v, %v", claimed, err)
 	}
-	if err := op.FinishGitHubDelivery(ctx, *claimed, "", now); err != nil {
+	if err := op.FinishGitHubDelivery(ctx, *claimed, ""); err != nil {
 		t.Fatal(err)
 	}
-	if next, err := op.ClaimGitHubDelivery(ctx, now); err != nil || next != nil {
+	if next, err := op.ClaimGitHubDelivery(ctx); err != nil || next != nil {
 		t.Fatalf("duplicate replay queued again: %+v, %v", next, err)
 	}
 }
@@ -57,12 +57,12 @@ func TestGitHubDeliveryLeaseExpiryNeverRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := time.Unix(1_000_000, 0)
+	now := teststore.Now(st)
 	ctx := t.Context()
 	if err := st.AsOperator().EnqueueGitHubDelivery(ctx, "delivery", "push", []byte("body"), now); err != nil {
 		t.Fatal(err)
 	}
-	first, err := st.AsOperator().ClaimGitHubDelivery(ctx, now)
+	first, err := st.AsOperator().ClaimGitHubDelivery(ctx)
 	if err != nil || first == nil {
 		t.Fatalf("claim: %+v %v", first, err)
 	}
@@ -74,10 +74,11 @@ func TestGitHubDeliveryLeaseExpiryNeverRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if got, err := st.AsOperator().ClaimGitHubDelivery(ctx, now.Add(3*time.Minute)); err != nil || got != nil {
+	st.SetTestClock(t, func() time.Time { return now.Add(3 * time.Minute) })
+	if got, err := st.AsOperator().ClaimGitHubDelivery(ctx); err != nil || got != nil {
 		t.Fatalf("automatically reclaimed: %+v %v", got, err)
 	}
-	if err := st.AsOperator().FinishGitHubDelivery(ctx, *first, "", now.Add(3*time.Minute)); err == nil {
+	if err := st.AsOperator().FinishGitHubDelivery(ctx, *first, ""); err == nil {
 		t.Fatal("stale completion accepted")
 	}
 	var state, reason string
@@ -96,14 +97,14 @@ func TestGitHubDeliveryFailuresNeverRetry(t *testing.T) {
 			if err := op.EnqueueGitHubDelivery(ctx, "delivery", "push", []byte("body"), now); err != nil {
 				t.Fatal(err)
 			}
-			claim, err := op.ClaimGitHubDelivery(ctx, now)
+			claim, err := op.ClaimGitHubDelivery(ctx)
 			if err != nil || claim == nil {
 				t.Fatalf("claim: %+v %v", claim, err)
 			}
-			if err := op.FinishGitHubDelivery(ctx, *claim, reason, now); err != nil {
+			if err := op.FinishGitHubDelivery(ctx, *claim, reason); err != nil {
 				t.Fatal(err)
 			}
-			if got, err := op.ClaimGitHubDelivery(ctx, now.Add(24*time.Hour)); err != nil || got != nil {
+			if got, err := op.ClaimGitHubDelivery(ctx); err != nil || got != nil {
 				t.Fatalf("automatically retried: %+v %v", got, err)
 			}
 			var state, gotReason string
@@ -128,7 +129,7 @@ func TestGitHubDeliveryLifecycleCrashDoesNotReplayAppliedSuspend(t *testing.T) {
 	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7}}`), now); err != nil {
 		t.Fatal(err)
 	}
-	old, err := op.ClaimGitHubDelivery(ctx, now)
+	old, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || old == nil {
 		t.Fatalf("claim: %+v, %v", old, err)
 	}
@@ -144,24 +145,25 @@ func TestGitHubDeliveryLifecycleCrashDoesNotReplayAppliedSuspend(t *testing.T) {
 	if err := op.EnqueueGitHubDelivery(ctx, "unsuspend", "installation", []byte(`{"action":"unsuspend","installation":{"id":7}}`), now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	newer, err := op.ClaimGitHubDelivery(ctx, now.Add(time.Second))
+	newer, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || newer == nil || newer.ID != "unsuspend" {
 		t.Fatalf("newer: %+v, %v", newer, err)
 	}
 	if err := op.SetGitHubAppInstallationSuspended(newer.Context(ctx), 7, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := op.FinishGitHubDelivery(ctx, *newer, "", now.Add(time.Second)); err != nil {
+	if err := op.FinishGitHubDelivery(ctx, *newer, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := op.ClaimGitHubDelivery(ctx, now.Add(3*time.Minute)); err != nil || got != nil {
+	st.SetTestClock(t, func() time.Time { return now.Add(3 * time.Minute) })
+	if got, err := op.ClaimGitHubDelivery(ctx); err != nil || got != nil {
 		t.Fatalf("automatic crash replay: %+v %v", got, err)
 	}
 	// An administrator's explicit replay preserves the committed effect receipt.
 	if _, err := teststore.SQL(t, st).Exec(`UPDATE github_app_deliveries SET state='pending' WHERE delivery_id='suspend'`); err != nil {
 		t.Fatal(err)
 	}
-	replay, err := op.ClaimGitHubDelivery(ctx, now.Add(3*time.Minute))
+	replay, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || replay == nil || replay.ID != "suspend" {
 		t.Fatalf("replay: %+v, %v", replay, err)
 	}
@@ -189,7 +191,7 @@ func TestGitHubDeliveryFailedLifecycleDoesNotKeepReceipt(t *testing.T) {
 	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7}}`), now); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := op.ClaimGitHubDelivery(ctx, now)
+	claim, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || claim == nil {
 		t.Fatalf("claim: %+v, %v", claim, err)
 	}

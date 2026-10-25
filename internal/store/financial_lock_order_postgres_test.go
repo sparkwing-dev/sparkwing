@@ -161,7 +161,7 @@ func TestPostgresDirectGrantRacingTeamPurge(t *testing.T) {
 	}
 	b := blockFinancialLedger(t, ctx, s, "a")
 	b.start(func() error {
-		result, err := tenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 1, Reference: "grant"})
+		result, err := tenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 1, Reference: "grant", CreatedBy: "operator"})
 		if err == nil && !result.Created {
 			return fmt.Errorf("grant was not created: %+v", result)
 		}
@@ -184,7 +184,7 @@ func TestPostgresDirectGrantRacingTeamPurge(t *testing.T) {
 	b.release(2)
 	for table, column := range map[string]string{"teams": "name", "credit_grants": "team"} {
 		var count int
-		if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE `+column+`='a'`).Scan(&count); err != nil || count != 0 {
+		if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE `+column+`='a'`).Scan(&count); err != nil || count != 1 {
 			t.Errorf("%s rows=%d: %v", table, count, err)
 		}
 	}

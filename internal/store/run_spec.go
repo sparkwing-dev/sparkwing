@@ -102,7 +102,8 @@ type AcceptedExpansion struct {
 // a changed body conflicts. An empty key requests a distinct invocation.
 // Verified App redeliveries return the original run for that delivery and pipeline,
 // including when the caller supplies no idempotency key.
-// Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them.
+// Retry intake loads Lineage.RetryOf from this Tenant, preserves code and inputs,
+// and reseals asserted writes for the retrier. The new execution ID stays outside the source envelope.
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error) {
 	var result AdmissionResult
 	var installed *localRunSecrets
@@ -376,7 +377,7 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
-	_, err = tx.execContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,idempotency_scope,idempotency_key,idempotency_digest,request_sealed_at,trigger_source,git_branch,git_sha,repo_key,repo_display,repo_identity,retry_of,lineage_json,parent_run_id,parent_node_id,dispatch,intake_mode,admission,allowed_pools,created_subject_kind,created_principal,created_at,claim_wait_ns,log_retention_class,log_retention_days) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, result.Number, input.Pipeline, body, snapshot.request.Hash, scope, key, digest, snapshot.request.AdmittedAt.UnixNano(), input.Origin, input.Git.Ref, input.Git.SHA, input.Git.Repository.Key, input.Git.Repository.Display, identity, snapshot.execution.Lineage.RetryOf, lineage, snapshot.execution.Lineage.ParentRunID, snapshot.execution.Lineage.ParentJobID, input.Dispatch, input.Mode, input.Options.AdmissionClass.Value, pools, p.Capability.Subject.Kind, p.Capability.Subject.ID, now.UnixNano(), int64(input.Options.ClaimWait.Value), policy.LogRetentionClass, policy.LogRetentionDays)
+	_, err = tx.execContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,idempotency_scope,idempotency_key,idempotency_digest,request_sealed_at,trigger_source,git_branch,git_sha,provenance_sha,provenance_ref,repo_key,repo_display,repo_identity,retry_of,lineage_json,parent_run_id,parent_node_id,dispatch,intake_mode,admission,allowed_pools,created_subject_kind,created_principal,created_at,claim_wait_ns,log_retention_class,log_retention_days) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, result.Number, input.Pipeline, body, snapshot.request.Hash, scope, key, digest, snapshot.request.AdmittedAt.UnixNano(), input.Origin, input.Git.Ref, input.Git.SHA, snapshot.request.Provenance.SHA(), snapshot.request.Provenance.Ref(), input.Git.Repository.Key, input.Git.Repository.Display, identity, snapshot.execution.Lineage.RetryOf, lineage, snapshot.execution.Lineage.ParentRunID, snapshot.execution.Lineage.ParentJobID, input.Dispatch, input.Mode, input.Options.AdmissionClass.Value, pools, p.Capability.Subject.Kind, p.Capability.Subject.ID, now.UnixNano(), int64(input.Options.ClaimWait.Value), policy.LogRetentionClass, policy.LogRetentionDays)
 	if err != nil {
 		return err
 	}
@@ -440,7 +441,8 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		return err
 	}
 	var kind capability.UnitKind
-	err = tx.QueryRowContext(ctx, `SELECT unit_kind FROM triggers WHERE team=? AND id=?`, team, id).Scan(&kind)
+	var previousContext string
+	err = tx.QueryRowContext(ctx, `SELECT unit_kind,claim_context FROM triggers WHERE team=? AND id=?`, team, id).Scan(&kind, &previousContext)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -451,6 +453,11 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		}
 		if _, err := tx.execContext(ctx, `UPDATE triggers SET claim_requirements=?,claim_context=? WHERE team=? AND id=?`, requirements, claimContext, team, id); err != nil {
 			return err
+		}
+		if previousContext != "" && previousContext != claimContext {
+			if err := deleteUnusedClaimContextTx(ctx, tx, team, previousContext); err != nil {
+				return err
+			}
 		}
 	}
 

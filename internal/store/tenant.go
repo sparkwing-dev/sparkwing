@@ -44,7 +44,7 @@ func NormalizeTeam(team Team) Team {
 	return Team(strings.ToLower(strings.TrimSpace(string(team))))
 }
 
-// ForTeam returns a tenant handle for a registered team without a pending deletion.
+// ForTeam returns a tenant handle for a registered team that has never begun deletion.
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error) {
 	return s.forTeam(ctx, team)
 }
@@ -129,7 +129,7 @@ func registerTeamTx(ctx context.Context, tx *storeTx, team Team) error {
 }
 
 // liveTeamsSQL is shared by handle acquisition and fleet maintenance.
-const liveTeamsSQL = `SELECT name FROM teams WHERE NOT EXISTS (SELECT 1 FROM team_deletions d WHERE d.slug = teams.name AND d.state = 'pending')`
+const liveTeamsSQL = `SELECT name FROM teams WHERE NOT EXISTS (SELECT 1 FROM team_deletions d WHERE d.slug = teams.name)`
 
 // EachTeam visits selected live tenants, or all live tenants when query is nil.
 // Tenant failures are logged; database failures and loss of the maintenance lease stop the sweep.

@@ -19,6 +19,7 @@ func burstFixture(t *testing.T, policy runspec.BurstPlacement) (*Store, UnitDema
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
 	body := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Burst: &policy, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}, assertedProvenance(t, "ci", "", ""))
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,created_principal='owner',created_subject_kind='account'`, body)
+	fixtureRunWriter(t, s, "run", runspec.PrincipalWriter("account", "owner"))
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=?`, s.now().UnixNano())
 	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitTrigger, RunID: "run"})
@@ -56,9 +57,12 @@ func TestBurstPersonalMachineOwnershipProperty(t *testing.T) {
 			}
 			if i%4 == 0 {
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET created_subject_kind='machine'`)
+				fixtureRunWriter(t, s, "run", runspec.PrincipalWriter("machine", "owner"))
 				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitTrigger, RunID: "run"})
 				allowed = false
+			} else if allowed {
+				rewriteSchemaExec(t, s.db, `UPDATE runs SET created_principal='different-creator',created_subject_kind='machine'`)
 			}
 			demand.CapabilityPrefix = issued.Capability.Prefix
 			demand.Labels = []string{"class=coordinator", "name=owner", "pool=trusted"}
@@ -257,6 +261,7 @@ func TestBurstMachinesPreferenceFollowsTheMachineStartedRunsOwner(t *testing.T) 
 	burstPersonalClaimant(t, s, owner.Authority, "desktop")
 	burstPersonalClaimant(t, s, other.Authority, "foreign")
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET created_principal='laptop',created_subject_kind='machine'`)
+	fixtureRunWriter(t, s, "run", runspec.PrincipalWriter("machine", "laptop"))
 	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 	indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitTrigger, RunID: "run"})
 	var run string

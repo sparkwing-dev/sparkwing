@@ -35,6 +35,15 @@ type automaton struct {
 }
 
 func (m *Masker) matcher() *compiledMatcher {
+	local := m.localMatcher()
+	if m.parent == nil {
+		return local
+	}
+	shared := m.parent.matcher()
+	return &compiledMatcher{groups: append(slices.Clone(shared.groups), local.groups...), markerSuffix: shared.markerSuffix || local.markerSuffix}
+}
+
+func (m *Masker) localMatcher() *compiledMatcher {
 	m.mu.RLock()
 	compiled := m.compiled
 	current := m.compiledCount == len(m.values)

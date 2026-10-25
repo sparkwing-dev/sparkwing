@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -120,16 +122,34 @@ func TestOwnerEvaluationRefusesFreshIdentifierAfterIssuance(t *testing.T) {
 	in, _, deps, process := evaluationFixture(t)
 	deps.Masks = NewMaskRegistry(deps.Masker)
 	deps.Validation = nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: deps.Masks.replayMasks}
+	processes, lookup, delegation, services := nativeProcessesFixture(t)
+	processes.Masks = deps.Masks
+	parent := processes.Authorities.deps.Parent.(*processParent)
+	parent.snapshot.Authorities[0].Principal.Capability.Binding.NodeID = in.NodeID
+	parent.snapshot.Binding.Current.NodeID = in.NodeID
+	delegation.Binding.NodeID, services.Job.ID = in.NodeID, in.NodeID
+	services.OIDC = func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error) {
+		return ProcessOIDCToken{Token: "build", ExpiresAt: *delegation.ExpiresAt}, nil
+	}
+	var bound *ProcessServices
+	generatedID := "new-build"
+	deps.Bind = func(ctx context.Context, _ EvaluationInput) (ProcessGrant, error) {
+		grant, err := processes.Delegate(ctx, lookup, delegation, services)
+		if err == nil {
+			bound, err = processes.Authorities.processServices(ctx, grant.Binding)
+		}
+		return grant, err
+	}
 	process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 		if request.Op != nodeproto.OpEval {
 			return nil, nil
 		}
-		if err := deps.Masks.registerIssued("build"); err != nil {
+		if _, err := bound.oidc(httptest.NewRequest("POST", "/node/v1/oidc-token", strings.NewReader(`{"audience":"deploy"}`)), capability.Authorized{}); err != nil {
 			t.Fatal(err)
 		}
 		jobs := []nodeproto.JobSpec{}
 		if request.Closure == "first" {
-			jobs = append(jobs, nodeproto.JobSpec{ID: "new-build", Groups: []string{"first"}, Steps: []nodeproto.StepSpec{{ID: "run"}}})
+			jobs = append(jobs, nodeproto.JobSpec{ID: generatedID, Groups: []string{"first"}, Steps: []nodeproto.StepSpec{{ID: "run"}}})
 		}
 		raw, _ := json.Marshal(jobs)
 		return nodeproto.EvalResult{Value: raw}, nil
@@ -141,6 +161,11 @@ func TestOwnerEvaluationRefusesFreshIdentifierAfterIssuance(t *testing.T) {
 	body, _, failure, err := host.evaluateExpansion(t.Context(), in)
 	if err != nil || failure == nil || failure.Code != apierr.SecretInIdentifier || len(body) != 0 {
 		t.Fatalf("fresh expansion = %s, failure = %+v, error = %v", body, failure, err)
+	}
+	generatedID = "unrelated-job"
+	body, _, failure, err = host.evaluateExpansion(t.Context(), in)
+	if err != nil || failure != nil || len(body) == 0 {
+		t.Fatalf("issued credential invalidated accepted topology: body=%s failure=%+v error=%v", body, failure, err)
 	}
 }
 

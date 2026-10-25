@@ -31,7 +31,8 @@ func TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork(t *testing.T) {
 		{name: "reserved secret pool launcher takes the verified default branch", secret: true, verified: true, launcher: true, claims: true},
 		{name: "reserved secret pool refuses a persistent runner even for verified work", secret: true, verified: true},
 		{name: "explicit verified pool refuses a persistent runner", trust: capability.TrustVerifiedDefault, verified: true},
-		{name: "operator opts the pool into any run", secret: true, trust: capability.TrustAny, claims: true},
+		{name: "any trust still refuses a persistent secret pool runner", secret: true, trust: capability.TrustAny},
+		{name: "operator opts a pool launcher into any run", secret: true, trust: capability.TrustAny, claims: true, launcher: true},
 		{name: "declared verified-default refuses an unverified run", trust: capability.TrustVerifiedDefault},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

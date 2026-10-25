@@ -808,6 +808,9 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 		}
 		out.Admitted = true
 	}
+	if err := op.recordAudit(ctx, tx, auditContext{At: now, Team: Team(team), Actor: auditAccountActor(accountID)}, auditInvitationAcceptance{InvitationID: invitationID}); err != nil {
+		return none, err
+	}
 	return out, nil
 }
 

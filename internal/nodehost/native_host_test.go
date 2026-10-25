@@ -229,7 +229,8 @@ func TestNativeHostRegistersServicesAgainstLiveProcessAuthority(t *testing.T) {
 	}
 	authorized := capability.Authorized{Principal: snapshot.Authorities[0].Principal, Binding: delegation.Binding}
 	_, err = callService(t, config.Router.(*serviceRegistrar), authorized, "/node/v1/masks", `{"value":"native-service-secret"}`)
-	if err != nil || config.Masks.masker.Mask("native-service-secret") != "***" {
+	bound, resolveErr := authorities.processServices(t.Context(), grant.Binding)
+	if err != nil || resolveErr != nil || bound.Masks.masker.Mask("native-service-secret") != "***" || config.Masks.masker.Mask("native-service-secret") != "native-service-secret" {
 		t.Fatal("registered handler lost the native process service registry:", err)
 	}
 }

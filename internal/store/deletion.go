@@ -17,7 +17,7 @@ import (
 )
 
 // Team deletion states. A deletion is pending from the request until the
-// purge removes the team's last row, and done after.
+// purge removes its operational data, and done after.
 const (
 	TeamDeletionPending = "pending"
 	TeamDeletionDone    = "done"
@@ -36,13 +36,7 @@ var (
 	// ErrDeletionLeaseLost reports a purge step taken by a purger that no
 	// longer holds the deletion's lease, because another replica took it.
 	ErrDeletionLeaseLost = errors.New("store: this purger no longer holds the team deletion's lease")
-	// ErrOpenCheckout refuses deletion with an unexpired checkout or an unfinished bound payment.
-	ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
-		"wait for the checkout to expire or complete; any payment already started must finish before deletion")
-	// ErrTeamFrozen refuses deleting a team held over a disputed payment,
-	// because the hold and the ledger it points at are the dispute's record.
-	ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
-	// ErrTeamBeingDeleted refuses financial writes after deletion has begun.
+	// ErrTeamBeingDeleted refuses new checkouts and saved cards after deletion has begun.
 	ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
 )
 
@@ -236,50 +230,10 @@ func (t *Tenant) requestTeamDeletionTx(ctx context.Context, tx *storeTx, now tim
 	return del, revoked, nil
 }
 
-func refuseUnfinishedRefundsTx(ctx context.Context, q rowQuerier, team Team) error {
-	var refunds int
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM card_refunds WHERE team=? AND status<>?`, team, cardRefundSucceeded).Scan(&refunds); err != nil {
-		return err
-	}
-	if refunds > 0 {
-		return fmt.Errorf("%w: the team has an unfinished card refund; wait for it to complete", ErrInvalidInput)
-	}
-	return nil
-}
-
-// A bound, unfinished payment can settle after its checkout expires.
-func refuseDeletionWithMoneyInFlightTx(ctx context.Context, tx *storeTx, team Team, now time.Time) error {
-	if err := refuseUnfinishedRefundsTx(ctx, tx, team); err != nil {
-		return err
-	}
-	var open int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM credit_checkouts WHERE team = ? AND paid_at IS NULL
-		 AND (expires_at > ? OR (payment_id <> '' AND closed_at IS NULL))`,
-		string(team), now.UnixNano()).Scan(&open); err != nil {
-		return err
-	}
-	if open > 0 {
-		return ErrOpenCheckout
-	}
-	freeze, err := teamCreditFreezeTx(ctx, tx, team)
-	if err != nil {
-		return err
-	}
-	if freeze.Frozen {
-		return ErrTeamFrozen
-	}
-	return nil
-}
-
-// Authority and payment settlement close here, before the controller removes
-// physical logs and objects and [Operator.PurgeTeam] removes SQL rows.
+// Authority closes before physical cleanup. Financial records survive both purge passes.
 func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy string, now time.Time) ([]string, error) {
 	if t.team == DefaultTeam {
 		return nil, fmt.Errorf("%w: the default team holds every single-team install's rows", ErrInvalidInput)
-	}
-	if err := refuseDeletionWithMoneyInFlightTx(ctx, tx, t.team, now); err != nil {
-		return nil, err
 	}
 	at := now.UTC().UnixNano()
 	if _, err := tx.execContext(ctx, `
@@ -501,31 +455,28 @@ func requireDeletionLeaseTx(ctx context.Context, tx *storeTx, team Team, holder,
 // Run dependents go first to avoid a large cascade; requirement sets follow
 // the work rows that reference them.
 func deleteTenantRowsTx(ctx context.Context, tx *storeTx, team Team) error {
-	tables := append([]string{"capabilities", "sessions", "payment_events"}, tenantTables...)
-	tables = slices.DeleteFunc(tables, func(t string) bool { return t == "credit_grants" || t == "credit_charges" })
+	tables := []string{"capabilities", "sessions"}
+	for _, table := range schemaTables {
+		if table.Owner == schemaTenant && !table.RetainOnTeamDeletion {
+			tables = append(tables, table.Name)
+		}
+	}
 	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool {
 		return t == "runs" || t == "quota_admission" || t == "claim_requirements" || t == "claim_contexts"
 	}), "quota_admission", "runs", "claim_contexts", "claim_requirements") {
 		query := `DELETE FROM ` + table + ` WHERE team = ?`
-		if table == "card_refunds" {
-			query += ` AND status = 'succeeded'`
-		}
 		if _, err := tx.execContext(ctx, query, string(team)); err != nil {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}
 	}
-	l, err := lockLedgerTx(ctx, tx, team)
-	if err != nil {
-		return err
-	}
-	return l.purge(ctx)
+	// Receipt addresses serve delivery, not financial reconciliation.
+	_, err := tx.execContext(ctx, `UPDATE credit_checkouts SET receipt_email='' WHERE team=?`, team)
+	return err
 }
 
-// PurgeTeam removes every row a team owns in every tenant-owned table, then
-// its registry row, and marks its deletion done with a recheck due at
-// now+recheckAfter. holder must hold the deletion's lease; see
-// [Operator.ClaimTeamDeletion]. Financial checks and deletion share a transaction
-// and the team's exclusive row lock, fencing settlement until the purge commits.
+// PurgeTeam removes operational data and clears the team to a tombstone.
+// Financial records keep their payer association for late callbacks.
+// holder must hold the deletion lease; see [Operator.ClaimTeamDeletion].
 func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, recheckAfter time.Duration) error {
 	team = NormalizeTeam(team)
 	return o.s.inTx(ctx, func(tx *storeTx) error {
@@ -533,12 +484,6 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, rech
 			return err
 		}
 		if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
-			return err
-		}
-		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
-			return err
-		}
-		if err := refuseDeletionWithMoneyInFlightTx(ctx, tx, team, tx.now(ctx)); err != nil {
 			return err
 		}
 		if err := deleteTenantRowsTx(ctx, tx, team); err != nil {
@@ -556,7 +501,12 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, rech
 		if n, err := res.RowsAffected(); err != nil || n != 1 {
 			return errors.Join(fmt.Errorf("%w: %s", ErrDeletionLeaseLost, team), err)
 		}
-		if _, err := tx.execContext(ctx, `DELETE FROM teams WHERE name = ?`, string(team)); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE teams SET display_name='', created_by='', members_can_add_machines=1,
+		    claim_ranking='', max_children_per_root=50, claim_award_ordinal=0,
+		    billing_trust_at=0, billing_trust_reason='', billing_trust='', billing_trust_by='',
+		    card_customer='', card_payment_method='', card_fingerprint='', card_brand='', card_last4='', card_added_at=0,
+		    refill_enabled=0, refill_threshold_cents=0, refill_amount_cents=0, refill_week_limit_cents=0, refill_month_limit_cents=0,
+		    next_run_number=1 WHERE name = ?`, string(team)); err != nil {
 			return err
 		}
 		if _, err := tx.execContext(ctx,
@@ -574,20 +524,11 @@ func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder stri
 		if err := requireDeletionLeaseTx(ctx, tx, team, holder, TeamDeletionDone); err != nil {
 			return err
 		}
-		lockErr := lockFinancialTeamsTx(ctx, tx, team)
-		if lockErr != nil && !errors.Is(lockErr, ErrUnknownTeam) {
-			return lockErr
+		if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
+			return err
 		}
-		if lockErr == nil {
-			if _, err := lockLedgerTx(ctx, tx, team); err != nil {
-				return err
-			}
-			if err := refuseDeletionWithMoneyInFlightTx(ctx, tx, team, tx.now(ctx)); err != nil {
-				return err
-			}
-			if err := deleteTenantRowsTx(ctx, tx, team); err != nil {
-				return err
-			}
+		if err := deleteTenantRowsTx(ctx, tx, team); err != nil {
+			return err
 		}
 		res, err := tx.execContext(ctx, `
 		UPDATE team_deletions SET recheck_at = NULL, lease_holder = '', lease_until = NULL, last_error = ''

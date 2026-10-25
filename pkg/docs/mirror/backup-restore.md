@@ -25,6 +25,16 @@ session for the same account can stay valid. Identity unlink adds
 Payment recovery and targeted revocation recovery are manual. Follow the
 operator runbook kept outside this repository.
 
+After a restore, Cloud nodes may still hold orphan reservations or bindings for
+awards the restored controller no longer recognizes. The launcher excludes those
+nodes and quarantines them when their protected team identity matches: it cordons
+the node and adds the `sparkwing.dev/quarantined` taint and annotation. Healthy
+nodes can still take work. Inspect the launcher logs and the node's quarantine
+annotation, then terminate the node so fresh capacity replaces it. To reuse a node,
+first remove the orphan workload and its stale reservation or binding, then remove
+the quarantine taint and annotation and uncordon it. Uncordoning alone does not
+make it eligible again. Do not clear a live award's reservation or binding.
+
 ## Schema compatibility
 
 Keep the binary matching a database backup. This build does not upgrade older
@@ -33,8 +43,8 @@ a matching backup in a separate database.
 
 <!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: store schema version 23 is older than this binary (expects 24); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> (or drop the database) and start again
+sparkwing: store schema version 24 is older than this binary (expects 25); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> (or drop the database) and start again
 
-sparkwing: store schema version 25 is newer than this binary (expects 24); start a binary matching the store, or restore a backup matching this binary into a separate database
+sparkwing: store schema version 26 is newer than this binary (expects 25); start a binary matching the store, or restore a backup matching this binary into a separate database
 ```
 <!-- END GENERATED SCHEMA ERRORS -->

@@ -249,20 +249,9 @@ func lockOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) 
 func lockPaymentTeamsTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (lockSet, error) {
 	var set lockSet
 	if err := acquireLockSet(ctx, tx, func() lockSet { set = tx.operator.discoverPaymentTeamsTx(ctx, tx, e); return set }); err != nil {
-		if !errors.Is(err, ErrUnknownTeam) {
-			return lockSet{}, err
-		}
+		return lockSet{}, err
 	}
 	set = set.normalized()
-	if set.err != nil {
-		return lockSet{}, set.err
-	}
-	for _, row := range set.rows {
-		team := Team(row.key.keys[0])
-		if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
-			return lockSet{}, err
-		}
-	}
 	return set, nil
 }
 
