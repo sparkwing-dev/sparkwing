@@ -9,8 +9,26 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
+
+func TestCapacityWorkLocksAreReusableAfterLedger(t *testing.T) {
+	s := authorityStore(t)
+	unitClaimFixtureStore(t, s)
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
+		if err := lockCapacityWorkTx(t.Context(), tx, "a", nil, ref, true); err != nil {
+			return err
+		}
+		if _, err := lockLedgerTx(t.Context(), tx, "a"); err != nil {
+			return err
+		}
+		return tx.operator.lockUnitsTx(t.Context(), tx, []UnitRef{{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}})
+	}); err != nil {
+		t.Fatalf("admission did not register its work locks: %v", err)
+	}
+}
 
 func TestFinancialLockOrderRejectsNewWorkAfterLedger(t *testing.T) {
 	for _, name := range []string{"trigger", "eval", "run", "node"} {

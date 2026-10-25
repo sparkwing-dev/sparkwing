@@ -233,11 +233,10 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		} else if count != 1 {
 			return holderRefusal()
 		}
-		if err := finishExpansionBillingTx(ctx, tx, t.team, request); err != nil {
+		if err := settleControllerTx(ctx, tx, t.team, string(request.Source.RunID), tx.now(ctx)); err != nil {
 			return err
 		}
-		now := tx.now(ctx)
-		return settleControllerTx(ctx, tx, t.team, string(request.Source.RunID), now)
+		return finishExpansionBillingTx(ctx, tx, t.team, request)
 	})
 	return result, err
 }
@@ -560,6 +559,10 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 			}
 		}
 		if err = settleControllerTx(ctx, tx, team, run.ID, tx.now(ctx)); err != nil {
+			return AcceptedPlan{}, err
+		}
+		// Admission locks competing work before preparation settlement takes the ledger.
+		if err = settleOwnerBillingTx(ctx, tx, team, run.ID, int64(request.Actor.Owner.Generation), tx.now(ctx)); err != nil {
 			return AcceptedPlan{}, err
 		}
 		return AcceptedPlan{Spec: spec, Plan: body, PlanHash: string(spec.PlanHash), Owner: &controller.Owner, Replayed: replay}, nil

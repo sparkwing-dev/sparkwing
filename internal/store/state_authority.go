@@ -150,7 +150,7 @@ func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor runst
 }
 
 func lockStateRunTx(ctx context.Context, tx *storeTx, team Team, id string) error {
-	err := lockWorkRowTx(ctx, tx, storeLockKey{tier: lockRun, keys: [3]string{string(team), id}})
+	err := lockWorkRowTx(ctx, tx, storeLockKey{tier: lockRun, keys: [3]string{string(team), id}}, false)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("run", id)
 	}

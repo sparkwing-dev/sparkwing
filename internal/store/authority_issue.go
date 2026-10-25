@@ -251,7 +251,7 @@ func (op *Operator) lockUnitsTx(ctx context.Context, tx *storeTx, units []UnitRe
 	}
 	slices.SortFunc(locks, compare)
 	for _, l := range slices.Compact(locks) {
-		err := lockWorkRowTx(ctx, tx, storeLockKey{tier: l.tier, keys: [3]string{l.team, l.run, l.node}, generation: l.generation})
+		err := lockWorkRowTx(ctx, tx, storeLockKey{tier: l.tier, keys: [3]string{l.team, l.run, l.node}, generation: l.generation}, false)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}

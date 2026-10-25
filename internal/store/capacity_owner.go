@@ -285,54 +285,17 @@ UNION SELECT ?,? ORDER BY run_id,node_id`, args...)
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
-	previous := ""
 	for _, ref := range work {
-		if ref.RunID == runspec.RunID(previous) {
-			continue
-		}
-		if nonblocking && tx.dialect == DialectPostgres {
-			var found string
-			if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team=? AND id=?`+tx.forNoKeyUpdate()+` SKIP LOCKED`, team, ref.RunID).Scan(&found); err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					var exists bool
-					if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE team=? AND id=?)`, team, ref.RunID).Scan(&exists); err != nil {
-						return err
-					}
-					if exists {
-						return errCapacityAdmissionBusy
-					}
-					continue
-				}
-				return err
-			}
-		} else if err := lockStateRunTx(ctx, tx, team, string(ref.RunID)); err != nil && !errors.Is(err, ErrNotFound) {
+		if err := lockWorkRowTx(ctx, tx, storeLockKey{tier: lockRun, keys: [3]string{string(team), string(ref.RunID)}}, nonblocking); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		previous = string(ref.RunID)
 	}
 	for _, ref := range work {
 		if ref.NodeID == "" {
 			continue
 		}
-		var found string
-		lock := tx.forUpdate()
-		if nonblocking && tx.dialect == DialectPostgres {
-			lock += " SKIP LOCKED"
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT node_id FROM nodes WHERE team=? AND run_id=? AND node_id=?`+lock, team, ref.RunID, ref.NodeID).Scan(&found); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				if nonblocking && tx.dialect == DialectPostgres {
-					var exists bool
-					if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM nodes WHERE team=? AND run_id=? AND node_id=?)`, team, ref.RunID, ref.NodeID).Scan(&exists); err != nil {
-						return err
-					}
-					if exists {
-						return errCapacityAdmissionBusy
-					}
-				}
-			} else {
-				return err
-			}
+		if err := lockWorkRowTx(ctx, tx, storeLockKey{tier: lockNode, keys: [3]string{string(team), string(ref.RunID), string(ref.NodeID)}}, nonblocking); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
 		}
 	}
 	return nil

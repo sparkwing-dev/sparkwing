@@ -25,14 +25,14 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (r
 			return err
 		}
 
-		if _, err := controllerOwnerTx(ctx, tx, t.team, string(request.Ref.RunID)); err != nil {
-			return err
-		}
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{request.Actor.Authority}); err != nil {
 			return err
 		}
 
 		if err := prepareStateActorTx(ctx, tx, t.team, string(request.Ref.RunID), request.Actor); err != nil {
+			return err
+		}
+		if err := lockControllerCapacityTx(ctx, tx, t.team, string(request.Ref.RunID)); err != nil {
 			return err
 		}
 

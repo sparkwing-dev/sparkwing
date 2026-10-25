@@ -239,10 +239,10 @@ func lockOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) 
 	default:
 		return nil
 	}
-	return lockWorkRowTx(ctx, tx, key)
+	return lockWorkRowTx(ctx, tx, key, false)
 }
 
-func lockWorkRowTx(ctx context.Context, tx *storeTx, key storeLockKey) error {
+func lockWorkRowTx(ctx context.Context, tx *storeTx, key storeLockKey, nonblocking bool) error {
 	if slices.Contains(tx.workLocks, key) {
 		return nil
 	}
@@ -272,7 +272,16 @@ func lockWorkRowTx(ctx context.Context, tx *storeTx, key storeLockKey) error {
 		return errors.New("unsupported work lock tier")
 	}
 	var id string
+	if nonblocking && tx.dialect == DialectPostgres {
+		mode += " SKIP LOCKED"
+	}
 	if err := tx.QueryRowContext(ctx, query+mode, args...).Scan(&id); err != nil {
+		if nonblocking && tx.dialect == DialectPostgres && errors.Is(err, sql.ErrNoRows) {
+			if err := tx.QueryRowContext(ctx, query, args...).Scan(&id); err != nil {
+				return err
+			}
+			return errCapacityAdmissionBusy
+		}
 		return err
 	}
 	tx.workLocks = append(tx.workLocks, key)

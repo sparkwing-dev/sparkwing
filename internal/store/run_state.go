@@ -478,10 +478,7 @@ func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request
 		return err
 	}
 	if count == 1 {
-		if err := retireClaimContextTx(ctx, tx, team, UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(request.RunID)}); err != nil {
-			return err
-		}
-		return settleOwnerBillingTx(ctx, tx, team, request.RunID, int64(request.Actor.Owner.Generation), tx.now(ctx))
+		return retireClaimContextTx(ctx, tx, team, UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(request.RunID)})
 	}
 	if !replay {
 		return holderRefusal()

@@ -132,6 +132,9 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	if err := lockStateRunTx(ctx, tx, target.team, string(target.ref.RunID)); err != nil {
 		return nil, err
 	}
+	if err := lockControllerCapacityTx(ctx, tx, target.team, string(target.ref.RunID)); err != nil {
+		return nil, err
+	}
 	run, err := readRunTx(ctx, tx, target.team, string(target.ref.RunID))
 	if err != nil {
 		return nil, err
