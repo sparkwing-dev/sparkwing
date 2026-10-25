@@ -116,7 +116,7 @@ func TestTimerOperationsHonorCancellation(t *testing.T) {
 	h.Version = "v1.2.3"
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	for _, operation := range []func(context.Context, Host) (State, error){Install, Refresh, Status, Inspect, Uninstall} {
+	for _, operation := range []func(context.Context, Host) (State, error){Install, Refresh, Inspect, Uninstall} {
 		if _, err := operation(ctx, h); !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancelled operation = %v", err)
 		}

@@ -11,16 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
-type entry struct {
-	Path string `yaml:"path"`
-}
-
-type config struct {
-	Repos []*entry `yaml:"repos,omitempty"`
-
-	FallbackPaths []string `yaml:"fallback_paths,omitempty"`
-}
-
 // defaultPath reports the config.yaml the repo registry is read from and
 // written to; see [userconfig.Path].
 func defaultPath() (string, error) {
@@ -29,8 +19,8 @@ func defaultPath() (string, error) {
 
 // load reads the repos section of the config.yaml at path. An absent file or
 // section is an empty registry.
-func load(path string) (*config, error) {
-	var cfg config
+func load(path string) (*userconfig.ReposConfig, error) {
+	var cfg userconfig.ReposConfig
 	if _, err := userconfig.Read(path, userconfig.Repos, &cfg); err != nil {
 		return nil, err
 	}
@@ -39,12 +29,12 @@ func load(path string) (*config, error) {
 
 // safety: the registry changes under the settings file's lock, so two
 // registrations racing each keep their entry.
-func update(change func(cfg *config) (bool, error)) error {
+func update(change func(cfg *userconfig.ReposConfig) (bool, error)) error {
 	path, err := defaultPath()
 	if err != nil {
 		return err
 	}
-	var cfg config
+	var cfg userconfig.ReposConfig
 	errUnchanged := errors.New("unchanged")
 	err = userconfig.Update(path, userconfig.Repos, "the repo registry", &cfg, func(bool) error {
 		changed, err := change(&cfg)
@@ -67,13 +57,13 @@ func Add(absPath string) error {
 	if _, err := repoKind(abs); err != nil {
 		return err
 	}
-	return update(func(cfg *config) (bool, error) {
+	return update(func(cfg *userconfig.ReposConfig) (bool, error) {
 		for _, e := range cfg.Repos {
 			if pathsEqual(e.Path, abs) {
 				return false, nil
 			}
 		}
-		cfg.Repos = append(cfg.Repos, &entry{Path: abs})
+		cfg.Repos = append(cfg.Repos, userconfig.RepoPath{Path: abs})
 		return true, nil
 	})
 }
@@ -81,7 +71,7 @@ func Add(absPath string) error {
 func Remove(match string) (int, error) {
 	matchAbs, _ := filepath.Abs(match)
 	removed := 0
-	err := update(func(cfg *config) (bool, error) {
+	err := update(func(cfg *userconfig.ReposConfig) (bool, error) {
 		keep := cfg.Repos[:0]
 		for _, e := range cfg.Repos {
 			if pathsEqual(e.Path, matchAbs) || filepath.Base(e.Path) == match {
@@ -101,7 +91,7 @@ func Remove(match string) (int, error) {
 
 func Prune() ([]string, error) {
 	var dropped []string
-	err := update(func(cfg *config) (bool, error) {
+	err := update(func(cfg *userconfig.ReposConfig) (bool, error) {
 		keep := cfg.Repos[:0]
 		for _, e := range cfg.Repos {
 			if !hasSparkwingDir(e.Path) {

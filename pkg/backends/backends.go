@@ -2,7 +2,7 @@ package backends
 
 import "os"
 
-// Spec declares a secret source consumed by internal/secretsource.
+// Spec declares a backend connection.
 // Type selects which fields the resolver requires.
 type Spec struct {
 	Type   string `yaml:"type"`

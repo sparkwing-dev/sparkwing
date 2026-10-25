@@ -26,24 +26,6 @@ func pushedService(t *testing.T) *pushedFixture {
 	return &pushedFixture{Service: &Service{Operator: st.AsOperator(), Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "operator@laptop"}, Store: st}
 }
 
-func TestDisarmRepoURLRemovesOnlyThatRepository(t *testing.T) {
-	svc := pushedService(t)
-	for i, repo := range []string{pushedRepoURL, "https://github.com/acme/other.git"} {
-		_, _, err := svc.Schedules.ArmCronSchedule(t.Context(), store.CronSchedule{ID: []string{"first", "second"}[i], RepoPath: repo, Pipeline: "ci", Cron: "0 * * * *", Where: store.CronWhereController, GitHubInstallationID: 7, GitHubRepositoryID: int64(701 + i)})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	removed, err := svc.disarmRepoURL(t.Context(), pushedRepoURL)
-	if err != nil || removed != 1 {
-		t.Fatalf("removed %d: %v", removed, err)
-	}
-	rows, err := svc.Schedules.ListCronSchedules(t.Context())
-	if err != nil || len(rows) != 1 || rows[0].RepoPath != "https://github.com/acme/other.git" {
-		t.Fatalf("remaining rows: %+v %v", rows, err)
-	}
-}
-
 func TestControllerHealthReportsTimerLoop(t *testing.T) {
 	svc := pushedService(t)
 	health, err := svc.ControllerHealth(context.Background())

@@ -135,8 +135,8 @@ func agentPlist(h Host) string {
 	b.WriteString("  </array>\n\n")
 	b.WriteString("  <key>StartInterval</key>\n  <integer>60</integer>\n")
 	b.WriteString("  <key>RunAtLoad</key>\n  <false/>\n")
-	// safety: launchd reaps the job's process group when the tick exits unless told to
-	// leave it, and the run consumer the tick starts lives in that group.
+	// safety: __tick ensures the local controller, then invokes its tick.
+	// Keep that controller alive after launchd reaps the tick process.
 	b.WriteString("  <key>AbandonProcessGroup</key>\n  <true/>\n\n")
 	if pairs := envPairs(h); len(pairs) > 0 {
 		b.WriteString("  <key>EnvironmentVariables</key>\n  <dict>\n")

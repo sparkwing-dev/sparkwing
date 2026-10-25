@@ -122,15 +122,18 @@ record boundaries reject forged metadata and borrowed same-run upload receipts,
 then admit independently verified member uploads and read them after reopening.
 Record fixtures, writers and store checks share `ResultRecordKey`.
 
-Artifact capture and staging live in `internal/artifacts`.
+Artifact capture lives in `internal/artifacts`.
+`nodehost.ArtifactRecords.Stage` stages authorized manifest members.
 The common host artifact publisher calls `Capture` with its current storage
 binding and the final result key. It writes the shared `Manifest` format, which
 the real store verifies before publishing member edges. Its `Data` value binds
 the byte store, record store and authority to the same job. Capture uploads each
 file even if another principal stored identical bytes, because an existence
 answer does not establish an upload receipt. It commits the manifest only after
-all uploads succeed. Staging requires an authorized record and verifies both
-the manifest and each member before replacing a destination file.
+all uploads succeed. The stager looks up an authorized record, validates its
+admitted member metadata,
+and verifies the manifest bytes and each member through EOF and Close before
+replacing that member's destination file.
 
 Artifact records use `KindManifest` and the exact-attempt `ResultRecordKey`
 layout. A memo copy uses that same layout for its destination manifest.
@@ -262,8 +265,9 @@ replace authenticated controller or native placement evidence.
 Artifact staging and dependency-cache restore close each verified stream before
 publishing the downloaded files. A close failure returns an error and preserves
 the destination for that download.
-Artifact staging applies its caller's explicit budget to record lookup, downloads
-and file publication. Cancellation before replacement preserves the existing file.
+Artifact staging uses its caller's context for record lookup, downloads and
+file publication. It adds no separate budget. Cancellation before replacement
+preserves the existing file.
 Capture checks the exact uploader receipt for each file and the manifest, then
 checks the committed record's key, digest and source identity before returning it.
 Dependency-cache saves check uploader authority before creating the archive. They
@@ -271,16 +275,6 @@ check the returned receipt and committed record against the expected digest, key
 and exact uploader. Output and dependency-cache writes cancelled after upload
 return an error before committing a record.
 Archive spools and filesystem upload temporary files report cleanup errors.
-
-`bincache.binaryData` binds remote pipeline binaries to these same byte and
-record contracts. A download checks the exact repo/ref/build record and team
-provenance policy before reading its committed digest. It installs the
-executable only after EOF verification and successful close. An upload obtains
-the exact owner/job receipt before committing its binary record. The record
-store assigns provenance. The binding keeps the host's authority in memory.
-The compiler key determines freshness, including build flags. Remote digest
-verification checks byte integrity. Local binary reuse relies on the machine's
-compiler-keyed cache and does not perform the remote download integrity check.
 
 Remote cache construction carries the authenticated team and full
 `DataBinding.Authority` in `RemoteCacheOptions`. Record lookups and signed byte

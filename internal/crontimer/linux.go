@@ -149,8 +149,8 @@ func serviceUnit(h Host) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n", Marker)
 	b.WriteString("[Unit]\nDescription=sparkwing __tick\n\n")
-	// safety: a oneshot's cgroup is killed when its main process exits, which would take
-	// the run consumer and the admission daemon the tick just started with it.
+	// safety: __tick ensures the local controller, then invokes its tick.
+	// Keep that controller alive after the oneshot exits.
 	b.WriteString("[Service]\nType=oneshot\nKillMode=process\n")
 	// safety: a tick that hangs on a lock or a store would otherwise hold the
 	// unit active and swallow every following minute.

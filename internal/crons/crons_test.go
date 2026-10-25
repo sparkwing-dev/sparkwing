@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -313,7 +314,7 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
 		t.Fatalf("cursor = %v, want the arming instant", sched.CursorAt)
 	}
 
-	if err := h.svc.pause(ctx, id); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), id, true); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	h.clock.set(at(t, "2026-01-01T02:00:30Z"))
@@ -426,7 +427,7 @@ func TestDisarmRemovesEverySchedulOfTheRepo(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, other, ArmOptions{}); err != nil {
 		t.Fatalf("Arm other: %v", err)
 	}
-	removed, err := h.svc.disarmRepo(ctx, root)
+	removed, err := teststore.ForTeam(t, h.store, store.DefaultTeam).DeleteAuthorizedSchedules(ctx, scheduleAuthorization(t, h.store), root)
 	if err != nil {
 		t.Fatalf("Disarm: %v", err)
 	}
@@ -795,7 +796,7 @@ func TestTickAdvancesAPausedScheduleWithoutFiring(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	sched := armOne(t, h, writeRepo(t, "svc", everyMinute))
-	if err := h.svc.pause(ctx, sched.ID); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), sched.ID, true); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	h.clock.set(at(t, "2026-01-01T00:05:05Z"))
@@ -832,12 +833,12 @@ func TestResumeDoesNotReplayThePauseWindow(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	sched := armOne(t, h, writeRepo(t, "svc", everyMinute))
-	if err := h.svc.pause(ctx, sched.ID); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), sched.ID, true); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	// safety: no tick lands during the pause, so only Resume can move the cursor.
 	h.clock.set(at(t, "2026-01-08T00:00:30Z"))
-	if err := h.svc.resume(ctx, sched.ID); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), sched.ID, false); err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
 	h.clock.set(at(t, "2026-01-08T00:01:05Z"))
@@ -1073,7 +1074,7 @@ func TestListAndShowDeriveNameStateAndZone(t *testing.T) {
 	if rows[0].Location != time.UTC {
 		t.Errorf("location = %v, want UTC", rows[0].Location)
 	}
-	if err := h.svc.pause(ctx, sched.ID); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), sched.ID, true); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	row, fires, err := h.svc.Show(ctx, sched.ID, 5)
@@ -1083,7 +1084,7 @@ func TestListAndShowDeriveNameStateAndZone(t *testing.T) {
 	if row.State != statePaused || len(fires) != 0 {
 		t.Fatalf("show: %+v %+v", row, fires)
 	}
-	if err := h.svc.resume(ctx, sched.ID); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), sched.ID, false); err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
 	if row, _, err = h.svc.Show(ctx, sched.ID, 5); err != nil || row.State != stateArmed {
@@ -1144,4 +1145,13 @@ func TestTickRetriesAbortedIntakeWithoutConsumingTheDueInstant(t *testing.T) {
 			}
 		})
 	}
+}
+
+func scheduleAuthorization(t *testing.T, st *store.Store) capability.Authorized {
+	t.Helper()
+	snapshot, err := st.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: "test-peer"}}, capability.RequestEvidence{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return capability.Authorized{Principal: snapshot.Authorities[0].Principal, Target: capability.Target{Team: string(store.DefaultTeam)}}
 }

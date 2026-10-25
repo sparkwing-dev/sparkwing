@@ -1,17 +1,14 @@
 package main
 
 import (
+	"io"
+
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
-	"io"
 )
 
-func renderNoDaemon(w io.Writer, format string) error {
-	return opsview.RenderNoDaemon(w, format)
-}
-
 func renderQueuePretty(w io.Writer, qs wingwire.QueueState) error {
-	return opsview.RenderQueuePretty(w, qs)
+	return opsview.RenderQueue(w, qs, "pretty")
 }
 
 func containerNote(c *wingwire.ContainerLimit) string { return opsview.ContainerNote(c) }

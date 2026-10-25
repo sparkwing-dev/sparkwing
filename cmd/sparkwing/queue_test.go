@@ -252,25 +252,3 @@ func TestRenderQueue_PlainIsOneRecordPerLine(t *testing.T) {
 		t.Fatalf("plain rows not tagged by kind:\n%s", buf.String())
 	}
 }
-
-func TestRenderNoDaemon_CalmMessageAndEmptyJSON(t *testing.T) {
-	var pretty bytes.Buffer
-	if err := renderNoDaemon(&pretty, "pretty"); err != nil {
-		t.Fatalf("pretty: %v", err)
-	}
-	if !strings.Contains(pretty.String(), "no admission daemon running") {
-		t.Fatalf("missing calm message: %q", pretty.String())
-	}
-
-	var jsonBuf bytes.Buffer
-	if err := renderNoDaemon(&jsonBuf, "json"); err != nil {
-		t.Fatalf("json: %v", err)
-	}
-	var qs wingwire.QueueState
-	if err := json.Unmarshal(jsonBuf.Bytes(), &qs); err != nil {
-		t.Fatalf("no-daemon json must be well-formed: %v", err)
-	}
-	if len(qs.Holders) != 0 || len(qs.Waiters) != 0 {
-		t.Fatalf("no-daemon queue should be empty: %+v", qs)
-	}
-}

@@ -2,7 +2,6 @@
 package buildinfo
 
 import (
-	"fmt"
 	"runtime"
 	"runtime/debug"
 
@@ -43,30 +42,6 @@ func Read(binary, stampedVersion string) Identity {
 		identity.Version = "(unknown)"
 	}
 	return identity
-}
-
-// Expectation binds the product, release and platform an executable must
-// report before it can be installed under that identity.
-type Expectation struct {
-	Binary  string
-	Version string
-	GOOS    string
-	GOARCH  string
-}
-
-// Verify rejects an identity that does not exactly match expected.
-func Verify(identity Identity, expected Expectation) error {
-	if identity.Binary != expected.Binary {
-		return fmt.Errorf("binary reports product %q, want %q", identity.Binary, expected.Binary)
-	}
-	if identity.Version != expected.Version {
-		return fmt.Errorf("%s reports version %q, want %q", expected.Binary, identity.Version, expected.Version)
-	}
-	if identity.GOOS != expected.GOOS || identity.GOARCH != expected.GOARCH {
-		return fmt.Errorf("%s reports platform %s/%s, want %s/%s",
-			expected.Binary, identity.GOOS, identity.GOARCH, expected.GOOS, expected.GOARCH)
-	}
-	return nil
 }
 
 // IsReleaseVersion reports whether version is a canonical stable release tag.

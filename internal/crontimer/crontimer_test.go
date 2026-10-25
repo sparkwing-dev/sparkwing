@@ -178,80 +178,7 @@ func TestInstallLinuxWritesBothUnitsAndEnablesTheTimer(t *testing.T) {
 	}
 }
 
-func TestStatusLinuxAfterInstall(t *testing.T) {
-	tests := []struct {
-		name        string
-		rules       []func(*fakeExec)
-		binary      string
-		wantEnabled bool
-		wantStale   bool
-		wantDetail  string
-	}{
-		{
-			name:        "enabled and current",
-			binary:      fixtureAbsolutePath("/usr/local/bin/sparkwing"),
-			wantEnabled: true,
-		},
-		{
-			name:      "enabled but a different binary is asked about",
-			binary:    fixtureAbsolutePath("/home/me/go/bin/sparkwing"),
-			wantStale: true, wantEnabled: true,
-		},
-		{
-			name:       "no user session",
-			rules:      []func(*fakeExec){func(e *fakeExec) { e.fail("systemctl --user is-", "Failed to connect to bus") }},
-			binary:     fixtureAbsolutePath("/usr/local/bin/sparkwing"),
-			wantDetail: "Failed to connect to bus",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			installer := &fakeExec{}
-			h := linuxHost(t, installer)
-			if _, err := Install(t.Context(), h); err != nil {
-				t.Fatalf("Install: %v", err)
-			}
-
-			prober := &fakeExec{}
-			for _, apply := range tc.rules {
-				apply(prober)
-			}
-			prober.home = h.Home
-			h.Exec = prober.run
-			h.Binary = tc.binary
-
-			state, err := Status(t.Context(), h)
-			if err != nil {
-				t.Fatalf("Status: %v", err)
-			}
-			if !state.Installed {
-				t.Fatalf("State.Installed = false, want true: %+v", state)
-			}
-			if state.Binary != fixtureAbsolutePath("/usr/local/bin/sparkwing") {
-				t.Errorf("State.Binary = %q, want the installed binary", state.Binary)
-			}
-			if state.Enabled != tc.wantEnabled {
-				t.Errorf("State.Enabled = %v, want %v (%s)", state.Enabled, tc.wantEnabled, state.Detail)
-			}
-			if state.Stale != tc.wantStale {
-				t.Errorf("State.Stale = %v, want %v", state.Stale, tc.wantStale)
-			}
-			if tc.wantDetail != "" && !strings.Contains(state.Detail, tc.wantDetail) {
-				t.Errorf("State.Detail = %q, want it to carry %q", state.Detail, tc.wantDetail)
-			}
-			wantProbe := []string{
-				"systemctl --user show -p FragmentPath --value sparkwing-crons.timer",
-				"systemctl --user is-enabled sparkwing-crons.timer",
-				"systemctl --user is-active sparkwing-crons.timer",
-			}
-			if !slices.Equal(prober.calls, wantProbe) {
-				t.Errorf("status calls = %v, want %v", prober.calls, wantProbe)
-			}
-		})
-	}
-}
-
-func TestStatusOnAnEmptyHostReportsNothingInstalled(t *testing.T) {
+func TestInspectOnAnEmptyHostReportsNothingInstalled(t *testing.T) {
 	for _, goos := range []string{"linux", "darwin"} {
 		t.Run(goos, func(t *testing.T) {
 			exec := &fakeExec{}
@@ -259,9 +186,9 @@ func TestStatusOnAnEmptyHostReportsNothingInstalled(t *testing.T) {
 			if goos == "darwin" {
 				h = darwinHost(t, exec)
 			}
-			state, err := Status(t.Context(), h)
+			state, err := Inspect(t.Context(), h)
 			if err != nil {
-				t.Fatalf("Status: %v", err)
+				t.Fatalf("Inspect: %v", err)
 			}
 			if state.Installed || state.Enabled || state.Foreign {
 				t.Errorf("State = %+v, want an empty host", state)
@@ -355,9 +282,9 @@ func TestGeneratedFilesEscapeAwkwardValues(t *testing.T) {
 			t.Errorf("plistBinary = %q, want %q", got, h.Binary)
 		}
 
-		state, err := Status(t.Context(), h)
+		state, err := Inspect(t.Context(), h)
 		if err != nil {
-			t.Fatalf("Status: %v", err)
+			t.Fatalf("Inspect: %v", err)
 		}
 		if state.Stale {
 			t.Errorf("State.Stale = true, want the escaped path to round-trip: %+v", state)
@@ -386,9 +313,9 @@ func TestGeneratedFilesEscapeAwkwardValues(t *testing.T) {
 		if got := binaryArgument(unitfile.Arguments("linux", service)); got != h.Binary {
 			t.Errorf("execStartBinary = %q, want %q", got, h.Binary)
 		}
-		state, err := Status(t.Context(), h)
+		state, err := Inspect(t.Context(), h)
 		if err != nil {
-			t.Fatalf("Status: %v", err)
+			t.Fatalf("Inspect: %v", err)
 		}
 		if state.Stale {
 			t.Errorf("State.Stale = true, want the quoted path to round-trip: %+v", state)
@@ -470,12 +397,12 @@ func TestAForeignFileBlocksInstallAndSurvivesUninstall(t *testing.T) {
 				t.Errorf("Uninstall ran commands despite refusing: %v", exec.calls)
 			}
 
-			state, err = Status(t.Context(), h)
+			state, err = Inspect(t.Context(), h)
 			if err != nil {
-				t.Fatalf("Status: %v", err)
+				t.Fatalf("Inspect: %v", err)
 			}
 			if !state.Foreign || state.Installed {
-				t.Errorf("Status = %+v, want foreign and not installed", state)
+				t.Errorf("Inspect = %+v, want foreign and not installed", state)
 			}
 		})
 	}
@@ -634,7 +561,7 @@ func TestUnsupportedGOOS(t *testing.T) {
 	for _, goos := range []string{"windows", "plan9", ""} {
 		t.Run("goos="+goos, func(t *testing.T) {
 			h := Host{GOOS: goos, Home: t.TempDir(), Binary: fixtureAbsolutePath("/usr/local/bin/sparkwing"), Exec: (&fakeExec{}).run}
-			for name, fn := range map[string]func(context.Context, Host) (State, error){"Install": Install, "Uninstall": Uninstall, "Status": Status} {
+			for name, fn := range map[string]func(context.Context, Host) (State, error){"Install": Install, "Uninstall": Uninstall, "Inspect": Inspect} {
 				if _, err := fn(t.Context(), h); !errors.Is(err, errUnsupported) {
 					t.Errorf("%s error = %v, want errUnsupported", name, err)
 				}
@@ -676,7 +603,7 @@ func TestExecIsRequiredOnceACommandIsNeeded(t *testing.T) {
 	}
 }
 
-func TestLinuxStatusAndUninstallLeaveAStrangersUnitAlone(t *testing.T) {
+func TestLinuxUninstallLeavesAStrangersUnitAlone(t *testing.T) {
 	exec := &fakeExec{}
 	h := linuxHost(t, exec)
 	if _, err := Install(t.Context(), h); err != nil {
@@ -684,25 +611,7 @@ func TestLinuxStatusAndUninstallLeaveAStrangersUnitAlone(t *testing.T) {
 	}
 	exec.rules = append(exec.rules, rule{"systemctl --user show -p FragmentPath", "/elsewhere/systemd/user/sparkwing-crons.timer\n", nil})
 	exec.calls = nil
-
-	st, err := Status(t.Context(), h)
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if !st.Installed || st.Enabled {
-		t.Fatalf("status = %+v, want installed and not enabled", st)
-	}
-	if !strings.Contains(st.Detail, "/elsewhere/") {
-		t.Fatalf("detail should name the loaded unit: %q", st.Detail)
-	}
-	for _, c := range exec.calls {
-		if strings.Contains(c, "is-enabled") || strings.Contains(c, "is-active") {
-			t.Fatalf("status asked systemd about a unit it does not own: %v", exec.calls)
-		}
-	}
-
-	exec.calls = nil
-	st, err = Uninstall(t.Context(), h)
+	st, err := Uninstall(t.Context(), h)
 	if err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
@@ -739,15 +648,15 @@ func TestASecondHomeGetsItsOwnTimerAndLeavesTheDefaultHomesAlone(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Install second home: %v", err)
 			}
-			firstState, err := Status(t.Context(), first)
+			firstState, err := Inspect(t.Context(), first)
 			if err != nil {
-				t.Fatalf("Status default home: %v", err)
+				t.Fatalf("Inspect default home: %v", err)
 			}
 			if firstState.Path == secondState.Path {
 				t.Fatalf("both homes installed to %s", firstState.Path)
 			}
-			if !firstState.Enabled || strings.Contains(firstState.Detail, "another Sparkwing home") {
-				t.Errorf("default home after a second install = %+v, want its own timer still enabled", firstState)
+			if !firstState.Installed || firstState.Home != first.SparkwingHome {
+				t.Errorf("default home after a second install = %+v, want its own timer installed", firstState)
 			}
 			if !strings.Contains(firstState.Path, "sparkwing-crons.timer") && !strings.HasSuffix(firstState.Path, "dev.sparkwing.crons.plist") {
 				t.Errorf("default home path = %s, want the name existing installs use", firstState.Path)
@@ -756,7 +665,7 @@ func TestASecondHomeGetsItsOwnTimerAndLeavesTheDefaultHomesAlone(t *testing.T) {
 	}
 }
 
-func TestStatusRefusesATimerThatTicksAnotherHome(t *testing.T) {
+func TestInspectReportsATimerThatTicksAnotherHome(t *testing.T) {
 	for _, tc := range []struct {
 		goos string
 		host func(*testing.T, *fakeExec) Host
@@ -783,12 +692,12 @@ func TestStatusRefusesATimerThatTicksAnotherHome(t *testing.T) {
 			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 				t.Fatal(err)
 			}
-			state, err := Status(t.Context(), h)
+			state, err := Inspect(t.Context(), h)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if state.Enabled || !strings.Contains(state.Detail, "another Sparkwing home") {
-				t.Errorf("Status = %+v, want it reported as another home's timer", state)
+			if !state.Stale || state.Home != other.SparkwingHome {
+				t.Errorf("Inspect = %+v, want it reported as another home's timer", state)
 			}
 		})
 	}

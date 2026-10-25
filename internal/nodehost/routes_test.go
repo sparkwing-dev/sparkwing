@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 )
 
 type entry struct {
@@ -35,7 +35,7 @@ func (f *fakeResolver) Resolve(ctx context.Context, name string) (string, bool, 
 	e, ok := f.entries[name]
 	f.mu.Unlock()
 	if !ok {
-		return "", false, secretsource.ErrMissing
+		return "", false, &apierr.Error{Code: apierr.NotFound, Message: "secret missing"}
 	}
 	if e.stall != nil {
 		e.stall <- nil
