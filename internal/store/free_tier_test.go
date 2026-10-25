@@ -50,7 +50,7 @@ func standing(t *testing.T, st *store.Store, team store.Team) store.StorageStand
 func TestTriggersAreNeverRefusedForBilling(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	if err := st.SetFreeTeamSlots(ctx, 0); err != nil {
+	if _, err := st.AsOperator().ConfigureDeployment(ctx, "", 0, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	acme := teamHandle(t, st, "acme")

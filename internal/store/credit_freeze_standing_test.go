@@ -43,7 +43,7 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 		t.Fatalf("a member past the free limit of a frozen paid team = %v, want ErrTeamFull", err)
 	}
 
-	if _, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_frozen", "", ""); err != nil {
+	if _, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_frozen", "operator", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := standing(t, st, team); got.Tier != "funded" {

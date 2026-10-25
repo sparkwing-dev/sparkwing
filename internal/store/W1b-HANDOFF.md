@@ -52,7 +52,7 @@ because ambiguous delivery must preserve the financial reservation. Its
 replacement is `TestBillingPagesFailureRetainsReservationAndProviderBinding`.
 No contract change remains blocked on another worker.
 
-`Operator.SetPaymentMode` supplies the missing production writer for the existing
+`Operator.ConfigureDeployment` supplies the missing production writer for the existing
 mode setting. Controller startup calls it from its validated `--payment-mode`
 flag before serving. The constructor proofs configure it through this operator
 method. Invalid values leave the persisted mode unchanged.

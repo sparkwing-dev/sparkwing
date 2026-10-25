@@ -14,10 +14,10 @@ import (
 func TestStoreDataFreeSlotPolicyPersistsAndRejectsInvalidWrites(t *testing.T) {
 	s := authorityStore(t)
 	path := blobAccountingDiskStore(t, s)
-	if err := s.SetFreeTeamSlots(t.Context(), 3); err != nil {
+	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), "", 3, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetFreeTeamSlots(t.Context(), -1); !errors.Is(err, ErrInvalidInput) {
+	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), "", -1, func() error { return nil }); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("negative slot count: %v", err)
 	}
 	if err := s.db.Close(); err != nil {
@@ -28,7 +28,7 @@ func TestStoreDataFreeSlotPolicyPersistsAndRejectsInvalidWrites(t *testing.T) {
 		t.Fatalf("reopened slot policy: %d/%d, %v", taken, limit, err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE settings SET sealed=1 WHERE key=?", metaKeyFreeTeamSlots)
-	if err := s.SetFreeTeamSlots(t.Context(), 4); err == nil {
+	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), "", 4, func() error { return nil }); err == nil {
 		t.Fatal("sealed slot policy changed")
 	}
 	var raw []byte

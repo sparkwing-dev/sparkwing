@@ -43,7 +43,7 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 			engineSQL(t, st, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
 			engineSQL(t, st, `INSERT INTO team_counters(team) VALUES ('b')`)
 			if strings.HasSuffix(tc.path, "/refunds") {
-				if err := st.AsOperator().SetPaymentMode(t.Context(), "test"); err != nil {
+				if _, err := st.AsOperator().ConfigureDeployment(t.Context(), "test", store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
 					t.Fatal(err)
 				}
 				engineSQL(t, st, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('b','refund-paid','paid',1000000,'pi_refund','provider',1)`)

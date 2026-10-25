@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -47,26 +48,18 @@ func projectFixtureClaimRepositories(t *testing.T, db rewriteSchemaExecer, diale
 		t.Fatal(err)
 	}
 	for _, v := range runs {
+		var sealed runspec.SealedRequest
+		if err = json.Unmarshal(v.request, &sealed); err != nil {
+			t.Fatal(err)
+		}
 		if v.display == "" {
-			var request struct {
-				Request struct {
-					Git struct {
-						Repository struct {
-							Display string `json:"display"`
-						} `json:"repository"`
-					} `json:"git"`
-				} `json:"request"`
-			}
-			if err = json.Unmarshal(v.request, &request); err != nil {
-				t.Fatal(err)
-			}
-			v.display = request.Request.Git.Repository.Display
+			v.display = sealed.Request.Git.Repository.Display
 		}
 		identity, err := sourceurl.RoutingIdentity(v.key, v.display)
 		if err != nil {
 			identity = ""
 		}
-		if _, err = db.Exec(rewritePh(dialect, `UPDATE runs SET repo_identity=? WHERE id=?`), identity, v.id); err != nil {
+		if _, err = db.Exec(rewritePh(dialect, `UPDATE runs SET repo_identity=?,provenance_sha=?,provenance_ref=? WHERE id=?`), identity, sealed.Provenance.SHA(), sealed.Provenance.Ref(), v.id); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -245,7 +245,7 @@ func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor runstate
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	claim, err := tx.operator.claimUnitTx(ctx, tx, demand, UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID})
+	claim, err := tx.operator.claimUnitTx(ctx, tx, demand, claimHead{Unit: UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}})
 	if err != nil {
 		return UnitClaim{}, err
 	}

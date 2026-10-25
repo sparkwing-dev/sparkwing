@@ -15,7 +15,11 @@ func TestMeasurementStoreMissingRegionNamesTheRemedy(t *testing.T) {
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "y")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 
-	_, err := OpenMeasurementStore(context.Background(), "s3://bucket/prefix", 0)
+	cfg, err := ParseMeasurementURL("s3://bucket/prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = cfg.Open(context.Background(), 0)
 	if err == nil {
 		t.Fatal("got nil, want an error naming the missing region")
 	}
@@ -34,7 +38,11 @@ func TestMeasurementStoreRegionPresentBuilds(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "x")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "y")
 
-	if _, err := OpenMeasurementStore(context.Background(), "s3://bucket/prefix", 0); err != nil {
+	cfg, err := ParseMeasurementURL("s3://bucket/prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.Open(context.Background(), 0); err != nil {
 		t.Fatalf("OpenMeasurementStore: %v", err)
 	}
 }

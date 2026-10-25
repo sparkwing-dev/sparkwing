@@ -50,29 +50,32 @@ func TestLauncherQueueReachesFundedWorkBehindLargeUnpaidQueue(t *testing.T) {
 
 func TestLauncherConcurrentQueueClaimsEachAwardOnce(t *testing.T) {
 	s, demand := launcherQueueFixture(t, 65, 3)
-	var group sync.WaitGroup
-	results := make(chan UnitClaim, 4)
-	for range 4 {
-		group.Go(func() {
-			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
-			if errors.Is(err, ErrNotFound) {
-				return
-			}
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			results <- claim
-		})
-	}
-	group.Wait()
-	close(results)
 	seen := map[string]bool{}
-	for claim := range results {
-		if claim.Team != "a" || seen[claim.NodeID] || claim.Award.Generation != 1 || len(claim.Bearer) == 0 {
-			t.Fatalf("duplicate or unfunded award: %+v", claim)
+	// Unlocked searches can choose the same candidate; losing polls try again.
+	for round := 0; round < 3 && len(seen) < 3; round++ {
+		var group sync.WaitGroup
+		results := make(chan UnitClaim, 4)
+		for range 4 {
+			group.Go(func() {
+				claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+				if errors.Is(err, ErrNotFound) {
+					return
+				}
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				results <- claim
+			})
 		}
-		seen[claim.NodeID] = true
+		group.Wait()
+		close(results)
+		for claim := range results {
+			if claim.Team != "a" || seen[claim.NodeID] || claim.Award.Generation != 1 || len(claim.Bearer) == 0 {
+				t.Fatalf("duplicate or unfunded award: %+v", claim)
+			}
+			seen[claim.NodeID] = true
+		}
 	}
 	if len(seen) != 3 {
 		t.Fatalf("awards=%v; want all three funded jobs", seen)

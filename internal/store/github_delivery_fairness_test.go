@@ -39,8 +39,7 @@ func TestGitHubDeliveryClaimsRotateTeamsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	for turn, want := range []string{"a-00", "b-00", "a-01", "b-01", "a-02"} {
-		at := now.Add(time.Duration(turn+1) * time.Hour)
-		claim, err := st.AsOperator().ClaimGitHubDelivery(ctx, at)
+		claim, err := st.AsOperator().ClaimGitHubDelivery(ctx)
 		if err != nil || claim == nil || claim.ID != want {
 			t.Fatalf("turn %d: claim = %+v, %v, want %s", turn, claim, err, want)
 		}
@@ -48,7 +47,7 @@ func TestGitHubDeliveryClaimsRotateTeamsAcrossRestart(t *testing.T) {
 		if claim.ID == "a-00" {
 			reason = "team allowance exhausted"
 		}
-		if err := st.AsOperator().FinishGitHubDelivery(ctx, *claim, reason, at); err != nil {
+		if err := st.AsOperator().FinishGitHubDelivery(ctx, *claim, reason); err != nil {
 			t.Fatal(err)
 		}
 		if err := st.Close(); err != nil {
@@ -77,9 +76,8 @@ func TestGitHubDeliveryUnboundInstallationsShareOneTurn(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for turn, want := range []string{"3", "0", "1", "2"} {
-		at := now.Add(time.Duration(turn+1) * time.Hour)
-		claim, err := st.AsOperator().ClaimGitHubDelivery(ctx, at)
+	for _, want := range []string{"3", "0", "1", "2"} {
+		claim, err := st.AsOperator().ClaimGitHubDelivery(ctx)
 		if err != nil || claim == nil || claim.ID != want {
 			t.Fatalf("claim = %+v, %v, want %s", claim, err, want)
 		}
@@ -87,7 +85,7 @@ func TestGitHubDeliveryUnboundInstallationsShareOneTurn(t *testing.T) {
 		if claim.ID == "3" {
 			reason = "team allowance exhausted"
 		}
-		if err := st.AsOperator().FinishGitHubDelivery(ctx, *claim, reason, at); err != nil {
+		if err := st.AsOperator().FinishGitHubDelivery(ctx, *claim, reason); err != nil {
 			t.Fatal(err)
 		}
 	}

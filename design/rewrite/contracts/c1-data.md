@@ -840,22 +840,41 @@ runner selection keeps its label-term alternatives.
 plan acceptance and expansion insertion. A context hash includes the request,
 provenance, resolved options and guards, job execution settings, repository
 scope, allowed pools and creator. Seal identities, source revisions, timestamps and unrelated job declarations
-do not split otherwise equal contexts. The context row stores
-only its identity, requirement set and unit kind; it duplicates no run policy.
+do not split otherwise equal contexts. The context row stores its identity,
+requirement set and unit kind, and copies the overflow account and minute limit
+for indexed budget checks. Finished sources clear their context reference in the
+finishing transaction. A context is deleted when its last source leaves. History
+reads the sealed run and job settings, not this search index.
 
-Label lookups select matching requirement sets, then context routes. Ready
-source indexes use team, requirement set, context, arrival and identity. A
-transaction-local merge selects one head per unit kind from each route and
-compares those heads in the award order. Nodes and triggers carry explicit
-contexts; only evaluations use the context-free route. Indexed requirement
-alternatives narrow the proof's observers; the SQL predicate checks every term.
-The shared eligibility and ranking predicate proves holds in a batch. A proof supplied by an unbound shared
-claimant skips that context: its earliest ready job is inside the ranking
-window, so every later ready job is held too. Personal, bound and Actions
-claimants cannot supply that proof because they can distinguish runs within a
-context. Selected heads still pass
-the complete predicate and atomic award recheck. Rejected heads advance only
-that transaction's route. Named rechecks seek the complete team and unit key.
+Push-bound Actions claims seek runs by team, repository key and sealed provenance
+SHA/ref and the shared verified-trust push predicate, then use the shared eligibility
+predicate. Run-bound and here claims seek
+the bound run directly. Intake writes the provenance index from the sealed identity.
+Named rechecks seek the complete team and unit key.
+
+Broad claimants examine teams by their last committed award ordinal. Exclusions
+filter the team list. Context routes apply the shared overflow budget predicate
+before node lookups. Pool trust, funding and standing use the canonical per-unit
+eligibility predicate, including its unpriced exception.
+Overflow usage is loaded only for the team being examined and accounts with ready
+work. Label lookups select matching requirement sets, then immutable context routes
+with ready work. Indexed heads prove shared-claimant ranking holds. Each remaining route selects its first eligible
+source through a correlated application of the canonical predicate. There is no
+rejected-head probe cap, cursor advancement or fallback batch.
+When neither the claimant nor its placement observers use Cloud, selection skips
+overflow funding preparation entirely.
+
+Candidate search uses a read snapshot without arbitration or row locks. It may
+visit multiple policies or ready sources. After search closes its snapshot, the
+award transaction takes queue arbitration and applies the same eligibility
+predicate to only the selected unit, with fresh authority, placement observers
+and funding. A broad-search candidate keeps the team's award ordinal from the
+snapshot. Recheck requires that ordinal to remain unchanged because another
+award can move the team behind other eligible work. A stale candidate returns
+not-found for this poll. It does not restart the search under the lock. Backlog
+and retained contexts cannot increase the number of candidate rows checked while
+arbitration is held.
+
 Local foreground intake seals `Request.LocalForeground`. An omitted dispatch
 is resolved from the request before checking foreground authority. The shared predicate
 reserves the original intake's generation-zero trigger for a named claim by the
@@ -2698,7 +2717,7 @@ still need W7's hard cut. Legacy direct-upload and node-log writers and their
 internal reservation code are removed. Their old host/client and read surfaces
 remain pending final data and tagged-log bindings.
 
-`SetFreeTeamSlots` writes the final settings table through the existing checked
+`Operator.ConfigureDeployment` writes the final settings table through the existing checked
 writer. Negative or sealed updates fail without replacing the prior value.
 The persisted setting survives reopening. The controller reads slot availability
 and passes full or unreadable conditions to its signup gate without a counter RPC.
@@ -3590,7 +3609,7 @@ Store fixtures reach transaction helpers through test-only methods. The unused
 unattached-checkout abort path and its legacy-only test are deleted. Ambiguous
 provider failures retain their reservation and replay identity.
 
-`Operator.SetPaymentMode` persists validated `test`/`live` configuration under the
+`Operator.ConfigureDeployment` persists validated `test`/`live` configuration under the
 ledger lock. Controller startup calls it from the same `--payment-mode` that
 constructs the verifier. Reservations and verified settlement read that stored
 mode. Mode changes retain prior rows and their mode tags. This supplies the
@@ -3689,12 +3708,12 @@ prepaid credits cover it (decision 26). An unpriced CPU class reports no hold.
 ## Break-glass credit grants
 
 Break-glass in-pod grants extend frozen §9's break-glass scope from freeze to
-grants; capped at $100 without the explicit flag. `sparkwing-controller admin
-grant` refuses more than 10,000 cents per grant unless the pod sets
-`SPARKWING_ADMIN_GRANT_ALLOW_LARGE=1`. It grants once per key with reference
-`admin:<key>` and records `credit.granted` with fixed system actor
-`sparkwing-controller admin` and a digest of the reference. Audit rows exclude
-free-form reasons. No remote credential reaches it.
+grants. They are capped at $100 without the explicit flag. `sparkwing-controller admin
+grant` refuses more than 10,000 cents per grant unless `--allow-large` is supplied
+for that invocation. `--operator` names the operator's own account ID. It grants
+once per key with reference `admin:<key>` and records `credit.granted` with that
+account as the actor and a digest of the reference. Audit rows exclude free-form
+reasons. No remote credential reaches it.
 
 ## Integrated working-tree source uploads
 

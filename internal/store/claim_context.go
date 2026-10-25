@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -89,6 +91,40 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 	if err != nil {
 		return "", err
 	}
-	_, err = tx.execContext(ctx, `INSERT INTO claim_contexts(team,id,requirements,unit_kind) VALUES (?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, team, id, requirements, kind)
+	var account, minutes any
+	if sealed.Request.Burst != nil {
+		account, minutes = principal, sealed.Request.Burst.OverflowMinutes
+	}
+	// Keep the context alive until the referencing source is inserted.
+	_, err = tx.execContext(ctx, `INSERT INTO claim_contexts(team,id,requirements,unit_kind,overflow_account,overflow_minutes) VALUES (?,?,?,?,?,?) ON CONFLICT(team,id) DO UPDATE SET id=excluded.id`, team, id, requirements, kind, account, minutes)
 	return id, err
+}
+
+func retireClaimContextTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
+	query := `SELECT claim_context FROM triggers WHERE team=? AND id=? AND status IN ('done','failed')`
+	clear := `UPDATE triggers SET claim_context='' WHERE team=? AND id=?`
+	args := []any{team, unit.RunID}
+	if unit.Kind == capability.UnitNode {
+		query = `SELECT claim_context FROM nodes WHERE team=? AND run_id=? AND node_id=? AND status='done'`
+		clear = `UPDATE nodes SET claim_context='' WHERE team=? AND run_id=? AND node_id=?`
+		args = append(args, unit.NodeID)
+	}
+	var id string
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&id); errors.Is(err, sql.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if _, err := tx.execContext(ctx, clear, args...); err != nil {
+		return err
+	}
+	return deleteUnusedClaimContextTx(ctx, tx, team, id)
+}
+
+func deleteUnusedClaimContextTx(ctx context.Context, tx *storeTx, team Team, id string) error {
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM claim_contexts WHERE team=? AND id=?`+tx.forUpdate(), team, id).Scan(&id); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	_, err := tx.execContext(ctx, `DELETE FROM claim_contexts WHERE team=? AND id=? AND NOT EXISTS (SELECT 1 FROM nodes WHERE team=? AND claim_context=?) AND NOT EXISTS (SELECT 1 FROM triggers WHERE team=? AND claim_context=?)`, team, id, team, id, team, id)
+	return err
 }

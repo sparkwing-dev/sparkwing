@@ -115,7 +115,7 @@ func TestAppAdmissionRevokedInstallationInClaim(t *testing.T) {
 				if err := op.EnqueueGitHubDelivery(ctx, "queued", "push", body, now); err != nil {
 					t.Fatal(err)
 				}
-				claim, err := op.ClaimGitHubDelivery(ctx, now)
+				claim, err := op.ClaimGitHubDelivery(ctx)
 				if err != nil || claim == nil {
 					t.Fatalf("claim: %+v %v", claim, err)
 				}
@@ -287,15 +287,15 @@ func TestAppAdmissionFencesDeliveryLeaseAndOriginalTeam(t *testing.T) {
 			if err := op.EnqueueGitHubDelivery(ctx, "queued", "push", body, now); err != nil {
 				t.Fatal(err)
 			}
-			first, err := op.ClaimGitHubDelivery(ctx, now)
+			first, err := op.ClaimGitHubDelivery(ctx)
 			if err != nil || first == nil {
 				t.Fatalf("claim: %+v %v", first, err)
 			}
-			if err := op.FinishGitHubDelivery(ctx, *first, "failed before admission", now); err != nil {
+			if err := op.FinishGitHubDelivery(ctx, *first, "failed before admission"); err != nil {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, s.db, `UPDATE github_app_deliveries SET state='pending' WHERE delivery_id='queued'`)
-			claim, err := op.ClaimGitHubDelivery(ctx, now)
+			claim, err := op.ClaimGitHubDelivery(ctx)
 			if err != nil || claim == nil {
 				t.Fatalf("manual claim: %+v %v", claim, err)
 			}

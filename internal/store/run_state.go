@@ -92,6 +92,9 @@ func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish runstate.FinishRun
 			if n != 1 && !out.Replayed {
 				return holderRefusal()
 			}
+			if err := retireClaimContextTx(ctx, tx, t.team, UnitRef{Kind: capability.UnitTrigger, RunID: finish.Unit.RunID}); err != nil {
+				return err
+			}
 			if err := settleOwnerBillingTx(ctx, tx, t.team, string(finish.Unit.RunID), int64(finish.Unit.Generation), tx.now(ctx)); err != nil {
 				return err
 			}
@@ -434,7 +437,7 @@ func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, 
 		return holderRefusal()
 	}
 	if status != "pending" {
-		return nil
+		return retireClaimContextTx(ctx, tx, target.team, UnitRef{Kind: target.kind, RunID: target.ref.RunID})
 	}
 	run, err := readRunTx(ctx, tx, target.team, string(target.ref.RunID))
 	if err != nil {
@@ -475,6 +478,9 @@ func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request
 		return err
 	}
 	if count == 1 {
+		if err := retireClaimContextTx(ctx, tx, team, UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(request.RunID)}); err != nil {
+			return err
+		}
 		return settleOwnerBillingTx(ctx, tx, team, request.RunID, int64(request.Actor.Owner.Generation), tx.now(ctx))
 	}
 	if !replay {

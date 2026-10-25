@@ -300,18 +300,6 @@ ON CONFLICT (team) DO NOTHING`, string(team), tx.now(ctx).UnixNano()); err != ni
 		}
 		return nil
 	})
-
-}
-
-// SetFreeTeamSlots sets how many teams without credits may hold a slot.
-// Lowering it takes no slot back.
-func (s *Store) SetFreeTeamSlots(ctx context.Context, slots int64) error {
-	if slots < 0 {
-		return fmt.Errorf("%w: free team slots must not be negative", ErrInvalidInput)
-	}
-	return s.inTx(ctx, func(tx *storeTx) error {
-		return setCreditSettingTx(ctx, tx, metaKeyFreeTeamSlots, formatCreditSetting(slots))
-	})
 }
 
 // FreeSlots reports how many free-tier slots are taken and how many exist.

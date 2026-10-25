@@ -90,7 +90,7 @@ func TestPaymentWarningUsesConfiguredModeWhenTeamHasBothModes(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at)
 	    VALUES ('live','a','live-session','live','usd',100,1000000,1,2)`)
-	if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentLive); err != nil {
+	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, DefaultFreeTeamSlots, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	paid.Mode, paid.CheckoutID, paid.EventID = capability.PaymentLive, "live-session", "live-paid"

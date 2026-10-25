@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
@@ -64,8 +65,10 @@ func openControllerStore(ctx context.Context, cfg deployment.Config, sqlitePath 
 
 // deploymentRecord is what a serving controller leaves beside its state for
 // `admin`, which runs in the same pod and must act on the same store
-// without the operator repeating the controller's flags. It is written once
-// startup has succeeded, and it names where the controller's connection
+// without the operator repeating the controller's flags. It is published
+// before the settings transaction commits and restored to the previous record
+// if that fails, so its presence alone does not prove startup succeeded. It
+// names where the controller's connection
 // landed, so admin refuses a store reached at another target or created at
 // another time, such as one a rotated pg-url points at.
 type deploymentRecord struct {
@@ -80,30 +83,34 @@ func deploymentRecordPath(stateDB string) string {
 	return filepath.Join(filepath.Dir(stateDB), "deployment.json")
 }
 
-func writeDeploymentRecord(ctx context.Context, stateDB string, cfg deployment.Config, credentialsDir, epochDir string, st *store.Store) error {
+func deploymentRecordBytes(ctx context.Context, cfg deployment.Config, credentialsDir, epochDir string, st *store.Store) ([]byte, error) {
 	conn, err := st.Connection(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if credentialsDir != "" {
 		if credentialsDir, err = filepath.Abs(credentialsDir); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	epochDir, err = filepath.Abs(epochDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	body, err := json.Marshal(deploymentRecord{Kind: cfg.Kind(), Store: cfg.Store(), CredentialsDir: credentialsDir, EpochDir: epochDir, Connection: conn})
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return append(body, '\n'), nil
+}
+
+func publishDeploymentRecord(stateDB string, body []byte) error {
 	path := deploymentRecordPath(stateDB)
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".deployment-*")
 	if err != nil {
 		return fmt.Errorf("write deployment record: %w", err)
 	}
-	_, werr := tmp.Write(append(body, '\n'))
+	_, werr := tmp.Write(body)
 	if err := errors.Join(werr, tmp.Chmod(0o600), tmp.Close()); err != nil {
 		return errors.Join(fmt.Errorf("write deployment record: %w", err), os.Remove(tmp.Name()))
 	}
@@ -164,4 +171,34 @@ func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error
 		return nil, errors.Join(err, st.Close())
 	}
 	return st, nil
+}
+
+func configureDeployment(ctx context.Context, stateDB string, cfg deployment.Config, credentialsDir, epochDir string, st *store.Store, mode capability.PaymentMode, freeSlots int64) (string, error) {
+	body, err := deploymentRecordBytes(ctx, cfg, credentialsDir, epochDir, st)
+	if err != nil {
+		return "", err
+	}
+	path := deploymentRecordPath(stateDB)
+	previous, snapshotErr := os.ReadFile(path)
+	if snapshotErr != nil && !errors.Is(snapshotErr, os.ErrNotExist) {
+		return "", fmt.Errorf("read deployment record: %w", snapshotErr)
+	}
+	published := false
+	id, err := st.AsOperator().ConfigureDeployment(ctx, mode, freeSlots, func() error {
+		err := publishDeploymentRecord(stateDB, body)
+		published = published || err == nil
+		return err
+	})
+	if err != nil && published {
+		var restoreErr error
+		if snapshotErr == nil {
+			restoreErr = publishDeploymentRecord(stateDB, previous)
+		} else {
+			restoreErr = os.Remove(path)
+		}
+		if restoreErr != nil {
+			err = errors.Join(err, fmt.Errorf("restore deployment record: %w", restoreErr))
+		}
+	}
+	return id, err
 }

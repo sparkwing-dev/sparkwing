@@ -133,7 +133,6 @@ func TestGitHubAppCronPushGuardsPreserveExistingSchedules(t *testing.T) {
 	if rows := appCronRows(t, f, olga.team); len(rows) != 1 || rows[0].LockedRef != "" {
 		t.Fatalf("GitHub API failure changed schedule: %+v", rows)
 	}
-	f.inboxNow = f.inboxNow.Add(10 * time.Minute)
 	f.processAgain(olga, payload)
 	if code, _ := f.deliver("push", payload, ""); code < 400 {
 		t.Fatalf("bad config = %d, want failure", code)

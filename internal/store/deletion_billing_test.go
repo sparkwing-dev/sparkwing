@@ -55,7 +55,7 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 		t.Fatalf("deleting a held team = %v, want ErrTeamFrozen naming the remedy", err)
 	}
 	st.SetTestClock(t, func() time.Time { return now })
-	if _, err := teststore.ForTeam(t, st, "held").ReleaseCreditFreezes(ctx, "dp_held", "", ""); err != nil {
+	if _, err := teststore.ForTeam(t, st, "held").ReleaseCreditFreezes(ctx, "dp_held", "operator", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := held.DeleteTeamForTest(t, ctx, owner.Account.ID, now); err != nil {

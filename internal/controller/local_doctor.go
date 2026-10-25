@@ -43,6 +43,9 @@ func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capabilit
 	if s.githubAppProblem != nil {
 		findings = append(findings, localhostwire.LocalDoctorFinding{Code: "github_app_unavailable", Message: s.githubAppProblem.Error()})
 	}
+	if s.hasPreviousWebhookSecret() {
+		findings = append(findings, localhostwire.LocalDoctorFinding{Code: "github_app_previous_webhook_secret", Message: previousWebhookSecretWarning})
+	}
 	failure := sweepErr
 	for _, outcome := range outcomes {
 		switch outcome.Verdict {

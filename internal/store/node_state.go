@@ -813,6 +813,9 @@ func writeNodeStateTx(ctx context.Context, tx *storeTx, team Team, row runstate.
 	if n != 1 {
 		return errors.New("job state changed during transition")
 	}
+	if row.Status == runstate.StatusDone {
+		return retireClaimContextTx(ctx, tx, team, UnitRef{Kind: capability.UnitNode, RunID: row.Ref.RunID, NodeID: row.Ref.NodeID})
+	}
 	return nil
 }
 

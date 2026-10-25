@@ -164,7 +164,7 @@ func TestAuthorizedCrossRepositoryChildIsAsserted(t *testing.T) {
 					registerChildRepository(t, e, 2)
 				} else {
 					teststore.SeedGitHubInstallation(t, e.Store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "owner", GitHubUserID: 71}, time.Now())
-					cfg := githubapp.Config{AppID: 1, PrivateKey: key, HTTP: &http.Client{Transport: intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
+					cfg := githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook", HTTP: &http.Client{Transport: intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
 						var payload string
 						switch r.URL.Path {
 						case "/app/installations/7/access_tokens":

@@ -34,7 +34,7 @@ func TestATeamStaysFrozenWhileAnyDisputeHoldsIt(t *testing.T) {
 	if f := frozen(); !f.Frozen || len(f.Disputes) != 2 {
 		t.Fatalf("freeze = %+v, want two disputes holding the team", f)
 	}
-	if n, err := acme.ReleaseCreditFreezes(ctx, "dp_1", "", ""); err != nil || n != 1 {
+	if n, err := acme.ReleaseCreditFreezes(ctx, "dp_1", "operator", ""); err != nil || n != 1 {
 		t.Fatalf("release dp_1 = %d, %v", n, err)
 	}
 	if f := frozen(); !f.Frozen || len(f.Disputes) != 1 || f.Disputes[0] != "dp_2" {
@@ -46,7 +46,7 @@ func TestATeamStaysFrozenWhileAnyDisputeHoldsIt(t *testing.T) {
 	if f := frozen(); len(f.Disputes) != 1 {
 		t.Fatalf("a replay re-held a released dispute: %+v", f)
 	}
-	if n, err := acme.ReleaseCreditFreezes(ctx, "dp_2", "", ""); err != nil || n != 1 {
+	if n, err := acme.ReleaseCreditFreezes(ctx, "dp_2", "operator", ""); err != nil || n != 1 {
 		t.Fatalf("release dp_2 = %d, %v", n, err)
 	}
 	if f := frozen(); f.Frozen {

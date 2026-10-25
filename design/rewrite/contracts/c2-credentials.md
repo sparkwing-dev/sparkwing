@@ -462,6 +462,11 @@ trigger request. The unused reservation expires at its original claim_by.
 Target.ClaimKinds carries the requested set to BindClaimSelection, and ClaimUnit
 repeats every kind/grant check in its transaction.
 
+Named, here and run-bound claims read overflow funding inputs only for their run.
+Push-bound Actions claims use the repository, sealed SHA and ref index for both
+selection and funding inputs. These lookups share one scope builder, so funding
+preparation cannot scan unrelated runs.
+
 Mask registration first checks the accepted job/step/group/approval identifiers
 and subsequent generated declarations. A collision returns secret_in_identifier
 with the field path, never the identifier or value, before acknowledging success.
@@ -1160,7 +1165,8 @@ All capability names below are in `internal/capability`.
 | `apierr.WriteHTTP` | Write the error envelope and Retry-After without plain-text fallbacks. |
 | `apierr.WriteJSON` | Write one JSON error line for CLI stderr. |
 | `blob.NewFilesystem`, `blob.NewS3` | Physical backends own object validation, transfer signing and byte verification. |
-| `controller.NewCloudFrontDataBackend` | Wrap S3 downloads with CloudFront for public-ingress requests. Direct requests and uploads retain the backend signer. Physical operations and log deletion remain on S3. |
+| `controller.ParseCloudFrontDataConfig` | Validate CloudFront download signing before opening object storage. |
+| `controller.CloudFrontDataConfig.Backend` | Wrap S3 downloads with CloudFront for public-ingress requests. Direct requests and uploads retain the backend signer. Physical operations and log deletion remain on S3. |
 | `controller.PaymentSettler`, `Server.WithPayments` | Supply C1 settlement to the signed Stripe callback. The server registers `/webhooks/stripe` through `PolicyRouter` and passes only verified events to the store. |
 | `controller.Server.WithAuthorization` | Configure the shared verifier, bindings, transport identity and CSRF adapters before constructing the server handler. Missing adapters fail closed. |
 | [`routepolicy.Authorization`](../../../internal/routepolicy/policy.go), [`controllerwire.Endpoint`](../../../internal/controllerwire/endpoint.go), [`routepolicy.Router`](../../../internal/routepolicy/policy.go) | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
@@ -3220,7 +3226,7 @@ guards govern funding. Cloud admissions own standing and budget enforcement.
 real sessions and CSRF, page commits, provider delivery and signed settlement.
 
 Controller startup commits its validated `--payment-mode` through
-`Operator.SetPaymentMode` before serving requests. Verifier configuration and
+`Operator.ConfigureDeployment` before serving requests. Verifier configuration and
 ledger configuration therefore share the operator's mode selection. Constructor
 proofs configure the ledger through that operator method instead of SQL seeding.
 

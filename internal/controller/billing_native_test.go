@@ -43,7 +43,7 @@ func billingNativeServer(t *testing.T) (*serverFixture, string, string) {
 		t.Fatal(err)
 	}
 	engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE team='a'`)
-	if err := s.store.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+	if _, err := s.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	s.WithBillingCheckout("https://checkout.test", "credential")

@@ -16,14 +16,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
 func TestFilesystemDataStartup(t *testing.T) {
 	for _, fixture := range []struct{ external, address, host string }{
 		{"", "127.0.0.1:4344", "127.0.0.1:4344"},
-		{"", ":4344", "localhost:4344"},
-		{"", "0.0.0.0:4344", "localhost:4344"},
-		{"", "[::]:4344", "localhost:4344"},
 		{"", "[::1]:4344", "[::1]:4344"},
 		{"https://controller.invalid", "0.0.0.0:4344", "controller.invalid"},
 		{"https://controller.invalid/prefix", "0.0.0.0:4344", "controller.invalid"},
@@ -113,5 +111,38 @@ func TestS3DataStartupPreservesURLPrefix(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFilesystemDataStartupRequiresOriginForWildcard(t *testing.T) {
+	for _, address := range []string{":4344", "0.0.0.0:4344", "[::]:4344", "[0:0:0:0:0:0:0:0]:4344"} {
+		t.Run(address, func(t *testing.T) {
+			root := t.TempDir()
+			objects, err := openFilesystemData(root, "", address)
+			if err == nil {
+				_ = objects.Close()
+				t.Fatal("wildcard listener advertised a local transfer URL")
+			}
+			if !strings.Contains(err.Error(), "--external-url") {
+				t.Fatalf("unclear refusal: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(root, "data-signing.key")); !os.IsNotExist(err) {
+				t.Fatalf("refused configuration changed signing key: %v", err)
+			}
+		})
+	}
+}
+
+func TestFilesystemWildcardRefusesBeforeOpeningStore(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	if err := run([]string{"--addr=:0", "--free-team-slots=5"}); err == nil || !strings.Contains(err.Error(), "--external-url") {
+		t.Fatalf("wildcard --addr: %v", err)
+	}
+	p, err := paths.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p.StateDB()); !os.IsNotExist(err) {
+		t.Fatalf("wildcard listener opened the store: %v", err)
 	}
 }
