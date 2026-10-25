@@ -1088,3 +1088,13 @@ separate operations; no database transaction stays open across a provider call.
 - Team deletion and purge never delete checkouts, payments, refunds (queued or provider-originated), credit grants, holds, reversals, ledger entries or their payer association; those rows keep the team id as a tombstone. Everything else (members, runs, logs, secrets, settings, saved card details) is removed as before.
 - Deletion no longer infers financial finality: it is never refused or delayed because money is still moving, and late settlements, refunds and fraud warnings always find their records. A deleted team's collateral card cleanup cannot veto another payer's financial consequence.
 - The retained rows hold no personal data (decision 39).
+
+## 2026-10-25 Korey decision 63: one one-way switch from test to live payments
+
+- Keeps decision 100's configuration-only cutover. The first start in live mode records the switch once; from then on test-mode financial records are excluded from every live balance, limit and payment decision (test credits stop counting). Switching back from live to test is refused. No store replacement is required.
+- Replaces the round-2 irreversible marker that refused live mode after any test activity.
+
+## 2026-10-25 Korey decision 64: S9 judges growth by reason, after one deletion pass
+
+- One deletion-only lane runs now: dead code, compatibility paths with no remaining caller, duplicated helpers and unused exports, with no behavior change.
+- Then S9 is amended: instead of a net line target, every area that grew names its reason (the bug class it removes), and no new internal package exceeds 500 lines without a named deletion that pays for it (decision 35).
