@@ -79,7 +79,11 @@ func overflowControlTx(ctx context.Context, tx *storeTx, team Team, account stri
 	if err == nil {
 		out.MonthlyMinutes = &limit
 	}
-	rows, err := tx.queryContext(ctx, `SELECT a.capability_prefix,COALESCE((SELECT SUM(c.seconds) FROM credit_charges c WHERE c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind IN ('reservation','slice','usage','refund')),0),i.started_at,i.finished_at,a.settled_at,a.awarded_at FROM billing_awards a LEFT JOIN billable_intervals i ON i.team=a.team AND i.reservation_id=a.reservation_id WHERE a.team=? AND a.requester_account=? AND a.executor_class='cloud' AND a.metered=1 AND (a.awarded_at>=? OR a.settled_at IS NULL OR a.settled_at>=?)`, team, account, out.PeriodStart.UnixNano(), out.PeriodStart.UnixNano())
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return out, err
+	}
+	rows, err := tx.queryContext(ctx, `SELECT a.capability_prefix,COALESCE((SELECT SUM(c.seconds) FROM credit_charges c WHERE c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind IN ('reservation','slice','usage','refund')),0),i.started_at,i.finished_at,a.settled_at,a.awarded_at FROM billing_awards a LEFT JOIN billable_intervals i ON i.team=a.team AND i.reservation_id=a.reservation_id WHERE a.team=? AND a.requester_account=? AND a.executor_class='cloud' AND a.metered=1 AND EXISTS(SELECT 1 FROM credit_charges c WHERE c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' AND c.payment_mode=?) AND (a.awarded_at>=? OR a.settled_at IS NULL OR a.settled_at>=?)`, team, account, mode, out.PeriodStart.UnixNano(), out.PeriodStart.UnixNano())
 	if err != nil {
 		return out, err
 	}

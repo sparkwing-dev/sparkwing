@@ -16,10 +16,13 @@ A GitHub App push requiring a Cloud size needs credits at intake. An unfunded
 push records a terminal run that did not start. Adding credits later does not
 start that delivery's run. Use Run now after funding.
 
-A store uses one payment mode for balances, standing and history. Once any grant,
-charge, checkout or refill has been written, changing the mode is refused even
-after team deletion. Start a fresh store
-to switch between test and live, including when changing `--payment-mode` at startup.
+A store can switch once from test to live payment mode using `--payment-mode`
+at startup, even after test activity. The first live start persists the switch;
+restarting live preserves it. Switching from live to test is refused, including
+after team deletion. Live balances, standing, limits, refills and payment decisions
+use only live records. Test rows remain in the store for history; they never fund
+live work. The switch clears saved test cards and card pins and disables automatic
+refills; save a live card and opt in again to use live refills.
 
 Operator free grants require an explicit idempotency key. A mistaken free grant
 can be corrected with a negative reversal naming its reference. Corrections

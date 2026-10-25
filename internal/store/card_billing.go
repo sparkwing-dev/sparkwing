@@ -129,7 +129,7 @@ func paymentWarningTx(ctx context.Context, tx *storeTx, paymentIntent, fingerpri
 	}
 	var id string
 	err = tx.QueryRowContext(ctx, `SELECT warning_id FROM payment_warnings
-	  WHERE actionable = 1 AND ((payment_mode=? AND payment_intent = ?) OR (fingerprint != '' AND fingerprint = ?))
+	  WHERE actionable = 1 AND payment_mode=? AND (payment_intent = ? OR (fingerprint != '' AND fingerprint = ?))
 	  ORDER BY CASE WHEN payment_mode=? AND payment_intent = ? THEN 0 ELSE 1 END, created_at LIMIT 1`, mode, paymentIntent, fingerprint, mode, paymentIntent).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil

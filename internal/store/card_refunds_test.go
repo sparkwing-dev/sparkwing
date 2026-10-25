@@ -239,14 +239,27 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 		case 1:
 			rewriteSchemaExec(t, s.db, "UPDATE payment_refunds SET payment_intent=?", foreign)
 		case 2:
-			if err := s.AsOperator().setPaymentMode(ctx, capability.PaymentLive); err == nil {
-				t.Fatal("changed payment mode after refund activity")
+			var beforeStatus, beforeID string
+			var beforeAttempts int
+			if err := s.db.QueryRow("SELECT status,refund_id,attempts FROM card_refunds WHERE payment_mode='test'").Scan(&beforeStatus, &beforeID, &beforeAttempts); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.AsOperator().setPaymentMode(ctx, capability.PaymentLive); err != nil {
+				t.Fatal(err)
 			}
 			event.Mode = capability.PaymentLive
-			if _, err := s.settlePaymentFacts(ctx, event); err == nil {
-				t.Fatal("accepted another mode's refund")
+			if result, err := s.settlePaymentFacts(ctx, event); err != nil || result.Team != "" || result.GrantID != "" {
+				t.Fatalf("live refund associated with a test payment: %+v: %v", result, err)
 			}
-			event.Mode = capability.PaymentTest
+			if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "bound-refund"); err == nil {
+				t.Fatal("bound a test refund in live mode")
+			}
+			var status, id string
+			var attempts int
+			if err := s.db.QueryRow("SELECT status,refund_id,attempts FROM card_refunds WHERE payment_mode='test'").Scan(&status, &id, &attempts); err != nil {
+				t.Fatal(err)
+			}
+			return status == beforeStatus && id == beforeID && attempts == beforeAttempts
 		}
 		err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "bound-refund")
 		if seed%4 == 1 {
@@ -266,7 +279,7 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 			return status == cardRefundSucceeded
 		case seed%4 == 1:
 			return status == cardRefundDue && id == "" && attempts == 0
-		case seed%4 == 2 || seed%4 == 3:
+		case seed%4 == 3:
 			return status == cardRefundDue && id == "bound-refund" && attempts == 1
 		}
 		return status == cardRefundPending && id == "bound-refund" && attempts == 0

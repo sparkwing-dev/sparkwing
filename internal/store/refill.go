@@ -114,9 +114,13 @@ func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing Billin
 	}
 	s.Enabled = enabled == 1
 	s.Caps = refillCaps(standing, now)
+	mode, err := creditPaymentMode(ctx, q)
+	if err != nil {
+		return s, err
+	}
 	var failedAt int64
-	err := q.QueryRowContext(ctx, `SELECT closed_at, failure FROM credit_checkouts
-	    WHERE team = ? AND refill_blocked = 1 ORDER BY closed_at DESC LIMIT 1`, string(team)).Scan(&failedAt, &s.Failure)
+	err = q.QueryRowContext(ctx, `SELECT closed_at, failure FROM credit_checkouts
+	    WHERE team = ? AND payment_mode = ? AND refill_blocked = 1 ORDER BY closed_at DESC LIMIT 1`, string(team), mode).Scan(&failedAt, &s.Failure)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return s, err
 	}
@@ -132,9 +136,9 @@ func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing Billin
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillDay)+` THEN 1 ELSE 0 END), 0),
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillWeek)+` THEN amount_minor ELSE 0 END), 0),
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillMonth)+` THEN amount_minor ELSE 0 END), 0)
-	  FROM credit_checkouts WHERE team = ? AND kind = ? AND (COALESCE(closed_at, opened_at) >= ? OR closed_at IS NULL)
+	  FROM credit_checkouts WHERE team = ? AND payment_mode = ? AND kind = ? AND (COALESCE(closed_at, opened_at) >= ? OR closed_at IS NULL)
 	    AND NOT ((payment_id = '' OR failure = 'canceled') AND closed_at IS NOT NULL)`,
-		string(team), checkoutKindRefill, now.Add(-refillMonth).UnixNano()).Scan(&open, &s.DayCount, &s.WeekCents, &s.MonthCents); err != nil {
+		string(team), mode, checkoutKindRefill, now.Add(-refillMonth).UnixNano()).Scan(&open, &s.DayCount, &s.WeekCents, &s.MonthCents); err != nil {
 		return s, err
 	}
 	s.Open = open > 0
@@ -222,8 +226,12 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 func (o *Operator) DueRefills(ctx context.Context) ([]Refill, error) {
 	var teams []Team
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		mode, err := paymentModeTx(ctx, tx)
+		if err != nil {
+			return err
+		}
 		rows, err := tx.queryContext(ctx, `SELECT name FROM teams WHERE refill_enabled = 1
-		    UNION SELECT team FROM credit_checkouts WHERE kind = ? AND closed_at IS NULL ORDER BY 1`, checkoutKindRefill)
+		    UNION SELECT team FROM credit_checkouts WHERE payment_mode = ? AND kind = ? AND closed_at IS NULL ORDER BY 1`, mode, checkoutKindRefill)
 		if err != nil {
 			return err
 		}
@@ -399,11 +407,15 @@ func (o *Operator) CanConfirmRefill(ctx context.Context, r Refill) (bool, error)
 		if _, err := lockLedgerTx(ctx, tx, r.Team); err != nil {
 			return err
 		}
+		mode, err := paymentModeTx(ctx, tx)
+		if err != nil {
+			return err
+		}
 		var opened, amount int64
 		var customer, method string
-		err := tx.QueryRowContext(ctx, `SELECT opened_at, amount_minor, customer_id, payment_method FROM credit_checkouts
-		    WHERE team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
-			string(r.Team), r.ID, checkoutKindRefill, r.PaymentIntent).Scan(&opened, &amount, &customer, &method)
+		err = tx.QueryRowContext(ctx, `SELECT opened_at, amount_minor, customer_id, payment_method FROM credit_checkouts
+		    WHERE payment_mode = ? AND team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
+			mode, string(r.Team), r.ID, checkoutKindRefill, r.PaymentIntent).Scan(&opened, &amount, &customer, &method)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -449,9 +461,13 @@ func (o *Operator) RecordRefillCanceled(ctx context.Context, r Refill) error {
 		if _, err := lockLedgerTx(ctx, tx, r.Team); err != nil {
 			return err
 		}
-		_, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = 'canceled'
-		    WHERE team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
-			tx.now(ctx).UnixNano(), string(r.Team), r.ID, checkoutKindRefill, r.PaymentIntent)
+		mode, err := paymentModeTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		_, err = tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = 'canceled'
+		    WHERE payment_mode = ? AND team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
+			tx.now(ctx).UnixNano(), mode, string(r.Team), r.ID, checkoutKindRefill, r.PaymentIntent)
 		return err
 	})
 }

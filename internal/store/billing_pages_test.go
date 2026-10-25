@@ -141,8 +141,14 @@ func TestBillingPagesFailureRetainsReservationAndProviderBinding(t *testing.T) {
 	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, replay); err == nil {
 		t.Fatal("replaced provider")
 	}
-	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err == nil {
-		t.Fatal("changed mode after checkout activity")
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 2000, "key"); err == nil {
+		t.Fatal("replayed a test billing page in live mode")
+	}
+	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, original); err == nil {
+		t.Fatal("completed a test billing page in live mode")
 	}
 }
 

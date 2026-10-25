@@ -51,9 +51,13 @@ func teamHoldTx(ctx context.Context, q rowQuerier, team Team) (string, error) {
 	if trust == billingTrustRevoked {
 		return holdCauseRevoked, nil
 	}
+	mode, err := creditPaymentMode(ctx, q)
+	if err != nil {
+		return "", err
+	}
 	var cause string
-	err := q.QueryRowContext(ctx, `SELECT cause FROM credit_freezes WHERE team = ? AND released_at IS NULL
-	    ORDER BY created_at, dispute_id LIMIT 1`, string(team)).Scan(&cause)
+	err = q.QueryRowContext(ctx, `SELECT cause FROM credit_freezes WHERE team = ? AND payment_mode = ? AND released_at IS NULL
+	    ORDER BY created_at, dispute_id LIMIT 1`, string(team), mode).Scan(&cause)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -171,8 +175,12 @@ func teamCreditFreezeTx(ctx context.Context, tx *storeTx, team Team) (_ TeamCred
 	if err != nil {
 		return TeamCreditFreeze{}, err
 	}
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return TeamCreditFreeze{}, err
+	}
 	rows, err := tx.queryContext(ctx, `SELECT dispute_id, cause FROM credit_freezes
-	  WHERE team = ? AND released_at IS NULL ORDER BY created_at, dispute_id`, string(team))
+	  WHERE team = ? AND payment_mode = ? AND released_at IS NULL ORDER BY created_at, dispute_id`, string(team), mode)
 	if err != nil {
 		return TeamCreditFreeze{}, err
 	}

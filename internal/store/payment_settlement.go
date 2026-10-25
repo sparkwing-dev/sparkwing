@@ -17,23 +17,30 @@ func setPaymentModeTx(ctx context.Context, tx *storeTx, mode capability.PaymentM
 	if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
 		return err
 	}
-	var encoded []byte
-	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='payment_mode'`+tx.forUpdate()).Scan(&encoded); err != nil {
-		return err
-	}
-	var current capability.PaymentMode
-	if err := json.Unmarshal(encoded, &current); err != nil {
+	current, err := scanPaymentMode(tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='payment_mode'`+tx.forUpdate()))
+	if err != nil {
 		return err
 	}
 	if current == mode {
 		return nil
 	}
-	var activity bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM settings WHERE key='payment_mode_frozen')`).Scan(&activity); err != nil {
+	if current == capability.PaymentLive {
+		return authorityError(apierr.Conflict, "payment mode cannot switch from live to test")
+	}
+	teams, err := rotationTeamsTx(ctx, tx)
+	if err != nil {
 		return err
 	}
-	if activity {
-		return authorityError(apierr.Conflict, "payment mode cannot change after ledger activity; start a fresh store to switch modes")
+	if err := lockFinancialTeamsTx(ctx, tx, teams...); err != nil {
+		return err
+	}
+	if _, err := tx.execContext(ctx, `UPDATE teams SET card_customer='',card_payment_method='',card_fingerprint='',
+	    card_brand='',card_last4='',card_added_at=0,refill_enabled=0`); err != nil {
+		return err
+	}
+	// Card pins are test-provider state; payment and ledger history stay intact.
+	if _, err := tx.execContext(ctx, `DELETE FROM payment_cards`); err != nil {
+		return err
 	}
 	data, err := json.Marshal(mode)
 	if err != nil {
@@ -143,9 +150,26 @@ func configuredPaymentModeTx(ctx context.Context, tx *storeTx, eventMode capabil
 }
 
 func paymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMode, error) {
-	var encoded []byte
-	if err := tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"+tx.forShare()).Scan(&encoded); err != nil {
+	mode, err := scanPaymentMode(tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"+tx.forShare()))
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", authorityError(apierr.Unavailable, "payment mode is not configured")
+	}
+	return mode, err
+}
+
+// Reads before payment configuration use the same test default as ledger writes.
+func creditPaymentMode(ctx context.Context, q rowQuerier) (capability.PaymentMode, error) {
+	mode, err := scanPaymentMode(q.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='payment_mode'"))
+	if errors.Is(err, sql.ErrNoRows) {
+		return capability.PaymentTest, nil
+	}
+	return mode, err
+}
+
+func scanPaymentMode(row rowScanner) (capability.PaymentMode, error) {
+	var encoded []byte
+	if err := row.Scan(&encoded); err != nil {
+		return "", err
 	}
 	var mode capability.PaymentMode
 	if json.Unmarshal(encoded, &mode) != nil || (mode != capability.PaymentTest && mode != capability.PaymentLive) {
@@ -234,7 +258,7 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		return err
 	}
 	if checkout.kind == checkoutKindCheckout {
-		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0 WHERE team = ? AND refill_blocked = 1`, string(team)); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0 WHERE team = ? AND payment_mode = ? AND refill_blocked = 1`, string(team), event.Mode); err != nil {
 			return err
 		}
 	}
@@ -262,7 +286,7 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 	// A successful Add funds supersedes failures from earlier refill reservations, including delayed outcomes.
 	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?,
 	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team)
-	      AND NOT EXISTS (SELECT 1 FROM credit_checkouts recovery WHERE recovery.team = credit_checkouts.team
+	      AND NOT EXISTS (SELECT 1 FROM credit_checkouts recovery WHERE recovery.team = credit_checkouts.team AND recovery.payment_mode = credit_checkouts.payment_mode
 	        AND recovery.kind = 'checkout' AND recovery.paid_at > credit_checkouts.opened_at) THEN 1 ELSE 0 END
 	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), failure, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err

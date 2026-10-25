@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -130,22 +129,6 @@ func TestFinancialLockOrderRejectsUpgradesAndLateTeams(t *testing.T) {
 		if compareLockTiers(lockTeam, work) >= 0 || compareLockTiers(work, lockLedger) >= 0 {
 			t.Fatalf("%s locks must follow teams and precede ledgers", work)
 		}
-	}
-}
-
-func TestPaymentModeFreezeRollsBackWithFinancialWrite(t *testing.T) {
-	s := authorityStore(t)
-	err := s.inTx(t.Context(), func(tx *storeTx) error {
-		if _, err := recordCreditGrantTx(t.Context(), tx, "a", CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 1, Reference: "first"}, auditActor{system: auditBreakGlass}); err != nil {
-			return err
-		}
-		return context.Canceled
-	})
-	if err != context.Canceled {
-		t.Fatalf("rollback: %v", err)
-	}
-	if err := s.AsOperator().setPaymentMode(t.Context(), "live"); err != nil {
-		t.Fatalf("rolled-back activity froze the mode: %v", err)
 	}
 }
 

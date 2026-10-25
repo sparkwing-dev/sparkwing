@@ -370,7 +370,9 @@ func TestProviderPaymentModeSwitchCannotReassignAnExistingPayment(t *testing.T) 
 	if _, err := s.settlePaymentFacts(t.Context(), payment); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, "UPDATE settings SET value=? WHERE key='payment_mode'", []byte(`"live"`))
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
+		t.Fatal(err)
+	}
 	before := paymentMutationSnapshot(t, s)
 	for _, kind := range []capability.PaymentEventKind{capability.PaymentRefund, capability.PaymentDisputeOpened} {
 		e := providerPaymentEvent(now, kind)

@@ -27,14 +27,17 @@ Existing stores are refused rather than opened under the new schema.
 
 ## Payment ledgers and operator grants
 
-The store's payment mode is fixed once any grant, charge, checkout or refill exists.
-Start a fresh store to switch between test and live. Grants, charges and holds retain
-mode tags. Reversals require an existing grant in the same team and mode.
-The schema baseline includes these columns and the reversal foreign key.
-Settlement and refund reconciliation refuse a team whose deletion has started.
-Purge rechecks unfinished refunds, open checkouts and unfinished bound payments
-under an exclusive team lock in the transaction that deletes SQL rows. A refund's
-checkout is retained until the refund finishes.
+Start with `--payment-mode live` to switch a test store to live once, even after
+test activity. Later live starts preserve the switch; live-to-test startup is
+refused. Test credits, standing, holds, card pins and refill windows cannot affect
+live decisions. Saved test cards, card pins and refill opt-ins are cleared at
+cutover; save a live card and opt in again. Test financial rows remain in the store.
+Grants, charges and holds retain mode tags. Reversals require an existing grant in
+the same team and mode. The schema includes these columns and the reversal
+foreign key.
+Financial records and payer associations survive team deletion as tombstones.
+Deletion never waits for financial finality; late payments, refunds and fraud
+warnings reconcile against retained records.
 Operator grants require an explicit idempotency key. Use `admin grant --reverses`
 to correct a free grant, naming its full reference and using a fresh key.
 

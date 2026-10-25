@@ -295,21 +295,29 @@ func sameGrantTerms(stored CreditGrant, team Team, req CreditGrantRequest) error
 }
 
 func reversedMicroTx(ctx context.Context, tx *storeTx, team Team, kind, payment string) (int64, error) {
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
 	var sum sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
-	  WHERE team = ? AND kind = ? AND reverses_kind = ? AND reverses = ?`, string(team), creditGrantReversal, kind, payment).Scan(&sum)
+	err = tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
+	  WHERE team = ? AND payment_mode = ? AND kind = ? AND reverses_kind = ? AND reverses = ?`, string(team), mode, creditGrantReversal, kind, payment).Scan(&sum)
 	return -sum.Int64, err
 }
 
 func creditGrantByReferenceTx(
 	ctx context.Context, tx *storeTx, team Team, kind, reference string,
 ) (CreditGrant, bool, error) {
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return CreditGrant{}, false, err
+	}
 	var g CreditGrant
 	var created int64
 	var owner string
-	err := tx.QueryRowContext(ctx, `SELECT team, id, kind, amount_micro, reference, reverses, reverses_kind, created_by, created_at
-	  FROM credit_grants WHERE team = ? AND kind = ? AND reference = ?
-	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), kind, reference).
+	err = tx.QueryRowContext(ctx, `SELECT team, id, kind, amount_micro, reference, reverses, reverses_kind, created_by, created_at
+	  FROM credit_grants WHERE team = ? AND payment_mode = ? AND kind = ? AND reference = ?
+	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), mode, kind, reference).
 		Scan(&owner, &g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.ReversesKind, &g.CreatedBy, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CreditGrant{}, false, nil
@@ -322,44 +330,32 @@ func creditGrantByReferenceTx(
 	return g, true, nil
 }
 
-// safety: even a provider-free ledger fixes the store's mode before its first row is written.
-// The marker commits with the first financial write and survives tenant purge.
+// A provider-free ledger starts in test mode; only startup can switch it to live.
 func ledgerPaymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMode, error) {
-	var exists int
-	err := tx.QueryRowContext(ctx, "SELECT 1 FROM settings WHERE key='payment_mode'").Scan(&exists)
-	if errors.Is(err, sql.ErrNoRows) {
-		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
-			return "", err
-		}
-	} else if err != nil {
+	if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
 		return "", err
 	}
-	mode, err := paymentModeTx(ctx, tx)
-	if err != nil {
-		return "", err
-	}
-	var frozen int
-	err = tx.QueryRowContext(ctx, "SELECT 1 FROM settings WHERE key='payment_mode_frozen'").Scan(&frozen)
-	if errors.Is(err, sql.ErrNoRows) {
-		_, err = tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode_frozen',?) ON CONFLICT(key) DO NOTHING`, []byte(`true`))
-	}
-	return mode, err
+	return paymentModeTx(ctx, tx)
 }
 
-const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?),
-        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`
+const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ?),
+        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND payment_mode = ?)`
 
 // safety: a reversal is a grant row with a negative amount, so a reader that
 // wants the two apart asks for them apart; the balance is the same either way.
 const creditGrantSplitSQL = `SELECT
-        (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind != ?),
-        (SELECT -SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind = ?),
-        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`
+        (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ? AND kind != ?),
+        (SELECT -SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ? AND kind = ?),
+        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND payment_mode = ?)`
 
 func creditBalanceTx(ctx context.Context, tx rowQuerier, team Team) (int64, error) {
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
 	var granted, charged sql.NullInt64
 	if err := tx.QueryRowContext(ctx, creditBalanceSQL,
-		string(team), string(team)).Scan(&granted, &charged); err != nil {
+		string(team), mode, string(team), mode).Scan(&granted, &charged); err != nil {
 		return 0, err
 	}
 	return granted.Int64 - charged.Int64, nil

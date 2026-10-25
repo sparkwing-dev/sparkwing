@@ -16,12 +16,16 @@ func (o *Operator) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals
 	}
 	defer rollbackUnlessDone(tx, &err)
 
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return CreditLedgerTotals{}, err
+	}
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
                         -COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0)
-                   FROM credit_grants`,
-		CreditGrantFree, CreditGrantPaid, creditGrantReversal,
+                   FROM credit_grants WHERE payment_mode=?`,
+		CreditGrantFree, CreditGrantPaid, creditGrantReversal, mode,
 	).Scan(&out.GrantedFreeMicro, &out.GrantedPaidMicro, &out.ReversedMicro); err != nil {
 		return CreditLedgerTotals{}, err
 	}
@@ -33,9 +37,9 @@ func (o *Operator) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals
                         COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(amount_micro), 0),
                         COALESCE(SUM(CASE WHEN kind = ? THEN 0 ELSE seconds END), 0)
-                   FROM credit_charges`,
+                   FROM credit_charges WHERE payment_mode=?`,
 		creditChargeReservation, creditChargeSlice, creditChargeUsage, creditChargeRefund,
-		CreditChargeStorage, CreditChargeStorage,
+		CreditChargeStorage, CreditChargeStorage, mode,
 	).Scan(&out.ReservedMicro, &out.ChargedMicro, &out.RefundedMicro, &out.StorageMicro,
 		&settled, &charged); err != nil {
 		return CreditLedgerTotals{}, err
@@ -60,12 +64,17 @@ type pendingBillingSeconds struct {
 }
 
 func (op *Operator) refundableBillingSecondsTx(ctx context.Context, tx *storeTx) (int64, error) {
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
 	rows, err := tx.queryContext(ctx, `SELECT a.team,a.reservation_id,a.capability_prefix,a.run_id,a.node_id,
 	 a.payer_team,a.executor_class,a.billing_start,a.billing_unit,
 	 (SELECT COALESCE(SUM(c.seconds),0) FROM credit_charges c WHERE c.team=a.team
 	 AND c.capability_prefix=a.capability_prefix AND c.run_id=a.run_id AND c.node_id=a.node_id
 	 AND c.kind IN ('reservation','slice','usage','refund'))
-	 FROM billing_awards a WHERE a.metered=1 AND a.settled_at IS NULL`)
+	 FROM billing_awards a WHERE a.metered=1 AND a.settled_at IS NULL
+	 AND EXISTS(SELECT 1 FROM credit_charges c WHERE c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' AND c.payment_mode=?)`, mode)
 	if err != nil {
 		return 0, err
 	}

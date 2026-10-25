@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 var ledgerDollarQuote = regexp.MustCompile(`(?i)^\$(?:[a-z_][a-z_0-9]*)?\$`)
@@ -162,6 +164,16 @@ func (l *ledgerTx) insertCharge(ctx context.Context, c CreditCharge) error {
 	mode, err := ledgerPaymentModeTx(ctx, l.storeTx)
 	if err != nil {
 		return err
+	}
+	if c.TokenPrefix != "" && c.Kind != creditChargeReservation {
+		var reservedMode string
+		err := l.QueryRowContext(ctx, `SELECT payment_mode FROM credit_charges WHERE team=? AND capability_prefix=? AND kind='reservation' LIMIT 1`, l.team, c.TokenPrefix).Scan(&reservedMode)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil {
+			mode = capability.PaymentMode(reservedMode)
+		}
 	}
 	_, err = l.exec(ctx, `INSERT INTO credit_charges (team, id, run_id, node_id, capability_prefix, principal,
 	    kind, seconds, amount_micro, storage_bytes, cpu_class, rate_micro_per_second, charged_at, payment_mode)

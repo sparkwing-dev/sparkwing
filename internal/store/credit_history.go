@@ -7,9 +7,13 @@ import (
 
 // ListCreditGrants returns this tenant's newest grants, bounded by CreditHistoryMaxLimit.
 func (t *Tenant) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error) {
+	mode, err := creditPaymentMode(ctx, storeRowQuerier{t.s})
+	if err != nil {
+		return nil, err
+	}
 	rows, err := t.s.query(ctx, `SELECT id, kind, amount_micro, reference, reverses, reverses_kind, created_by, created_at
-	  FROM credit_grants WHERE team = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
-		string(t.team), creditLimit(limit))
+	  FROM credit_grants WHERE team = ? AND payment_mode = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+		string(t.team), mode, creditLimit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -30,10 +34,14 @@ func (t *Tenant) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGra
 
 // ListCreditCharges returns this tenant's newest charges, bounded by CreditHistoryMaxLimit.
 func (t *Tenant) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error) {
+	mode, err := creditPaymentMode(ctx, storeRowQuerier{t.s})
+	if err != nil {
+		return nil, err
+	}
 	rows, err := t.s.query(ctx, `SELECT id, run_id, node_id, capability_prefix, principal, kind,
 	         seconds, amount_micro, storage_bytes, cpu_class, rate_micro_per_second, charged_at
-	  FROM credit_charges WHERE team = ? ORDER BY charged_at DESC, id DESC LIMIT ?`,
-		string(t.team), creditLimit(limit))
+	  FROM credit_charges WHERE team = ? AND payment_mode = ? ORDER BY charged_at DESC, id DESC LIMIT ?`,
+		string(t.team), mode, creditLimit(limit))
 	if err != nil {
 		return nil, err
 	}
