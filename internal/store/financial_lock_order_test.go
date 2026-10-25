@@ -80,9 +80,10 @@ func TestConcurrencyMaintenanceLocksTeamBeforeCapacity(t *testing.T) {
 func TestDirectGrantLocksTeamBeforeWritingLedger(t *testing.T) {
 	s, recorder := newRecordingStore(t)
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('operator','operator@example.test',1,1)`)
 	recorder.reset()
-	if _, err := (&Tenant{s: s, team: "a"}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 1, Reference: "first"}); err != nil {
-		t.Fatal(err)
+	if result, err := (&Tenant{s: s, team: "a"}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 1, Reference: "first", CreatedBy: "operator"}); err != nil || !result.Created {
+		t.Fatalf("grant=%+v: %v", result, err)
 	}
 	team, grant := -1, -1
 	for i, q := range recorder.snapshot() {

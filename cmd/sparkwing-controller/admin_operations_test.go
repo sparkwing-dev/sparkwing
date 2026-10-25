@@ -32,7 +32,7 @@ func TestAdminAuditsOperatorAndScopesLargeGrantToInvocation(t *testing.T) {
 	for _, verb := range []string{"freeze", "unfreeze", "grant"} {
 		args := []string{verb, "--team", "default", "--reason", "incident", "--operator", "ops-alice"}
 		if verb == "grant" {
-			args = append(args, "--cents", "10001", "--allow-large")
+			args = append(args, "--cents", "10001", "--allow-large", "--key", "alice-grant")
 		}
 		var audit bytes.Buffer
 		if err := runAdmin(args, &bytes.Buffer{}, &audit); err != nil {
@@ -42,7 +42,7 @@ func TestAdminAuditsOperatorAndScopesLargeGrantToInvocation(t *testing.T) {
 			t.Errorf("audit: %s", &audit)
 		}
 	}
-	if err := runAdmin([]string{"grant", "--team", "default", "--reason", "incident", "--operator", "ops-bob", "--cents", "10001"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "--allow-large") {
+	if err := runAdmin([]string{"grant", "--team", "default", "--reason", "incident", "--operator", "ops-bob", "--cents", "10001", "--key", "bob-grant"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "--allow-large") {
 		t.Fatalf("pod environment authorized a later large grant: %v", err)
 	}
 	st = openState(t)

@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -118,8 +119,15 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsRows(t *testing.T) {
 	if len(mine) != 1 || mine[0].State != store.TeamDeletionDone {
 		t.Fatalf("owner's deletions = %+v, want acme done", mine)
 	}
-	if _, err := f.store.TeamInfo(context.Background(), "acme"); err == nil {
-		t.Fatal("the team is still registered after the pass")
+	if info, err := f.store.TeamInfo(t.Context(), "acme"); err != nil || info.DisplayName != "" || info.CreatedBy != "" {
+		t.Fatalf("purged team tombstone = %+v: %v", info, err)
+	}
+	if _, err := f.store.ForTeam(t.Context(), "acme"); !errors.Is(err, store.ErrUnknownTeam) {
+		t.Fatalf("purged team reopened: %v", err)
+	}
+	var runs int
+	if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs WHERE team='acme'`).Scan(&runs); err != nil || runs != 0 {
+		t.Fatalf("purged team runs = %d: %v", runs, err)
 	}
 }
 
