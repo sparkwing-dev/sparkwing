@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -394,7 +395,11 @@ func enforceChildLimitsTx(ctx context.Context, tx *storeTx, team Team, root stri
 		return err
 	}
 	if children >= ceiling {
-		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("a root run starts at most %d child runs", ceiling), Details: map[string]any{"limit": "max_children_per_root", "cap": ceiling, "observed": children}}
+		maximum := strconv.FormatInt(limits.MaxChildrenPerRoot, 10)
+		for i := len(maximum) - 3; i > 0; i -= 3 {
+			maximum = maximum[:i] + "," + maximum[i:]
+		}
+		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("This team allows %d child runs per root run (maximum %s). Raise the team's child-run limit or split the work into separate runs.", ceiling, maximum), Details: map[string]any{"limit": "max_children_per_root", "cap": ceiling, "observed": children}}
 	}
 	return nil
 }
