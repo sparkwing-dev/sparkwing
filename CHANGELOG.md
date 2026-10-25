@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **child runs:** Creation-time limit errors retain their 409 and details, name the team's setting and the 1,000 maximum, and explain how to raise the limit or split the work
 - **cache:** Retries preserve the source writer's memo and dependency-cache scope in full and failed modes. Personal placement reads the same sealed writer. Only that writer's principal can retry `--runner here` and other local runs. Other members must start a new run
 - **runtime:** Owners refuse `--only` when the controller omits the selection projection, with an error asking for a controller update
 - **security:** Deleting another member's run requires `team.admin` on the credential. Member schedule edits and deletion exclude GitHub App declarations. Runner enrollment routes require the same direct account session and grants as the store
