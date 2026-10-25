@@ -796,15 +796,6 @@ func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {
 	return nil
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 func splitCSV(s string) []string {
 	parts := strings.Split(s, ",")
 	out := make([]string, 0, len(parts))

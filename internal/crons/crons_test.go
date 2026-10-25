@@ -16,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
-	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -1092,142 +1091,11 @@ func TestListAndShowDeriveNameStateAndZone(t *testing.T) {
 	}
 }
 
-func TestHealthReportsAStaleTick(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
-	armOne(t, h, writeRepo(t, "svc", everyMinute))
-
-	timer := fakeTimerHost(t, h.home, true)
-	fresh, err := h.svc.health(ctx, timer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if !fresh.Timer.Enabled {
-		t.Fatalf("timer: %+v", fresh.Timer)
-	}
-	if !fresh.TickStale {
-		t.Error("a home that has never ticked with an enabled timer is stale")
-	}
-
-	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
-	if _, err := h.svc.Tick(ctx, false); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	ticked, err := h.svc.health(ctx, timer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if ticked.TickStale || !ticked.healthy() {
-		t.Fatalf("a home that just ticked: %+v", ticked)
-	}
-	if ticked.Armed != 1 || ticked.Schedules != 1 {
-		t.Errorf("counts: %+v", ticked)
-	}
-
-	h.clock.set(at(t, "2026-01-01T00:10:00Z"))
-	stale, err := h.svc.health(ctx, timer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if !stale.TickStale || stale.healthy() {
-		t.Fatalf("ten minutes without a tick: %+v", stale)
-	}
-	if !strings.Contains(stale.Detail, "crons.log") {
-		t.Errorf("detail = %q, want the log named", stale.Detail)
-	}
-}
-
-func TestHealthIsUnhealthyWhenTheLastTickReportedAnError(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
-	armOne(t, h, writeRepo(t, "svc", everyMinute))
-	timer := fakeTimerHost(t, h.home, true)
-
-	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
-	if err := h.store.AsOperator().RecordCronTick(ctx, store.CronTick{
-		At: h.clock.now(), Host: "test-host", Error: "svc/every-minute: consumer will not start",
-	}); err != nil {
-		t.Fatalf("RecordCronTick: %v", err)
-	}
-	health, err := h.svc.health(ctx, timer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if health.TickStale {
-		t.Fatalf("the tick just landed: %+v", health)
-	}
-	if health.healthy() {
-		t.Fatal("a tick that reported a failure read as healthy")
-	}
-	if !strings.Contains(health.Detail, "consumer will not start") {
-		t.Errorf("detail = %q, want the tick's own reason", health.Detail)
-	}
-}
-
 func nativeTimerFixtureBinary() string {
 	if runtime.GOOS == "windows" {
 		return filepath.VolumeName(os.TempDir()) + "/usr/local/bin/sparkwing"
 	}
 	return "/usr/local/bin/sparkwing"
-}
-
-func fakeTimerHost(t *testing.T, home string, installed bool) crontimer.Host {
-	t.Helper()
-	root := t.TempDir()
-	h := crontimer.Host{
-		GOOS:          "linux",
-		Home:          root,
-		ConfigHome:    filepath.Join(root, ".config"),
-		Binary:        nativeTimerFixtureBinary(),
-		PathEnv:       "/usr/bin:/bin",
-		SparkwingHome: home,
-		Version:       "v1.2.3",
-		LogPath:       filepath.Join(home, "crons.log"),
-		UID:           1000,
-		Exec:          func(context.Context, string, ...string) (string, error) { return "", nil },
-	}
-	if installed {
-		if _, err := crontimer.Install(t.Context(), h); err != nil {
-			t.Fatalf("install the timer fixture: %v", err)
-		}
-	}
-	return h
-}
-
-func TestHealthAcceptsAHostTickingFromItsOwnScheduler(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
-	armOne(t, h, writeRepo(t, "svc", everyMinute))
-	noTimer := fakeTimerHost(t, h.home, false)
-
-	before, err := h.svc.health(ctx, noTimer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if before.healthy() {
-		t.Fatalf("an armed host with no timer and no tick: %+v", before)
-	}
-
-	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
-	if _, err := h.svc.Tick(ctx, false); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	ticked, err := h.svc.health(ctx, noTimer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if !ticked.healthy() || ticked.TickStale {
-		t.Fatalf("a host ticking from its own scheduler: %+v", ticked)
-	}
-
-	h.clock.set(at(t, "2026-01-01T01:00:00Z"))
-	lapsed, err := h.svc.health(ctx, noTimer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if !lapsed.TickStale || lapsed.healthy() {
-		t.Fatalf("an hour after the last external tick: %+v", lapsed)
-	}
 }
 
 func TestTeamScheduleIDKeepsTheOperatorsIDsAndSeparatesTeams(t *testing.T) {

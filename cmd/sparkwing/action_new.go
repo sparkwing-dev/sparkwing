@@ -191,18 +191,6 @@ func builtinShapeByName(name string) (builtinShape, bool) {
 	return builtinShape{}, false
 }
 
-func (s builtinShape) Summary() string {
-	unit := "jobs"
-	if s.Nodes == 1 {
-		unit = "job"
-	}
-	out := fmt.Sprintf("%d %s, %s", s.Nodes, unit, s.Structure)
-	if s.DefaultOn != "" {
-		out += "; on: " + s.DefaultOn
-	}
-	return out
-}
-
 var builtinShapes = []builtinShape{
 	{"minimal", 1, "stubbed Run -- the smallest thing that runs", "", minimalTemplate},
 	{"build-test-deploy", 3, "in a line", "", buildTestDeployTemplate},

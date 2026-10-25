@@ -28,12 +28,12 @@ import (
 // Marker appears verbatim in every file this package writes.
 const Marker = "Installed by sparkwing"
 
-// ErrUnsupported is returned, wrapped, for a GOOS that has no cron timer.
-var ErrUnsupported = errors.New("no sparkwing cron timer on this operating system")
+// errUnsupported is returned, wrapped, for a GOOS that has no cron timer.
+var errUnsupported = errors.New("no sparkwing cron timer on this operating system")
 
 // Host is everything the installer needs to know about the machine.
 type Host struct {
-	// GOOS is "linux" or "darwin"; anything else yields [ErrUnsupported].
+	// GOOS is "linux" or "darwin"; anything else yields [errUnsupported].
 	GOOS string
 
 	// Home is the user's home directory, where launchd reads LaunchAgents.
@@ -140,23 +140,6 @@ func Uninstall(ctx context.Context, h Host) (State, error) {
 	return State{}, unsupported(h.GOOS)
 }
 
-// Status reports the timer without changing anything. A service manager that
-// cannot be reached -- no user session under a bare WSL, no launchd domain --
-// leaves Enabled false and says why in Detail; it is not an error, because the
-// files on disk still answer the question that was asked.
-func Status(ctx context.Context, h Host) (State, error) {
-	if err := checkOperation(ctx, h); err != nil {
-		return State{}, err
-	}
-	switch h.GOOS {
-	case "linux":
-		return statusLinux(ctx, h)
-	case "darwin":
-		return statusDarwin(ctx, h)
-	}
-	return State{}, unsupported(h.GOOS)
-}
-
 // DefaultExec runs a command and returns its output, stdout and stderr
 // combined, for a Host that talks to the real machine.
 func DefaultExec(ctx context.Context, name string, args ...string) (string, error) {
@@ -168,7 +151,7 @@ func unsupported(goos string) error {
 	if goos == "" {
 		goos = "unknown"
 	}
-	return fmt.Errorf("crontimer: %s: %w", goos, ErrUnsupported)
+	return fmt.Errorf("crontimer: %s: %w", goos, errUnsupported)
 }
 
 func (h Host) run(ctx context.Context, name string, args ...string) (string, error) {

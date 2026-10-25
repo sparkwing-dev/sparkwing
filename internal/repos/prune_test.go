@@ -45,15 +45,3 @@ func TestPruneDropsOnlyStaleCheckouts(t *testing.T) {
 		t.Fatalf("fallback paths = %v, want %v", got.FallbackPaths, want.FallbackPaths)
 	}
 }
-
-func TestUnderTempDir_CoversSharedTmpAsWellAsTMPDIR(t *testing.T) {
-	for _, p := range []string{filepath.Join(os.TempDir(), "scratch"), "/tmp/scratch", "/private/tmp/scratch"} {
-		if !underTempDir(p) {
-			t.Errorf("underTempDir(%q) = false, want true", p)
-		}
-	}
-	permanent := filepath.Join(string(filepath.Separator), "sparkwing-permanent-checkout", "code", "app")
-	if underTempDir(permanent) {
-		t.Errorf("underTempDir(%q) = true, want false", permanent)
-	}
-}

@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,15 +102,6 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request, authoriz
 	return nil
 }
 
-func includeHas(csv, target string) bool {
-	for _, p := range strings.Split(csv, ",") {
-		if strings.TrimSpace(p) == target {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	name := r.PathValue("name")
 	if name == "" {
@@ -194,13 +183,6 @@ func removeLocalRunDir(runsDir, runID string) error {
 		return err
 	}
 	return errors.Join(root.RemoveAll(runID), root.Close())
-}
-
-func newRunID() string {
-	ts := time.Now().UTC().Format("20060102-150405")
-	var suffix [2]byte
-	_, _ = rand.Read(suffix[:])
-	return fmt.Sprintf("run-%s-%s", ts, hex.EncodeToString(suffix[:]))
 }
 
 const (

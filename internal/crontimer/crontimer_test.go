@@ -635,8 +635,8 @@ func TestUnsupportedGOOS(t *testing.T) {
 		t.Run("goos="+goos, func(t *testing.T) {
 			h := Host{GOOS: goos, Home: t.TempDir(), Binary: fixtureAbsolutePath("/usr/local/bin/sparkwing"), Exec: (&fakeExec{}).run}
 			for name, fn := range map[string]func(context.Context, Host) (State, error){"Install": Install, "Uninstall": Uninstall, "Status": Status} {
-				if _, err := fn(t.Context(), h); !errors.Is(err, ErrUnsupported) {
-					t.Errorf("%s error = %v, want ErrUnsupported", name, err)
+				if _, err := fn(t.Context(), h); !errors.Is(err, errUnsupported) {
+					t.Errorf("%s error = %v, want errUnsupported", name, err)
 				}
 			}
 		})

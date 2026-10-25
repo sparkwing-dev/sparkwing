@@ -2,23 +2,12 @@ package crons
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 )
 
-// disarmRepoURL deletes every schedule pushed for one repository URL, and their
-// histories, returning how many rows went.
-func (s *Service) disarmRepoURL(ctx context.Context, repoURL string) (int, error) {
-	if repoURL == "" {
-		return 0, errors.New("crons: a repository URL is required to disarm pushed schedules")
-	}
-	return s.Schedules.DeleteCronSchedulesForRepo(ctx, repoURL)
-}
-
-// ControllerHealth is [Service.health] for a process that evaluates schedules
-// from a loop of its own rather than an OS timer: the counts and the last tick
-// come from the store, and the timer state names the loop.
+// ControllerHealth reports schedule counts and the last tick from the store,
+// with the timer state naming the controller loop.
 func (s *Service) ControllerHealth(ctx context.Context) (Health, error) {
 	rows, err := s.List(ctx)
 	if err != nil {

@@ -20,8 +20,8 @@ type ManifestEntry struct {
 	Mode   uint32 `json:"mode"`
 }
 
-// DecodeManifest verifies the digest and exact agreement with authorized members.
-func DecodeManifest(body []byte, digest Digest, team string, members []Member) (Manifest, error) {
+// decodeManifest verifies the digest and exact agreement with authorized members.
+func decodeManifest(body []byte, digest Digest, team string, members []Member) (Manifest, error) {
 	sum := sha256.Sum256(body)
 	if Digest(hex.EncodeToString(sum[:])) != digest {
 		return Manifest{}, ErrIntegrity

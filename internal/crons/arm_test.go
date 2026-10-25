@@ -753,7 +753,7 @@ func TestHealthCountsLocksFollowersAndStaleOverrides(t *testing.T) {
 		t.Fatalf("Refresh: %v", err)
 	}
 
-	health, err := h.svc.health(ctx, fakeTimerHost(t, h.home, true))
+	health, err := h.svc.ControllerHealth(ctx)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}

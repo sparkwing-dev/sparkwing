@@ -48,10 +48,6 @@ func verifyReleaseAsset(publicKey ed25519.PublicKey, manifest, manifestSig []byt
 	return fromSharedVerified(verified), err
 }
 
-func manifestDigest(manifest []byte, assetName string) (string, error) {
-	return releaseasset.ManifestDigest(manifest, assetName)
-}
-
 func fromSharedVerified(asset releaseasset.Verified) verifiedReleaseAsset {
 	return verifiedReleaseAsset{
 		name: asset.Name(), bytes: asset.Bytes(), digest: asset.Digest(),

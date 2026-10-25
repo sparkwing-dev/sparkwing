@@ -12,12 +12,6 @@ const (
 	fileMode fs.FileMode = 0o600
 )
 
-type change struct {
-	Path   string `json:"path"`
-	Before string `json:"before"`
-	After  string `json:"after"`
-}
-
 func EnsureDir(path string) error {
 	target := dirMode
 	if info, err := os.Lstat(path); err == nil {
@@ -79,18 +73,6 @@ func WriteFile(path string, data []byte) error {
 		return err
 	}
 	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return err
-	}
-	return f.Close()
-}
-
-func secureFile(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	if err := tightenOpen(f, fileMode); err != nil {
 		_ = f.Close()
 		return err
 	}

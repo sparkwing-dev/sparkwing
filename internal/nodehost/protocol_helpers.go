@@ -2,10 +2,7 @@ package nodehost
 
 import (
 	"context"
-	"fmt"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 const (
@@ -19,8 +16,4 @@ type sessionProcess interface {
 	Kill() error
 	Finish(context.Context, time.Duration) error
 	Terminate(context.Context, time.Duration) error
-}
-
-func invalid(format string, args ...any) error {
-	return &apierr.Error{Code: apierr.PlanInvalid, Message: fmt.Sprintf(format, args...)}
 }

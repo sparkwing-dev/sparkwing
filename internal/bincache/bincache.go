@@ -25,8 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-var errMiss = errors.New("remote binary cache: miss")
-
 func mkdirCache(dir string) error {
 	err := os.MkdirAll(dir, 0o755)
 	if err == nil {
