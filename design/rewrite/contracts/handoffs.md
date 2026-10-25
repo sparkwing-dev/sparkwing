@@ -1093,3 +1093,8 @@ separate operations; no database transaction stays open across a provider call.
 
 - Keeps decision 100's configuration-only cutover. The first start in live mode records the switch once; from then on test-mode financial records are excluded from every live balance, limit and payment decision (test credits stop counting). Switching back from live to test is refused. No store replacement is required.
 - Replaces the round-2 irreversible marker that refused live mode after any test activity.
+
+## 2026-10-25 Korey decision 64: S9 judges growth by reason, after one deletion pass
+
+- One deletion-only lane runs now: dead code, compatibility paths with no remaining caller, duplicated helpers and unused exports, with no behavior change.
+- Then S9 is amended: instead of a net line target, every area that grew names its reason (the bug class it removes), and no new internal package exceeds 500 lines without a named deletion that pays for it (decision 35).
