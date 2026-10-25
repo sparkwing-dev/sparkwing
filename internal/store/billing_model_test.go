@@ -84,7 +84,7 @@ func TestBillingModelPrepayImmediatelyLiftsCloudStanding(t *testing.T) {
 	s, demand, now := billingModelFixture(t)
 	rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
 	tenant := &Tenant{s: s, team: "a"}
-	if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentTest); err != nil {
 		t.Fatal(err)
 	}
 	checkout, err := tenant.TestOnlyOpenCreditCheckout(t.Context(), 5000*MicroCreditsPerCent, *now, time.Hour)

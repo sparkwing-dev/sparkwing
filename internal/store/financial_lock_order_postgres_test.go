@@ -104,7 +104,7 @@ func TestPostgresSettlementsLockAllWarningTeamsBeforeLedger(t *testing.T) {
 	s := storetest.OpenPostgres(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	if err := s.AsOperator().SetPaymentMode(ctx, capability.PaymentTest); err != nil {
+	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
@@ -188,7 +188,7 @@ func TestPostgresDirectGrantRacingTeamPurge(t *testing.T) {
 			t.Errorf("%s rows=%d: %v", table, count, err)
 		}
 	}
-	if err := s.AsOperator().SetPaymentMode(ctx, capability.PaymentLive); err == nil {
+	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentLive, store.DefaultFreeTeamSlots, func() error { return nil }); err == nil {
 		t.Fatal("purge erased the payment mode freeze")
 	}
 }

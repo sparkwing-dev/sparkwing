@@ -13,14 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// SetPaymentMode configures the provider mode. Switching modes requires a store without ledger activity.
-func (o *Operator) SetPaymentMode(ctx context.Context, mode capability.PaymentMode) error {
-	if mode != capability.PaymentTest && mode != capability.PaymentLive {
-		return ErrInvalidInput
-	}
-	return o.s.inTx(ctx, func(tx *storeTx) error { return setPaymentModeTx(ctx, tx, mode) })
-}
-
 func setPaymentModeTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode) error {
 	if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
 		return err

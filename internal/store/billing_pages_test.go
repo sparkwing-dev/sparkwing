@@ -141,7 +141,7 @@ func TestBillingPagesFailureRetainsReservationAndProviderBinding(t *testing.T) {
 	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, replay); err == nil {
 		t.Fatal("replaced provider")
 	}
-	if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentLive); err == nil {
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err == nil {
 		t.Fatal("changed mode after checkout activity")
 	}
 }

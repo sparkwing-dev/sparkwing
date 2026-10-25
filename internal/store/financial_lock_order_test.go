@@ -144,14 +144,14 @@ func TestPaymentModeFreezeRollsBackWithFinancialWrite(t *testing.T) {
 	if err != context.Canceled {
 		t.Fatalf("rollback: %v", err)
 	}
-	if err := s.AsOperator().SetPaymentMode(t.Context(), "live"); err != nil {
+	if err := s.AsOperator().setPaymentMode(t.Context(), "live"); err != nil {
 		t.Fatalf("rolled-back activity froze the mode: %v", err)
 	}
 }
 
 func TestWarningLocksSavedCardTeamsBeforeClearingCards(t *testing.T) {
 	s, recorder := newRecordingStore(t)
-	if err := s.AsOperator().SetPaymentMode(t.Context(), "test"); err != nil {
+	if err := s.AsOperator().setPaymentMode(t.Context(), "test"); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_payment_method,card_fingerprint,refill_enabled,refill_amount_cents) VALUES ('z',1,1,'customer','method','card',1,1000),('a',1,1,'customer','method','card',1,1000)`)

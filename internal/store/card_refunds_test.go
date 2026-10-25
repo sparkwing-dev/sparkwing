@@ -239,7 +239,7 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 		case 1:
 			rewriteSchemaExec(t, s.db, "UPDATE payment_refunds SET payment_intent=?", foreign)
 		case 2:
-			if err := s.AsOperator().SetPaymentMode(ctx, capability.PaymentLive); err == nil {
+			if err := s.AsOperator().setPaymentMode(ctx, capability.PaymentLive); err == nil {
 				t.Fatal("changed payment mode after refund activity")
 			}
 			event.Mode = capability.PaymentLive

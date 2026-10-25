@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -8,11 +9,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+func (o *Operator) setPaymentMode(ctx context.Context, mode capability.PaymentMode) error {
+	_, err := o.ConfigureDeployment(ctx, mode, DefaultFreeTeamSlots, func() error { return nil })
+	return err
+}
+
 func TestPaymentModeFixedByLedgerActivity(t *testing.T) {
 	for _, activity := range []string{"grant", "charge", "checkout", "refill"} {
 		t.Run(activity, func(t *testing.T) {
 			s := authorityStore(t)
-			if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+			if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentTest); err != nil {
 				t.Fatal(err)
 			}
 			switch activity {
@@ -51,13 +57,13 @@ func TestPaymentModeFixedByLedgerActivity(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentLive); err == nil || !strings.Contains(err.Error(), "fresh store") {
+			if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err == nil || !strings.Contains(err.Error(), "fresh store") {
 				t.Fatalf("switch with %s: %v; want fresh-store error", activity, err)
 			}
 			if _, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, DefaultFreeTeamSlots, func() error { t.Fatal("published a forbidden mode change"); return nil }); err == nil || !strings.Contains(err.Error(), "fresh store") {
 				t.Fatalf("startup mode switch with %s: %v", activity, err)
 			}
-			if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+			if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentTest); err != nil {
 				t.Fatalf("same mode: %v", err)
 			}
 		})
@@ -67,7 +73,7 @@ func TestPaymentModeFixedByLedgerActivity(t *testing.T) {
 func TestFreshStoreCanSwitchPaymentMode(t *testing.T) {
 	s := authorityStore(t)
 	for _, mode := range []capability.PaymentMode{capability.PaymentLive, capability.PaymentTest, capability.PaymentLive} {
-		if err := s.AsOperator().SetPaymentMode(t.Context(), mode); err != nil {
+		if err := s.AsOperator().setPaymentMode(t.Context(), mode); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -78,7 +84,7 @@ func TestUnconfiguredLedgerFixesPaymentMode(t *testing.T) {
 	if _, err := (&Tenant{s: s, team: "a"}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 1, Reference: "first", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentLive); err == nil || !strings.Contains(err.Error(), "fresh store") {
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err == nil || !strings.Contains(err.Error(), "fresh store") {
 		t.Fatalf("switch unconfigured ledger: %v", err)
 	}
 }
@@ -88,7 +94,7 @@ func TestFixedPaymentModeLedgerReports(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			s := authorityStore(t)
 			tenant := &Tenant{s: s, team: "a"}
-			if err := s.AsOperator().SetPaymentMode(t.Context(), mode); err != nil {
+			if err := s.AsOperator().setPaymentMode(t.Context(), mode); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 1000, Reference: "grant", CreatedBy: "operator"}); err != nil {
@@ -150,7 +156,7 @@ func TestPaymentModeFreezeSurvivesPurge(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "credit_grants", 1)
-	if err := s.AsOperator().SetPaymentMode(t.Context(), capability.PaymentLive); err == nil || !strings.Contains(err.Error(), "fresh store") {
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err == nil || !strings.Contains(err.Error(), "fresh store") {
 		t.Fatalf("switch after purge: %v", err)
 	}
 }

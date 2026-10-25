@@ -2520,8 +2520,8 @@ settlement checks actionable fraud warnings in the same transaction as the
 grant and event receipt. A refusal leaves the checkout and ledger unchanged.
 The verified-event implementation and HTTP adapter remain W2 integrations.
 
-`Operator.SetPaymentMode` refuses a mode change while any grant, charge, checkout
-or refill exists. Startup uses the same owner. Switching between test and live
+`Operator.ConfigureDeployment` refuses a mode change while any grant, charge,
+checkout or refill exists. Switching between test and live
 requires a fresh store. Ledger reports read that store's single mode.
 
 `Operator.CreditLedgerTotals` owns deployment-wide ledger reports. Its raw Store
@@ -3622,8 +3622,8 @@ Store fixtures reach transaction helpers through test-only methods. The unused
 unattached-checkout abort path and its legacy-only test are deleted. Ambiguous
 provider failures retain their reservation and replay identity.
 
-`Operator.ConfigureDeployment` and `Operator.SetPaymentMode` persists validated `test`/`live` configuration under the
-payment-mode setting lock. Controller startup uses the same `--payment-mode` for
+`Operator.ConfigureDeployment` persists validated `test`/`live` configuration
+under the payment-mode setting lock. Controller startup uses the same `--payment-mode` for
 the store and verifier. The first grant, charge, checkout or refill atomically
 persists an irreversible freeze marker. Purging teams never clears it. Switching
 modes after any financial activity requires a fresh store. Reservations and
