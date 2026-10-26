@@ -1112,3 +1112,9 @@ separate operations; no database transaction stays open across a provider call.
 - Card management and display go through Stripe (hosted customer portal, or a live read at page load that is never persisted). Auto-refill charges the Stripe customer's default payment method off-session.
 - Cross-team card pinning and fingerprint-spread fraud warnings are removed. Stripe Radar handles card fraud; an early fraud warning holds the team whose payment it names. Abuse with one card across many teams is handled by a Radar rule or by hand (runbook).
 - Amends decision 62: purge has no card data to scrub.
+
+## 2026-10-26 Korey decision 66: pipeline secrets are scoped to their repository
+
+- A secret set for a pipeline belongs to one repository and that pipeline (`--repo <owner/name> --pipeline <name>`); a run receives it only when its sealed repository identity and pipeline match. Two repositories with the same pipeline name never share pipeline secrets, matching GitHub repository secrets.
+- Team-wide `--shared` secrets stay team-wide; the docs compare them to GitHub organization secrets without a repository allow-list. Reserved pools and only_on remain the way to protect deploy secrets.
+- Amends decision 34's pipeline scope (branch-pinned `source:` behaviour is unchanged).
