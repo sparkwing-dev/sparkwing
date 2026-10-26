@@ -189,7 +189,9 @@ A refill that returns `requires_action` closes as failed with `authentication_re
 whether the status arrives from reconciliation, confirmation or a signed webhook.
 A refill the card declines, or that asks for authentication, is recorded with
 its decline code, and the team's owners receive an email asking them to update
-the card with Manage card. A refill that an early fraud warning named before it
+the card with Manage card. A refill that cannot be created because the Stripe
+customer has no card, for example after the card was removed in Stripe's portal,
+closes as `no_card` and notifies the owners the same way. A refill that an early fraud warning named before it
 settled is refused, refunded in full and holds the team. Either way no further
 refill starts until an Add funds payment succeeds or a new card setup completes;
 changing the card in Stripe's portal or changing the refill settings does not

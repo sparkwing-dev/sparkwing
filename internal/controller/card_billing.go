@@ -148,6 +148,10 @@ func (s *Server) refillPass(ctx context.Context) {
 	for _, r := range due {
 		if r.PaymentIntent == "" {
 			res, err := s.checkout.refill(ctx, s.paymentDeployment, r, "")
+			if errors.Is(err, errRefillNoCard) {
+				s.recordRefillFailure(ctx, r, store.RefillNoCard)
+				continue
+			}
 			if err != nil || res.Status != refillCreated {
 				s.logger.Error("creating a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "status", res.Status, "err", err)
 				continue
@@ -187,12 +191,7 @@ func (s *Server) refillPass(ctx context.Context) {
 			}
 		}
 		if res.Status == "requires_action" {
-			settled, err := operator.RecordRefillAuthenticationRequired(ctx, r)
-			if err != nil {
-				s.logger.Error("recording refill authentication failure", "team", string(r.Team), "err", err)
-			} else {
-				s.reportPaymentSettlement(ctx, settled)
-			}
+			s.recordRefillFailure(ctx, r, store.RefillAuthenticationRequired)
 		}
 		if res.Status == "canceled" {
 			if err := operator.RecordRefillCanceled(ctx, r); err != nil {
@@ -200,6 +199,17 @@ func (s *Server) refillPass(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// recordRefillFailure stops refills the way a declined payment does and notifies the owners; a failed write is retried
+// on the next pass.
+func (s *Server) recordRefillFailure(ctx context.Context, r store.Refill, code string) {
+	settled, err := s.operator.RecordRefillFailed(ctx, r, code)
+	if err != nil {
+		s.logger.Error("recording a refill failure; it is retried", "team", string(r.Team), "refill", r.ID, "failure", code, "err", err)
+		return
+	}
+	s.reportPaymentSettlement(ctx, settled)
 }
 
 // safety: a refused payment is refunded under a key naming its retry, so a

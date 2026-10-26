@@ -443,8 +443,20 @@ func (o *Operator) RecordRefillCanceled(ctx context.Context, r Refill) error {
 	})
 }
 
-// RecordRefillAuthenticationRequired closes a refill that cannot complete off-session and reports its failure for owner notification.
-func (o *Operator) RecordRefillAuthenticationRequired(ctx context.Context, r Refill) (out PaymentSettlement, err error) {
+// Failures the refill worker records without a signed payment outcome.
+const (
+	// RefillAuthenticationRequired closes a refill whose payment cannot complete off-session.
+	RefillAuthenticationRequired = "authentication_required"
+	// RefillNoCard closes a refill the checkout service could not create because the customer has no card in Stripe.
+	RefillNoCard = "no_card"
+)
+
+// RecordRefillFailed closes an unpaid refill with code, stopping refills like a declined payment, and reports the
+// failure for owner notification.
+func (o *Operator) RecordRefillFailed(ctx context.Context, r Refill, code string) (out PaymentSettlement, err error) {
+	if code != RefillAuthenticationRequired && code != RefillNoCard {
+		return out, fmt.Errorf("%w: unknown refill failure %q", ErrInvalidInput, code)
+	}
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
 		mode, err := paymentModeTx(ctx, tx)
 		if err != nil {
@@ -453,7 +465,7 @@ func (o *Operator) RecordRefillAuthenticationRequired(ctx context.Context, r Ref
 		if err := lockFinancialTeamsTx(ctx, tx, r.Team); err != nil {
 			return err
 		}
-		if err := lockPaymentTx(ctx, tx, mode, r.PaymentIntent); err != nil {
+		if err := lockPaymentTx(ctx, tx, mode, cmp.Or(r.PaymentIntent, r.ID)); err != nil {
 			return err
 		}
 		if _, err := lockLedgerTx(ctx, tx, r.Team); err != nil {
@@ -468,7 +480,7 @@ func (o *Operator) RecordRefillAuthenticationRequired(ctx context.Context, r Ref
 			out.Replayed = true
 			return nil
 		}
-		err = closeUnpaidTx(ctx, tx, capability.PaymentEvent{Mode: mode, DeclineCode: "authentication_required"}, &checkout)
+		err = closeUnpaidTx(ctx, tx, capability.PaymentEvent{Mode: mode, DeclineCode: code}, &checkout)
 		out = checkout.result
 		return err
 	})

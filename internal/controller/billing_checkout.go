@@ -46,6 +46,9 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 
 var errCheckoutRefused = errors.New("the checkout service refused the session")
 
+// errRefillNoCard is the checkout service's refusal to create a refill for a customer with no card in Stripe.
+var errRefillNoCard = errors.New("the customer has no card")
+
 // openReservedPage opens the provider page for a reservation; email, the team owner's address for Stripe's receipts,
 // is sent with a card setup and never stored.
 func (c *billingCheckout) openReservedPage(ctx context.Context, deployment string, page *capability.BillingPage, email string) error {
@@ -115,7 +118,11 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 		return fmt.Errorf("checkout service: read: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%w: %d %s", errCheckoutRefused, resp.StatusCode, strings.TrimSpace(string(payload)))
+		err := fmt.Errorf("%w: %d %s", errCheckoutRefused, resp.StatusCode, strings.TrimSpace(string(payload)))
+		if path == "/internal/refill" && resp.StatusCode == http.StatusConflict {
+			err = errors.Join(errRefillNoCard, err)
+		}
+		return err
 	}
 	if err := json.Unmarshal(payload, out); err != nil {
 		return fmt.Errorf("checkout service: decode: %w", err)

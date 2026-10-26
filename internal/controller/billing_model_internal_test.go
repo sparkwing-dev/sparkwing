@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -613,4 +614,42 @@ func TestRefillAuthenticationRequiredClosesAndAlerts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A refill the checkout service cannot create because the customer has no card in Stripe stops like a declined
+// refill: it is closed as no_card, the owners are told, and later passes ask nothing more of the service.
+func TestARefillWithoutACardStopsAndNotifiesTheOwners(t *testing.T) {
+	e, tenant := refillFixture(t)
+	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('owner','owner@example.test',1,1,1)`)
+	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
+	mail := &refillMail{}
+	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential").WithMailer(mail)
+	calls := 0
+	worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.Path != "/internal/refill" {
+			t.Fatalf("unexpected checkout call: %s", r.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusConflict, Body: io.NopCloser(strings.NewReader(`{"error":"the customer has no card"}`))}, nil
+	})
+	for range 3 {
+		worker.refillPass(t.Context())
+	}
+	if calls != 1 {
+		t.Fatalf("checkout calls = %d; want the refill stopped after the first refusal", calls)
+	}
+	standing, err := tenant.SpendStanding(t.Context())
+	if err != nil || standing.Refill.Failure != store.RefillNoCard || standing.Refill.FailedAt.IsZero() || standing.Refill.Open {
+		t.Fatalf("refill state %+v: %v; want it closed as no_card", standing.Refill, err)
+	}
+	if sent := mail.sent; len(sent) != 1 || sent[0].To != "owner@example.test" || !strings.Contains(sent[0].Text, store.RefillNoCard) {
+		t.Fatalf("owner mail %+v; want one refill failure notice", sent)
+	}
+}
+
+type refillMail struct{ sent []mailer.Message }
+
+func (m *refillMail) Send(_ context.Context, msg mailer.Message) error {
+	m.sent = append(m.sent, msg)
+	return nil
 }
