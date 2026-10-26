@@ -95,11 +95,11 @@ func TestBillingPagesImmutableReservationProperty(t *testing.T) {
 		case 2:
 			page.Customer = "forged"
 		case 3:
-			page.Email = "forged@example.test"
+			page.ProviderID = ""
 		case 4:
 			page.AmountCents--
 		case 5:
-			page.Email = ""
+			page.URL = "http://checkout.test/page"
 		case 6:
 			page.Kind = capability.BillingPageCard
 		case 7:
@@ -141,11 +141,14 @@ func TestBillingPagesFailureRetainsReservationAndProviderBinding(t *testing.T) {
 	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, replay); err == nil {
 		t.Fatal("replaced provider")
 	}
-	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 2000, "key"); err == nil {
-		t.Fatal("mode changed")
+		t.Fatal("replayed a test billing page in live mode")
+	}
+	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, original); err == nil {
+		t.Fatal("completed a test billing page in live mode")
 	}
 }
 
@@ -183,7 +186,7 @@ func TestBillingPagesAccountRemovalAndTenantPurge(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `DELETE FROM sessions WHERE account_id='owner'`)
 	rewriteSchemaExec(t, s.db, `DELETE FROM memberships WHERE account_id='owner'`)
 	rewriteSchemaExec(t, s.db, `DELETE FROM accounts WHERE id='owner'`)
-	if err := s.AsOperator().deleteTenantRows(t.Context(), "a"); err != nil {
+	if err := s.inTx(t.Context(), func(tx *storeTx) error { return deleteTenantRowsTx(t.Context(), tx, "a") }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM teams WHERE name='a'`); err != nil {

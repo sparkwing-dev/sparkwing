@@ -74,6 +74,17 @@ type operatorTeamJSON struct {
 	HoldCauses   []string            `json:"hold_causes"`
 	Events       []operatorEventJSON `json:"events"`
 	NextCursor   string              `json:"next_cursor,omitempty"`
+	// FailedRefunds are queued refunds Stripe failed or canceled; the operator returns the money by hand.
+	FailedRefunds []operatorFailedRefundJSON `json:"failed_refunds"`
+}
+
+type operatorFailedRefundJSON struct {
+	PaymentIntent string `json:"payment_intent"`
+	RefundID      string `json:"refund_id"`
+	Status        string `json:"status"`
+	Reason        string `json:"reason"`
+	AmountMicro   int64  `json:"amount_micro"`
+	CreatedAt     int64  `json:"created_at"`
 }
 
 const operatorEventLimit = 50
@@ -109,13 +120,21 @@ func operatorTeamView(ctx context.Context, t *store.Tenant, cursor string) (oper
 	standing, serr := t.BillingStanding(ctx)
 	freeze, ferr := t.CreditFreeze(ctx)
 	events, eerr := t.BusinessEvents(ctx, "", operatorEventLimit+1, cursor)
-	if err := errors.Join(err, merr, cerr, serr, ferr, eerr); err != nil {
+	refunds, rerr := t.FailedCardRefunds(ctx)
+	if err := errors.Join(err, merr, cerr, serr, ferr, eerr, rerr); err != nil {
 		return operatorTeamJSON{}, err
 	}
 	out := operatorTeamJSON{
 		Team: string(t.Team()), DisplayName: info.DisplayName, Owners: []string{},
 		BalanceMicro: credit.BalanceMicro, Billing: billingTrustBody(t.Team(), standing),
 		Frozen: freeze.Frozen, Holds: append([]string{}, freeze.Disputes...), HoldCauses: append([]string{}, freeze.Causes...), Events: []operatorEventJSON{},
+		FailedRefunds: []operatorFailedRefundJSON{},
+	}
+	for _, f := range refunds {
+		out.FailedRefunds = append(out.FailedRefunds, operatorFailedRefundJSON{
+			PaymentIntent: f.PaymentIntent, RefundID: f.RefundID, Status: f.Status, Reason: f.Reason,
+			AmountMicro: f.AmountMicro, CreatedAt: f.CreatedAt.Unix(),
+		})
 	}
 	for _, m := range members {
 		if m.Role == store.RoleOwner {

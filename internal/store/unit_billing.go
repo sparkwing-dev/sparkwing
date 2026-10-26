@@ -88,11 +88,7 @@ func checkUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 }
 
 func unitCreditRefusalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, price CreditRate) error {
-	l, err := lockLedgerTx(ctx, tx, team)
-	if err != nil {
-		return err
-	}
-	return unitCreditRefusalViewTx(ctx, l.view(), unit, price)
+	return unitCreditRefusalViewTx(ctx, ledgerView{tx: tx, team: team}, unit, price)
 }
 
 func unitCreditRefusalViewTx(ctx context.Context, view ledgerView, unit UnitRef, price CreditRate) error {
@@ -161,8 +157,27 @@ func settleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitR
 	return err
 }
 
+// Purge closes accounting while the work rows still exist. Retained awards
+// and intervals then contain everything needed for late financial callbacks.
+func settleTeamAwardsTx(ctx context.Context, tx *storeTx, team Team) error {
+	rows, err := tx.queryContext(ctx, `SELECT reservation_id FROM billing_awards WHERE team=? AND settled_at IS NULL ORDER BY reservation_id`, team)
+	if err != nil {
+		return err
+	}
+	reservations, err := scanPrefixes(rows)
+	if err != nil {
+		return err
+	}
+	for _, reservation := range reservations {
+		if _, err := accountBillingAwardTx(ctx, tx, team, reservation, tx.now(ctx), true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // safety: a renewal charges what the work used and pays for its next slice in one step. A balance or hold that cannot
-// pay writes the award's durable stop, a drain deadline one slice out and the job's cancellation in the same
+// pay writes the award's durable stop, a drain deadline at most one slice out and the job's cancellation in the same
 // transaction, so every later renewal reports the refusal and no lease outlives the drain. It returns the unit's
 // funded bound for leaseBoundTx.
 func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64, beat *runstate.LeaseBeat) (time.Time, error) {
@@ -182,7 +197,23 @@ func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 	now := tx.now(ctx)
 	err = renewBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, now, a.provenance.Metered && !a.drain.Valid)
 	if refused := (*InsufficientCreditsError)(nil); errors.As(err, &refused) {
-		err = stopAwardTx(ctx, tx, team, *a, refused.Error(), now.Add(SliceSeconds*time.Second))
+		drain := now.Add(SliceSeconds * time.Second)
+		if refused.Hold != "" {
+			mode, modeErr := creditPaymentMode(ctx, tx)
+			if modeErr != nil {
+				return time.Time{}, modeErr
+			}
+			var deadline sql.NullInt64
+			if err := tx.QueryRowContext(ctx, `SELECT MIN(deadline) FROM (
+ SELECT drain_deadline_at AS deadline FROM credit_freezes WHERE team=? AND payment_mode=? AND released_at IS NULL
+ UNION ALL SELECT billing_trust_at+? FROM teams WHERE name=? AND billing_trust='revoked' AND billing_trust_at>0) drains`, team, mode, int64(SliceSeconds*time.Second), team).Scan(&deadline); err != nil {
+				return time.Time{}, err
+			}
+			if deadline.Valid && deadline.Int64 < drain.UnixNano() {
+				drain = time.Unix(0, deadline.Int64).UTC()
+			}
+		}
+		err = stopAwardTx(ctx, tx, team, *a, refused.Error(), drain)
 	}
 	if err != nil {
 		return time.Time{}, err
@@ -195,48 +226,6 @@ func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 		beat.CancelRequested, beat.CancelReason = true, a.stop
 	}
 	return fundedBoundTx(ctx, tx, team, unit, generation, now)
-}
-
-// Hold mutations use whole-transaction retries because cancellation reaches run locks after the ledger lock.
-func stopHeldAwardsTx(ctx context.Context, tx *storeTx, team Team) error {
-	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
-		return err
-	}
-	cause, err := teamHoldTx(ctx, tx, team)
-	if err != nil || cause == "" {
-		return err
-	}
-	rows, err := tx.queryContext(ctx, `SELECT reservation_id FROM billing_awards WHERE team=? AND metered=1 AND settled_at IS NULL AND stop_reason='' ORDER BY run_id,reservation_id`, team)
-	if err != nil {
-		return err
-	}
-	var reservations []string
-	for rows.Next() {
-		var reservation string
-		if err := rows.Scan(&reservation); err != nil {
-			return errors.Join(err, rows.Close())
-		}
-		reservations = append(reservations, reservation)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return err
-	}
-	reason := (&InsufficientCreditsError{Hold: cause}).Error()
-	drain := tx.now(ctx).Add(SliceSeconds * time.Second)
-	for _, reservation := range reservations {
-		a, err := readBillingAwardTx(ctx, tx, team, reservation)
-		if err != nil {
-			return err
-		}
-		// A prior stop may already have settled this unstarted award.
-		if a.settled.Valid || a.stop != "" {
-			continue
-		}
-		if err := stopAwardTx(ctx, tx, team, a, reason, drain); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func stopAwardTx(ctx context.Context, tx *storeTx, team Team, a billingAward, reason string, drain time.Time) error {
@@ -317,15 +306,8 @@ func endUnstartedBillingTx(ctx context.Context, tx *storeTx, team Team, run stri
 	if err != nil {
 		return err
 	}
-	var unstarted []string
-	for rows.Next() {
-		var reservation string
-		if err := rows.Scan(&reservation); err != nil {
-			return errors.Join(err, rows.Close())
-		}
-		unstarted = append(unstarted, reservation)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+	unstarted, err := scanPrefixes(rows)
+	if err != nil {
 		return err
 	}
 	for _, reservation := range unstarted {

@@ -611,8 +611,8 @@ The controller verifies Stripe signatures at `POST /webhooks/stripe`. Checkout
 payments, failures and expiry carry the committed provider session identity.
 Card setup and card payment outcomes, individual refund updates, early fraud
 warnings and opened or closed disputes carry their provider identities and
-verified status. The verifier reads card details from Stripe when needed and
-checks their identity, customer and test/live mode. Metadata grants no team,
+verified status. The verifier reads a paid charge's 3-D Secure result from Stripe
+and checks its identity, payment and test/live mode. It keeps no card details. Metadata grants no team,
 credit, attempt or billing authority.
 
 Settlement derives the team and ledger effect from committed billing records
@@ -721,8 +721,11 @@ before it acts. It never creates a store, and it refuses when there is no
 record or when the store it reaches differs, for example after `pg-url` was
 pointed at a restored copy.
 
-A grant with a `--key` it has seen reports the first grant instead of granting
-again. One grant is capped at 10,000 cents ($100). Pass `--allow-large` on that
+Every grant requires `--key`. Reusing it reports the first grant instead of
+granting again. To correct a mistaken free grant, use `--reverses` with its full
+reference, for example `--key qa-correction --reverses admin:qa-1`. Keep `--cents`
+positive. The command records a negative reversal bounded by the grant's remaining
+amount. Paid credits use the payment refund path. One grant is capped at 10,000 cents ($100). Pass `--allow-large` on that
 invocation to allow more. Every command requires `--operator ACCOUNT_ID` with
 your existing account ID and records that identity in the business event and
 operator log. Pod access remains the authority for the command. Audit rows

@@ -41,7 +41,7 @@ func providerRefillEvent(t *testing.T, s *Store, now time.Time, kind capability.
 	e := refillPaid(now, "payment", 15000)
 	e.EventID, e.Kind = "event-"+string(kind), kind
 	if kind == capability.PaymentCardFailed {
-		e.Status, e.Fingerprint, e.ChargeID, e.DeclineCode = "requires_payment_method", "", "", "card_declined"
+		e.Status, e.ChargeID, e.DeclineCode = "requires_payment_method", "", "card_declined"
 	}
 	return e
 }
@@ -117,7 +117,7 @@ func TestProviderPaymentsCommitFinancialStateWithReceipt(t *testing.T) {
 			case capability.PaymentCardSetup:
 				rewriteSchemaExec(t, s.db, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES ('test',?,'setup','a','new-customer')`, e.ObjectID)
 				e.PaymentID, e.Currency, e.AmountMinor, e.ChargeID = "", "", 0, ""
-				e.CustomerID, e.MethodID, e.Fingerprint, e.Brand, e.Last4, e.Status = "new-customer", "new-method", "new-card", "visa", "4242", "succeeded"
+				e.CustomerID, e.Status = "new-customer", "succeeded"
 				e.Created++
 			case capability.PaymentCardPaid, capability.PaymentCardFailed:
 				e = providerRefillEvent(t, s, now, kind)
@@ -127,7 +127,7 @@ func TestProviderPaymentsCommitFinancialStateWithReceipt(t *testing.T) {
 				case capability.PaymentRefund:
 					e.AmountMinor, e.Status = 25, "succeeded"
 				case capability.PaymentWarningEvent:
-					e.AmountMinor, e.Currency, e.Fingerprint, e.Actionable = 0, "", "fp_1", true
+					e.AmountMinor, e.Currency, e.Actionable = 0, "", true
 				case capability.PaymentDisputeOpened:
 					e.Reason, e.Status = "fraudulent", "needs_response"
 				case capability.PaymentDisputeClosed:
@@ -257,7 +257,7 @@ func TestProviderWarningBeforeCollectionAndCloseBeforeOpen(t *testing.T) {
 		s, tenant, now := providerPaymentFixture(t)
 		payment := providerRefillEvent(t, s, now, capability.PaymentCardPaid)
 		warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
-		warning.AmountMinor, warning.Currency, warning.Fingerprint = 0, "", "fp_1"
+		warning.AmountMinor, warning.Currency = 0, ""
 		for _, actionable := range []bool{false, true, false} {
 			warning.Actionable = actionable
 			warning.EventID += fmt.Sprint(actionable)
@@ -301,7 +301,7 @@ func TestProviderSetupReplayCannotRestoreAnOlderCard(t *testing.T) {
 	s, tenant, now := providerPaymentFixture(t)
 	setup := func(id, method string, created int64) capability.PaymentEvent {
 		rewriteSchemaExec(t, s.db, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES ('test',?,'setup','a','cus_1')`, id)
-		return capability.PaymentEvent{EventID: id + "-event", ObjectID: id, Mode: capability.PaymentTest, Kind: capability.PaymentCardSetup, CustomerID: "cus_1", MethodID: method, Fingerprint: method, Brand: "visa", Last4: "4242", Created: created, Status: "succeeded"}
+		return capability.PaymentEvent{EventID: id + "-event", ObjectID: id, Mode: capability.PaymentTest, Kind: capability.PaymentCardSetup, CustomerID: "cus_1", Created: created, Status: "succeeded"}
 	}
 	old := setup("old", "old-method", now.Unix()+1)
 	newer := setup("new", "new-method", now.Unix()+2)
@@ -317,7 +317,7 @@ func TestProviderSetupReplayCannotRestoreAnOlderCard(t *testing.T) {
 	}
 	tenant.s.SetTestClock(t, func() time.Time { return now })
 	standing, err := tenant.SpendStanding(t.Context())
-	if err != nil || standing.Card.PaymentMethod != "new-method" {
+	if err != nil || !standing.Card.AddedAt.Equal(time.Unix(now.Unix()+2, 0)) {
 		t.Fatalf("replay replaced current card: %+v: %v", standing.Card, err)
 	}
 	stale := setup("stale", "stale-method", now.Unix()+1)
@@ -326,7 +326,7 @@ func TestProviderSetupReplayCannotRestoreAnOlderCard(t *testing.T) {
 	}
 	tenant.s.SetTestClock(t, func() time.Time { return now })
 	standing, err = tenant.SpendStanding(t.Context())
-	if err != nil || standing.Card.PaymentMethod != "new-method" {
+	if err != nil || !standing.Card.AddedAt.Equal(time.Unix(now.Unix()+2, 0)) {
 		t.Fatalf("stale setup replaced current card: %+v: %v", standing.Card, err)
 	}
 }
@@ -338,7 +338,7 @@ func TestProviderWarningProtectionIsMonotonicProperty(t *testing.T) {
 	property := func(seed uint32) bool {
 		index++
 		e := providerPaymentEvent(now, capability.PaymentWarningEvent)
-		e.ObjectID, e.AmountMinor, e.Currency, e.Fingerprint = fmt.Sprintf("warning-%d", index), 0, "", "fp_1"
+		e.ObjectID, e.AmountMinor, e.Currency = fmt.Sprintf("warning-%d", index), 0, ""
 		seen := false
 		for step := 0; step < 8; step++ {
 			e.EventID = fmt.Sprintf("%s-event-%d", e.ObjectID, step)
@@ -370,7 +370,9 @@ func TestProviderPaymentModeSwitchCannotReassignAnExistingPayment(t *testing.T) 
 	if _, err := s.settlePaymentFacts(t.Context(), payment); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, "UPDATE settings SET value=? WHERE key='payment_mode'", []byte(`"live"`))
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
+		t.Fatal(err)
+	}
 	before := paymentMutationSnapshot(t, s)
 	for _, kind := range []capability.PaymentEventKind{capability.PaymentRefund, capability.PaymentDisputeOpened} {
 		e := providerPaymentEvent(now, kind)
@@ -459,7 +461,7 @@ func TestProviderRefillSuccessAfterFailureGrantsOnce(t *testing.T) {
 	if _, err := s.settlePaymentFacts(t.Context(), wrong); err == nil {
 		t.Fatal("a refill paid with another amount was settled")
 	}
-	e.Kind, e.EventID, e.Status, e.Fingerprint, e.ChargeID = capability.PaymentCardPaid, "paid-after-retry", "succeeded", "fp_1", "provider-charge"
+	e.Kind, e.EventID, e.Status, e.ChargeID = capability.PaymentCardPaid, "paid-after-retry", "succeeded", "provider-charge"
 	for range 2 {
 		if _, err := s.settlePaymentFacts(t.Context(), e); err != nil {
 			t.Fatal(err)

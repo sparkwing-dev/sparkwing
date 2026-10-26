@@ -66,13 +66,17 @@ func prepayCeiling(earned int) int {
 }
 
 func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Time, trust string, held bool) (standingPolicy, error) {
+	mode, err := creditPaymentMode(ctx, q)
+	if err != nil {
+		return standingPolicy{}, err
+	}
 	var paid, first, incident sql.NullInt64
 	var p standingPolicy
-	err := q.QueryRowContext(ctx, `SELECT
- (SELECT SUM(amount_micro) FROM credit_grants WHERE team=? AND kind IN (?,?)),
- (SELECT MIN(g.created_at) FROM credit_grants g WHERE g.team=? AND g.kind=? AND
- g.amount_micro+COALESCE((SELECT SUM(r.amount_micro) FROM credit_grants r WHERE r.team=g.team AND r.kind='reversal' AND r.reverses=g.reference AND g.reference<>''),0)>0),
- (SELECT MAX(COALESCE(released_at,created_at)) FROM credit_freezes WHERE team=? AND no_fault=0)`, team, CreditGrantPaid, creditGrantReversal, team, CreditGrantPaid, team).Scan(&paid, &first, &incident)
+	err = q.QueryRowContext(ctx, `SELECT
+ (SELECT SUM(amount_micro) FROM credit_grants WHERE team=? AND payment_mode=? AND (kind=? OR (kind=? AND reverses_kind='paid'))),
+ (SELECT MIN(g.created_at) FROM credit_grants g WHERE g.team=? AND g.payment_mode=? AND g.kind=? AND
+ g.amount_micro+COALESCE((SELECT SUM(r.amount_micro) FROM credit_grants r WHERE r.team=g.team AND r.payment_mode=g.payment_mode AND r.kind='reversal' AND r.reverses_kind='paid' AND r.reverses=g.reference AND g.reference<>''),0)>0),
+ (SELECT MAX(COALESCE(released_at,created_at)) FROM credit_freezes WHERE team=? AND payment_mode=? AND no_fault=0)`, team, mode, CreditGrantPaid, creditGrantReversal, team, mode, CreditGrantPaid, team, mode).Scan(&paid, &first, &incident)
 	if err != nil {
 		return p, err
 	}
@@ -100,7 +104,7 @@ func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Tim
 	p.history.Tier, p.prepayCeiling = billingPolicy[earned].tier, billingPolicy[ceiling].tier
 	p.row = billingPolicy[max(earned, min(backed, ceiling))]
 	switch {
-	case held || trust == billingTrustRevoked:
+	case held:
 		p.row = billingPolicyRow{tier: "Held"}
 	case trust == billingTrustGranted:
 		p.row = billingPolicy[len(billingPolicy)-1]
@@ -121,8 +125,12 @@ func checkCloudCapacityTx(ctx context.Context, view ledgerView, cores int64) err
 	if cores > standing.CloudVCPU {
 		return authorityError(apierr.BadRequest, "job exceeds "+standing.Tier+" standing Cloud vCPU limit")
 	}
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return err
+	}
 	var active int64
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(c.cpu_class),0) FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE a.team=? AND a.executor_class='cloud' AND a.settled_at IS NULL`, team).Scan(&active)
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(c.cpu_class),0) FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE c.payment_mode=? AND a.team=? AND a.executor_class='cloud' AND a.settled_at IS NULL`, mode, team).Scan(&active)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -137,29 +138,17 @@ func (v ledgerView) balance(ctx context.Context) (int64, error) {
 	return creditBalanceTx(ctx, v.tx, v.team)
 }
 
-// safety: PostgreSQL runs concurrent claims and settlements in their own transactions, so a team's balance check and
-// the write it guards serialize on the team's lock; SQLite allows one writer and is already serial. The lock key is
-// a 32-bit hash of the team, so two teams can share one and serialize; that costs only waiting, never a balance.
-func lockLedgerTx(ctx context.Context, tx *storeTx, team Team) (*ledgerTx, error) {
-	if team == "" {
-		return nil, errors.New("ledger: a ledger lock names its team")
-	}
-	if tx.dialect == DialectPostgres {
-		if _, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/ledger/"+string(team)); err != nil {
-			return nil, err
-		}
-	}
-	tx.ledgerLocked = true
-	return &ledgerTx{storeTx: tx, team: team}, nil
-}
-
 func (l *ledgerTx) insertGrant(ctx context.Context, g CreditGrant) error {
 	if g.Team != l.team {
 		return fmt.Errorf("ledger: grant for %q under %q's lock", g.Team, l.team)
 	}
-	_, err := l.exec(ctx, `INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses, created_by,
-	    created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(g.Team), g.ID, g.Kind, g.AmountMicro, g.Reference, g.Reverses, g.CreatedBy, g.CreatedAt.UnixNano())
+	mode, err := creditPaymentMode(ctx, l.storeTx)
+	if err != nil {
+		return err
+	}
+	_, err = l.exec(ctx, `INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses, created_by,
+	    created_at, payment_mode, reverses_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(g.Team), g.ID, g.Kind, g.AmountMicro, g.Reference, g.Reverses, g.CreatedBy, g.CreatedAt.UnixNano(), mode, cmp.Or(g.ReversesKind, CreditGrantPaid))
 	if err != nil {
 		return fmt.Errorf("credits: insert %s grant: %w", g.Kind, err)
 	}
@@ -170,11 +159,15 @@ func (l *ledgerTx) insertCharge(ctx context.Context, c CreditCharge) error {
 	if c.Team != l.team {
 		return fmt.Errorf("ledger: charge for %q under %q's lock", c.Team, l.team)
 	}
-	_, err := l.exec(ctx, `INSERT INTO credit_charges (team, id, run_id, node_id, capability_prefix, principal,
-	    kind, seconds, amount_micro, storage_bytes, cpu_class, rate_micro_per_second, charged_at)
-	    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	mode, err := creditPaymentMode(ctx, l.storeTx)
+	if err != nil {
+		return err
+	}
+	_, err = l.exec(ctx, `INSERT INTO credit_charges (team, id, run_id, node_id, capability_prefix, principal,
+	    kind, seconds, amount_micro, storage_bytes, cpu_class, rate_micro_per_second, charged_at, payment_mode)
+	    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(c.Team), c.ID, c.RunID, c.NodeID, c.TokenPrefix, c.Principal, c.Kind, c.Seconds, c.AmountMicro,
-		c.StorageBytes, c.CPUClassCores, c.RateMicroPerSecond, c.ChargedAt.UnixNano())
+		c.StorageBytes, c.CPUClassCores, c.RateMicroPerSecond, c.ChargedAt.UnixNano(), mode)
 	if err != nil {
 		return fmt.Errorf("credits: insert %s charge: %w", c.Kind, err)
 	}
@@ -208,13 +201,4 @@ func (l *ledgerTx) balance(ctx context.Context) (int64, error) {
 func (l *ledgerTx) relabelCreator(ctx context.Context, from, to string) error {
 	_, err := l.exec(ctx, `UPDATE credit_grants SET created_by=? WHERE team=? AND created_by=?`, to, l.team, from)
 	return err
-}
-
-func (l *ledgerTx) purge(ctx context.Context) error {
-	for _, q := range []string{`DELETE FROM credit_charges WHERE team=?`, `DELETE FROM credit_grants WHERE team=?`} {
-		if _, err := l.exec(ctx, q, l.team); err != nil {
-			return err
-		}
-	}
-	return nil
 }

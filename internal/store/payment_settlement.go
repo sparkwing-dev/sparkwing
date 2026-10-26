@@ -13,6 +13,50 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+func (op *Operator) setPaymentModeTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode) error {
+	if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`, []byte(`"test"`)); err != nil {
+		return err
+	}
+	current, err := scanPaymentMode(tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='payment_mode'`+tx.forUpdate()))
+	if err != nil {
+		return err
+	}
+	if current == mode {
+		return nil
+	}
+	if current == capability.PaymentLive {
+		return authorityError(apierr.Conflict, "payment mode cannot switch from live to test")
+	}
+	teams, err := rotationTeamsTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err := lockFinancialTeamsTx(ctx, tx, teams...); err != nil {
+		return err
+	}
+	var open bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM billing_awards WHERE settled_at IS NULL)
+	    OR EXISTS(SELECT 1 FROM credit_checkouts WHERE payment_mode='test' AND kind='refill' AND closed_at IS NULL)`).Scan(&open); err != nil {
+		return err
+	}
+	if open {
+		return authorityError(apierr.Conflict, "drain metered work before switching to live; see the cutover runbook")
+	}
+	if _, err := tx.execContext(ctx, `UPDATE team_storage SET storage_charged_through=? WHERE store IN ('cache','logs')`, tx.now(ctx).UnixNano()); err != nil {
+		return err
+	}
+	// Test customers do not exist in live mode; payment and ledger history stay intact.
+	if _, err := tx.execContext(ctx, `UPDATE teams SET card_customer='',card_added_at=0,refill_enabled=0`); err != nil {
+		return err
+	}
+	data, err := json.Marshal(mode)
+	if err != nil {
+		return err
+	}
+	_, err = tx.execContext(ctx, `UPDATE settings SET value=? WHERE key='payment_mode'`, data)
+	return err
+}
+
 // PaymentSettlement reports committed credit without accepting caller-selected credits.
 type PaymentSettlement struct {
 	Team        Team
@@ -113,9 +157,26 @@ func configuredPaymentModeTx(ctx context.Context, tx *storeTx, eventMode capabil
 }
 
 func paymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMode, error) {
-	var encoded []byte
-	if err := tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"+tx.forShare()).Scan(&encoded); err != nil {
+	mode, err := scanPaymentMode(tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"))
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", authorityError(apierr.Unavailable, "payment mode is not configured")
+	}
+	return mode, err
+}
+
+// Reads before payment configuration use the same test default as ledger writes.
+func creditPaymentMode(ctx context.Context, q rowQuerier) (capability.PaymentMode, error) {
+	mode, err := scanPaymentMode(q.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='payment_mode'"))
+	if errors.Is(err, sql.ErrNoRows) {
+		return capability.PaymentTest, nil
+	}
+	return mode, err
+}
+
+func scanPaymentMode(row rowScanner) (capability.PaymentMode, error) {
+	var encoded []byte
+	if err := row.Scan(&encoded); err != nil {
+		return "", err
 	}
 	var mode capability.PaymentMode
 	if json.Unmarshal(encoded, &mode) != nil || (mode != capability.PaymentTest && mode != capability.PaymentLive) {
@@ -172,25 +233,13 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		return err
 	}
 	event.LiabilityShift = shifted == 1
-	refusal, err := claimCardTx(ctx, tx, team, event.PaymentID, event.Fingerprint, now)
+	warned, err := paymentWarnedTx(ctx, tx, event.Mode, event.PaymentID)
 	if err != nil {
 		return err
 	}
-	if refusal.warning != "" && event.LiabilityShift {
-		var warnedPayment string
-		if err := tx.QueryRowContext(ctx, `SELECT payment_intent FROM payment_warnings WHERE payment_mode=? AND warning_id = ? AND actionable=1`, event.Mode, refusal.warning).Scan(&warnedPayment); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		// A warning can precede its paid event; protect that payment while keeping the team held.
-		if warnedPayment == event.PaymentID {
-			refusal, err = claimCardPinTx(ctx, tx, team, event.PaymentID, event.Fingerprint, now)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if refusal.reason != "" {
-		return refuseCheckoutTx(ctx, tx, event, checkout, refusal)
+	// A warning can precede its paid event; a liability-shifted payment keeps its credit while the warning holds the team.
+	if warned && !event.LiabilityShift {
+		return refuseCheckoutTx(ctx, tx, event, checkout, CardRefusedWarning)
 	}
 	id, err := newCreditID("paid")
 	if err != nil {
@@ -204,7 +253,7 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		return err
 	}
 	if checkout.kind == checkoutKindCheckout {
-		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0 WHERE team = ? AND refill_blocked = 1`, string(team)); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0 WHERE team = ? AND payment_mode = ? AND refill_blocked = 1`, string(team), event.Mode); err != nil {
 			return err
 		}
 	}
@@ -231,8 +280,8 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 	}
 	// A successful Add funds supersedes failures from earlier refill reservations, including delayed outcomes.
 	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?,
-	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team)
-	      AND NOT EXISTS (SELECT 1 FROM credit_checkouts recovery WHERE recovery.team = credit_checkouts.team
+	    refill_blocked = CASE WHEN `+refillOnCurrentCard+`
+	      AND NOT EXISTS (SELECT 1 FROM credit_checkouts recovery WHERE recovery.team = credit_checkouts.team AND recovery.payment_mode = credit_checkouts.payment_mode
 	        AND recovery.kind = 'checkout' AND recovery.paid_at > credit_checkouts.opened_at) THEN 1 ELSE 0 END
 	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), failure, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
@@ -240,27 +289,29 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 	return tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: auditActor{system: auditPaymentProvider}}, auditCheckout{CheckoutID: checkout.result.CheckoutID, Outcome: auditCheckoutOutcome(kind), PaymentMode: auditPaymentMode(event.Mode), EventID: digestAudit(event.EventID)})
 }
 
+// refillOnCurrentCard matches a refill opened since the team's current card setup, so a failure from before a newer
+// setup does not stop refills on the new card.
+const refillOnCurrentCard = `kind = 'refill' AND opened_at >= (SELECT card_added_at FROM teams WHERE name = credit_checkouts.team)`
+
 // safety: a refused Add funds or refill payment closes its row without a grant and is queued for a full refund, whose
-// settlement finds the team through the checkout's payment; a warned card also holds the team. Refusal removes the
-// matching saved card, and a refused refill records its failure, so later passes cannot charge it again.
-func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, refusal cardRefusal) error {
+// settlement finds the team through the checkout's payment and holds it for the warning. A refused refill records its
+// failure, so later passes do not charge again until Add funds succeeds or a new card setup completes; a change in
+// Stripe's portal does not resume them.
+func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, reason string) error {
 	team, now := checkout.result.Team, tx.now(ctx)
-	checkout.result.Refused = refusal.reason
-	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?), failure = ?, warning_id=?,
-	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team) THEN 1 ELSE 0 END
-	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), refusal.reason, refusal.warning, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+	checkout.result.Refused = reason
+	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?), failure = ?,
+	    refill_blocked = CASE WHEN `+refillOnCurrentCard+` THEN 1 ELSE 0 END
+	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), reason, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
 	if checkout.kind == checkoutKindRefill {
-		checkout.result.RefillFailed = refusal.reason
-	}
-	if err := forgetTeamCardTx(ctx, tx, team, event.Fingerprint, refusal.reason, now); err != nil {
-		return err
+		checkout.result.RefillFailed = reason
 	}
 	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(checkout.result.CheckoutID), Operation: businessEventCardRefused}); err != nil {
 		return err
 	}
-	return queueCardRefundTx(ctx, tx, team, event.PaymentID, event.AmountMinor, refusal.reason, now)
+	return queueCardRefundTx(ctx, tx, team, event.PaymentID, event.AmountMinor, reason, now)
 }
 
 func deploymentIDTx(ctx context.Context, tx *storeTx) (string, error) {
@@ -285,6 +336,7 @@ func deploymentIDTx(ctx context.Context, tx *storeTx) (string, error) {
 }
 
 // ConfigureDeployment commits startup settings only after publish records the deployment.
+// Call before serving requests or starting workers; payment mode is fixed for that startup.
 // An empty mode preserves the existing payment mode. publish must not call the store.
 func (o *Operator) ConfigureDeployment(ctx context.Context, mode capability.PaymentMode, freeSlots int64, publish func() error) (string, error) {
 	if (mode != "" && mode != capability.PaymentTest && mode != capability.PaymentLive) || freeSlots < 0 || publish == nil {
@@ -296,11 +348,7 @@ func (o *Operator) ConfigureDeployment(ctx context.Context, mode capability.Paym
 			return "", err
 		}
 		if mode != "" {
-			data, err := json.Marshal(mode)
-			if err != nil {
-				return "", err
-			}
-			if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, data); err != nil {
+			if err := tx.operator.setPaymentModeTx(ctx, tx, mode); err != nil {
 				return "", err
 			}
 		}

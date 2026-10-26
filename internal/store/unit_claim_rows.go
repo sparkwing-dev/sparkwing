@@ -11,18 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func lockClaimOwnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
-	var id string
-	switch unit.Kind {
-	case capability.UnitTrigger, capability.UnitPlan:
-		return tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND id=? AND unit_kind=?`+tx.forUpdate(), team, unit.RunID, unit.Kind).Scan(&id)
-	case capability.UnitEval:
-		return tx.QueryRowContext(ctx, `SELECT run_id FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&id)
-	default:
-		return nil
-	}
-}
-
 func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capability, unit UnitRef) error {
 	if c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush {
 		return nil
@@ -49,6 +37,9 @@ func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capab
 }
 
 func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
+	if err := lockOwnerUnitTx(ctx, tx, team, unit); err != nil {
+		return err
+	}
 	now := tx.now(ctx).UnixNano()
 	var expired int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM triggers WHERE team=? AND id=? AND expires_at<=?`, team, unit.RunID, now).Scan(&expired); err != nil {
@@ -86,7 +77,7 @@ func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 	var expiry sql.NullInt64
 	if unit.Kind == capability.UnitEval {
 		var ownerName string
-		err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,expires_at,owner_lease_name FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&status, &holder, &prefix, &expiry, &ownerName)
+		err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,expires_at,owner_lease_name FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, team, unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&status, &holder, &prefix, &expiry, &ownerName)
 		if err != nil {
 			return err
 		}
@@ -103,7 +94,7 @@ func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 	} else {
 		var available int64
 		var cancelled, started sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,expires_at,available_at,cancel_requested_at,started_at FROM triggers WHERE team=? AND id=? AND unit_kind=?`+tx.forUpdate(), team, unit.RunID, unit.Kind).Scan(&status, &holder, &prefix, &expiry, &available, &cancelled, &started)
+		err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,expires_at,available_at,cancel_requested_at,started_at FROM triggers WHERE team=? AND id=? AND unit_kind=?`, team, unit.RunID, unit.Kind).Scan(&status, &holder, &prefix, &expiry, &available, &cancelled, &started)
 		if err != nil {
 			return err
 		}

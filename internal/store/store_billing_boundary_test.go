@@ -113,7 +113,9 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	tenant := &Tenant{s: s, team: "a"}
 	op := s.AsOperator()
 	rewriteSchemaExec(t, s.db, "DELETE FROM credit_grants")
-	rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value) VALUES ('payment_mode',?)", []byte(`"test"`))
+	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+		t.Fatal(err)
+	}
 	if err := op.TestOnlyCreateTeam(t.Context(), "neighbor_%'--"); err != nil {
 		t.Fatal(err)
 	}
@@ -138,14 +140,14 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 		}
 	}
 	for _, event := range []capability.PaymentEvent{
-		{Mode: capability.PaymentTest, EventID: "pending-setup", Kind: capability.PaymentCardSetup, ObjectID: "setup", CustomerID: "customer", MethodID: "method", Fingerprint: "card", Created: now.Unix()},
+		{Mode: capability.PaymentTest, EventID: "pending-setup", Kind: capability.PaymentCardSetup, ObjectID: "setup", CustomerID: "customer", Created: now.Unix()},
 		{Mode: capability.PaymentTest, EventID: "pending-payment", Kind: capability.PaymentCardFailed, ObjectID: "pending-payment", PaymentID: "pending-payment", CustomerID: "customer", Currency: "usd", AmountMinor: 1000, Status: "requires_payment_method", Created: now.Unix()},
 	} {
 		if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "customer", PaymentMethod: "method", Fingerprint: "card"}, "provider", *now); err != nil {
+	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "customer"}, "provider", *now); err != nil {
 		t.Fatal(err)
 	}
 	table := CreditRateTable{{Cores: 2, MicroPerSecond: 1000000}, {Cores: 4, MicroPerSecond: 1000000}}
@@ -180,12 +182,6 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 		t.Fatal(err)
 	}
 	payment := "recovery"
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := claimCardTx(t.Context(), tx, tenant.team, payment, "fp_fixture", *now)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		return queueCardRefundTx(t.Context(), tx, tenant.team, payment, 1, "fixture", *now)
 	}); err != nil {

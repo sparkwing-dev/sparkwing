@@ -35,15 +35,15 @@ func TestGrantCreditsIsIdempotentByReference(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "credit_grants", 2)
 }
 
-func TestGrantCreditsRepeatsAnEmptyReference(t *testing.T) {
+func TestGrantCreditsRejectsAnEmptyReference(t *testing.T) {
 	s := authorityStore(t)
 	tenant := &Tenant{s: s, team: "a"}
 	for range 2 {
-		if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 50000, Reference: "", CreatedBy: "ops"}); err != nil {
-			t.Fatal(err)
+		if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 50000, Reference: "", CreatedBy: "ops"}); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("unkeyed grant: %v", err)
 		}
 	}
-	rewriteSchemaCount(t, s.db, "credit_grants", 2)
+	rewriteSchemaCount(t, s.db, "credit_grants", 0)
 }
 
 func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {

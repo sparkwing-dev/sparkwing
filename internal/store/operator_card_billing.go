@@ -20,7 +20,7 @@ func (o *Operator) DueCardRefunds(ctx context.Context) (_ []CardRefundWork, err 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.queryContext(ctx, `SELECT team,payment_intent,reason,attempts FROM card_refunds WHERE payment_mode=? AND status=? AND next_attempt_at<=? ORDER BY created_at`, mode, cardRefundDue, tx.now(ctx).UnixNano())
+	rows, err := tx.queryContext(ctx, `SELECT team,payment_intent,reason FROM card_refunds WHERE payment_mode=? AND status=? ORDER BY created_at`, mode, cardRefundDue)
 	if err != nil {
 		return nil, err
 	}
@@ -28,27 +28,27 @@ func (o *Operator) DueCardRefunds(ctx context.Context) (_ []CardRefundWork, err 
 	var out []CardRefundWork
 	for rows.Next() {
 		var w CardRefundWork
-		var attempts int64
-		if err := rows.Scan(&w.Team, &w.PaymentIntent, &w.Reason, &attempts); err != nil {
+		if err := rows.Scan(&w.Team, &w.PaymentIntent, &w.Reason); err != nil {
 			return nil, err
 		}
-		w.Key = fmt.Sprintf("%s-%d", w.PaymentIntent, attempts)
 		out = append(out, w)
 	}
 	return out, rows.Err()
 }
 
-// MarkCardRefundMade binds the provider refund ID to an exact queued attempt.
+// MarkCardRefundMade binds the provider refund ID to the payment's queued refund.
 // Only verified callbacks establish the refund's amount and outcome.
-func (o *Operator) MarkCardRefundMade(ctx context.Context, team Team, key, refundID string) error {
-	paymentIntent, attempt, ok := parseRefundKey(key)
-	if !ok || refundID == "" {
-		return fmt.Errorf("%w: refund key %q", ErrInvalidInput, key)
+func (o *Operator) MarkCardRefundMade(ctx context.Context, team Team, paymentIntent, refundID string) error {
+	if paymentIntent == "" || refundID == "" {
+		return fmt.Errorf("%w: a refund names its payment and provider refund", ErrInvalidInput)
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
-		// The mode is configuration, not payment state; the payment lock precedes all association reads.
+		// Existing refund obligations use the retained payer tombstone.
 		mode, err := paymentModeTx(ctx, tx)
 		if err != nil {
+			return err
+		}
+		if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
 			return err
 		}
 		if err := lockPaymentTx(ctx, tx, mode, paymentIntent); err != nil {
@@ -70,7 +70,7 @@ func (o *Operator) MarkCardRefundMade(ctx context.Context, team Team, key, refun
 		if err == nil && recordedPayment != paymentIntent {
 			return authorityError(apierr.Conflict, "refund belongs to another payment")
 		}
-		if _, err := tx.execContext(ctx, `UPDATE card_refunds SET refund_id=?, status='pending' WHERE payment_mode=? AND team=? AND payment_intent=? AND attempts=? AND status='due'`, refundID, mode, team, paymentIntent, attempt); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE card_refunds SET refund_id=?, status='pending' WHERE payment_mode=? AND team=? AND payment_intent=? AND status='due'`, refundID, mode, team, paymentIntent); err != nil {
 			return err
 		}
 		return tx.operator.reconcilePaymentStateTx(ctx, tx, mode, paymentIntent, paymentAttribution{})

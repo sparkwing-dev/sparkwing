@@ -432,7 +432,7 @@ describe("automatic refill", () => {
   });
 
   it("names a replacement card and Add funds as recovery from a failed refill", () => {
-    assert.match(lib.refillStatus({ ...refill, failed_at: 1, failure: "card_declined" }), /failed \(card_declined\)\. Change the saved card or add funds/);
+    assert.match(lib.refillStatus({ ...refill, failed_at: 1, failure: "card_declined" }), /failed \(card_declined\)\. Update your card with Manage card, then add funds/);
   });
 
   it("defaults a response without refill to off", async () => {

@@ -52,10 +52,9 @@ type teamBillingJSON struct {
 	Grants                    []teamBillingGrantJSON `json:"grants"`
 }
 
+// teamCardJSON says when a card was last added; whether Stripe still holds it, and which, only Stripe's portal shows.
 type teamCardJSON struct {
-	Brand   string `json:"brand"`
-	Last4   string `json:"last4"`
-	AddedAt int64  `json:"added_at"`
+	AddedAt int64 `json:"added_at"`
 }
 
 type teamRefillJSON struct {
@@ -163,8 +162,8 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 		Usage:    make([]teamBillingUsageJSON, 0, len(usage)),
 		Grants:   make([]teamBillingGrantJSON, 0, len(grants)),
 	}
-	if spend.Card.PaymentMethod != "" {
-		out.Card = &teamCardJSON{Brand: spend.Card.Brand, Last4: spend.Card.Last4, AddedAt: spend.Card.AddedAt.Unix()}
+	if !spend.Card.AddedAt.IsZero() {
+		out.Card = &teamCardJSON{AddedAt: spend.Card.AddedAt.Unix()}
 	}
 	for _, u := range usage {
 		out.Usage = append(out.Usage, teamBillingUsageJSON{

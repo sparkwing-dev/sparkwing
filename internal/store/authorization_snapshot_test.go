@@ -139,7 +139,7 @@ func TestAuthorizationSnapshotReadsWithoutLocksAndMutationLocksAncestry(t *testi
 		t.Fatal(err)
 	}
 	want := []authorizationLock{
-		{query: "SELECT name FROM teams WHERE name=$1 FOR SHARE", args: []driver.NamedValue{{Ordinal: 1, Value: "a"}}},
+		{query: "SELECT name FROM teams WHERE name=$1 FOR UPDATE", args: []driver.NamedValue{{Ordinal: 1, Value: "a"}}},
 		{query: "SELECT prefix FROM capabilities WHERE prefix=$1 FOR NO KEY UPDATE", args: []driver.NamedValue{{Ordinal: 1, Value: child.Prefix}}},
 		{query: "SELECT prefix FROM capabilities WHERE prefix=$1 FOR NO KEY UPDATE", args: []driver.NamedValue{{Ordinal: 1, Value: root.Prefix}}},
 	}

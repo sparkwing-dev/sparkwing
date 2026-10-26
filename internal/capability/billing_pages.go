@@ -17,7 +17,6 @@ type BillingPage struct {
 	ReservationID string
 	AmountCents   int64
 	Customer      string
-	Email         string
 	ProviderID    string
 	URL           string
 	ExpiresAt     time.Time

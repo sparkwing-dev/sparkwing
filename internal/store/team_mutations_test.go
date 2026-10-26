@@ -154,7 +154,7 @@ func TestTeamDeletionUsesCurrentOwnerAndLastTeamGuards(t *testing.T) {
 	}
 }
 
-func TestTeamDeletionRetainsCheckoutAndHoldGuardsOnStoreClock(t *testing.T) {
+func TestTeamDeletionAllowsOpenCheckoutAndHold(t *testing.T) {
 	s := authorityStore(t)
 	actor := authorityMember(t, s, "owner", RoleOwner)
 	tenant := &Tenant{s: s, team: "a"}
@@ -166,18 +166,7 @@ func TestTeamDeletionRetainsCheckoutAndHoldGuardsOnStoreClock(t *testing.T) {
 	if _, err := tenant.TestOnlyOpenCreditCheckout(t.Context(), 100*MicroCreditsPerCent, now, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.DeleteAuthorizedTeam(t.Context(), a); !errors.Is(err, ErrOpenCheckout) {
-		t.Fatalf("open checkout: %v", err)
-	}
-	now = now.Add(time.Hour)
 	if _, err := tenant.hold(t.Context(), "dispute", "", "hold", "owner"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.DeleteAuthorizedTeam(t.Context(), a); !errors.Is(err, ErrTeamFrozen) {
-		t.Fatalf("hold: %v", err)
-	}
-	s.SetTestClock(t, func() time.Time { return now })
-	if _, err := tenant.ReleaseCreditFreezes(t.Context(), "dispute", "operator", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.DeleteAuthorizedTeam(t.Context(), a); err != nil {

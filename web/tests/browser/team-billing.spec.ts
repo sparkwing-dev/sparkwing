@@ -226,13 +226,14 @@ test("a held team sees the hold and no pay-now or budget controls", async ({
       frozen: true,
       hold_cause: "dispute",
       can_add_card: true,
-      card: { brand: "visa", last4: "4242", added_at: 1_790_000_000 },
+      card: { added_at: 1_790_000_000 },
     },
   });
   await page.goto("/team/billing");
   await expect(page.getByRole("alert").filter({ hasText: "Cloud work is stopped while a payment dispute is open" })).toBeVisible();
   await expect(page.getByText(/balance is empty/)).toHaveCount(0);
-  await expect(page.getByText("visa ending 4242")).toBeVisible();
+  await expect(page.getByText(/A card was added on/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage card" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Pay .* now/ })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Spend limits" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add funds" })).toBeVisible();
@@ -242,12 +243,12 @@ test("an owner turns on automatic refill within the limits", async ({ page }) =>
   const seen = await mockController(page, {
     billing: {
       can_add_card: true,
-      card: { brand: "visa", last4: "4242", added_at: 1_790_000_000 },
+      card: { added_at: 1_790_000_000 },
     },
   });
   await page.goto("/team/billing");
   await expect(page.getByRole("heading", { name: "Automatic refill" })).toBeVisible();
-  await expect(page.getByText(/Established standing allows at most \$200 per refill, 2 refills a day and \$500 a week/)).toBeVisible();
+  await expect(page.getByText(/Your payment history allows at most \$200 per refill, 2 refills a day and \$500 a week/)).toBeVisible();
   const toggle = page.getByLabel("Refill automatically");
   await expect(toggle).not.toBeChecked();
   await expect(page.getByLabel("When the balance is below")).toHaveValue("10");
@@ -292,12 +293,12 @@ test("a failed refill tells the owner to update the card", async ({ page }) => {
   await mockController(page, {
     billing: {
       can_add_card: true,
-      card: { brand: "visa", last4: "4242", added_at: 1_790_000_000 },
+      card: { added_at: 1_790_000_000 },
       refill: { ...billing.refill, enabled: true, threshold_cents: 1_000, amount_cents: 5_000, failed_at: 1_790_000_000, failure: "card_declined" },
     },
   });
   await page.goto("/team/billing");
-  await expect(page.getByText(/The last refill failed \(card_declined\)\. Update your card/)).toBeVisible();
+  await expect(page.getByText(/The last refill failed \(card_declined\)\. Update your card with Manage card/)).toBeVisible();
 });
 
 test("an owner contacts the operators for higher limits or larger payments", async ({ page }) => {

@@ -11,7 +11,10 @@ import (
 )
 
 func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition) (runstate.Applied, error) {
-	if _, err := controllerOwnerTx(ctx, tx, team, string(change.Ref.RunID)); err != nil {
+	if err := prepareStateActorTx(ctx, tx, team, string(change.Ref.RunID), change.Actor); err != nil {
+		return runstate.Applied{}, err
+	}
+	if err := lockControllerCapacityTx(ctx, tx, team, string(change.Ref.RunID)); err != nil {
 		return runstate.Applied{}, err
 	}
 	applied, err := transitionNodeStateTx(ctx, tx, team, change)
@@ -24,6 +27,20 @@ func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change nodeTr
 		}
 	}
 	return applied, nil
+}
+
+// Completion can settle billing before the controller schedules again. Lock
+// every run that admission can affect before that settlement takes the ledger.
+func lockControllerCapacityTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
+	actor, err := controllerOwnerTx(ctx, tx, team, runID)
+	if err != nil || actor == nil {
+		return err
+	}
+	keys, _, err := capacityDeclarationsTx(ctx, tx, team, runstate.CapacityBinding{RunID: runID}, *actor)
+	if err != nil {
+		return err
+	}
+	return lockCapacityWorkTx(ctx, tx, team, keys, runspec.NodeRef{RunID: runspec.RunID(runID)}, false)
 }
 
 func controllerOwnerTx(ctx context.Context, tx *storeTx, team Team, runID string) (*runstate.Actor, error) {

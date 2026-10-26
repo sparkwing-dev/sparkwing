@@ -686,8 +686,9 @@ capability-backed session retains its parent's team and ends with that parent.
 Revocation updates the envelope and authority generation. Descendants
 retain their ancestry check. Every effect rolls back after a failed write.
 
-`schemaTables` is the single table inventory in `schema.go`. Runtime purge,
-tenant SQL guards and shape tests use it. Operator-owned `audit_events`,
+`schemaTables` is the single table inventory in `schema.go`. Financial tenant
+tables set `RetainOnTeamDeletion` so both purge passes preserve them. Operational
+purge, tenant SQL guards and shape tests use the inventory. Operator-owned `audit_events`,
 `capabilities` and `sessions` may carry a nullable team. Audit rows are retained
 after team deletion and expire only by age. Human actors and account subjects use
 account IDs. Non-account claimants use capability and holder digests, with no
@@ -888,8 +889,8 @@ ordinal. Queue arbitration serializes holds and awards. Claims take the controll
 lease, queue arbitration, authority and unit rows, then the ledger. Taking queue
 arbitration or a new team lock after a ledger lock poisons the transaction before
 acquisition. Billing pages, standing decisions, and team and account deletion
-take team rows and authority before ledger locks. Team rows use no-key-update strength because their names never change;
-ledger writes can take foreign-key key-share locks without waiting for deletion. Award rechecks SQL eligibility and reserves the unit and funding atomically.
+take team rows and authority before ledger locks. Financial writers take team rows
+with `FOR UPDATE`. Award rechecks SQL eligibility and reserves the unit and funding atomically.
 For a ready job naming no runner, the existing placement-hold predicate holds
 work for the best-ranked tier with a live claimant on the same team, matching
 labels and a free slot in its latest poll. The hold ends when that claimant takes
@@ -1063,11 +1064,35 @@ Operator entry points call those owners in a store transaction. Payment receipt
 settlement can use the same owners without nesting transactions or committing
 financial state before its receipt. No new unverified payment entry point exists.
 
+Stripe holds all card data (decision 65). No table column or persisted event
+JSON stores a card brand, last four digits, fingerprint, payment method ID or
+payer email. Per team the store keeps only `card_customer` and `card_added_at`;
+the ledger keeps checkout, payment and refund IDs, amounts, modes and statuses.
+Refills charge the Stripe customer's default payment method off-session, and the
+billing page shows and changes the card through Stripe's customer portal. Stripe
+Radar handles card fraud. The store never links one card across teams, so abuse
+of one card across many teams is a Radar rule or a manual matter. An actionable
+early fraud warning holds only the team its payment funded.
+`TestNoCardDetailsAreStoredFromSetupThroughPurge` scans every column of every
+table after a card setup, payment, refill, warning, refund and purge.
+
 Card setup ordering uses the supplied completion timestamp at nanosecond
 precision, or receipt time when completion time is absent. Older timestamps
-cannot replace the saved card. The subsecond migration marker is removed.
+cannot replace the recorded card setup. The subsecond migration marker is removed.
 Collection amounts must fit the credit ledger's integer representation.
-Refund retry state is read and updated under one transaction and ledger lock.
+Refund queue state is read and updated under one transaction and ledger lock. A
+refund Stripe fails or cancels is terminal and listed for the operator, never retried.
+Payment settlement, refund reconciliation and purge first lock team rows FOR UPDATE.
+Deletion never waits for financial finality. Purge removes operational data,
+refill settings and the team's Stripe customer ID, keeping the team row as a
+tombstone. Checkouts, receipts, refunds, grants, charges, holds and payer
+associations survive both purge passes, so late settlement, refund callbacks and
+fraud warnings still reconcile. No card details exist to scrub.
+Purge final-settles every award from its retained intervals before deleting work.
+Warnings and dispute holds write financial facts and a drain deadline only. Work
+renewal applies that deadline. Financial writers acquire no owner or work locks
+after the ledger. Refund binding uses the payer tombstone without an eligibility
+check. Financial JSON never holds card details, so purge scrubs nothing.
 
 `TestPaymentMutationsRollBackWithReceipt` exercises eight mutations against a
 failing receipt boundary and checks their financial state after reopening.
@@ -1090,8 +1115,9 @@ financial mutation. C2 owns provider payload/status verification. C1 owns payer
 association, supported ledger currency, integer arithmetic and settlement.
 
 The final `schema.sql` implements these local C1 requirements. Payment receipts
-are operator-owned because an unbound warning has no team. A team purge removes
-its bound receipts and correlations while retaining unbound warnings.
+are operator-owned because an unbound warning has no team. A team purge retains
+bound receipts and financial associations as well as unbound warnings. Card-setup
+correlations and hosted-page delivery details are removed.
 
 - `payment_events` keeps its existing columns and `(payment_mode,event_id)` key.
   Its kind check admits all `capability.PaymentEventKind` values. `checkout_id`
@@ -1103,9 +1129,9 @@ its bound receipts and correlations while retaining unbound warnings.
   The JSON stores the verified facts and `PaymentSettlement`, respectively.
   Checkout writes retain their existing shape. Index `(payment_mode,object_id)`.
   Several event IDs can refer to one provider object. They cannot change its
-  payer association or a settled object's payment, amount, currency, method and
-  card. A payment-intent failure is an observation before settlement. Its amount,
-  method and latest charge can change before success while the persisted payer
+  payer association or a settled object's payment, amount, currency and charge.
+  A payment-intent failure is an observation before settlement. Its amount and
+  latest charge can change before success while the persisted payer
   and attempt remain fixed. Closing a dispute preserves its
   terminal outcome and prevents a late open from restoring its hold.
 - Add `payment_correlations` with `payment_mode`, `provider_id`, `kind`, `team`,
@@ -1144,9 +1170,8 @@ Refund and dispute owners resolve the mode-scoped checkout or collection payer
 before touching legacy financial rows. Unknown warnings may persist before a
 payment is associated, so later settlement can refuse the warned payment.
 Warnings escalate monotonically. Returning to non-actionable never removes
-recorded protection. Mode isolation of retained card fingerprints and legacy
-warning/collection rows still needs W1's final schema and writer cutover. This
-contract does not treat the raw legacy rows as a new provider association.
+recorded protection. Warnings select the configured mode. The test-to-live
+startup switch forgets test-provider customers while retaining payment history.
 
 ## Persisted log readers
 
@@ -2486,10 +2511,10 @@ persisted payer attribution, replay rules and refund queue. This handle cut
 adds no provider verification contract. C2 still owns verified event delivery.
 
 Warning persistence and its payer hold share one transaction-local mutation owner.
-A warning ID retains its first payment and card fingerprint. A conflicting
-replay fails before applying a hold. Payer lookup compares every matching paid
-grant and card attempt. Conflicting tenant evidence rolls back the warning and
-hold. Shared-card warnings still hold each team when its own payment settles.
+A warning ID retains its first payment. A conflicting replay fails before
+applying a hold. Payer lookup compares every matching paid grant and card
+attempt. Conflicting tenant evidence rolls back the warning and hold. A warning
+holds only the team its payment funded.
 Holds use the tenant-scoped warning identity. The legacy provider-only hold
 identity is removed. Replaying an exact warning after release cannot restore
 its hold. A failed audit rolls back both warning persistence and the hold.
@@ -2506,11 +2531,22 @@ Console HTTP and break-glass callers retain their authenticated tenant selection
 
 The raw `paid` grant path and `POST /api/v1/credits/grants` are removed.
 `Tenant.GrantCredits` is removed. `Tenant.RecordCreditGrant` owns free grant requests
-and refuses paid credit and reversals before writing the ledger. Payment reversals
-use verified provider settlement or the authorized console refund transaction. Checkout
+and requires an explicit idempotency key. A correction reverses a named free grant,
+up to its remaining amount. Paid credit and payment reversals use verified provider
+settlement or the authorized console refund transaction. Checkout
 settlement checks actionable fraud warnings in the same transaction as the
 grant and event receipt. A refusal leaves the checkout and ledger unchanged.
 The verified-event implementation and HTTP adapter remain W2 integrations.
+
+`Operator.ConfigureDeployment` permits one test-to-live switch, including after
+financial activity. The persisted `settings.payment_mode` records live on the
+first live start; later live starts preserve it. Live-to-test startup is refused.
+Balances, standing history, holds, refill windows and payment decisions select
+the configured mode. Startup refuses the switch while any test award or reservation
+is unsettled or a test refill is open. All test work settles before live accounting
+starts, so later charges need no reservation-mode carry-over. The switch restarts
+storage watermarks at the cutover instant and forgets test-provider customers.
+Test financial rows remain for history, excluded from live reports and decisions.
 
 `Operator.CreditLedgerTotals` owns deployment-wide ledger reports. Its raw Store
 method is removed. Reports use the same billing calculator as unit renewal and
@@ -3574,7 +3610,8 @@ and member authority before the ledger, then recheck authority at commit. `billi
 is a tenant table with the reservation ID, caller account ID, request key,
 payment mode, immutable page facts and failed-delivery time. Its unique key is
 `(team, account_id, request_key)`. Changing kind or requested amount conflicts.
-Account removal preserves financial replay facts. Tenant purge removes them.
+Account removal and tenant purge preserve financial replay facts. Purge removes
+the hosted-page delivery details, retaining its checkout and payment association.
 
 Prepare commits a prepaid checkout or recovery attempt with the page reservation.
 Card setup reserves a new setup identity. Delivery failure retains the reservation
@@ -3609,11 +3646,17 @@ Store fixtures reach transaction helpers through test-only methods. The unused
 unattached-checkout abort path and its legacy-only test are deleted. Ambiguous
 provider failures retain their reservation and replay identity.
 
-`Operator.ConfigureDeployment` persists validated `test`/`live` configuration under the
-ledger lock. Controller startup calls it from the same `--payment-mode` that
-constructs the verifier. Reservations and verified settlement read that stored
-mode. Mode changes retain prior rows and their mode tags. This supplies the
-missing production writer for the existing `payment_mode` setting.
+`Operator.ConfigureDeployment` persists validated `test`/`live` configuration
+in the startup transaction, before requests and workers start. Controller startup
+uses the same `--payment-mode` for the store and verifier. An unconfigured ledger
+uses test mode. The first live start refuses unsettled test awards and reservations
+or open test refills. It atomically records the switch, restarts storage watermarks
+at the cutover instant, and forgets test Stripe customers and refill opt-ins.
+Publication failure rolls back the whole transaction. Subsequent live starts
+preserve live cards, refills and accounting watermarks. Payment mode stays fixed
+for that startup, so financial readers need no payment-mode row lock. Purging teams never clears
+the persisted mode. Live-to-test startup is refused. Reservations and verified
+settlement select the configured mode, and test rows never fund live work.
 
 ## Runner integration amendment: source reporting and declared references
 
@@ -4277,7 +4320,7 @@ committed refund receipt in the same ledger transaction. The receipt is selected
 by configured provider mode, refund object, tenant and payment identity through
 the existing payment_events object index. A successful receipt completes the
 queue and wins over a stale failed worker response; failed or canceled receipts
-schedule one retry. Repeated binds cannot
+are final and listed for the operator, never retried. Repeated binds cannot
 repeat that transition. The verified callback owns the financial reversal.
 No second callback authority or refund ledger is introduced.
 

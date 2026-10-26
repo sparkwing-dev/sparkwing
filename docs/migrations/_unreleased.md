@@ -25,6 +25,62 @@ jobs have different preferences.
 Recreate stores from an earlier baseline before starting this build.
 Existing stores are refused rather than opened under the new schema.
 
+## Stripe holds card data
+
+The controller no longer stores card details. `GET /api/v1/team/billing` returns
+`card` as `{"added_at": <unix seconds>}`; `card.brand` and `card.last4` are
+removed. Read the card in Stripe's customer portal, which
+`POST /api/v1/team/billing/portal` opens for a team admin once the team has a
+card (409 with reason `no_card` before then). The billing page shows Manage
+card instead of the card's brand and last four digits.
+
+Each team keeps only its Stripe customer ID and the time its last card setup
+completed. The schema drops `teams.card_payment_method`, `card_fingerprint`,
+`card_brand` and `card_last4`, `credit_checkouts.payment_method`,
+`receipt_email` and `warning_id`, `payment_warnings.fingerprint`, the card
+columns of `payment_setups`, and the `payment_cards` table. Recreate stores
+built from an earlier development baseline. Verified payment events persisted
+in `payment_events` and `payment_states` no longer carry a payment method or
+card details.
+
+The checkout service contract changes with this controller. `POST
+/internal/card-setup` receives the team owner's account `email`, which only Stripe
+keeps, for its receipts. `POST /internal/refill` and its
+reconcile, confirm and cancel operations receive the Stripe `customer` without
+`payment_method` or `receipt_email`; the service must charge the customer's
+default payment method off-session. The new `POST /internal/portal` receives
+`team`, `deployment` and `customer` and answers with the `url` of a Stripe
+customer portal session. Deploy the matching sparkwing-platform release.
+
+Cards are no longer pinned to the first team they fund, and an early fraud
+warning no longer blocks its card on other teams. A warning holds only the team
+whose payment it names, takes back unprotected credit and queues its refund as
+before. Stripe Radar handles card fraud; stop abuse of one card across many
+teams with a Radar rule or by hand. A refill refused by an early fraud warning
+leaves the team's card in place, and the warning's hold stops further refills.
+A failed refill waits for Add funds or a new card setup; changing the card in
+Stripe's portal does not restart refills.
+
+## Payment ledgers and operator grants
+
+Start with `--payment-mode live` to switch a test store to live once, even after
+test activity. First drain test awards, reservations and refills as described in
+the [cutover runbook](../billing.md#test-to-live-cutover-runbook). The switch commits
+before the controller serves requests and restarts storage accounting at the
+cutover instant. Later live starts preserve the switch and accounting watermarks.
+Live-to-test startup is refused. Test credits, standing, holds and refill windows cannot affect
+live decisions. Test Stripe customers and refill opt-ins are cleared at
+cutover; add a live card and opt in again. Test financial rows remain in the store.
+Grants, charges and holds retain mode tags. Reversals require an existing grant in
+the same team and mode. The schema includes these columns and the reversal
+foreign key.
+Financial records and payer associations survive team deletion as tombstones.
+Deletion never waits for financial finality; late payments, refunds and fraud
+warnings reconcile against retained records. Purge final-settles awards. Holds retain their drain
+deadline independently of operational work.
+Operator grants require an explicit idempotency key. Use `admin grant --reverses`
+to correct a free grant, naming its full reference and using a fresh key.
+
 ## Runner sizes are labels
 
 Replace CPU and memory requests in pipeline declarations with runner labels.
@@ -65,7 +121,7 @@ not delay matching jobs. Existing stores must be recreated because the baseline
 adds normalized requirement sets and indexed references on queued work.
 Metered claim leases account for billable time that begins during issuance.
 
-The store baseline is 23. Earlier stores are refused and must be recreated under
+The store baseline is 24. Earlier stores are refused and must be recreated under
 the pre-launch baseline policy. Delivery receipts now include each targeted
 admission, publication, withdrawal and lifecycle result. Reprocessing preserves
 committed effects. Installation withdrawals keep their original repository targets
@@ -2525,8 +2581,9 @@ accepts checkout outcomes, `setup_intent.succeeded`, payment-intent success and
 failure, individual refund creation/update/failure, early fraud warning
 creation/update, and dispute creation/closure. It passes provider identities,
 minor-unit amounts and statuses to settlement. Provider metadata never selects
-a team, credit grant or card attempt. Card details are read from Stripe with the
-configured key and checked against the signed object. Test and live use the same
+a team, credit grant or card attempt. A paid charge's 3-D Secure result is read
+from Stripe with the configured key and checked against the signed object; card
+details are never kept. Test and live use the same
 path with different keys.
 
 The store must connect non-checkout outcomes to its committed billing records.

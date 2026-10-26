@@ -20,6 +20,7 @@ type billingWriter interface {
 	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
 	RecordAuthorizedBillingPageFailure(context.Context, capability.Authorized, capability.BillingPage) error
 	SetAuthorizedRefill(context.Context, capability.Authorized, store.RefillSettings) error
+	TeamOwnerEmails(context.Context) ([]string, error)
 	RequestAuthorizedStanding(context.Context, capability.Authorized, string, string) (store.StandingRequest, error)
 }
 
@@ -34,6 +35,7 @@ func (s *Server) billingEndpoints() []controllerwire.Endpoint {
 		{Method: "POST", Pattern: "/api/v1/team/billing/checkout", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingCheckout)},
 		{Method: "POST", Pattern: "/api/v1/team/billing/standing-request", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamStandingRequest)},
 		{Method: "POST", Pattern: "/api/v1/team/billing/card", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingCard)},
+		{Method: "POST", Pattern: "/api/v1/team/billing/portal", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingPortal)},
 		{Method: "PUT", Pattern: "/api/v1/team/billing/refill", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingRefill)},
 	}
 }
@@ -61,7 +63,18 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 		return routepolicy.MissingEndpointPolicy()
 	}
 	if page.URL == "" {
-		if err := s.checkout.openReservedPage(r.Context(), s.paymentDeployment, &page); err != nil {
+		// safety: the owner's email goes only to Stripe, for receipts; the page record never holds it.
+		var email string
+		if kind == capability.BillingPageCard {
+			owners, err := writer.TeamOwnerEmails(r.Context())
+			if err != nil {
+				return err
+			}
+			if len(owners) > 0 {
+				email = owners[0]
+			}
+		}
+		if err := s.checkout.openReservedPage(r.Context(), s.paymentDeployment, &page, email); err != nil {
 			recordErr := writer.RecordAuthorizedBillingPageFailure(r.Context(), a, page)
 			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the payment page could not be opened; try again"}, err, recordErr)
 		}
@@ -79,8 +92,6 @@ func billingMutationError(err error) error {
 		return invalidEngineBody(err.Error())
 	case errors.Is(err, store.ErrNoCard):
 		return &apierr.Error{Code: apierr.Conflict, Message: err.Error(), Details: map[string]any{"reason": noCardCode}}
-	case moneyInFlight(err):
-		return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
 	default:
 		return accountMutationError(err)
 	}

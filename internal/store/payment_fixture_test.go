@@ -54,8 +54,15 @@ func (t *Tenant) TestOnlyHoldForDispute(
 // TestOnlySaveCard exercises the transaction owner with trusted fixture facts.
 func (t *Tenant) TestOnlySaveCard(ctx context.Context, c Card, actor string, now time.Time) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		return saveCardTx(ctx, tx, t.team, c, auditActor{system: auditPaymentProvider}, now)
+		return saveCardTx(ctx, tx, t.team, c, "seti_"+c.Customer, auditActor{system: auditPaymentProvider}, now)
 	})
+}
+
+// paymentWarning is an early fraud warning a test records directly.
+type paymentWarning struct {
+	WarningID     string
+	PaymentIntent string
+	Actionable    bool
 }
 
 // TestOnlyRecordPaymentWarning exercises the transaction owner with trusted fixture facts.
@@ -68,7 +75,7 @@ func (o *Operator) TestOnlyRecordPaymentWarning(ctx context.Context, w paymentWa
 		if err := lockPaymentTx(ctx, tx, mode, w.PaymentIntent); err != nil {
 			return err
 		}
-		result, applyErr := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: mode, ObjectID: w.WarningID, PaymentID: w.PaymentIntent, Fingerprint: w.Fingerprint, Actionable: w.Actionable}, auditActor{system: auditPaymentProvider})
+		result, applyErr := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: mode, ObjectID: w.WarningID, PaymentID: w.PaymentIntent, Actionable: w.Actionable}, auditActor{system: auditPaymentProvider})
 		team, err = result.Team, applyErr
 		return err
 	})

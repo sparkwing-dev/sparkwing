@@ -170,16 +170,17 @@ const (
 
 // schemaTable records the owner of a baseline table.
 type schemaTable struct {
-	Name  string
-	Owner schemaOwner
+	Name                 string
+	Owner                schemaOwner
+	RetainOnTeamDeletion bool
 }
 
 // schemaTables classifies every table created by the neutral schema.
 var schemaTables = []schemaTable{
 	{Name: "accounts", Owner: schemaOperator},
 	{Name: "approvals", Owner: schemaTenant},
-	{Name: "billable_intervals", Owner: schemaTenant},
-	{Name: "billing_awards", Owner: schemaTenant},
+	{Name: "billable_intervals", Owner: schemaTenant, RetainOnTeamDeletion: true},
+	{Name: "billing_awards", Owner: schemaTenant, RetainOnTeamDeletion: true},
 	{Name: "billing_pages", Owner: schemaTenant},
 	{Name: "blob_members", Owner: schemaTenant},
 	{Name: "blob_receipts", Owner: schemaTenant},
@@ -188,7 +189,7 @@ var schemaTables = []schemaTable{
 	{Name: "blobs", Owner: schemaTenant},
 	{Name: "audit_events", Owner: schemaOperator},
 	{Name: "capabilities", Owner: schemaOperator},
-	{Name: "card_refunds", Owner: schemaTenant},
+	{Name: "card_refunds", Owner: schemaTenant, RetainOnTeamDeletion: true},
 	{Name: "claim_awards", Owner: schemaOperator},
 	{Name: "claim_requirements", Owner: schemaTenant},
 	{Name: "claim_contexts", Owner: schemaTenant},
@@ -197,12 +198,12 @@ var schemaTables = []schemaTable{
 	{Name: "concurrency_holders", Owner: schemaTenant},
 	{Name: "admission_work", Owner: schemaTenant},
 	{Name: "concurrency_waiters", Owner: schemaTenant},
-	{Name: "credit_charges", Owner: schemaTenant},
-	{Name: "credit_checkouts", Owner: schemaTenant},
-	{Name: "credit_freezes", Owner: schemaTenant},
-	{Name: "credit_grants", Owner: schemaTenant},
+	{Name: "credit_charges", Owner: schemaTenant, RetainOnTeamDeletion: true},
+	{Name: "credit_checkouts", Owner: schemaTenant, RetainOnTeamDeletion: true},
+	{Name: "credit_freezes", Owner: schemaTenant, RetainOnTeamDeletion: true},
+	{Name: "credit_grants", Owner: schemaTenant, RetainOnTeamDeletion: true},
 	{Name: "cron_fires", Owner: schemaTenant},
-	{Name: "console_refund_receipts", Owner: schemaTenant},
+	{Name: "console_refund_receipts", Owner: schemaTenant, RetainOnTeamDeletion: true},
 	{Name: "cron_schedules", Owner: schemaTenant},
 	{Name: "debug_pauses", Owner: schemaTenant},
 	{Name: "egress_usage", Owner: schemaTenant},
@@ -238,7 +239,6 @@ var schemaTables = []schemaTable{
 	{Name: "payment_correlations", Owner: schemaTenant},
 	{Name: "payment_events", Owner: schemaOperator},
 	{Name: "payment_warnings", Owner: schemaOperator},
-	{Name: "payment_cards", Owner: schemaOperator},
 	{Name: "payment_refunds", Owner: schemaOperator},
 	{Name: "payment_setups", Owner: schemaOperator},
 	{Name: "payment_states", Owner: schemaOperator},

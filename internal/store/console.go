@@ -173,7 +173,7 @@ func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, 
 	})
 }
 
-// ConsoleDeleteTeam queues deletion after checking money in flight under current authority.
+// ConsoleDeleteTeam queues deletion under current authority.
 func (c *Console) ConsoleDeleteTeam(ctx context.Context, a capability.Authorized) (TeamDeletion, error) {
 	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (TeamDeletion, error) {
 		t, err := consoleTeamTx(ctx, tx, a.Target.Team)

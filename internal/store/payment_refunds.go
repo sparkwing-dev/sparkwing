@@ -137,12 +137,14 @@ func refundedMicroTx(ctx context.Context, tx *storeTx, paymentIntent string) (in
 func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, payment string, attribution paymentAttribution) error {
 	var team Team
 	var amount int64
-	var refusalWarning string
-	err := tx.QueryRowContext(ctx, `SELECT team,amount_minor,warning_id FROM credit_checkouts WHERE payment_mode=? AND payment_id=?`, mode, payment).Scan(&team, &amount, &refusalWarning)
+	err := tx.QueryRowContext(ctx, `SELECT team,amount_minor FROM credit_checkouts WHERE payment_mode=? AND payment_id=?`, mode, payment).Scan(&team, &amount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
+		return err
+	}
+	if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
 		return err
 	}
 	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
@@ -177,7 +179,7 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 			}
 		case "refund":
 			if item.status == cardRefundSucceeded || item.status == "failed" || item.status == "canceled" {
-				if _, err := applyCardRefundTx(ctx, tx, team, payment, item.id, item.status, `refund_id = ? AND status = 'pending'`, []any{item.id}, tx.now(ctx)); err != nil {
+				if err := applyCardRefundTx(ctx, tx, team, payment, item.id, item.status); err != nil {
 					return err
 				}
 			}
@@ -199,18 +201,10 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 		return err
 	}
 	for _, id := range warnings {
-		if id == refusalWarning {
-			refusalWarning = ""
-		}
 		if err := holdForWarningTx(ctx, tx, team, id, payment, tx.now(ctx)); err != nil {
 			return err
 		}
 		if err := recordPaymentConsequenceTx(ctx, tx, capability.PaymentEvent{Mode: mode, ObjectID: id, PaymentID: payment, AmountMinor: amount, Status: cardRefundSucceeded}, "warning"); err != nil {
-			return err
-		}
-	}
-	if refusalWarning != "" {
-		if err := holdForWarningTx(ctx, tx, team, refusalWarning, payment, tx.now(ctx)); err != nil {
 			return err
 		}
 	}

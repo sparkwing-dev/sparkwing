@@ -27,7 +27,7 @@ func TestStoreDataCreditReadsStayInTenantAndUseStoreClock(t *testing.T) {
 				if kind == creditGrantReversal {
 					value, reverses = -value, "payment:test:checkout"
 				}
-				rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(id,team,kind,amount_micro,reverses,created_at) VALUES (?,?,?,?,?,?)", fmt.Sprintf("%d_%d_%d", iteration, i, j), team, kind, value, reverses, j+1)
+				rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(id,team,kind,amount_micro,reverses,created_at,reference) VALUES (?,?,?,?,?,?,?)", fmt.Sprintf("%d_%d_%d", iteration, i, j), team, kind, value, reverses, j+1, map[string]string{CreditGrantPaid: "payment:test:checkout"}[kind])
 			}
 			for j, kind := range []string{creditChargeUsage, CreditChargeStorage, creditChargeRefund} {
 				at := now.Add(-window)

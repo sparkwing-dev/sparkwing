@@ -2,11 +2,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"html"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -31,6 +33,32 @@ func (s *Server) handleTeamBillingCard(w http.ResponseWriter, r *http.Request, a
 		return err
 	}
 	return s.openBillingPage(w, r, a, capability.BillingPageCard, 0)
+}
+
+func (s *Server) handleTeamBillingPortal(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if err := emptyBillingBody(r); err != nil {
+		return err
+	}
+	if s.checkout == nil {
+		return &apierr.Error{Code: apierr.Unavailable, Message: "this controller opens no payment pages", Details: map[string]any{"reason": checkoutUnavailableCode}}
+	}
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
+	}
+	spend, err := t.SpendStanding(r.Context())
+	if err != nil {
+		return engineLookupError(err)
+	}
+	if spend.Card.Customer == "" {
+		return &apierr.Error{Code: apierr.Conflict, Message: store.ErrNoCard.Error(), Details: map[string]any{"reason": noCardCode}}
+	}
+	url, err := s.checkout.portal(r.Context(), s.paymentDeployment, a.Target.Team, spend.Card.Customer)
+	if err != nil {
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the card page could not be opened; try again"}, err)
+	}
+	writeJSON(w, http.StatusOK, hostedPageJSON{URL: url})
+	return nil
 }
 
 type teamRefillReq struct {
@@ -71,14 +99,14 @@ func (s *Server) reportPaymentSettlement(ctx context.Context, settled store.Paym
 			append(attrs, "alert", cardPaymentRefusedAlert, "reason", settled.Refused)...)
 		if settled.RefillFailed != "" {
 			s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill was refused",
-				"We queued a full refund for an automatic refill because the card cannot pay for this team ("+settled.Refused+"). "+
-					"This refill did not add credits. Check your saved card or use Add funds to keep Cloud work funded:", s.billingPageURL())
+				"We queued a full refund for an automatic refill because the card issuer reported possible fraud on it ("+settled.Refused+"). "+
+					"This refill did not add credits, and Cloud work is held; see the billing page:", s.billingPageURL())
 		}
 	case settled.RefillFailed != "":
 		s.logger.Warn("billing alert: an automatic refill failed", append(attrs, "alert", "refill_failed", "decline_code", settled.RefillFailed)...)
 		s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill failed",
 			"We could not charge your card for an automatic refill ("+settled.RefillFailed+"). "+
-				"Refills stop until you change the saved card or Add funds succeeds; Cloud work stops when the credits run out:", s.billingPageURL())
+				"Cloud work stops when the credits run out. Update your card under Manage card if needed, then click Add funds to resume automatic refills:", s.billingPageURL())
 	case settled.Granted:
 		s.logger.Info("payment granted", append(attrs, "grant", settled.GrantID, "amount_micro", settled.AmountMicro)...)
 	}
@@ -120,6 +148,10 @@ func (s *Server) refillPass(ctx context.Context) {
 	for _, r := range due {
 		if r.PaymentIntent == "" {
 			res, err := s.checkout.refill(ctx, s.paymentDeployment, r, "")
+			if errors.Is(err, errRefillNoCard) {
+				s.recordRefillFailure(ctx, r, store.RefillNoCard)
+				continue
+			}
 			if err != nil || res.Status != refillCreated {
 				s.logger.Error("creating a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "status", res.Status, "err", err)
 				continue
@@ -140,7 +172,7 @@ func (s *Server) refillPass(ctx context.Context) {
 		default:
 			continue
 		}
-		if res.Status != "canceled" {
+		if res.Status != "canceled" && res.Status != "requires_action" {
 			allowed, err := operator.CanConfirmRefill(ctx, r)
 			if err != nil {
 				s.logger.Error("checking refill confirmation failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
@@ -158,6 +190,9 @@ func (s *Server) refillPass(ctx context.Context) {
 				continue
 			}
 		}
+		if res.Status == "requires_action" {
+			s.recordRefillFailure(ctx, r, store.RefillAuthenticationRequired)
+		}
 		if res.Status == "canceled" {
 			if err := operator.RecordRefillCanceled(ctx, r); err != nil {
 				s.logger.Error("recording a canceled refill failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
@@ -166,9 +201,20 @@ func (s *Server) refillPass(ctx context.Context) {
 	}
 }
 
-// safety: a refused payment is refunded under a key naming its retry, so a
-// repeated pass repeats the same refund and a retry after a failed one makes a
-// new one; the refund's success reverses any grant.
+// recordRefillFailure stops refills the way a declined payment does and notifies the owners; a failed write is retried
+// on the next pass.
+func (s *Server) recordRefillFailure(ctx context.Context, r store.Refill, code string) {
+	settled, err := s.operator.RecordRefillFailed(ctx, r, code)
+	if err != nil {
+		s.logger.Error("recording a refill failure; it is retried", "team", string(r.Team), "refill", r.ID, "failure", code, "err", err)
+		return
+	}
+	s.reportPaymentSettlement(ctx, settled)
+}
+
+// safety: a refused payment is refunded under its payment as the key, so a pass
+// after a lost answer repeats the same refund; a refund Stripe fails is listed
+// for the operator, not retried, and the refund's success reverses any grant.
 func (s *Server) refundQueuedPayments(ctx context.Context) {
 	operator := s.operator
 	due, err := operator.DueCardRefunds(ctx)
@@ -177,13 +223,13 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 		return
 	}
 	for _, d := range due {
-		refund, status, err := s.checkout.refund(ctx, d.PaymentIntent, d.Key, d.Reason)
+		refund, status, err := s.checkout.refund(ctx, d.PaymentIntent, d.Reason)
 		if err != nil {
 			s.logger.Error("refunding a queued card payment failed; it is retried", "team", string(d.Team),
 				"payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
-		if err := operator.MarkCardRefundMade(ctx, d.Team, d.Key, refund); err != nil {
+		if err := operator.MarkCardRefundMade(ctx, d.Team, d.PaymentIntent, refund); err != nil {
 			s.logger.Error("recording a card refund failed", "payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}

@@ -162,6 +162,7 @@ var routes = []RoutePolicy{
 	route("POST", "/api/v1/team/billing/checkout", OwnerTeam, RetryIdempotencyKey, member(TeamAdmin)),
 	route("POST", "/api/v1/team/billing/standing-request", OwnerTeam, RetryNever, member(TeamAdmin)),
 	route("POST", "/api/v1/team/billing/card", OwnerTeam, RetryIdempotencyKey, member(TeamAdmin)),
+	route("POST", "/api/v1/team/billing/portal", OwnerTeam, RetrySafe, member(TeamAdmin)),
 	route("PUT", "/api/v1/team/billing/refill", OwnerTeam, RetrySafe, member(TeamAdmin)),
 	route("DELETE", "/api/v1/team/members/{account}", OwnerTeam, RetrySafe, selfOrTeamAdmin()),
 	route("GET", "/api/v1/overflow", OwnerTeam, RetrySafe, member(RunsRead)),

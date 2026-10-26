@@ -52,25 +52,13 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 	if run.Spec == nil {
 		return runstate.AcquireSlotResponse{}, bindingRefusal()
 	}
-	groups, err := capacityGroupsTx(ctx, tx, t.team, binding.RunID, binding.NodeID)
+	keys, declarations, err := capacityDeclarationsTx(ctx, tx, t.team, binding, actor)
+	if errors.Is(err, errLauncherHostPending) {
+		return runstate.AcquireSlotResponse{Kind: runstate.AcquireQueued}, nil
+	}
 	if err != nil {
 		return runstate.AcquireSlotResponse{}, err
 	}
-	keys := make([]string, 0, len(groups))
-	declarations := make(map[string]runspec.Concurrency, len(groups))
-	for _, group := range groups {
-		key, err := capacityKeyTx(ctx, tx, actor.Authority, binding.RunID, binding.NodeID, group.Scope, group.Group)
-		if errors.Is(err, errLauncherHostPending) {
-			return runstate.AcquireSlotResponse{Kind: runstate.AcquireQueued}, nil
-		}
-		if err != nil {
-			return runstate.AcquireSlotResponse{}, err
-		}
-		keys = append(keys, key)
-		declarations[key] = group
-	}
-	slices.Sort(keys)
-	keys = slices.Compact(keys)
 	lockKeys := slices.Clone(keys)
 	rows, err := tx.queryContext(ctx, `SELECT key FROM concurrency_holders WHERE team=? AND run_id=? AND node_id=? UNION SELECT key FROM concurrency_waiters WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID, t.team, binding.RunID, binding.NodeID)
 	if err != nil {
@@ -227,6 +215,25 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		}
 	}
 	return result, nil
+}
+
+func capacityDeclarationsTx(ctx context.Context, tx *storeTx, team Team, binding runstate.CapacityBinding, actor runstate.Actor) ([]string, map[string]runspec.Concurrency, error) {
+	groups, err := capacityGroupsTx(ctx, tx, team, binding.RunID, binding.NodeID)
+	if err != nil {
+		return nil, nil, err
+	}
+	keys := make([]string, 0, len(groups))
+	declarations := make(map[string]runspec.Concurrency, len(groups))
+	for _, group := range groups {
+		key, err := capacityKeyTx(ctx, tx, actor.Authority, binding.RunID, binding.NodeID, group.Scope, group.Group)
+		if err != nil {
+			return nil, nil, err
+		}
+		keys = append(keys, key)
+		declarations[key] = group
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys), declarations, nil
 }
 
 func settleAdmissionTx(ctx context.Context, tx *storeTx, team Team, b runstate.CapacityBinding, actor runstate.Actor, result runstate.AcquireSlotResponse) error {

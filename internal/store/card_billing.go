@@ -2,32 +2,33 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strconv"
-	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // MinCardChargeCents is the provider's minimum card payment.
 const MinCardChargeCents = 50
 
 const (
+	// CardRefusedWarning refuses a payment that an actionable early fraud warning named before it settled.
+	CardRefusedWarning = "warning"
+
 	businessEventCardAdded     = "card.added"
+	businessEventCardRefused   = "card.refused"
 	businessEventCardRefundDue = "card.refund_due"
 )
 
 // errStaleCardSetup refuses a card setup older than the card already on file.
 var errStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
 
-// Card is the card a team saved for refills.
+// Card records that a card setup completed for the team's Stripe customer. Stripe holds the card and may since have
+// removed it; refills charge the customer's default payment method, and a refill without one stops as no_card.
 type Card struct {
-	Customer      string
-	PaymentMethod string
-	Fingerprint   string
-	Brand         string
-	Last4         string
-	// AddedAt orders setups by completion time, or receipt time when absent.
+	Customer string
+	// AddedAt orders setups by completion time, or receipt time when absent; zero means no card was ever added.
 	AddedAt time.Time
 }
 
@@ -57,9 +58,8 @@ func spendStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 		return s, err
 	}
 	var addedNS int64
-	if err := q.QueryRowContext(ctx, `SELECT card_customer, card_payment_method, card_fingerprint, card_brand,
-	    card_last4, card_added_at FROM teams WHERE name = ?`, string(team)).Scan(&s.Card.Customer, &s.Card.PaymentMethod,
-		&s.Card.Fingerprint, &s.Card.Brand, &s.Card.Last4, &addedNS); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT card_customer, card_added_at FROM teams WHERE name = ?`,
+		string(team)).Scan(&s.Card.Customer, &addedNS); err != nil {
 		return s, err
 	}
 	if addedNS > 0 {
@@ -120,21 +120,10 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, payment stri
 	return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(payment), Operation: businessEventCardRefundDue, AmountMicro: amount})
 }
 
-// A same-payment warning preserves protected credit under a hold; other actionable
-// warnings refuse the payment. Non-actionable warnings do not affect settlement.
-func paymentWarningTx(ctx context.Context, tx *storeTx, paymentIntent, fingerprint string) (string, error) {
-	mode, err := paymentModeTx(ctx, tx)
-	if err != nil {
-		return "", err
-	}
-	var id string
-	err = tx.QueryRowContext(ctx, `SELECT warning_id FROM payment_warnings
-	  WHERE actionable = 1 AND ((payment_mode=? AND payment_intent = ?) OR (fingerprint != '' AND fingerprint = ?))
-	  ORDER BY CASE WHEN payment_mode=? AND payment_intent = ? THEN 0 ELSE 1 END, created_at LIMIT 1`, mode, paymentIntent, fingerprint, mode, paymentIntent).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	return id, err
+// paymentWarnedTx reports an actionable early fraud warning that names the payment. Non-actionable warnings do not
+// affect settlement, and a warning never reaches another payment: Stripe Radar handles a card used across teams.
+func paymentWarnedTx(ctx context.Context, tx *storeTx, mode capability.PaymentMode, paymentIntent string) (bool, error) {
+	return rowPresentTx(ctx, tx, `SELECT 1 FROM payment_warnings WHERE actionable = 1 AND payment_mode=? AND payment_intent = ?`, mode, paymentIntent)
 }
 
 func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paymentIntent string, now time.Time) error {
@@ -151,24 +140,12 @@ func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paym
 		string(team), freezeID); err != nil || held {
 		return err
 	}
-	if _, err := tx.execContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at)
-	    VALUES (?, ?, ?, ?, ?, ?)`,
-		freezeID, string(team), paymentIntent, "early fraud warning "+warning, HoldCauseWarning, now.UnixNano()); err != nil {
-		return err
-	}
-	if err := stopHeldAwardsTx(ctx, tx, team); err != nil {
+	if _, err := tx.execContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at, payment_mode)
+	    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		freezeID, string(team), paymentIntent, "early fraud warning "+warning, HoldCauseWarning, now.UnixNano(), mode); err != nil {
 		return err
 	}
 	return tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: auditActor{system: auditController}}, auditHold{HoldID: digestAudit(freezeID), PaymentID: digestAudit(paymentIntent), WarningID: digestAudit(warning)})
-}
-
-// paymentWarning is an early fraud warning on a payment.
-type paymentWarning struct {
-	WarningID     string
-	PaymentIntent string
-	Fingerprint   string
-	// Actionable is Stripe's word that the payment can still be refunded to head off a dispute; only such a warning refuses a payment or holds a team.
-	Actionable bool
 }
 
 const (
@@ -177,26 +154,52 @@ const (
 	cardRefundSucceeded = "succeeded"
 )
 
-// safety: a failed refund is retried on a widening schedule, and never
-// dropped, because until it succeeds the payer holds neither the money nor
-// credits for it.
-var cardRefundRetryAfter = []time.Duration{time.Hour, 6 * time.Hour, 24 * time.Hour}
-
-// CardRefundWork is a payment the worker must refund in full.
+// CardRefundWork is a payment the worker must refund in full. The payment is the refund's idempotency key, so a
+// retry after a lost answer repeats the same refund.
 type CardRefundWork struct {
 	Team          Team
 	PaymentIntent string
 	Reason        string
-	Key           string
 }
 
-func parseRefundKey(key string) (string, int64, bool) {
-	i := strings.LastIndexByte(key, '-')
-	if i <= 0 {
-		return "", 0, false
+// FailedCardRefund is a queued refund Stripe reported failed or canceled; the operator settles it by hand.
+type FailedCardRefund struct {
+	PaymentIntent string
+	RefundID      string
+	Status        string
+	Reason        string
+	AmountMicro   int64
+	CreatedAt     time.Time
+}
+
+// FailedCardRefunds lists t's refunds that Stripe failed or canceled, newest first.
+func (t *Tenant) FailedCardRefunds(ctx context.Context) (_ []FailedCardRefund, err error) {
+	tx, err := t.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return nil, err
 	}
-	attempt, err := strconv.ParseInt(key[i+1:], 10, 64)
-	return key[:i], attempt, err == nil && attempt >= 0
+	defer rollbackOrLog(tx)
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.queryContext(ctx, `SELECT payment_intent,refund_id,status,reason,amount_micro,created_at FROM card_refunds
+	    WHERE team=? AND payment_mode=? AND status IN ('failed','canceled') ORDER BY created_at DESC`, string(t.team), mode)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []FailedCardRefund
+	for rows.Next() {
+		var f FailedCardRefund
+		var created int64
+		if err := rows.Scan(&f.PaymentIntent, &f.RefundID, &f.Status, &f.Reason, &f.AmountMicro, &created); err != nil {
+			return nil, err
+		}
+		f.CreatedAt = time.Unix(0, created)
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 // TeamOwnerEmails returns the verified email addresses of t's owners.

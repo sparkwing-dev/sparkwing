@@ -35,12 +35,13 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 				if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), paymentWarning{WarningID: "queued", PaymentIntent: event.PaymentID, Actionable: true}, now); err != nil {
 					t.Fatal(err)
 				}
+				rewriteSchemaExec(t, s.db, `UPDATE card_refunds SET refund_id='provider-refund', status='pending'`)
 			}
 			mutate := func(tx *storeTx) error {
 				ctx := t.Context()
 				switch kind {
 				case "card_setup":
-					return saveCardTx(ctx, tx, tenant.team, Card{Customer: "new-customer", PaymentMethod: "new-method", Fingerprint: "new-card", AddedAt: now.Add(time.Second)}, auditActor{system: auditPaymentProvider}, now)
+					return saveCardTx(ctx, tx, tenant.team, Card{Customer: "new-customer", AddedAt: now.Add(time.Second)}, "seti_new", auditActor{system: auditPaymentProvider}, now)
 				case "refund":
 					_, err := reversePaymentTx(ctx, tx, event.PaymentID, "refund", auditActor{system: auditPaymentProvider}, 100)
 					return err
@@ -51,14 +52,10 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 					_, err := releaseCreditFreezesTx(ctx, tx, tenant.team, "dispute", false, false, "provider", "", now, auditActor{system: auditBreakGlass})
 					return err
 				case "warning":
-					_, err := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: event.Mode, ObjectID: "warning", PaymentID: event.PaymentID, Fingerprint: "fp_1", Actionable: true}, auditActor{system: auditPaymentProvider})
+					_, err := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: event.Mode, ObjectID: "warning", PaymentID: event.PaymentID, Actionable: true}, auditActor{system: auditPaymentProvider})
 					return err
 				case "queued_refund":
-					changed, err := applyCardRefundTx(ctx, tx, tenant.team, event.PaymentID, "provider-refund", "failed", `attempts = ? AND status = 'due'`, []any{0}, now)
-					if err == nil && !changed {
-						return errors.New("refund queue did not change")
-					}
-					return err
+					return applyCardRefundTx(ctx, tx, tenant.team, event.PaymentID, "provider-refund", "failed")
 				}
 				return errors.New("unknown payment mutation")
 			}
@@ -196,8 +193,8 @@ func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
 	property := func(seed uint32) bool {
 		first := now.Add(time.Duration(seed%1000) * time.Second)
 		second := first.Add(time.Duration(seed%999999999 + 1))
-		older := Card{Customer: "customer", PaymentMethod: "older", Fingerprint: "older-card", AddedAt: first}
-		newer := Card{Customer: "customer", PaymentMethod: "newer", Fingerprint: "newer-card", AddedAt: second}
+		older := Card{Customer: "customer", AddedAt: first}
+		newer := Card{Customer: "customer", AddedAt: second}
 		for _, card := range []Card{older, newer, newer} {
 			if err := tenant.TestOnlySaveCard(t.Context(), card, "provider", second.Add(time.Hour)); err != nil {
 				t.Log(err)
@@ -210,7 +207,7 @@ func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
 		}
 		tenant.s.SetTestClock(t, func() time.Time { return second })
 		standing, err := tenant.SpendStanding(t.Context())
-		if err != nil || standing.Card.PaymentMethod != newer.PaymentMethod || !standing.Card.AddedAt.Equal(second) {
+		if err != nil || !standing.Card.AddedAt.Equal(second) {
 			t.Logf("card or timestamp changed: %+v, %v", standing.Card, err)
 			return false
 		}
@@ -233,7 +230,7 @@ func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
 	blobAccountingDiskStore(t, s)
 	tenant.s.SetTestClock(t, func() time.Time { return now })
 	standing, err := tenant.SpendStanding(t.Context())
-	if err != nil || standing.Card.PaymentMethod != "newer" || !standing.Card.AddedAt.Equal(now.Add(-time.Second)) {
+	if err != nil || standing.Card.Customer != "customer" || !standing.Card.AddedAt.Equal(now.Add(-time.Second)) {
 		t.Fatalf("setup order did not survive reopening: %+v, %v", standing.Card, err)
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -39,7 +40,7 @@ func (billingCloudProfile) ResolveClaimProfile(context.Context, capability.Princ
 func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	engineSQL(t, e.Store, `UPDATE triggers SET expires_at=?`, time.Now().Add(24*time.Hour).UnixNano())
-	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp',card_added_at=? WHERE name='a'`, time.Now().UnixNano())
+	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_added_at=1,card_added_at=? WHERE name='a'`, time.Now().UnixNano())
 	engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('a','funded-a','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
 	execution := runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sparkwing-4cpu"}}}}
 	rawExecution, err := json.Marshal(execution)
@@ -77,8 +78,8 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 	for _, blocked := range []string{"capacity", "oversized"} {
 		t.Run(blocked, func(t *testing.T) {
 			e, _ := engineRuntimeStore(t)
-			engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp' WHERE name='a'`)
-			engineSQL(t, e.Store, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_payment_method,card_fingerprint) VALUES ('b',1,1,'customer-b','method-b','fp-b')`)
+			engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_added_at=1 WHERE name='a'`)
+			engineSQL(t, e.Store, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at) VALUES ('b',1,1,'customer-b',1)`)
 			engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('a','funded-a','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
 			engineSQL(t, e.Store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('b','funded-b','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
 			for _, id := range []string{"one", "two", "three"} {
@@ -126,7 +127,7 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	e, tenant := engineRuntimeStore(t)
 	engineSQL(t, e.Store, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
-	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp' WHERE name='a'`)
+	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_added_at=1 WHERE name='a'`)
 	for _, id := range []string{"one", "two"} {
 		engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"requires":{"set":true,"value":["sparkwing-16cpu"]}}`))
 	}
@@ -184,13 +185,15 @@ func refillFixture(t *testing.T) (*engineFixture, *store.Tenant) {
 	t.Helper()
 	e, tenant := engineRuntimeStore(t)
 	engineSQL(t, e.Store, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
-	engineSQL(t, e.Store, `UPDATE teams SET card_customer='cus_refill',card_payment_method='pm_refill',card_fingerprint='fp_refill',
+	engineSQL(t, e.Store, `UPDATE teams SET card_customer='cus_refill',card_added_at=1,
 	    refill_enabled=1,refill_threshold_cents=1000,refill_amount_cents=2000 WHERE name='a'`)
 	return e, tenant
 }
 
 func refillIntent(id, status string) string {
 	switch status {
+	case "requires_action":
+		return fmt.Sprintf(`{"id":%q,"object":"payment_intent","livemode":false,"metadata":{"purpose":"card_refill"},"status":"requires_action","amount":2000,"currency":"usd","customer":"cus_refill"}`, id)
 	case "succeeded":
 		return fmt.Sprintf(`{"id":%q,"object":"payment_intent","livemode":false,"metadata":{"purpose":"card_refill"},"status":"succeeded","amount":2000,"amount_received":2000,"currency":"usd","customer":"cus_refill","latest_charge":"ch_%s"}`, id, strings.TrimPrefix(id, "pi_"))
 	default:
@@ -229,7 +232,7 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 			t.Fatal(err)
 		}
 		if body["team"] != "a" || body["amount_cents"] != float64(2000) || body["customer"] != "cus_refill" ||
-			body["payment_method"] != "pm_refill" || body["receipt_email"] != "owner@example.test" || body["refill_id"] == "" {
+			body["payment_method"] != nil || body["receipt_email"] != nil || body["refill_id"] == "" {
 			t.Fatalf("refill request %v", body)
 		}
 		intent, _ := body["payment_intent"].(string)
@@ -268,7 +271,7 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 	if err != nil || !standing.Refill.Open || standing.Refill.DayCount != 1 {
 		t.Fatalf("refill state %+v: %v; want one open refill", standing.Refill, err)
 	}
-	provider := paymenttest.Provider{}.Charge("pi_refill", false, "", "fp_refill")
+	provider := paymenttest.Provider{}.SettledCheckout("pi_refill", false, "")
 	_, deliver := billingModelProviderDelivery(t, e, provider, func(s *Server) *Server { return s })
 	for _, id := range []string{"evt_refill", "evt_refill"} {
 		if w := deliver(id, "payment_intent.succeeded", refillIntent("pi_refill", "succeeded")); w.Code != http.StatusNoContent {
@@ -289,7 +292,7 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 	}
 }
 
-// A signed failure closes the refill, stops refills until the saved card changes or Add funds succeeds, and alerts and mails
+// A signed failure closes the refill, stops refills until Add funds succeeds, and alerts and mails
 // the owners.
 func TestARefusedRefillStopsRefillsAndAlerts(t *testing.T) {
 	e, tenant := refillFixture(t)
@@ -421,7 +424,7 @@ func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
 	server := e.Server.WithBillingCheckout("https://checkout.test", "credential")
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('owner','owner@example.test',1,1)`)
 	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
-	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp' WHERE name='a'`)
+	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_added_at=1 WHERE name='a'`)
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 600000 * store.MicroCreditsPerCent, Reference: "console:grant", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +501,7 @@ func TestRefillRestartReconcilesBeforeConfirmingABlockedCard(t *testing.T) {
 			e, tenant := refillFixture(t)
 			engineSQL(t, e.Store, `UPDATE teams SET refill_threshold_cents=10000 WHERE name='a'`)
 			billingModelCheckout(t, e.Store, tenant, "cs_earlier", 2000)
-			provider := paymenttest.Provider{}.Charge("pi_earlier", false, "authenticated", "fp_refill")
+			provider := paymenttest.Provider{}.SettledCheckout("pi_earlier", false, "authenticated")
 			_, deliver := billingModelProviderDelivery(t, e, provider, func(s *Server) *Server { return s })
 			if response := deliver("evt_earlier", "checkout.session.completed", stolenCardSession("cs_earlier", "pi_earlier")); response.Code != http.StatusNoContent {
 				t.Fatalf("earlier payment: %d %s", response.Code, response.Body)
@@ -524,7 +527,7 @@ func TestRefillRestartReconcilesBeforeConfirmingABlockedCard(t *testing.T) {
 				t.Fatalf("warning: %d %s", response.Code, response.Body)
 			}
 			standing, err := tenant.SpendStanding(t.Context())
-			if err != nil || standing.Refill.Enabled || standing.Card.PaymentMethod != "" || standing.Billing.HoldCause == "" {
+			if err != nil || standing.Billing.HoldCause == "" {
 				t.Fatalf("warning did not restrict team: %+v, %v", standing, err)
 			}
 			calls = nil
@@ -562,4 +565,91 @@ func TestRefillRestartReconcilesBeforeConfirmingABlockedCard(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRefillAuthenticationRequiredClosesAndAlerts(t *testing.T) {
+	for _, source := range []string{"reconcile", "confirm", "webhook"} {
+		t.Run(source, func(t *testing.T) {
+			e, tenant := refillFixture(t)
+			var logs bytes.Buffer
+			worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
+			worker.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			if source == "webhook" {
+				due, err := e.Store.AsOperator().DueRefills(t.Context())
+				if err != nil || len(due) != 1 {
+					t.Fatalf("due=%+v: %v", due, err)
+				}
+				if err := e.Store.AsOperator().RecordRefillIntent(t.Context(), "a", due[0].ID, "pi_auth"); err != nil {
+					t.Fatal(err)
+				}
+				_, deliver := billingModelProviderDelivery(t, e, paymenttest.Provider{}, func(s *Server) *Server { s.logger = worker.logger; return s })
+				if w := deliver("evt_auth", "payment_intent.requires_action", refillIntent("pi_auth", "requires_action")); w.Code != http.StatusNoContent {
+					t.Fatalf("requires_action=%d %s", w.Code, w.Body)
+				}
+			} else {
+				worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+					status := "created"
+					if r.URL.Path == "/internal/refill/reconcile" {
+						status = "requires_action"
+						if source == "confirm" {
+							status = "requires_confirmation"
+						}
+					}
+					if r.URL.Path == "/internal/refill/confirm" {
+						status = "requires_action"
+					}
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"payment_intent":"pi_auth","status":%q}`, status)))}, nil
+				})
+				worker.refillPass(t.Context())
+			}
+			standing, err := tenant.SpendStanding(t.Context())
+			if err != nil || standing.Refill.Open || standing.Refill.Failure != "authentication_required" {
+				t.Fatalf("authentication-required refill=%+v: %v", standing.Refill, err)
+			}
+			if !strings.Contains(logs.String(), `"alert":"refill_failed"`) || !strings.Contains(logs.String(), "authentication_required") {
+				t.Fatalf("missing failure notice: %s", logs.String())
+			}
+			if due, err := e.Store.AsOperator().DueRefills(t.Context()); err != nil || len(due) != 0 {
+				t.Fatalf("failed refill retried: %+v: %v", due, err)
+			}
+		})
+	}
+}
+
+// A refill the checkout service cannot create because the customer has no card in Stripe stops like a declined
+// refill: it is closed as no_card, the owners are told, and later passes ask nothing more of the service.
+func TestARefillWithoutACardStopsAndNotifiesTheOwners(t *testing.T) {
+	e, tenant := refillFixture(t)
+	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('owner','owner@example.test',1,1,1)`)
+	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
+	mail := &refillMail{}
+	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential").WithMailer(mail)
+	calls := 0
+	worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.Path != "/internal/refill" {
+			t.Fatalf("unexpected checkout call: %s", r.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusConflict, Body: io.NopCloser(strings.NewReader(`{"error":"the customer has no card"}`))}, nil
+	})
+	for range 3 {
+		worker.refillPass(t.Context())
+	}
+	if calls != 1 {
+		t.Fatalf("checkout calls = %d; want the refill stopped after the first refusal", calls)
+	}
+	standing, err := tenant.SpendStanding(t.Context())
+	if err != nil || standing.Refill.Failure != store.RefillNoCard || standing.Refill.FailedAt.IsZero() || standing.Refill.Open {
+		t.Fatalf("refill state %+v: %v; want it closed as no_card", standing.Refill, err)
+	}
+	if sent := mail.sent; len(sent) != 1 || sent[0].To != "owner@example.test" || !strings.Contains(sent[0].Text, store.RefillNoCard) {
+		t.Fatalf("owner mail %+v; want one refill failure notice", sent)
+	}
+}
+
+type refillMail struct{ sent []mailer.Message }
+
+func (m *refillMail) Send(_ context.Context, msg mailer.Message) error {
+	m.sent = append(m.sent, msg)
+	return nil
 }

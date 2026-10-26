@@ -167,6 +167,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"POST", "/api/v1/team/billing/checkout", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"POST", "/api/v1/team/billing/standing-request", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"POST", "/api/v1/team/billing/card", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
+		{"POST", "/api/v1/team/billing/portal", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"PUT", "/api/v1/team/billing/refill", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"DELETE", "/api/v1/team/members/{account}", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|selfOrTeamAdmin|credential"}},
 		{"GET", "/api/v1/overflow", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},

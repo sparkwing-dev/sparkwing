@@ -168,7 +168,7 @@ func TestBillingCLIRefillChangesOnlyTheGivenSettings(t *testing.T) {
 	if !errors.As(err, &refusal) || refusal.Code != apierr.Conflict || refusal.Details["reason"] != "no_card" {
 		t.Fatalf("refill without a card: %v", err)
 	}
-	if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `UPDATE teams SET card_customer='cus_1', card_payment_method='pm_1', card_fingerprint='fp_1' WHERE name='billing-test'`); err != nil {
+	if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `UPDATE teams SET card_customer='cus_1', card_added_at=1 WHERE name='billing-test'`); err != nil {
 		t.Fatal(err)
 	}
 	if r := read("--enable", "--threshold", "$10", "--amount", "25.50", "--week-limit", "1,000"); !r.Enabled || r.ThresholdCents != 1000 || r.AmountCents != 2550 || r.WeekLimitCents != 100_000 || r.MonthLimitCents != 0 {

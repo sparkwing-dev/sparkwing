@@ -48,7 +48,8 @@ export interface Billing {
   usage: UsageRow[];
   storage_charged_micro: number;
   grants: GrantRow[];
-  card?: { brand: string; last4: string; added_at: number };
+  // Stripe holds the card; Sparkwing knows only when one was last added.
+  card?: { added_at: number };
   can_add_card: boolean;
   refill: Refill;
   limits: SpendLimits;
@@ -221,7 +222,7 @@ export function refillLimitReason(r: Refill): string {
 export function refillStatus(r: Refill): string {
   if (!r.enabled) return "";
   if (r.failed_at)
-    return `The last refill failed${r.failure ? ` (${r.failure})` : ""}. Change the saved card or add funds to start refills again; Cloud work stops when the credits run out.`;
+    return `The last refill failed${r.failure ? ` (${r.failure})` : ""}. Update your card with Manage card, then add funds to start refills again; Cloud work stops when the credits run out.`;
   const reason = refillLimitReason(r);
   return reason ? `${reason} No refill is made until it allows one, so Cloud work stops when the credits run out.` : "";
 }
@@ -585,12 +586,15 @@ export function checkoutReturn(param: string | null): CheckoutReturn {
 // land a few seconds later; the page reloads billing at these offsets (ms).
 export const checkoutRefreshDelays = [2_000, 5_000, 10_000, 15_000, 20_000];
 
-// openCardPage asks the controller for a Stripe card setup page and returns its link.
-export async function openCardPage(): Promise<string> {
-  const res = await authFetch("/api/v1/team/billing/card", {
-    method: "POST",
-    headers: { "Idempotency-Key": crypto.randomUUID() },
-  });
+// openCardPage asks the controller for Stripe's card setup page, or for
+// Stripe's customer portal once the team has added a card, and returns its link.
+export async function openCardPage(hasCard: boolean): Promise<string> {
+  const res = await authFetch(
+    hasCard ? "/api/v1/team/billing/portal" : "/api/v1/team/billing/card",
+    hasCard
+      ? { method: "POST" }
+      : { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() } },
+  );
   if (!res.ok) {
     const body = await readErrorBody(res);
     throw new BillingApiError(

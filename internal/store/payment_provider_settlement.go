@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -27,8 +28,19 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 	}
 	var result PaymentSettlement
 	err = s.inTx(ctx, func(tx *storeTx) error {
+		teams, err := lockPaymentTeamsTx(ctx, tx, event)
+		if err != nil {
+			return err
+		}
 		if err := lockPaymentTx(ctx, tx, event.Mode, paymentStateID(event)); err != nil {
 			return err
+		}
+		current := tx.operator.discoverPaymentTeamsTx(ctx, tx, event).normalized()
+		if current.err != nil {
+			return current.err
+		}
+		if !slices.Equal(teams.rows, current.rows) {
+			return errAuthorityChanged
 		}
 		if err := configuredPaymentModeTx(ctx, tx, event.Mode); err != nil {
 			return err
@@ -166,26 +178,16 @@ func samePaymentObject(a, b capability.PaymentEvent) bool {
 	if a.AmountMinor != b.AmountMinor || a.Currency != b.Currency || a.ChargeID != b.ChargeID {
 		return false
 	}
-	for _, values := range [][2]string{{a.CustomerID, b.CustomerID}, {a.MethodID, b.MethodID}, {a.Fingerprint, b.Fingerprint}} {
-		if values[0] != "" && values[1] != "" && values[0] != values[1] {
-			return false
-		}
-	}
-	if a.Kind == capability.PaymentCardSetup && (a.Brand != b.Brand || a.Last4 != b.Last4) {
-		return false
-	}
 	return a.Kind != capability.PaymentDisputeClosed || b.Kind != capability.PaymentDisputeClosed || a.Status == b.Status
 }
 
 func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent, actor auditActor) (PaymentSettlement, error) {
-	// The refill worker locks ledger before checkout; callbacks preserve that order after the payment lock.
-	var team Team
-	err := tx.QueryRowContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND ((payment_id<>'' AND payment_id=?) OR (session_id<>id AND session_id=?))`, e.Mode, e.PaymentID, e.CheckoutID).Scan(&team)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	set, err := lockPaymentTeamsTx(ctx, tx, e)
+	if err != nil {
 		return PaymentSettlement{}, err
 	}
-	if team != "" {
-		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
+	for _, row := range set.rows {
+		if _, err := lockLedgerTx(ctx, tx, Team(row.key.keys[0])); err != nil {
 			return PaymentSettlement{}, err
 		}
 	}
@@ -254,6 +256,41 @@ func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capa
 	return result, nil
 }
 
+func (op *Operator) discoverPaymentTeamsTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) lockSet {
+	var set lockSet
+	rows, err := tx.queryContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND ((payment_id<>'' AND payment_id=?) OR (session_id<>id AND session_id=?))
+ UNION SELECT team FROM payment_correlations WHERE payment_mode=? AND provider_id IN (?,?,?)`, e.Mode, e.PaymentID, e.CheckoutID, e.Mode, e.ObjectID, e.IntentID, e.CheckoutID)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	for rows.Next() {
+		var team string
+		if err := rows.Scan(&team); err != nil {
+			set.err = err
+			break
+		}
+		set.add(lockTeam, true, team)
+	}
+	set.err = errors.Join(set.err, rows.Err(), rows.Close())
+	return set
+}
+
+func lockPaymentTeamTx(ctx context.Context, tx *storeTx, team Team) error {
+	lockErr := lockFinancialTeamsTx(ctx, tx, team)
+	if lockErr != nil && !errors.Is(lockErr, ErrUnknownTeam) {
+		return lockErr
+	}
+	var deleting int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug=?`, string(team)).Scan(&deleting); err != nil {
+		return err
+	}
+	if deleting != 0 {
+		return ErrTeamBeingDeleted
+	}
+	return lockErr
+}
+
 func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
 	var result PaymentSettlement
 	switch e.Kind {
@@ -262,10 +299,10 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 	case capability.PaymentPageCompleted:
 		return tx.operator.bindCompletedPageTx(ctx, tx, e)
 	case capability.PaymentCardSetup:
-		if e.CustomerID == "" || e.MethodID == "" || e.Fingerprint == "" {
+		if e.CustomerID == "" {
 			return result, ErrInvalidInput
 		}
-		res, err := tx.execContext(ctx, `INSERT INTO payment_setups(payment_mode,intent_id,customer_id,payment_method,fingerprint,brand,last4,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(payment_mode,intent_id) DO NOTHING`, e.Mode, e.ObjectID, e.CustomerID, e.MethodID, e.Fingerprint, e.Brand, e.Last4, e.Created)
+		res, err := tx.execContext(ctx, `INSERT INTO payment_setups(payment_mode,intent_id,customer_id,created_at) VALUES (?,?,?,?) ON CONFLICT(payment_mode,intent_id) DO NOTHING`, e.Mode, e.ObjectID, e.CustomerID, e.Created)
 		if err == nil {
 			n, rowsErr := res.RowsAffected()
 			result.Replayed = n == 0
@@ -291,37 +328,29 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 		err = applyPaymentOutcomeTx(ctx, tx, e, &checkout)
 		return checkout.result, err
 	case capability.PaymentWarningEvent:
-		w := paymentWarning{WarningID: e.ObjectID, PaymentIntent: e.PaymentID, Fingerprint: e.Fingerprint, Actionable: e.Actionable}
-		now := tx.now(ctx)
-		if w.WarningID == "" || w.PaymentIntent == "" {
+		// safety: an actionable warning holds only the team its payment funded; reconciliation places that hold.
+		if e.ObjectID == "" || e.PaymentID == "" {
 			return result, fmt.Errorf("%w: a warning names itself and its payment", ErrInvalidInput)
 		}
-		actionable := 0
-		if w.Actionable {
-			actionable = 1
-		}
-		if _, err := tx.execContext(ctx, `INSERT INTO payment_warnings (payment_mode, warning_id, payment_intent, fingerprint, actionable,
-	    created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (payment_mode,warning_id) DO NOTHING`,
-			e.Mode, w.WarningID, w.PaymentIntent, w.Fingerprint, actionable, now.UnixNano()); err != nil {
+		if _, err := tx.execContext(ctx, `INSERT INTO payment_warnings (payment_mode, warning_id, payment_intent, actionable,
+	    created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (payment_mode,warning_id) DO NOTHING`,
+			e.Mode, e.ObjectID, e.PaymentID, boolInt(e.Actionable), tx.now(ctx).UnixNano()); err != nil {
 			return result, err
 		}
-		var payment, fingerprint string
-		if err := tx.QueryRowContext(ctx, `SELECT payment_intent,fingerprint FROM payment_warnings WHERE payment_mode=? AND warning_id=?`, e.Mode, w.WarningID).Scan(&payment, &fingerprint); err != nil {
+		var payment string
+		if err := tx.QueryRowContext(ctx, `SELECT payment_intent FROM payment_warnings WHERE payment_mode=? AND warning_id=?`, e.Mode, e.ObjectID).Scan(&payment); err != nil {
 			return result, err
 		}
-		if payment != w.PaymentIntent || fingerprint != w.Fingerprint {
-			return result, fmt.Errorf("%w: warning identity names another payment or card", ErrCreditGrantConflict)
+		if payment != e.PaymentID {
+			return result, fmt.Errorf("%w: warning identity names another payment", ErrCreditGrantConflict)
 		}
-		if !w.Actionable {
+		if !e.Actionable {
 			return result, nil
 		}
-		if _, err := tx.execContext(ctx, "UPDATE payment_warnings SET actionable=1 WHERE payment_mode=? AND warning_id=?", e.Mode, w.WarningID); err != nil {
+		if _, err := tx.execContext(ctx, "UPDATE payment_warnings SET actionable=1 WHERE payment_mode=? AND warning_id=?", e.Mode, e.ObjectID); err != nil {
 			return result, err
 		}
-		if err := forgetCardTx(ctx, tx, fingerprint, CardRefusedWarning, now); err != nil {
-			return result, err
-		}
-		result.Team, result.Payment = "", payment
+		result.Payment = payment
 		return result, nil
 	case capability.PaymentRefund:
 		result.Payment = e.PaymentID
@@ -343,7 +372,7 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 
 func (op *Operator) bindCompletedPageTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
 	var team, customer string
-	err := tx.QueryRowContext(ctx, `SELECT team,customer_id FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='setup_session'`+tx.forShare(), e.Mode, e.ObjectID).Scan(&team, &customer)
+	err := tx.QueryRowContext(ctx, `SELECT team,customer_id FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='setup_session'`, e.Mode, e.ObjectID).Scan(&team, &customer)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PaymentSettlement{}, authorityError(apierr.NotFound, "committed payment page is unavailable")
 	}
@@ -352,6 +381,9 @@ func (op *Operator) bindCompletedPageTx(ctx context.Context, tx *storeTx, e capa
 	}
 	if customer != e.CustomerID {
 		return PaymentSettlement{}, authorityError(apierr.Conflict, "completed page names another customer")
+	}
+	if err := lockPaymentTeamTx(ctx, tx, Team(team)); err != nil {
+		return PaymentSettlement{}, err
 	}
 	result := PaymentSettlement{Team: Team(team)}
 	var bound string
@@ -382,7 +414,7 @@ func (op *Operator) reconcileSetupStateTx(ctx context.Context, tx *storeTx, mode
 	var card Card
 	var created int64
 	var applied int
-	err := tx.QueryRowContext(ctx, `SELECT customer_id,payment_method,fingerprint,brand,last4,created_at,applied FROM payment_setups WHERE payment_mode=? AND intent_id=?`, mode, intent).Scan(&card.Customer, &card.PaymentMethod, &card.Fingerprint, &card.Brand, &card.Last4, &created, &applied)
+	err := tx.QueryRowContext(ctx, `SELECT customer_id,created_at,applied FROM payment_setups WHERE payment_mode=? AND intent_id=?`, mode, intent).Scan(&card.Customer, &created, &applied)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -405,7 +437,7 @@ func (op *Operator) reconcileSetupStateTx(ctx context.Context, tx *storeTx, mode
 		return team, nil
 	}
 	card.AddedAt = time.Unix(created, 0)
-	if err := saveCardTx(ctx, tx, team, card, auditActor{system: auditPaymentProvider}, tx.now(ctx)); err != nil && !errors.Is(err, errStaleCardSetup) {
+	if err := saveCardTx(ctx, tx, team, card, intent, auditActor{system: auditPaymentProvider}, tx.now(ctx)); err != nil && !errors.Is(err, errStaleCardSetup) {
 		return "", err
 	}
 	_, err = tx.execContext(ctx, `UPDATE payment_setups SET applied=1 WHERE payment_mode=? AND intent_id=?`, mode, intent)

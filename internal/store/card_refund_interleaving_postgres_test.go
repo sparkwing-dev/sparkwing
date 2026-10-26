@@ -44,7 +44,7 @@ func TestPostgresRefundCallbackWaitsForMidflightBinding(t *testing.T) {
 			}
 			binder := make(chan error, 1)
 			callback := make(chan error, 1)
-			go func() { binder <- s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund") }()
+			go func() { binder <- s.AsOperator().MarkCardRefundMade(ctx, "a", "payment", "refund") }()
 			waitBlocked := func(want int) {
 				t.Helper()
 				for {
@@ -88,13 +88,19 @@ func TestPostgresRefundCallbackWaitsForMidflightBinding(t *testing.T) {
 			if err := s.TestOnlySettleRefund(ctx, event); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund"); err != nil {
+			if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment", "refund"); err != nil {
 				t.Fatal(err)
 			}
-			s.SetTestClock(t, func() time.Time { return now.Add(2 * time.Hour) })
 			due, err := s.AsOperator().DueCardRefunds(ctx)
-			if err != nil || len(due) != 1 || due[0].Key != "payment-1" {
-				t.Fatalf("terminal callback lost or applied twice: %+v, %v", due, err)
+			if err != nil || len(due) != 0 {
+				t.Fatalf("a refund Stripe %s was queued again: %+v, %v", outcome, due, err)
+			}
+			tenant, err := s.ForTeam(ctx, "a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if failed, err := tenant.FailedCardRefunds(ctx); err != nil || len(failed) != 1 || failed[0].Status != outcome || failed[0].RefundID != "refund" {
+				t.Fatalf("terminal callback lost or applied twice: %+v, %v", failed, err)
 			}
 		})
 	}

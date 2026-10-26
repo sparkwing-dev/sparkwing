@@ -19,12 +19,12 @@ func (t *Tenant) openCreditCheckoutTx(ctx context.Context, tx *storeTx, amountMi
 	if err != nil {
 		return "", err
 	}
-	if err := t.lockTeamTx(ctx, tx); err != nil {
+	if _, err := lockLedgerTx(ctx, tx, t.team); err != nil {
 		return "", err
 	}
 	var deleting int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug = ? AND state = ?`,
-		string(t.team), TeamDeletionPending).Scan(&deleting); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug = ?`,
+		string(t.team)).Scan(&deleting); err != nil {
 		return "", err
 	}
 	if deleting > 0 {

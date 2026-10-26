@@ -145,8 +145,9 @@ Final upload expiry uses quota admission and leased blob maintenance. Empty
 uploads reserve object capacity too, and expired tickets cannot commit.
 
 The raw paid-credit grant path is removed. `Tenant.GrantCredits` is removed.
-`Tenant.RecordCreditGrant` accepts free grants only. Payment reversals use verified
-provider settlement or the authorized console refund transaction.
+`Tenant.RecordCreditGrant` accepts free grants and bounded negative corrections
+of those grants. Payment reversals use verified provider settlement or the
+authorized console refund transaction.
 Paid checkout credit uses `Store.SettlePayment`, which derives the team and
 amount from the committed checkout. Actionable fraud warnings refuse
 unprotected payments before a grant commits. A protected same-payment warning
@@ -208,7 +209,7 @@ removed too. Each caller must select a Tenant for its grants, charge history
 and idempotent events.
 The separate `SetCreditRateTable` wrapper is removed.
 `recordBillingAwardTx` stores immutable provenance and a reservation charge. The
-charge snapshots the CPU class, rate and card fingerprint. Its caller must pass
+charge snapshots the CPU class and rate. Its caller must pass
 server-derived authority, pricing and reservation size after taking claim locks.
 A capability prefix belongs to one reservation. Identical award replay writes
 nothing, and conflicting provenance or pricing fails.
@@ -227,7 +228,7 @@ settlement return zero cost without invoking a calculator or writing a charge.
 Final settlement still closes the immutable award, and exact replay returns
 that zero result after claimant pruning. Settlement reads the award and ledger,
 so deleting a run or revoking its claimant cannot change its payer or rate.
-Refunds retain the reservation's card and spend day. Callers keep renewal,
+Refunds retain the reservation's spend day. Callers keep renewal,
 transition and accounting in one transaction. They apply the existing spend
 policy to the resulting balance. A pause cannot precede the interval's last
 charged checkpoint.
@@ -236,7 +237,7 @@ The unused expired-claim settlement adapter is removed. Reapers must use the
 immutable award and interval helpers in their state transaction. Generated
 SQLite tests settle through an earlier persisted lapse after database reopening,
 race two settlement connections, and replay the committed result. The original
-rate, CPU class, card and refund day survive claimant pruning and pricing/card
+rate, CPU class and refund day survive claimant pruning and pricing
 changes. C2 calculation is a contract fake in these tests. Claim/start/reaper
 wiring and native execution remain integration obligations.
 
@@ -529,10 +530,10 @@ protection snapshot. Replays share the same reversal reference and all reversals
 are capped by the paid grant. Only refund-kind rows count as money returned by
 Stripe when closing the card-refund queue.
 
-Refill reservations persist amount, customer, payment method and receipt email.
+Refill reservations persist amount and Stripe customer, never a card or email.
 Unbound reservations may expire or be explicitly replaced. A bound payment
 keeps the team's single refill slot until its payment outcome is known.
-`CanConfirmRefill` rechecks current card eligibility, refill authorization,
+`CanConfirmRefill` rechecks the team's Stripe customer, refill authorization,
 holds and limits before the worker confirms an unconfirmed intent. The worker
 reconciles processing and succeeded intents without confirming again. An
 ineligible unconfirmed intent is canceled at Stripe; `RecordRefillCanceled`
@@ -551,8 +552,8 @@ first verified paid outcome, including a refused payment. The separate
 is protected. Missing, unknown and `attempt_acknowledged` results are
 unprotected. Later deliveries cannot change either value. A fraud
 warning keeps protected credit under a payment-specific team hold. Without
-protection, it reverses the credit and queues a refund. Both paths block the
-card deployment-wide. Held credit cannot fund storage growth or retention.
+protection, it reverses the credit and queues a refund. Both paths hold only the
+team the payment funded. Held credit cannot fund storage growth or retention.
 
 The unused `ErrMeteredInProcessNodes`, `LiveLogOffsetHeader`,
 `LiveLogAttemptHeader` and `LogWatchHeader` exports are removed. Tagged log
@@ -596,10 +597,12 @@ ledger lock. A refusal writes `billing_awards.stop_reason` and
 `drain_deadline_at` (one slice out) and cancels the metered job in the same
 transaction. A job stop leaves its owner orchestrating independent unmetered
 jobs. An owner-unit stop cancels the whole run. Placing a dispute, warning or
-operator hold, or revoking standing,
-also writes the stop and cancellation for active metered awards before the hold
-commits. Releasing a hold never clears that stop. These billing mutations use
-the same whole-transaction retry as other admin/work lock-order exceptions.
+operator hold records only the hold, whose `credit_freezes.drain_deadline_at`
+is one slice after it was placed; revoking standing records `billing_trust_at`,
+which bounds the drain the same way. Neither touches active awards. The award's
+next renewal is refused, and writes the stop with the earlier of its own slice
+and that recorded deadline, then cancels. Releasing a hold never clears that
+stop.
 `leaseBoundTx` in `lease_bound.go` is
 the only lease bound: every node, owner, eval and launcher-preparation lease is
 the earliest of the default lease, the capability expiry, revocation and binding deadline,
@@ -691,15 +694,27 @@ GitHub or git I/O while it holds locks. Sets such as ancestry, batches and
 migration destinations are discovered without locks, locked complete in this
 order, then reread and validated.
 
+`lock_order.go` owns financial team and ledger acquisition. Every affected team
+is locked before any ledger. A warning locks only the team its payment funded.
+A shared team lock cannot be upgraded, and a new team cannot be added after a
+ledger lock. Payment callbacks revalidate their discovered teams after taking
+the payment identity lock. A changed binding restarts the transaction.
+Concurrency maintenance takes the same team locks before capacity entries
+because its funding checks acquire the ledger.
+Owner claims and reapers use the same helper to lock the team before trigger or
+evaluation rows. Raw owner-row locks are confined to `lock_order.go` by the guard. Work locks
+reuse their transaction's held keys. New work locks after the ledger are refused.
+Warnings record financial holds and drain deadlines without touching work.
+
 `lock_order.go` defines the canonical tiers and comparator. Authority and unit
 batch locking use it. The acquisition-sequence test checks actual SQL against
 that order with shuffled authority and unit inputs.
 
-1. Global advisories, in fixed order: credit ledger, settings, compute and free
+1. Global advisories, in fixed order: settings, compute and free
    tier, bootstrap and service enrollment, capacity admission.
 2. Singleton lease rows (maintenance, controller owner and reaper).
 3. Settings and signup gate rows.
-4. Teams, sorted.
+4. Teams, sorted. Financial writers take `FOR UPDATE` before any ledger lock.
 5. Accounts, sorted.
 6. Memberships.
 7. The complete authority set, deepest first, then by kind and key at equal
@@ -718,8 +733,9 @@ that order with shuffled authority and unit inputs.
 16. Blob digest advisories, sorted and deduplicated.
 17. Quota dimensions: monthly bytes, run bytes, run objects; admission before
     reservation within each dimension.
-18. Billing awards, intervals, payment rows and storage counters.
-19. Records, manifests, logs, events, effects and invitations.
+18. Credit ledgers, sorted by team.
+19. Billing awards, intervals, payment rows and storage counters.
+20. Records, manifests, logs, events, effects and invitations.
 
 Hot transaction families:
 
@@ -742,15 +758,10 @@ Justified exceptions:
 
 - A concurrency-maintenance entry lock followed by an implicit run key-share is
   compatible with renewal's run `NO KEY UPDATE`.
-- A team key-share from a foreign key followed by a team update during billing
-  is compatible with other key-share holders.
+- A Cloud service claimant has no tenant. Its authority can precede the selected
+  team because global service authority mutations do not wait for tenant rows.
 - GitHub source release locks its installation after work rows. No transaction
   holds an installation and then waits on work.
-- Work billing takes the ledger advisory after work locks, opposite team and
-  account deletion. Tenant and operator revocation, membership changes, team
-  deletion requests, account deletion, purge finalization, leased retention,
-  sign-in and console mutations run their complete transaction bodies through
-  `inTx` because their admin lock order can conflict with live work.
 
 `inTx` reruns its whole function in a fresh transaction when PostgreSQL reports
 a deadlock (`40P01`) or serialization failure (`40001`): at most five attempts,

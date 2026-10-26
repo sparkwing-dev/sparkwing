@@ -61,7 +61,7 @@ func TestPaymentProof(t *testing.T) {
 			}
 			want := PaymentEvent{EventID: "evt_fixture", CheckoutID: "cs_fixture", PaymentID: "pi_fixture", Currency: "usd", AmountMinor: 1200, Mode: PaymentTest, Kind: tc.want}
 			if tc.want == PaymentCheckoutPaid {
-				want.ThreeDS, want.Fingerprint = "authenticated", "fp_ch_fixture"
+				want.ThreeDS = "authenticated"
 				want.LiabilityShift = true
 			}
 			if proof == nil || proof.Event() != want {
@@ -147,7 +147,7 @@ func (h *paymentHeaders) RoundTrip(r *http.Request) (*http.Response, error) {
 	return h.next.RoundTrip(r)
 }
 
-func TestPaidCheckoutReadsThreeDSecureAndCardFromTheSettledCharge(t *testing.T) {
+func TestPaidCheckoutReadsThreeDSecureFromTheSettledCharge(t *testing.T) {
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	secret := "whsec_fixture_only"
 	body := paymentBody("checkout.session.completed", "paid", false)
@@ -162,7 +162,7 @@ func TestPaidCheckoutReadsThreeDSecureAndCardFromTheSettledCharge(t *testing.T) 
 	for _, result := range []string{"authenticated", "attempt_acknowledged", "failed", "processing_error", "exempted", "not_supported", "unknown", ""} {
 		proof, versions, err := verify(paymenttest.Provider{}.SettledCheckout("pi_fixture", false, result))
 		shifted := result == "authenticated"
-		if err != nil || proof == nil || proof.Event().ThreeDS != result || proof.Event().LiabilityShift != shifted || proof.Event().Fingerprint != "fp_ch_fixture" {
+		if err != nil || proof == nil || proof.Event().ThreeDS != result || proof.Event().LiabilityShift != shifted {
 			t.Fatalf("%q: proof=%+v err=%v", result, proof, err)
 		}
 		if len(versions) != 2 || versions[0] != paymentProviderAPIVersion || versions[1] != paymentProviderAPIVersion {
@@ -273,5 +273,19 @@ func TestARecordedObjectStampedElsewhereIsAnIntegrityFault(t *testing.T) {
 		if proof != nil || !errors.As(err, &conflict) || conflict.Details["reason"] != PaymentOwnershipReason || conflict.Details["stamp"] != "dep-another" || conflict.Details["object"] != "cs_fixture" {
 			t.Fatalf("%s: proof=%+v err=%v, want an ownership conflict before purpose filtering", name, proof, err)
 		}
+	}
+}
+
+func TestRequiresActionProducesRefillFailureProof(t *testing.T) {
+	now := time.Now()
+	secret := "whsec_fixture_only"
+	v := &paymentAuthenticator{mode: PaymentTest, secret: []byte(secret), now: func() time.Time { return now }, provider: newPaymentProvider("sk_test_fixture")}
+	body := verifiedProviderBody(PaymentTest, "payment_intent.requires_action", `{"id":"pi_fixture","object":"payment_intent","status":"requires_action","amount":1200,"currency":"usd","customer":"cus_fixture","livemode":false,"metadata":{"purpose":"card_refill"}}`)
+	proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, secret, now)}, testPaymentScope)
+	if err != nil || proof == nil {
+		t.Fatalf("authentication-required proof=%+v: %v", proof, err)
+	}
+	if proof.Event().Kind != PaymentCardFailed || proof.Event().DeclineCode != "authentication_required" {
+		t.Fatalf("outcome=%+v", proof.Event())
 	}
 }

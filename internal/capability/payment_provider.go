@@ -32,30 +32,23 @@ func (r *paymentReference) UnmarshalJSON(data []byte) error {
 }
 
 type paymentObject struct {
-	ID             string           `json:"id"`
-	Object         string           `json:"object"`
-	LiveMode       *bool            `json:"livemode"`
-	Status         string           `json:"status"`
-	Currency       string           `json:"currency"`
-	Amount         *int64           `json:"amount"`
-	AmountReceived *int64           `json:"amount_received"`
-	Customer       paymentReference `json:"customer"`
-	PaymentMethod  paymentReference `json:"payment_method"`
-	PaymentIntent  paymentReference `json:"payment_intent"`
-	Charge         paymentReference `json:"charge"`
-	LatestCharge   paymentReference `json:"latest_charge"`
-	Actionable     *bool            `json:"actionable"`
-	Reason         string           `json:"reason"`
-	Type           string           `json:"type"`
-	Metadata       paymentMetadata  `json:"metadata"`
-	Card           struct {
-		Fingerprint string `json:"fingerprint"`
-		Brand       string `json:"brand"`
-		Last4       string `json:"last4"`
-	} `json:"card"`
+	ID                   string           `json:"id"`
+	Object               string           `json:"object"`
+	LiveMode             *bool            `json:"livemode"`
+	Status               string           `json:"status"`
+	Currency             string           `json:"currency"`
+	Amount               *int64           `json:"amount"`
+	AmountReceived       *int64           `json:"amount_received"`
+	Customer             paymentReference `json:"customer"`
+	PaymentMethod        paymentReference `json:"payment_method"`
+	PaymentIntent        paymentReference `json:"payment_intent"`
+	Charge               paymentReference `json:"charge"`
+	LatestCharge         paymentReference `json:"latest_charge"`
+	Actionable           *bool            `json:"actionable"`
+	Reason               string           `json:"reason"`
+	Metadata             paymentMetadata  `json:"metadata"`
 	PaymentMethodDetails struct {
 		Card struct {
-			Fingerprint  string `json:"fingerprint"`
 			ThreeDSecure *struct {
 				Result string `json:"result"`
 			} `json:"three_d_secure"`
@@ -73,12 +66,12 @@ func (a *paymentAuthenticator) providerEvent(ctx context.Context, id string, cre
 	}
 	event := PaymentEvent{
 		EventID: id, ObjectID: object.ID, Created: created, Mode: a.mode, Kind: policy.Kind, Status: object.Status,
-		CustomerID: string(object.Customer), MethodID: string(object.PaymentMethod), PaymentID: string(object.PaymentIntent), ChargeID: string(object.Charge), Reason: object.Reason,
+		CustomerID: string(object.Customer), PaymentID: string(object.PaymentIntent), ChargeID: string(object.Charge), Reason: object.Reason,
 	}
 	var err error
 	switch policy.Kind {
 	case PaymentCardSetup:
-		err = a.cardSetup(ctx, object, &event)
+		err = cardSetup(object, &event)
 	case PaymentCardPaid, PaymentCardFailed:
 		err = a.cardPayment(ctx, object, &event)
 	case PaymentRefund:
@@ -91,7 +84,6 @@ func (a *paymentAuthenticator) providerEvent(ctx context.Context, id string, cre
 			return nil, invalidPaymentEvent()
 		}
 		event.Actionable = *object.Actionable
-		err = a.chargeFingerprint(ctx, &event)
 	case PaymentDisputeOpened, PaymentDisputeClosed:
 		err = disputeEvent(object, &event)
 	default:
@@ -103,18 +95,11 @@ func (a *paymentAuthenticator) providerEvent(ctx context.Context, id string, cre
 	return &VerifiedPaymentEvent{event: event}, nil
 }
 
-func (a *paymentAuthenticator) cardSetup(ctx context.Context, object paymentObject, event *PaymentEvent) error {
-	if object.Object != "setup_intent" || object.Status != "succeeded" || event.CustomerID == "" || event.MethodID == "" {
+// safety: Stripe holds the card; a setup records only that its customer now has one, never which card.
+func cardSetup(object paymentObject, event *PaymentEvent) error {
+	if object.Object != "setup_intent" || object.Status != "succeeded" || event.CustomerID == "" || object.PaymentMethod == "" {
 		return invalidPaymentEvent()
 	}
-	method, err := a.provider.read(ctx, "payment_methods", event.MethodID, "payment_method", a.mode)
-	if err != nil {
-		return err
-	}
-	if string(method.Customer) != event.CustomerID || method.Type != "card" || method.Card.Fingerprint == "" || method.Card.Brand == "" || len(method.Card.Last4) != 4 || strings.IndexFunc(method.Card.Last4, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
-		return invalidPaymentEvent()
-	}
-	event.Fingerprint, event.Brand, event.Last4 = method.Card.Fingerprint, method.Card.Brand, method.Card.Last4
 	return nil
 }
 
@@ -125,6 +110,10 @@ func (a *paymentAuthenticator) cardPayment(ctx context.Context, object paymentOb
 	event.PaymentID, event.AmountMinor, event.Currency = object.ID, *object.Amount, object.Currency
 	event.ChargeID, event.DeclineCode = string(object.LatestCharge), object.LastPaymentError.DeclineCode
 	if event.Kind == PaymentCardFailed {
+		if object.Status == "requires_action" {
+			event.DeclineCode = "authentication_required"
+			return nil
+		}
 		if object.Status != "requires_payment_method" {
 			return invalidPaymentEvent()
 		}
@@ -133,7 +122,7 @@ func (a *paymentAuthenticator) cardPayment(ctx context.Context, object paymentOb
 	if object.Status != "succeeded" || object.AmountReceived == nil || *object.AmountReceived != *object.Amount || event.ChargeID == "" {
 		return invalidPaymentEvent()
 	}
-	return a.chargeFingerprint(ctx, event)
+	return a.chargeFacts(ctx, event)
 }
 
 func refundEvent(object paymentObject, event *PaymentEvent) error {
@@ -168,23 +157,19 @@ func disputeEvent(object paymentObject, event *PaymentEvent) error {
 	return nil
 }
 
-func (a *paymentAuthenticator) chargeFingerprint(ctx context.Context, event *PaymentEvent) error {
+func (a *paymentAuthenticator) chargeFacts(ctx context.Context, event *PaymentEvent) error {
 	charge, err := a.provider.read(ctx, "charges", event.ChargeID, "charge", a.mode)
 	if err != nil {
 		return err
 	}
-	if string(charge.PaymentIntent) != event.PaymentID || charge.PaymentMethodDetails.Card.Fingerprint == "" {
+	if string(charge.PaymentIntent) != event.PaymentID {
 		return invalidPaymentEvent()
 	}
-	event.Fingerprint = charge.PaymentMethodDetails.Card.Fingerprint
-	if event.Kind == PaymentCardPaid {
-		event.setPaidCardFacts(charge)
-	}
+	event.setPaidCardFacts(charge)
 	return nil
 }
 
 func (event *PaymentEvent) setPaidCardFacts(charge paymentObject) {
-	event.Fingerprint = charge.PaymentMethodDetails.Card.Fingerprint
 	if secure := charge.PaymentMethodDetails.Card.ThreeDSecure; secure != nil {
 		event.ThreeDS = secure.Result
 		event.LiabilityShift = secure.Result == "authenticated"

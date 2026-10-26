@@ -233,11 +233,10 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		} else if count != 1 {
 			return holderRefusal()
 		}
-		if err := finishExpansionBillingTx(ctx, tx, t.team, request); err != nil {
+		if err := settleControllerTx(ctx, tx, t.team, string(request.Source.RunID), tx.now(ctx)); err != nil {
 			return err
 		}
-		now := tx.now(ctx)
-		return settleControllerTx(ctx, tx, t.team, string(request.Source.RunID), now)
+		return finishExpansionBillingTx(ctx, tx, t.team, request)
 	})
 	return result, err
 }
@@ -277,7 +276,10 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		if runspec.RunID(lease.ID) != request.Source.RunID {
 			return holderRefusal()
 		}
-		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,cancel_requested_at FROM triggers WHERE team=? AND id=? AND unit_kind='trigger'`+tx.forUpdate(), team, lease.ID).Scan(&status, &holder, &prefix, &generation, &until, &cancelled)
+		if err := lockOwnerUnitTx(ctx, tx, team, UnitRef{Kind: lease.Kind, RunID: request.Source.RunID}); err != nil {
+			return err
+		}
+		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,cancel_requested_at FROM triggers WHERE team=? AND id=? AND unit_kind='trigger'`, team, lease.ID).Scan(&status, &holder, &prefix, &generation, &until, &cancelled)
 		if err == nil && !slices.ContainsFunc(chain, func(node authorityNode) bool { return node.principal.Capability.Prefix == prefix }) {
 			return holderRefusal()
 		}
@@ -286,7 +288,10 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		if decodeErr != nil || unit.RunID != request.Source.RunID || unit.NodeID != request.Source.NodeID || runspec.ClaimGeneration(unit.SourceGeneration) != request.SourceGeneration {
 			return holderRefusal()
 		}
-		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,owner_generation FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration).Scan(&status, &holder, &prefix, &generation, &until, &ownerGeneration)
+		if err := lockOwnerUnitTx(ctx, tx, team, unit); err != nil {
+			return err
+		}
+		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,owner_generation FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration).Scan(&status, &holder, &prefix, &generation, &until, &ownerGeneration)
 		stored := runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: holder, Generation: runspec.ClaimGeneration(generation)}
 		credential := runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), SourceNodeID: runspec.NodeID(c.Binding.NodeID), SourceGeneration: runspec.ClaimGeneration(c.Binding.Generation), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}
 		if err == nil && (prefix != c.Prefix || ownerGeneration != controllerGeneration || request.Actor.Owner.Kind != runstate.OwnerEval || stored != request.Actor.Owner.EvalFence || request.Actor.Owner.EvalFence != credential) {
@@ -554,6 +559,10 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 			}
 		}
 		if err = settleControllerTx(ctx, tx, team, run.ID, tx.now(ctx)); err != nil {
+			return AcceptedPlan{}, err
+		}
+		// Admission locks competing work before preparation settlement takes the ledger.
+		if err = settleOwnerBillingTx(ctx, tx, team, run.ID, int64(request.Actor.Owner.Generation), tx.now(ctx)); err != nil {
 			return AcceptedPlan{}, err
 		}
 		return AcceptedPlan{Spec: spec, Plan: body, PlanHash: string(spec.PlanHash), Owner: &controller.Owner, Replayed: replay}, nil

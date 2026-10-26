@@ -19,8 +19,11 @@ type ownerRecovery struct {
 }
 
 func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor runstate.Actor, now time.Time) (*ReapedUnit, error) {
+	if err := lockOwnerUnitTx(ctx, tx, target.team, UnitRef{Kind: target.kind, RunID: target.ref.RunID, NodeID: target.ref.NodeID, SourceGeneration: target.sourceGeneration}); err != nil {
+		return nil, err
+	}
 	var owner ownerRecovery
-	err := tx.QueryRowContext(ctx, `SELECT status,capability_prefix,generation,disruptions,lease_expires_at,expires_at,started_at,cancel_requested_at FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), target.team, target.ref.RunID).Scan(&owner.status, &owner.prefix, &owner.generation, &owner.disruptions, &owner.lease, &owner.deadline, &owner.started, &owner.cancelled)
+	err := tx.QueryRowContext(ctx, `SELECT status,capability_prefix,generation,disruptions,lease_expires_at,expires_at,started_at,cancel_requested_at FROM triggers WHERE team=? AND id=?`, target.team, target.ref.RunID).Scan(&owner.status, &owner.prefix, &owner.generation, &owner.disruptions, &owner.lease, &owner.deadline, &owner.started, &owner.cancelled)
 	if err != nil {
 		return nil, err
 	}
@@ -115,8 +118,11 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 }
 
 func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor runstate.Actor, now time.Time) (*ReapedUnit, error) {
+	if err := lockOwnerUnitTx(ctx, tx, target.team, UnitRef{Kind: target.kind, RunID: target.ref.RunID, NodeID: target.ref.NodeID, SourceGeneration: target.sourceGeneration}); err != nil {
+		return nil, err
+	}
 	var unit ownerRecovery
-	err := tx.QueryRowContext(ctx, `SELECT status,capability_prefix,generation,disruptions,lease_expires_at,expires_at,started_at FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration).Scan(&unit.status, &unit.prefix, &unit.generation, &unit.disruptions, &unit.lease, &unit.deadline, &unit.started)
+	err := tx.QueryRowContext(ctx, `SELECT status,capability_prefix,generation,disruptions,lease_expires_at,expires_at,started_at FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration).Scan(&unit.status, &unit.prefix, &unit.generation, &unit.disruptions, &unit.lease, &unit.deadline, &unit.started)
 	if err != nil {
 		return nil, err
 	}
@@ -124,6 +130,9 @@ func reapEvalUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 		return nil, nil
 	}
 	if err := lockStateRunTx(ctx, tx, target.team, string(target.ref.RunID)); err != nil {
+		return nil, err
+	}
+	if err := lockControllerCapacityTx(ctx, tx, target.team, string(target.ref.RunID)); err != nil {
 		return nil, err
 	}
 	run, err := readRunTx(ctx, tx, target.team, string(target.ref.RunID))

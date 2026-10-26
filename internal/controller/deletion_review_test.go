@@ -3,7 +3,6 @@ package controller_test
 import (
 	"context"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -20,12 +19,13 @@ func TestTeamPurgeWaitsForDeletionDelay(t *testing.T) {
 		t.Fatalf("delete = %d", code)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), teststore.Now(f.store).Add(30*time.Second))
-	if _, err := f.store.TeamInfo(t.Context(), "acme"); err != nil {
-		t.Fatalf("a pass 30s after the request purged the team: %v", err)
+	var runs int
+	if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs WHERE team='acme'`).Scan(&runs); err != nil || runs != 1 {
+		t.Fatalf("team runs before purge delay = %d: %v", runs, err)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), teststore.Now(f.store).Add(3*time.Minute))
-	if _, err := f.store.TeamInfo(t.Context(), "acme"); err == nil {
-		t.Fatal("a pass 3 minutes after the request left the team registered")
+	if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs WHERE team='acme'`).Scan(&runs); err != nil || runs != 0 {
+		t.Fatalf("team runs after purge delay = %d: %v", runs, err)
 	}
 }
 
@@ -61,39 +61,36 @@ func TestDeleteAccountOwningTheDefaultTeamIsABadRequest(t *testing.T) {
 	}
 }
 
-// Deleting a team with money in flight answers 409 with the remedy, from the
-// owner's route and the operator's, and neither closes the team.
-func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
-	f := newDeletionFixture(t)
-	owner := f.user("o", "olga@example.com")
-	f.createTeam(&owner, "acme")
-	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('pending','acme','pending','test','usd',100,?,1,?)`, store.MicroCreditsPerCredit, teststore.Now(f.store).Add(time.Hour).UnixNano()); err != nil {
-		t.Fatal(err)
-	}
-	var refused struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "acme"}, &refused); code != http.StatusConflict ||
-		!strings.Contains(refused.Error.Message, "wait for the checkout to expire or complete") {
-		t.Fatalf("deleting a team with an open checkout = %d %q, want 409 naming the remedy", code, refused.Error.Message)
-	}
-	if code := f.call("DELETE", "/api/v1/operator/teams/acme", f.consoleAuth(), nil, nil); code != http.StatusConflict {
-		t.Fatalf("the operator deleting it = %d, want 409", code)
-	}
-
-	f.createTeam(&owner, "held")
-	if _, err := teststore.SQL(t, f.store).ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause) VALUES (?,?,?,?,?,'dispute')", "dp_held", "held", "", "dispute opened", teststore.Now(f.store).UnixNano()); err != nil {
-		t.Fatal(err)
-	}
-	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "held"}, &refused); code != http.StatusConflict ||
-		!strings.Contains(refused.Error.Message, "contact support") {
-		t.Fatalf("deleting a held team = %d %q, want 409 naming the remedy", code, refused.Error.Message)
-	}
-	var mine []teamDeletionBody
-	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)
-	if len(mine) != 0 {
-		t.Fatalf("a refused deletion was recorded: %+v", mine)
+func TestDeleteTeamKeepsAnOpenCheckoutAndADisputeHold(t *testing.T) {
+	for _, operator := range []bool{false, true} {
+		t.Run(map[bool]string{false: "owner", true: "operator"}[operator], func(t *testing.T) {
+			f := newDeletionFixture(t)
+			owner := f.user("o", "olga@example.com")
+			f.createTeam(&owner, "acme")
+			if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('pending','acme','pending','test','usd',100,?,1,?)`, store.MicroCreditsPerCredit, teststore.Now(f.store).Add(time.Hour).UnixNano()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at,cause) VALUES ('dispute','acme','','dispute opened',1,'dispute')`); err != nil {
+				t.Fatal(err)
+			}
+			path, auth := "/api/v1/team", owner.auth
+			if operator {
+				path, auth = "/api/v1/operator/teams/acme", f.consoleAuth()
+			}
+			var del teamDeletionBody
+			if code := f.call("DELETE", path, auth, map[string]string{"confirm_slug": "acme"}, &del); code != http.StatusAccepted || del.State != store.TeamDeletionPending {
+				t.Fatalf("deletion with money in flight = %d %+v", code, del)
+			}
+			f.srv.ProcessTeamDeletions(t.Context(), teststore.Now(f.store).Add(3*time.Minute))
+			var kept int
+			if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM team_deletions WHERE slug='acme' AND state='done'`).Scan(&kept); err != nil || kept != 1 {
+				t.Fatalf("finished deletion = %d: %v", kept, err)
+			}
+			for _, table := range []string{"credit_checkouts", "credit_freezes"} {
+				if err := teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM `+table+` WHERE team='acme'`).Scan(&kept); err != nil || kept != 1 {
+					t.Fatalf("retained %s = %d: %v", table, kept, err)
+				}
+			}
+		})
 	}
 }

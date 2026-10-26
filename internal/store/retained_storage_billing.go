@@ -89,6 +89,9 @@ func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease,
 }
 
 func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team, rate, free int64) (*CreditCharge, error) {
+	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
+		return nil, err
+	}
 	if rate == 0 {
 		_, err := tx.execContext(ctx, "UPDATE team_storage SET storage_charged_through=0 WHERE team=? AND store IN ('cache','logs') AND storage_charged_through<>0", team)
 		if err != nil {

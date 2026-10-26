@@ -246,6 +246,7 @@ func TestOverflowUsageIncludesCloudWorkAcrossMonthBoundary(t *testing.T) {
 	s.clock = func() time.Time { return now }
 	start := now.Add(-4 * time.Minute)
 	rewriteSchemaExec(t, s.db, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,requester_account) VALUES ('a','award','cloud','run',1,'a',1,'cloud','at_start','node','job',?,'owner')`, start.UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(team,id,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('a','reservation','run','job','cloud','reservation',10,1,?)`, start.UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO billable_intervals(team,id,run_id,generation,capability_prefix,reservation_id,payer_team,metered,executor_class,unit_kind,billing_unit,billing_start,started_at,charged_through) VALUES ('a','interval','run',1,'cloud','award','a',1,'cloud','node','job','at_start',?,?)`, start.UnixNano(), start.UnixNano())
 	control, err := (&Tenant{s: s, team: "a"}).ReadOverflowControl(t.Context(), owner.Authority)
 	if err != nil || control.UsedSeconds != 120 {

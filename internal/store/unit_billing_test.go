@@ -15,16 +15,22 @@ import (
 
 func meteredUnitFixture(t *testing.T, cloud bool) (*Store, UnitDemand, *time.Time) {
 	t.Helper()
-	s, demand := unitClaimFixture(t)
+	return meteredUnitFixtureStore(t, authorityStore(t), cloud)
+}
+
+func meteredUnitFixtureStore(t *testing.T, s *Store, cloud bool) (*Store, UnitDemand, *time.Time) {
+	t.Helper()
+	s, demand := unitClaimFixtureStore(t, s)
 	now := s.now()
 	s.clock = func() time.Time { return now }
+	s.pinnedClock = s.clock
 	root := authorityRoot("paid-runner", "a")
 	root.RootMetered = true
 	root.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
 	if cloud {
 		root.Subject.Kind, root.Team = capability.SubjectService, ""
 		root.Grants = []capability.Grant{capability.ClaimsLaunch}
-		rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu"]}}`))
+		s.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["sparkwing-4cpu"]}}`))
 		indexFixtureUnit(t, s, "a", *demand.Target)
 	}
 	authorityPersist(t, s, root)
@@ -174,10 +180,16 @@ func TestMeteredUnitEvalSettlementUsesPersistedLease(t *testing.T) {
 	unitBillingTotal(t, s, 22, true)
 }
 
-func TestMeteredUnitNodeLifecycleUsesImmutableAward(t *testing.T) {
+// BillingLifecycleReferenceModel runs the same immutable-award lifecycle against a real store in either dialect.
+func BillingLifecycleReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 	for _, cloud := range []bool{false, true} {
 		t.Run(map[bool]string{false: "runner", true: "cloud"}[cloud], func(t *testing.T) {
-			s, demand, now := meteredUnitFixture(t, cloud)
+			s := open(t)
+			for _, team := range []string{"a", "b"} {
+				s.testOnlyExec(t, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1) ON CONFLICT(name) DO NOTHING`, team)
+				s.testOnlyExec(t, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
+			}
+			s, demand, now := meteredUnitFixtureStore(t, s, cloud)
 			awarded := *now
 			_, actor := meteredUnitClaim(t, s, demand)
 			wantCharge := int64(120)

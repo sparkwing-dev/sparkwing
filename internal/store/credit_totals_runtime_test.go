@@ -14,8 +14,8 @@ import (
 
 func TestStoreDataLedgerTotalsUseFinancialRows(t *testing.T) {
 	s := authorityStore(t)
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,reverses,created_at) VALUES
-	 ('free','a','free',100,'',1),('paid','b','paid',1000,'',1),('reversal','b','reversal',-25,'payment:test:paid',1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,reverses,created_at,reference) VALUES
+	 ('free','a','free',100,'',1,''),('paid','b','paid',1000,'',1,'payment:test:paid'),('reversal','b','reversal',-25,'payment:test:paid',1,'')`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES
 	 ('reserve','a','pruned','job','award','reservation',60,600,1),
 	 ('refund','a','pruned','job','award','refund',-57,-570,1),

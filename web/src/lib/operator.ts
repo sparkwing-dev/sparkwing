@@ -47,6 +47,18 @@ export interface OperatorTeam {
   hold_causes: HoldCause[];
   events: OperatorEvent[];
   next_cursor?: string;
+  // Queued refunds Stripe failed or canceled; return the money by hand in Stripe.
+  failed_refunds: FailedRefund[];
+}
+
+export interface FailedRefund {
+  payment_intent: string;
+  refund_id: string;
+  status: string;
+  reason: string;
+  amount_micro: number;
+  // Unix seconds.
+  created_at: number;
 }
 
 export type HoldCause = "operator" | "dispute" | "early_fraud_warning" | string;

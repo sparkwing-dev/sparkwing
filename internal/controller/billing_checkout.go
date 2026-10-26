@@ -46,7 +46,12 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 
 var errCheckoutRefused = errors.New("the checkout service refused the session")
 
-func (c *billingCheckout) openReservedPage(ctx context.Context, deployment string, page *capability.BillingPage) error {
+// errRefillNoCard is the checkout service's refusal to create a refill for a customer with no card in Stripe.
+var errRefillNoCard = errors.New("the customer has no card")
+
+// openReservedPage opens the provider page for a reservation; email, the team owner's address for Stripe's receipts,
+// is sent with a card setup and never stored.
+func (c *billingCheckout) openReservedPage(ctx context.Context, deployment string, page *capability.BillingPage, email string) error {
 	path := "/internal/checkout"
 	body := map[string]any{"team": page.Team, "key": page.ReservationID, "deployment": deployment, "expires_at": page.ExpiresAt.Unix()}
 	switch page.Kind {
@@ -54,7 +59,7 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, deployment strin
 		body["amount_cents"] = page.AmountCents
 	case capability.BillingPageCard:
 		path = "/internal/card-setup"
-		body["setup_id"], body["customer"], body["email"] = page.ReservationID, page.Customer, page.Email
+		body["setup_id"], body["customer"], body["email"] = page.ReservationID, page.Customer, email
 	default:
 		return routepolicy.MissingEndpointPolicy()
 	}
@@ -113,7 +118,11 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 		return fmt.Errorf("checkout service: read: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%w: %d %s", errCheckoutRefused, resp.StatusCode, strings.TrimSpace(string(payload)))
+		err := fmt.Errorf("%w: %d %s", errCheckoutRefused, resp.StatusCode, strings.TrimSpace(string(payload)))
+		if path == "/internal/refill" && resp.StatusCode == http.StatusConflict {
+			err = errors.Join(errRefillNoCard, err)
+		}
+		return err
 	}
 	if err := json.Unmarshal(payload, out); err != nil {
 		return fmt.Errorf("checkout service: decode: %w", err)
@@ -134,7 +143,7 @@ func (c *billingCheckout) refill(ctx context.Context, deployment string, r store
 	}
 	err := c.post(ctx, path, map[string]any{
 		"team": string(r.Team), "deployment": deployment, "refill_id": r.ID, "amount_cents": r.AmountCents,
-		"customer": r.Customer, "payment_method": r.PaymentMethod, "receipt_email": r.ReceiptEmail, "payment_intent": r.PaymentIntent,
+		"customer": r.Customer, "payment_intent": r.PaymentIntent,
 	}, &out)
 	if err == nil && (out.PaymentIntent == "" || out.Status == "" || r.PaymentIntent != "" && out.PaymentIntent != r.PaymentIntent) {
 		err = fmt.Errorf("%w: missing or mismatched payment or status", errCheckoutRefused)
@@ -142,13 +151,25 @@ func (c *billingCheckout) refill(ctx context.Context, deployment string, r store
 	return out, err
 }
 
-func (c *billingCheckout) refund(ctx context.Context, paymentIntent, key, reason string) (string, string, error) {
+// portal opens a Stripe customer portal session, where the team views and changes its card; Sparkwing never sees it.
+func (c *billingCheckout) portal(ctx context.Context, deployment, team, customer string) (string, error) {
+	var out hostedPageJSON
+	if err := c.post(ctx, "/internal/portal", map[string]any{"team": team, "deployment": deployment, "customer": customer}, &out); err != nil {
+		return "", err
+	}
+	if !validBillingPageURL(out.URL) {
+		return "", fmt.Errorf("%w: non-https portal page", errCheckoutRefused)
+	}
+	return out.URL, nil
+}
+
+func (c *billingCheckout) refund(ctx context.Context, paymentIntent, reason string) (string, string, error) {
 	var out struct {
 		Refund string `json:"refund"`
 		Status string `json:"status"`
 	}
 	err := c.post(ctx, "/internal/refund", map[string]any{
-		"payment_intent": paymentIntent, "key": key, "reason": reason,
+		"payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
 	}, &out)
 	if err == nil && (out.Refund == "" || out.Status == "") {
 		err = fmt.Errorf("%w: it named no refund and status", errCheckoutRefused)

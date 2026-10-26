@@ -32,6 +32,9 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 		if err := lockPaymentTx(ctx, tx, mode, req.PaymentID); err != nil {
 			return CreditReversal{}, err
 		}
+		if err := lockFinancialTeamsTx(ctx, tx, Team(a.Target.Team)); err != nil {
+			return CreditReversal{}, err
+		}
 		if _, err := lockLedgerTx(ctx, tx, Team(a.Target.Team)); err != nil {
 			return CreditReversal{}, err
 		}
@@ -91,7 +94,7 @@ func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, re
 			result.Grant = &grant
 			result.Created = !existed
 		}
-		result.ReversedMicro, err = reversedMicroTx(ctx, tx, paid.Team, paid.Reference)
+		result.ReversedMicro, err = reversedMicroTx(ctx, tx, paid.Team, CreditGrantPaid, paid.Reference)
 		if err != nil {
 			return CreditReversal{}, err
 		}

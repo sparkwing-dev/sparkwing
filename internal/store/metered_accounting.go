@@ -254,8 +254,8 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 	return result, err
 }
 
-// safety: the next slice is reserved in the renewal's own transaction under the team's lock, so the balance it is
-// checked against is the one it is charged from; a refusal still charges what the work already used.
+// safety: balance checks and slice debits share the team lock and startup payment mode.
+// Cutover requires settled awards; a refusal still charges work already used.
 func renewBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservation string, through time.Time, reserve bool) error {
 	result, err := accountBillingAwardTx(ctx, tx, team, reservation, through, false)
 	if err != nil || !reserve {

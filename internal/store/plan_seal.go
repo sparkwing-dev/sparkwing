@@ -43,10 +43,13 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 	if request.Actor.Kind != runstate.ActorRunHost || owner.Kind != runstate.OwnerTrigger || owner.RunID != runspec.RunID(request.RunID) || owner.Generation <= 0 || owner.Holder == "" || c.Unit != expected || c.UnitID != request.RunID || c.Binding.Kind != binding || !slices.Contains(c.Grants, capability.NodeResult) || runspec.ClaimGeneration(c.Binding.Generation) != owner.Generation || c.Binding.Holder != owner.Holder {
 		return holderRefusal()
 	}
+	if err := lockOwnerUnitTx(ctx, tx, team, UnitRef{Kind: expected, RunID: runspec.RunID(request.RunID)}); err != nil {
+		return err
+	}
 	var holder, prefix, status string
 	var generation int64
 	var lease, cancelled sql.NullInt64
-	if err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,cancel_requested_at FROM triggers WHERE team=? AND id=? AND unit_kind=?`+tx.forUpdate(), team, request.RunID, expected).Scan(&status, &holder, &prefix, &generation, &lease, &cancelled); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,cancel_requested_at FROM triggers WHERE team=? AND id=? AND unit_kind=?`, team, request.RunID, expected).Scan(&status, &holder, &prefix, &generation, &lease, &cancelled); err != nil {
 		return err
 	}
 	if runspec.ClaimGeneration(generation) != owner.Generation {

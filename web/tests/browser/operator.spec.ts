@@ -18,6 +18,7 @@ const acme = {
   frozen: false,
   holds: [],
   hold_causes: [],
+  failed_refunds: [],
   events: [
     {
       at: 1_790_000_000,
@@ -73,6 +74,18 @@ test("the operator finds a team and reads its standing", async ({ page }) => {
     page.getByText(/by korey@example\.com .*: chargeback/),
   ).toBeVisible();
   await expect(page.getByText("billing.trust_changed")).toBeVisible();
+});
+
+test("the operator sees refunds Stripe did not make", async ({ page }) => {
+  await mockOperator(page, {
+    ...acme,
+    failed_refunds: [
+      { payment_intent: "pi_failed", refund_id: "re_failed", status: "failed", reason: "warning", amount_micro: 2_000_000_000, created_at: 1_790_000_000 },
+    ],
+  });
+  await page.goto("/operator?team=acme");
+  await expect(page.getByText("Refunds Stripe did not make")).toBeVisible();
+  await expect(page.getByRole("listitem").filter({ hasText: "pi_failed" })).toContainText("failed (refund re_failed)");
 });
 
 test("audit history continues through the browser client and preserves mutation targets", async ({ page }) => {

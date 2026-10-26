@@ -91,6 +91,8 @@ func TestStoreDataRetainedStorageForgivesUnfundedTimeBeforeTopUp(t *testing.T) {
 			s, lease, now := retainedBillingFixture(t)
 			rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
 			if balance < 0 {
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_at) VALUES ('a','paid-before-clawback','paid',?,'paid-before-clawback',1)`, -balance)
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(team,id,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('a','spent-before-clawback','','','','usage',0,?,1)`, -balance)
 				rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,reverses,created_at) VALUES ('a','reversal','reversal',?,'paid-before-clawback',1)`, balance)
 			}
 			retainedBlob(t, s, "a", "a", StorageBytesPerGB, *now)

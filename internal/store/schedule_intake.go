@@ -234,7 +234,7 @@ func (in scheduleAdmission) resolve(ctx context.Context, tx *storeTx) (capabilit
 			return capability.Principal{}, err
 		}
 	}
-	current, err := scanCronSchedule(tx.QueryRowContext(ctx, `SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team=? AND id=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=? AND state=?)`+tx.forUpdate(), s.Team, s.ID, s.Team, TeamDeletionPending).Scan)
+	current, err := scanCronSchedule(tx.QueryRowContext(ctx, `SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team=? AND id=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=?)`+tx.forUpdate(), s.Team, s.ID, s.Team).Scan)
 	if err != nil {
 		return capability.Principal{}, err
 	}

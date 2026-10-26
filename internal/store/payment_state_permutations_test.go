@@ -15,7 +15,7 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 			for _, order := range deliveryOrders("pay", "pending", "terminal", "warning") {
 				t.Run(fmt.Sprintf("refill=%t/%s/%s", refill, outcome, strings.Join(order, "-")), func(t *testing.T) {
 					s, tenant, now := providerPaymentFixture(t)
-					pay := capability.PaymentEvent{EventID: "paid", CheckoutID: "provider-session", PaymentID: "payment", Currency: "usd", AmountMinor: 100, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid, Fingerprint: "fp_1"}
+					pay := capability.PaymentEvent{EventID: "paid", CheckoutID: "provider-session", PaymentID: "payment", Currency: "usd", AmountMinor: 100, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid}
 					if refill {
 						pay = providerRefillEvent(t, s, now, capability.PaymentCardPaid)
 					}
@@ -24,7 +24,7 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 					terminal := pending
 					terminal.EventID, terminal.Status = "refund-terminal", outcome
 					warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
-					warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
+					warning.AmountMinor, warning.Currency, warning.Actionable = 0, "", true
 					events := map[string]capability.PaymentEvent{"pay": pay, "pending": pending, "terminal": terminal, "warning": warning}
 					for _, name := range order {
 						for range 2 {
@@ -49,7 +49,7 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 					}
 					if outcome != cardRefundSucceeded {
 						for range 2 {
-							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment-0", pending.ObjectID); err != nil {
+							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment", pending.ObjectID); err != nil {
 								t.Fatal(err)
 							}
 						}
@@ -77,7 +77,7 @@ func TestPaymentStateEveryRefundResponseDeliveryPermutation(t *testing.T) {
 				for _, name := range order {
 					for range 2 {
 						if name == "response" {
-							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment-0", "refund"); err != nil {
+							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment", "refund"); err != nil {
 								t.Fatal(err)
 							}
 						} else {
@@ -148,7 +148,7 @@ func TestPaymentStateEverySetupDeliveryPermutation(t *testing.T) {
 			s, tenant, now := providerPaymentFixture(t)
 			rewriteSchemaExec(t, s.db, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES ('test','setup-page','setup_session','a','cus_1')`)
 			page := capability.PaymentEvent{EventID: "page-completed", ObjectID: "setup-page", IntentID: "setup-intent", CustomerID: "cus_1", Mode: capability.PaymentTest, Kind: capability.PaymentPageCompleted, Created: now.Unix() + 1}
-			setup := capability.PaymentEvent{EventID: "setup-completed", ObjectID: "setup-intent", CustomerID: "cus_1", MethodID: "new-method", Fingerprint: "new-fingerprint", Brand: "visa", Last4: "4242", Status: "succeeded", Mode: capability.PaymentTest, Kind: capability.PaymentCardSetup, Created: now.Unix() + 2}
+			setup := capability.PaymentEvent{EventID: "setup-completed", ObjectID: "setup-intent", CustomerID: "cus_1", Status: "succeeded", Mode: capability.PaymentTest, Kind: capability.PaymentCardSetup, Created: now.Unix() + 2}
 			events := map[string]capability.PaymentEvent{"page": page, "setup": setup}
 			for _, name := range order {
 				for range 2 {
@@ -159,7 +159,7 @@ func TestPaymentStateEverySetupDeliveryPermutation(t *testing.T) {
 			}
 			tenant.s.SetTestClock(t, func() time.Time { return now })
 			standing, err := tenant.SpendStanding(t.Context())
-			if err != nil || standing.Card.PaymentMethod != "new-method" {
+			if err != nil || !standing.Card.AddedAt.Equal(time.Unix(now.Unix()+2, 0)) {
 				t.Fatalf("setup was lost before page association: %+v: %v", standing.Card, err)
 			}
 		})
@@ -182,7 +182,7 @@ func TestPaymentStateEveryRefillAssociationPermutation(t *testing.T) {
 			paid := refillPaid(now, "payment", 15_000)
 			failed := paid
 			failed.Kind, failed.EventID, failed.Status, failed.DeclineCode = capability.PaymentCardFailed, "failed", "requires_payment_method", "card_declined"
-			failed.Fingerprint, failed.ChargeID = "", ""
+			failed.ChargeID = ""
 			for _, name := range order {
 				for range 2 {
 					if name == "bind" {
@@ -211,59 +211,7 @@ func TestPaymentStateEveryRefillAssociationPermutation(t *testing.T) {
 	}
 }
 
-func TestPaymentStateProviderModesKeepIndependentConsequences(t *testing.T) {
-	for _, kind := range []capability.PaymentEventKind{capability.PaymentRefund, capability.PaymentDisputeClosed, capability.PaymentWarningEvent} {
-		t.Run(string(kind), func(t *testing.T) {
-			s, tenant, now := providerPaymentFixture(t)
-			paid := capability.PaymentEvent{EventID: "paid", CheckoutID: "provider-session", PaymentID: "payment", Currency: "usd", AmountMinor: 100, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid}
-			consequence := providerPaymentEvent(now, kind)
-			consequence.ObjectID, consequence.Status = "same-provider-object", cardRefundSucceeded
-			if kind == capability.PaymentDisputeClosed {
-				consequence.Status = "lost"
-			}
-			if kind == capability.PaymentWarningEvent {
-				consequence.AmountMinor, consequence.Currency, consequence.Actionable = 0, "", true
-			}
-			for _, mode := range []capability.PaymentMode{capability.PaymentTest, capability.PaymentLive} {
-				if mode == capability.PaymentLive {
-					if _, err := s.AsOperator().ConfigureDeployment(t.Context(), mode, DefaultFreeTeamSlots, func() error { return nil }); err != nil {
-						t.Fatal(err)
-					}
-					rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('live','a','live-session','live','usd',100,100000000,1,2)`)
-					paid.CheckoutID = "live-session"
-				}
-				paid.Mode, consequence.Mode = mode, mode
-				if _, err := s.settlePaymentFacts(t.Context(), paid); err != nil {
-					t.Fatal(err)
-				}
-				if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 100*MicroCreditsPerCent {
-					t.Fatalf("%s payment consumed another mode's consequence: %d: %v", mode, balance, err)
-				}
-				if freeze, err := tenant.CreditFreeze(t.Context()); err != nil || freeze.Frozen {
-					t.Fatalf("%s payment revived another mode's hold: %+v: %v", mode, freeze, err)
-				}
-				if _, err := s.settlePaymentFacts(t.Context(), consequence); err != nil {
-					t.Fatal(err)
-				}
-				if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 0 {
-					t.Fatalf("%s consequence did not reverse its own payment: %d: %v", mode, balance, err)
-				}
-				if kind != capability.PaymentRefund {
-					freeze, err := tenant.CreditFreeze(t.Context())
-					if err != nil || !freeze.Frozen || len(freeze.Disputes) != 1 {
-						t.Fatalf("%s consequence reused a released hold: %+v: %v", mode, freeze, err)
-					}
-					tenant.s.SetTestClock(t, func() time.Time { return now })
-					if _, err := tenant.ReleaseCreditFreezes(t.Context(), freeze.Disputes[0], "operator", "reviewed"); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-		})
-	}
-}
-
-func assertPaymentStateFinancialResult(t *testing.T, s *Store, tenant *Tenant, now time.Time, refundDue bool) {
+func assertPaymentStateFinancialResult(t *testing.T, s *Store, tenant *Tenant, now time.Time, refundFailed bool) {
 	t.Helper()
 	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 0 {
 		t.Fatalf("balance=%d, want zero after warning/refund: %v", balance, err)
@@ -272,15 +220,14 @@ func assertPaymentStateFinancialResult(t *testing.T, s *Store, tenant *Tenant, n
 		t.Fatalf("warning hold=%+v: %v", freeze, err)
 	}
 	s.SetTestClock(t, func() time.Time { return now.Add(24 * time.Hour) })
-	due, err := s.AsOperator().DueCardRefunds(t.Context())
+	if due, err := s.AsOperator().DueCardRefunds(t.Context()); err != nil || len(due) != 0 {
+		t.Fatalf("refunds=%+v, want none queued again: %v", due, err)
+	}
 	want := 0
-	if refundDue {
+	if refundFailed {
 		want = 1
 	}
-	if err != nil || len(due) != want {
-		t.Fatalf("refunds=%+v, want %d: %v", due, want, err)
-	}
-	if refundDue && due[0].Key != "payment-1" {
-		t.Fatalf("refund terminal applied more or less than once: %+v", due[0])
+	if failed, err := tenant.FailedCardRefunds(t.Context()); err != nil || len(failed) != want {
+		t.Fatalf("failed refunds=%+v, want %d listed: %v", failed, want, err)
 	}
 }

@@ -53,7 +53,7 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 	if err != nil {
 		return err
 	}
-	if err := lockClaimOwnerTx(ctx, tx, t.team, UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(a.Target.RunID)}); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := lockOwnerUnitTx(ctx, tx, t.team, UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(a.Target.RunID)}); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err := lockStateRunTx(ctx, tx, t.team, a.Target.RunID); err != nil {

@@ -27,10 +27,8 @@ func providerVerifier(t *testing.T, mode PaymentMode) (*paymentAuthenticator, *i
 		}
 		var body string
 		switch r.URL.Path {
-		case "/v1/payment_methods/pm_card":
-			body = fmt.Sprintf(`{"id":"pm_card","object":"payment_method","livemode":%t,"customer":"cus_owner","type":"card","card":{"fingerprint":"card-fingerprint","brand":"visa","last4":"4242"}}`, mode == PaymentLive)
 		case "/v1/charges/ch_paid":
-			body = fmt.Sprintf(`{"id":"ch_paid","object":"charge","livemode":%t,"payment_intent":"pi_paid","payment_method_details":{"card":{"fingerprint":"card-fingerprint"}}}`, mode == PaymentLive)
+			body = fmt.Sprintf(`{"id":"ch_paid","object":"charge","livemode":%t,"payment_intent":"pi_paid","payment_method_details":{"card":{"brand":"visa","last4":"4242","fingerprint":"card-fingerprint"}}}`, mode == PaymentLive)
 		default:
 			t.Fatalf("unexpected provider path %s", r.URL.Path)
 		}
@@ -73,8 +71,14 @@ func TestPaymentProviderOutcomes(t *testing.T) {
 				if e.EventID != "evt_verified" || e.ObjectID == "" || e.Created != 900 || e.Mode != mode || e.CheckoutID != "" || e.Kind == "" {
 					t.Fatalf("event %+v", e)
 				}
-				if kind == "setup_intent.succeeded" && (e.CustomerID != "cus_owner" || e.MethodID != "pm_card" || e.Brand != "visa" || e.Last4 != "4242" || e.Fingerprint != "card-fingerprint" || *calls != 1) {
+				if kind == "setup_intent.succeeded" && (e.CustomerID != "cus_owner" || *calls != 0) {
 					t.Fatalf("setup %+v calls=%d", e, *calls)
+				}
+				if strings.HasPrefix(kind, "radar.") && (e.PaymentID != "pi_paid" || *calls != 0) {
+					t.Fatalf("warning %+v calls=%d", e, *calls)
+				}
+				if encoded, err := json.Marshal(e); err != nil || strings.Contains(string(encoded), "pm_card") || strings.Contains(string(encoded), "4242") || strings.Contains(string(encoded), "card-fingerprint") || strings.Contains(string(encoded), "visa") {
+					t.Fatalf("event carries card details: %s %v", encoded, err)
 				}
 				if kind == "payment_intent.payment_failed" && (e.PaymentID != "pi_failed" || e.DeclineCode != "insufficient_funds" || *calls != 0) {
 					t.Fatalf("failure %+v", e)
@@ -82,7 +86,7 @@ func TestPaymentProviderOutcomes(t *testing.T) {
 				if strings.HasPrefix(kind, "refund.") && (e.AmountMinor != 600 || e.PaymentID != "pi_paid" || e.ChargeID != "ch_paid" || *calls != 0) {
 					t.Fatalf("refund %+v", e)
 				}
-				if kind == "payment_intent.succeeded" && (e.AmountMinor != 1200 || e.Fingerprint != "card-fingerprint" || *calls != 1) {
+				if kind == "payment_intent.succeeded" && (e.AmountMinor != 1200 || *calls != 1) {
 					t.Fatalf("paid %+v", e)
 				}
 			})
@@ -100,7 +104,7 @@ func TestPaymentProviderProofProperty(t *testing.T) {
 					return false
 				}
 				purpose, _ := raw["metadata"].(map[string]any)
-				raw["metadata"] = map[string]any{"team": metadata, "credits": metadata, "charge": metadata, "attempt": metadata, "fingerprint": metadata, "purpose": purpose["purpose"]}
+				raw["metadata"] = map[string]any{"team": metadata, "credits": metadata, "charge": metadata, "attempt": metadata, "purpose": purpose["purpose"]}
 				encoded, _ := json.Marshal(raw)
 				body := verifiedProviderBody(PaymentTest, kind, string(encoded))
 				proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
@@ -145,15 +149,15 @@ func TestPaymentProviderRefusals(t *testing.T) {
 		t.Run(bad, func(t *testing.T) {
 			v, _ := providerVerifier(t, PaymentTest)
 			v.provider.client.Transport = paymentTransport(func(*http.Request) (*http.Response, error) {
-				body := `{"id":"pm_card","object":"payment_method","livemode":false,"customer":"cus_owner","type":"card","card":{"fingerprint":"card-fingerprint","brand":"visa","last4":"4242"}}`
+				body := `{"id":"ch_paid","object":"charge","livemode":false,"payment_intent":"pi_paid"}`
 				status := 200
 				switch bad {
 				case "mode":
 					body = strings.ReplaceAll(body, `false`, `true`)
 				case "identity":
-					body = strings.ReplaceAll(body, `pm_card`, `pm_other`)
+					body = strings.ReplaceAll(body, `ch_paid`, `ch_other`)
 				case "relation":
-					body = strings.ReplaceAll(body, `payment_method`, `charge`)
+					body = strings.ReplaceAll(body, `"charge"`, `"refund"`)
 				case "malformed":
 					body = `{"error":"private-provider-diagnostic"}`
 				case "redirect":
@@ -161,13 +165,13 @@ func TestPaymentProviderRefusals(t *testing.T) {
 				case "backend":
 					return nil, fmt.Errorf("private-provider-diagnostic")
 				case "customer":
-					body = strings.ReplaceAll(body, `cus_owner`, `cus_other`)
+					body = strings.ReplaceAll(body, `pi_paid`, `pi_other`)
 				case "oversized":
 					body = strings.Repeat("x", (1<<20)+1)
 				}
 				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Location": []string{"https://attacker.invalid"}}}, nil
 			})
-			body := verifiedProviderBody(PaymentTest, "setup_intent.succeeded", financialObjects(PaymentTest)["setup_intent.succeeded"])
+			body := verifiedProviderBody(PaymentTest, "payment_intent.succeeded", financialObjects(PaymentTest)["payment_intent.succeeded"])
 			p, err := v.VerifyPaymentEvent(context.Background(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
 			if err == nil || p != nil || strings.Contains(err.Error(), "private-provider") {
 				t.Fatalf("proof=%+v err=%v", p, err)
@@ -177,7 +181,7 @@ func TestPaymentProviderRefusals(t *testing.T) {
 }
 
 func TestPaymentProviderRequiresFinancialEvidenceProperty(t *testing.T) {
-	for _, kind := range []string{"payment_intent.succeeded", "radar.early_fraud_warning.created", "radar.early_fraud_warning.updated", "charge.dispute.created", "charge.dispute.closed"} {
+	for _, kind := range []string{"payment_intent.succeeded", "charge.dispute.created", "charge.dispute.closed"} {
 		t.Run(kind, func(t *testing.T) {
 			property := func(metadata string, shape uint8) bool {
 				v, _ := providerVerifier(t, PaymentTest)
@@ -185,7 +189,7 @@ func TestPaymentProviderRequiresFinancialEvidenceProperty(t *testing.T) {
 				if err := json.Unmarshal([]byte(financialObjects(PaymentTest)[kind]), &object); err != nil {
 					t.Fatal(err)
 				}
-				object["metadata"] = map[string]any{"fingerprint": metadata, "reason": metadata, "purpose": paymentPurposeRefill}
+				object["metadata"] = map[string]any{"reason": metadata, "purpose": paymentPurposeRefill}
 				if strings.HasPrefix(kind, "charge.dispute.") {
 					switch shape % 3 {
 					case 0:
@@ -197,14 +201,14 @@ func TestPaymentProviderRequiresFinancialEvidenceProperty(t *testing.T) {
 					}
 				} else {
 					v.provider.client.Transport = paymentTransport(func(*http.Request) (*http.Response, error) {
-						charge := map[string]any{"id": "ch_paid", "object": "charge", "livemode": false, "payment_intent": "pi_paid", "metadata": map[string]any{"fingerprint": metadata}}
-						switch shape % 4 {
+						charge := map[string]any{"id": "ch_paid", "object": "charge", "livemode": false, "payment_intent": "pi_paid", "metadata": map[string]any{"reason": metadata}}
+						switch shape % 3 {
 						case 0:
-							charge["payment_method_details"] = nil
+							delete(charge, "payment_intent")
 						case 1:
-							charge["payment_method_details"] = map[string]any{"card": nil}
+							charge["payment_intent"] = "pi_other"
 						case 2:
-							charge["payment_method_details"] = map[string]any{"card": map[string]any{"fingerprint": ""}}
+							charge["object"] = "refund"
 						}
 						body, err := json.Marshal(charge)
 						if err != nil {

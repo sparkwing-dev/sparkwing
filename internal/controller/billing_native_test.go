@@ -36,7 +36,7 @@ func billingNativeServer(t *testing.T) (*serverFixture, string, string) {
 	e, _ := engineRuntimeStore(t, fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) }))
 	fixture.engine = e
 	s := fixture
-	engineSQL(t, s.store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('owner','owner@example.test',1,1)`)
+	engineSQL(t, s.store, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('owner','owner@example.test',1,1,1)`)
 	engineSQL(t, s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
 	session, csrf, _, err := s.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "owner"}, "a", time.Hour)
 	if err != nil {
@@ -150,8 +150,6 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	verifier, err := capability.NewPaymentAuthenticator(capability.PaymentConfig{Mode: capability.PaymentTest, APIKeyFile: key, WebhookSecretFile: secret, HTTPTransport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
 		body := ""
 		switch r.URL.Path {
-		case "/v1/payment_methods/pm_native":
-			body = `{"id":"pm_native","object":"payment_method","livemode":false,"customer":"cus_native","type":"card","card":{"fingerprint":"fp_native","brand":"visa","last4":"4242"}}`
 		case "/v1/charges/ch_auto":
 			body = `{"id":"ch_auto","object":"charge","livemode":false,"payment_intent":"pi_auto","payment_method_details":{"card":{"fingerprint":"fp_native"}}}`
 		case "/v1/charges/ch_other":
@@ -186,10 +184,15 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 				t.Fatalf("setup=%v", in)
 			}
 			body = `{"id":"cs_setup","customer":"cus_native","url":"https://checkout.test/setup"}`
+		case "/internal/portal":
+			if len(in) != 3 || in["customer"] != "cus_native" {
+				t.Fatalf("portal=%v", in)
+			}
+			body = `{"url":"https://billing.stripe.test/portal"}`
 		case "/internal/checkout":
 			body = `{"id":"cs_prepay","url":"https://checkout.test/prepay"}`
 		case "/internal/refill", "/internal/refill/reconcile", "/internal/refill/confirm":
-			if in["amount_cents"] != float64(1000) || in["customer"] != "cus_native" || in["payment_method"] != "pm_native" {
+			if _, method := in["payment_method"]; in["amount_cents"] != float64(1000) || in["customer"] != "cus_native" || method || in["receipt_email"] != nil {
 				t.Fatalf("refill=%v", in)
 			}
 			status := "created"
@@ -252,22 +255,28 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	for range 2 {
 		call("card", "", 200)
 	}
+	var stored int
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM billing_pages WHERE CAST(page_json AS TEXT) LIKE '%owner@example.test%'`).Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("the receipt email reached the page record: %d, %v", stored, err)
+	}
 	webhook("evt_setup", "setup_intent.succeeded", setupIntent)
 	tenant, err := s.store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spend, err := tenant.SpendStanding(t.Context()); err != nil || spend.Card.PaymentMethod != "" {
+	if spend, err := tenant.SpendStanding(t.Context()); err != nil || !spend.Card.AddedAt.IsZero() {
 		t.Fatalf("setup attached a card before its page bound it: %+v: %v", spend.Card, err)
 	}
+	call("portal", "", 409)
 	for range 2 {
 		webhook("evt_setup_page", "checkout.session.completed", `{"id":"cs_setup","object":"checkout.session","mode":"setup","status":"complete","livemode":false,"customer":"cus_native","setup_intent":"seti_native","metadata":{"purpose":"card_setup",`+stamp+`}}`)
 		webhook("evt_setup", "setup_intent.succeeded", setupIntent)
 	}
 	spend, err := tenant.SpendStanding(t.Context())
-	if err != nil || spend.Card.PaymentMethod != "pm_native" || spend.Billing.Tier != "New" {
+	if err != nil || spend.Card.Customer != "cus_native" || spend.Card.AddedAt.IsZero() || spend.Billing.Tier != "New" {
 		t.Fatalf("card=%+v: %v", spend, err)
 	}
+	call("portal", "", 200)
 	for range 2 {
 		call("checkout", `{"amount_cents":2000}`, 200)
 	}
@@ -297,7 +306,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	if !spend.Billing.History.LastIncidentAt.IsZero() {
 		t.Fatalf("a successful refill restarted clean days: %+v", spend.Billing.History)
 	}
-	if counts["/internal/card-setup"] != 1 || counts["/internal/checkout"] != 1 || counts["/internal/refill"] != 1 || counts["/internal/refill/reconcile"] != 2 || counts["/internal/refill/confirm"] != 2 {
+	if counts["/internal/card-setup"] != 1 || counts["/internal/checkout"] != 1 || counts["/internal/refill"] != 1 || counts["/internal/refill/reconcile"] != 2 || counts["/internal/refill/confirm"] != 2 || counts["/internal/portal"] != 1 {
 		t.Fatalf("provider calls: %v; want one page each, then creation and two confirmations of one refill", counts)
 	}
 }
@@ -420,7 +429,7 @@ func TestCardBilling_OwnerSetsARefill(t *testing.T) {
 	if enabled, _, _ := settings("a"); enabled {
 		t.Fatal("a refused refill turned on")
 	}
-	engineSQL(t, s.store, `UPDATE teams SET card_customer='cus',card_payment_method='pm',card_fingerprint='fp',card_brand='visa',card_last4='4242' WHERE name='a'`)
+	engineSQL(t, s.store, `UPDATE teams SET card_customer='cus',card_added_at=1 WHERE name='a'`)
 	call("PUT", on, 204)
 	var answer struct {
 		Refill struct {

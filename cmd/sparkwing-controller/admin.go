@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +18,7 @@ import (
 
 const adminUsage = `usage: sparkwing-controller admin freeze --operator ACCOUNT_ID --team SLUG --reason TEXT
        sparkwing-controller admin unfreeze --operator ACCOUNT_ID --team SLUG --reason TEXT [--hold ID]
-       sparkwing-controller admin grant --operator ACCOUNT_ID --team SLUG --cents N --reason TEXT [--key KEY] [--allow-large]
+       sparkwing-controller admin grant --operator ACCOUNT_ID --team SLUG --cents N --reason TEXT --key KEY [--reverses REF] [--allow-large]
 
 Break-glass for the operator console. When console sign-in is down, run it in
 the controller pod with kubectl exec; it acts on the controller's state
@@ -28,14 +27,15 @@ reaches the pod is the credential. It opens the running controller's recorded
 store configuration under SPARKWING_HOME and never creates a store.
 
 freeze holds the team: its metered claims are refused until the hold is
-released, while work already running finishes. unfreeze releases the holds
+released. Running Cloud work stops at its funded deadline. unfreeze releases the holds
 the console and this command placed, or with --hold the one hold it names, a
 payment dispute's included. grant gives the team N cents of free credits,
-once per --key: a rerun with the same key reports the grant it already made,
-and a run without --key grants under a fresh key. It refuses more than 10000
+once per required --key. A rerun reports the grant it already made.
+Use --reverses REF to take back credits from a mistaken free grant.
+It refuses more than 10000
 cents ($100) per grant unless --allow-large is supplied for that invocation.
 --operator names your account ID. Each action commits the business event the
-console writes (team.frozen, team.unfrozen or credit.granted) with that account
+console writes (team.frozen, team.unfrozen or credit.granted or credit.reversed) with that account
 as the actor, prints an audit line to stderr, and prints the team's holds, or the
 grant and the team's balance, as JSON. Audit rows exclude free-form reasons
 and store grant keys as digests.`
@@ -71,7 +71,8 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	reason := fs.String("reason", "", "why (required, up to 500 characters; excluded from audit rows)")
 	hold := fs.String("hold", "", "unfreeze only: the one hold to release, as the team's holds name it")
 	cents := fs.Int64("cents", 0, "grant only: the free credits to grant, in cents (required)")
-	key := fs.String("key", "", "grant only: makes a rerun report the first grant instead of granting again")
+	key := fs.String("key", "", "grant only: required idempotency key")
+	reverses := fs.String("reverses", "", "grant only: reference of a free grant to correct")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -85,7 +86,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("admin %s: %w", verb, err)
 	}
-	for _, name := range []string{"cents", "key", "allow-large"} {
+	for _, name := range []string{"cents", "key", "reverses", "allow-large"} {
 		if fs.Changed(name) && verb != "grant" {
 			return fmt.Errorf("--%s belongs to grant; %s takes none", name, verb)
 		}
@@ -100,8 +101,11 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 		if *cents > adminGrantCapCents && !*allowLarge {
 			return fmt.Errorf("admin grant refuses more than %d cents ($%d) per grant; pass --allow-large for this invocation", adminGrantCapCents, adminGrantCapCents/100)
 		}
-		if fs.Changed("key") && strings.TrimSpace(*key) == "" {
-			return errors.New("--key names no key; give one, or leave --key out to grant under a fresh key")
+		if fs.Changed("reverses") && strings.TrimSpace(*reverses) == "" {
+			return errors.New("--reverses requires the free grant's reference")
+		}
+		if strings.TrimSpace(*key) == "" {
+			return errors.New("admin grant requires --key for idempotency")
 		}
 	}
 	holdID := strings.TrimSpace(*hold)
@@ -137,7 +141,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if verb == "grant" {
-		return adminGrant(ctx, t, *operator, *cents, strings.TrimSpace(*key), why, stdout, stderr)
+		return adminGrant(ctx, t, *operator, *cents, strings.TrimSpace(*key), strings.TrimSpace(*reverses), why, stdout, stderr)
 	}
 	var changed []string
 	switch {
@@ -172,11 +176,15 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	return json.NewEncoder(stdout).Encode(adminFreezeJSON{Team: string(t.Team()), Frozen: freeze.Frozen, Holds: holds})
 }
 
-func adminGrant(ctx context.Context, t *store.Tenant, operator string, cents int64, key, reason string, stdout, stderr io.Writer) error {
-	if key == "" {
-		key = strings.ToLower(rand.Text())
+func adminGrant(ctx context.Context, t *store.Tenant, operator string, cents int64, key, reverses, reason string, stdout, stderr io.Writer) error {
+	if strings.TrimSpace(key) == "" {
+		return errors.New("admin grant requires --key for idempotency")
 	}
-	result, err := t.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: cents * store.MicroCreditsPerCent, Reference: "admin:" + key, CreatedBy: operator, Reason: reason})
+	kind, amount := store.CreditGrantFree, cents*store.MicroCreditsPerCent
+	if reverses != "" {
+		kind, amount = "reversal", -amount
+	}
+	result, err := t.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: kind, AmountMicro: amount, Reverses: reverses, Reference: "admin:" + key, CreatedBy: operator, Reason: reason})
 	if err != nil {
 		return err
 	}

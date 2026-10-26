@@ -240,7 +240,7 @@ func TestTeamDeletionLeaseKeepsOnePurger(t *testing.T) {
 	}
 }
 
-func TestTeamRecheckPreservesForeignKeyFenceAfterThePurge(t *testing.T) {
+func TestTeamRecheckRemovesOperationalRowsFromTombstone(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
@@ -250,8 +250,8 @@ func TestTeamRecheckPreservesForeignKeyFenceAfterThePurge(t *testing.T) {
 	}
 	deleteAndPurge(t, st, "acme", now)
 	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
-		`INSERT INTO egress_usage (replica_id, period, bytes, updated_at, team) VALUES ('replica', '2026-09', 1, 1, 'acme')`)); err == nil {
-		t.Fatal("deleted team accepted a new usage row")
+		`INSERT INTO egress_usage (replica_id, period, bytes, updated_at, team) VALUES ('replica', '2026-09', 1, 1, 'acme')`)); err != nil {
+		t.Fatal(err)
 	}
 	op := st.AsOperator()
 	st.SetTestClock(t, func() time.Time { return now.Add(30 * time.Minute) })

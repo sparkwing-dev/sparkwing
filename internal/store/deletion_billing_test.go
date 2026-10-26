@@ -4,64 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
-
-// A team cannot be deleted while money is in flight for it: an unexpired
-// checkout may still be paid, and a dispute hold is the record the dispute
-// is about. Either refuses the request with its remedy until it clears.
-func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	owner := signIn(t, st, "o", "owner@example.com")
-	for _, slug := range []store.Team{"acme", "held"} {
-		if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: string(slug)}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	acme := tenant(t, st, "acme")
-	if _, err := acme.TestOnlyOpenCreditCheckout(ctx, 50*store.MicroCreditsPerCent, now, time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	_, _, err := acme.DeleteTeamForTest(t, ctx, owner.Account.ID, now)
-	if !errors.Is(err, store.ErrOpenCheckout) || !strings.Contains(err.Error(), "wait for the checkout to expire or complete") {
-		t.Fatalf("deleting a team with an open checkout = %v, want ErrOpenCheckout naming the remedy", err)
-	}
-	st.SetTestClock(t, func() time.Time { return now })
-	if _, _, err := st.AsOperator().RequestTeamDeletion(ctx, "acme"); !errors.Is(err, store.ErrOpenCheckout) {
-		t.Fatalf("the operator deleting it = %v, want ErrOpenCheckout", err)
-	}
-	if _, err := st.ForTeam(ctx, "acme"); err != nil {
-		t.Fatalf("a refused deletion closed the team: %v", err)
-	}
-	if _, _, err := acme.DeleteTeamForTest(t, ctx, owner.Account.ID, now.Add(2*time.Hour)); err != nil {
-		t.Fatalf("deleting it once the checkout expired = %v", err)
-	}
-
-	held := tenant(t, st, "held")
-	if _, err := teststore.ForTeam(t, st, "held").TestOnlyHoldForDispute(ctx, "dp_held", "", "dispute opened", now); err != nil {
-		t.Fatal(err)
-	}
-	_, _, err = held.DeleteTeamForTest(t, ctx, owner.Account.ID, now)
-	if !errors.Is(err, store.ErrTeamFrozen) || !strings.Contains(err.Error(), "contact support") {
-		t.Fatalf("deleting a held team = %v, want ErrTeamFrozen naming the remedy", err)
-	}
-	st.SetTestClock(t, func() time.Time { return now })
-	if _, err := teststore.ForTeam(t, st, "held").ReleaseCreditFreezes(ctx, "dp_held", "operator", ""); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := held.DeleteTeamForTest(t, ctx, owner.Account.ID, now); err != nil {
-		t.Fatalf("deleting it once the hold was released = %v", err)
-	}
-}
 
 // A handle taken before the team's deletion began cannot open a checkout
 // after it: the checkout would take a payment for a team about to be purged.

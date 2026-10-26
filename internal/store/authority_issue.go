@@ -181,11 +181,11 @@ func (op *Operator) loadAwardRowTx(ctx context.Context, tx *storeTx, spec capabi
 	row := awardRow{run: string(unit.RunID), node: string(unit.NodeID)}
 	switch spec.Unit {
 	case capability.UnitTrigger, capability.UnitPlan:
-		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at,created_at,cancel_requested_at FROM triggers WHERE id = ? AND unit_kind = ?"+tx.forUpdate(), unit.RunID, string(spec.Unit)).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease, &row.created, &row.cancel)
+		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at,created_at,cancel_requested_at FROM triggers WHERE id = ? AND unit_kind = ?", unit.RunID, string(spec.Unit)).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease, &row.created, &row.cancel)
 	case capability.UnitNode:
-		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,attempt,lease_expires_at,cancel_requested_at,spec_json FROM nodes WHERE run_id = ? AND node_id = ? AND status <> 'done'"+tx.forUpdate(), unit.RunID, unit.NodeID).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.attempt, &row.lease, &row.cancel, &row.spec)
+		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,attempt,lease_expires_at,cancel_requested_at,spec_json FROM nodes WHERE run_id = ? AND node_id = ? AND status <> 'done'", unit.RunID, unit.NodeID).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.attempt, &row.lease, &row.cancel, &row.spec)
 	case capability.UnitEval:
-		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at FROM eval_units WHERE run_id = ? AND source_node_id = ? AND source_generation = ? AND status IN ('pending','claimed','running')"+tx.forUpdate(), unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease)
+		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at FROM eval_units WHERE run_id = ? AND source_node_id = ? AND source_generation = ? AND status IN ('pending','claimed','running')", unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease)
 	default:
 		return row, authorityError(apierr.BadRequest, "unknown award unit")
 	}
@@ -239,23 +239,19 @@ func (op *Operator) lockUnitsTx(ctx context.Context, tx *storeTx, units []UnitRe
 			locks = append(locks, lock{tier: lockNode, team: team, run: string(unit.RunID), node: string(unit.NodeID)})
 		}
 	}
+	var teams []Team
+	for _, row := range locks {
+		teams = append(teams, Team(row.team))
+	}
+	if err := lockFinancialTeamsTx(ctx, tx, teams...); err != nil {
+		return err
+	}
 	compare := func(a, b lock) int {
 		return compareStoreLocks(storeLockKey{tier: a.tier, keys: [3]string{a.team, a.run, a.node}, generation: a.generation}, storeLockKey{tier: b.tier, keys: [3]string{b.team, b.run, b.node}, generation: b.generation})
 	}
 	slices.SortFunc(locks, compare)
-	var held string
 	for _, l := range slices.Compact(locks) {
-		var err error
-		switch l.tier {
-		case lockTrigger:
-			err = tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND id=?`+tx.forUpdate(), l.team, l.run).Scan(&held)
-		case lockEval:
-			err = tx.QueryRowContext(ctx, `SELECT run_id FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), l.team, l.run, l.node, l.generation).Scan(&held)
-		case lockRun:
-			err = tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team=? AND id=?`+tx.forNoKeyUpdate(), l.team, l.run).Scan(&held)
-		default:
-			err = tx.QueryRowContext(ctx, `SELECT node_id FROM nodes WHERE team=? AND run_id=? AND node_id=?`+tx.forUpdate(), l.team, l.run, l.node).Scan(&held)
-		}
+		err := lockWorkRowTx(ctx, tx, storeLockKey{tier: l.tier, keys: [3]string{l.team, l.run, l.node}, generation: l.generation}, false)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}

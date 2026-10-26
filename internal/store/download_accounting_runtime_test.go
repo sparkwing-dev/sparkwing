@@ -49,7 +49,7 @@ func TestStoreDataDownloadCapCrossingFundingAndMidnight(t *testing.T) {
 	if got, err := tenant.ChargeDownload(t.Context(), request); err != nil || got.DayBytes != 620 {
 		t.Fatalf("delivered stream=%+v: %v", got, err)
 	}
-	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, CreatedBy: "operator"}); err != nil {
+	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, Reference: "download-fixture", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
 	request.Record, request.Bytes = false, 200

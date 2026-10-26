@@ -23,7 +23,7 @@ func TestDeploymentRecordFailurePreservesSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	if _, err := st.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, 3, func() error { return nil }); err != nil {
+	if _, err := st.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, 3, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	db, err := sql.Open("sqlite", path)
@@ -53,26 +53,33 @@ func TestDeploymentRecordFailurePreservesSettings(t *testing.T) {
 	}
 	before := settings()
 	missingDirectory := filepath.Join(root, "absent-directory", "state.db")
-	if _, err := configureDeployment(t.Context(), missingDirectory, deployment.Config{}, "", root, st, capability.PaymentTest, 8); err == nil || !strings.Contains(err.Error(), "write deployment record") {
+	if _, err := configureDeployment(t.Context(), missingDirectory, deployment.Config{}, "", root, st, capability.PaymentLive, 8); err == nil || !strings.Contains(err.Error(), "write deployment record") {
 		t.Fatalf("startup with an unwritable deployment record: %v", err)
 	}
 	if got := settings(); !reflect.DeepEqual(got, before) {
 		t.Fatalf("failed startup changed settings: before=%v after=%v", before, got)
 	}
-	id, err := configureDeployment(t.Context(), path, deployment.Config{}, "", root, st, capability.PaymentTest, 8)
+	id, err := configureDeployment(t.Context(), path, deployment.Config{}, "", root, st, capability.PaymentLive, 8)
 	if err != nil || id == "" {
 		t.Fatalf("successful startup: id=%q err=%v", id, err)
 	}
 	got := settings()
-	if got["payment_mode"] != `"test"` || got["free_team_slots"] != "8" || got["payment_deployment"] != `"`+id+`"` {
+	if got["payment_mode"] != `"live"` || got["free_team_slots"] != "8" || got["payment_deployment"] != `"`+id+`"` {
 		t.Fatalf("successful settings: %v", got)
 	}
 	same, err := configureDeployment(t.Context(), path, deployment.Config{}, "", root, st, "", 9)
 	if err != nil || same != id {
 		t.Fatalf("restarted deployment: id=%q err=%v", same, err)
 	}
-	if got := settings(); got["payment_mode"] != `"test"` || got["free_team_slots"] != "9" {
+	if got := settings(); got["payment_mode"] != `"live"` || got["free_team_slots"] != "9" {
 		t.Fatalf("disabled verifier changed payment mode: %v", got)
+	}
+	before = settings()
+	if _, err := configureDeployment(t.Context(), path, deployment.Config{}, "", root, st, capability.PaymentTest, 8); err == nil || !strings.Contains(err.Error(), "live to test") {
+		t.Fatalf("test startup after live: %v", err)
+	}
+	if got := settings(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("refused startup changed settings: before=%v after=%v", before, got)
 	}
 }
 
@@ -118,7 +125,7 @@ func TestDeploymentCommitFailurePreservesSettingsAndRecord(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := configureDeployment(t.Context(), path, deployment.Config{}, "", root, st, capability.PaymentTest, 8); err == nil || !strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
+			if _, err := configureDeployment(t.Context(), path, deployment.Config{}, "", root, st, capability.PaymentLive, 8); err == nil || !strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
 				t.Fatalf("deferred commit failure: %v", err)
 			}
 			if _, limit, err := st.AsOperator().FreeSlots(t.Context()); err != nil || limit != store.DefaultFreeTeamSlots {
