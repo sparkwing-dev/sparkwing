@@ -23,7 +23,7 @@ func TestOperatorTeamAdminOriginCannotMintIntoExistingTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	property := func(subject, team string) bool {
-		request := capability.ProvisionSpec{Kind: capability.ProvisionTeamAdmin, Authority: &operator.Authority, Team: team, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: subject}, Grants: issued.Capability.Grants, Binding: capability.Binding{Kind: capability.BindingNone}}
+		request := capability.ProvisionSpec{Kind: capability.ProvisionTeamAdmin, Authority: &operator.Authority, Team: team, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: subject}, Grants: issued.Capability.Grants, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: issued.Capability.ExpiresAt}
 		got, err := s.AsOperator().ProvisionCapability(t.Context(), request)
 		return err != nil && got.Raw == ""
 	}
@@ -36,7 +36,8 @@ func TestOperatorTeamAdminOriginCannotMintIntoExistingTeam(t *testing.T) {
 }
 
 // The first administrator of an operator-created team holds team.admin like any
-// other admin token, so it has the same 30-day ceiling and is rotated to renew.
+// other admin token, so it has the same 30-day ceiling. Rotation keeps that expiry;
+// the handoff is inviting a real owner before it ends.
 func TestOperatorTeamAdminExpiresLikeOtherAdminTokens(t *testing.T) {
 	s := authorityStore(t)
 	spec := bootstrapSpec(sha256.Sum256([]byte(t.Name())))
