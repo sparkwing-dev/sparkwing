@@ -31,7 +31,7 @@ const (
 func (r Role) Valid() bool { return r.rank() > 0 }
 
 // safety: the most recent provider assertion owns an address, so another account's verified claim on
-// it is withdrawn before this one takes it.
+// it, primary or through a linked sign-in, is withdrawn before this one takes it.
 func claimEmailTx(ctx context.Context, tx *storeTx, accountID, email string, at int64) error {
 	if err := releaseEmailTx(ctx, tx, email, accountID, at); err != nil {
 		return err
@@ -41,6 +41,9 @@ func claimEmailTx(ctx context.Context, tx *storeTx, accountID, email string, at 
 	return err
 }
 
+// releaseEmailTx withdraws every other account's verified claim on email. Sign-up,
+// sign-in through any identity and linking all call it when a provider newly
+// asserts the address, so no older holder keeps a cached claim; accounts are never merged.
 func releaseEmailTx(ctx context.Context, tx *storeTx, email, keepID string, at int64) error {
 	if _, err := tx.execContext(ctx, `
 		UPDATE accounts SET email_verified = 0, updated_at = ?
@@ -431,11 +434,15 @@ func (op *Operator) resolveSignInTx(ctx context.Context, tx *storeTx, p SignInPr
 		}
 		// safety: the account's address is its linking and invitation key, so it follows what the
 		// provider asserts now; an address left behind would let whoever holds it next walk in. A
-		// linked identity was attached whatever its address, so its address is not the account's.
+		// linked identity was attached whatever its address, so its address is not the account's, but
+		// its newer assertion still withdraws every other account's claim.
 		if linked == 0 {
-			if err := claimEmailTx(ctx, tx, accountID, p.Email, at); err != nil {
-				return SignInResult{}, err
-			}
+			err = claimEmailTx(ctx, tx, accountID, p.Email, at)
+		} else {
+			err = releaseEmailTx(ctx, tx, p.Email, accountID, at)
+		}
+		if err != nil {
+			return SignInResult{}, err
 		}
 	case errors.Is(err, sql.ErrNoRows):
 		// safety: rule 2, the account side must hold this address verified too.
@@ -482,6 +489,9 @@ func (op *Operator) resolveSignInTx(ctx context.Context, tx *storeTx, p SignInPr
 				accountID, p.Email, boolInt(p.EmailVerified), strings.TrimSpace(p.Name), at, at,
 				waitlistedAt, decision.reason); err != nil {
 				return SignInResult{}, fmt.Errorf("identity: create account: %w", err)
+			}
+			if err := releaseEmailTx(ctx, tx, p.Email, accountID, at); err != nil {
+				return SignInResult{}, err
 			}
 			if decision.reason == "" {
 				if err := recordAdmissionTx(ctx, tx, accountID, admissionSignUp, now); err != nil {

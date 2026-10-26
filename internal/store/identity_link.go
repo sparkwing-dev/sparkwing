@@ -213,6 +213,9 @@ func linkIdentityTx(ctx context.Context, tx *storeTx, accountID string, p SignIn
 		p.Provider, p.Subject, accountID); err != nil {
 		return Identity{}, err
 	}
+	if err := releaseEmailTx(ctx, tx, p.Email, accountID, at); err != nil {
+		return Identity{}, err
+	}
 	return Identity{
 		Provider: p.Provider, Subject: p.Subject, Email: p.Email, Linked: true,
 		CreatedAt: time.Unix(0, at).UTC(),

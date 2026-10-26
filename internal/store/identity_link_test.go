@@ -40,9 +40,10 @@ func identitiesOf(t *testing.T, st *store.Store, accountID string) []store.Ident
 	return ids
 }
 
-// A linked sign-in reaches the account whatever address the provider holds,
-// and neither the link nor a later sign-in through it moves the account's
-// email or withdraws another account's claim on the linked address.
+// A linked sign-in reaches the account whatever address the provider holds.
+// Neither the link nor a later sign-in through it moves the account's email,
+// but the provider's newer assertion withdraws another account's claim on the
+// linked address.
 func TestLinkIdentityAttachesASignInWhateverItsEmail(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
@@ -70,8 +71,8 @@ func TestLinkIdentityAttachesASignInWhateverItsEmail(t *testing.T) {
 		t.Fatalf("owner after linking and signing in = %+v, %v; want its email unchanged", acct, err)
 	}
 	other, err := st.AsOperator().Account(ctx, holder.Account.ID)
-	if err != nil || !other.EmailVerified {
-		t.Fatalf("the account holding the linked address = %+v, %v; want its claim kept", other, err)
+	if err != nil || other.EmailVerified {
+		t.Fatalf("the account holding the linked address = %+v, %v; want its claim withdrawn", other, err)
 	}
 	if ids := identitiesOf(t, st, owner.Account.ID); len(ids) != 2 {
 		t.Fatalf("owner identities = %+v, want google and github", ids)
@@ -570,8 +571,9 @@ func TestDeletingAnAccountLeavesALinkedAddressAlone(t *testing.T) {
 		t.Fatal("the deleted account's unlink records survived it")
 	}
 	st.SetTestClock(t, func() time.Time { return now })
-	if _, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-1", "holder@example.com"), store.SignUpConditions{}); !errors.Is(err, store.ErrAccountExists) {
-		t.Fatalf("GitHub sign-in after the deletion = %v, want holder's account to refuse it until holder links it", err)
+	after, err := st.AsOperator().ResolveSignIn(ctx, gh("gh-1", "holder@example.com"), store.SignUpConditions{})
+	if err != nil || !after.NewAccount || after.Account.ID == holder.Account.ID {
+		t.Fatalf("GitHub sign-in after the deletion = %+v, %v; want a new account, never holder's", after, err)
 	}
 }
 
@@ -738,5 +740,35 @@ func TestLinkedIdentityProvesItsAddressForInvitations(t *testing.T) {
 	}
 	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID); err != nil {
 		t.Fatalf("accepting through the linked address = %v", err)
+	}
+}
+
+// The newest owner of an address invalidates every other account's claim on
+// it, a linked sign-in's included: after the address moves, only its new
+// holder can accept its invitations.
+func TestNewAddressOwnerWithdrawsALinkedIdentitysClaim(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	former := signIn(t, st, "g-former", "home@example.com")
+	if _, err := st.LinkIdentity(ctx, former.Account.ID, gh("gh-former", "work@corp.example"), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	successor := signIn(t, st, "g-successor", "work@corp.example")
+	if successor.Account.ID == former.Account.ID || !successor.NewAccount {
+		t.Fatalf("the address's next holder = %+v, want a new account", successor)
+	}
+	owner := signIn(t, st, "g-owner", "owner@corp.example")
+	inv, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "work@corp.example", store.RoleReader, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, former.Account.ID); err != nil || len(listed) != 0 {
+		t.Fatalf("former holder still lists the invitation: %+v %v", listed, err)
+	}
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, former.Account.ID), inv.ID); !errors.Is(err, store.ErrEmailMismatch) {
+		t.Fatalf("former holder accepting = %v, want ErrEmailMismatch", err)
+	}
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, successor.Account.ID), inv.ID); err != nil {
+		t.Fatalf("new holder accepting = %v", err)
 	}
 }
