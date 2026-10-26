@@ -203,7 +203,8 @@ runs as an asserted manual run under its own pipeline name and reads only
 team-wide shared secrets. Use `WithFreshRepo("owner/repo")` (TypeScript
 `runAndAwait` option `repo`) for an explicit repository and `WithFreshBranch`
 (option `branch`) to override its default `main` branch. The parent's live claim
-must authorize that repository. A child in another repository is always asserted.
+must authorize that repository. A child in another repository always names a
+branch, never a commit, and is always asserted.
 Children nest at most 10 levels deep
 counting the root, and one root starts at most 50; see
 [limits](limits.md#execution-and-records).
