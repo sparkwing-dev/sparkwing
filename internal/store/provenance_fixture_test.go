@@ -70,7 +70,6 @@ const fixtureFeatureSHA = "fea7fea7fea7fea7fea7fea7fea7fea7fea7fea7"
 // fixtureOtherSHA is a full commit distinct from fixtureFeatureSHA.
 const fixtureOtherSHA = "0123456789abcdef0123456789abcdef01234567"
 
-// testAllowedPools reads the pools the team's current access rules open to a provenance.
 func testAllowedPools(t *testing.T, s *Store, team Team, provenance runspec.Provenance) []string {
 	t.Helper()
 	var pools []string
@@ -84,8 +83,6 @@ func testAllowedPools(t *testing.T, s *Store, team Team, provenance runspec.Prov
 	return pools
 }
 
-// grantFixturePool seals run as a verified push of gh:1 on branch and adds an
-// access rule opening pool to that repository, the only way a run reaches a pool.
 func grantFixturePool(t *testing.T, s *Store, run, pool, branch string) {
 	t.Helper()
 	var body []byte

@@ -248,7 +248,7 @@ func (in scheduleAdmission) resolve(ctx context.Context, tx *storeTx) (capabilit
 	if current.RepoPath != s.RepoPath || current.RepositoryKey != s.RepositoryKey || current.Pipeline != s.Pipeline || current.GitBranch != s.GitBranch || current.LockedRef != s.LockedRef || current.Where != s.Where || current.GitHubInstallationID != s.GitHubInstallationID || current.GitHubRepositoryID != s.GitHubRepositoryID || !current.ArmedAt.Equal(s.ArmedAt) || current.ArmedBy != s.ArmedBy || current.Paused != s.Paused || current.Declared != s.Declared || !reflect.DeepEqual(current.Effective(), s.Effective()) {
 		return capability.Principal{}, authorityError(apierr.Forbidden, "schedule declaration changed before admission")
 	}
-	// A fire acts for the armer; run now acts for the member who pressed it.
+	// safety: a fire acts for the armer; run now acts for the member who pressed it.
 	subject := capability.Subject{Kind: capability.SubjectService, ID: s.ArmedBy}
 	if in.caller != nil {
 		subject = in.caller.Principal.Capability.Subject

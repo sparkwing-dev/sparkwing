@@ -17,8 +17,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// actionsExchangeBody bounds the unauthenticated exchange to a token request:
-// a team slug and one GitHub ID token, which is a few kilobytes.
+// safety: the exchange is unauthenticated until GitHub's token verifies, so it reads
+// only a token request: a team slug and one GitHub ID token, a few kilobytes.
 const actionsExchangeBody = 16 << 10
 
 type actionsProofKey struct{}

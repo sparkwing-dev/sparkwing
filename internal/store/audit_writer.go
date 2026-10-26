@@ -239,8 +239,9 @@ type auditSecretRelease struct {
 	CapabilityPrefix auditDigest `json:"capability_digest"`
 	Holder           auditDigest `json:"holder_digest"`
 }
-// auditOIDCMint names the relying party a run's token was minted for. Audiences
-// are service identifiers a pipeline names, not people.
+
+// safety: audiences are relying-party identifiers a pipeline names, not people, so
+// the audience is kept plain while the job is a digest like other release events.
 type auditOIDCMint struct {
 	RunID    string      `json:"-"`
 	Node     auditDigest `json:"node_digest"`

@@ -52,8 +52,8 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 	request.Source.WorkingTree, request.Source.CommittedCheckout = false, true
 	request.Source.BundleDigest = runspec.Optional[string]{}
 	if sameRepository {
-		// Intake refuses another location for the same repository; resolve the
-		// branch where the parent fetched rather than at a requested address.
+		// safety: intake refuses another location for the same repository, so the branch
+		// resolves where the parent fetched and never at a requested address.
 		request.Source.Location = from.Source.Location
 	}
 	git, code, err := s.selectIntakeSource(ctx, store.Team(a.Target.Team), *request, nil)

@@ -522,8 +522,7 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	return input, nil
 }
 
-// routeIntakeTx adds the pool requirement of every access rule that routes this
-// run onto its pool. Access itself is decided at each use, never sealed.
+// safety: intake only routes a run onto a pool; access is decided at each use, never sealed.
 func routeIntakeTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, provenance runspec.Provenance) error {
 	_, routed, err := runPoolsTx(ctx, tx, team, provenance)
 	if err != nil {

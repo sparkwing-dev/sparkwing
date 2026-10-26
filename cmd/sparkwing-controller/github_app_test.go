@@ -192,7 +192,6 @@ func TestGitHubAppStartupAvailability(t *testing.T) {
 				if path == "/api/v1/health" {
 					wantStatus = http.StatusOK
 				}
-				// Public health answers liveness only; the App's state is on operator health.
 				named := strings.Contains(string(body), "GitHub App unavailable") == (path != "/api/v1/health")
 				if err != nil || resp.StatusCode != wantStatus || !named || strings.Contains(string(body), tc.want) {
 					t.Fatalf("%s = %d %s, %v; want generic unavailable hiding %q", path, resp.StatusCode, body, err, tc.want)

@@ -29,9 +29,6 @@ func ClaimSecurityRegressions(t *testing.T, open func(*testing.T) *Store) {
 	t.Run("pool branch rules", func(t *testing.T) { poolBranchRulesMatchLikePathGlobs(t, fixture) })
 }
 
-// The pool rule runs in SQL in both dialects; it must agree with path.Match for
-// the * and ? wildcards it accepts, never crossing a slash or treating % and _
-// as wildcards.
 func poolBranchRulesMatchLikePathGlobs(t *testing.T, open func(*testing.T) *Store) {
 	s := open(t)
 	for i, branch := range []string{"main", "release/*", "v?", "a_b", "x%y", "*"} {
@@ -126,7 +123,6 @@ func reservedPoolTrustClaimAndExplanationParity(t *testing.T, open func(*testing
 						if secret {
 							s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'',0,'prod')`)
 						}
-						// Only verified pushes reach a pool; a feature branch is not default-branch work.
 						branch := "feature"
 						if verified {
 							branch = "main"
@@ -282,7 +278,7 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					indexFixtureUnit(t, s, "a", ref)
 					want := runner != "persistent" || source == "asserted-main" || source == "verified-feature"
 					if runner == "launcher" && source == "asserted-main" {
-						want = false // no access rule opens a pool to an asserted run
+						want = false
 					}
 					if runner == "actions" && (source == "asserted-main" || source == "schedule" || source == "inherited-schedule") {
 						want = false

@@ -293,8 +293,6 @@ func actionsReference(t *testing.T, s *Store) (*Tenant, string) {
 	return actionsReferenceRunning(t, s, runspec.Source{Ref: referenceMain})
 }
 
-// actionsReferenceRunning submits the Actions push of main with the given code
-// source, as the runner in the workflow job reports it.
 func actionsReferenceRunning(t *testing.T, s *Store, source runspec.Source) (*Tenant, string) {
 	t.Helper()
 	tenant := referenceWorld(t, s, "gh:701")
@@ -460,8 +458,6 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			want:  provenanceObservation{Subject: "team:a:repository_id:701:pipeline:ci:trigger:manual:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:actions:refs/heads/main", Reads: []string{"manual:actions:refs/heads/main", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
-			// The submitter names the code commit; only the push GitHub proved may
-			// speak for main, so code from any other commit is asserted.
 			name: "attack: an Actions push running a commit it names itself is asserted",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return actionsReferenceRunning(t, s, runspec.Source{Ref: referenceFeature, RequestedRef: referenceFeature})

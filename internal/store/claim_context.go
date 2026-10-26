@@ -47,7 +47,7 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 			OriginMachine   string `json:"origin_machine"`
 			LocalForeground bool   `json:"local_foreground"`
 		} `json:"request"`
-		// Pool access rules read the repository and ref of runs that may hold a pool.
+		// safety: pool access rules read these, so units sharing a context share pool access.
 		Provenance struct {
 			Trust           runspec.TrustClass `json:"trust"`
 			RepositoryID    int64              `json:"repository_id"`

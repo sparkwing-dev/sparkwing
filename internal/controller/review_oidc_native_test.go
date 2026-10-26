@@ -90,8 +90,6 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
 		t.Fatal(err)
 	}
-	// Every minted token leaves one audit row naming the run, its job and the
-	// audience, and nothing that identifies a person.
 	minted, err := tenant.BusinessEvents(t.Context(), "oidc.minted", 1000, "")
 	if err != nil || len(minted) != 16 {
 		t.Fatalf("OIDC audit rows = %d, %v", len(minted), err)

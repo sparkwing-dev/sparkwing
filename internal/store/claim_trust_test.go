@@ -63,7 +63,6 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 			t.Fatal(err)
 		}
 	}
-	// Only verified pushes reach a pool; a feature branch is not default-branch work.
 	branch := "feature"
 	if verified {
 		branch = "main"
@@ -118,8 +117,6 @@ func TestRunnerTrustIsAnAdminSetCredentialFact(t *testing.T) {
 	}
 }
 
-// grantPool seals run as a verified push of gh:1 on branch and adds an access rule
-// opening pool to that repository, the only way a run reaches a pool.
 func grantPool(ctx context.Context, s *store.Store, team store.Team, run, pool, branch string) error {
 	var body []byte
 	if err := s.DB().QueryRowContext(ctx, `SELECT request_json FROM runs WHERE team=? AND id=?`, team, run).Scan(&body); err != nil {

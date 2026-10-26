@@ -23,8 +23,6 @@ import (
 // Public health answers only liveness and readiness, so it does not tell
 // anyone the license lapsed.
 func TestLicenseExpiryWhileRunningKeepsTheModeAndHidesItFromPublicHealth(t *testing.T) {
-	// The license was valid when the controller started 25 hours ago and
-	// expired an hour ago.
 	cfg := deploymenttest.Parse(t, deployment.Inputs{Kind: "team", Now: time.Now().Add(-25 * time.Hour)}, license.FeatureMultiTeam)
 	var srv *controller.Server
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {

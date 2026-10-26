@@ -167,13 +167,9 @@ func (t *Tenant) DeletePoolAccess(ctx context.Context, actor runstate.Actor, poo
 	})
 }
 
-// poolGrant is the one rule deciding whether access rule `rule` opens its pool to
-// a run: the rule as it stands now, judged against the run's sealed provenance.
-// Placement, secret release and OIDC all evaluate it at use, so removing a rule
-// stops every run on its next use, retries of older runs included. Only signed
-// App deliveries and admin-armed default-branch schedules qualify. A branch
-// pattern is a path.Match glob limited to * and ?, which WritePoolAccess enforces;
-// an equal slash count keeps both wildcards inside one path segment.
+// safety: the one pool access rule, read at every use (placement, secret release, OIDC), so
+// removing a rule stops retries of older runs too. Branches are path.Match globs limited to
+// * and ? by WritePoolAccess; an equal slash count keeps each wildcard in one path segment.
 func (q *claimSQL) poolGrant(rule, provenance string) string {
 	trust, ref := q.at(provenance, "trust"), `COALESCE(`+q.at(provenance, "ref")+`,'')`
 	branch := `substr(` + ref + `,12)`
@@ -187,7 +183,6 @@ func (q *claimSQL) poolGrant(rule, provenance string) string {
 		` AND (` + rule + `.branch='' OR (substr(` + ref + `,1,11)='refs/heads/' AND ` + slashes(rule+".branch") + `=` + slashes(branch) + ` AND ` + glob + `)))`
 }
 
-// allowedPools is the JSON array of pools poolGrant opens to a run, for row reads.
 func (q *claimSQL) allowedPools(team, provenance string) string {
 	from := ` FROM pool_access_rules pr WHERE pr.team=` + team + ` AND ` + q.poolGrant("pr", provenance)
 	if q.dialect == DialectPostgres {
@@ -196,8 +191,6 @@ func (q *claimSQL) allowedPools(team, provenance string) string {
 	return `(SELECT json_group_array(pool) FROM (SELECT DISTINCT pr.pool` + from + `))`
 }
 
-// runPoolsTx lists the pools the team's current access rules open to a sealed
-// provenance, and those of them whose rules also route the run onto the pool.
 func runPoolsTx(ctx context.Context, tx *storeTx, team Team, provenance runspec.Provenance) (pools, routed []string, err error) {
 	body, err := json.Marshal(provenance)
 	if err != nil {

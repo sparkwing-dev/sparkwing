@@ -59,7 +59,6 @@ func TestFreshChildRefLookupCannotSelectAnotherRepositoryOrDirectoryProperty(t *
 		}
 		err := server.resolveChildRevisions(t.Context(), e.EngineController, a, &request)
 		if mutation%3 == 0 {
-			// The parent's location replaces a requested one before any fetch.
 			return err != nil || request.Source.Location == parent.Request.Request.Source.Location
 		}
 		var refusal *apierr.Error

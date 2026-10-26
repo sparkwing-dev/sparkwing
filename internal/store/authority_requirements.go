@@ -83,7 +83,6 @@ func checkAuthorityRequirementTx(ctx context.Context, tx *storeTx, team string, 
 	return nil
 }
 
-// adminTokenLifetime is the ceiling of every credential that holds team.admin.
 const adminTokenLifetime = 30 * 24 * time.Hour
 
 func memberIssuancePolicy(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec, c capability.Capability) (capability.Capability, error) {
