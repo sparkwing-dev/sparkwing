@@ -152,7 +152,7 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 	b := authorityMember()
 	h := mutationServer(t, s, cipher, b)
 	property := func(value, selector string, masked bool) bool {
-		const repo = "git:git.example.com/acme/app"
+		const repo = "gh:1"
 		pipeline := "pipeline-" + selector
 		query := url.Values{"team": {selector}, "repo": {repo}, "pipeline": {pipeline}, "run": {selector}}
 		target, err := s.ForTeam(t.Context(), "team")
