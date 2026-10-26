@@ -77,7 +77,7 @@ func runQueueCommand(ctx context.Context, inv clisurface.Invocation, out io.Writ
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if inv.Command.Path == "sparkwing queue priority" && group == "" {
+	if inv.Command.Path == "sparkwing queue priority" {
 		if strings.Trim(input.RunID, "0123456789") == "" {
 			input.RunID, err = deps.resolveRun(ctx, input.RunID)
 			if err != nil {
@@ -108,7 +108,7 @@ func runQueueCommand(ctx context.Context, inv clisurface.Invocation, out io.Writ
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return manageQueue(ctx, inv, input, manager, out, format)
+	return manageQueue(ctx, inv, manager, out, format)
 }
 
 func resolveQueueRun(ctx context.Context, selector string) (string, error) {
@@ -124,15 +124,8 @@ func resolveQueueRun(ctx context.Context, selector string) (string, error) {
 	return run.ID, nil
 }
 
-func manageQueue(ctx context.Context, inv clisurface.Invocation, input controllerwire.QueuePriorityWrite, manager controllerwire.QueueManager, out io.Writer, format string) error {
+func manageQueue(ctx context.Context, inv clisurface.Invocation, manager controllerwire.QueueManager, out io.Writer, format string) error {
 	group := inv.Value("group")
-	if inv.Command.Path == "sparkwing queue priority" {
-		result, err := manager.SetGroupPriority(ctx, group, input)
-		if err != nil {
-			return err
-		}
-		return writeQueuePriority(out, result, format)
-	}
 	if group != "" {
 		result, err := manager.ReadQueueGroup(ctx, group)
 		if err != nil {

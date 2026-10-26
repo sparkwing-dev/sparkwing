@@ -94,7 +94,6 @@ func wireOperations() map[string]wireOperation {
 		"DELETE /api/v1/schedules/repos":                       operation("Remove repository schedules", nil, wire.ScheduleRepoDeletion{}, query("repo_url", "string")),
 		"GET /api/v1/queue":                                    operation("Read admission state", nil, wingwire.QueueState{}),
 		"GET /api/v1/queue/groups/{group}":                     operation("Read a concurrency group", nil, wire.QueueGroup{}),
-		"PUT /api/v1/queue/groups/{group}/priority":            operation("Change queued priority", wire.QueuePriorityWrite{}, wire.QueuePriorityResult{}),
 		"POST /api/v1/data/source":                             operation("Reserve a source snapshot upload", wire.SourceUploadRequest{}, wire.DataUploadTicket{}),
 		"POST /api/v1/data/source/{upload}/commit":             operation("Commit a verified source snapshot", struct{}{}, wire.DataReceipt{}),
 		"POST /api/v1/data/upload":                             operation("Reserve an object upload", wire.DataUploadRequest{}, wire.DataUploadTicket{}),
@@ -192,8 +191,4 @@ func addReadParameters(operations map[string]wireOperation) {
 		}
 		operations[key] = op
 	}
-	key := "PUT /api/v1/queue/groups/{group}/priority"
-	op := operations[key]
-	op.parameters = append(op.parameters, schema{"in": "header", "name": "Idempotency-Key", "required": true, "schema": schema{"type": "string"}})
-	operations[key] = op
 }

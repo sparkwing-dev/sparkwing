@@ -363,7 +363,6 @@ func Registry() []Command {
 			{Name: "profile", Argument: "PROFILE"},
 			{Name: "run", Argument: "ID", Required: true},
 			{Name: "set", Argument: "VALUE", Required: true},
-			{Name: "group", Argument: "GROUP"},
 		}},
 		{Path: "sparkwing repos", Flags: []Flag{}},
 		{Path: "sparkwing repos add", Rules: []string{"--checkout is required; it must be a local path."}, Flags: []Flag{}},

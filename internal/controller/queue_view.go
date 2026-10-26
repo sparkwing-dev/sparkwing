@@ -25,7 +25,6 @@ func (s *Server) queueReader(ctx context.Context, team string) (QueueReader, err
 
 func (s *Server) queueEndpoints() []controllerwire.Endpoint {
 	return []controllerwire.Endpoint{
-		{Method: "PUT", Pattern: "/api/v1/queue/groups/{group}/priority", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleQueuePriority},
 		{Method: "GET", Pattern: "/api/v1/queue", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleQueueStateView},
 	}
 }

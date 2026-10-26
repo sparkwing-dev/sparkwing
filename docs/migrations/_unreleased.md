@@ -1099,9 +1099,8 @@ Before: `sparkwing cluster concurrency --namespace GROUP --profile P`. Use
 The client uses `/api/v1/queue` and `/api/v1/queue/groups/{group}`.
 Connection failures return nonzero without an empty queue record.
 
-Use `queue priority --group GROUP --profile P --run ID --set VALUE` for a
-group rank change. Local admission priority keeps its existing admission
-operation. See [Queue views](../diagnosing-admission.md#queue-views) for the
+`queue priority` changes local admission priority only; queue groups have no
+priority route. See [Queue views](../diagnosing-admission.md#queue-views) for the
 unfinished native controller integrations.
 
 ## Local cache warming
@@ -2592,8 +2591,7 @@ Group waiter rows and responses drop the retired coalesce cache hash and leader
 fields. Memo keys are no longer recognized as concurrency groups.
 
 Read a group through `GET /api/v1/queue/groups/{group}`. Group waiter positions
-are one-based. Member
-priority changes use `PUT /api/v1/queue/groups/{group}/priority`.
+are one-based.
 
 The single-group `acquire`, `heartbeat`, `release`, `cancel-waiter`, `holder`,
 `resolve` and `force-release` endpoints are removed, including their older

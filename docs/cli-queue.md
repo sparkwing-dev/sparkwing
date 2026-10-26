@@ -52,4 +52,3 @@ Change the priority of queued work
 | `--profile PROFILE` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 | `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
 | `--set VALUE` | set (required) |
-| `--group GROUP` | group |

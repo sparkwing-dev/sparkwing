@@ -83,7 +83,6 @@ type QueuePriorityResult struct {
 type QueueManager interface {
 	ReadQueue(context.Context) (wingwire.QueueState, error)
 	ReadQueueGroup(context.Context, string) (QueueGroup, error)
-	SetGroupPriority(context.Context, string, QueuePriorityWrite) (QueuePriorityResult, error)
 }
 
 // ValidateQueueGroupName accepts opaque group names while refusing whole-name
