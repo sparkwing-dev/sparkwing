@@ -7,16 +7,18 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const (
-	stepKinds   = "kinds"
-	stepTrust   = "trust"
-	stepTier    = "tier"
-	stepAccess  = "access"
-	stepMatch   = "match"
-	stepBilling = "billing"
+	stepKinds    = "kinds"
+	stepTrust    = "trust"
+	stepFreshPod = "fresh_pod"
+	stepTier     = "tier"
+	stepAccess   = "access"
+	stepMatch    = "match"
+	stepBilling  = "billing"
 )
 
 type eligibility struct {
@@ -60,10 +62,6 @@ func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit Un
 		e.failed, e.refused = stepKinds, errors.Join(err, authorityError(apierr.Forbidden, "claimant does not take this kind of unit"))
 		return e, nil
 	}
-	if trusted, err := claimantTrustsRunTx(ctx, tx, team, string(unit.RunID), chain[len(chain)-1].principal.Capability, e.launcher); err != nil || !trusted {
-		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, "claimant trust requires verified default-branch work and launcher mode for reserved pools")
-		return e, err
-	}
 	e.profile, e.demand, err = readMatchingInputsTx(ctx, tx, claimant, unit, false)
 	switch {
 	case errors.Is(err, errTierOutsideRanking):
@@ -85,6 +83,17 @@ func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit Un
 	if !verdict.OK() {
 		e.failed, e.refused = stepMatch, authorityError(apierr.Forbidden, "work does not match claimant: "+verdict.String())
 		return e, nil
+	}
+	facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
+	if err != nil {
+		return e, err
+	}
+	if reason, err := claimantTrustRefusalTx(ctx, tx, team, string(unit.RunID), chain[len(chain)-1].principal.Capability, e.launcher, facts.PersistentKubernetes); err != nil || reason != "" {
+		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, reason)
+		if reason == freshPodReason {
+			e.failed = stepFreshPod
+		}
+		return e, err
 	}
 	return e, nil
 }
@@ -122,18 +131,22 @@ func localClaimant(c capability.Capability) bool {
 	return c.Subject.Kind == capability.SubjectLocal && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone && (slices.Contains(c.Grants, capability.NodesClaim) || slices.Contains(c.Grants, capability.TriggersClaim))
 }
 
+const freshPodReason = "verified default-branch work on Kubernetes runs only on fresh pods; add a launcher pool or use Sparkwing Cloud"
+
 // safety: a claimant that runs one job after another shares host state between them,
 // so work from a run anyone can push must not reach a host that later holds a pool's
 // reserved secrets.
-func claimantTrustsRunTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability, launcher bool) (bool, error) {
+func claimantTrustRefusalTx(ctx context.Context, tx *storeTx, team Team, run string, root capability.Capability, launcher, persistentKubernetes bool) (string, error) {
 	q := claimSQL{dialect: tx.dialect}
+	reasonParam := q.param(freshPodReason)
 	pools, err := q.jsonParam(root.ReservedPools)
 	if err != nil {
-		return false, err
+		return "", err
 	}
+	provenance := q.at(q.blob("r.request_json"), "provenance")
 	// A relation names each argument once even when the rule references it twice.
-	query := `SELECT CASE WHEN ` + q.poolTrust("r.team", "c.pools", "c.trust", "c.launcher", q.at(q.blob("r.request_json"), "provenance")) + ` THEN 1 ELSE 0 END FROM runs r CROSS JOIN (SELECT ` + pools + ` AS pools,` + q.param(string(root.Trust)) + ` AS trust,CAST(` + q.param(boolInt(launcher)) + ` AS BIGINT) AS launcher) c WHERE r.team=? AND r.id=?`
-	var trusted int
-	err = tx.QueryRowContext(ctx, query, append(q.args, team, run)...).Scan(&trusted)
-	return trusted == 1, err
+	query := `SELECT CASE WHEN NOT ` + q.freshPod("c.persistent_kubernetes", provenance) + ` THEN ` + reasonParam + ` WHEN NOT ` + q.poolTrust("r.team", "c.pools", "c.trust", "c.launcher", provenance) + ` THEN 'claimant trust requires verified default-branch work and launcher mode for reserved pools' ELSE '' END FROM runs r CROSS JOIN (SELECT ` + pools + ` AS pools,` + q.param(string(root.Trust)) + ` AS trust,CAST(` + q.param(boolInt(launcher)) + ` AS BIGINT) AS launcher,CAST(` + q.param(boolInt(persistentKubernetes)) + ` AS BIGINT) AS persistent_kubernetes) c WHERE r.team=? AND r.id=?`
+	var reason string
+	err = tx.QueryRowContext(ctx, query, append(q.args, team, run)...).Scan(&reason)
+	return reason, err
 }

@@ -178,6 +178,16 @@ func TestClaimContextsIgnoreRunSpecificExecutionInputs(t *testing.T) {
 	if got := persist(nextRequest, nextSpec, nextExecution); got != baseline {
 		t.Fatalf("run-specific inputs split identical claim policy: %s != %s", got, baseline)
 	}
+	for _, trust := range []string{"verified", "schedule"} {
+		verified := strings.Replace(nextRequest, `"trust":"asserted"`, `"trust":"`+trust+`","default_branch":"main"`, 1)
+		main := strings.Replace(verified, `"ref":"feature"`, `"ref":"refs/heads/main"`, 1)
+		if persist(verified, nextSpec, nextExecution) == persist(main, nextSpec, nextExecution) {
+			t.Fatalf("%s main and feature work shared a claim context", trust)
+		}
+		if persist(main, nextSpec, nextExecution) == persist(strings.Replace(main, `"default_branch":"main"`, `"default_branch":"trunk"`, 1), nextSpec, nextExecution) {
+			t.Fatalf("different %s default branches shared a claim context", trust)
+		}
+	}
 	for _, change := range []struct{ name, request, spec, execution string }{
 		{"runner", strings.Replace(nextRequest, `"set":false`, `"set":true,"value":{"kind":"name","value":"other"}`, 1), nextSpec, nextExecution},
 		{"root requirements", strings.Replace(nextRequest, `"runner":`, `"requires":{"value":["class=cloud"]},"runner":`, 1), nextSpec, nextExecution},

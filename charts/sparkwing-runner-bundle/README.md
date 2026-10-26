@@ -20,7 +20,15 @@ helm template sparkwing ./charts/sparkwing-runner-bundle \
   --set runner.image.tag=YOUR_BUILD
 ```
 
-Create the controller credential Secret separately. Persistent runners mount it
+Enroll the persistent runner as Kubernetes capacity with a team-admin credential:
+
+```sh
+sparkwing runners add --profile prod --runner pool-1 --repos github.com/your-org/* --platform kubernetes --no-service
+```
+
+Replace existing persistent chart credentials with this enrollment. The platform
+stays on the credential through rotation. Create the controller credential Secret
+separately. Persistent runners mount it
 in their credentials directory, where pipeline code under the same uid can read
 it. Verified pools mount it only in the launcher.
 

@@ -49,6 +49,7 @@ Shared runner registration requires team administration. --personal registers ca
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 | `--reserved-for POOL` | reserved for Repeatable; comma-separated values are accepted. |
 | `--trust CLASS` | trust Values: verified-default, any. |
+| `--platform PLATFORM` | Record a shared Kubernetes runner at admin enrollment; required for the runner chart. Values: kubernetes. |
 | `--launcher` | Enroll only claims.launch for a shared reserved pool and skip the persistent runner service. |
 
 ## `sparkwing runners list`

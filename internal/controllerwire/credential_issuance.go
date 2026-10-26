@@ -27,6 +27,7 @@ type CreatedToken struct {
 // EnrollRunnerRequest selects a machine name, repository patterns and authorized pools.
 type EnrollRunnerRequest struct {
 	Personal      bool       `json:"personal,omitempty"`
+	Platform      string     `json:"platform,omitempty"`
 	Name          string     `json:"name"`
 	Repos         []string   `json:"repos"`
 	ReservedPools []string   `json:"reserved_pools,omitempty"`

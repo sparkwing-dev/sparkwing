@@ -165,7 +165,7 @@ func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal,
 		return capability.IssueRequest{}, authorityError(apierr.IntegrityFailure, "credential provisioning origin is unavailable")
 	}
 	origin := record.Origin
-	spec := capability.ProvisionSpec{AllowTeamAdmin: slices.Contains(c.Grants, capability.TeamAdmin), Personal: origin.Personal, Kind: origin.Kind, RegistrationID: origin.RegistrationID, Authority: &p.Authority, Team: c.Team, Subject: c.Subject, Grants: slices.Clone(c.Grants), Binding: c.Binding, ReservedPools: slices.Clone(c.ReservedPools), Trust: c.Trust, Repositories: slices.Clone(c.Repositories), Data: c.Data, Metered: c.RootMetered, ExpiresAt: expires}
+	spec := capability.ProvisionSpec{AllowTeamAdmin: slices.Contains(c.Grants, capability.TeamAdmin), Personal: origin.Personal, Platform: origin.Platform, Kind: origin.Kind, RegistrationID: origin.RegistrationID, Authority: &p.Authority, Team: c.Team, Subject: c.Subject, Grants: slices.Clone(c.Grants), Binding: c.Binding, ReservedPools: slices.Clone(c.ReservedPools), Trust: c.Trust, Repositories: slices.Clone(c.Repositories), Data: c.Data, Metered: c.RootMetered, ExpiresAt: expires}
 	return capability.IssueRequest{Kind: capability.Delegate, Provision: &spec}, nil
 }
 
@@ -190,6 +190,9 @@ func scheduleRotationTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 }
 
 func validCapabilityOrigin(c capability.Capability, origin CapabilityOrigin) bool {
+	if origin.Platform != "" && (origin.Platform != "kubernetes" || origin.Kind != capability.ProvisionMachine || origin.Personal) {
+		return false
+	}
 	if origin.Personal && (origin.Kind != capability.ProvisionMachine || origin.Requirement == nil) {
 		return false
 	}
