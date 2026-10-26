@@ -48,9 +48,9 @@ func runTeamSettings(ctx context.Context, inv clisurface.Invocation) error {
 	case "json":
 		return json.NewEncoder(os.Stdout).Encode(result)
 	case "plain":
-		fmt.Printf("%t %s %d\n", result.MembersCanAddMachines, ranking, result.MaxChildrenPerRoot)
+		fmt.Printf("%t %s %d %t\n", result.MembersCanAddMachines, ranking, result.MaxChildrenPerRoot, result.HighTrust)
 	default:
-		fmt.Printf("members_can_add_machines: %t\nclaim_ranking: %s\nmax_children_per_root: %d\n", result.MembersCanAddMachines, ranking, result.MaxChildrenPerRoot)
+		fmt.Printf("members_can_add_machines: %t\nclaim_ranking: %s\nmax_children_per_root: %d\nhigh_trust: %t\n", result.MembersCanAddMachines, ranking, result.MaxChildrenPerRoot, result.HighTrust)
 	}
 	return nil
 }
@@ -68,6 +68,10 @@ func teamSettingsUpdate(inv clisurface.Invocation) (controllerwire.TeamSettingsU
 		enabled := raw == "true"
 		update.MembersCanAddMachines = &enabled
 	}
+	if raw := inv.Value("high-trust"); raw != "" {
+		enabled := raw == "true"
+		update.HighTrust = &enabled
+	}
 	if inv.Has("claim-ranking") {
 		var tiers []string
 		switch value := strings.TrimSpace(inv.Value("claim-ranking")); value {
@@ -82,8 +86,8 @@ func teamSettingsUpdate(inv clisurface.Invocation) (controllerwire.TeamSettingsU
 		}
 		update.ClaimRanking = &tiers
 	}
-	if update.MembersCanAddMachines == nil && update.ClaimRanking == nil && update.MaxChildrenPerRoot == nil {
-		return update, &clisurface.UsageError{Path: inv.Command.Path, Message: "pass --members-can-add-machines, --claim-ranking or --max-children-per-root"}
+	if update.MembersCanAddMachines == nil && update.ClaimRanking == nil && update.MaxChildrenPerRoot == nil && update.HighTrust == nil {
+		return update, &clisurface.UsageError{Path: inv.Command.Path, Message: "pass --members-can-add-machines, --claim-ranking, --max-children-per-root or --high-trust"}
 	}
 	return update, nil
 }

@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,4 +141,69 @@ func grantPool(ctx context.Context, s *store.Store, team store.Team, run, pool, 
 	}
 	_, err = s.DB().ExecContext(ctx, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES (?,?,?,'gh:1','owner',1)`, team, pool, pool)
 	return err
+}
+
+// A verified run on a host that outlives its jobs writes only that host's
+// cache scope, which fresh pods, Cloud and remote readers never restore, while
+// still reading the verified default branch. A launcher's fresh pods and a
+// high-trust team write the shared verified scope.
+func TestVerifiedWorkOnAPersistentHostWritesItsHostScope(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		launcher, highTrust bool
+		shared              bool
+	}{
+		{name: "plain machine runner"},
+		{name: "launcher pod", launcher: true, shared: true},
+		{name: "high-trust team", highTrust: true, shared: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			s := storetest.OpenSQLite(t, store.WithPolicies(sealStorePolicies), fixturePolicies(store.Policies{ClaimProfiles: &matchingEnrollment{profile: match.Profile{}}}))
+			tenant, plan, err := storePlanSealRequestWith(ctx, s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
+				doc.Jobs = []nodeproto.JobSpec{{ID: "job", Requires: []string{"pool=prod"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.AcceptPlan(ctx, plan); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "job"}, Actor: plan.Actor}); err != nil {
+				t.Fatal(err)
+			}
+			if err := grantPool(ctx, s, tenant.Team(), plan.RunID, "prod", "main"); err != nil {
+				t.Fatal(err)
+			}
+			if tc.highTrust {
+				if _, err := s.DB().ExecContext(ctx, `UPDATE teams SET high_trust=1 WHERE name=?`, tenant.Team()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			authority := plan.Seal.Request.AuthorityRef
+			grants := []capability.Grant{capability.NodesClaim}
+			if tc.launcher {
+				grants = []capability.Grant{capability.ClaimsLaunch}
+			}
+			issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(tenant.Team()), RegistrationID: "runner:" + string(tenant.Team()) + ":vm", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "vm"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, ReservedPools: []string{"prod"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim, err := s.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: issued.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			award, err := s.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+			if err != nil || award.Capability.Data == nil {
+				t.Fatalf("award: %+v %v", award.Capability.Data, err)
+			}
+			data := award.Capability.Data
+			if shared := data.WriteRef == "refs/heads/main"; shared != tc.shared || !tc.shared && !strings.HasPrefix(data.WriteRef, "manual:host-") {
+				t.Fatalf("write scope %q, want shared=%v", data.WriteRef, tc.shared)
+			}
+			if !slices.Contains(data.ReadRefs, "refs/heads/main") {
+				t.Fatalf("read scopes %v lost the verified default branch", data.ReadRefs)
+			}
+		})
+	}
 }

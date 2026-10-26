@@ -374,7 +374,7 @@ export async function mintMachineToken(
   return (await res.json()) as MintedMachineToken;
 }
 
-export type TeamSettings = { members_can_add_machines: boolean; max_children_per_root: number };
+export type TeamSettings = { members_can_add_machines: boolean; max_children_per_root: number; high_trust: boolean };
 
 export async function getTeamSettings(): Promise<TeamSettings> {
   const res = await send("GET", "/api/v1/team/settings", "Read team settings");

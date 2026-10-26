@@ -188,8 +188,20 @@ add a launcher pool or use Sparkwing Cloud. The
 controller reads the platform from the admin-issued enrollment, never from job
 claims. Plain-machine runners (VMs and bare metal) keep serving verified work
 under the same OS user, so job code can read runner credentials and leave host
-state for later jobs. Launcher pods, Cloud pods and Actions job runners are
-unaffected.
+state for later jobs.
+
+A verified run on a host that outlives its jobs (plain-machine runners and
+persistent Kubernetes runners) writes memo, depcache and output records only to
+that host's own cache scope. Fresh pods, Sparkwing Cloud and remote cache
+readers restore only the shared verified scope, which launcher pods, Cloud pods
+and Actions jobs write, so state an earlier job left on a long-lived host never
+reaches them through the cache. Runs on that host still read the verified
+default branch. A team administrator can turn on the `high_trust` team setting
+(console team settings, or `sparkwing team settings set --high-trust true`; off
+by default and audited), meant for teams whose every job on those runners is
+trusted, to let them write the shared verified scope. A verified default-branch
+run reads only cache records that carry default-branch evidence, including in
+its own ref scope.
 
 Before a Cloud node runs a job, the launcher probes from a pod on that node
 that default-deny egress holds: the Kubernetes API, instance metadata, the Pod

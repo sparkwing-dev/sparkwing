@@ -211,6 +211,8 @@ type auditTeamSettings struct {
 	PreviousClaimRanking          []auditClaimTier `json:"previous_claim_ranking"`
 	MaxChildrenPerRoot            int64            `json:"max_children_per_root"`
 	PreviousMaxChildrenPerRoot    int64            `json:"previous_max_children_per_root"`
+	HighTrust                     bool             `json:"high_trust"`
+	PreviousHighTrust             bool             `json:"previous_high_trust"`
 }
 type (
 	auditClaimTier      string

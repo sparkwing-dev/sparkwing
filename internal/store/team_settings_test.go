@@ -234,3 +234,24 @@ func TestReenablingMemberMachinesDoesNotReviveOldOnes(t *testing.T) {
 		t.Fatalf("a member's machine enrolled after re-enabling: %v", err)
 	}
 }
+
+// high_trust is off by default, changed only by an administrator, and audited.
+func TestHighTrustSettingIsAuditedAdministration(t *testing.T) {
+	s := authorityStore(t)
+	owner := authorityMember(t, s, "owner", RoleOwner)
+	tenant := &Tenant{s: s, team: "a"}
+	if settings, err := tenant.TeamSettings(t.Context()); err != nil || settings.HighTrust {
+		t.Fatalf("default high_trust: %+v %v", settings, err)
+	}
+	on := true
+	if err := tenant.SetAuthorizedTeamSettings(t.Context(), teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings"), TeamSettingsUpdate{HighTrust: &on}); err != nil {
+		t.Fatal(err)
+	}
+	if settings, err := tenant.TeamSettings(t.Context()); err != nil || !settings.HighTrust {
+		t.Fatalf("high_trust after enabling: %+v %v", settings, err)
+	}
+	events, err := tenant.BusinessEvents(t.Context(), "team.settings_changed", 10, "")
+	if err != nil || len(events) != 1 || events[0].Attrs["high_trust"] != true || events[0].Attrs["previous_high_trust"] != false {
+		t.Fatalf("high_trust audit: %+v %v", events, err)
+	}
+}

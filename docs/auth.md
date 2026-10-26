@@ -333,8 +333,8 @@ and that one of the account's current sign-ins verifies the invited address.
 Unlinking the sign-in that verified an address stops the account seeing or
 accepting invitations to it, and frees the address for its next holder.
 
-`GET /api/v1/team/settings` returns `members_can_add_machines` and
-`claim_ranking` under `runs.read`. `PUT /api/v1/team/settings` requires
+`GET /api/v1/team/settings` returns `members_can_add_machines`,
+`claim_ranking`, `max_children_per_root` and `high_trust` under `runs.read`. `PUT /api/v1/team/settings` requires
 `team.admin` and names at least one of them. `claim_ranking` takes distinct
 tiers from `here`, `personal`, `github-actions`, `self-hosted` and `cloud`, and
 an empty list means first come. A self-hosted controller has no Cloud launcher

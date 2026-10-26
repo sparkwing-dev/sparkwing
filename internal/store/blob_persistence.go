@@ -116,6 +116,9 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 	if err != nil {
 		return a, err
 	}
+	if write := blob.ParseCapabilityScope(c.Data.WriteRef); facts.Scope.Verified && !write.Verified && write.Ref == facts.Scope.Ref && strings.HasPrefix(write.Writer, hostWriterPrefix) {
+		facts = hostRefFacts(facts, write.Writer)
+	}
 	a.authority.Ref = facts
 	a.source = blob.UploadIdentity{Team: string(team), RunID: c.Binding.RunID, Principal: a.authority.Principal, CapabilityRef: c.Prefix}
 	if grant == capability.SourceRead {
@@ -340,6 +343,23 @@ func provenanceRefFacts(sealed runspec.SealedRequest) (blob.RefFacts, error) {
 		facts.PullRequestBase = runspec.Optional[string]{Set: true, Value: "refs/heads/" + base}
 	}
 	return facts, nil
+}
+
+// hostRefFacts confines a verified run on a host that outlives its jobs to that
+// host's own scope. Earlier jobs on the host may have tampered with what the
+// run archives, so its records never carry verified or default-branch evidence
+// that fresh pods, Cloud and remote readers trust; it still reads the verified
+// default branch. host is empty on a fresh host or for a high-trust team.
+const hostWriterPrefix = "host-"
+
+func hostRefFacts(facts blob.RefFacts, host string) blob.RefFacts {
+	if host == "" || !facts.Scope.Verified {
+		return facts
+	}
+	facts.Scope = blob.RefScope{Ref: facts.Scope.Ref, Writer: host}
+	facts.DefaultBranchVerified = false
+	facts.AppDeliveryKey = ""
+	return facts
 }
 
 // readScopes lists what a run may read: its own scope, then the verified default

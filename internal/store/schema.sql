@@ -13,6 +13,8 @@ CREATE TABLE teams (
     member_machines_epoch BIGINT NOT NULL DEFAULT 0 CHECK(member_machines_epoch >= 0),
     claim_ranking TEXT NOT NULL DEFAULT '',
     max_children_per_root BIGINT NOT NULL DEFAULT 50 CHECK(max_children_per_root BETWEEN 1 AND 1000),
+    -- safety: off, verified runs on plain-machine and persistent runners write only their host's cache scope.
+    high_trust BIGINT NOT NULL DEFAULT 0 CHECK(high_trust IN (0,1)),
     claim_award_ordinal BIGINT NOT NULL DEFAULT 0 CHECK(claim_award_ordinal >= 0),
     billing_trust_at BIGINT NOT NULL DEFAULT 0,
     billing_trust_reason TEXT NOT NULL DEFAULT '',

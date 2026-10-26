@@ -11,6 +11,10 @@ import (
 type claimantFacts struct {
 	Launcher, Personal, Shared, Cloud, Observable, PersistentKubernetes bool
 	OwnerAccount, Tier, OIDCKind, ExecutorClass                         string
+	// FreshHost is a host no earlier job touched: a launcher pod, a Cloud pod or
+	// an Actions job. Host names any other host by its enrollment.
+	FreshHost bool
+	Host      string
 }
 
 func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, request runspec.Request) (claimantFacts, error) {
@@ -31,10 +35,14 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 	if root.Subject.Kind == capability.SubjectLocal {
 		facts.Tier, facts.ExecutorClass = tierSelfHosted, "local"
 	}
+	facts.Host = root.Team + "/" + root.Prefix
 	if root.Subject.Kind == capability.SubjectMachine && root.Parent == nil {
 		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
 		if err != nil {
 			return facts, err
+		}
+		if record.Origin != nil && record.Origin.RegistrationID != "" {
+			facts.Host = root.Team + "/" + record.Origin.RegistrationID
 		}
 		facts.PersistentKubernetes = record.Origin != nil && record.Origin.Platform == "kubernetes" && !capability.Launcher(root)
 		facts.Personal = record.Origin != nil && record.Origin.Personal
@@ -67,5 +75,6 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 			facts.ExecutorClass = tierHere
 		}
 	}
+	facts.FreshHost = facts.Launcher || facts.Cloud || facts.Tier == tierActions
 	return facts, nil
 }
