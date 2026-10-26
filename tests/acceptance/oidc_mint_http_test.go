@@ -32,9 +32,10 @@ import (
 type oidcFacts struct {
 	selectorTransactions
 	facts capability.OIDCFacts
-	actor capability.Authorized
-	calls int
-	err   error
+	actor  capability.Authorized
+	calls  int
+	minted int
+	err    error
 }
 
 func (*oidcFacts) Team() store.Team { return "team" }
@@ -42,6 +43,11 @@ func (f *oidcFacts) ReadOIDCFacts(_ context.Context, a capability.Authorized) (c
 	f.calls++
 	f.actor = a
 	return f.facts, f.err
+}
+
+func (f *oidcFacts) RecordOIDCMint(context.Context, capability.Authorized, string) error {
+	f.minted++
+	return nil
 }
 
 func oidcBoundary() (*credentialBoundary, *oidcFacts) {
@@ -113,7 +119,7 @@ func TestOIDCMintHTTPIdentityAndExpiryProperty(t *testing.T) {
 	server := oidcServer(t, b, f, private, nil)
 	h := server.Handler()
 	property := func(input []byte, seconds uint16) bool {
-		f.calls = 0
+		f.calls, f.minted = 0, 0
 		forged := hex.EncodeToString(input)
 		f.facts.NotAfter = b.snapshot.Now.Add(time.Duration(1+seconds%600) * time.Second)
 		expiry := b.snapshot.Now.Add(time.Duration(1+(seconds/2)%600) * time.Second)
@@ -128,7 +134,7 @@ func TestOIDCMintHTTPIdentityAndExpiryProperty(t *testing.T) {
 		w := authorityHTTP(h, b, "POST", "/api/v1/runs/run/oidc-token?team="+forged+"&run_id="+forged+"&repository="+forged, `{"audience":"vault"}`)
 		result, c := oidcResponse(t, w, &key.PublicKey)
 		ceiling := min(f.facts.NotAfter.Unix(), expiry.Unix(), deadline.Unix(), revocation.Unix())
-		return f.calls == 1 && f.actor.Target.Team == "team" && f.actor.Target.RunID == "run" && f.actor.Access.Binding == capability.BindRun &&
+		return f.calls == 1 && f.minted == 1 && f.actor.Target.Team == "team" && f.actor.Target.RunID == "run" && f.actor.Access.Binding == capability.BindRun &&
 			f.actor.Principal.Authority == b.snapshot.Authorities[0].Principal.Authority && f.actor.Binding.Generation == 4 &&
 			c["iss"] == "https://issuer.example" && c["aud"] == "vault" && c["sub"] == "team:team:repository_id:42:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main" &&
 			c["team"] == "team" && c["run_id"] == "run" && c["repository"] == f.facts.Repository && c["sha"] == f.facts.SHA &&
