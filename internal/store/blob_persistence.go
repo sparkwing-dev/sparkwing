@@ -335,7 +335,7 @@ func provenanceRefFacts(sealed runspec.SealedRequest) (blob.RefFacts, error) {
 		return facts, nil
 	}
 	facts.AppDeliveryKey = p.Delivery()
-	facts.DefaultBranchVerified = p.Trust() == runspec.TrustVerifiedDefault
+	facts.DefaultBranchVerified = p.DefaultBranchWork()
 	if base := p.PullRequestBase(); base != "" {
 		facts.PullRequestBase = runspec.Optional[string]{Set: true, Value: "refs/heads/" + base}
 	}

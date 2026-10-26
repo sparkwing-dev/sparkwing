@@ -26,6 +26,31 @@ const (
 	TrustAsserted TrustClass = "asserted"
 )
 
+// TrustSet is one named rule over trust classes. The store renders every SQL trust
+// list from these sets, so changing a rule edits one line.
+type TrustSet []TrustClass
+
+// Has reports whether the set admits the class.
+func (s TrustSet) Has(c TrustClass) bool { return slices.Contains(s, c) }
+
+var (
+	// DefaultBranchWorkTrust is verified default-branch work: a signed push to the
+	// default branch, or an unmodified fire of an admin-armed default-branch schedule
+	// (decisions 31, 34, 60). Reserved pools, fresh-pod placement and extra source
+	// repositories all read this one rule.
+	DefaultBranchWorkTrust = TrustSet{TrustVerifiedDefault, TrustSchedule}
+	// AppRepositoryTrust proved its repository through the GitHub App: a signed
+	// delivery or a schedule whose commit the App resolved. Pool access rules grant it.
+	AppRepositoryTrust = TrustSet{TrustVerified, TrustVerifiedDefault, TrustSchedule}
+	// AppDeliveryTrust is a signed GitHub App delivery on any branch.
+	AppDeliveryTrust = TrustSet{TrustVerified, TrustVerifiedDefault}
+	// GitHubEventTrust carries a ref and commit GitHub proved for one event, from an
+	// App delivery or an Actions push, which an Actions push binding can match.
+	GitHubEventTrust = TrustSet{TrustActions, TrustVerified, TrustVerifiedDefault}
+	// AllTrust lists every class.
+	AllTrust = TrustSet{TrustVerifiedDefault, TrustVerified, TrustActions, TrustSchedule, TrustAsserted}
+)
+
 // appEvents are the signed delivery events that may seal verified provenance.
 var appEvents = []string{"push", "pull_request", "release", "create", "delete"}
 
@@ -175,9 +200,11 @@ func (p Provenance) Valid() bool { return p.validate() == nil }
 func (p Provenance) Trust() TrustClass { return p.identity.Trust }
 
 // Verified reports a signed GitHub App delivery, on any branch.
-func (p Provenance) Verified() bool {
-	return p.identity.Trust == TrustVerified || p.identity.Trust == TrustVerifiedDefault
-}
+func (p Provenance) Verified() bool { return AppDeliveryTrust.Has(p.identity.Trust) }
+
+// DefaultBranchWork reports verified default-branch work; the store's SQL renders
+// the same DefaultBranchWorkTrust set.
+func (p Provenance) DefaultBranchWork() bool { return DefaultBranchWorkTrust.Has(p.identity.Trust) }
 
 // RepositoryID is the GitHub repository a signed delivery, an Actions push binding
 // or App automation consent established, and zero for a run a principal chose.

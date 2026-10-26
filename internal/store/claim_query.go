@@ -335,7 +335,7 @@ func (q *claimSQL) flag(name string) string { return q.number(q.fact(name)) }
 func (q *claimSQL) pushScopeMatches(provenance, push, repo string) string {
 	p := func(name string) string { return q.at(provenance, name) }
 	b := func(name string) string { return q.at(push, name) }
-	return `COALESCE((` + p("trust") + ` IN ('actions','verified','verified-default') AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `='gh:'||CAST(` + p("repository_id") + ` AS TEXT) AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
+	return `COALESCE((` + trustIn(p("trust"), runspec.GitHubEventTrust) + ` AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `='gh:'||CAST(` + p("repository_id") + ` AS TEXT) AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
 }
 
 func writerPrincipalSQL(writer, kind string) string {
@@ -348,17 +348,27 @@ func writerPrincipalSQL(writer, kind string) string {
 func (q *claimSQL) poolTrust(team, pools, trust, launcher, provenance string) string {
 	reserved := `EXISTS (SELECT 1 FROM secrets s WHERE s.team=` + team + ` AND ` + q.contains(pools, "s.only_on") + `)`
 	hasPools := `EXISTS (SELECT 1 FROM ` + q.array(pools, "pool") + `)`
-	return `((NOT (` + reserved + ` OR (` + trust + `='verified-default' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='any' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.at(provenance, "trust") + ` IN ('verified-default','schedule')))`
+	return `((NOT (` + reserved + ` OR (` + trust + `='` + string(capability.TrustVerifiedDefault) + `' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='` + string(capability.TrustAny) + `' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.defaultBranchWork(provenance) + `))`
 }
 
-// Context sharing and placement must agree, including seals inherited from schedules.
-func (q *claimSQL) verifiedDefaultWork(provenance string) string {
-	p := func(name string) string { return q.at(provenance, name) }
-	return `COALESCE((` + p("trust") + ` IN ('verified','verified-default','schedule') AND ` + p("default_branch") + `<>'' AND ` + p("ref") + `='refs/heads/'||` + p("default_branch") + `),FALSE)`
+// defaultBranchWork is Provenance.DefaultBranchWork in SQL. Seal validation pins
+// both classes to the default branch, so the class alone decides.
+func (q *claimSQL) defaultBranchWork(provenance string) string {
+	return `COALESCE(` + trustIn(q.at(provenance, "trust"), runspec.DefaultBranchWorkTrust) + `,FALSE)`
+}
+
+// trustIn renders membership in one runspec trust set. TestStoreSQLTrustLiterals
+// refuses any trust-class literal written into store SQL by hand.
+func trustIn(expr string, set runspec.TrustSet) string {
+	quoted := make([]string, len(set))
+	for i, class := range set {
+		quoted[i] = `'` + string(class) + `'`
+	}
+	return expr + ` IN (` + strings.Join(quoted, ",") + `)`
 }
 
 func (q *claimSQL) freshPod(persistentKubernetes, provenance string) string {
-	return `(` + persistentKubernetes + `=0 OR NOT ` + q.verifiedDefaultWork(provenance) + `)`
+	return `(` + persistentKubernetes + `=0 OR NOT ` + q.defaultBranchWork(provenance) + `)`
 }
 
 func (q *claimSQL) predicate() string {
@@ -377,7 +387,7 @@ func (q *claimSQL) predicate() string {
 	trust := q.poolTrust("w.team", f("pools"), f("trust"), n("launcher"), q.at("w.request", "provenance"))
 	bind := `(` + f("bind_run") + `='' OR (w.run_id=` + f("bind_run") + ` AND (` + n("here") + `=0 OR (w.kind='trigger' AND EXISTS (SELECT 1 FROM triggers bt WHERE bt.team=w.team AND bt.id=w.run_id AND (bt.generation<>0 OR ` + n("claim_by") + `>clock.now))))))`
 	pushes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("pushes"), "push") + ` WHERE NOT (` + q.pushScopeMatches(q.at("w.request", "provenance"), "push.value", "w.repo_key") + `))`
-	personal := `(` + n("personal") + `=0 OR (` + f("account") + `<>'' AND ` + f("account") + `=w.requester AND NOT EXISTS (SELECT 1 FROM ancestors a WHERE a.team=w.team AND a.child=w.run_id AND a.origin IN ('github_app','schedule'))))`
+	personal := `(` + n("personal") + `=0 OR (` + f("account") + `<>'' AND ` + f("account") + `=w.requester AND NOT EXISTS (SELECT 1 FROM ancestors a WHERE a.team=w.team AND a.child=w.run_id AND a.origin IN ('` + string(runspec.OriginApp) + `','` + string(runspec.OriginSchedule) + `'))))`
 	runnerKind := `COALESCE(` + w("options", "runner", "value", "kind") + `,'')`
 	runnerValue := `COALESCE(` + w("options", "runner", "value", "value") + `,'')`
 	runnerLabels := `json_array(` + runnerValue + `)`

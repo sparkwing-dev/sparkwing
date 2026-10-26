@@ -93,7 +93,7 @@ func (t *Tenant) githubSourceReleaseTx(ctx context.Context, tx *storeTx, authori
 	if err != nil {
 		return out, err
 	}
-	ids, names, err := t.githubSourceRepositoriesTx(ctx, tx, slug, id, run.Request.Provenance.Trust() == runspec.TrustVerifiedDefault)
+	ids, names, err := t.githubSourceRepositoriesTx(ctx, tx, slug, id, run.Request.Provenance.DefaultBranchWork())
 	if err != nil {
 		return out, err
 	}

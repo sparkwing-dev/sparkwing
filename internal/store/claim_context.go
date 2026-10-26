@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -26,7 +25,7 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 	var verifiedDefault bool
 	q := claimSQL{dialect: tx.dialect}
 	var repoKey, repoDisplay, repository, dispatch, subject, principal string
-	if err := tx.QueryRowContext(ctx, `SELECT request_json,spec_json,repo_key,repo_display,repo_identity,dispatch,created_subject_kind,created_principal,`+q.verifiedDefaultWork(q.at(q.blob("request_json"), "provenance"))+` FROM runs WHERE team=? AND id=?`, team, runID).Scan(&request, &spec, &repoKey, &repoDisplay, &repository, &dispatch, &subject, &principal, &verifiedDefault); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT request_json,spec_json,repo_key,repo_display,repo_identity,dispatch,created_subject_kind,created_principal,`+q.defaultBranchWork(q.at(q.blob("request_json"), "provenance"))+` FROM runs WHERE team=? AND id=?`, team, runID).Scan(&request, &spec, &repoKey, &repoDisplay, &repository, &dispatch, &subject, &principal, &verifiedDefault); err != nil {
 		return "", err
 	}
 	var sealed struct {
@@ -59,7 +58,7 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 		return "", err
 	}
 	sealed.Provenance.VerifiedDefault = verifiedDefault
-	if !slices.Contains([]runspec.TrustClass{runspec.TrustVerified, runspec.TrustVerifiedDefault, runspec.TrustSchedule}, sealed.Provenance.Trust) {
+	if !runspec.AppRepositoryTrust.Has(sealed.Provenance.Trust) {
 		sealed.Provenance.RepositoryID, sealed.Provenance.Ref = 0, ""
 	}
 	var accepted struct {
