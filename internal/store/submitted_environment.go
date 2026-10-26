@@ -104,7 +104,7 @@ func (t *Tenant) readSubmittedEnvironmentTx(ctx context.Context, tx *storeTx, ru
 // ReadSubmittedEnvironment releases private values only to the run's live execution award.
 func (t *Tenant) ReadSubmittedEnvironment(ctx context.Context, authority capability.AuthorityRef) (values map[string][]byte, err error) {
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		chain, err := teamAuthorityChainTx(ctx, tx, t.team, authority, false)
+		chain, err := teamAuthorityChainTx(ctx, tx, t.team, authority, false, sameTeam)
 		if err != nil {
 			return err
 		}
@@ -116,7 +116,7 @@ func (t *Tenant) ReadSubmittedEnvironment(ctx context.Context, authority capabil
 		if err != nil {
 			return err
 		}
-		if _, err := authorityChainTx(ctx, tx, authority, false); err != nil {
+		if _, err := teamAuthorityChainTx(ctx, tx, t.team, authority, false, sameTeam); err != nil {
 			return err
 		}
 		return checkExecutionUnitTx(ctx, tx, c)

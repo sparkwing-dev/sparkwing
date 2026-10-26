@@ -574,7 +574,7 @@ func resolveTeamActorTx(ctx context.Context, tx *storeTx, team Team, actor runst
 	return teamPrincipal(resolveActorTx(ctx, tx, actor))(team, accept)
 }
 
-func teamAuthorityChainTx(ctx context.Context, tx *storeTx, team Team, ref capability.AuthorityRef, lock bool) ([]authorityNode, error) {
+func teamAuthorityChainTx(ctx context.Context, tx *storeTx, team Team, ref capability.AuthorityRef, lock bool, accept teamAuthority) ([]authorityNode, error) {
 	chain, err := authorityChainTx(ctx, tx, ref, lock)
 	if err != nil {
 		return nil, err
@@ -582,7 +582,7 @@ func teamAuthorityChainTx(ctx context.Context, tx *storeTx, team Team, ref capab
 	if len(chain) == 0 {
 		return nil, bindingRefusal()
 	}
-	_, err = teamPrincipal(chain[0].principal, nil)(team, sameTeam)
+	_, err = teamPrincipal(chain[0].principal, nil)(team, accept)
 	return chain, err
 }
 

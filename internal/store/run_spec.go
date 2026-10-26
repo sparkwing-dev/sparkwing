@@ -244,7 +244,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 }
 
 func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission) error {
-	preliminary, err := authorityChainTx(ctx, tx, request.Actor.Authority, false)
+	preliminary, err := teamAuthorityChainTx(ctx, tx, team, request.Actor.Authority, false, sameTeam)
 	if err != nil {
 		return err
 	}
@@ -258,7 +258,7 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 			return err
 		}
 	}
-	chain, err := teamAuthorityChainTx(ctx, tx, team, request.Actor.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, team, request.Actor.Authority, true, sameTeam)
 	if err != nil {
 		return err
 	}

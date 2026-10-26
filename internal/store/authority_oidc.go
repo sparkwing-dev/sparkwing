@@ -16,7 +16,7 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 		return capability.OIDCFacts{}, err
 	}
 	defer rollbackOrLog(tx)
-	chain, err := authorityChainTx(ctx, tx, supplied.Principal.Authority, false)
+	chain, err := teamAuthorityChainTx(ctx, tx, t.team, supplied.Principal.Authority, false, sameTeam)
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}

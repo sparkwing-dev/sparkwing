@@ -79,7 +79,7 @@ func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]strin
 }
 
 func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix string, indices map[string]int, out *capability.RunnerSnapshot) error {
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, false)
+	chain, err := teamAuthorityChainTx(ctx, tx, team, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, false, sameTeam)
 	if unavailableRunner(err) {
 		return nil
 	}
@@ -87,7 +87,7 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 		return err
 	}
 	c := chain[0].principal.Capability
-	if c.Team != string(team) || c.Billing == nil {
+	if c.Billing == nil {
 		return authorityError(apierr.IntegrityFailure, "invalid runner award")
 	}
 	key := c.Billing.ReservationID

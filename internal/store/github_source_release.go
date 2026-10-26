@@ -77,7 +77,7 @@ func (t *Tenant) githubSourceReleaseTx(ctx context.Context, tx *storeTx, authori
 	if err != nil {
 		return out, err
 	}
-	chain, err := authorityChainTx(ctx, tx, authorized.Principal.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, t.team, authorized.Principal.Authority, true, sameTeam)
 	if err != nil {
 		return out, err
 	}

@@ -31,7 +31,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
-		chain, err := authorityChainTx(ctx, tx, authorized.Principal.Authority, true)
+		chain, err := teamAuthorityChainTx(ctx, tx, t.team, authorized.Principal.Authority, true, sameTeam)
 		if err != nil {
 			return err
 		}
@@ -57,7 +57,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 			return err
 		}
 		// safety: enrollment may outlast the authority or lease.
-		if _, err := authorityChainTx(ctx, tx, authorized.Principal.Authority, false); err != nil {
+		if _, err := teamAuthorityChainTx(ctx, tx, t.team, authorized.Principal.Authority, false, sameTeam); err != nil {
 			return err
 		}
 		if err := checkSourceReleaseFenceTx(ctx, tx, request.Authorization.Principal.Capability); err != nil {
@@ -79,7 +79,7 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 	if err := lockClaimControllerTx(ctx, tx); err != nil {
 		return capability.SourceReleaseRequest{}, err
 	}
-	chain, err := teamAuthorityChainTx(ctx, tx, t.team, authorized.Principal.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, t.team, authorized.Principal.Authority, true, sameTeam)
 	if err != nil {
 		return capability.SourceReleaseRequest{}, err
 	}
