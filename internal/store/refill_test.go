@@ -626,3 +626,36 @@ func TestDueRefillsKeepsSuccessfulTeamsAroundFailure(t *testing.T) {
 		})
 	}
 }
+
+// A refill in flight holds the team's single refill slot until the transaction that grants it closes it, so no pass
+// before its webhook opens a second one. After the grant, another refill opens only while the balance is still below
+// the threshold: $10 of Add funds and a $10 refill reach $20, which a $25 threshold refills again to $30.
+func TestARefillInFlightBlocksASecondUntilItsGrantLands(t *testing.T) {
+	for _, tc := range []struct {
+		thresholdCents int64
+		second         bool
+	}{{1_500, false}, {2_500, true}} {
+		s, tenant, now := refillFixture(t, true)
+		addFunds(t, s, 1_000, "pi_add")
+		if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: tc.thresholdCents, AmountCents: 1_000}); err != nil {
+			t.Fatal(err)
+		}
+		first := dueRefillsFor(t, s, "a")
+		if len(first) != 1 {
+			t.Fatalf("threshold %d: refill = %+v", tc.thresholdCents, first)
+		}
+		for pass := range 5 {
+			if again := dueRefillsFor(t, s, "a"); len(again) != 1 || again[0] != first[0] {
+				t.Fatalf("threshold %d: pass %d before the grant opened another refill: %+v", tc.thresholdCents, pass, again)
+			}
+		}
+		rewriteSchemaCount(t, s.db, "credit_checkouts WHERE kind='refill'", 1)
+		payRefill(t, s, first[0], now)
+		if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 2_000*MicroCreditsPerCent {
+			t.Fatalf("threshold %d: balance after the refill = %d, %v", tc.thresholdCents, balance, err)
+		}
+		if next := dueRefillsFor(t, s, "a"); (len(next) == 1) != tc.second || len(next) == 1 && next[0].ID == first[0].ID {
+			t.Fatalf("threshold %d: refill after the grant = %+v, want a new one %t", tc.thresholdCents, next, tc.second)
+		}
+	}
+}
