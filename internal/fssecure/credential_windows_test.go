@@ -60,3 +60,44 @@ func TestCredentialWindowsAccess(t *testing.T) {
 		t.Fatal("directory accepted as credential")
 	}
 }
+
+// A private credential that Everyone may read is refused; one only its owner,
+// SYSTEM and Administrators may read opens.
+func TestPrivateCredentialWindowsRefusesForeignReaders(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "oidc-key")
+	if err := WriteFile(path, []byte("private")); err != nil {
+		t.Fatal(err)
+	}
+	everyone, err := windows.CreateWellKnownSid(windows.WinWorldSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, system, admins, err := privateConfigSIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, readable := range []bool{true, false} {
+		var entries []windows.EXPLICIT_ACCESS
+		for _, sid := range []*windows.SID{current, system, admins} {
+			entries = append(entries, windows.EXPLICIT_ACCESS{AccessPermissions: windows.GENERIC_ALL, AccessMode: windows.GRANT_ACCESS, Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeValue: windows.TrusteeValueFromSID(sid)}})
+		}
+		if readable {
+			entries = append(entries, windows.EXPLICIT_ACCESS{AccessPermissions: windows.GENERIC_READ, AccessMode: windows.GRANT_ACCESS, Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeValue: windows.TrusteeValueFromSID(everyone)}})
+		}
+		acl, err := windows.ACLFromEntries(entries, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
+			t.Fatal(err)
+		}
+		f, err := OpenPrivateCredential(directory, "oidc-key")
+		if f != nil {
+			_ = f.Close()
+		}
+		if (err != nil) != readable {
+			t.Fatalf("Everyone readable=%t: %v", readable, err)
+		}
+	}
+}

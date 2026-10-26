@@ -16,7 +16,7 @@ func OpenPrivateCredential(directory, name string) (*os.File, error) {
 	}
 	info, err := file.Stat()
 	if err == nil {
-		err = verifyOwnerOnly(info)
+		err = verifyOwnerOnly(file, info)
 	}
 	if err != nil {
 		_ = file.Close()

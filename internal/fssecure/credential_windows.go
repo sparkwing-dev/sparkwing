@@ -13,10 +13,19 @@ import (
 
 func openCredentialFile(root *os.Root, name string) (*os.File, error) { return root.Open(name) }
 
-// safety: the DACL check in verifyCredentialFile is what Windows offers; mode bits mean nothing there.
-func verifyOwnerOnly(os.FileInfo) error { return nil }
-
 func verifyCredentialFile(file *os.File, _ os.FileInfo) error {
+	const writeAccess = windows.GENERIC_ALL | windows.GENERIC_WRITE | windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA | windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER
+	return foreignAccess(file, writeAccess, "writable")
+}
+
+// verifyOwnerOnly refuses a private key that any principal besides the owner,
+// SYSTEM or Administrators may read.
+func verifyOwnerOnly(file *os.File, _ os.FileInfo) error {
+	const readAccess = windows.GENERIC_ALL | windows.GENERIC_READ | windows.FILE_READ_DATA
+	return foreignAccess(file, readAccess, "readable")
+}
+
+func foreignAccess(file *os.File, mask uint32, verb string) error {
 	sd, err := windows.GetSecurityInfo(windows.Handle(file.Fd()), windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return err
@@ -39,7 +48,6 @@ func verifyCredentialFile(file *os.File, _ os.FileInfo) error {
 	if dacl == nil {
 		return errors.New("credential has no access list")
 	}
-	const writeAccess = windows.GENERIC_ALL | windows.GENERIC_WRITE | windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA | windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER
 	for i := uint16(0); i < dacl.AceCount; i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, uint32(i), &ace); err != nil {
@@ -52,8 +60,8 @@ func verifyCredentialFile(file *os.File, _ os.FileInfo) error {
 			return fmt.Errorf("unsupported credential access entry type %d", ace.Header.AceType)
 		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
-		if ace.Mask&writeAccess != 0 && !sid.Equals(current) && !sid.Equals(system) && !sid.Equals(admins) {
-			return errors.New("credential is writable by another principal")
+		if uint32(ace.Mask)&mask != 0 && !sid.Equals(current) && !sid.Equals(system) && !sid.Equals(admins) {
+			return fmt.Errorf("credential is %s by another principal", verb)
 		}
 	}
 	return nil

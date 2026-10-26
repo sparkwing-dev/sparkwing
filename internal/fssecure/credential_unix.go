@@ -14,7 +14,7 @@ func openCredentialFile(root *os.Root, name string) (*os.File, error) {
 	return root.OpenFile(name, os.O_RDONLY|unix.O_NONBLOCK, 0)
 }
 
-func verifyOwnerOnly(info os.FileInfo) error {
+func verifyOwnerOnly(_ *os.File, info os.FileInfo) error {
 	if info.Mode().Perm()&0o077 != 0 {
 		return errors.New("private key is readable by group or others; restrict it to its owner (mode 0400 or 0600)")
 	}
