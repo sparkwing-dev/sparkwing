@@ -28,7 +28,6 @@ type matchingRun struct {
 	display string
 	request runspec.SealedRequest
 	spec    *runspec.Spec
-	pools   []string
 	err     error
 }
 
@@ -88,11 +87,6 @@ func (op *Operator) loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, 
 	if run.err = json.Unmarshal(requestBody, &run.request); run.err != nil {
 		return run
 	}
-	if len(run.profile.ReservedPools) > 0 {
-		if run.pools, _, run.err = runPoolsTx(ctx, tx, Team(run.team), run.request.Provenance); run.err != nil {
-			return run
-		}
-	}
 	if display == "" {
 		display = run.request.Request.Git.Repository.Display
 	}
@@ -126,7 +120,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if run.err != nil {
 		return profile, match.Demand{}, run.err
 	}
-	chain, here, team, display, requestSeal, pools := run.chain, run.here, run.team, run.display, run.request, run.pools
+	chain, here, team, display, requestSeal := run.chain, run.here, run.team, run.display, run.request
 	var err error
 	if requestSeal.Request.Burst != nil {
 		if err := checkBurstClaimantTx(ctx, tx, Team(team), chain, unit); err != nil {
@@ -143,7 +137,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		}
 		options = sealed.Resolved.Settings.Options
 	}
-	demand := match.Demand{Selector: slices.Clone(options.Requires.Value), Trigger: unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan, Repo: &match.Repository{URL: display}, AllowedPools: pools}
+	demand := match.Demand{Selector: slices.Clone(options.Requires.Value), Trigger: unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan, Repo: &match.Repository{URL: display}}
 	if demand.Repo.URL == "" {
 		demand.Repo.URL = requestSeal.Request.Git.Repository.Display
 	}
@@ -157,6 +151,9 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 			return profile, demand, err
 		}
 		demand.Selector = slices.Clone(execution.Requires.Value)
+	}
+	if demand.AllowedPools, err = unitPoolsTx(ctx, tx, Team(team), string(unit.RunID), unit.Kind, string(unit.NodeID), profile.ReservedPools); err != nil {
+		return profile, demand, err
 	}
 	switch selected := requestSeal.Request.Options.Runner.Value; selected.Kind {
 	case runspec.RunnerName:

@@ -371,7 +371,7 @@ func (q *claimSQL) predicate() string {
 	}
 	live := `(` + n("current") + `=1 OR ((` + horizon + `)>0 AND ` + n("observed_at") + `>=clock.now-(` + horizon + `)))`
 	labels := q.requirementsMatchSQL("w.team", "w.requirements", func(alt string) string { return q.contains(f("labels"), alt) })
-	reservation := `(` + f("pools") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + `) OR EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + ` WHERE ` + `EXISTS (SELECT 1 FROM pool_access_rules pr WHERE pr.team=w.team AND pr.pool=` + q.text("pool.value") + ` AND ` + q.poolGrant("pr", q.at("w.request", "provenance")) + `)` + ` AND ` + q.anyAlternative("w.selectors", func(alt string) string { return alt + `='pool='||` + q.text("pool.value") }) + `))`
+	reservation := `(` + f("pools") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + `) OR EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + ` WHERE ` + q.poolSatisfies(q.text("pool.value"), "w.team", "w.selectors", q.at("w.request", "provenance")) + `))`
 	scopes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("scopes"), "scope") + ` WHERE NOT EXISTS (SELECT 1 FROM ` + q.array("scope.value", "pattern") + ` WHERE (` + q.at("pattern.value", "key") + `=w.repo_key AND w.repo_key<>'') OR (` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `)))`
 	accepted := `(` + n("filter") + `=0 OR (w.kind IN ('node','eval') AND w.repo_display='' AND COALESCE(` + w("git", "repository", "display") + `,'')='') OR EXISTS (SELECT 1 FROM ` + q.array(f("accept"), "pattern") + ` WHERE ` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `))`
 	trust := q.poolTrust("w.team", f("pools"), f("trust"), n("launcher"), q.at("w.request", "provenance"))
@@ -660,14 +660,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	request := q.blob("r.request_json")
 	spec := q.blob("r.spec_json")
 	options := `COALESCE(` + q.at(spec, "resolved", "settings", "options") + `,` + q.at(request, "request", "options") + `,'{}')`
-	selectors := `CASE WHEN ready.kind='node' THEN COALESCE(` + q.at("ready.execution", "requires", "value") + `,'[]') ELSE COALESCE(` + q.at(options, "requires", "value") + `,'[]') END`
-	runnerKind := q.at(request, "request", "options", "runner", "value", "kind")
-	runnerValue := q.at(request, "request", "options", "runner", "value", "value")
-	appended := `json_insert(` + selectors + `,'$[#]',` + runnerValue + `)`
-	if q.dialect == DialectPostgres {
-		appended = `((` + selectors + `)::jsonb || jsonb_build_array(` + runnerValue + `))::text`
-	}
-	selectors = `CASE WHEN ` + runnerKind + `='label' THEN ` + appended + ` ELSE ` + selectors + ` END`
+	selectors := q.unitSelectors("ready.kind", "ready.execution", request, spec)
 	prefers := `CASE WHEN ready.kind='node' THEN COALESCE(` + q.at("ready.execution", "prefers", "value") + `,'[]') ELSE COALESCE(` + q.at(options, "prefers", "value") + `,'[]') END`
 	repository := "r.repo_identity"
 	class := `CAST(NULL AS BIGINT)`

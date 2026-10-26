@@ -149,6 +149,11 @@ func (f poolPin) claim(t *testing.T, kind capability.UnitKind, run string) (capa
 
 func poolPinFixture(t *testing.T, secrets ...string) poolPin {
 	t.Helper()
+	return poolPinFixtureOn(t, []string{"deploy"}, secrets...)
+}
+
+func poolPinFixtureOn(t *testing.T, reserved []string, secrets ...string) poolPin {
+	t.Helper()
 	ctx := t.Context()
 	tenant, input, now := intakeFixture(t)
 	s := tenant.s
@@ -162,7 +167,9 @@ func poolPinFixture(t *testing.T, secrets ...string) poolPin {
 	s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{SourceLocation: &input.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "actor"}}}, nil
 	})
-	rewriteSchemaExec(t, s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES ('a','deploy','deploy','gh:1','owner',1)`)
+	for _, pool := range reserved {
+		rewriteSchemaExec(t, s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES ('a',?,?,'gh:1','owner',1)`, pool, pool)
+	}
 	admitted, err := tenant.AdmitRun(ctx, input)
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +179,7 @@ func poolPinFixture(t *testing.T, secrets ...string) poolPin {
 	}
 	seal := admitted.Request
 	root := authorityRoot("deploy-launcher", "a")
-	root.Grants, root.ReservedPools, root.Trust = []capability.Grant{capability.ClaimsLaunch}, []string{"deploy"}, capability.TrustVerifiedDefault
+	root.Grants, root.ReservedPools, root.Trust = []capability.Grant{capability.ClaimsLaunch}, reserved, capability.TrustVerifiedDefault
 	authorityPersist(t, s, root)
 	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "controller.owner", "controller", time.Minute)
 	if err != nil {
@@ -283,6 +290,40 @@ func TestRemovedPoolRuleCutsOffRetriesOfVerifiedRuns(t *testing.T) {
 	}
 }
 
+// A launcher holding another still-allowed pool must not keep a job's pool
+// privileges once the rule for the pool that job requires is removed.
+func TestRemovedPoolRuleIsNotBypassedThroughAnotherPool(t *testing.T) {
+	ctx := t.Context()
+	f := poolPinFixtureOn(t, []string{"deploy", "staging"}, "DEPLOY")
+	s := f.tenant.s
+	worker, err := f.claim(t, capability.UnitNode, f.admitted.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := s.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: worker.Prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oidc := capability.Authorized{Principal: principal, Target: capability.Target{Team: "a", RunID: f.admitted.RunID}}
+	if _, err := f.tenant.ReadOIDCFacts(ctx, oidc); err != nil {
+		t.Fatalf("allowed pool withheld OIDC: %v", err)
+	}
+	rewriteSchemaExec(t, s.db, `DELETE FROM pool_access_rules WHERE team='a' AND pool='deploy'`)
+	if _, err := f.tenant.ReadOIDCFacts(ctx, oidc); err == nil {
+		t.Fatal("OIDC minted through a pool the job does not require")
+	}
+	if err := s.AsOperator().CheckBinding(ctx, principal, capability.BindDeclaredSecret, capability.Target{Team: "a", SecretName: "DEPLOY"}); err == nil {
+		t.Fatal("a removed pool rule still released the reserved secret")
+	}
+	late, err := f.tenant.AdmitRun(ctx, IntakeRequest{Authority: f.input.Authority, IdempotencyKey: "late", Request: runspec.Request{Pipeline: "p", Lineage: runspec.Lineage{RetryOf: f.admitted.RunID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.claim(t, capability.UnitPlan, late.RunID); err == nil {
+		t.Fatal("a retry placed on a pool whose rule was removed")
+	}
+}
+
 func TestPoolLauncherCannotCrossItsScope(t *testing.T) {
 	for _, other := range []string{"team", "pool", "repository"} {
 		t.Run(other, func(t *testing.T) {
@@ -329,10 +370,15 @@ func TestKubernetesRunnerNeedsAKubernetesEnrollment(t *testing.T) {
 				t.Fatal(err)
 			}
 			demand.CapabilityPrefix, demand.Kubernetes = issued.Capability.Prefix, true
-			_, err = s.AsOperator().ClaimUnit(t.Context(), demand)
-			refused := err != nil && strings.Contains(err.Error(), "--platform kubernetes")
-			if refused != (platform == "") {
-				t.Fatalf("platform %q: claim error %v", platform, err)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			if platform == "" {
+				if err == nil || !strings.Contains(err.Error(), "--platform kubernetes") {
+					t.Fatalf("unenrolled pod claim: %+v %v", claim, err)
+				}
+				return
+			}
+			if err != nil || claim.RunID != "run" || claim.Award.CapabilityPrefix == "" {
+				t.Fatalf("enrolled pod claim: %+v %v", claim, err)
 			}
 		})
 	}

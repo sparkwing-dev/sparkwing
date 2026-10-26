@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -181,6 +182,58 @@ func (q *claimSQL) poolGrant(rule, provenance string) string {
 	return `(` + trust + ` IN ('verified','verified-default','schedule') AND ` + rule + `.repo_key='gh:'||CAST(` + q.at(provenance, "repository_id") + ` AS TEXT)` +
 		` AND (` + rule + `.source='' OR (` + rule + `.source='github_app' AND ` + trust + ` IN ('verified','verified-default')))` +
 		` AND (` + rule + `.branch='' OR (substr(` + ref + `,1,11)='refs/heads/' AND ` + slashes(rule+".branch") + `=` + slashes(branch) + ` AND ` + glob + `)))`
+}
+
+// safety: the one reservation predicate placement, OIDC and reserved secret release share: a
+// claimant pool serves a unit only while a current rule grants it to the run's sealed identity
+// and the unit's resolved requirements name it, so another still-allowed pool never stands in.
+func (q *claimSQL) poolSatisfies(pool, team, selectors, provenance string) string {
+	return `(EXISTS (SELECT 1 FROM pool_access_rules pr WHERE pr.team=` + team + ` AND pr.pool=` + pool + ` AND ` + q.poolGrant("pr", provenance) + `) AND ` +
+		q.anyAlternative(selectors, func(alt string) string { return alt + `='pool='||` + pool }) + `)`
+}
+
+func (q *claimSQL) unitSelectors(kind, execution, request, spec string) string {
+	options := `COALESCE(` + q.at(spec, "resolved", "settings", "options") + `,` + q.at(request, "request", "options") + `,'{}')`
+	selectors := `CASE WHEN ` + kind + `='node' THEN COALESCE(` + q.at(execution, "requires", "value") + `,'[]') ELSE COALESCE(` + q.at(options, "requires", "value") + `,'[]') END`
+	runnerKind := q.at(request, "request", "options", "runner", "value", "kind")
+	runnerValue := q.at(request, "request", "options", "runner", "value", "value")
+	appended := `json_insert(` + selectors + `,'$[#]',` + runnerValue + `)`
+	if q.dialect == DialectPostgres {
+		appended = `((` + selectors + `)::jsonb || jsonb_build_array(` + runnerValue + `))::text`
+	}
+	return `CASE WHEN ` + runnerKind + `='label' THEN ` + appended + ` ELSE ` + selectors + ` END`
+}
+
+func unitPoolsTx(ctx context.Context, tx *storeTx, team Team, run string, kind capability.UnitKind, node string, reserved []string) ([]string, error) {
+	if len(reserved) == 0 {
+		return nil, nil
+	}
+	q := claimSQL{dialect: tx.dialect}
+	pools, err := q.jsonParam(reserved)
+	if err != nil {
+		return nil, err
+	}
+	selectors := q.unitSelectors("u.kind", q.blob("n.execution_json"), q.blob("r.request_json"), q.blob("r.spec_json"))
+	satisfies := q.poolSatisfies(q.text("pool.value"), "r.team", selectors, q.at(q.blob("r.request_json"), "provenance"))
+	// safety: a relation names each argument once although the predicate reads the unit kind twice.
+	query := `SELECT ` + q.text("pool.value") + ` FROM (SELECT CAST(? AS TEXT) AS kind,CAST(? AS TEXT) AS node) u CROSS JOIN runs r` +
+		` LEFT JOIN nodes n ON n.team=r.team AND n.run_id=r.id AND n.node_id=u.node CROSS JOIN ` + q.array(pools, "pool") +
+		` WHERE ` + satisfies + ` AND r.team=? AND r.id=?`
+	q.args = append([]any{string(kind), node}, q.args...)
+	rows, err := tx.queryContext(ctx, query, append(q.args, team, run)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var pool string
+		if err := rows.Scan(&pool); err != nil {
+			return nil, err
+		}
+		out = append(out, pool)
+	}
+	return out, rows.Err()
 }
 
 func (q *claimSQL) allowedPools(team, provenance string) string {

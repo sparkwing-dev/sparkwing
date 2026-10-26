@@ -91,6 +91,7 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 // They cannot execute SQL or accept database handles.
 var reviewedClaimSQLFragments = map[string]string{
 	"(*claimSQL).readyClaimContextSQL": "readiness existence checks correlate both indexed sources with the enclosing tenant-keyed context; this fragment cannot execute SQL",
+	"(*claimSQL).poolSatisfies":        "access rules correlate on the team column of the run the caller's tenant-keyed statement selects; this fragment cannot execute SQL",
 	"(*claimSQL).poolTrust":            "the correlated secret lookup uses the authenticated work team supplied by placement or the tenant-bound explanation query; this fragment cannot execute SQL",
 	"(*claimSQL).requirementsMatchSQL": "terms and alternatives bind the caller's scoped team and canonical requirement identity; this fragment cannot execute SQL",
 	"(*claimSQL).routesSQL":            "context routes join on both authenticated requirement team and requirement identity before selecting a tenant-keyed ready head",
