@@ -21,7 +21,6 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 		status             int
 		query              string
 	}{
-		{"POST", "/api/v1/operator/teams/b/refunds", `{"payment_id":"pi_refund","refund_id":"re_refund","amount_cents":10,"reason":"support"}`, 200, `SELECT COUNT(*) FROM credit_grants WHERE team='b' AND kind='reversal' AND created_by='operator'`},
 		{"POST", "/api/v1/operator/teams/b/grants", `{"amount_cents":10,"reason":"review","key":"once"}`, 201, `SELECT COUNT(*) FROM credit_grants WHERE team='b' AND created_by='operator'`},
 		{"POST", "/api/v1/operator/teams/b/trust", `{"trust":"granted","reason":"review"}`, 200, `SELECT COUNT(*) FROM teams WHERE name='b' AND billing_trust='granted' AND billing_trust_by='operator'`},
 		{"POST", "/api/v1/operator/teams/b/freeze", `{"reason":"review"}`, 200, `SELECT COUNT(*) FROM credit_freezes WHERE team='b' AND released_at IS NULL`},
@@ -42,13 +41,6 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 			st := engine.Store
 			engineSQL(t, st, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
 			engineSQL(t, st, `INSERT INTO team_counters(team) VALUES ('b')`)
-			if strings.HasSuffix(tc.path, "/refunds") {
-				if _, err := st.AsOperator().ConfigureDeployment(t.Context(), "test", store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
-					t.Fatal(err)
-				}
-				engineSQL(t, st, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('b','refund-paid','paid',1000000,'pi_refund','provider',1)`)
-				engineSQL(t, st, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,payment_id,currency,amount_minor,amount_micro,opened_at,expires_at,paid_at,closed_at,grant_id,liability_shift) VALUES ('refund-checkout','b','cs_refund','test','pi_refund','usd',100,1000000,1,2,1,1,'refund-paid',0)`)
-			}
 			engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at,waitlisted_at) VALUES ('operator','operator@example.test',1,1,0),('victim','victim@example.test',1,1,0),('waiting','waiting@example.test',1,1,1)`)
 			engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','operator','reader',1)`)
 			if strings.HasSuffix(tc.path, "/unfreeze") {

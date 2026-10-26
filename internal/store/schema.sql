@@ -1167,14 +1167,6 @@ CREATE TABLE payment_refunds (
     PRIMARY KEY (payment_mode, kind, refund_id)
 );
 
-CREATE TABLE console_refund_receipts (
-    team TEXT NOT NULL REFERENCES teams(name),
-    receipt_id TEXT NOT NULL CHECK(length(receipt_id)=64),
-    request_digest TEXT NOT NULL CHECK(length(request_digest)=64),
-    result_json BLOB NOT NULL,
-    PRIMARY KEY(team,receipt_id)
-);
-
 CREATE TABLE github_app_automation (
     team TEXT NOT NULL REFERENCES teams(name),
     repository_id BIGINT NOT NULL,

@@ -241,7 +241,7 @@ Manage deployment service credentials
 
 Issue a deployment service credential
 
-Only deployment service credentials; never console trust, grants, freezes, refunds or account deletion powers. Licensed self-hosters have no deployment-admin token path.
+Only deployment service credentials; never console trust, grants, freezes or account deletion powers. Licensed self-hosters have no deployment-admin token path.
 
 Use the deployment /operator/tokens routes. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry.
 

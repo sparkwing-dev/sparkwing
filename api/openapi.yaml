@@ -2423,47 +2423,6 @@ components:
         - limits
       type: object
       x-sparkwing-go-type: controllerwire.OperatorLimitsWrite
-    internal.controllerwire.OperatorRefund:
-      additionalProperties: true
-      properties:
-        amount_cents:
-          type: integer
-        payment_id:
-          type: string
-        reason:
-          type: string
-        refund_id:
-          type: string
-      required:
-        - payment_id
-        - refund_id
-        - amount_cents
-        - reason
-      type: object
-      x-sparkwing-go-type: controllerwire.OperatorRefund
-    internal.controllerwire.OperatorRefundRecorded:
-      additionalProperties: true
-      properties:
-        balance_micro:
-          type: integer
-        created:
-          type: boolean
-        grant_id:
-          type: string
-        paid_micro:
-          type: integer
-        reversed_micro:
-          type: integer
-        team:
-          type: string
-      required:
-        - team
-        - paid_micro
-        - reversed_micro
-        - balance_micro
-        - created
-      type: object
-      x-sparkwing-go-type: controllerwire.OperatorRefundRecorded
     internal.controllerwire.OperatorStandingQueue:
       additionalProperties: true
       properties:
@@ -9225,52 +9184,6 @@ paths:
             liveness: credential
         retry: idempotency_key
       x-sparkwing-wire: undocumented
-  /api/v1/operator/teams/{team}/refunds:
-    post:
-      parameters:
-        - in: path
-          name: team
-          required: true
-          schema:
-            type: string
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/internal.controllerwire.OperatorRefund'
-        required: true
-      responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.OperatorRefundRecorded'
-          description: Successful response.
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: Record a completed provider refund
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/operator/teams/{team}/refunds
-        audience: controller
-        owner: deployment
-        authentication: capability
-        access:
-          - credential: operator_console_session
-            grants:
-              - operator.console
-            binding: none
-            liveness: credential
-        retry: idempotency_key
   /api/v1/operator/teams/{team}/standing-request/decline:
     post:
       parameters:

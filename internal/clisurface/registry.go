@@ -184,7 +184,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing operator tokens", Authority: deploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator tokens create", Authority: deploymentAdmin, Rules: []string{"Only deployment service credentials; never console trust, grants, freezes, refunds or account deletion powers. Licensed self-hosters have no deployment-admin token path.", "Use the deployment /operator/tokens routes. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
+		{Path: "sparkwing operator tokens create", Authority: deploymentAdmin, Rules: []string{"Only deployment service credentials; never console trust, grants, freezes or account deletion powers. Licensed self-hosters have no deployment-admin token path.", "Use the deployment /operator/tokens routes. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
 			{Name: "type", Argument: "KIND", Values: []string{"service", "deployment"}},
 			{Name: "principal", Argument: "NAME"},
 			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},

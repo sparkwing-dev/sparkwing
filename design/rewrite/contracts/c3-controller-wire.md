@@ -906,17 +906,13 @@ The controller's step handler consumes `StepReportRequest` and returns
 `StepRecorded`. CLI execution reports steps under the independently awarded node
 bearer. Owner authority never substitutes for that node's reporting fence.
 
-## Output and console refund wire integration
+## Output wire integration
 
 JobOutput returns an output JSON value from both the same-run/declared-ref and
 child output endpoints. The native process client consumes that shared shape.
 
-OperatorRefund carries payment_id, refund_id, amount_cents and reason.
-POST /api/v1/operator/teams/{team}/refunds requires an Idempotency-Key and a
-direct configured operator-console session with CSRF. It records an already
-completed provider refund and returns OperatorRefundRecorded with team,
-grant_id, paid_micro, reversed_micro, balance_micro and created. C1 commits its
-receipt with the reversal and operator audit. It does not call the provider.
+Decision 67 removed the operator refund route. A refund made in the Stripe
+dashboard settles only through Stripe's refund webhooks.
 
 <!-- design:end -->
 

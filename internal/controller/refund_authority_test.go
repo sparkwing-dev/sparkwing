@@ -50,7 +50,7 @@ func TestRefundReportingRejectsTeamOwnerAndRunner(t *testing.T) {
 			}{
 				{"/api/v1/credits/reversals", map[string]any{"payment_id": "pi_fixture", "reference": "refund:pi_fixture"}, true},
 				{"/api/v1/credits/card-refunds", map[string]any{"payment_intent": "pi_fixture", "queue": "pi_fixture-0", "refund_id": "re_private", "status": "succeeded"}, true},
-				{"/api/v1/operator/teams/" + owner.team + "/refunds", map[string]any{"payment_id": "pi_fixture", "refund_id": "re_private", "amount_cents": 500, "reason": "test"}, false},
+				{"/api/v1/operator/teams/" + owner.team + "/refunds", map[string]any{"payment_id": "pi_fixture", "refund_id": "re_private", "amount_cents": 500, "reason": "test"}, true},
 			} {
 				want := caller.want
 				if route.retired {

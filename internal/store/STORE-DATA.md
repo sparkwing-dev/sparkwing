@@ -55,12 +55,6 @@ All UPDATEs remain refused, including changes to expired rows.
 same transaction as its completion and audit fact. It has no run foreign key,
 so run deletion and audit expiry cannot make a later success the first.
 
-`console_refund_receipts` retains each operator refund's request digest and full
-original result with the financial state. Replaying a key returns that result,
-including its balances and `created` value, after audit retention. A changed
-request under the same key conflicts. The separate expiring audit projection
-contains identifiers, digests and financial facts, with no free-form reason.
-
 Editors may delete only runs they submitted. Owners may delete any run in their team.
 
 `Tenant.BusinessEvents` reads bounded pages in descending timestamp and ID order.

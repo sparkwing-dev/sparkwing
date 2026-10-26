@@ -2930,28 +2930,10 @@ only data.read, ownNode and sensitive liveness. No transport alias remains.
 
 ## Console refund records
 
-`POST /api/v1/operator/teams/{team}/refunds` records a completed provider refund.
-It accepts `OperatorRefund` with payment_id, refund_id, positive amount_cents
-and reason, plus an Idempotency-Key header. It requires a configured direct
-operator-console session and CSRF. It makes no provider request.
-
-`ConsoleWriter.ConsoleRefund` is implemented by `store.Console`. The committing
-transaction rechecks the direct session and configured account, resolves the
-payment's current-mode persisted paid grant and refuses a different path team.
-The existing reversePaymentTx owns prior reversals and the paid-total bound.
-Its reference is `refund:<mode>:<refund_id>`, shared with verified provider
-settlement, so later delivery cannot debit the same refund twice.
-
-`console_refund_receipts` retains the normalized request digest and original
-result independently of audit retention. Its key hashes the operator and request
-key, scoped by path team. Exact replay returns that receipt, including its
-original balances and `created` value. Changed request or mode conflicts.
-Authority is rechecked even on replay. The ledger reversal, its audit projection
-and the durable request receipt commit together. The expiring
-`operator.refund_recorded` audit contains the operator identifier, receipt ID,
-payment and refund digests and financial result. It contains no reason.
-OperatorRefundRecorded returns team, optional grant_id, paid_micro,
-reversed_micro, balance_micro and created.
+Decision 67 removed `POST /api/v1/operator/teams/{team}/refunds`, its
+`console_refund_receipts` table and the `operator.refund_recorded` audit. An
+operator refunds in the Stripe dashboard, and the verified refund webhook
+reverses the credits under the shared `refund:<mode>:<refund_id>` reference.
 
 <!-- design:end -->
 

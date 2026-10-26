@@ -3419,14 +3419,9 @@ and committed output-record selector. The controller verifies the selected
 physical bytes through its configured blob store. The obsolete claim-input
 policy is removed with the retired C1 reader.
 
-Console.ConsoleRefund accepts capability.Authorized, [`store.OperatorRefund`](../../../internal/store/controller_requests.go)
-and the request key, returning CreditReversal. It runs through consoleWrite,
-resolves the persisted paid grant before any reversal and checks its team
-against the path. Its reference matches verified refund settlement. A receipt
-in console_refund_receipts retains the normalized request digest and original
-result independently of audit retention. The audit row projects identifiers,
-digests and financial facts. The existing ledger lock serializes reads, replay,
-reversal and receipt commit.
+Decision 67 removed Console.ConsoleRefund and console_refund_receipts. Refunds
+made in the Stripe dashboard reach the ledger only through verified refund
+settlement.
 
 <!-- design:end -->
 
@@ -4309,8 +4304,8 @@ retained-storage and log transactions remain their respective writers.
 
 The free-grant transaction cannot create paid credit or a payment-linked reversal.
 The duplicate raw reversal validator and writer, unused grant-kind helper and
-reversal overflow sentinel are removed. Provider settlement and ConsoleRefund
-retain payment identity, payer selection, replay and conservation.
+reversal overflow sentinel are removed. Provider settlement retains payment
+identity, payer selection, replay and conservation.
 
 The unused Tenant.AppendEventOnce and Operator.DropCardAttempt writers are
 removed. The obsolete reportCardRefundTx callback adapter and its fixture API are deleted.
