@@ -14,7 +14,7 @@ import (
 
 func TestStoreDataEventsUseFinalReplicaRows(t *testing.T) {
 	s, tenant, _, _ := resultFixture(t)
-	if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "job", "note", []byte("abc")); err != nil {
+	if _, err := tenant.AppendEventCharged(t.Context(), "run", "job", "note", []byte("abc")); err != nil {
 		t.Fatalf("final-schema event append: %v", err)
 	}
 	usage, err := tenant.StorageUsageFor(t.Context(), "run", StorageMonth(s.now()))
@@ -49,12 +49,12 @@ func TestStoreDataEventsRefuseEachLimitAtomically(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.limit == storageLimitEventsPerRun {
-				if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", "k", nil); err != nil {
+				if _, err := tenant.AppendEventCharged(t.Context(), "run", "", "k", nil); err != nil {
 					t.Fatal(err)
 				}
 			}
 			before := eventAccountingSnapshot(t, s)
-			seq, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", "kind", nil)
+			seq, err := tenant.AppendEventCharged(t.Context(), "run", "", "kind", nil)
 			var refusal *StorageQuotaError
 			if seq != 0 || !errors.As(err, &refusal) || refusal.Limit != tc.limit || refusal.Principal != "a" {
 				t.Fatalf("event=%d: %v, want %s", seq, err, tc.limit)
@@ -101,13 +101,13 @@ func TestStoreDataEventsShareCapacityWithUploadReservations(t *testing.T) {
 				t.Fatal(err)
 			}
 			var refusal *StorageQuotaError
-			if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", "kk", nil); !errors.As(err, &refusal) || refusal.Limit != limit || refusal.Used != 3 {
+			if _, err := tenant.AppendEventCharged(t.Context(), "run", "", "kk", nil); !errors.As(err, &refusal) || refusal.Limit != limit || refusal.Used != 3 {
 				t.Fatalf("event borrowed pending upload capacity: %v", err)
 			}
 			if err := tenant.AbortBlobUpload(t.Context(), request.Intent.Authority, ticket.ID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", "kk", nil); err != nil {
+			if _, err := tenant.AppendEventCharged(t.Context(), "run", "", "kk", nil); err != nil {
 				t.Fatal(err)
 			}
 			request.ID = "later"
@@ -125,7 +125,7 @@ func TestStoreDataEventsMonthAndRunUsageSurviveRestart(t *testing.T) {
 	if err := tenant.SetStorageQuota(t.Context(), StorageQuota{MaxBytesPerRun: 7, MaxBytesPerMonth: 5}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.AppendEventCharged(t.Context(), "first", "run", "", "kind", nil); err != nil {
+	if _, err := tenant.AppendEventCharged(t.Context(), "run", "", "kind", nil); err != nil {
 		t.Fatal(err)
 	}
 	path := blobAccountingDiskStore(t, s)
@@ -134,11 +134,11 @@ func TestStoreDataEventsMonthAndRunUsageSurviveRestart(t *testing.T) {
 	}
 	s.db = blobAccountingDB(t, path)
 	now = now.Add(2 * time.Minute)
-	if _, err := tenant.AppendEventCharged(t.Context(), "second", "run", "", "kkk", nil); err != nil {
+	if _, err := tenant.AppendEventCharged(t.Context(), "run", "", "kkk", nil); err != nil {
 		t.Fatal(err)
 	}
 	var refusal *StorageQuotaError
-	if _, err := tenant.AppendEventCharged(t.Context(), "second", "run", "", "k", nil); !errors.As(err, &refusal) || refusal.Limit != storageLimitBytesPerRun || refusal.Used != 7 {
+	if _, err := tenant.AppendEventCharged(t.Context(), "run", "", "k", nil); !errors.As(err, &refusal) || refusal.Limit != storageLimitBytesPerRun || refusal.Used != 7 {
 		t.Fatalf("new month reset run capacity: %v", err)
 	}
 	for month, want := range map[string]int64{"2026-01": 4, "2026-02": 3, "2025-12": 0} {
@@ -150,17 +150,15 @@ func TestStoreDataEventsMonthAndRunUsageSurviveRestart(t *testing.T) {
 }
 
 func TestStoreDataEventsFailuresLeaveNoPartialCharge(t *testing.T) {
-	for _, mode := range []string{"unknown_run", "foreign_run", "empty_replica", "invalid_kind", "monthly_write", "run_write", "event_write", "quota_overflow", "usage_overflow", "event_overflow"} {
+	for _, mode := range []string{"unknown_run", "foreign_run", "invalid_kind", "monthly_write", "run_write", "event_write", "quota_overflow", "usage_overflow", "event_overflow"} {
 		t.Run(mode, func(t *testing.T) {
 			s, tenant, _, _ := resultFixture(t)
-			run, replica, kind := "run", "replica", "kind"
+			run, kind := "run", "kind"
 			switch mode {
 			case "unknown_run":
 				run = "missing"
 			case "foreign_run":
 				tenant = &Tenant{s: s, team: "b"}
-			case "empty_replica":
-				replica = ""
 			case "invalid_kind":
 				kind = "secret\nkind"
 			case "monthly_write", "run_write", "event_write":
@@ -169,12 +167,12 @@ func TestStoreDataEventsFailuresLeaveNoPartialCharge(t *testing.T) {
 			case "quota_overflow":
 				rewriteSchemaExec(t, s.db, "INSERT INTO quota_admission(team,quota,period,used,updated_at) VALUES ('a','storage',?,?,1)", StorageMonth(s.now()), int64(math.MaxInt64))
 			case "usage_overflow":
-				rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,replica_id,bytes,updated_at) VALUES ('a',?,'replica',?,1)", StorageMonth(s.now()), int64(math.MaxInt64))
+				rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,bytes,updated_at) VALUES ('a',?,?,1)", StorageMonth(s.now()), int64(math.MaxInt64))
 			case "event_overflow":
 				rewriteSchemaExec(t, s.db, "UPDATE runs SET event_bytes=?", int64(math.MaxInt64))
 			}
 			before := eventAccountingSnapshot(t, s)
-			if seq, err := tenant.AppendEventCharged(t.Context(), replica, run, "", kind, nil); err == nil || seq != 0 {
+			if seq, err := tenant.AppendEventCharged(t.Context(), run, "", kind, nil); err == nil || seq != 0 {
 				t.Fatalf("accepted %s event=%d: %v", mode, seq, err)
 			}
 			if after := eventAccountingSnapshot(t, s); after != before {
@@ -185,13 +183,13 @@ func TestStoreDataEventsFailuresLeaveNoPartialCharge(t *testing.T) {
 }
 
 func TestStoreDataEventsTenantIsolationAndConservation(t *testing.T) {
-	property := func(first, second uint8, replica string) bool {
+	property := func(first, second uint8) bool {
 		s, tenant, _, _ := resultFixture(t)
 		path := blobAccountingDiskStore(t, s)
 		other := &Store{db: blobAccountingDB(t, path), dialect: DialectSQLite, clock: s.clock}
 		foreign := &Tenant{s: other, team: "b"}
 		before := eventAccountingSnapshot(t, s)
-		if _, err := foreign.AppendEventCharged(t.Context(), replica+"x", "run", "job", "k", nil); err == nil || eventAccountingSnapshot(t, s) != before {
+		if _, err := foreign.AppendEventCharged(t.Context(), "run", "job", "k", nil); err == nil || eventAccountingSnapshot(t, s) != before {
 			return false
 		}
 		amounts := []int{int(first) + 1, int(second) + 1}
@@ -200,7 +198,7 @@ func TestStoreDataEventsTenantIsolationAndConservation(t *testing.T) {
 		results := make(chan error, 2)
 		for i, handle := range tenants {
 			wg.Go(func() {
-				_, err := handle.AppendEventCharged(t.Context(), fmt.Sprint(i)+replica, "run", "job", "k", bytes.Repeat([]byte("x"), amounts[i]-1))
+				_, err := handle.AppendEventCharged(t.Context(), "run", "job", "k", bytes.Repeat([]byte("x"), amounts[i]-1))
 				results <- err
 			})
 		}
@@ -225,9 +223,6 @@ func TestStoreDataEventsTenantIsolationAndConservation(t *testing.T) {
 			t.Fatal(err)
 		}
 		return retained == want && charged == want
-	}
-	if !property(0, 255, "'; DELETE FROM runs; --") {
-		t.Fatal("adversarial replica changed event accounting")
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(13711))}); err != nil {
 		t.Fatal(err)

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -31,7 +30,7 @@ func TestRewriteRetentionKeepsPinsEffectsAndFinancialRows(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?),('operator.node_metric_retention_days',?)`, []byte(`90`), []byte(`7`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES ('a','grant','paid',100,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(team,id,run_id,node_id,capability_prefix,seconds,amount_micro,charged_at) VALUES ('a','charge','old_failure','job','cap',1,30,1)`)
-	rewriteSchemaExec(t, s.db, `INSERT INTO storage_run_usage(team,run_id,period,replica_id,bytes,updated_at) VALUES ('a','old_failure','month','replica',123,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO storage_run_usage(team,run_id,period,bytes,updated_at) VALUES ('a','old_failure','month',123,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at) VALUES ('expired','old',?),('fresh','new',?)`, old, now.UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event,body,state) VALUES ('pending','pending',?,'push',?,'pending')`, old, []byte(`{}`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event,body,state,last_error) VALUES ('failed','failed',?,'push',?,'failed','failure')`, old, []byte(`{}`))
@@ -42,11 +41,7 @@ VALUES ('a','output',?,'out',?,?,'gh:1','main','principal','cloud',?,'publicatio
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO capabilities(digest,prefix,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,created_at,expires_at,created_by)
 VALUES ('digest','expired','a','account','one','controller',?,'delegate',1,?,'none',?,1,?,'one')`, []byte(`[]`), []byte(`{}`), []byte(`[]`), now.Add(-8*24*time.Hour).UnixNano())
-	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "maintenance", "worker", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := s.AsOperator().MaintainRetention(ctx, RetentionRequest{Lease: lease, Limit: 100})
+	result, err := s.AsOperator().MaintainRetention(ctx, RetentionRequest{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,26 +55,18 @@ VALUES ('digest','expired','a','account','one','controller',?,'delegate',1,?,'no
 	if err := s.db.QueryRow(`SELECT (SELECT sum(amount_micro) FROM credit_grants) - (SELECT sum(amount_micro) FROM credit_charges)`).Scan(&balance); err != nil || balance != 70 {
 		t.Fatalf("balance = %d: %v", balance, err)
 	}
-	*now = now.Add(time.Hour)
-	if _, err := s.AsOperator().MaintainRetention(ctx, RetentionRequest{Lease: lease, Limit: 100}); !errors.Is(err, ErrLockHeld) {
-		t.Fatalf("expired retention lease: %v", err)
-	}
 }
 
 func TestRewriteRetentionDefaultLeavesSelfHostedRuns(t *testing.T) {
 	s, _, now := maintenanceStore(t)
 	maintenanceRun(t, s, "old", 1, runstate.RunFailed)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET finished_at = ? WHERE team = 'a' AND id = 'old'`, now.Add(-365*24*time.Hour).UnixNano())
-	lease, err := s.AsOperator().AcquireSingletonLease(context.Background(), "maintenance", "worker", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := s.AsOperator().MaintainRetention(context.Background(), RetentionRequest{Lease: lease, Limit: 10})
+	result, err := s.AsOperator().MaintainRetention(context.Background(), RetentionRequest{Limit: 10})
 	if err != nil || result.Runs != 0 {
 		t.Fatalf("default retention: %+v %v", result, err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)`, []byte(`"ninety"`))
-	if _, err := s.AsOperator().MaintainRetention(context.Background(), RetentionRequest{Lease: lease, Limit: 10}); err == nil {
+	if _, err := s.AsOperator().MaintainRetention(context.Background(), RetentionRequest{Limit: 10}); err == nil {
 		t.Fatal("invalid setting succeeded")
 	}
 	rewriteSchemaCount(t, s.db, "runs", 1)

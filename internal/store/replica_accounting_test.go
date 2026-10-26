@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -17,11 +16,11 @@ func TestReplicaUsageSurvivesReopening(t *testing.T) {
 	for i, client := range []*store.Store{first, second} {
 		team := tenant(t, client, store.DefaultTeam)
 		for _, counter := range []string{"egress_bytes", "download_bytes", "storage_bytes", "storage_objects", "runs"} {
-			if err := team.AddUsage(t.Context(), store.UsageDelta{Period: "fixture-period", ReplicaID: fmt.Sprint(i), Counter: counter, Amount: []int64{7, 11}[i]}); err != nil {
+			if err := team.AddUsage(t.Context(), store.UsageDelta{Period: "fixture-period", Counter: counter, Amount: []int64{7, 11}[i]}); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := team.AddUsage(t.Context(), store.UsageDelta{Period: period, ReplicaID: fmt.Sprint(i), Counter: "egress_bytes", Amount: []int64{7, 11}[i]}); err != nil {
+		if err := team.AddUsage(t.Context(), store.UsageDelta{Period: period, Counter: "egress_bytes", Amount: []int64{7, 11}[i]}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -123,32 +122,6 @@ func TestReplicaQuotaReservationSerializesAndReleases(t *testing.T) {
 	}
 }
 
-func TestReplicaMaintenanceLeaseHasOneWinner(t *testing.T) {
-	target := storetest.New(t)
-	clients := []*store.Store{target.Open(t), target.Open(t)}
-	start, results := make(chan struct{}), make(chan error, len(clients))
-	for i, client := range clients {
-		go func() {
-			<-start
-			_, err := client.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", fmt.Sprint(i), time.Hour)
-			results <- err
-		}()
-	}
-	close(start)
-	winners := 0
-	var raceErrors error
-	for range clients {
-		if err := <-results; err == nil {
-			winners++
-		} else if !errors.Is(err, store.ErrLockHeld) {
-			raceErrors = errors.Join(raceErrors, err)
-		}
-	}
-	if raceErrors != nil || winners != 1 {
-		t.Fatalf("singleton race has %d winners, want one: %v", winners, raceErrors)
-	}
-}
-
 func TestReplicaDownloadCapSurvivesReopening(t *testing.T) {
 	target := storetest.New(t)
 	first, second := target.Open(t), target.Open(t)
@@ -157,14 +130,14 @@ func TestReplicaDownloadCapSurvivesReopening(t *testing.T) {
 		t.Fatal(err)
 	}
 	teams := []*store.Tenant{tenant(t, first, team), tenant(t, second, team)}
-	if _, err := teams[0].ChargeDownload(t.Context(), store.DownloadCharge{ReplicaID: "first", Bytes: 90, FreeCapBytes: 100}); err != nil {
+	if _, err := teams[0].ChargeDownload(t.Context(), store.DownloadCharge{Bytes: 90, FreeCapBytes: 100}); err != nil {
 		t.Fatal(err)
 	}
 	start, results := make(chan struct{}), make(chan error, len(teams))
-	for i, selected := range teams {
+	for _, selected := range teams {
 		go func() {
 			<-start
-			_, err := selected.ChargeDownload(t.Context(), store.DownloadCharge{ReplicaID: fmt.Sprint(i), Bytes: 10, FreeCapBytes: 100})
+			_, err := selected.ChargeDownload(t.Context(), store.DownloadCharge{Bytes: 10, FreeCapBytes: 100})
 			results <- err
 		}()
 	}
@@ -185,7 +158,7 @@ func TestReplicaDownloadCapSurvivesReopening(t *testing.T) {
 		t.Fatal(err)
 	}
 	second = target.Open(t)
-	if _, err := tenant(t, second, team).ChargeDownload(t.Context(), store.DownloadCharge{ReplicaID: "first", FreeCapBytes: 100}); !errors.Is(err, store.ErrDownloadCap) {
+	if _, err := tenant(t, second, team).ChargeDownload(t.Context(), store.DownloadCharge{FreeCapBytes: 100}); !errors.Is(err, store.ErrDownloadCap) {
 		t.Fatalf("restart lost download cap: %v", err)
 	}
 	var total int64

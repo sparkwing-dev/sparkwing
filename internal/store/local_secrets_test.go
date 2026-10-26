@@ -211,11 +211,7 @@ func TestLocalSecretsPurgedOnTeamDeletionAndOwnerLeaseExpiry(t *testing.T) {
 				now := tenant.s.now().Add(time.Minute)
 				rewriteSchemaExec(t, tenant.s.db, "UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?", now.UnixNano(), tenant.team, a.Binding.RunID)
 				tenant.s.clock = func() time.Time { return now }
-				lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+				if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 					t.Fatalf("expired owner did not requeue: %+v %v", reaped, err)
 				}
 			}

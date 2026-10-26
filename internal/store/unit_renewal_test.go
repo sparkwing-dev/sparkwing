@@ -34,8 +34,7 @@ func renewalFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitDemand,
 	if kind == capability.UnitEval {
 		demand.Target.NodeID, demand.Target.SourceGeneration = "job", 7
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,generation=7,expansion='expected'`)
-		rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, now.Add(time.Hour).UnixNano())
-		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',7,'pending')`)
 	}
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
@@ -121,11 +120,7 @@ func TestRenewUnitRecordsOwnerExecutionForRecovery(t *testing.T) {
 				t.Fatalf("execution start changed: %v, %v", started, err)
 			}
 			*now = beat.ExpiresAt
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
-			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
+			reaped, err := s.AsOperator().ReapUnits(t.Context(), 10)
 			if err != nil || len(reaped) != 1 || !reaped[0].Requeued || reaped[0].Disruptions != 1 || reaped[0].Generation != int64(claim.Award.Generation) {
 				t.Fatalf("started unit loss: %+v, %v", reaped, err)
 			}
@@ -242,10 +237,10 @@ func TestRenewUnitNodeRequiresCommittedStart(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "node_attempts", 1)
 }
 
-func TestRenewUnitEvalChecksBothGenerations(t *testing.T) {
-	for _, problem := range []string{"source_generation", "source_outcome", "expansion_accepted", "controller_generation", "controller_expiry"} {
+func TestRenewUnitEvalChecksSourceGeneration(t *testing.T) {
+	for _, problem := range []string{"source_generation", "source_outcome", "expansion_accepted"} {
 		t.Run(problem, func(t *testing.T) {
-			s, _, claim, now := renewalFixture(t, capability.UnitEval)
+			s, _, claim, _ := renewalFixture(t, capability.UnitEval)
 			switch problem {
 			case "source_generation":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=generation+1`)
@@ -253,10 +248,6 @@ func TestRenewUnitEvalChecksBothGenerations(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET outcome='failed'`)
 			case "expansion_accepted":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET expansion='accepted'`)
-			case "controller_generation":
-				rewriteSchemaExec(t, s.db, `UPDATE leases SET generation=generation+1 WHERE name='controller.owner'`)
-			case "controller_expiry":
-				rewriteSchemaExec(t, s.db, `UPDATE leases SET until=? WHERE name='controller.owner'`, now.UnixNano())
 			}
 			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
 				t.Fatal("ended evaluation renewed")

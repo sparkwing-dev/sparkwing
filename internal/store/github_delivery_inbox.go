@@ -17,30 +17,27 @@ import (
 // its event and delivery ID. Pending work is retained until it finishes.
 const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
 
-const githubDeliveryLease = 2 * time.Minute
-
 var (
 	// ErrGitHubDeliveryConflict means a delivery ID or payload digest was
 	// previously bound to different signed material or an event name.
 	ErrGitHubDeliveryConflict = errors.New("store: GitHub delivery binding conflicts")
-	// errGitHubDeliveryLeaseLost fences completion and lifecycle writes from
-	// a worker whose claim expired or was replaced.
-	errGitHubDeliveryLeaseLost = errors.New("store: GitHub delivery lease lost")
+	// errGitHubDeliveryNotProcessing fences completion and lifecycle writes to the
+	// delivery the controller's inbox worker is processing.
+	errGitHubDeliveryNotProcessing = errors.New("store: GitHub delivery is not being processed")
 )
 
-// GitHubDelivery is one durable, leased App webhook. Its lease fences mutations
-// and completion. Processing failures require an administrator to enqueue another claim.
+// GitHubDelivery is one durable App webhook claimed by the controller's single inbox worker. Its processing state
+// fences mutations and completion. Processing failures require an administrator to enqueue another claim.
 type GitHubDelivery struct {
 	ID         string
 	Event      string
 	Body       []byte
-	Lease      int64
 	ReceivedAt time.Time
 }
 
 type githubDeliveryContextKey struct{}
 
-// Context binds mutations to this leased delivery. Each mutation's
+// Context binds mutations to this claimed delivery. Each mutation's
 // receipt commits with its effect so manual replay cannot overwrite later events.
 func (d GitHubDelivery) Context(ctx context.Context) context.Context {
 	return context.WithValue(ctx, githubDeliveryContextKey{}, d)
@@ -106,8 +103,9 @@ func (o *Operator) EnqueueGitHubDelivery(ctx context.Context, deliveryID, event 
 	return tx.Commit()
 }
 
-// ClaimGitHubDelivery rotates across teams and leases the team's oldest ready
-// delivery. Expired claims fail and require manual processing again.
+// ClaimGitHubDelivery rotates across teams and claims the team's oldest ready delivery. The one inbox worker
+// claims only after finishing its previous delivery, so a delivery still processing was interrupted by a restart or a
+// failed finish; it fails and requires manual processing again.
 func (o *Operator) ClaimGitHubDelivery(ctx context.Context) (*GitHubDelivery, error) {
 	tx, err := o.s.beginTx(ctx)
 	if err != nil {
@@ -122,7 +120,7 @@ func (o *Operator) ClaimGitHubDelivery(ctx context.Context) (*GitHubDelivery, er
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`+tx.forUpdate(), cursorKey).Scan(&raw); err != nil {
 		return nil, err
 	}
-	if _, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state='failed',lease_until=0,last_error='processing lease expired' WHERE state='leased' AND lease_until<=?`, tx.now(ctx).UnixNano()); err != nil {
+	if _, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state='failed',last_error='processing was interrupted' WHERE state='processing'`); err != nil {
 		return nil, err
 	}
 	var cursor string
@@ -143,27 +141,17 @@ func (o *Operator) ClaimGitHubDelivery(ctx context.Context) (*GitHubDelivery, er
 	var digest string
 	var d GitHubDelivery
 	var receivedAt int64
-	err = tx.QueryRowContext(ctx, `SELECT digest,delivery_id,event,body,lease,received_at
+	err = tx.QueryRowContext(ctx, `SELECT digest,delivery_id,event,body,received_at
 		FROM github_app_deliveries WHERE queue_team=? AND state='pending' ORDER BY received_at,digest LIMIT 1`, team).
-		Scan(&digest, &d.ID, &d.Event, &d.Body, &d.Lease, &receivedAt)
+		Scan(&digest, &d.ID, &d.Event, &d.Body, &receivedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, tx.Commit()
 	}
 	if err != nil {
 		return nil, err
 	}
-	result, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state='leased',lease=lease+1,
-		lease_until=? WHERE digest=? AND lease=? AND state='pending'`,
-		tx.now(ctx).Add(githubDeliveryLease).UnixNano(), digest, d.Lease)
-	if err != nil {
+	if _, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state='processing' WHERE digest=? AND state='pending'`, digest); err != nil {
 		return nil, err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-	if n != 1 {
-		return nil, errGitHubDeliveryLeaseLost
 	}
 	value, err := json.Marshal(team)
 	if err != nil {
@@ -175,12 +163,11 @@ func (o *Operator) ClaimGitHubDelivery(ctx context.Context) (*GitHubDelivery, er
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	d.Lease++
 	d.ReceivedAt = time.Unix(0, receivedAt).UTC()
 	return &d, nil
 }
 
-func githubDeliveryLeaseTx(ctx context.Context, tx *storeTx) (string, error) {
+func githubDeliveryClaimTx(ctx context.Context, tx *storeTx) (string, error) {
 	delivery, ok := ctx.Value(githubDeliveryContextKey{}).(GitHubDelivery)
 	if !ok {
 		return "", nil
@@ -192,9 +179,9 @@ func githubDeliveryLeaseTx(ctx context.Context, tx *storeTx) (string, error) {
 		}
 	}
 	var digest string
-	err := tx.QueryRowContext(ctx, `SELECT digest FROM github_app_deliveries WHERE delivery_id=? AND state='leased' AND lease=? AND lease_until>?`+tx.forUpdate(), delivery.ID, delivery.Lease, tx.now(ctx).UnixNano()).Scan(&digest)
+	err := tx.QueryRowContext(ctx, `SELECT digest FROM github_app_deliveries WHERE delivery_id=? AND state='processing'`+tx.forUpdate(), delivery.ID).Scan(&digest)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", errGitHubDeliveryLeaseLost
+		return "", errGitHubDeliveryNotProcessing
 	}
 	if err != nil {
 		return "", err
@@ -202,9 +189,9 @@ func githubDeliveryLeaseTx(ctx context.Context, tx *storeTx) (string, error) {
 	return digest, nil
 }
 
-// githubDeliveryFenceTx checks the live lease and the connection captured at receipt.
+// githubDeliveryFenceTx checks the delivery is still processing and the connection captured at receipt.
 func githubDeliveryFenceTx(ctx context.Context, tx *storeTx) (string, error) {
-	digest, err := githubDeliveryLeaseTx(ctx, tx)
+	digest, err := githubDeliveryClaimTx(ctx, tx)
 	if err != nil || digest == "" {
 		return digest, err
 	}
@@ -216,7 +203,7 @@ func githubDeliveryResultTx[T any](ctx context.Context, tx *storeTx, effect stri
 	if effect == "" {
 		return result, ErrInvalidInput
 	}
-	digest, err := githubDeliveryLeaseTx(ctx, tx)
+	digest, err := githubDeliveryClaimTx(ctx, tx)
 	if err != nil {
 		return result, err
 	}
@@ -296,10 +283,10 @@ func (s *Store) githubDeliveryExec(ctx context.Context, effect, query string, ar
 	return driver.RowsAffected(affected), nil
 }
 
-// FinishGitHubDelivery records a fenced success or failure. Failures retain the
+// FinishGitHubDelivery records the processing delivery's success or failure. Failures retain the
 // signed body for an administrator's explicit process-again action.
 func (o *Operator) FinishGitHubDelivery(ctx context.Context, claimed GitHubDelivery, reason string) error {
-	if claimed.ID == "" || claimed.Lease <= 0 {
+	if claimed.ID == "" {
 		return ErrInvalidInput
 	}
 	state := "done"
@@ -308,8 +295,8 @@ func (o *Operator) FinishGitHubDelivery(ctx context.Context, claimed GitHubDeliv
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		result, err := tx.execContext(ctx, `UPDATE github_app_deliveries SET state=?,
-			body=CASE WHEN ?='done' THEN NULL ELSE body END,lease_until=0,last_error=?
-			WHERE delivery_id=? AND state='leased' AND lease=? AND lease_until>?`, state, state, reason, claimed.ID, claimed.Lease, tx.now(ctx).UnixNano())
+			body=CASE WHEN ?='done' THEN NULL ELSE body END,last_error=?
+			WHERE delivery_id=? AND state='processing'`, state, state, reason, claimed.ID)
 		if err != nil {
 			return err
 		}
@@ -318,7 +305,7 @@ func (o *Operator) FinishGitHubDelivery(ctx context.Context, claimed GitHubDeliv
 			return err
 		}
 		if n != 1 {
-			return errGitHubDeliveryLeaseLost
+			return errGitHubDeliveryNotProcessing
 		}
 		return nil
 	})

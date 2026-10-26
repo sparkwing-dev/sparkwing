@@ -18,7 +18,6 @@ type DataController struct {
 	ReadBlob         func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error)
 	ChargeDownload   func(context.Context, blob.Authority, blob.Blob) error
 	Access           capability.DataAccessChecker
-	replicaID        string
 }
 
 // dataTransactions preserves C1's upload lifecycle and atomic record operations.

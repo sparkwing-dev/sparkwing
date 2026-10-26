@@ -49,16 +49,12 @@ func TestPostgresOwnerReaperAndClaimerLockTeamBeforeOwner(t *testing.T) {
 			if _, err := s.DB().ExecContext(ctx, `UPDATE `+table+` SET status='claimed',claimed_by='lost',capability_prefix='lost-cap',generation=7,claimed_at=1,lease_expires_at=1`); err != nil {
 				t.Fatal(err)
 			}
-			lease, err := s.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", "reaper", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
 			b := blockFinancialLedger(t, ctx, s, "a")
 			if _, err := b.tx.ExecContext(ctx, `SELECT name FROM teams WHERE name='a' FOR UPDATE`); err != nil {
 				t.Fatal(err)
 			}
 			b.start(func() error {
-				reaped, err := s.AsOperator().ReapUnits(ctx, lease, 1)
+				reaped, err := s.AsOperator().ReapUnits(ctx, 1)
 				if err == nil && (len(reaped) != 1 || !reaped[0].Requeued) {
 					return fmt.Errorf("reap: %+v", reaped)
 				}
@@ -95,7 +91,7 @@ func TestPostgresConcurrencyMaintenanceLocksTeamBeforeCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.start(func() error {
-		_, err := f.s.AsOperator().MaintainConcurrency(ctx, f.lease)
+		_, err := f.s.AsOperator().MaintainConcurrency(ctx)
 		return err
 	})
 	b.waitBlocked(1)

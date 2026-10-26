@@ -73,7 +73,7 @@ func TestTriggersAreNeverRefusedForBilling(t *testing.T) {
 }
 
 func appendBytes(tenant *store.Tenant, runID string, n int) error {
-	_, err := tenant.AppendEventCharged(context.Background(), "replica", runID, "", "k",
+	_, err := tenant.AppendEventCharged(context.Background(), runID, "", "k",
 		[]byte(strings.Repeat("x", n-1)))
 	return err
 }
@@ -150,11 +150,7 @@ func TestExpiryAndDeletionLowerAFreeTeamsEventBytes(t *testing.T) {
 	if err := st.AsOperator().SetStorageSettings(ctx, store.StorageSettings{RunRetentionDays: 30}); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := st.AsOperator().AcquireSingletonLease(ctx, "maintenance", "free-tier", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100}); err != nil {
+	if _, err := st.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Limit: 100}); err != nil {
 		t.Fatal(err)
 	}
 	if got := standing(t, st, "acme"); got.EventBytes != 200 {

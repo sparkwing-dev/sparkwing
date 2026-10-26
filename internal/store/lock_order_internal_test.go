@@ -76,7 +76,7 @@ func TestAuthorityAndUnitAcquisitionsFollowCanonicalLockOrder(t *testing.T) {
 		depths[ref] = 1
 	}
 	depths[capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"}] = 0
-	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',7,'pending')`)
 	units := []UnitRef{{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, {Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 7}, {Kind: capability.UnitTrigger, RunID: "run"}}
 	random := rand.New(rand.NewPCG(4901, 17))
 	for range 32 {

@@ -20,11 +20,7 @@ func TestUnitReaperContinuesAfterTargetFailure(t *testing.T) {
 	if _, err := st.DB().Exec(`CREATE TRIGGER refuse_reap BEFORE UPDATE ON nodes WHEN OLD.run_id='bad' BEGIN SELECT RAISE(ABORT,'target refused'); END`); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := st.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page, err := st.AsOperator().ReapUnits(t.Context(), lease, 10)
+	page, err := st.AsOperator().ReapUnits(t.Context(), 10)
 	if err == nil || !strings.Contains(err.Error(), "target refused") || len(page) != 1 || page[0].RunID != "good" {
 		t.Fatalf("reap results=%+v, error=%v", page, err)
 	}
@@ -57,13 +53,9 @@ func TestUnitReaperBoundsNodeRecovery(t *testing.T) {
 	for i := range 3 {
 		seedExpiredUnitNode(t, st, "acme", fmt.Sprintf("run-%d", i), i+1, 0)
 	}
-	lease, err := st.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	seen := map[string]bool{}
 	for _, size := range []int{2, 1, 0} {
-		page, err := st.AsOperator().ReapUnits(t.Context(), lease, 2)
+		page, err := st.AsOperator().ReapUnits(t.Context(), 2)
 		if err != nil || len(page) != size {
 			t.Fatalf("page: %+v, %v, expected %d units", page, err, size)
 		}
@@ -86,11 +78,7 @@ func TestUnitReaperPreservesAgentLostAttempt(t *testing.T) {
 			st := storetest.Open(t)
 			tenant := tenantFor(t, st, "acme")
 			seedExpiredUnitNode(t, st, "acme", "run", 1, disruptions)
-			lease, err := st.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
-			page, err := st.AsOperator().ReapUnits(t.Context(), lease, 1)
+			page, err := st.AsOperator().ReapUnits(t.Context(), 1)
 			if err != nil || len(page) != 1 || page[0].Failed != (disruptions == 2) || page[0].Disruptions != disruptions+1 {
 				t.Fatalf("loss policy: %+v, %v", page, err)
 			}

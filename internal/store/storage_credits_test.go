@@ -39,7 +39,7 @@ func TestAnEmptyBalanceRefusesATeamWithNoQuotaRow(t *testing.T) {
 		t.Fatalf("set storage settings: %v", err)
 	}
 	seedRunWithNode(t, st, "r1", "n1", "running")
-	_, err := storageTestTenant(t, st).AppendEventCharged(ctx, "replica", "r1", "n1", "log", []byte("bytes"))
+	_, err := storageTestTenant(t, st).AppendEventCharged(ctx, "r1", "n1", "log", []byte("bytes"))
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("append = %v, want an insufficient-credits refusal", err)
 	}
@@ -51,7 +51,7 @@ func TestAnEmptyBalanceRefusesAWriteThatGrowsRetainedBytes(t *testing.T) {
 	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, gib)
 	seedRunWithNode(t, st, "r1", "n1", "running")
 
-	_, err := storageTestTenant(t, st).AppendEventCharged(ctx, "replica", "r1", "n1", "log", []byte("more bytes"))
+	_, err := storageTestTenant(t, st).AppendEventCharged(ctx, "r1", "n1", "log", []byte("more bytes"))
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("append on an empty balance = %v, want an insufficient-credits refusal", err)
 	}
@@ -65,7 +65,7 @@ func TestAnEmptyBalanceRefusesAWriteThatGrowsRetainedBytes(t *testing.T) {
 	if _, err := tenant(t, st, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 10 * store.MicroCreditsPerCent, Reference: "storage-funding", CreatedBy: "operator"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if _, err := storageTestTenant(t, st).AppendEventCharged(ctx, "replica", "r1", "n1", "log", []byte("more bytes")); err != nil {
+	if _, err := storageTestTenant(t, st).AppendEventCharged(ctx, "r1", "n1", "log", []byte("more bytes")); err != nil {
 		t.Fatalf("append once the balance holds credit: %v", err)
 	}
 	retained, err := storageTestTenant(t, st).StorageRetainedBytes(ctx)

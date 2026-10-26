@@ -121,7 +121,7 @@ func (s *boundData) Commit(ctx context.Context, request blob.CommitUpload) (blob
 			return blob.Receipt{}, err
 		}
 	}
-	receipt, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{Authority: authority, TicketID: request.TicketID, Verified: reservation.Blob, ReplicaID: s.controller.replicaID})
+	receipt, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{Authority: authority, TicketID: request.TicketID, Verified: reservation.Blob})
 	if err != nil {
 		return blob.Receipt{}, engineLookupError(err)
 	}

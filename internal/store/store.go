@@ -59,6 +59,7 @@ const retrySourceManual = "manual"
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
 	creditMeteringOff  atomic.Bool
+	storageTiersOn     atomic.Bool
 	controllerEpoch    int64
 	credentialEpoch    string
 	controllerFailStop func(error)

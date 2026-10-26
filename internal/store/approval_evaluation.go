@@ -38,7 +38,7 @@ func scheduleApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, r
 	if err != nil || released.Waiting {
 		return true, false, err
 	}
-	if _, err = tx.execContext(ctx, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES(?,?,?,?,'pending',?)`, team, ref.RunID, ref.NodeID, row.Generation, actor.Owner.Generation); err != nil {
+	if _, err = tx.execContext(ctx, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES(?,?,?,?,'pending')`, team, ref.RunID, ref.NodeID, row.Generation); err != nil {
 		return true, false, err
 	}
 	return true, false, nil
@@ -61,7 +61,7 @@ func finishApprovalEvaluationTx(ctx context.Context, tx *storeTx, team Team, row
 	}
 	lease := change.Actor.Owner
 	now := tx.now(ctx).UnixNano()
-	result, err := tx.execContext(ctx, `UPDATE eval_units SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status IN ('claimed','running') AND lease_expires_at>? AND EXISTS(SELECT 1 FROM leases l WHERE l.name=eval_units.owner_lease_name AND l.generation=eval_units.owner_generation AND l.until>?)`, now, team, row.Ref.RunID, row.Ref.NodeID, row.Generation, lease.Generation, lease.Holder, change.Actor.CapabilityPrefix, now, now)
+	result, err := tx.execContext(ctx, `UPDATE eval_units SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status IN ('claimed','running') AND lease_expires_at>?`, now, team, row.Ref.RunID, row.Ref.NodeID, row.Generation, lease.Generation, lease.Holder, change.Actor.CapabilityPrefix, now)
 	if err != nil {
 		return err
 	}

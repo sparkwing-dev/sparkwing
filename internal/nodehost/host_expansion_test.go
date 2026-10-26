@@ -65,7 +65,7 @@ func TestOwnerExpansion(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			owner := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, Name: "trigger", EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 9}}
+			owner := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: "run", Holder: "owner", Generation: 9}}
 			job := nodeproto.JobSpec{ID: "source", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"first", "second"}}}
 			job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "capacity", Capacity: new(3)}}
 			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}

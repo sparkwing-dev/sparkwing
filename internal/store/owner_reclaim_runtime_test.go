@@ -23,11 +23,7 @@ func TestOwnerReclaimFencesLostHostAndKeepsTerminalAbsorbing(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = first.Award.LeaseExpiresAt
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 1); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+	if reaped, err := s.AsOperator().ReapUnits(t.Context(), 1); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 		t.Fatalf("recovery: %+v, %v", reaped, err)
 	}
 	second, err := s.AsOperator().ClaimUnit(t.Context(), demand)
@@ -48,7 +44,7 @@ func TestOwnerReclaimFencesLostHostAndKeepsTerminalAbsorbing(t *testing.T) {
 	if _, err := finish(second); err != nil {
 		t.Fatal(err)
 	}
-	if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+	if reaped, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 0 {
 		t.Fatalf("finished owner recovered: %+v, %v", reaped, err)
 	}
 	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
@@ -68,19 +64,15 @@ func TestOwnerReaperLimitRecoversUnstartedWorkAcrossTeams(t *testing.T) {
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET team=? WHERE id=?`, team, id)
 		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels,claimed_at) VALUES (?,?,'claimed','trigger',1,1,'owner','owner-cap',7,?,?,?,1)`, team, id, now.UnixNano(), []byte(`[]`), []byte(`[]`))
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
 	seen := map[Team]bool{}
 	for range 2 {
-		page, err := s.AsOperator().ReapUnits(t.Context(), lease, 1)
+		page, err := s.AsOperator().ReapUnits(t.Context(), 1)
 		if err != nil || len(page) != 1 || !page[0].Requeued || page[0].Disruptions != 0 || seen[page[0].Team] {
 			t.Fatalf("bounded recovery: %+v, %v", page, err)
 		}
 		seen[page[0].Team] = true
 	}
-	if page, err := s.AsOperator().ReapUnits(t.Context(), lease, 1); err != nil || len(page) != 0 {
+	if page, err := s.AsOperator().ReapUnits(t.Context(), 1); err != nil || len(page) != 0 {
 		t.Fatalf("completed recovery: %+v, %v", page, err)
 	}
 	for team := range seen {

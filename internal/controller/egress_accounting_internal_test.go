@@ -17,12 +17,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
-func TestControllerEgressUsesAuthenticatedTenantAndReplica(t *testing.T) {
+func TestControllerEgressUsesAuthenticatedTenant(t *testing.T) {
 	engine, _ := engineRuntimeStore(t)
 	teststore.SeedTeam(t, engine.Store, "b")
 	first := New(engine.Store, nil).WithEgressMeter(egress.New(egress.Config{}))
 	second := New(engine.Store, nil)
-	for _, server := range []*Server{first, second} {
+	for i, server := range []*Server{first, second} {
 		for _, class := range []egress.Class{egress.ClassArtifact, egress.ClassLog, egress.ClassLogStream} {
 			r := httptest.NewRequest(http.MethodGet, "/data?team=b&replica=forged", nil)
 			response := httptest.NewRecorder()
@@ -34,8 +34,8 @@ func TestControllerEgressUsesAuthenticatedTenantAndReplica(t *testing.T) {
 			}
 		}
 		var bytes int64
-		if err := teststore.SQL(t, engine.Store).QueryRow("SELECT SUM(bytes) FROM egress_usage WHERE team='a' AND replica_id=?", server.leaseHolder).Scan(&bytes); err != nil || bytes != 15 {
-			t.Fatalf("replica=%s bytes=%d: %v", server.leaseHolder, bytes, err)
+		if err := teststore.SQL(t, engine.Store).QueryRow("SELECT SUM(bytes) FROM egress_usage WHERE team='a'").Scan(&bytes); err != nil || bytes != int64(15*(i+1)) {
+			t.Fatalf("server=%d bytes=%d: %v", i, bytes, err)
 		}
 	}
 	tenant, err := engine.Store.ForTeam(t.Context(), "a")
@@ -124,7 +124,7 @@ func TestControllerEgressRestoresTotalsBeyondMeterCardinality(t *testing.T) {
 	if _, err := teststore.SQL(t, engine.Store).Exec(`WITH RECURSIVE numbers(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM numbers WHERE n<?) INSERT INTO teams(name,created_at,updated_at) SELECT 'egress-'||n,1,1 FROM numbers`, count); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.SQL(t, engine.Store).Exec("INSERT INTO egress_usage(team,period,replica_id,bytes,updated_at) SELECT name,?,'replica',1,1 FROM teams WHERE name LIKE 'egress-%'", time.Now().UTC().Format("2006-01-02")); err != nil {
+	if _, err := teststore.SQL(t, engine.Store).Exec("INSERT INTO egress_usage(team,period,bytes,updated_at) SELECT name,?,1,1 FROM teams WHERE name LIKE 'egress-%'", time.Now().UTC().Format("2006-01-02")); err != nil {
 		t.Fatal(err)
 	}
 	s := New(engine.Store, nil).WithEgressMeter(egress.New(egress.Config{GlobalDailyAlarmBytes: int64(count)}))

@@ -101,8 +101,7 @@ func releaseFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitClaim) 
 		purpose = capability.PurposePlan
 	case capability.UnitEval:
 		unit.NodeID, unit.SourceGeneration, purpose = "job", 2, capability.PurposeEval
-		rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',1,?)`, s.now().Add(time.Hour).UnixNano())
-		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,expires_at,owner_generation) VALUES ('a','run','job',2,'pending',6,?,1)`, s.now().Add(time.Hour).UnixNano())
+		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,expires_at) VALUES ('a','run','job',2,'pending',6,?)`, s.now().Add(time.Hour).UnixNano())
 	}
 	if kind == capability.UnitTrigger || kind == capability.UnitPlan {
 		rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind=?,generation=6 WHERE id='run'`, kind)

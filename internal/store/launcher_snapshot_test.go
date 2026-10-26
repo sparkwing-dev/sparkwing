@@ -43,8 +43,7 @@ func launcherSnapshotFixtureExpiry(t *testing.T, kind capability.UnitKind, lifet
 	if kind == capability.UnitEval {
 		demand.Target.NodeID, demand.Target.SourceGeneration = "job", 7
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,generation=7,expansion='expected'`)
-		rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, now.Add(time.Hour).UnixNano())
-		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',7,'pending')`)
 	}
 	if len(previousAttempts) > 0 {
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET attempt=?`, previousAttempts[0])
@@ -118,9 +117,7 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 				case 5:
 					query = `UPDATE runs SET status='success',finished_at=1 WHERE id='run'`
 				case 6:
-					if kind == capability.UnitEval {
-						query = `UPDATE leases SET generation=generation+1 WHERE name='controller.owner'`
-					} else if kind == capability.UnitNode {
+					if kind == capability.UnitNode {
 						query = `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE run_id='run'`
 					} else {
 						query = `UPDATE ` + table + ` SET status='done',finished_at=1,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL WHERE ` + predicate
@@ -150,7 +147,6 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 				}
 				rewriteSchemaExec(t, s.db, `UPDATE `+table+` SET generation=?,claimed_by=?,capability_prefix=?,lease_expires_at=?,status=?`+extra+` WHERE `+predicate, claim.Award.Generation, claim.Award.Holder, claim.Award.CapabilityPrefix, claim.Award.LeaseExpiresAt.UnixNano(), status)
 				if kind == capability.UnitEval {
-					rewriteSchemaExec(t, s.db, `UPDATE leases SET generation=3 WHERE name='controller.owner'`)
 					rewriteSchemaExec(t, s.db, `UPDATE nodes SET expansion='expected' WHERE run_id='run'`)
 				} else {
 					rewriteSchemaExec(t, s.db, `UPDATE `+table+` SET finished_at=NULL,cancel_requested_at=NULL WHERE `+predicate)

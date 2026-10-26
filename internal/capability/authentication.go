@@ -303,10 +303,7 @@ func expansionLive(b Binding, state BindingState, now time.Time) bool {
 		b.Generation < 0 || b.Generation != state.Current.Generation || !now.Before(expansion.ExpiresAt) {
 		return false
 	}
-	if expansion.Lease.Kind == UnitEval {
-		return expansion.ControllerLeaseExpiresAt != nil && now.Before(*expansion.ControllerLeaseExpiresAt)
-	}
-	return expansion.Lease.Kind == UnitTrigger
+	return expansion.Lease.Kind == UnitEval || expansion.Lease.Kind == UnitTrigger
 }
 
 func resultMatches(p Principal, record *RecordedResult, evidence RequestEvidence) bool {

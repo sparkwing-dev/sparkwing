@@ -41,8 +41,7 @@ func TestOwnerSnapshotPlanAndEvalUseTheirOwnLease(t *testing.T) {
 			if kind == capability.UnitEval {
 				demand.Target.NodeID, demand.Target.SourceGeneration = "job", 7
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,generation=7,expansion='expected'`)
-				rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, s.now().Add(time.Hour).UnixNano())
-				rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+				rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',7,'pending')`)
 			}
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {

@@ -94,7 +94,6 @@ func planFixtureWithInput(t *testing.T, dispatch runspec.Dispatch, change func(*
 	if dispatch == runspec.DispatchController {
 		owner.Unit = capability.UnitPlan
 		owner.Binding.Kind = capability.BindingRun
-		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',1,?)`, now.Add(time.Hour).UnixNano())
 	}
 	persistPlanOwner(t, tenant.s, owner)
 	seedTriggerClaim(t, tenant.s, admitted.RunID, "host", "planner", 1, now.Add(time.Hour))
@@ -399,7 +398,7 @@ func TestPlanControllerHandoffKeepsExactReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.Owner == nil || accepted.Owner.Kind != runstate.OwnerController || accepted.Owner.Holder != "controller" {
+	if accepted.Owner == nil || accepted.Owner.Kind != runstate.OwnerController || accepted.Owner.RunID != runspec.RunID(request.RunID) {
 		t.Fatalf("owner=%+v", accepted.Owner)
 	}
 	var status string
@@ -418,19 +417,6 @@ func TestPlanControllerHandoffKeepsExactReplay(t *testing.T) {
 	if err != nil || !replay.Replayed {
 		t.Fatalf("replay=%+v %v", replay, err)
 	}
-}
-
-func TestPlanControllerHandoffRequiresLiveOwnerLease(t *testing.T) {
-	tenant, request, _ := planFixture(t, runspec.DispatchController)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET until=1 WHERE name='controller.owner'`)
-	if _, err := tenant.AcceptPlan(t.Context(), request); err == nil {
-		t.Fatal("plan owner released without controller owner")
-	}
-	run, err := tenant.ReadRun(t.Context(), request.RunID)
-	if err != nil || run.Spec != nil {
-		t.Fatalf("partial seal=%+v %v", run.Spec, err)
-	}
-	rewriteSchemaCount(t, tenant.s.db, "nodes", 0)
 }
 
 func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {

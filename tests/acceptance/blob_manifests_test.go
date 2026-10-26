@@ -159,7 +159,7 @@ func settleManifestBlob(ctx context.Context, tenant *store.Tenant, objects blob.
 	if pending != reserved.StagingKey {
 		return blob.ErrIntegrity
 	}
-	if _, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{TicketID: reserved.ID, Authority: request.Intent.Authority, Verified: reserved.Blob, ReplicaID: "fixture"}); err != nil {
+	if _, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{TicketID: reserved.ID, Authority: request.Intent.Authority, Verified: reserved.Blob}); err != nil {
 		return err
 	}
 	return objects.DeleteObject(ctx, pending)

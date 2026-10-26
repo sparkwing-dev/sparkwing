@@ -26,7 +26,7 @@ const cronTickOffer = 20 * time.Second
 // safety: long enough that a tick which dies mid-flight does not hand the next
 // minute a claim it will never release, short enough that the minute after that
 // still runs.
-const cronTickLeaseTTL = 90 * time.Second
+const cronTickTimeout = 90 * time.Second
 
 const cronDetailFires = 200
 
@@ -149,10 +149,9 @@ func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 
 func (s *Server) cronTickOnce(ctx context.Context) {
 	var report crons.TickReport
-	ran, err := s.operator.RunCronTickLeased(ctx, s.cronHolder, cronTickLeaseTTL, func(tickCtx context.Context) error {
-		// safety: the tick ends by the lease's expiry, so it never runs
-		// unfenced after another caller could acquire the lease.
-		deadline, cancel := context.WithTimeout(tickCtx, cronTickLeaseTTL)
+	ran, err := s.operator.RunCronTick(ctx, func(tickCtx context.Context) error {
+		// safety: a bounded tick cannot hold back the next minute's offer.
+		deadline, cancel := context.WithTimeout(tickCtx, cronTickTimeout)
 		defer cancel()
 		var terr error
 		report, terr = s.cronService().Tick(deadline, false)

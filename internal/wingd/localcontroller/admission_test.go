@@ -65,7 +65,7 @@ func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
 		t.Fatalf("repeated cancellation changed sequence: %d != %d: %v", row.StateSeq, seq, err)
 	}
 	c := owner.(*localController)
-	if err := c.sweep(t.Context(), c.lease); err != nil {
+	if err := c.sweep(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if terminal, err := owner.IsRunTerminal("run"); terminal || err != nil {
@@ -74,7 +74,7 @@ func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
 	if _, err := stateSQL(t, binding).ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=1 WHERE id='run'`); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.sweep(t.Context(), c.lease); err != nil {
+	if err := c.sweep(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if terminal, err := owner.IsRunTerminal("run"); !terminal || err != nil {
@@ -100,11 +100,11 @@ func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
 	}
 }
 
-func FuzzAdmissionCancellationKeepsTenantAndFence(f *testing.F) {
-	f.Add(uint8(0), uint8(0), uint8(2))
-	f.Add(uint8(1), uint8(1), uint8(3))
-	f.Add(uint8(2), uint8(2), uint8(4))
-	f.Fuzz(func(t *testing.T, mode, target, suffix uint8) {
+func FuzzAdmissionCancellationKeepsTenant(f *testing.F) {
+	f.Add(uint8(0), uint8(2))
+	f.Add(uint8(1), uint8(3))
+	f.Add(uint8(2), uint8(4))
+	f.Fuzz(func(t *testing.T, target, suffix uint8) {
 		var binding Binding
 		own, foreign := fmt.Sprintf("local-%d", suffix), fmt.Sprintf("foreign-%d", suffix)
 		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
@@ -132,23 +132,11 @@ func FuzzAdmissionCancellationKeepsTenantAndFence(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		switch mode % 3 {
-		case 1:
-			_, err := stateSQL(t, binding).ExecContext(t.Context(), `UPDATE leases SET until=1 WHERE name='controller.reaper'`)
-			if err != nil {
-				t.Fatal(err)
-			}
-		case 2:
-			_, err := stateSQL(t, binding).ExecContext(t.Context(), `UPDATE leases SET generation=generation+?,holder='successor' WHERE name='controller.reaper'`, int64(suffix)+1)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
 		id := []string{own, foreign, "missing"}[target%3]
 		err = c.FinalizeCancelledRuns([]string{id}, "cancelled")
-		allowed := mode%3 == 0 && target%3 == 0
+		allowed := target%3 == 0
 		if (err == nil) != allowed {
-			t.Fatalf("mode=%d target=%s: %v", mode%3, id, err)
+			t.Fatalf("target=%s: %v", id, err)
 		}
 		row, readErr := binding.Tenant.ReadRun(t.Context(), own)
 		if readErr != nil || (row.CancelRequestedAt != nil) != allowed {

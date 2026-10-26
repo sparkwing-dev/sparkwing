@@ -29,9 +29,6 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 	}
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
 		out = UnitClaim{}
-		if err := lockClaimControllerTx(ctx, tx); err != nil {
-			return err
-		}
 		if err := lockClaimQueueTx(ctx, tx); err != nil {
 			return err
 		}
@@ -84,15 +81,6 @@ func (o *Operator) searchClaimUnit(ctx context.Context, demand UnitDemand) (clai
 }
 
 var errRankingHold = authorityError(apierr.LockHeld, "work is waiting for a preferred runner")
-
-func lockClaimControllerTx(ctx context.Context, tx *storeTx) error {
-	var holder string
-	err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	return err
-}
 
 func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKind, error) {
 	if c.Audience != capability.Controller || c.Subject.ID == "" {
@@ -284,15 +272,6 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		return UnitClaim{}, err
 	}
 	deadline = until
-	if unit.Kind == capability.UnitEval {
-		var ownerUntil int64
-		if err := tx.QueryRowContext(ctx, `SELECT until FROM leases WHERE name='controller.owner'`).Scan(&ownerUntil); err != nil {
-			return UnitClaim{}, err
-		}
-		if ownerUntil < deadline.UnixNano() {
-			deadline = time.Unix(0, ownerUntil).UTC()
-		}
-	}
 	current := tx.now(ctx)
 	if !deadline.After(current) {
 		return UnitClaim{}, holderRefusal()

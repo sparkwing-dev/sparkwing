@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"fmt"
 	"math"
 	"math/rand"
 	"reflect"
@@ -12,17 +11,17 @@ import (
 	"time"
 )
 
-func TestStoreDataDownloadUsesFinalReplicaRows(t *testing.T) {
+func TestStoreDataDownloadRecordsTheDayRow(t *testing.T) {
 	s := authorityStore(t)
 	now := time.Date(2026, 10, 15, 22, 0, 0, 0, time.UTC)
 	s.clock = func() time.Time { return now }
-	got, err := (&Tenant{s: s, team: "a"}).ChargeDownload(t.Context(), DownloadCharge{ReplicaID: "replica", Bytes: 60, FreeCapBytes: 100})
+	got, err := (&Tenant{s: s, team: "a"}).ChargeDownload(t.Context(), DownloadCharge{Bytes: 60, FreeCapBytes: 100})
 	if err != nil || got.DayBytes != 60 {
 		t.Fatalf("final-schema download charge=%+v: %v", got, err)
 	}
 	var recorded int64
-	if err := s.db.QueryRow("SELECT bytes FROM team_download_day WHERE team='a' AND period='2026-10-15' AND replica_id='replica'").Scan(&recorded); err != nil || recorded != 60 {
-		t.Fatalf("replica usage=%d: %v", recorded, err)
+	if err := s.db.QueryRow("SELECT bytes FROM team_download_day WHERE team='a' AND period='2026-10-15'").Scan(&recorded); err != nil || recorded != 60 {
+		t.Fatalf("day usage=%d: %v", recorded, err)
 	}
 }
 
@@ -31,13 +30,12 @@ func TestStoreDataDownloadCapCrossingFundingAndMidnight(t *testing.T) {
 	now := time.Date(2026, 10, 15, 22, 0, 0, 0, time.UTC)
 	s.clock = func() time.Time { return now }
 	tenant := &Tenant{s: s, team: "a"}
-	request := DownloadCharge{ReplicaID: "first", Bytes: 60, FreeCapBytes: 100, FundedCapBytes: 1000}
+	request := DownloadCharge{Bytes: 60, FreeCapBytes: 100, FundedCapBytes: 1000}
 	for _, want := range []int64{60, 120} {
 		got, err := tenant.ChargeDownload(t.Context(), request)
 		if err != nil || got.DayBytes != want || got.CapBytes != 100 || got.Tier != teamTierFree {
 			t.Fatalf("charge=%+v, want %d: %v", got, want, err)
 		}
-		request.ReplicaID = "second"
 	}
 	request.Bytes = 0
 	got, err := tenant.ChargeDownload(t.Context(), request)
@@ -77,7 +75,7 @@ func TestStoreDataDownloadSharesReservationsAndExpiresHolds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := DownloadCharge{ReplicaID: "replica", FreeCapBytes: 100}
+	request := DownloadCharge{FreeCapBytes: 100}
 	if _, err := tenant.ChargeDownload(t.Context(), request); !errors.Is(err, ErrDownloadCap) {
 		t.Fatalf("held download capacity admitted: %v", err)
 	}
@@ -102,14 +100,14 @@ func TestStoreDataDownloadReplicasRaceForLastCapacity(t *testing.T) {
 	now := time.Date(2026, 10, 15, 22, 0, 0, 0, time.UTC)
 	s.clock, other.clock = func() time.Time { return now }, func() time.Time { return now }
 	tenants := []*Tenant{{s: s, team: "a"}, {s: other, team: "a"}}
-	if _, err := tenants[0].ChargeDownload(t.Context(), DownloadCharge{ReplicaID: "first", Bytes: 40, FreeCapBytes: 100}); err != nil {
+	if _, err := tenants[0].ChargeDownload(t.Context(), DownloadCharge{Bytes: 40, FreeCapBytes: 100}); err != nil {
 		t.Fatal(err)
 	}
 	start, results := make(chan struct{}), make(chan error, 8)
 	for i := range 8 {
 		go func() {
 			<-start
-			_, err := tenants[i%2].ChargeDownload(t.Context(), DownloadCharge{ReplicaID: fmt.Sprint(i), Bytes: 60, FreeCapBytes: 100})
+			_, err := tenants[i%2].ChargeDownload(t.Context(), DownloadCharge{Bytes: 60, FreeCapBytes: 100})
 			results <- err
 		}()
 	}
@@ -129,13 +127,13 @@ func TestStoreDataDownloadReplicasRaceForLastCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.db = blobAccountingDB(t, path)
-	if _, err := tenants[0].ChargeDownload(t.Context(), DownloadCharge{ReplicaID: "restarted", FreeCapBytes: 100}); !errors.Is(err, ErrDownloadCap) {
+	if _, err := tenants[0].ChargeDownload(t.Context(), DownloadCharge{FreeCapBytes: 100}); !errors.Is(err, ErrDownloadCap) {
 		t.Fatalf("restart restored spent capacity: %v", err)
 	}
 }
 
 func TestStoreDataDownloadTenantIsolationAndConservation(t *testing.T) {
-	property := func(first, second, foreign uint16, replica string) bool {
+	property := func(first, second, foreign uint16) bool {
 		s := authorityStore(t)
 		path := blobAccountingDiskStore(t, s)
 		other := &Store{db: blobAccountingDB(t, path), dialect: DialectSQLite}
@@ -147,7 +145,7 @@ func TestStoreDataDownloadTenantIsolationAndConservation(t *testing.T) {
 		results := make(chan error, len(tenants))
 		for i, tenant := range tenants {
 			wg.Go(func() {
-				_, err := tenant.ChargeDownload(t.Context(), DownloadCharge{ReplicaID: fmt.Sprint(i) + replica, Bytes: amounts[i], Record: true})
+				_, err := tenant.ChargeDownload(t.Context(), DownloadCharge{Bytes: amounts[i], Record: true})
 				results <- err
 			})
 		}
@@ -174,31 +172,28 @@ func TestStoreDataDownloadTenantIsolationAndConservation(t *testing.T) {
 		}
 		return true
 	}
-	if !property(0, 1, 65535, "'; UPDATE teams SET name='b'; --") {
-		t.Fatal("adversarial replica changed accounting")
-	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(527903))}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestStoreDataDownloadFailuresRollbackBothCounters(t *testing.T) {
-	for _, mode := range []string{"admission_overflow", "replica_overflow", "write_failure", "invalid_request"} {
+	for _, mode := range []string{"admission_overflow", "day_overflow", "write_failure", "invalid_request"} {
 		t.Run(mode, func(t *testing.T) {
 			s := authorityStore(t)
 			now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 			s.clock = func() time.Time { return now }
 			tenant := &Tenant{s: s, team: "a"}
-			request := DownloadCharge{ReplicaID: "replica", Bytes: 1, Record: true}
+			request := DownloadCharge{Bytes: 1, Record: true}
 			switch mode {
 			case "admission_overflow":
 				rewriteSchemaExec(t, s.db, "INSERT INTO quota_admission(team,quota,period,used,updated_at) VALUES ('a','download','2026-10-15',?,1)", int64(math.MaxInt64))
-			case "replica_overflow":
-				rewriteSchemaExec(t, s.db, "INSERT INTO team_download_day(team,period,replica_id,bytes,updated_at) VALUES ('a','2026-10-15','replica',?,1)", int64(math.MaxInt64))
+			case "day_overflow":
+				rewriteSchemaExec(t, s.db, "INSERT INTO team_download_day(team,period,bytes,updated_at) VALUES ('a','2026-10-15',?,1)", int64(math.MaxInt64))
 			case "write_failure":
 				rewriteSchemaExec(t, s.db, "CREATE TRIGGER refuse_download BEFORE INSERT ON team_download_day BEGIN SELECT RAISE(ABORT,'unavailable'); END")
 			case "invalid_request":
-				request.ReplicaID = ""
+				request.Bytes = -1
 			}
 			var before int
 			if err := s.db.QueryRow("SELECT COUNT(*) FROM quota_admission").Scan(&before); err != nil {

@@ -272,7 +272,13 @@ func (f *identityFixture) metricValue(series string) float64 {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		t.Fatalf("GET /metrics = %d: %s", resp.StatusCode, body)
+	}
 	sc := bufio.NewScanner(resp.Body)
+	// safety: the registry is process-wide, so a long series another test left behind must not end the scan early.
+	sc.Buffer(nil, 64<<20)
 	for sc.Scan() {
 		if rest, ok := strings.CutPrefix(sc.Text(), series+" "); ok {
 			v, err := strconv.ParseFloat(rest, 64)

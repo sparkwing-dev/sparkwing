@@ -35,14 +35,11 @@ type abandonedLogStream struct {
 // SealAbandonedLogStreams closes ended execution logs as incomplete under the
 // maintenance fence. Completed attempts and owner units retain final-tail grace. Publication
 // streams require their publisher's final commit because they have no lease.
-func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonLease, limit int) (int64, error) {
+func (o *Operator) SealAbandonedLogStreams(ctx context.Context, limit int) (int64, error) {
 	if limit <= 0 {
 		return 0, ErrInvalidInput
 	}
 	return inTxResult(ctx, o.s, func(tx *storeTx) (int64, error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return 0, err
-		}
 		rows, err := tx.queryContext(ctx, `SELECT l.team,l.run_id,l.id FROM log_streams l WHERE `+abandonedLogStreamSQL+` ORDER BY l.team,l.run_id,l.id LIMIT ?`, append(abandonedLogStreamArgs(tx.now(ctx)), limit)...)
 		if err != nil {
 			return 0, err
@@ -60,31 +57,24 @@ func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonL
 		}
 		var sealed int64
 		for _, candidate := range candidates {
-			n, err := sealAbandonedLogStreamTx(ctx, tx, lease, candidate)
+			n, err := sealAbandonedLogStreamTx(ctx, tx, candidate)
 			if err != nil {
 				return 0, err
 			}
 			sealed += n
 		}
 
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return 0, err
-		}
 		return sealed, nil
 	})
 }
 
-func sealAbandonedLogStreamTx(ctx context.Context, tx *storeTx, lease SingletonLease, stream abandonedLogStream) (int64, error) {
+func sealAbandonedLogStreamTx(ctx context.Context, tx *storeTx, stream abandonedLogStream) (int64, error) {
 	if err := lockStateRunTx(ctx, tx, stream.team, stream.run); errors.Is(err, ErrNotFound) {
 		return 0, nil
 	} else if err != nil {
 		return 0, err
 	}
-	// safety: a run-lock wait can cross lease expiry or a writer's final commit.
-
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-		return 0, err
-	}
+	// safety: a run-lock wait can cross a writer's final commit.
 	now := tx.now(ctx)
 	args := append([]any{now.UnixNano(), now.UnixNano(), stream.team, stream.run, stream.id}, abandonedLogStreamArgs(now)...)
 	result, err := tx.execContext(ctx, `UPDATE log_streams AS l SET sealed_at=?,updated_at=?,completeness='incomplete',incomplete_reason='writer_lost' WHERE l.team=? AND l.run_id=? AND l.id=? AND `+abandonedLogStreamSQL, args...)

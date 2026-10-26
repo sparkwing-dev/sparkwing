@@ -24,7 +24,7 @@ func uploadFixture(t *testing.T) (*Store, *Tenant, UploadReservationRequest) {
 }
 
 func verifiedUpload(ticket UploadReservation, authority blob.Authority) VerifiedUploadCommit {
-	return VerifiedUploadCommit{Authority: authority, TicketID: ticket.ID, Verified: ticket.Blob, ReplicaID: "replica-a"}
+	return VerifiedUploadCommit{Authority: authority, TicketID: ticket.ID, Verified: ticket.Blob}
 }
 
 func TestBlobUploadReservationReplayAndCommit(t *testing.T) {
@@ -104,7 +104,7 @@ func TestBlobUploadConflictingReservationIsAtomic(t *testing.T) {
 }
 
 func TestBlobUploadCommitRechecksTicketAndAuthority(t *testing.T) {
-	for _, problem := range []string{"digest", "size", "team", "ticket", "replica", "revoked", "generation", "attempt", "holder", "foreign_uploader", "expired"} {
+	for _, problem := range []string{"digest", "size", "team", "ticket", "revoked", "generation", "attempt", "holder", "foreign_uploader", "expired"} {
 		t.Run(problem, func(t *testing.T) {
 			s, tenant, request := uploadFixture(t)
 			ticket, err := tenant.ReserveBlobUpload(t.Context(), request)
@@ -121,8 +121,6 @@ func TestBlobUploadCommitRechecksTicketAndAuthority(t *testing.T) {
 				commit.Verified.Team = "b"
 			case "ticket":
 				commit.TicketID = "absent"
-			case "replica":
-				commit.ReplicaID = ""
 			case "revoked":
 				rewriteSchemaExec(t, s.db, "UPDATE capabilities SET revoked_at=1 WHERE prefix='machine'")
 			case "generation":
@@ -225,7 +223,6 @@ func TestBlobUploadDurableReplayAndDeduplication(t *testing.T) {
 		t.Fatal(err)
 	}
 	commit := verifiedUpload(second, other.Authority)
-	commit.ReplicaID = "replica-b"
 	if _, err := tenant.CommitBlobUpload(t.Context(), commit); err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +402,7 @@ func TestBlobUploadEmptyCommitAndExpiredReplay(t *testing.T) {
 	assertBlobUsage(t, s, 0, 0, 0, 1)
 }
 
-func TestBlobUploadLeasedGCReleasesExpiredTicketsAfterRunDeletion(t *testing.T) {
+func TestBlobUploadGCReleasesExpiredTicketsAfterRunDeletion(t *testing.T) {
 	s, tenant, request := uploadFixture(t)
 	if _, err := tenant.ReserveBlobUpload(t.Context(), request); err != nil {
 		t.Fatal(err)
@@ -418,22 +415,13 @@ func TestBlobUploadLeasedGCReleasesExpiredTicketsAfterRunDeletion(t *testing.T) 
 	rewriteSchemaCount(t, s.db, "uploads", 2)
 	now := request.ExpiresAt
 	s.clock = func() time.Time { return now }
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "replica", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale := lease
-	stale.Generation++
-	if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), stale, 1); err == nil {
-		t.Fatal("stale maintenance released quota")
-	}
 	assertBlobUsage(t, s, 0, 6, 0, 0)
-	if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 1); err != nil {
+	if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), 1); err != nil {
 		t.Fatal(err)
 	}
 	assertBlobUsage(t, s, 0, 3, 0, 0)
 	for range 2 {
-		if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 1); err != nil {
+		if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), 1); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -557,17 +545,13 @@ func TestBlobUploadReservationProtectsBytesDuringCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "blob_tombstones", 0)
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "gc", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil || n != 0 {
+	if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), 10); err != nil || n != 0 {
 		t.Fatalf("pending upload marked: %d, %v", n, err)
 	}
 	rewriteSchemaExec(t, s.db, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES ('a',?,1)", request.Intent.Digest)
 	deleted := false
 	deleter := blobDeleteFunc(func(_ context.Context, _ blob.Blob) error { deleted = true; return nil })
-	if n, err := s.AsOperator().CollectBlobTombstones(t.Context(), lease, 10, deleter); err != nil || n != 0 || deleted {
+	if n, err := s.AsOperator().CollectBlobTombstones(t.Context(), 10, deleter); err != nil || n != 0 || deleted {
 		t.Fatalf("pending upload collected: %d, %v, deleted=%v", n, err, deleted)
 	}
 	if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(ticket, request.Intent.Authority)); err != nil {
@@ -607,20 +591,16 @@ func TestBlobUploadRejectedCommitLeavesCollectableBytes(t *testing.T) {
 			} else if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(ticket, request.Intent.Authority)); !errors.Is(err, ErrLockHeld) {
 				t.Fatalf("rejected commit: %v", err)
 			}
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "gc", 3*limits.BlobGCGrace)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil {
+			if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), 10); err != nil {
 				t.Fatal(err)
 			}
 			now = now.Add(limits.BlobGCGrace)
 			var deleted []blob.Blob
-			n, err := s.AsOperator().CollectBlobTombstones(t.Context(), lease, 10, blobDeleteFunc(func(_ context.Context, b blob.Blob) error { deleted = append(deleted, b); return nil }))
+			n, err := s.AsOperator().CollectBlobTombstones(t.Context(), 10, blobDeleteFunc(func(_ context.Context, b blob.Blob) error { deleted = append(deleted, b); return nil }))
 			if err != nil || n != 1 || len(deleted) != 1 || deleted[0].Digest != ticket.Blob.Digest || deleted[0].Size != ticket.Blob.Size {
 				t.Fatalf("orphan escaped collection: %d, %+v, %v", n, deleted, err)
 			}
-			if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil || n != 0 {
+			if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), 10); err != nil || n != 0 {
 				t.Fatalf("repeated orphan: %d, %v", n, err)
 			}
 			rewriteSchemaCount(t, s.db, "blobs", 0)
@@ -650,11 +630,7 @@ func TestBlobUploadLiveTicketsProtectSharedDigestProperty(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "gc", time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil || n != 0 {
+			if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), 10); err != nil || n != 0 {
 				t.Fatalf("live upload marked: %d, %v", n, err)
 			}
 			if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(last, request.Intent.Authority)); err != nil {

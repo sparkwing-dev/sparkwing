@@ -14,7 +14,7 @@ func capacityGenerationTx(ctx context.Context, tx *storeTx, team Team, runID, no
 		err = tx.QueryRowContext(ctx, `SELECT generation FROM nodes WHERE team=? AND run_id=? AND node_id=? AND status<>'done'`, team, runID, nodeID).Scan(&generation)
 	} else {
 		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN `+controllerRunOwnership+`
- THEN (SELECT generation FROM leases WHERE name='controller.owner')
+ THEN 1
  ELSE (SELECT generation FROM triggers WHERE team=r.team AND id=r.id) END
  FROM runs r WHERE r.team=? AND r.id=? AND r.status IN ('pending','running')`, team, runID).Scan(&generation)
 	}

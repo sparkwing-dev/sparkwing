@@ -30,7 +30,7 @@ func ownerProcessAuthorityFixture(t *testing.T, evaluation bool) (*ProcessAuthor
 		principal.Capability.Grants = []capability.Grant{capability.ExpansionSubmit, capability.DataRead}
 		parent.snapshot.Binding.FinishedAt = &parent.snapshot.Now
 		expires := parent.snapshot.Now.Add(time.Hour)
-		parent.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *principal.Capability.Binding.Expansion, ExpiresAt: expires, ControllerLeaseExpiresAt: &expires}
+		parent.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *principal.Capability.Binding.Expansion, ExpiresAt: expires}
 	}
 	service.SourceBindings = registry.deps.Bindings
 	spec.Binding, spec.Grants = principal.Capability.Binding, principal.Capability.Grants

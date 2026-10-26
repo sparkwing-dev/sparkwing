@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-func TestStoreDataEgressReplicaConservationAndTenantIsolation(t *testing.T) {
-	property := func(first, second uint16, replica string) bool {
+func TestStoreDataEgressConservationAndTenantIsolation(t *testing.T) {
+	property := func(first, second uint16) bool {
 		s, tenant, _ := maintenanceStore(t)
 		path := blobAccountingDiskStore(t, s)
 		other := &Store{db: blobAccountingDB(t, path), clock: s.clock}
@@ -20,7 +20,7 @@ func TestStoreDataEgressReplicaConservationAndTenantIsolation(t *testing.T) {
 		errors := make(chan error, 2)
 		for i, handle := range handles {
 			wg.Go(func() {
-				errors <- handle.AddUsage(t.Context(), UsageDelta{Period: "2026-10-15", ReplicaID: replica + string(rune('a'+i)), Counter: "egress_bytes", Amount: amounts[i]})
+				errors <- handle.AddUsage(t.Context(), UsageDelta{Period: "2026-10-15", Counter: "egress_bytes", Amount: amounts[i]})
 			})
 		}
 		wg.Wait()
@@ -32,7 +32,7 @@ func TestStoreDataEgressReplicaConservationAndTenantIsolation(t *testing.T) {
 			}
 		}
 		foreign := &Tenant{s: other, team: "b"}
-		if err := foreign.AddUsage(t.Context(), UsageDelta{Period: "2026-10-15", ReplicaID: replica + "a", Counter: "egress_bytes", Amount: 17}); err != nil {
+		if err := foreign.AddUsage(t.Context(), UsageDelta{Period: "2026-10-15", Counter: "egress_bytes", Amount: 17}); err != nil {
 			t.Fatal(err)
 		}
 		for _, period := range []string{"2026-10", "2026-10-15"} {
@@ -44,19 +44,16 @@ func TestStoreDataEgressReplicaConservationAndTenantIsolation(t *testing.T) {
 		}
 		return true
 	}
-	if !property(7, 11, "'; DELETE FROM egress_usage; --") {
-		t.Fatal("hostile replica changed another counter")
-	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(7381))}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestStoreDataEgressSurvivesRestartAndLeasedRetention(t *testing.T) {
+func TestStoreDataEgressSurvivesRestartAndRetention(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
 	*now = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	for _, period := range []string{"2025-08", "2025-09-01", "2026-10-14", "2026-10-15"} {
-		if err := tenant.AddUsage(t.Context(), UsageDelta{Period: period, ReplicaID: "first", Counter: "egress_bytes", Amount: 10}); err != nil {
+		if err := tenant.AddUsage(t.Context(), UsageDelta{Period: period, Counter: "egress_bytes", Amount: 10}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -65,16 +62,7 @@ func TestStoreDataEgressSurvivesRestartAndLeasedRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.db = blobAccountingDB(t, path)
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "replica", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale := lease
-	stale.Generation++
-	if _, err := s.AsOperator().PruneEgressUsage(t.Context(), stale); err == nil {
-		t.Fatal("stale maintenance pruned egress")
-	}
-	if n, err := s.AsOperator().PruneEgressUsage(t.Context(), lease); err != nil || n != 1 {
+	if n, err := s.AsOperator().PruneEgressUsage(t.Context()); err != nil || n != 1 {
 		t.Fatalf("prune=%d: %v", n, err)
 	}
 	for period, want := range map[string]int64{"2025-08": 0, "2025-09": 10, "2026-10": 20, "2026-10-14": 10, "2026-10-15": 10, "2026-11": 0} {
@@ -97,12 +85,12 @@ func TestStoreDataEgressSurvivesRestartAndLeasedRetention(t *testing.T) {
 func TestStoreDataEgressReportsRefuseCorruptionAndOverflow(t *testing.T) {
 	s, tenant, _ := maintenanceStore(t)
 	for _, row := range []struct {
-		team    string
-		replica string
-		amount  int64
-	}{{"a", "one", 7}, {"a", "two", 11}, {"b", "one", 30}} {
+		team   string
+		period string
+		amount int64
+	}{{"a", "2026-10-15", 7}, {"a", "2026-10-16", 11}, {"b", "2026-10-15", 30}} {
 		handle := &Tenant{s: s, team: Team(row.team)}
-		if err := handle.AddUsage(t.Context(), UsageDelta{Period: "2026-10-15", ReplicaID: row.replica, Counter: "egress_bytes", Amount: row.amount}); err != nil {
+		if err := handle.AddUsage(t.Context(), UsageDelta{Period: row.period, Counter: "egress_bytes", Amount: row.amount}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -112,7 +100,7 @@ func TestStoreDataEgressReportsRefuseCorruptionAndOverflow(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, "PRAGMA ignore_check_constraints=ON")
 	for _, amount := range []int64{-1, math.MaxInt64} {
-		rewriteSchemaExec(t, s.db, "UPDATE egress_usage SET bytes=? WHERE team='a' AND replica_id='one'", amount)
+		rewriteSchemaExec(t, s.db, "UPDATE egress_usage SET bytes=? WHERE team='a' AND period='2026-10-15'", amount)
 		if _, err := tenant.EgressUsage(t.Context(), "2026-10"); err == nil {
 			t.Fatalf("tenant accepted invalid total from %d", amount)
 		}
@@ -120,11 +108,11 @@ func TestStoreDataEgressReportsRefuseCorruptionAndOverflow(t *testing.T) {
 			t.Fatalf("operator accepted invalid total from %d", amount)
 		}
 	}
-	if err := tenant.AddUsage(t.Context(), UsageDelta{Period: "2026-10-15", ReplicaID: "one", Counter: "egress_bytes", Amount: 1}); err == nil {
-		t.Fatal("overflowed a replica counter")
+	if err := tenant.AddUsage(t.Context(), UsageDelta{Period: "2026-10-15", Counter: "egress_bytes", Amount: 1}); err == nil {
+		t.Fatal("overflowed a day counter")
 	}
 	var persisted int64
-	if err := s.db.QueryRow("SELECT bytes FROM egress_usage WHERE team='a' AND replica_id='one'").Scan(&persisted); err != nil || persisted != math.MaxInt64 {
+	if err := s.db.QueryRow("SELECT bytes FROM egress_usage WHERE team='a' AND period='2026-10-15'").Scan(&persisted); err != nil || persisted != math.MaxInt64 {
 		t.Fatalf("overflow changed counter=%d: %v", persisted, err)
 	}
 }

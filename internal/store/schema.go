@@ -225,7 +225,6 @@ var schemaTables = []schemaTable{
 	{Name: "identity_unlinks", Owner: schemaOperator},
 	{Name: "invitation_email_log", Owner: schemaOperator},
 	{Name: "invitations", Owner: schemaTenant},
-	{Name: "leases", Owner: schemaOperator},
 	{Name: "memberships", Owner: schemaTenant},
 	{Name: "membership_epochs", Owner: schemaTenant},
 	{Name: "overflow_controls", Owner: schemaTenant},

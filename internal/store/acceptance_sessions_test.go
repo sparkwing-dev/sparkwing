@@ -124,16 +124,7 @@ func checkStoreSessions(t *testing.T) (err error) {
 	if _, err := s.DB().ExecContext(ctx, `UPDATE sessions SET expires_at=1 WHERE hash=?`, hex.EncodeToString(lookup.Digest[:])); err != nil {
 		return err
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "maintenance", "session-acceptance", time.Hour)
-	if err != nil {
-		return err
-	}
-	forged := lease
-	forged.Generation++
-	if result, err := s.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Lease: forged, Limit: 1}); !errors.Is(err, store.ErrLockHeld) || result != (store.RetentionResult{}) {
-		return fmt.Errorf("forged maintenance fence returned %+v: %v", result, err)
-	}
-	if result, err := s.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 1}); err != nil || result.Sessions != 1 {
+	if result, err := s.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Limit: 1}); err != nil || result.Sessions != 1 {
 		return fmt.Errorf("session maintenance returned %+v: %v", result, err)
 	}
 	if _, err := s.AsOperator().LookupSession(ctx, ownerRaw); err != nil {

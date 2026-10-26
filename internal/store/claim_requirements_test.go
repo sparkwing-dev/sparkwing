@@ -132,10 +132,6 @@ func TestRetentionRemovesOnlyUnreferencedClaimRequirements(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	check := func(want int) {
 		t.Helper()
 		for _, table := range []string{"claim_requirements", "claim_requirement_terms"} {
@@ -145,13 +141,13 @@ func TestRetentionRemovesOnlyUnreferencedClaimRequirements(t *testing.T) {
 			}
 		}
 	}
-	result, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 10})
+	result, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Limit: 10})
 	if err != nil || result.Runs != 1 {
 		t.Fatalf("first retention = %+v: %v", result, err)
 	}
 	check(2)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET finished_at=? WHERE id='retained'`, old)
-	result, err = s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 10})
+	result, err = s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Limit: 10})
 	if err != nil || result.Runs != 1 {
 		t.Fatalf("last-reference retention = %+v: %v", result, err)
 	}

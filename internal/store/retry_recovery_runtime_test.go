@@ -20,7 +20,7 @@ func TestRecoveryPreservesTheAcceptedJobInItsTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}, 10)
+	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 	if err != nil || len(reaped) != 1 || reaped[0].Team != tenant.team || runspec.RunID(reaped[0].RunID) != ref.RunID {
 		t.Fatalf("recovery identity = %+v, %v", reaped, err)
 	}
@@ -39,8 +39,7 @@ func TestReapedClaimCannotReportAfterReclaim(t *testing.T) {
 	tenant, now, oldHolder := liveHolderFixture(t)
 	ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=? WHERE team='a' AND run_id='run'`, now.Add(-time.Second).UnixNano())
-	lease := SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}
-	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
+	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 	if err != nil || len(reaped) != 1 || !reaped[0].Requeued || reaped[0].Generation != 2 {
 		t.Fatalf("reaped = %+v, %v", reaped, err)
 	}
@@ -83,7 +82,7 @@ func TestRecoveryNeverResetsTerminalJobs(t *testing.T) {
 			if cancel {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET cancel_requested_at=? WHERE team='a' AND id='run'`, now.UnixNano())
 			}
-			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}, 10)
+			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 			if err != nil || len(reaped) != 1 || reaped[0].Requeued {
 				t.Fatalf("reaped = %+v, %v", reaped, err)
 			}

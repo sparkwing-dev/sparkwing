@@ -594,6 +594,10 @@ func creditLimit(limit int) int {
 // is no call that turns metering back on.
 func (s *Store) DisableCreditMetering() { s.creditMeteringOff.Store(true) }
 
+// EnableStorageTiers gives every team without an explicit quota or a deployment default tier the free storage tier,
+// or the paid tier once it has bought credits. Sparkwing Cloud calls it once while it is composed.
+func (s *Store) EnableStorageTiers() { s.storageTiersOn.Store(true) }
+
 func newCreditID(prefix string) (string, error) {
 	var suffix [12]byte
 	if _, err := rand.Read(suffix[:]); err != nil {

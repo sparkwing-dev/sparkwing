@@ -23,14 +23,14 @@ func usageStatement(counter string) (string, error) {
 	case "storage_objects":
 		table, column = "storage_month_usage", "objects"
 	case "runs":
-		return `INSERT INTO run_rate_usage(team,period,replica_id,principal,runs,updated_at) VALUES (?,?,?,'',?,?)
-ON CONFLICT(team,period,replica_id,principal) DO UPDATE SET runs = run_rate_usage.runs + excluded.runs, updated_at = excluded.updated_at
+		return `INSERT INTO run_rate_usage(team,period,principal,runs,updated_at) VALUES (?,?,'',?,?)
+ON CONFLICT(team,period,principal) DO UPDATE SET runs = run_rate_usage.runs + excluded.runs, updated_at = excluded.updated_at
 WHERE run_rate_usage.runs <= 9223372036854775807 - excluded.runs`, nil
 	default:
 		return "", fmt.Errorf("unknown usage counter %q", counter)
 	}
-	return `INSERT INTO ` + table + `(team,period,replica_id,` + column + `,updated_at) VALUES (?,?,?,?,?)
-ON CONFLICT(team,period,replica_id) DO UPDATE SET ` + column + ` = ` + table + `.` + column + ` + excluded.` + column + `, updated_at = excluded.updated_at
+	return `INSERT INTO ` + table + `(team,period,` + column + `,updated_at) VALUES (?,?,?,?)
+ON CONFLICT(team,period) DO UPDATE SET ` + column + ` = ` + table + `.` + column + ` + excluded.` + column + `, updated_at = excluded.updated_at
 WHERE ` + table + `.` + column + ` <= 9223372036854775807 - excluded.` + column, nil
 }
 

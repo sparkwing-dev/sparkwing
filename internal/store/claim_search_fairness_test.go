@@ -61,9 +61,6 @@ func recheckClaimCandidate(t *testing.T, s *Store, demand UnitDemand, candidate 
 	t.Helper()
 	var claim UnitClaim
 	err := s.inTx(t.Context(), func(tx *storeTx) error {
-		if err := lockClaimControllerTx(t.Context(), tx); err != nil {
-			return err
-		}
 		if err := lockClaimQueueTx(t.Context(), tx); err != nil {
 			return err
 		}

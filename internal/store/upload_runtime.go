@@ -137,8 +137,8 @@ func (t *Tenant) LookupBlobUpload(ctx context.Context, authority blob.Authority,
 
 // CommitBlobUpload atomically settles verified bytes, quota and the exact uploader receipt.
 func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCommit) (blob.Receipt, error) {
-	if !validUploadTicket(request.TicketID) || request.ReplicaID == "" || request.Verified.Team != string(t.team) || !validBlobDigest(request.Verified.Digest) || request.Verified.Size < 0 {
-		return blob.Receipt{}, authorityError(apierr.BadRequest, "verified upload and replica are required")
+	if !validUploadTicket(request.TicketID) || request.Verified.Team != string(t.team) || !validBlobDigest(request.Verified.Digest) || request.Verified.Size < 0 {
+		return blob.Receipt{}, authorityError(apierr.BadRequest, "a verified upload is required")
 	}
 	return inTxResult(ctx, t.s, func(tx *storeTx) (blob.Receipt, error) {
 		a, err := resolveBlobAuthorityTx(ctx, tx, t.team, request.Authority, capability.DataWrite)
@@ -159,7 +159,7 @@ func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCom
 			return blob.Receipt{}, blob.ErrIntegrity
 		}
 		intent := blob.UploadIntent{Authority: request.Authority, Identity: u.Identity, Digest: u.Blob.Digest, Size: u.Blob.Size}
-		receipt, err := commitVerifiedBlobTx(ctx, tx, t.team, a, intent, blobAccounting{ReservationID: blobUploadQuotaID(u.ID), ReplicaID: request.ReplicaID})
+		receipt, err := commitVerifiedBlobTx(ctx, tx, t.team, a, intent, blobAccounting{ReservationID: blobUploadQuotaID(u.ID)})
 		if err != nil {
 			return blob.Receipt{}, err
 		}

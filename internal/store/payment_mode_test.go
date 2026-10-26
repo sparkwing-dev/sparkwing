@@ -358,9 +358,9 @@ func TestLiveCutoverRequiresDrainedTestWork(t *testing.T) {
 }
 
 func TestLiveCutoverRestartsStorageAccounting(t *testing.T) {
-	s, lease, now := retainedBillingFixture(t)
+	s, now := retainedBillingFixture(t)
 	retainedBlob(t, s, "a", "a", StorageBytesPerGB, now.Add(-time.Hour))
-	retainedBill(t, s, lease)
+	retainedBill(t, s)
 	*now = now.Add(time.Hour)
 	cutover := *now
 	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
@@ -374,7 +374,7 @@ func TestLiveCutoverRestartsStorageAccounting(t *testing.T) {
 	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
 		t.Fatal(err)
 	}
-	billed := retainedBill(t, s, lease)
+	billed := retainedBill(t, s)
 	if len(billed.Charges) != 1 || billed.Charges[0].Seconds != 60 {
 		t.Fatalf("live billing includes test time or restarted live watermark: %+v (cutover %s)", billed, cutover)
 	}

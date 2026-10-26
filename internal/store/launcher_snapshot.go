@@ -379,7 +379,7 @@ func launcherEvalLiveTx(ctx context.Context, tx *storeTx, award LauncherAward) (
 		return false, nil
 	}
 	var live int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM eval_units e JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=? AND e.owner_lease_name='controller.owner' AND e.owner_generation=l.generation AND l.until>?`, award.Claim.Team, award.Claim.RunID, award.Claim.NodeID, award.Claim.SourceGeneration, tx.now(ctx).UnixNano()).Scan(&live)
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM eval_units e WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=?`, award.Claim.Team, award.Claim.RunID, award.Claim.NodeID, award.Claim.SourceGeneration).Scan(&live)
 	return live == 1, err
 }
 
@@ -388,9 +388,6 @@ var errLauncherAuthorityChanged = errors.New("launcher authority changed during 
 func (s *Store) inLauncherBatchTx(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef, observed bool, fn func(*storeTx) error) error {
 	for range 5 {
 		err := s.inTx(ctx, func(tx *storeTx) error {
-			if err := lockClaimControllerTx(ctx, tx); err != nil {
-				return err
-			}
 			if err := lockLauncherBatchTx(ctx, tx, authority, fences, observed); err != nil {
 				return err
 			}

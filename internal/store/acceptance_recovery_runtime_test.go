@@ -22,7 +22,6 @@ type storeRecoveryFixture struct {
 	s             *store.Store
 	tenant        *store.Tenant
 	owner, holder runstate.Actor
-	lease         store.SingletonLease
 	ref           runspec.NodeRef
 	target        *storetest.Target
 	seq           int64
@@ -88,10 +87,6 @@ func newStoreRecoveryFixtureForAt(t *testing.T, started bool, target *storetest.
 		t.Fatal(err)
 	}
 	f.seq = row.StateSeq
-	f.lease, err = f.s.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", "recovery", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if started {
 		if admitted, err := f.tenant.MayStart(ctx, runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder); err != nil || admitted.Kind != runstate.AcquireGranted {
 			t.Fatalf("fixture admission: %+v, %v", admitted, err)
@@ -184,7 +179,7 @@ func checkRecoveryUnstarted(t *testing.T) error {
 			return err
 		}
 		checkStoreQueueCounts(t, f.s, map[string]int{"claimed": 1})
-		units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
+		units, err := f.s.AsOperator().ReapUnits(ctx, 10)
 		if err != nil {
 			return err
 		}
@@ -259,7 +254,7 @@ func checkRecoveryStartedCap(t *testing.T) error {
 		if err := f.expireHolder(ctx); err != nil {
 			return err
 		}
-		units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
+		units, err := f.s.AsOperator().ReapUnits(ctx, 10)
 		if err != nil {
 			return err
 		}
@@ -404,7 +399,7 @@ func checkRecoveryApplicationRetry(t *testing.T) error {
 func checkRecoveryCancellation(t *testing.T) error {
 	ctx := t.Context()
 	f := newStoreRecoveryFixture(t, true)
-	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: f.lease.Name, EvalFence: runspec.EvalFence{Holder: f.lease.Holder, Generation: runspec.ClaimGeneration(f.lease.Generation)}}}
+	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController}}
 	request := runstate.RunTransition{RunID: f.ref.RunID, Actor: actor, To: runstate.RunCancelled, Cause: runstate.RunCancel, Reason: "user_cancelled"}
 	for range 2 {
 		if _, err := f.tenant.TransitionRun(ctx, request); err != nil {
@@ -421,7 +416,7 @@ func checkRecoveryCancellation(t *testing.T) error {
 	if err := f.expireHolder(ctx); err != nil {
 		return err
 	}
-	units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
+	units, err := f.s.AsOperator().ReapUnits(ctx, 10)
 	if err != nil {
 		return err
 	}
@@ -488,7 +483,7 @@ func checkRecoveryReconciliation(t *testing.T, order string) error {
 			return err
 		}
 	}
-	units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
+	units, err := f.s.AsOperator().ReapUnits(ctx, 10)
 	if err != nil {
 		return err
 	}

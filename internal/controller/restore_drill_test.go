@@ -167,7 +167,7 @@ func checkRestoreDrill(t *testing.T, signOut bool) {
 	if _, err := restored.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(pending.RunID)}}); !errors.As(err, &refused) || refused.Reason != store.ReasonHolderRights {
 		t.Fatalf("restored pending deploy claim did not refuse cancelled work: %v", err)
 	}
-	if ran, err := restored.AsOperator().RunCronTickLeased(t.Context(), "restore-drill", time.Minute, func(context.Context) error { t.Fatal("restored cron tick ran before acknowledgement"); return nil }); ran || !errors.Is(err, store.ErrRestorePending) {
+	if ran, err := restored.AsOperator().RunCronTick(t.Context(), func(context.Context) error { t.Fatal("restored cron tick ran before acknowledgement"); return nil }); ran || !errors.Is(err, store.ErrRestorePending) {
 		t.Fatalf("restored cron hold: ran=%t err=%v", ran, err)
 	}
 	if result, err := tenant.AdmitScheduledRun(t.Context(), schedule, firedAfterBackup); !errors.Is(err, store.ErrRestorePending) || result.RunID != "" {

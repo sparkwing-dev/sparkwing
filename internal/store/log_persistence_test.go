@@ -150,10 +150,6 @@ func TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace(t *testing.T) {
 			t.Fatal(err)
 		}
 		reader := authorityMember(t, s, "grace-reader", RoleReader)
-		lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "logs", time.Hour)
-		if err != nil {
-			t.Fatal(err)
-		}
 		finished := s.now()
 		nodeFinished := finished.Add(time.Duration(1+later%59) * time.Second)
 		rewriteSchemaExec(t, s.db, "UPDATE nodes SET status='done',outcome='success',finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run'", nodeFinished.UnixNano())
@@ -167,7 +163,7 @@ func TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace(t *testing.T) {
 			t.Logf("offset=%d later=%d read=%v write=%v", offset, later, readErr, writeErr)
 			return false
 		}
-		sealed, err := s.AsOperator().SealAbandonedLogStreams(t.Context(), lease, 1)
+		sealed, err := s.AsOperator().SealAbandonedLogStreams(t.Context(), 1)
 		if err != nil || sealed != int64(boolInt(!allowed)) {
 			t.Logf("offset=%d maintenance sealed=%d: %v", offset, sealed, err)
 			return false

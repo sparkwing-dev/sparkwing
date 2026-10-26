@@ -28,20 +28,17 @@ UNION SELECT m.team,m.member_digest FROM blob_members m JOIN reachable r ON r.te
 
 // MarkBlobTombstones starts the grace period for blobs outside all live reference graphs.
 // Receipt authority remains a root until run retention removes its uploader.
-func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease, limit int) (int64, error) {
+func (o *Operator) MarkBlobTombstones(ctx context.Context, limit int) (int64, error) {
 	if limit <= 0 {
 		return 0, ErrInvalidInput
 	}
-	if err := o.abandonExpiredBlobUploads(ctx, lease, limit); err != nil {
+	if err := o.abandonExpiredBlobUploads(ctx, limit); err != nil {
 		return 0, err
 	}
 	var marked int64
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		marked = 0
 
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return err
-		}
 		candidates, err := teamKeysTx(ctx, tx, reachableBlobsSQL+`SELECT b.team,b.digest FROM blobs b WHERE NOT EXISTS(SELECT 1 FROM reachable r WHERE r.team=b.team AND r.digest=b.digest) AND NOT EXISTS(SELECT 1 FROM blob_tombstones t WHERE t.team=b.team AND t.digest=b.digest) ORDER BY b.team,b.digest LIMIT ?`, limit)
 		if err != nil {
 			return err
@@ -74,7 +71,7 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 
 // safety: one ticket per transaction keeps cleanup from holding one ticket's
 // digest and quota locks while it waits on another (STORE-DATA.md lock order).
-func (o *Operator) abandonExpiredBlobUploads(ctx context.Context, lease SingletonLease, limit int) error {
+func (o *Operator) abandonExpiredBlobUploads(ctx context.Context, limit int) error {
 	var expired []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
 		expired, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND committed_at=0 AND abandoned_at IS NULL AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now(ctx).UnixNano(), limit)
@@ -85,9 +82,6 @@ func (o *Operator) abandonExpiredBlobUploads(ctx context.Context, lease Singleto
 			return err
 		}
 		err = o.s.inTx(ctx, func(tx *storeTx) error {
-			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-				return err
-			}
 			return abandonBlobUploadTx(ctx, tx, Team(u.team), u.key)
 		})
 	}
@@ -101,16 +95,13 @@ type StagingDeleter interface {
 
 // DeleteExpiredBlobStaging removes staging bytes of settled blob tickets once
 // their upload URLs are past the collection grace. A failed delete stays pending
-// for the next leased pass.
-func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease SingletonLease, limit int, objects StagingDeleter) error {
+// for the next pass.
+func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, limit int, objects StagingDeleter) error {
 	if limit <= 0 || objects == nil {
 		return ErrInvalidInput
 	}
 	var settled []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return err
-		}
 		settled, err = teamKeysTx(ctx, tx, "SELECT team,id FROM uploads WHERE store='blob' AND staging_deleted_at IS NULL AND (committed_at<>0 OR abandoned_at IS NOT NULL) AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now(ctx).Add(-limits.BlobGCGrace).UnixNano(), limit)
 		return err
 	})
@@ -124,9 +115,6 @@ func (o *Operator) DeleteExpiredBlobStaging(ctx context.Context, lease Singleton
 			continue
 		}
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
-			if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-				return err
-			}
 			_, err := tx.execContext(ctx, "UPDATE uploads SET staging_deleted_at=? WHERE team=? AND id=? AND staging_deleted_at IS NULL", tx.now(ctx).UnixNano(), u.team, u.key)
 			return err
 		})
@@ -162,16 +150,13 @@ func blobReachableTx(ctx context.Context, tx *storeTx, team Team, digest blob.Di
 }
 
 // CollectBlobTombstones rechecks reachability under the blob lock before removing bytes.
-// A deletion error preserves existence and its tombstone for the next leased pass.
-func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLease, limit int, deleter BlobDeleter) (int64, error) {
+// A deletion error preserves existence and its tombstone for the next pass.
+func (o *Operator) CollectBlobTombstones(ctx context.Context, limit int, deleter BlobDeleter) (int64, error) {
 	if limit <= 0 || deleter == nil {
 		return 0, ErrInvalidInput
 	}
 	var candidates []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return err
-		}
 		candidates, err = teamKeysTx(ctx, tx, "SELECT team,digest FROM blob_tombstones WHERE marked_at<=? ORDER BY team,digest LIMIT ?", tx.now(ctx).Add(-limits.BlobGCGrace).UnixNano(), limit)
 		return err
 	})
@@ -180,7 +165,7 @@ func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLea
 	}
 	var removed int64
 	for _, c := range candidates {
-		deleted, err := o.collectBlob(ctx, lease, blob.Blob{Team: c.team, Digest: blob.Digest(c.key)}, deleter)
+		deleted, err := o.collectBlob(ctx, blob.Blob{Team: c.team, Digest: blob.Digest(c.key)}, deleter)
 		if err != nil {
 			return removed, err
 		}
@@ -192,13 +177,13 @@ func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLea
 }
 
 // safety: collecting_at refuses publication until deletion finishes, but the final
-// lease/tombstone check cannot fence a process paused inside a backend delete.
-func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob.Blob, deleter BlobDeleter) (bool, error) {
+// tombstone check cannot fence a process paused inside a backend delete.
+func (o *Operator) collectBlob(ctx context.Context, b blob.Blob, deleter BlobDeleter) (bool, error) {
 	var claimed bool
 	var collectingAt int64
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		claimed = false
-		if err := lockCollectedBlobTx(ctx, tx, lease, b); err != nil {
+		if err := lockCollectedBlobTx(ctx, tx, b); err != nil {
 			return err
 		}
 		var marked, created int64
@@ -234,7 +219,7 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 		return false, err
 	}
 	err = o.s.inTx(ctx, func(tx *storeTx) (err error) {
-		claimed, err = blobCollectionCurrentTx(ctx, tx, lease, b, collectingAt)
+		claimed, err = blobCollectionCurrentTx(ctx, tx, b, collectingAt)
 		return err
 	})
 	if err != nil || !claimed {
@@ -245,7 +230,7 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 	}
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
 		claimed = false
-		current, err := blobCollectionCurrentTx(ctx, tx, lease, b, collectingAt)
+		current, err := blobCollectionCurrentTx(ctx, tx, b, collectingAt)
 		if err != nil || !current {
 			return err
 		}
@@ -265,8 +250,8 @@ func (o *Operator) collectBlob(ctx context.Context, lease SingletonLease, b blob
 	return claimed && err == nil, err
 }
 
-func blobCollectionCurrentTx(ctx context.Context, tx *storeTx, lease SingletonLease, b blob.Blob, collectingAt int64) (bool, error) {
-	if err := lockCollectedBlobTx(ctx, tx, lease, b); err != nil {
+func blobCollectionCurrentTx(ctx context.Context, tx *storeTx, b blob.Blob, collectingAt int64) (bool, error) {
+	if err := lockCollectedBlobTx(ctx, tx, b); err != nil {
 		return false, err
 	}
 	var current int
@@ -274,15 +259,8 @@ func blobCollectionCurrentTx(ctx context.Context, tx *storeTx, lease SingletonLe
 	return current == 1, err
 }
 
-func lockCollectedBlobTx(ctx context.Context, tx *storeTx, lease SingletonLease, b blob.Blob) error {
-	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-		return err
-	}
-	if err := advisoryLockTx(ctx, tx, "blob:"+b.Team+":"+string(b.Digest)); err != nil {
-		return err
-	}
-
-	return assertSingletonLeaseTx(ctx, tx, lease, "maintenance")
+func lockCollectedBlobTx(ctx context.Context, tx *storeTx, b blob.Blob) error {
+	return advisoryLockTx(ctx, tx, "blob:"+b.Team+":"+string(b.Digest))
 }
 
 // safety: callers hold the digest's blob lock, which orders this check against collection.

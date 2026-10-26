@@ -24,15 +24,15 @@ import (
 )
 
 type stateFixture struct {
-	reconcile func(context.Context, store.SingletonLease) (wingd.LocalActivity, error)
+	reconcile func(context.Context) (wingd.LocalActivity, error)
 	watch     func(context.Context, func(wingd.LocalActivity) error) error
 }
 
 func (*stateFixture) Ready() error { return nil }
 
-func (s *stateFixture) Reconcile(ctx context.Context, lease store.SingletonLease) (wingd.LocalActivity, error) {
+func (s *stateFixture) Reconcile(ctx context.Context) (wingd.LocalActivity, error) {
 	if s.reconcile != nil {
-		return s.reconcile(ctx, lease)
+		return s.reconcile(ctx)
 	}
 	return wingd.LocalActivity{}, nil
 }
@@ -118,10 +118,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 		seedOwner(t, b, "unstarted", false)
 		seedOwner(t, b, "started", true)
 		services := serviceFixture(b)
-		services.State.(*stateFixture).reconcile = func(ctx context.Context, lease store.SingletonLease) (wingd.LocalActivity, error) {
-			if lease.Name != "controller.reaper" || lease.Generation < 1 {
-				return wingd.LocalActivity{}, errors.New("projection did not receive the elected fence")
-			}
+		services.State.(*stateFixture).reconcile = func(ctx context.Context) (wingd.LocalActivity, error) {
 			started, err := b.Tenant.ReadRun(ctx, "started")
 			if err != nil || started.State != runstate.RunFailed || started.FinishedAt == nil {
 				return wingd.LocalActivity{}, fmt.Errorf("started orphan was not recovered: %+v: %w", started, err)
@@ -336,34 +333,6 @@ func TestCompositionJoinsQueueAndActivityBeforeStoreClose(t *testing.T) {
 		}
 		if closeCount.Load() != 1 {
 			t.Fatal("shared services closed more than once")
-		}
-	})
-}
-
-func FuzzLocalReconciliationKeepsFence(f *testing.F) {
-	f.Add(true, uint8(0))
-	f.Add(false, uint8(7))
-	f.Fuzz(func(t *testing.T, expire bool, replacement uint8) {
-		var queued atomic.Bool
-		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
-			services := serviceFixture(b)
-			services.Runner.Bearer = func(context.Context) (string, error) { queued.Store(true); return "", errors.New("unexpected claim") }
-			services.State.(*stateFixture).reconcile = func(ctx context.Context, _ store.SingletonLease) (wingd.LocalActivity, error) {
-				var err error
-				if expire {
-					_, err = stateSQL(t, b).ExecContext(ctx, `UPDATE leases SET until=1 WHERE name='controller.reaper'`)
-				} else {
-					_, err = stateSQL(t, b).ExecContext(ctx, `UPDATE leases SET holder='replacement',generation=generation+? WHERE name='controller.reaper'`, int64(replacement)+1)
-				}
-				return wingd.LocalActivity{}, err
-			}
-			return services, nil
-		})
-		if _, err := c.Reconcile(t.Context()); !errors.Is(err, store.ErrLockHeld) {
-			t.Fatalf("startup accepted a lost reaper fence: %v", err)
-		}
-		if err := c.Run(t.Context(), func(wingd.LocalActivity) error { return nil }); err == nil || queued.Load() {
-			t.Fatalf("queue started after reconciliation lost its fence: %v", err)
 		}
 	})
 }

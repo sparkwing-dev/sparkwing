@@ -125,15 +125,11 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor runstate.A
 	now = tx.now(ctx)
 	var expiry time.Time
 	if actor.Owner.Kind == runstate.OwnerController {
-		var until int64
-		if err = tx.QueryRowContext(ctx, `SELECT until FROM leases WHERE name=?`, actor.Owner.Name).Scan(&until); err != nil {
-			return err
-		}
 		drain, drainErr := cancelDrainTx(ctx, tx, t.team, string(runID), "")
 		if drainErr != nil {
 			return drainErr
 		}
-		expiry, err = leaseBound(now, append(funded, drain, time.Unix(0, until).UTC())...)
+		expiry, err = leaseBound(now, append(funded, drain, now.Add(controllerOwnedHorizon))...)
 	} else {
 		expiry, err = leaseBoundTx(ctx, tx, actor.CapabilityPrefix, now, funded...)
 	}

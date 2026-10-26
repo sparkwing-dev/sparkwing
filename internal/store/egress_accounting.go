@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// EgressUsage reports summed replica bytes for one team and UTC day or month.
+// EgressUsage reports one team's egress bytes for a UTC day or month.
 type EgressUsage struct {
 	Team      Team
 	Period    string
@@ -29,7 +29,7 @@ func egressPeriod(period string) (string, string, error) {
 	return period, at.AddDate(0, 0, 1).Format(layout), nil
 }
 
-// EgressUsage sums this team's replicas for a UTC day or month.
+// EgressUsage sums this team's daily egress over a UTC day or month.
 func (t *Tenant) EgressUsage(ctx context.Context, period string) (EgressUsage, error) {
 	start, end, err := egressPeriod(period)
 	if err != nil {
@@ -76,12 +76,9 @@ func (o *Operator) EgressUsageAcrossTeams(ctx context.Context, period string) (_
 const egressUsageRetentionMonths = 13
 
 // PruneEgressUsage expires old reports under the maintenance fence and store clock.
-func (o *Operator) PruneEgressUsage(ctx context.Context, lease SingletonLease) (int64, error) {
+func (o *Operator) PruneEgressUsage(ctx context.Context) (int64, error) {
 	var removed int64
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return err
-		}
 		now := tx.now(ctx).UTC()
 		cutoff := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -egressUsageRetentionMonths, 0).Format("2006-01")
 		result, err := tx.execContext(ctx, "DELETE FROM egress_usage WHERE period<?", cutoff)

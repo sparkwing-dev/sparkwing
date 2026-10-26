@@ -64,14 +64,10 @@ func TestCompletedOwnerLogMaintenanceWaitsForFinalTail(t *testing.T) {
 				table, filter = "eval_units", "run_id='run'"
 			}
 			rewriteSchemaExec(t, s.db, "UPDATE "+table+" SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',claimed_at=NULL,lease_expires_at=NULL WHERE "+filter, finished.UnixNano())
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "tail", time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if n, err := s.AsOperator().SealAbandonedLogStreams(t.Context(), lease, 10); err != nil || n != 0 {
+			if n, err := s.AsOperator().SealAbandonedLogStreams(t.Context(), 10); err != nil || n != 0 {
 				t.Fatalf("sealed before tail grace: %d %v", n, err)
 			}
-			err = s.inTx(t.Context(), func(tx *storeTx) error {
+			err := s.inTx(t.Context(), func(tx *storeTx) error {
 				p, err := resolveActorTx(t.Context(), tx, commit.Actor)
 				if err != nil {
 					return err
@@ -92,7 +88,7 @@ func TestCompletedOwnerLogMaintenanceWaitsForFinalTail(t *testing.T) {
 				t.Fatal(err)
 			}
 			s.clock = func() time.Time { return finished.Add(limits.LogSealGrace) }
-			if n, err := s.AsOperator().SealAbandonedLogStreams(t.Context(), lease, 10); err != nil || n != 1 {
+			if n, err := s.AsOperator().SealAbandonedLogStreams(t.Context(), 10); err != nil || n != 1 {
 				t.Fatalf("abandoned tail not sealed: %d %v", n, err)
 			}
 		})

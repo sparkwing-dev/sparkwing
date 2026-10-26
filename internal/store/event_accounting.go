@@ -23,7 +23,7 @@ func admitEventStorageTx(ctx context.Context, tx *storeTx, team Team, size int64
 	return refuseStorageGrowthOnEmptyBalanceTx(ctx, tx, team, size)
 }
 
-func chargeEventStorageTx(ctx context.Context, tx *storeTx, team Team, replica, run string, size int64) error {
+func chargeEventStorageTx(ctx context.Context, tx *storeTx, team Team, run string, size int64) error {
 	policy, err := storageQuotaForTeamTx(ctx, tx, team)
 	if err != nil {
 		return err
@@ -40,14 +40,11 @@ func chargeEventStorageTx(ctx context.Context, tx *storeTx, team Team, replica, 
 			period = chargedPeriod
 		}
 	}
-	return recordStorageUsageTx(ctx, tx, team, run, replica, period, size, 0)
+	return recordStorageUsageTx(ctx, tx, team, run, period, size, 0)
 }
 
-// AppendEventCharged commits an event and its tenant usage under the controller's trusted replica identity.
-func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID, kind string, payload []byte) (int64, error) {
-	if replica == "" {
-		return 0, ErrInvalidInput
-	}
+// AppendEventCharged commits an event and its tenant usage together.
+func (t *Tenant) AppendEventCharged(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error) {
 	if err := validateEventKind(kind); err != nil {
 		return 0, err
 	}
@@ -62,7 +59,7 @@ func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID,
 		if err := admitEventStorageTx(ctx, tx, t.team, size); err != nil {
 			return 0, err
 		}
-		if err := chargeEventStorageTx(ctx, tx, t.team, replica, runID, size); err != nil {
+		if err := chargeEventStorageTx(ctx, tx, t.team, runID, size); err != nil {
 			return 0, err
 		}
 		return appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now(ctx))

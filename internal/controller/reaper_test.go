@@ -41,9 +41,7 @@ func TestReaperRecoversExpiredOwnerAndKeepsLiveOwner(t *testing.T) {
 			}
 			srv := New(st, slog.New(slog.DiscardHandler))
 			for range 2 {
-				if !srv.reapLeased(ctx) {
-					t.Fatal("controller could not acquire its reaper fence")
-				}
+				srv.reap(ctx)
 			}
 			tenant, err := st.ForTeam(ctx, store.DefaultTeam)
 			if err != nil {

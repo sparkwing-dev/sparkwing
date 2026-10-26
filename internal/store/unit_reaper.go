@@ -13,15 +13,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-// ReapUnits recovers expired work under the elected reaper fence.
-func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error) {
+// ReapUnits recovers expired work.
+func (o *Operator) ReapUnits(ctx context.Context, limit int) ([]ReapedUnit, error) {
 	if limit <= 0 {
 		return nil, errors.New("reaper limit must be positive")
-	}
-	if err := o.s.inTx(ctx, func(tx *storeTx) error {
-		return assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper")
-	}); err != nil {
-		return nil, err
 	}
 	targets, err := o.expiredUnits(ctx, limit)
 	if err != nil {
@@ -33,14 +28,7 @@ func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit in
 		var result *ReapedUnit
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
 			now := tx.now(ctx)
-			var holder string
-			if err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder); err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
-			if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
-				return err
-			}
-			actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
+			actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController}}
 			var err error
 			if target.kind == capability.UnitNode {
 				result, err = reapNodeUnitTx(ctx, tx, target, actor, now)

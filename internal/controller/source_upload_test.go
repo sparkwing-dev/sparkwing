@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -229,11 +228,7 @@ func TestSourceSnapshotRevokedBeforeCommitExpiresPhysicalStaging(t *testing.T) {
 	}
 	engineSQL(t, s.store, "UPDATE source_uploads SET expires_at=1 WHERE id=?", id)
 	engineSQL(t, s.store, "UPDATE quota_reservations SET expires_at=1 WHERE id=?", "upload:"+id)
-	lease, err := s.store.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "source-expiry", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.maintainDataObjects(t.Context(), lease); err != nil {
+	if err := s.maintainDataObjects(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(stage); !os.IsNotExist(err) {

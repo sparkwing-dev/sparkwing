@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).ClaimFailedRefundNotices":       "the billing pass finds every team's failed queued refunds once and marks each announced by its own team key",
 	"(*Operator).setPaymentModeTx":               "startup cutover checks all teams for open test work and restarts every storage watermark before serving",
 	"(*Operator).claimObserversTx":               "claim placement discovers live claimant observations across teams, then checks every pair against authenticated scope",
 	"(*Operator).claimOverflowAccountsTx":        "deployment claims gather each live team's overflow policy before the shared eligibility predicate filters pairs",
@@ -39,24 +40,24 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).getLatestRun":              "the operator locates the latest pipeline run across tenants",
 	"(*Operator).ComputeUsage":              "deployment capacity sums metered awards from every tenant",
 	"(*Operator).ListWaitingNodes":          "deployment attention samples every tenant queue before updating individual tenant nodes",
-	"(*Operator).MarkBlobTombstones":        "leased garbage collection compares every tenant blob with the complete live reference graph",
-	"(*Operator).SealAbandonedLogStreams":   "leased log maintenance discovers abandoned streams across every tenant",
+	"(*Operator).MarkBlobTombstones":        "garbage collection compares every tenant blob with the complete live reference graph",
+	"(*Operator).SealAbandonedLogStreams":   "log maintenance discovers abandoned streams across every tenant",
 	"(*Operator).dueRunEffects":             "the completion worker discovers due effects across tenants before dispatching each tenant run",
-	"(*Operator).expiredUnits":              "the leased reaper discovers expired execution units across tenants before expiring each exact unit",
+	"(*Operator).expiredUnits":              "the reaper discovers expired execution units across tenants before expiring each exact unit",
 	"(*Operator).launcherKeysTx":            "launcher observations name global unit identities whose stored fence and capability ancestry prove ownership before any award is returned",
 	"(*Operator).launcherPrefixesTx":        "launcher reconciliation discovers every tenant award before validating each exact award",
-	"(*Operator).lockMaintenanceCapacityTx": "the leased concurrency pass locks capacity entries across tenants before maintaining each tenant key",
+	"(*Operator).lockMaintenanceCapacityTx": "the concurrency pass locks capacity entries across tenants before maintaining each tenant key",
 	"(*Operator).retainedStorageTeams":      "storage billing discovers every live tenant holding retained records or blobs",
-	"(*Operator).deleteRetentionRunsTx":     "leased retention discovers finished runs across tenants before deleting exact tenant run keys",
-	"(*Operator).deleteRetentionEffectsTx":  "leased retention discovers settled effects across tenants before deleting exact tenant effect keys",
+	"(*Operator).deleteRetentionRunsTx":     "retention discovers finished runs across tenants before deleting exact tenant run keys",
+	"(*Operator).deleteRetentionEffectsTx":  "retention discovers settled effects across tenants before deleting exact tenant effect keys",
 	"(*Operator).SearchTeams":               "the operator console searches every tenant and its owners by deployment search text",
 	"(*Operator).nodeRunActiveSQL":          "the shared predicate correlates a node with its own run; its enclosing statement supplies the tenant scope",
 	"(*Operator).paidGrantForPaymentTx":     "a verified provider payment identity resolves its paid grant before its tenant is known",
 	"(*Operator).accountHasOtherTeamTx":     "an account must retain another membership when deleting its current tenant; account identity spans tenants",
 
-	"(*Operator).abandonExpiredBlobUploads": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
-	"(*Operator).ExpireSourceUploads":       "leased maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
-	"(*Operator).DeleteExpiredBlobStaging":  "leased maintenance selects settled blob tickets across teams, then marks each exact tenant ticket after its staging delete",
+	"(*Operator).abandonExpiredBlobUploads": "maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
+	"(*Operator).ExpireSourceUploads":       "maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
+	"(*Operator).DeleteExpiredBlobStaging":  "maintenance selects settled blob tickets across teams, then marks each exact tenant ticket after its staging delete",
 	"(*Operator).EnsureBootstrapCapability": "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
 	"(*Operator).launcherAwardPrefixTx":     "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
@@ -122,7 +123,7 @@ var reviewedUnscopedSQL = map[string]string{
 		"so the installation's binding is how either finds the team it belongs to",
 	"(*Operator).FreeSlots":              "the free tier is bounded by how many teams hold a slot, so it counts every team's",
 	"(*Operator).freeSlotOpenTx":         "a reservation asks whether any slot is left, so it counts every team's",
-	"(*Operator).releaseIdleFreeSlotsTx": "leased retention inspects every team's slot and releases only its exact team after thirty empty days without bytes or runs",
+	"(*Operator).releaseIdleFreeSlotsTx": "retention inspects every team's slot and releases only its exact team after thirty empty days without bytes or runs",
 	"(*Operator).disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
 

@@ -15,7 +15,7 @@ import (
 func TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite(t *testing.T) {
 	for _, decision := range []string{"approved", "denied"} {
 		t.Run(decision, func(t *testing.T) {
-			tenant, ref, _, _, change := approvalReaperFixture(t, "fail")
+			tenant, ref, _, change := approvalReaperFixture(t, "fail")
 			before, err := tenant.GetApproval(t.Context(), string(ref.RunID), string(ref.NodeID))
 			if err != nil || before.ResolvedAt != nil {
 				t.Fatalf("pending gate: %+v, %v", before, err)

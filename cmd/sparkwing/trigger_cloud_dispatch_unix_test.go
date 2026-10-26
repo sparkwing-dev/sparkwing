@@ -146,9 +146,6 @@ func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
 	if cloudDispatchRequest(t, f, created.RunID).Request.Dispatch != runspec.DispatchController || created.HereBearer != "" {
 		t.Fatalf("Cloud intake sealed dispatch=%s here=%v", cloudDispatchRequest(t, f, created.RunID).Request.Dispatch, created.HereBearer != "")
 	}
-	if _, err := f.state.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "cloud-dispatch-test", time.Hour); err != nil {
-		t.Fatal(err)
-	}
 	cloud := newCloudDispatchLauncher(t, f)
 	planned := cloud.launch(t, capability.UnitPlan, "")
 	engineID := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, ManifestDigest: strings.Repeat("b", 64)}

@@ -276,8 +276,8 @@ func TestAppAdmissionOIDCUsesSealedEventAfterReplayExpiry(t *testing.T) {
 	}
 }
 
-func TestAppAdmissionFencesDeliveryLeaseAndOriginalTeam(t *testing.T) {
-	for _, state := range []string{"current", "moved", "expired"} {
+func TestAppAdmissionFencesDeliveryAndOriginalTeam(t *testing.T) {
+	for _, state := range []string{"current", "moved"} {
 		t.Run(state, func(t *testing.T) {
 			s, tenant, in := appAdmissionFixture(t, true, "fixture")
 			defer s.Close()
@@ -308,8 +308,6 @@ func TestAppAdmissionFencesDeliveryLeaseAndOriginalTeam(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at,runner) VALUES ('b','gh:701',701,?,7,?,?,?)`, grant.Repository, grant.EnabledBy, grant.EnabledAt.UnixNano(), grant.Runner)
 				in.Installation.Team, in.Request.Team = "b", "b"
 				tenant = &Tenant{s: s, team: "b"}
-			case "expired":
-				s.clock = func() time.Time { return now.Add(3 * time.Minute) }
 			}
 			remote := in.Request.Source.Location.RemoteURL
 			schedule := CronSchedule{Team: tenant.team, RepoPath: remote, Pipeline: "ci", Name: "nightly", Cron: "0 0 * * *", TZ: "UTC", Overlap: CronOverlapSkip, Where: CronWhereController, GitBranch: "main", GitHubInstallationID: 7, GitHubRepositoryID: 701}

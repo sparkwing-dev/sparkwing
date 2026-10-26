@@ -34,7 +34,7 @@ func TestRestoreHoldsSchedulesUntilAcknowledgement(t *testing.T) {
 		t.Fatal(err)
 	}
 	op := s.AsOperator()
-	if ran, err := op.RunCronTickLeased(ctx, "restored", time.Minute, func(context.Context) error {
+	if ran, err := op.RunCronTick(ctx, func(context.Context) error {
 		t.Fatal("a held deployment ticked")
 		return nil
 	}); ran || !errors.Is(err, ErrRestorePending) {

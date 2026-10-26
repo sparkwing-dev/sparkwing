@@ -18,36 +18,29 @@ func (s *Server) WithDataObjects(objects blob.ObjectBackend) *Server {
 	return s
 }
 
-func (s *Server) maintainDataObjects(ctx context.Context, lease store.SingletonLease) error {
+func (s *Server) maintainDataObjects(ctx context.Context) error {
 	if s.dataController == nil || s.dataController.Objects == nil {
 		return nil
 	}
 	operator := s.operator
-	lease, err := operator.RenewSingletonLease(ctx, lease, StorageMaintenanceInterval)
-	if err != nil {
-		return err
-	}
-	if err := operator.ExpireSourceUploads(ctx, lease, 5000, s.dataController.Objects); err != nil {
+	if err := operator.ExpireSourceUploads(ctx, 5000, s.dataController.Objects); err != nil {
 		return fmt.Errorf("expire source uploads: %w", err)
 	}
-	marked, err := operator.MarkBlobTombstones(ctx, lease, 5000)
+	marked, err := operator.MarkBlobTombstones(ctx, 5000)
 	if err != nil {
 		return fmt.Errorf("mark blob tombstones: %w", err)
 	}
-	removed, err := operator.CollectBlobTombstones(ctx, lease, 5000, s.dataController.Objects)
+	removed, err := operator.CollectBlobTombstones(ctx, 5000, s.dataController.Objects)
 	if err != nil {
 		return fmt.Errorf("collect blob tombstones: %w", err)
 	}
-	if err := operator.DeleteExpiredBlobStaging(ctx, lease, 5000, s.dataController.Objects); err != nil {
+	if err := operator.DeleteExpiredBlobStaging(ctx, 5000, s.dataController.Objects); err != nil {
 		return fmt.Errorf("delete expired blob staging: %w", err)
 	}
 	if marked > 0 || removed > 0 {
 		s.logger.Info("collected unreachable data", "marked", marked, "removed", removed)
 	}
 	if objects, ok := s.dataController.Objects.(*blob.Filesystem); ok {
-		if _, err := operator.RenewSingletonLease(ctx, lease, StorageMaintenanceInterval); err != nil {
-			return err
-		}
 		if _, err := objects.ExpireLogs(ctx); err != nil {
 			return fmt.Errorf("expire filesystem logs: %w", err)
 		}

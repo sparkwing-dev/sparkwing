@@ -92,9 +92,6 @@ func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing
 	if cloudDispatchRequest(t, f, created.RunID).Request.Dispatch != runspec.DispatchController {
 		t.Fatalf("unselected Cloud trigger sealed dispatch=%s", cloudDispatchRequest(t, f, created.RunID).Request.Dispatch)
 	}
-	if _, err := f.state.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "run-anywhere-test", time.Hour); err != nil {
-		t.Fatal(err)
-	}
 	cloud := newCloudDispatchLauncher(t, f)
 	if launched, err := cloud.runtime.LaunchOne(t.Context()); err != nil || launched {
 		t.Fatalf("launcher took the plan while a better-ranked runner was live: %v %v", launched, err)

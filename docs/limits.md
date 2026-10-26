@@ -94,24 +94,39 @@ Storage usage comes from committed blob rows and tagged log-stream records.
 `GET /api/v1/storage` reports retained event, blob and tagged-log bytes plus
 live blob-upload holds. Historical usage counters and bucket listings do not
 replace those authoritative counts. Exact ticket replay never charges twice.
-Deployment reports sum usage by tenant, period and replica.
+Deployment reports sum usage by tenant and period.
 
-Leased retention releases a free-tier slot after thirty consecutive days with
+Retention releases a free-tier slot after thirty consecutive days with
 no runs or stored bytes. New run or storage activity restarts that clock.
 Expired staging uploads still count until garbage collection removes them.
 A team that stores data again competes for an available free slot.
 
-The controller's leased maintenance pass expires records, marks unreachable
+The controller's maintenance pass expires records, marks unreachable
 blobs and collects tombstones after the 24-hour grace period. New references
 preserve their bytes. Physical deletion failures retain the tombstone for retry.
 S3 uses log lifecycle rules. A filesystem backend expires classed objects during
-leased maintenance. The former bucket-reconciliation pass, free-log-share pruner
+maintenance. The former bucket-reconciliation pass, free-log-share pruner
 and `storage_pass` health field are removed.
 
 The controller authorizes `/api/v1/data/upload` and reserves quota before signing
 a PUT. `/api/v1/data/commit` verifies physical bytes and rechecks authority before
 committing existence, receipts and accounting. Aborted or expired reservations
 release pending capacity. A raw digest never grants read or attachment rights.
+
+Sparkwing Cloud applies a storage tier to every team without an explicit quota.
+A team that has bought credits at least once gets the paid tier; any other team
+gets the free tier. The deployment's default tier and a per-team quota set by
+the operator take precedence over both.
+
+| Tier | Per run | Per month | Objects per run |
+| --- | --- | --- | --- |
+| Free | 10 MiB | 1 GiB | 1,000 |
+| Paid | 1 GiB | 100 GiB | 100,000 |
+
+For comparison, GitHub Actions caches 10 GB per repository by default, and GitLab
+gives free namespaces 10 GiB of storage. A write past a limit is refused with the
+limit it hit and "contact support to raise this limit". Self-hosted deployments
+apply no tier unless the operator sets a default tier or a team quota.
 
 Quotas count the team's unique stored bytes. Repeated authorized references do
 not multiply that byte count. A team's copy has its own accounting. Financial
@@ -132,8 +147,7 @@ See [data uploads](data-uploads.md) and [caching](caching.md).
 
 ## What prunes automatically
 
-An elected controller holds a maintenance lease and deletes eligible records in
-bounded batches. Run retention preserves each pipeline's newest successful run
+The store's one active controller deletes eligible records in bounded batches. Run retention preserves each pipeline's newest successful run
 and output. Metric retention has its own window. Log retention classes expire
 independently of run and output pins. Unreachable blobs pass a tombstone grace
 before collection.

@@ -178,4 +178,3 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 		})
 	}
 }
-

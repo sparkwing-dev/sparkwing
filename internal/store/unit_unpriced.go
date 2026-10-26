@@ -17,9 +17,6 @@ func (o *Operator) failUnpricedClaim(ctx context.Context, demand UnitDemand, ref
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		tx.unpricedDemand = &demand
-		if err := lockClaimControllerTx(ctx, tx); err != nil {
-			return err
-		}
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}}); err != nil {
 			return err
 		}

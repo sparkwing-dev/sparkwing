@@ -78,7 +78,7 @@ func TestOwnerBindingsCannotReplaceOwnerFenceProperty(t *testing.T) {
 			valid := false
 			bind := func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error) {
 				return hereHostSession{
-					input: nodehost.RunInput{Owner: runstate.Actor{Kind: runstate.ActorController, Authority: authority, CapabilityPrefix: authority.ID, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: "foreign-unit", EvalFence: runspec.EvalFence{RunID: "foreign-run", Holder: "foreign-holder", Generation: -1}}}},
+					input: nodehost.RunInput{Owner: runstate.Actor{Kind: runstate.ActorController, Authority: authority, CapabilityPrefix: authority.ID, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, EvalFence: runspec.EvalFence{RunID: "foreign-run", Holder: "foreign-holder", Generation: -1}}}},
 					close: func() error { return nil },
 					host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 						valid = input.Owner.Kind == runstate.ActorRunHost && input.Owner.Owner == want && input.Owner.Authority == authority && input.Owner.CapabilityPrefix == authority.ID

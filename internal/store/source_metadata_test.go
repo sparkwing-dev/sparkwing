@@ -62,7 +62,7 @@ func FuzzSourceMetadataCannotEscapeItsLease(f *testing.F) {
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET status='failed',finished_at=1 WHERE team='a' AND id='run'`)
 		case 8:
 			if evaluation {
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET generation=5`)
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE eval_units SET claimed_by='other'`)
 			} else {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET claimed_by='other'`)
 			}
@@ -77,7 +77,7 @@ func FuzzSourceMetadataCannotEscapeItsLease(f *testing.F) {
 }
 
 func TestEvalMetadataKeepsSourceGenerationAndIndependentLease(t *testing.T) {
-	for _, problem := range []string{"", "source", "eval lease", "controller lease", "foreign job"} {
+	for _, problem := range []string{"", "source", "eval lease", "foreign job"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, now, request := expansionFixture(t)
 			request = sourceMetadataEval(t, tenant, now, request)
@@ -86,8 +86,6 @@ func TestEvalMetadataKeepsSourceGenerationAndIndependentLease(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET generation=3 WHERE run_id='run'`)
 			case "eval lease":
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE eval_units SET generation=9`)
-			case "controller lease":
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET generation=5`)
 			case "foreign job":
 				request.Source.NodeID += "foreign"
 			}
@@ -119,7 +117,6 @@ func sourceMetadataEval(t *testing.T, tenant *Tenant, now *time.Time, request Ex
 	request.Actor.Authority.ID, request.Actor.CapabilityPrefix = eval.Prefix, eval.Prefix
 	request.Actor.Owner = runstate.OwnerLeaseRef{Kind: runstate.OwnerEval, EvalFence: runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: "eval-host", Generation: 8}}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Minute).UnixNano())
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,claimed_at,started_at) VALUES ('a','run','job',2,'running',8,'eval-host','eval-report',?,4,1,1)`, now.Add(time.Minute).UnixNano())
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,claimed_at,started_at) VALUES ('a','run','job',2,'running',8,'eval-host','eval-report',?,1,1)`, now.Add(time.Minute).UnixNano())
 	return request
 }

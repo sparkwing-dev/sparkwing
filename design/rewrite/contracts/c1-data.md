@@ -150,10 +150,10 @@ financial grant changes. C2 records the route and full issuance boundary.
 
 ## Shared lease fences and sealed credential writes
 
-Ordinary claim, renewal, release, reaper, secret, source and metric transactions
-share the controller-owner fence with PostgreSQL `FOR KEY SHARE`. Acquiring,
-renewing and releasing singleton leases take `FOR UPDATE`. Lease checks read
-database time after lock waits. A database clock read failure refuses commit.
+Decision 29 leaves one active controller per store, so claim, renewal, release,
+reaper, secret, source and metric transactions take no controller fence; the
+singleton `leases` table is removed. Claim lease checks read database time after
+lock waits. A database clock read failure refuses commit.
 Reaping commits each target independently, continues after a target fails, and
 returns committed recoveries alongside the joined errors. Run admission refuses
 commit unless exactly one tenant run-number counter advances.
@@ -324,12 +324,10 @@ sample limit. Conflicting readings and overflowing usage totals leave stored
 values unchanged. The controller selects the concrete tenant writer by default.
 Its optional test resolver can still supply a fake.
 
-`Operator.RunCronTickLeased` replaces the Store method and uses the declared
-`schedules.tick` singleton lease. The existing tick window uses the store clock.
-The last successful tick is a nanosecond timestamp in `settings`. Success is
-stamped only while the captured lease is live. `Operator.ReleaseSingletonLease`
-checks the exact name, holder and generation, so a stale callback cannot release
-a replacement. Failure, cancellation and panic release the captured lease.
+`Operator.RunCronTick` replaces the Store method. The tick window uses the store
+clock. The last successful tick is a nanosecond timestamp in `settings`, stamped
+only after the tick succeeds, so a window never ticks twice and a failed,
+cancelled or panicking tick is retried by the next offer.
 
 The unused claim-liveness SQL helpers and token scope decoder are removed.
 
@@ -1754,10 +1752,8 @@ failed index reads and unknown releases return errors. The engine index/evaluati
 and wire calendar helper remain their owners' runtime integrations.
 
 The controller calls `Operator.ReconcileControllerRuns` on startup and each
-maintenance tick under `controller.owner`. It pages across all teams and renews
-the exact fence between full pages. Election, renewal or reconciliation failure
-stops the pass. Every Server has a random instance lease identity, separate from
-the hostname displayed in schedule history. Another process on the same machine
+maintenance tick. It pages across all teams. A reconciliation failure stops the
+pass. The hostname is displayed in schedule history. Another process on the same machine
 cannot reuse that holder's live fence.
 
 Final run pruning uses `Operator.MaintainRetention`. The unleased
@@ -1858,8 +1854,7 @@ and AbortBlobUpload using the existing uploads table. Reservation binds tenant,
 uploader, digest, size, expiry, provenance and ref facts before signing. The
 physical backend verifies size/digest before W1 commits existence and the exact
 receipt with quota settlement. Commit repeats live authority and fence checks.
-`VerifiedUploadCommit.ReplicaID` is trusted controller configuration, never a
-client-selected field. The ticket ID also binds the persisted quota reservation.
+The ticket ID also binds the persisted quota reservation.
 It is one ASCII letter/digit/underscore/hyphen path segment selected by the
 trusted adapter within its tenant/principal idempotency scope.
 Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
@@ -2133,7 +2128,7 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
     separately in `NodeRow.Execution` and `nodes.execution_json`. Hosts execute
     those winners and compare declarative hashes only for reconstruction.
 12. Owner loss preserves remote work in the same run. Controller-owned runs
-    use `controller.owner` after plan acceptance. Local started orphans fail.
+    use the controller as owner after plan acceptance. Local started orphans fail.
     Controller ownership lapse does not fail its runs; the next elected replica
     resumes them, subject to their existing limits.
 13. A concurrency holder's own lease proves continuously counted capacity.
@@ -2239,12 +2234,12 @@ same transaction. It advances the run state sequence without changing its
 pending or running status. Repeated sweeps cannot duplicate that event.
 
 `Operator.ReconcileControllerRuns` resumes accepted controller-owned runs
-under the exact live `controller.owner` lease. It visits a bounded page across
+It visits a bounded page across
 teams, ordered by global run ID. Callers pass the last visited ID to the next
 page and start the next sweep with an empty cursor. Each run settles in its
 own transaction. Errors return the committed prefix. The sweep renews only
-continuously live concurrency holders and waiters to the persisted owner
-lease expiry. It cannot revive expired capacity.
+continuously live concurrency holders and waiters, one minute ahead
+(`controllerOwnedHorizon`). It cannot revive expired capacity.
 
 Controller ownership begins at a positive `plan_accepted_generation`, after
 the current invocation's planner accepts its plan. A retry carries its source
@@ -2663,11 +2658,11 @@ Usage is recorded even when no quota is configured. Failed writes and overflow
 return no sequence and roll back every accounting row.
 
 `Tenant.ChargeDownload` replaces `Store.ChargeDownload`. `DownloadCharge`
-carries the controller's trusted `ReplicaID`, byte count, delivered-byte flag
+carries the byte count, delivered-byte flag
 and existing free/funded caps. It accepts no team or caller clock. The tenant
 handle supplies the team. Store time after the shared `download` quota lock
-selects the UTC day. Admission totals and additive `team_download_day` replica
-rows commit together. Unexpired download reservations consume shared capacity.
+selects the UTC day. Admission totals and the additive `team_download_day`
+row commit together. Unexpired download reservations consume shared capacity.
 Expiry releases their holds before another charge can use that capacity.
 Already delivered bytes remain countable after the cap, and the download that
 crosses the cap finishes. Zero-byte checks add no usage row. Midnight resets
@@ -3276,7 +3271,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `EffectPhase` | EffectPhase is ranked independently of the terminal outcome so a late pending write cannot regress it. |
 | `DesiredRunEffect` | DesiredRunEffect is a committed snapshot for delivery; Payload comes from the run, never an executor. |
 | `EffectDelivery` | EffectDelivery acknowledges only the revision actually sent, leaving a newer desired revision due. |
-| `Operator.DueRunEffects` | DueRunEffects reads revisions under the completion singleton lease; expiry stops further delivery acknowledgements. |
+| `Operator.DueRunEffects` | DueRunEffects reads the revisions due for delivery. |
 | `Tenant.AcknowledgeRunEffect` | AcknowledgeRunEffect advances delivered_rev only to the delivered revision, never to a newly observed desired_rev. |
 | `Tenant.RetryRunEffect` | RetryRunEffect records a failed delivery without overwriting a later desired state or its due work. |
 
@@ -3290,12 +3285,9 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 
 | Export | Purpose |
 |---|---|
-| `SingletonLease` | SingletonLease is fenced so a former replica cannot continue maintenance after another replica takes over. |
-| `Operator.AcquireSingletonLease` | AcquireSingletonLease refuses a live foreign holder and advances the fence after a lapse. |
-| `Operator.RenewSingletonLease` | RenewSingletonLease refuses an expired fence; owner recovery acquires a new lease instead of reviving one. |
 | `ReapedUnit` | ReapedUnit reports recovery in the same run; application retry budgets are never consumed by a lapse. |
 | `Operator.ReapUnits` | ReapUnits uses the store clock and cancellation precedence, settling billing and effects with each transition. |
-| `RetentionRequest` | RetentionRequest is executed only while the maintenance lease is live; settings are resolved inside the store. |
+| `RetentionRequest` | RetentionRequest bounds one retention pass; settings are resolved inside the store. |
 | `RetentionResult` | RetentionResult reports committed removals and preserved pins; financial rows must always remain untouched. |
 | `Operator.MaintainRetention` | MaintainRetention is the single deployment pass for run, metric, object and credential expiration. |
 | `UsageDelta` | UsageDelta is additive per replica; summed counters are reports and never admission locks. |
@@ -3761,7 +3753,7 @@ reasons. No remote credential reaches it.
 `source_uploads` is a tenant table. Its primary key is `(team,id)`; it stores
 `authority_kind`, `authority_id`, `repo_key`, `repo_display`, `execution_sha`,
 `pipeline_sha`, `digest`, `size`, `expires_at`, `committed_at`, `bound_run_id`,
-`period`, `replica_id` and `charged_objects`. `bound_run_id` references the
+`period` and `charged_objects`. `bound_run_id` references the
 retained run with cascading deletion. An expiry index selects
 tickets. Pending tickets are not blob receipts and create no synthetic run.
 
@@ -4542,3 +4534,17 @@ same sealed writer because that principal chose the code.
 Dependency terminal transitions require the outcome that `Decide(graph)` returns
 for that node in the committing transaction. An owner cannot bypass an approval
 by asserting that its dependencies require a skip.
+
+
+## Decision 29 leftovers removed, 2026-10-26
+
+Decision 67 deletes the multi-controller coordination decision 29 made redundant.
+The `leases` table, `SingletonLease` and its acquire/renew/release/assert helpers,
+the lease parameters on maintenance, reaping, completion and reconciliation calls,
+`eval_units.owner_lease_name`/`owner_generation`, the evaluation credential's
+controller-lease bound, the GitHub inbox's per-delivery `lease`/`lease_until`
+and every `replica_id` usage column are gone. The GitHub inbox has one sequential
+worker; a delivery still `processing` when the next claim starts was interrupted
+and fails for an administrator to process again (decision 41). Controller-owned
+runs renew capacity and owner deadlines one minute ahead each reconciliation pass.
+Team deletion keeps its own holder lease for now.

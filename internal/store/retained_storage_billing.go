@@ -11,13 +11,10 @@ import (
 // ChargeRetainedStorage bills unique committed blobs and persisted log bytes.
 // The maintenance fence and each team's watermarks commit with its ledger debit.
 // The initial sample starts billing without charging for earlier storage.
-func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLease) (StorageChargeSweep, error) {
+func (o *Operator) ChargeRetainedStorage(ctx context.Context) (StorageChargeSweep, error) {
 	var out StorageChargeSweep
 	var rate, free int64
 	if err := o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return err
-		}
 		var err error
 		if rate, err = creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0); err != nil {
 			return err
@@ -32,7 +29,7 @@ func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLea
 		return out, err
 	}
 	err = o.EachTeam(ctx, teams, func(t *Tenant) error {
-		charge, err := o.chargeRetainedTeam(ctx, lease, t.team, rate, free)
+		charge, err := o.chargeRetainedTeam(ctx, t.team, rate, free)
 		if err != nil {
 			return err
 		}
@@ -71,19 +68,13 @@ ORDER BY t.name`)
 	return teams, rows.Err()
 }
 
-func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease, team Team, rate, free int64) (*CreditCharge, error) {
+func (o *Operator) chargeRetainedTeam(ctx context.Context, team Team, rate, free int64) (*CreditCharge, error) {
 	return inTxResult(ctx, o.s, func(tx *storeTx) (*CreditCharge, error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return nil, err
-		}
 		charge, err := chargeRetainedTeamTx(ctx, tx, team, rate, free)
 		if err != nil {
 			return nil, err
 		}
 
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return nil, err
-		}
 		return charge, nil
 	})
 }

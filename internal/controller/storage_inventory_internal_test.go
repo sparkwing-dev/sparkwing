@@ -42,8 +42,8 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	for _, replica := range []string{"first", "second"} {
-		if err := tenant.AddUsage(t.Context(), store.UsageDelta{Period: store.StorageMonth(now), ReplicaID: replica, Counter: "storage_bytes", Amount: 7}); err != nil {
+	for range 2 {
+		if err := tenant.AddUsage(t.Context(), store.UsageDelta{Period: store.StorageMonth(now), Counter: "storage_bytes", Amount: 7}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -74,6 +74,6 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 	}
 	usage, err := tenant.StorageUsageFor(t.Context(), "", store.StorageMonth(now))
 	if err != nil || usage.MonthBytes != 14 {
-		t.Fatalf("replica usage overwritten: %+v, %v", usage, err)
+		t.Fatalf("recorded usage overwritten: %+v, %v", usage, err)
 	}
 }

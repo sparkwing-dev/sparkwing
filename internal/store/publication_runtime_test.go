@@ -50,10 +50,6 @@ func publicationFixtureWithDispatch(t *testing.T, dispatch runspec.Dispatch) (*T
 
 func TestPublicationUsesNoControllerExecution(t *testing.T) {
 	tenant, now, result := publicationFixtureWithDispatch(t, runspec.DispatchController)
-	lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "replica", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := tenant.TransitionNode(t.Context(), result); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +59,7 @@ func TestPublicationUsesNoControllerExecution(t *testing.T) {
 	}
 	rewriteSchemaCount(t, tenant.s.db, "triggers", 0)
 	rewriteSchemaCount(t, tenant.s.db, "eval_units", 0)
-	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(run.ID), To: runstate.RunSuccess, Cause: runstate.RunFinish, Actor: runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{RunID: runspec.RunID(run.ID), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}}); err == nil {
+	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: runspec.RunID(run.ID), To: runstate.RunSuccess, Cause: runstate.RunFinish, Actor: controllerActor(run.ID)}); err == nil {
 		t.Fatal("controller finished a published run")
 	}
 	*now = now.Add(time.Second)

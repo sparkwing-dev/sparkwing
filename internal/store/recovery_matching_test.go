@@ -23,7 +23,7 @@ func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET plan_json=?,plan_hash='plan',spec_json=?,spec_hash='spec',sealed_at=1 WHERE id='run'`, []byte(`{"jobs":[{"id":"job"}]}`), []byte(`{}`))
 				indexFixtureUnit(t, s, "a", UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE run_id='run'`, now.Add(-time.Nanosecond).UnixNano())
-				reaped, err := s.AsOperator().ReapUnits(t.Context(), SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}, 10)
+				reaped, err := s.AsOperator().ReapUnits(t.Context(), 10)
 				if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 					t.Fatalf("reap: %+v, %v", reaped, err)
 				}

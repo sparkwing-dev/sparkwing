@@ -22,13 +22,9 @@ func TestFreeSlotsReleaseAfterThirtyEmptyDays(t *testing.T) {
 	maintenanceRun(t, s, "busy", 1, runstate.RunSuccess)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET team='bbb' WHERE id='busy'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO blobs(team,digest,size,created_at) VALUES ('bbb','stored',3,?)`, now.UnixNano())
-	lease, err := op.AcquireSingletonLease(ctx, "maintenance", "free-slots", 90*24*time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
 	check := func(wantReleased, wantTaken int64) {
 		t.Helper()
-		result, err := op.MaintainRetention(ctx, RetentionRequest{Lease: lease, Limit: 100})
+		result, err := op.MaintainRetention(ctx, RetentionRequest{Limit: 100})
 		if err != nil || result.FreeSlotsReleased != wantReleased {
 			t.Fatalf("retention at %s: %+v %v", now.Format(time.RFC3339), result, err)
 		}
@@ -66,11 +62,7 @@ func TestFreeSlotIdleClockRestartsAfterTransientStoredBytes(t *testing.T) {
 	if err := s.GrantFreeSlot(ctx, "aaa"); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "maintenance", "free-slots", 90*24*time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AsOperator().MaintainRetention(ctx, RetentionRequest{Lease: lease, Limit: 100}); err != nil {
+	if _, err := s.AsOperator().MaintainRetention(ctx, RetentionRequest{Limit: 100}); err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(29 * 24 * time.Hour)
@@ -82,17 +74,17 @@ func TestFreeSlotIdleClockRestartsAfterTransientStoredBytes(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `DELETE FROM blobs WHERE team='aaa' AND digest='brief'`)
 	*now = now.Add(24 * time.Hour)
-	result, err := s.AsOperator().MaintainRetention(ctx, RetentionRequest{Lease: lease, Limit: 100})
+	result, err := s.AsOperator().MaintainRetention(ctx, RetentionRequest{Limit: 100})
 	if err != nil || result.FreeSlotsReleased != 0 {
 		t.Fatalf("transient bytes lost idle clock: %+v %v", result, err)
 	}
 	*now = now.Add(29 * 24 * time.Hour)
-	result, err = s.AsOperator().MaintainRetention(ctx, RetentionRequest{Lease: lease, Limit: 100})
+	result, err = s.AsOperator().MaintainRetention(ctx, RetentionRequest{Limit: 100})
 	if err != nil || result.FreeSlotsReleased != 0 {
 		t.Fatalf("released before thirty empty days: %+v %v", result, err)
 	}
 	*now = now.Add(24 * time.Hour)
-	result, err = s.AsOperator().MaintainRetention(ctx, RetentionRequest{Lease: lease, Limit: 100})
+	result, err = s.AsOperator().MaintainRetention(ctx, RetentionRequest{Limit: 100})
 	if err != nil || result.FreeSlotsReleased != 1 {
 		t.Fatalf("failed to release after thirty empty days: %+v %v", result, err)
 	}

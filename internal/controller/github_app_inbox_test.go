@@ -244,7 +244,6 @@ func TestGitHubInboxLifecycleCrashBeforeCompletionKeepsNewerState(t *testing.T) 
 		t.Fatalf("newer delivery: %+v, %v", outcome, err)
 	}
 	restarted := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook"})
-	engineSQL(t, e.Store, `UPDATE github_app_deliveries SET lease_until=0 WHERE state='leased'`)
 	if outcome, err := restarted.processNextGitHubDelivery(ctx); err != nil || outcome != nil {
 		t.Fatalf("expired delivery retried automatically: %+v, %v", outcome, err)
 	}

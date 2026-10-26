@@ -54,7 +54,7 @@ func (s *Server) meterResponse(w http.ResponseWriter, r *http.Request, class egr
 	delivered := s.egress.Handle(w, r, principal, class, next)
 	if tenant != nil && delivered > 0 {
 		ctx := context.WithoutCancel(r.Context())
-		err := tenant.AddUsage(ctx, store.UsageDelta{Period: time.Now().UTC().Format("2006-01-02"), ReplicaID: s.leaseHolder, Counter: "egress_bytes", Amount: delivered})
+		err := tenant.AddUsage(ctx, store.UsageDelta{Period: time.Now().UTC().Format("2006-01-02"), Counter: "egress_bytes", Amount: delivered})
 		if err != nil {
 			s.logger.Error("record delivered egress failed", "team", tenant.Team(), "bytes", delivered, "err", err)
 		}

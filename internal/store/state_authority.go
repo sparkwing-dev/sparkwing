@@ -51,7 +51,7 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor runsta
 		return holderRefusal()
 	}
 	if ref.Kind == runstate.OwnerController {
-		if actor.Kind != runstate.ActorController || ref.Name != "controller.owner" {
+		if actor.Kind != runstate.ActorController {
 			return holderRefusal()
 		}
 		scheduled, err := controllerOwnershipTx(ctx, tx, team, runID)
@@ -61,7 +61,7 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor runsta
 		if !scheduled {
 			return holderRefusal()
 		}
-		return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: int64(ref.Generation)}, "controller.owner")
+		return nil
 	}
 	if ref.Kind != runstate.OwnerTrigger || ref.RunID != runspec.RunID(runID) || ref.Holder == "" || ref.Generation <= 0 {
 		return holderRefusal()
@@ -100,12 +100,12 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor runsta
 	return nil
 }
 
-func checkReaperTx(ctx context.Context, tx *storeTx, actor runstate.Actor) error {
-	ref := actor.Owner
-	if actor.Kind != runstate.ActorReaper || ref.Kind != runstate.OwnerController || ref.Name != "controller.reaper" {
+// safety: reaper actors are built only inside the controller process, which the store's single-controller lock fences.
+func checkReaperTx(actor runstate.Actor) error {
+	if actor.Kind != runstate.ActorReaper || actor.Owner.Kind != runstate.OwnerController {
 		return holderRefusal()
 	}
-	return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: int64(ref.Generation)}, "controller.reaper")
+	return nil
 }
 
 func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, actor runstate.Actor) error {
@@ -133,7 +133,7 @@ func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor runst
 	case runstate.ActorController, runstate.ActorRunHost:
 		return checkOwnerLeaseTx(ctx, tx, team, actor, runID)
 	case runstate.ActorReaper:
-		return checkReaperTx(ctx, tx, actor)
+		return checkReaperTx(actor)
 	case runstate.ActorOperator:
 		principal, err := tx.ResolveAuthority(ctx, actor.Authority)
 		if err != nil {
@@ -166,14 +166,14 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 		return nil
 	}
 	if actor.Kind == runstate.ActorReaper {
-		return checkReaperTx(ctx, tx, actor)
+		return checkReaperTx(actor)
 	}
 	if actor.Kind == runstate.ActorController {
 		ref := actor.Owner
-		if ref.Kind != runstate.OwnerController || ref.Name != "controller.owner" || (ref.RunID != "" && ref.RunID != runspec.RunID(runID)) {
+		if ref.Kind != runstate.OwnerController || (ref.RunID != "" && ref.RunID != runspec.RunID(runID)) {
 			return holderRefusal()
 		}
-		return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: int64(ref.Generation)}, "controller.owner")
+		return nil
 	}
 	principal, err := tx.ResolveAuthority(ctx, actor.Authority)
 	if err != nil {

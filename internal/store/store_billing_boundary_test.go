@@ -24,16 +24,12 @@ func TestStoreBillingRetention(t *testing.T) {
 	if _, err := op.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "billing-boundary", 200*24*time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES (?,'storage-fund','paid',?,1)`, tenant.Team(), 100*rate)
-	if initial, err := op.ChargeRetainedStorage(t.Context(), lease); err != nil || len(initial.Charges) != 0 {
+	if initial, err := op.ChargeRetainedStorage(t.Context()); err != nil || len(initial.Charges) != 0 {
 		t.Fatalf("initial sample: %+v: %v", initial, err)
 	}
 	*now = now.Add(24 * time.Hour)
-	billed, err := op.ChargeRetainedStorage(t.Context(), lease)
+	billed, err := op.ChargeRetainedStorage(t.Context())
 	if err != nil || len(billed.Charges) != 1 {
 		t.Fatalf("storage charge: %+v: %v", billed, err)
 	}
@@ -67,7 +63,7 @@ func TestStoreBillingRetention(t *testing.T) {
 	}
 	*now = now.Add(120 * 24 * time.Hour)
 	rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)", []byte(`90`))
-	result, err := op.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 100})
+	result, err := op.MaintainRetention(t.Context(), RetentionRequest{Limit: 100})
 	if err != nil || result.Runs != 1 {
 		t.Fatalf("retention: %+v: %v", result, err)
 	}
@@ -204,16 +200,12 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	if _, err := tenant.ReleaseCreditFreezes(t.Context(), hold, "console", "resolved"); err != nil {
 		t.Fatal(err)
 	}
-	completion, err := op.AcquireSingletonLease(t.Context(), "completion", "billing-boundary", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	effects, err := op.DueRunEffects(t.Context(), completion, 100)
+	effects, err := op.DueRunEffects(t.Context(), 100)
 	if err != nil || len(effects) != 4 {
 		t.Fatalf("completion work: %+v: %v", effects, err)
 	}
 	for _, effect := range effects {
-		if err := tenant.AcknowledgeRunEffect(t.Context(), EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev, Lease: completion}); err != nil {
+		if err := tenant.AcknowledgeRunEffect(t.Context(), EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev}); err != nil {
 			t.Fatal(err)
 		}
 	}

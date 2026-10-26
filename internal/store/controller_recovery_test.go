@@ -2,7 +2,6 @@ package store
 
 import (
 	"encoding/json"
-	"errors"
 	"math/rand/v2"
 	"reflect"
 	"strings"
@@ -62,34 +61,25 @@ func controllerJobActor(t *testing.T, tenant *Tenant, runID string) runstate.Act
 	return actor
 }
 
-func TestControllerReconcileResumesReportsAcrossLeaseGap(t *testing.T) {
-	tenant, request, now := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}, {ID: "next", Needs: []string{"job"}}}})
+func TestControllerReconcileResumesReports(t *testing.T) {
+	tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}, {ID: "next", Needs: []string{"job"}}}})
 	actor := controllerJobActor(t, tenant, request.RunID)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET until=? WHERE name='controller.owner'`, now.UnixNano())
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}, To: runstate.NodeSuccess, Cause: runstate.CauseReport, Actor: actor, SourceAttempt: sourceAttempt(1)}); err != nil {
 		t.Fatal(err)
 	}
-	next, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "next"})
-	if err != nil || next.ReadyAt != nil {
-		t.Fatalf("advanced without controller: %+v, %v", next, err)
-	}
-	lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "successor", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for range 2 {
-		visited, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 10)
+		visited, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10)
 		if err != nil || len(visited) != 1 || visited[0].Team != tenant.team || visited[0].RunID != request.RunID {
 			t.Fatalf("reconcile: %+v, %v", visited, err)
 		}
 	}
-	next, err = tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "next"})
+	next, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "next"})
 	if err != nil || next.ReadyAt == nil || next.StateSeq != 1 {
-		t.Fatalf("successor release: %+v, %v", next, err)
+		t.Fatalf("release: %+v, %v", next, err)
 	}
 	run, err := tenant.ReadRun(t.Context(), request.RunID)
-	if err != nil || run.State != runstate.RunRunning || run.Owner == nil || run.Owner.Holder != lease.Holder || run.Owner.Generation != runspec.ClaimGeneration(lease.Generation) {
-		t.Fatalf("successor owner: %+v, %v", run, err)
+	if err != nil || run.State != runstate.RunRunning || run.Owner == nil || run.Owner.Kind != runstate.OwnerController {
+		t.Fatalf("controller owner: %+v, %v", run, err)
 	}
 }
 
@@ -104,14 +94,10 @@ func TestControllerReconcilePagesAllTeamsAndFinishesAtomically(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET intake_mode='publish' WHERE id='d'`)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET sealed_at=NULL,spec_json=NULL,spec_hash='',plan_json=NULL,plan_hash='' WHERE id='e'`)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET plan_accepted_generation=0 WHERE id='f'`)
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var visited []ControllerRun
 	after := ""
 	for {
-		page, err := s.AsOperator().ReconcileControllerRuns(t.Context(), lease, after, 1)
+		page, err := s.AsOperator().ReconcileControllerRuns(t.Context(), after, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,31 +130,10 @@ func TestControllerReconcilePagesAllTeamsAndFinishesAtomically(t *testing.T) {
 	}
 }
 
-func TestControllerReconcileRequiresLiveExactFenceEvenWithoutRuns(t *testing.T) {
-	for _, problem := range []string{"expired", "holder", "generation", "name", "limit"} {
-		t.Run(problem, func(t *testing.T) {
-			s, _, now := maintenanceStore(t)
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "replica", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
-			limit := 10
-			switch problem {
-			case "expired":
-				*now = lease.ExpiresAt
-			case "holder":
-				lease.Holder = "other"
-			case "generation":
-				lease.Generation++
-			case "name":
-				lease.Name = "maintenance"
-			case "limit":
-				limit = 0
-			}
-			if _, err := s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", limit); err == nil {
-				t.Fatal("invalid controller pass succeeded")
-			}
-		})
+func TestControllerReconcileRejectsInvalidLimitWithoutRuns(t *testing.T) {
+	s, _, _ := maintenanceStore(t)
+	if _, err := s.AsOperator().ReconcileControllerRuns(t.Context(), "", 0); err == nil {
+		t.Fatal("invalid controller pass succeeded")
 	}
 }
 
@@ -176,12 +141,8 @@ func TestControllerReconcileRollsBackFailedCompletion(t *testing.T) {
 	s, tenant, _ := maintenanceStore(t)
 	maintenanceRun(t, s, "run", 1, runstate.RunRunning)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller',sealed_at=1,spec_json=?,spec_hash='spec',plan_json=?,plan_hash='plan',plan_accepted_generation=1`, []byte(`{}`), []byte(`{"jobs":[]}`))
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_completion BEFORE INSERT ON run_effects BEGIN SELECT RAISE(ABORT,'completion unavailable'); END`)
-	if visited, err := s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 10); err == nil || len(visited) != 0 {
+	if visited, err := s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err == nil || len(visited) != 0 {
 		t.Fatalf("failed completion: %+v, %v", visited, err)
 	}
 	run, err := tenant.ReadRun(t.Context(), "run")
@@ -190,15 +151,12 @@ func TestControllerReconcileRollsBackFailedCompletion(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "events", 0)
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_completion`)
-	if _, err := s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 10); err != nil {
+	if _, err := s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
 		t.Fatal(err)
 	}
 	run, err = tenant.ReadRun(t.Context(), "run")
 	if err != nil || run.State != runstate.RunSuccess {
 		t.Fatalf("completion retry: %+v, %v", run, err)
-	}
-	if _, err := s.AsOperator().ReconcileControllerRuns(t.Context(), SingletonLease{Name: lease.Name, Holder: "stale", Generation: lease.Generation}, "", 10); !errors.Is(err, ErrLockHeld) {
-		t.Fatalf("stale pass: %v", err)
 	}
 }
 
@@ -218,12 +176,11 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 			if err != nil || run.Owner == nil || run.Owner.Kind != runstate.OwnerTrigger || run.Spec == nil || run.Spec.Hash != accepted.Spec.Hash {
 				t.Fatalf("retry owner/seal: %+v, %v", run, err)
 			}
-			controller := runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{Holder: "controller", Generation: 1, RunID: runspec.RunID(retry.RunID)}}}
+			controller := controllerActor(retry.RunID)
 			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(retry.RunID), NodeID: "job"}, To: runstate.NodeReady, Cause: runstate.CauseRelease, Actor: controller}); err == nil {
 				t.Fatal("controller bypassed retry planner")
 			}
-			lease := SingletonLease{Name: "controller.owner", Holder: "controller", Generation: 1}
-			visited, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 10)
+			visited, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10)
 			if err != nil || len(visited) != 1 || visited[0].RunID != request.RunID {
 				t.Fatalf("retry settled before handoff: %+v, %v", visited, err)
 			}
@@ -248,11 +205,7 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, "UPDATE triggers SET disruptions=2 WHERE team=? AND id=?", tenant.team, retry.RunID)
 			}
 			*now = claim.Award.LeaseExpiresAt
-			reaper, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
-			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), reaper, 10)
+			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 			if err != nil || len(reaped) != 1 || reaped[0].RunID != retry.RunID || reaped[0].Requeued == started || reaped[0].Failed != started {
 				t.Fatalf("retry planner loss: %+v, %v", reaped, err)
 			}
@@ -296,25 +249,15 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 	if err != nil || before.Status != runstate.StatusApprovalPending {
 		t.Fatalf("initial approval: %+v, %v", before, err)
 	}
-	rewriteSchemaExec(t, tenant.s.db, "UPDATE leases SET until=? WHERE name='controller.owner'", now.UnixNano())
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "job"}, To: runstate.NodeSuccess, Cause: runstate.CauseReport, Actor: actor, SourceAttempt: sourceAttempt(1)}); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaCount(t, tenant.s.db, "eval_units", 0)
 	*now = now.Add(time.Minute)
-	reaper, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), reaper, 10); err != nil || len(reaped) != 0 {
+	if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 0 {
 		t.Fatalf("owner lapse failed waiting work: %+v, %v", reaped, err)
 	}
-	lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "successor", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for range 2 {
-		if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 10); err != nil {
+		if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -368,16 +311,12 @@ func TestControllerReconcileRenewsOnlyContinuousCapacity(t *testing.T) {
 			controllerJobActor(t, tenant, request.RunID)
 			expiry := *now
 			if live {
-				expiry = now.Add(time.Minute)
+				expiry = now.Add(time.Second)
 			}
 			for _, table := range []string{"concurrency_holders", "admission_work"} {
 				rewriteSchemaExec(t, tenant.s.db, "UPDATE "+table+" SET lease_expires_at=? WHERE team=? AND run_id=?", expiry.UnixNano(), tenant.team, request.RunID)
 			}
-			lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "controller", time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 10); err != nil {
+			if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
 				t.Fatal(err)
 			}
 			for _, table := range []string{"concurrency_holders", "admission_work"} {
@@ -387,8 +326,10 @@ func TestControllerReconcileRenewsOnlyContinuousCapacity(t *testing.T) {
 						t.Fatal(err)
 					}
 					want := expiry.UnixNano()
-					if live || node == "" {
+					if node == "" {
 						want = now.Add(defaultConcurrencyLease).UnixNano()
+					} else if live {
+						want = now.Add(controllerOwnedHorizon).UnixNano()
 					}
 					if actual != want {
 						t.Fatalf("%s node=%q continuous=%t: expiry=%d want %d", table, node, live, actual, want)

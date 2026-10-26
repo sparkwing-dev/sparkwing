@@ -18,9 +18,6 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (r
 	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
 		result = runstate.ReconciledNode{}
 
-		if err := lockClaimControllerTx(ctx, tx); err != nil {
-			return err
-		}
 		if err := lockClaimQueueTx(ctx, tx); err != nil {
 			return err
 		}

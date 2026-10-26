@@ -3,7 +3,6 @@ package controller
 import (
 	"log/slog"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -12,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func TestReaperRunsInOneOfTwoOverlappingControllers(t *testing.T) {
+func TestReaperRecoversAnExpiredJobClaimOnce(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -28,15 +27,9 @@ func TestReaperRunsInOneOfTwoOverlappingControllers(t *testing.T) {
 	if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,'run','job',3,2,'runner','claim','runner','runner','remote',1)`, store.DefaultTeam); err != nil {
 		t.Fatal(err)
 	}
-	servers := []*Server{New(st, slog.New(slog.DiscardHandler)), New(st, slog.New(slog.DiscardHandler))}
-	ran := make([]bool, len(servers))
-	var wg sync.WaitGroup
-	for i, srv := range servers {
-		wg.Go(func() { ran[i] = srv.reapLeased(ctx) })
-	}
-	wg.Wait()
-	if ran[0] == ran[1] {
-		t.Fatalf("sweeps ran = %v, want one elected controller", ran)
+	srv := New(st, slog.New(slog.DiscardHandler))
+	for range 2 {
+		srv.reap(ctx)
 	}
 	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
 	if err != nil {
@@ -49,19 +42,6 @@ func TestReaperRunsInOneOfTwoOverlappingControllers(t *testing.T) {
 	run, err := tenant.ReadRun(ctx, "run")
 	if err != nil || run.State != runstate.RunRunning {
 		t.Fatalf("recovered run = %+v, %v", run, err)
-	}
-	loser := servers[0]
-	if ran[0] {
-		loser = servers[1]
-	}
-	if loser.reapLeased(ctx) {
-		t.Fatal("foreign controller swept while the elected lease remained live")
-	}
-	if _, err := teststore.SQL(t, st).ExecContext(ctx, `UPDATE leases SET until=1 WHERE name='controller.reaper'`); err != nil {
-		t.Fatal(err)
-	}
-	if !loser.reapLeased(ctx) {
-		t.Fatal("successor could not recover the expired controller lease")
 	}
 	events, err := tenant.ReadStateEvents(ctx, "run", 0, 10)
 	if err != nil || len(events) != 1 || events[0].Kind != "job_requeued" {

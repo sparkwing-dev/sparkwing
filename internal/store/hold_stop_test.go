@@ -235,11 +235,7 @@ func TestFundingStoppedJobPreservesOwnerAndIndependentJobs(t *testing.T) {
 				t.Fatal(err)
 			}
 			now = beat.ExpiresAt
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
+			if _, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(request.RunID), NodeID: "blocked"}, To: runstate.NodeCancelled, Cause: causeDependency, Actor: request.Actor}); err != nil {

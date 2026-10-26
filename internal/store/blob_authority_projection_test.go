@@ -43,15 +43,15 @@ func TestDataProjectionAndChargeUseLiveAuthorityProperty(t *testing.T) {
 		if _, err := tenant.ReadDataBlob(t.Context(), input, intent.Digest); err == nil {
 			t.Fatalf("forged data identity %d read bytes", i)
 		}
-		if _, err := tenant.ChargeDataDownload(t.Context(), input, metadata, DownloadCharge{ReplicaID: "controller", Bytes: metadata.Size}); err == nil {
+		if _, err := tenant.ChargeDataDownload(t.Context(), input, metadata, DownloadCharge{Bytes: metadata.Size}); err == nil {
 			t.Fatalf("forged data identity %d committed a download", i)
 		}
 	}
-	if _, err := tenant.ChargeDataDownload(t.Context(), resolved, metadata, DownloadCharge{ReplicaID: "controller", Bytes: metadata.Size}); err != nil {
+	if _, err := tenant.ChargeDataDownload(t.Context(), resolved, metadata, DownloadCharge{Bytes: metadata.Size}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `DELETE FROM blob_receipts WHERE team='a' AND digest=?`, intent.Digest)
-	if _, err := tenant.ChargeDataDownload(t.Context(), resolved, metadata, DownloadCharge{ReplicaID: "controller", Bytes: metadata.Size}); err == nil {
+	if _, err := tenant.ChargeDataDownload(t.Context(), resolved, metadata, DownloadCharge{Bytes: metadata.Size}); err == nil {
 		t.Fatal("removed read edge still committed a download")
 	}
 	var bytes int64
@@ -105,7 +105,7 @@ func TestDataCancellationClosesSensitiveAccessWithoutEndingHolder(t *testing.T) 
 			if _, err := tenant.ReadDataBlob(t.Context(), authority, intent.Digest); err == nil {
 				t.Fatal("cancelled work retained blob reads")
 			}
-			if _, err := tenant.ChargeDataDownload(t.Context(), authority, metadata, DownloadCharge{ReplicaID: "controller", Bytes: metadata.Size}); err == nil {
+			if _, err := tenant.ChargeDataDownload(t.Context(), authority, metadata, DownloadCharge{Bytes: metadata.Size}); err == nil {
 				t.Fatal("cancelled work committed signed-byte usage")
 			}
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
