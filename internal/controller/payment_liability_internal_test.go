@@ -23,7 +23,8 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 						billingModelCheckout(t, s, tenant, "cs_refill", 2000)
 						paidKind, paidObject = "checkout.session.completed", stolenCardSession("cs_refill", payment)
 					} else {
-						due, err := s.AsOperator().DueRefills(t.Context())
+						var due []store.Refill
+						err := s.AsOperator().EachDueRefill(t.Context(), func(r store.Refill) { due = append(due, r) })
 						if err != nil || len(due) != 1 {
 							t.Fatalf("reserve refill = %+v, %v", due, err)
 						}

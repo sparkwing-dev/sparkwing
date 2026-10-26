@@ -175,7 +175,7 @@ func TestPaymentStateEveryRefillOutcomePermutation(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			due, err := s.AsOperator().DueRefills(t.Context())
+			due, err := collectDueRefills(t.Context(), s.AsOperator())
 			if err != nil || len(due) != 1 {
 				t.Fatalf("reservation=%+v: %v", due, err)
 			}

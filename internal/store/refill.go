@@ -195,19 +195,24 @@ func (s RefillSettings) validate() error {
 // ErrNoCard refuses turning on refills for a team that never added a card.
 var ErrNoCard = errors.New("card billing: save a card before turning on automatic refill")
 
-// retryable reports whether the team may still be charged for its open refill r: refills on, no failed refill
-// blocking them, no hold, the same Stripe customer, and within every limit once r's own reservation is set aside.
-func (st SpendStanding) retryable(r Refill) bool {
+// refillEligible is the one rule for charging a refill, applied when one opens and before every retry: refills on, no
+// failed refill blocking them, no hold, the balance below the threshold and every limit respected. own is the open
+// refill a retry would charge, whose reservation the windows already count and whose customer must still be the
+// team's; nil asks about opening a new one.
+func (st SpendStanding) refillEligible(own *Refill) bool {
 	refill := st.Refill
-	if !refill.Enabled || !refill.FailedAt.IsZero() || st.Billing.HoldCause != "" || r.Customer != st.Card.Customer {
-		return false
+	if own != nil {
+		if own.Customer != st.Card.Customer {
+			return false
+		}
+		// An open refill is younger than its key life, so every window already counts it.
+		refill.AmountCents = own.AmountCents
+		refill.DayCount--
+		refill.WeekCents -= own.AmountCents
+		refill.MonthCents -= own.AmountCents
 	}
-	// An open refill is younger than its key life, so every window already counts it.
-	refill.AmountCents = r.AmountCents
-	refill.DayCount--
-	refill.WeekCents -= r.AmountCents
-	refill.MonthCents -= r.AmountCents
-	return refill.limit() == ""
+	return refill.Enabled && refill.FailedAt.IsZero() && st.Billing.HoldCause == "" && refill.limit() == "" &&
+		st.BalanceMicro < refill.ThresholdCents*MicroCreditsPerCent
 }
 
 func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, actor auditActor) error {
@@ -231,9 +236,13 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 	return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: tx.now(ctx)}, auditRefillSettings{ReceiptID: change, Enabled: s.Enabled, ThresholdCents: s.ThresholdCents, AmountCents: s.AmountCents, WeekLimitCents: s.WeekLimitCents, MonthLimitCents: s.MonthLimitCents})
 }
 
-// DueRefills opens a refill for every opted-in team whose balance fell below its threshold, within its limits, and
-// returns each refill no outcome has settled yet, opened now or earlier.
-func (o *Operator) DueRefills(ctx context.Context) ([]Refill, error) {
+// EachDueRefill visits every team that opted in or has an open refill. For each, it authorizes in one transaction
+// the refill to charge now, opening a new one or keeping an open one only while refillEligible holds, and passes it
+// to charge after that transaction commits and before the next team is checked.
+//
+// safety: authorization is per call, immediately before it, so no team is charged on a check made before another
+// team's provider call.
+func (o *Operator) EachDueRefill(ctx context.Context, charge func(Refill)) error {
 	var teams []Team
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		mode, err := paymentModeTx(ctx, tx)
@@ -255,25 +264,23 @@ func (o *Operator) DueRefills(ctx context.Context) ([]Refill, error) {
 		return errors.Join(rows.Err(), rows.Close())
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var due []Refill
-	err = o.EachTeam(ctx, teams, func(t *Tenant) error {
+	return o.EachTeam(ctx, teams, func(t *Tenant) error {
 		var r *Refill
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
 			var err error
-			r, err = dueRefillTx(ctx, tx, t.team)
+			r, err = authorizeRefillTx(ctx, tx, t.team)
 			return err
 		})
 		if err == nil && r != nil {
-			due = append(due, *r)
+			charge(*r)
 		}
 		return err
 	})
-	return due, err
 }
 
-func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
+func authorizeRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
 		return nil, err
 	}
@@ -291,8 +298,8 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 		return nil, err
 	}
 	// safety: the checkout service charges whatever it is asked, so an open refill is retried, with its own request
-	// under its own key, only while the team is still eligible. One that is not is withdrawn; if an earlier call did
-	// charge, its signed payment still credits the closed refill.
+	// under its own key, only while refillEligible holds. One that is not is withdrawn; if an earlier call did charge,
+	// its signed payment still credits the closed refill.
 	r := Refill{Team: team}
 	var opened int64
 	err = tx.QueryRowContext(ctx, `SELECT id, amount_minor, opened_at, customer_id
@@ -305,7 +312,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	default:
 		closed := refillExpired
 		if now.Sub(time.Unix(0, opened)) < refillKeyLife {
-			if st.retryable(r) {
+			if st.refillEligible(&r) {
 				return &r, nil
 			}
 			closed = refillWithdrawn
@@ -321,11 +328,10 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 			return nil, err
 		}
 	}
-	refill := st.Refill
-	if !refill.Enabled || !refill.FailedAt.IsZero() || st.Billing.HoldCause != "" || refill.Limit != "" ||
-		st.BalanceMicro >= refill.ThresholdCents*MicroCreditsPerCent {
+	if !st.refillEligible(nil) {
 		return nil, nil
 	}
+	refill := st.Refill
 	r = Refill{Team: team, AmountCents: refill.AmountCents, Customer: st.Card.Customer}
 	if r.ID, err = newCreditID("refill"); err != nil {
 		return nil, err

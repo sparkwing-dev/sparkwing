@@ -131,8 +131,9 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 }
 
 // refillRequest and refillResponse are the checkout service's POST /internal/refill contract, which creates and
-// confirms one off-session payment under the refill id. testdata/refill_contract.json holds the example the checkout
-// service tests against too, byte for byte, so a drift in either repository fails a test.
+// confirms one off-session payment under the refill id. testdata/refill_contract.json holds the example these types
+// are tested against; the checkout service keeps a byte-identical copy and tests its own side against that, so the
+// copies must be changed together, since neither suite reads the other's.
 type refillRequest struct {
 	Team        string `json:"team"`
 	Deployment  string `json:"deployment"`

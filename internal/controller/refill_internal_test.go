@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -276,6 +277,39 @@ func TestARefusedRefillStopsRefillsAndNotifiesTheOwners(t *testing.T) {
 			}
 			if len(mail.sent) != 1 || mail.sent[0].To != "owner@example.test" || !strings.Contains(mail.sent[0].Text, tc.failure) {
 				t.Fatalf("owner mail %+v; want one refill failure notice", mail.sent)
+			}
+		})
+	}
+}
+
+// Each refill is authorized immediately before its own call, so a team that turns refills off, is held or tops up
+// above its threshold while another team's call is in flight is not charged.
+func TestARefillIsAuthorizedImmediatelyBeforeItsOwnCall(t *testing.T) {
+	for change, query := range map[string]string{
+		"disabled": `UPDATE teams SET refill_enabled=0 WHERE name='b'`,
+		"held":     `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES ('operator:b','b','review','operator','owner',1)`,
+		"topped up": `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('topup','b','paid',` +
+			strconv.FormatInt(5000*store.MicroCreditsPerCent, 10) + `,1)`,
+	} {
+		t.Run(change, func(t *testing.T) {
+			e, _ := refillFixture(t)
+			engineSQL(t, e.Store, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at,refill_enabled,refill_threshold_cents,refill_amount_cents) VALUES ('b',1,1,'cus_b',1,1,1000,2000)`)
+			worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
+			var teams []string
+			worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+				var body refillRequest
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				teams = append(teams, body.Team)
+				if body.Team == "a" {
+					engineSQL(t, e.Store, query)
+				}
+				return refillReply(http.StatusOK, `{"payment_intent":"pi_`+body.Team+`","status":"processing"}`), nil
+			})
+			worker.refillPass(t.Context())
+			if len(teams) != 1 || teams[0] != "a" {
+				t.Fatalf("charged teams %v; want only a, whose authorization preceded the change to b", teams)
 			}
 		})
 	}

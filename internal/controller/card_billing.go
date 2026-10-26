@@ -127,21 +127,14 @@ func (s *Server) runBilling(ctx context.Context, every time.Duration) {
 	}
 }
 
-// safety: DueRefills rechecks eligibility and opens each refill in its own transaction before any provider call, and
-// every pass sends an open refill's same request under its id as the idempotency key, so a crash or lost answer is
+// safety: EachDueRefill authorizes each refill in its own transaction immediately before that refill's call, and
+// every retry sends an open refill's same request under its id as the idempotency key, so a crash or lost answer is
 // retried without a second charge. Only the signed webhook grants credit; a refusal the service reports stops refills.
 func (s *Server) refillPass(ctx context.Context) {
 	if !s.deployment.Metering() {
 		return
 	}
-	due, err := s.operator.DueRefills(ctx)
-	if err != nil {
-		if ctx.Err() == nil {
-			s.logger.Error("refill pass", "err", err)
-		}
-		return
-	}
-	for _, r := range due {
+	err := s.operator.EachDueRefill(ctx, func(r store.Refill) {
 		res, err := s.checkout.refill(ctx, s.paymentDeployment, r)
 		switch {
 		case errors.Is(err, errRefillNoCard):
@@ -151,6 +144,9 @@ func (s *Server) refillPass(ctx context.Context) {
 		case res.Failure != "":
 			s.recordRefillFailure(ctx, r, res.Failure)
 		}
+	})
+	if err != nil && ctx.Err() == nil {
+		s.logger.Error("refill pass", "err", err)
 	}
 }
 

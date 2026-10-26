@@ -531,10 +531,12 @@ are capped by the paid grant. Only refund-kind rows count as money returned by
 Stripe when closing the card-refund queue.
 
 Refill reservations persist amount and Stripe customer, never a card or email.
-`DueRefills` checks eligibility and opens a reservation in one transaction; the
-worker then sends its fixed request under its id, rechecking eligibility before
-every retry, until a signed outcome or a refusal closes it, a recheck withdraws
-it, or it expires after 23 hours. A card payment's signed
+`EachDueRefill` authorizes each team's refill in its own transaction
+immediately before that refill's checkout call, with one eligibility rule
+(refills on, not blocked, no hold, within limits, balance below threshold) for
+opening a reservation and for every retry of its fixed request under its id.
+A reservation stays open until a signed outcome or a refusal closes it, a
+recheck withdraws it, or it expires after 23 hours. A card payment's signed
 outcome finds its reservation by the refill id in the payment's metadata and
 records the payment id then; a reservation funds at most one payment. Open
 reservations and every refill payment count against refill limits, including

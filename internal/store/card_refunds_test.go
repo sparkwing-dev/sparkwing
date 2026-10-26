@@ -32,7 +32,7 @@ func openRefill(t *testing.T, s *Store, team Team, cents int64) Refill {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	due, err := s.AsOperator().DueRefills(t.Context())
+	due, err := collectDueRefills(t.Context(), s.AsOperator())
 	if err != nil {
 		t.Fatal(err)
 	}

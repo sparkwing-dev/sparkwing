@@ -15,7 +15,7 @@ func TestARefillWithoutACardClosesAndBlocksRefills(t *testing.T) {
 	if _, err := s.DB().ExecContext(ctx, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at,refill_enabled,refill_threshold_cents,refill_amount_cents,billing_trust,billing_trust_at,billing_trust_by,billing_trust_reason) VALUES ('a',1,1,'cus_a',1,1,1000,2000,'granted',1,'operator','customer')`); err != nil {
 		t.Fatal(err)
 	}
-	due, err := s.AsOperator().DueRefills(ctx)
+	due, err := collectDueRefills(ctx, s.AsOperator())
 	if err != nil || len(due) != 1 {
 		t.Fatalf("due = %+v, %v", due, err)
 	}
@@ -25,7 +25,7 @@ func TestARefillWithoutACardClosesAndBlocksRefills(t *testing.T) {
 			t.Fatalf("record %d = %+v, %v", i, got, err)
 		}
 	}
-	if again, err := s.AsOperator().DueRefills(ctx); err != nil || len(again) != 0 {
+	if again, err := collectDueRefills(ctx, s.AsOperator()); err != nil || len(again) != 0 {
 		t.Fatalf("refills after no_card = %+v, %v", again, err)
 	}
 	tenant, err := s.ForTeam(ctx, "a")

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -9,9 +10,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+// collectDueRefills runs a refill pass that charges nothing and returns the refills it authorized.
+func collectDueRefills(ctx context.Context, op *Operator) ([]Refill, error) {
+	var due []Refill
+	err := op.EachDueRefill(ctx, func(r Refill) { due = append(due, r) })
+	return due, err
+}
+
 func dueRefillsFor(t *testing.T, s *Store, team Team) []Refill {
 	t.Helper()
-	due, err := s.AsOperator().DueRefills(t.Context())
+	due, err := collectDueRefills(t.Context(), s.AsOperator())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +319,7 @@ func TestAnOpenRefillIsRetriedAsOpenedUntilItsKeyLife(t *testing.T) {
 // Every retry rechecks eligibility, setting the refill's own reservation aside; a refill the team may no longer be
 // charged for is withdrawn without another call, and a payment an earlier call made still credits it.
 func TestAnOpenRefillIsWithdrawnWhenNoLongerEligible(t *testing.T) {
-	for _, restriction := range []string{"none", "disabled", "hold", "changed customer", "weekly limit", "monthly limit"} {
+	for _, restriction := range []string{"none", "disabled", "hold", "changed customer", "weekly limit", "monthly limit", "funded", "threshold lowered"} {
 		t.Run(restriction, func(t *testing.T) {
 			s, tenant, now := refillFixture(t, true)
 			settings := RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, WeekLimitCents: 1_000}
@@ -335,6 +343,11 @@ func TestAnOpenRefillIsWithdrawnWhenNoLongerEligible(t *testing.T) {
 				settings.WeekLimitCents = 999
 			case "monthly limit":
 				settings.MonthLimitCents = 999
+			case "funded":
+				settings.ThresholdCents = 1_500
+				addFunds(t, s, 2_000, "pi_topup")
+			case "threshold lowered":
+				settings.ThresholdCents = 0
 			}
 			if err := setRefill(t, s, "a", settings); err != nil {
 				t.Fatal(err)
@@ -354,8 +367,12 @@ func TestAnOpenRefillIsWithdrawnWhenNoLongerEligible(t *testing.T) {
 			if restriction == "hold" {
 				return
 			}
+			before, err := tenant.CreditBalanceMicro(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
 			payRefill(t, s, first[0], now)
-			if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 1_000*MicroCreditsPerCent {
+			if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != before+1_000*MicroCreditsPerCent {
 				t.Fatalf("a payment an earlier call made was not credited: %d, %v", balance, err)
 			}
 		})
@@ -602,7 +619,7 @@ func TestDueRefillsKeepsSuccessfulTeamsAroundFailure(t *testing.T) {
 			default:
 				rewriteSchemaExec(t, s.db, "CREATE TRIGGER reject_refill BEFORE INSERT ON credit_checkouts WHEN NEW.team='"+fault+"' BEGIN SELECT RAISE(ABORT,'unavailable'); END")
 			}
-			due, err := s.AsOperator().DueRefills(t.Context())
+			due, err := collectDueRefills(t.Context(), s.AsOperator())
 			if fault == "database" {
 				if err == nil || len(due) != 0 {
 					t.Fatalf("database failure: due=%+v, %v", due, err)
@@ -628,7 +645,7 @@ func TestDueRefillsKeepsSuccessfulTeamsAroundFailure(t *testing.T) {
 }
 
 // A refill in flight holds the team's single refill slot until the transaction that grants it closes it, so no pass
-// before its webhook opens a second one. After the grant, another refill opens only while the balance is still below
+// within its 23-hour key life opens a second one before its webhook; a webhook later than that is the runbook case. After the grant, another refill opens only while the balance is still below
 // the threshold: $10 of Add funds and a $10 refill reach $20, which a $25 threshold refills again to $30.
 func TestARefillInFlightBlocksASecondUntilItsGrantLands(t *testing.T) {
 	for _, tc := range []struct {

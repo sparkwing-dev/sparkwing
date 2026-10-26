@@ -83,7 +83,7 @@ func TestNoCardDetailsAreStoredFromSetupThroughPurge(t *testing.T) {
 	if _, err := s.DB().ExecContext(ctx, `UPDATE teams SET refill_enabled=1, refill_threshold_cents=1000000, refill_amount_cents=1500 WHERE name='a'`); err != nil {
 		t.Fatal(err)
 	}
-	due, err := s.AsOperator().DueRefills(ctx)
+	due, err := collectDueRefills(ctx, s.AsOperator())
 	if err != nil || len(due) != 1 || due[0].Customer != "cus_cards" {
 		t.Fatalf("due refills = %+v, %v", due, err)
 	}
