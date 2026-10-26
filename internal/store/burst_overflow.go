@@ -135,25 +135,35 @@ func overflowControlTx(ctx context.Context, tx *storeTx, team Team, account stri
 	return out, nil
 }
 
+// overflowBudgetReached refuses or stops overflow work whose requester has no room left for another slice.
+const overflowBudgetReached = "user monthly overflow budget reached; local capacity remains available"
+
 func checkOverflowTx(ctx context.Context, tx *storeTx, team Team, run string) error {
+	exhausted, err := overflowExhaustedTx(ctx, tx, team, run)
+	if err != nil || !exhausted {
+		return err
+	}
+	return authorityError(apierr.LockHeld, overflowBudgetReached)
+}
+
+// overflowExhaustedTx reports whether run's requester lacks room for another slice in its monthly overflow budget,
+// counting every slice its overflow work has already reserved.
+func overflowExhaustedTx(ctx context.Context, tx *storeTx, team Team, run string) (bool, error) {
 	burst, err := burstPlacementTx(ctx, tx, team, run)
 	if err != nil || burst == nil {
-		return err
+		return false, err
 	}
 	var account string
 	if err := tx.QueryRowContext(ctx, `SELECT created_principal FROM runs WHERE team=? AND id=?`, team, run).Scan(&account); err != nil {
-		return err
+		return false, err
 	}
 	control, err := overflowControlTx(ctx, tx, team, account)
 	if err != nil {
-		return err
+		return false, err
 	}
 	limit := control.MonthlyMinutes
 	if burst.OverflowMinutes != nil && (limit == nil || *burst.OverflowMinutes < *limit) {
 		limit = burst.OverflowMinutes
 	}
-	if limit != nil && (control.UsedSeconds > *limit*60 || SliceSeconds > *limit*60-control.UsedSeconds) {
-		return authorityError(apierr.LockHeld, "user monthly overflow budget reached; local capacity remains available")
-	}
-	return nil
+	return limit != nil && (control.UsedSeconds > *limit*60 || SliceSeconds > *limit*60-control.UsedSeconds), nil
 }
