@@ -32,7 +32,7 @@ func billingModelCheckout(t *testing.T, s *store.Store, tenant *store.Tenant, pr
 	if err != nil {
 		t.Fatal(err)
 	}
-	page.ProviderID, page.URL = provider, "https://checkout.test/prepay"
+	page.ProviderID, page.URL = provider, "https://checkout.stripe.com/prepay"
 	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, page); err != nil {
 		t.Fatal(err)
 	}

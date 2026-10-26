@@ -62,7 +62,7 @@ func TestBillingModelProductionPages(t *testing.T) {
 		if body["team"] != "a" || body["amount_cents"] != float64(2000) || body["key"] == "" {
 			t.Fatalf("provider: %v", body)
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.test/page","id":"cs_native","expires_at":` + strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10) + `}`))}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_native","expires_at":` + strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10) + `}`))}, nil
 	})
 	h := s.Handler()
 	call := func(method, path, body string, status int) {
@@ -184,14 +184,14 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 			if in["setup_id"] != in["key"] || in["email"] != "owner@example.test" {
 				t.Fatalf("setup=%v", in)
 			}
-			body = `{"id":"cs_setup","customer":"cus_native","url":"https://checkout.test/setup"}`
+			body = `{"id":"cs_setup","customer":"cus_native","url":"https://checkout.stripe.com/setup"}`
 		case "/internal/portal":
 			if len(in) != 3 || in["customer"] != "cus_native" {
 				t.Fatalf("portal=%v", in)
 			}
-			body = `{"url":"https://billing.stripe.test/portal"}`
+			body = `{"url":"https://billing.stripe.com/portal"}`
 		case "/internal/checkout":
-			body = `{"id":"cs_prepay","url":"https://checkout.test/prepay"}`
+			body = `{"id":"cs_prepay","url":"https://checkout.stripe.com/prepay"}`
 		case "/internal/refill":
 			if _, method := in["payment_method"]; in["amount_cents"] != float64(1000) || in["customer"] != "cus_native" || method || in["receipt_email"] != nil {
 				t.Fatalf("refill=%v", in)
@@ -334,7 +334,7 @@ func TestBillingModelProductionPageFailureKeepsReservation(t *testing.T) {
 				if phase == "revoked" {
 					engineSQL(t, s.store, `UPDATE memberships SET role='reader' WHERE team='a' AND account_id='owner'`)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"id":"cs_retry","url":"https://checkout.test/page"}`))}, nil
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"id":"cs_retry","url":"https://checkout.stripe.com/page"}`))}, nil
 			})
 			h := s.Handler()
 			call := func(want int) {

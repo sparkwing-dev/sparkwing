@@ -72,8 +72,8 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, deployment strin
 	if err := c.post(ctx, path, body, &out); err != nil {
 		return err
 	}
-	if !validBillingPageURL(out.URL) {
-		return fmt.Errorf("%w: non-https payment page", errCheckoutRefused)
+	if !validBillingPageURL(out.URL, stripeCheckoutHost) {
+		return fmt.Errorf("%w: payment page not on %s", errCheckoutRefused, stripeCheckoutHost)
 	}
 	if out.ID == "" {
 		return fmt.Errorf("%w: missing session id", errCheckoutRefused)
@@ -167,8 +167,8 @@ func (c *billingCheckout) portal(ctx context.Context, deployment, team, customer
 	if err := c.post(ctx, "/internal/portal", map[string]any{"team": team, "deployment": deployment, "customer": customer}, &out); err != nil {
 		return "", err
 	}
-	if !validBillingPageURL(out.URL) {
-		return "", fmt.Errorf("%w: non-https portal page", errCheckoutRefused)
+	if !validBillingPageURL(out.URL, stripePortalHost) {
+		return "", fmt.Errorf("%w: portal page not on %s", errCheckoutRefused, stripePortalHost)
 	}
 	return out.URL, nil
 }
@@ -187,7 +187,15 @@ func (c *billingCheckout) refund(ctx context.Context, paymentIntent, reason stri
 	return out.Refund, out.Status, err
 }
 
-func validBillingPageURL(raw string) bool {
+// Stripe hosts its payment pages on checkout.stripe.com and its customer portal on billing.stripe.com.
+const (
+	stripeCheckoutHost = "checkout.stripe.com"
+	stripePortalHost   = "billing.stripe.com"
+)
+
+// safety: a hosted page leaves only for Stripe's own host, so a compromised checkout service cannot send an owner to
+// a look-alike payment page.
+func validBillingPageURL(raw, host string) bool {
 	u, err := url.Parse(raw)
-	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil
+	return err == nil && u.Scheme == "https" && u.Host == host && u.User == nil
 }
