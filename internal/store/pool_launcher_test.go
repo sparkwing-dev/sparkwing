@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,7 +124,6 @@ type poolPin struct {
 	lease    SingletonLease
 }
 
-// claim awards one unit to the deploy launcher and exchanges its bootstrap.
 func (f poolPin) claim(t *testing.T, kind capability.UnitKind, run string) (capability.Capability, error) {
 	t.Helper()
 	demand := UnitDemand{CapabilityPrefix: f.root.Prefix, Kinds: []capability.UnitKind{kind}}
@@ -147,8 +147,6 @@ func (f poolPin) claim(t *testing.T, kind capability.UnitKind, run string) (capa
 	return issued.Capability, nil
 }
 
-// poolPinFixture admits a verified main push pinned to the deploy pool that one
-// access rule opens, and accepts its plan, which declares secrets.
 func poolPinFixture(t *testing.T, secrets ...string) poolPin {
 	t.Helper()
 	ctx := t.Context()
@@ -309,6 +307,32 @@ func TestPoolLauncherCannotCrossItsScope(t *testing.T) {
 			}
 			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 				t.Fatalf("pool launcher escaped its %s", other)
+			}
+		})
+	}
+}
+
+// A runner that reports running in a Kubernetes pod is persistent Kubernetes
+// capacity, which never takes verified default-branch work; a credential not
+// enrolled as Kubernetes would hide that, so its claims are refused with the fix.
+func TestKubernetesRunnerNeedsAKubernetesEnrollment(t *testing.T) {
+	for _, platform := range []string{"", "kubernetes"} {
+		t.Run("platform="+platform, func(t *testing.T) {
+			s, demand := unitClaimFixture(t)
+			owner := authorityMember(t, s, "owner", RoleOwner)
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
+				Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:pod", Team: "a",
+				Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "pod"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim},
+				Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Platform: platform,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			demand.CapabilityPrefix, demand.Kubernetes = issued.Capability.Prefix, true
+			_, err = s.AsOperator().ClaimUnit(t.Context(), demand)
+			refused := err != nil && strings.Contains(err.Error(), "--platform kubernetes")
+			if refused != (platform == "") {
+				t.Fatalf("platform %q: claim error %v", platform, err)
 			}
 		})
 	}

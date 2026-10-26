@@ -98,7 +98,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
-	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch})
+	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch, Kubernetes: body.Kubernetes})
 	if target == nil && errors.Is(err, store.ErrNotFound) {
 		observeEmptyClaim(principal.Capability)
 		return controllerwire.ClaimResponse{}, nil

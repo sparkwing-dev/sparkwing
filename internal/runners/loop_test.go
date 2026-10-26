@@ -1047,3 +1047,15 @@ func TestLoopDrainedCompletionRepollsBeforeIdleExit(t *testing.T) {
 		}
 	})
 }
+
+func TestRunnerReportsAKubernetesPodToTheController(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	if !InKubernetesPod() {
+		t.Fatal("the kubelet's service host did not mark a pod")
+	}
+	for _, pod := range []bool{false, true} {
+		if got := (&Loop{Config: LoopConfig{Kubernetes: pod}}).request().Kubernetes; got != pod {
+			t.Fatalf("claim request kubernetes = %v, want %v", got, pod)
+		}
+	}
+}

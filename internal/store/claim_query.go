@@ -11,12 +11,15 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
+
+const kubernetesEnrollmentRefusal = "this runner runs in a Kubernetes pod, but its credential was not enrolled as Kubernetes capacity; enroll it with `sparkwing runners add --platform kubernetes --no-service` and put the new credential in the runner's token Secret"
 
 type claimRepositoryPattern struct {
 	Key     string `json:"key"`
@@ -101,6 +104,12 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	observed, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
 	if err != nil {
 		return f, err
+	}
+	// safety: a self-hosted runner in a pod is persistent Kubernetes capacity, which
+	// never takes verified default-branch work; an enrollment that does not say so
+	// would let it, so the runner stops until it is enrolled correctly.
+	if demand.Kubernetes && root.Subject.Kind == capability.SubjectMachine && root.Parent == nil && root.Binding.Kind == capability.BindingNone && !capability.Launcher(root) && !observed.PersistentKubernetes {
+		return f, authorityError(apierr.Forbidden, kubernetesEnrollmentRefusal)
 	}
 	profile := match.Profile{}
 	if tx.store.claimProfiles != nil {

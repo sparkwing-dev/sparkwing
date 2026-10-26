@@ -32,6 +32,8 @@ type UnitDemand struct {
 	Target             *UnitRef
 	OS                 string
 	Arch               string
+	// Kubernetes is the runner's report that it runs in a Kubernetes pod.
+	Kubernetes bool
 }
 
 // UnitClaim records the store-derived team and award; source generation remains distinct from eval claim generation.

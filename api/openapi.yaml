@@ -810,6 +810,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        kubernetes:
+          type: boolean
         labels:
           anyOf:
             - items:

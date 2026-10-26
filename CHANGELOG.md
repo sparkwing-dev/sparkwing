@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **runners (Breaking):** A runner in a Kubernetes pod reports it on every claim, and the controller refuses the claims of a self-hosted credential not enrolled with `--platform kubernetes`, so the runner stops at its first poll with an error naming the fix instead of serving as a plain machine that takes verified default-branch work.
 - **oidc:** Every minted run token writes an `oidc.minted` audit event naming the run, a digest of its job and the audience, before the token is returned.
 - **controller (Breaking):** `GET /api/v1/health` answers liveness and readiness only (`status` and `auth`, HTTP 503 when the database is unreachable). License expiry, webhook secret rotation, bucket, database size, egress and GitHub App state moved to the new `GET /api/v1/operator/health`, which requires `operator.limits` or an operator console session. The unauthenticated GitHub Actions credential exchange reads at most 16 KiB. OIDC docs state that a branch `delete` run's `sha` is the default branch's head.
 - **operator:** The first team-admin credential of an operator-created team expires after 30 days, like every other `team.admin` token, instead of never. Rotate it before then with the team token commands.

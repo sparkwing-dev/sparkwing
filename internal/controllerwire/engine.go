@@ -86,6 +86,8 @@ type ClaimRequest struct {
 	ExcludedTeamLabels []string              `json:"excluded_team_labels,omitempty"`
 	RunID              string                `json:"run_id,omitempty"`
 	JobID              string                `json:"job_id,omitempty"`
+	// Kubernetes reports that the runner runs in a Kubernetes pod.
+	Kubernetes bool `json:"kubernetes,omitempty"`
 }
 
 // ClaimedUnit carries the one-time private execution award over authenticated transport.

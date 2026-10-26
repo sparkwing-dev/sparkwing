@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"slices"
 	"sync"
@@ -36,6 +37,8 @@ type LoopConfig struct {
 	PollInterval  time.Duration
 	IdleExit      time.Duration
 	ClaimUntil    time.Time
+	// Kubernetes reports to the controller that this runner runs in a pod.
+	Kubernetes bool
 }
 
 // Loop claims triggers and jobs until stopped and joins held work before returning.
@@ -312,7 +315,7 @@ func (l *Loop) request() controllerwire.ClaimRequest {
 	return controllerwire.ClaimRequest{
 		RunnerVersion: l.Config.Version, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Kinds:  slices.Clone(l.Config.Kinds),
-		Labels: slices.Clone(l.Config.Labels), RunID: l.Config.RunID,
+		Labels: slices.Clone(l.Config.Labels), RunID: l.Config.RunID, Kubernetes: l.Config.Kubernetes,
 	}
 }
 
@@ -325,3 +328,7 @@ func validateUnit(unit controllerwire.ClaimedUnit) error {
 	}
 	return nil
 }
+
+// InKubernetesPod reports whether this process runs in a Kubernetes pod, where the
+// kubelet sets KUBERNETES_SERVICE_HOST in every container.
+func InKubernetesPod() bool { return os.Getenv("KUBERNETES_SERVICE_HOST") != "" }
