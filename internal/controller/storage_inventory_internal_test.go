@@ -65,7 +65,7 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 		}
 	}
 	charges, err := tenant.ListCreditCharges(t.Context(), 10)
-	if err != nil || len(charges) != 1 || charges[0].Kind != store.CreditChargeStorage || charges[0].StorageBytes != size || charges[0].AmountMicro <= 0 {
+	if err != nil || len(charges) != 1 || charges[0].Kind != store.CreditChargeStorage || charges[0].StorageBytes != size-1<<30 || charges[0].AmountMicro <= 0 {
 		t.Fatalf("inventory billing: %+v, %v", charges, err)
 	}
 	retained, err := tenant.StorageRetainedBytes(t.Context())

@@ -95,8 +95,8 @@ controllers require a separately reviewed design. Standbys using filesystem
 data must share the active controller's `SPARKWING_HOME`. S3 data is shared
 through the bucket.
 
-`--payment-mode` and `--free-team-slots` remain shared settings written at
-startup. All controllers on one store must declare matching values.
+`--payment-mode` remains a shared setting written at startup. Every controller
+on one store must declare the same value.
 
 ### Declared deployment
 

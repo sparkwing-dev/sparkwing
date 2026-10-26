@@ -358,9 +358,6 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
-	if err := markFreeSlotActiveTx(ctx, tx, team); err != nil {
-		return err
-	}
 	identity, err := sourceurl.RoutingIdentity(string(input.Git.Repository.Key), input.Git.Repository.Display)
 	if err != nil {
 		return err

@@ -10,13 +10,13 @@ import (
 )
 
 // TestOnlyReversePayment exercises the transaction owner with trusted fixture facts.
-func (o *Operator) TestOnlyReversePayment(ctx context.Context, paymentID, reference, createdBy string, amountMicro int64) (out CreditReversal, err error) {
+func (o *Operator) TestOnlyReversePayment(ctx context.Context, paymentID, reference, createdBy string, amountMicro int64) (out creditReversal, err error) {
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
 		out, err = reversePaymentTx(ctx, tx, paymentID, reference, auditActor{system: auditPaymentProvider}, amountMicro)
 		return err
 	})
 	if err != nil {
-		return CreditReversal{}, err
+		return creditReversal{}, err
 	}
 	return out, err
 }

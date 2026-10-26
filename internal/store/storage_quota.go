@@ -40,14 +40,14 @@ func setStorageQuotaTx(ctx context.Context, tx *storeTx, team Team, q StorageQuo
 	if q.Tier != "" && q.unlimited() {
 		q, _ = TierQuota(q.Tier)
 	}
-	_, err := tx.execContext(ctx, `INSERT INTO storage_quotas(team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,updated_at)
-VALUES (?,?,?,?,?,?) ON CONFLICT(team) DO UPDATE SET tier=excluded.tier,max_bytes_per_run=excluded.max_bytes_per_run,max_bytes_per_month=excluded.max_bytes_per_month,max_objects_per_run=excluded.max_objects_per_run,updated_at=excluded.updated_at`,
+	_, err := tx.execContext(ctx, `INSERT INTO storage_quotas(team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,limits_set,updated_at)
+VALUES (?,?,?,?,?,1,?) ON CONFLICT(team) DO UPDATE SET tier=excluded.tier,max_bytes_per_run=excluded.max_bytes_per_run,max_bytes_per_month=excluded.max_bytes_per_month,max_objects_per_run=excluded.max_objects_per_run,limits_set=1,updated_at=excluded.updated_at`,
 		team, q.Tier, q.MaxBytesPerRun, q.MaxBytesPerMonth, q.MaxObjectsPerRun, tx.now(ctx).UnixNano())
 	return err
 }
 
-// StorageQuota returns this team's explicit quota or the deployment's default tier.
-// An absent default and absent row leave the team's writes unlimited.
+// StorageQuota returns this team's explicit quota, else the deployment's default tier, else on Sparkwing Cloud
+// the team's automatic tier. Without any of them the team's writes are unlimited.
 func (t *Tenant) StorageQuota(ctx context.Context) (StorageQuota, error) {
 	var q StorageQuota
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
@@ -59,25 +59,42 @@ func (t *Tenant) StorageQuota(ctx context.Context) (StorageQuota, error) {
 }
 
 func storageQuotaForTeamTx(ctx context.Context, tx *storeTx, team Team) (StorageQuota, error) {
-	q, err := scanStorageQuota(tx.QueryRowContext(ctx, "SELECT "+storageQuotaColumns+" FROM storage_quotas WHERE team=?", team))
-	if !errors.Is(err, sql.ErrNoRows) {
-		return q, err
+	var limitsSet bool
+	row := tx.QueryRowContext(ctx, "SELECT "+storageQuotaColumns+",limits_set FROM storage_quotas WHERE team=?", team)
+	q, err := scanStorageQuota(row, &limitsSet)
+	if err == nil && limitsSet {
+		return q, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return StorageQuota{}, err
 	}
 	tier, err := storageDefaultTierTx(ctx, tx)
 	if err != nil {
 		return StorageQuota{}, err
 	}
+	if tier == "" && tx.store.cloudStorage.Load() && holdsFreeAllowance(team) {
+		// safety: a team keeps the paid tier once it has paid, even after a refund or while its balance is empty.
+		var paid bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM credit_grants WHERE team=? AND kind=?)", team, CreditGrantPaid).Scan(&paid); err != nil {
+			return StorageQuota{}, err
+		}
+		tier = storageTierFree
+		if paid {
+			tier = storageTierPaid
+		}
+	}
+	allowance := q.AllowanceBytes
+	q = StorageQuota{}
 	if tier != "" {
 		q, _ = TierQuota(tier)
 	}
-
-	q.Team = team
+	q.Team, q.AllowanceBytes = team, allowance
 	return q, nil
 }
 
-func scanStorageQuota(row rowScanner) (StorageQuota, error) {
+func scanStorageQuota(row rowScanner, extra ...any) (StorageQuota, error) {
 	var q StorageQuota
-	if err := row.Scan(&q.Team, &q.Tier, &q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun, &q.AllowanceBytes); err != nil {
+	if err := row.Scan(append([]any{&q.Team, &q.Tier, &q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun, &q.AllowanceBytes}, extra...)...); err != nil {
 		return StorageQuota{}, err
 	}
 	return q, validateStorageQuota(q)
@@ -99,12 +116,8 @@ func setStorageAllowanceTx(ctx context.Context, tx *storeTx, team Team, bytes in
 	if bytes < 0 {
 		return StorageQuota{}, errors.New("storage: the allowance must not be negative")
 	}
-	prior, err := storageQuotaForTeamTx(ctx, tx, team)
-	if err != nil {
-		return StorageQuota{}, err
-	}
-	_, err = tx.execContext(ctx, `INSERT INTO storage_quotas(team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,storage_allowance_bytes,updated_at) VALUES (?,?,?,?,?,?,?)
-ON CONFLICT(team) DO UPDATE SET storage_allowance_bytes=excluded.storage_allowance_bytes,updated_at=excluded.updated_at`, team, prior.Tier, prior.MaxBytesPerRun, prior.MaxBytesPerMonth, prior.MaxObjectsPerRun, bytes, tx.now(ctx).UnixNano())
+	_, err := tx.execContext(ctx, `INSERT INTO storage_quotas(team,storage_allowance_bytes,limits_set,updated_at) VALUES (?,?,0,?)
+ON CONFLICT(team) DO UPDATE SET storage_allowance_bytes=excluded.storage_allowance_bytes,updated_at=excluded.updated_at`, team, bytes, tx.now(ctx).UnixNano())
 	if err != nil {
 		return StorageQuota{}, err
 	}
@@ -113,7 +126,7 @@ ON CONFLICT(team) DO UPDATE SET storage_allowance_bytes=excluded.storage_allowan
 
 // ListStorageQuotas returns every explicit team quota in team order.
 func (o *Operator) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err error) {
-	rows, err := o.s.query(ctx, "SELECT "+storageQuotaColumns+" FROM storage_quotas ORDER BY team")
+	rows, err := o.s.query(ctx, "SELECT "+storageQuotaColumns+" FROM storage_quotas WHERE limits_set=1 ORDER BY team")
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +142,7 @@ func (o *Operator) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err
 	return out, rows.Err()
 }
 
-// StorageUsageFor sums this team's replica counters. Run totals span periods;
+// StorageUsageFor reads this team's usage counters. Run totals span periods;
 // month totals select the requested period. Retention never restores these counters.
 func (t *Tenant) StorageUsageFor(ctx context.Context, runID, month string) (StorageUsage, error) {
 	out := StorageUsage{Team: t.team, RunID: runID, Month: month}
@@ -169,7 +182,7 @@ func (t *Tenant) StorageRetainedBytes(ctx context.Context) (int64, error) {
 	return bytes, err
 }
 
-// TopStorageTeams ranks summed replica usage for one period, breaking ties by team.
+// TopStorageTeams ranks usage for one period, breaking ties by team.
 func (o *Operator) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error) {
 	if limit <= 0 {
 		limit = 10

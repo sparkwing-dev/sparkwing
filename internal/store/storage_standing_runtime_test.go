@@ -14,7 +14,6 @@ import (
 func TestStoreDataStandingReadsRetainedEventsInsteadOfHistoricalUsage(t *testing.T) {
 	s, tenant, _, _ := resultFixture(t)
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET event_bytes=17 WHERE team='a'")
-	rewriteSchemaExec(t, s.db, "INSERT INTO free_slots(team,taken_at) VALUES ('a',1)")
 	rewriteSchemaExec(t, s.db, "INSERT INTO storage_run_usage(team,run_id,period,bytes,objects,updated_at) VALUES ('a','run','1970-01',1000,1,1)")
 	got, err := tenant.StorageStanding(t.Context())
 	if err != nil || got.EventBytes != 17 || got.Tier != teamTierFree {
@@ -76,8 +75,8 @@ func TestStoreDataStandingTracksOnlyLiveUploadHolds(t *testing.T) {
 	}
 }
 
-func TestStoreDataStandingPreservesFundingAndSlotPolicy(t *testing.T) {
-	s, tenant, _, _ := resultFixture(t)
+func TestStoreDataStandingFollowsFundingAndHolds(t *testing.T) {
+	_, tenant, _, _ := resultFixture(t)
 	check := func(want TeamStorageTier) {
 		t.Helper()
 		got, err := tenant.StorageStanding(t.Context())
@@ -85,8 +84,6 @@ func TestStoreDataStandingPreservesFundingAndSlotPolicy(t *testing.T) {
 			t.Fatalf("standing=%+v, want %s: %v", got, want, err)
 		}
 	}
-	check(teamTierNone)
-	rewriteSchemaExec(t, s.db, "INSERT INTO free_slots(team,taken_at) VALUES ('a',?)", s.now().UnixNano())
 	check(teamTierFree)
 	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, Reference: "funding-fixture", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
@@ -143,7 +140,7 @@ func FuzzStorageStandingTenantInventory(f *testing.F) {
 			t.Fatal(err)
 		}
 		rewriteSchemaExec(t, s.db, "INSERT INTO team_storage(team,store,used_bytes,reserved_bytes,updated_at) VALUES ('a','cache',999999,999999,1),('b','logs',999999,999999,1)")
-		rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,bytes,objects,updated_at) VALUES ('a','1970-01',?,1,1),('b','1970-01',?,1,1)", int64(foreign), int64(own))
+		rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,bytes,objects,updated_at) VALUES ('a','1969-12',?,1,1),('b','1969-12',?,1,1)", int64(foreign), int64(own))
 		first, err := tenant.StorageStanding(t.Context())
 		if err != nil || first.BlobBytes != int64(own) || first.LogBytes != int64(own)+1 || first.EventBytes != int64(events) || first.ReservedBlobBytes != 0 {
 			t.Fatalf("tenant inventory=%+v: %v", first, err)
@@ -162,11 +159,10 @@ func FuzzStorageStandingTenantInventory(f *testing.F) {
 			t.Fatalf("reopened inventory=%+v, want %+v: %v", reopened, first, err)
 		}
 		var raw, usage int64
-		err = errors.Join(s.db.QueryRow("SELECT used_bytes FROM team_storage WHERE team='a' AND store='cache'").Scan(&raw), s.db.QueryRow("SELECT bytes FROM storage_month_usage WHERE team='a'").Scan(&usage))
+		err = errors.Join(s.db.QueryRow("SELECT used_bytes FROM team_storage WHERE team='a' AND store='cache'").Scan(&raw), s.db.QueryRow("SELECT bytes FROM storage_month_usage WHERE team='a' AND period='1969-12'").Scan(&usage))
 		if err != nil || raw != 999999 || usage != int64(foreign) {
 			t.Fatalf("report changed accounting: raw=%d usage=%d: %v", raw, usage, err)
 		}
-		rewriteSchemaCount(t, s.db, "free_slots", 0)
 		rewriteSchemaCount(t, s.db, "credit_charges", 0)
 	})
 }

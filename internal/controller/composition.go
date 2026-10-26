@@ -52,7 +52,7 @@ func NewDeployment(st *store.Store, cfg deployment.Config, logger *slog.Logger) 
 			st.DisableCreditMetering()
 		}
 		if cfg.Hosted() {
-			st.EnableStorageTiers()
+			st.EnableCloudStorage()
 		}
 		srv.resolveTenant = storeTenantResolver(st)
 		srv.credentialIssuer = srv.operator

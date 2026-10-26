@@ -70,7 +70,7 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 		if err != nil {
 			return UploadReservation{}, err
 		}
-		if err := reserveBlobUploadQuotaTx(ctx, tx, t.team, request.ID, a.source.RunID, reserved, objects, request.ExpiresAt); err != nil {
+		if err := admitStorageGrowthTx(ctx, tx, t.team, storageGrowth{reservation: blobUploadQuotaID(request.ID), expires: request.ExpiresAt, run: a.source.RunID, bytes: reserved, objects: objects}); err != nil {
 			return UploadReservation{}, err
 		}
 		u := UploadReservation{ID: request.ID, Blob: blob.Blob{Team: string(t.team), Digest: request.Intent.Digest, Size: request.Intent.Size}, Identity: a.source, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, ExpiresAt: request.ExpiresAt.UTC()}
@@ -78,11 +78,6 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 		node, attempt, generation, unitKind, unitID, unitGeneration, unitSource, err := blobUploadColumns(u.Identity)
 		if err != nil {
 			return UploadReservation{}, err
-		}
-		if u.Blob.Size > 0 {
-			if err := markFreeSlotActiveTx(ctx, tx, t.team); err != nil {
-				return UploadReservation{}, err
-			}
 		}
 		_, err = tx.execContext(ctx, `INSERT INTO uploads(id,team,run_id,store,size,provenance,expires_at,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,node_id,attempt,generation,uploader_principal,capability_prefix,repo_key,ref_scope) VALUES (?,?,?,'blob',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, u.ID, t.team, u.Identity.RunID, u.Blob.Size, u.Provenance, u.ExpiresAt.UnixNano(), u.Identity.Kind, unitKind, unitID, unitGeneration, unitSource, u.Blob.Digest, node, attempt, generation, u.Identity.Principal, u.Identity.CapabilityRef, a.authority.Repo, u.RefFacts.Scope.CapabilityScope())
 		if err != nil {

@@ -827,7 +827,7 @@ func timeNS(value *time.Time) any {
 }
 
 func appendStateEventTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, kind string, stateSeq int64, payload any, now time.Time) error {
-	seq, err := appendEventTx(ctx, tx, team, string(ref.RunID), string(ref.NodeID), kind, payload, now)
+	seq, err := appendEventTx(ctx, tx, team, string(ref.RunID), string(ref.NodeID), kind, payload, now, true)
 	if err != nil {
 		return err
 	}

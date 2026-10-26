@@ -87,10 +87,6 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 	if err := tx.operator.deleteRetentionIdentityTx(ctx, tx, now, request.Limit, &result); err != nil {
 		return RetentionResult{}, err
 	}
-	result.FreeSlotsReleased, err = tx.operator.releaseIdleFreeSlotsTx(ctx, tx)
-	if err != nil {
-		return RetentionResult{}, err
-	}
 	return result, nil
 }
 

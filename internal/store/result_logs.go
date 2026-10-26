@@ -156,7 +156,7 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 }
 
 func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segments []runstate.Segment) error {
-	var next, offset, stored int64
+	var next, offset, stored, added int64
 	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,1),COALESCE(MAX(end_offset),0),COALESCE(SUM(stored_bytes),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset, &stored); err != nil {
 		return err
 	}
@@ -192,11 +192,10 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 		next++
 		offset += segment.Size
 		stored += segment.StoredBytes
+		added += segment.StoredBytes
 	}
-	if stored > 0 {
-		if err := markFreeSlotActiveTx(ctx, tx, team); err != nil {
-			return err
-		}
+	if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: run, bytes: added}); err != nil {
+		return err
 	}
 	_, err := tx.execContext(ctx, "UPDATE log_streams SET uploaded_through = ?, stored_bytes = ? WHERE team = ? AND run_id = ? AND id = ?", offset, stored, team, run, identity.id)
 	return err

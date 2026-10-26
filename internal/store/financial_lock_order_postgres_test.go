@@ -105,7 +105,7 @@ func TestPostgresWarningLocksItsTeamBeforeLedger(t *testing.T) {
 	s := storetest.OpenPostgres(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
@@ -187,10 +187,10 @@ func TestPostgresDirectGrantRacingTeamPurge(t *testing.T) {
 			t.Errorf("%s rows=%d: %v", table, count, err)
 		}
 	}
-	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentLive, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentLive, func() error { return nil }); err != nil {
 		t.Fatalf("live startup after purge: %v", err)
 	}
-	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err == nil || !strings.Contains(err.Error(), "live to test") {
+	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, func() error { return nil }); err == nil || !strings.Contains(err.Error(), "live to test") {
 		t.Fatalf("test startup after purge: %v", err)
 	}
 }

@@ -11,35 +11,6 @@ import (
 	"time"
 )
 
-func TestStoreDataFreeSlotPolicyPersistsAndRejectsInvalidWrites(t *testing.T) {
-	s := authorityStore(t)
-	path := blobAccountingDiskStore(t, s)
-	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), "", 3, func() error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), "", -1, func() error { return nil }); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("negative slot count: %v", err)
-	}
-	if err := s.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	s.db = blobAccountingDB(t, path)
-	if taken, limit, err := s.AsOperator().FreeSlots(t.Context()); err != nil || taken != 0 || limit != 3 {
-		t.Fatalf("reopened slot policy: %d/%d, %v", taken, limit, err)
-	}
-	rewriteSchemaExec(t, s.db, "UPDATE settings SET sealed=1 WHERE key=?", metaKeyFreeTeamSlots)
-	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), "", 4, func() error { return nil }); err == nil {
-		t.Fatal("sealed slot policy changed")
-	}
-	var raw []byte
-	if err := s.db.QueryRowContext(t.Context(), "SELECT value FROM settings WHERE key=?", metaKeyFreeTeamSlots).Scan(&raw); err != nil || string(raw) != "3" {
-		t.Fatalf("sealed policy overwritten: %q, %v", raw, err)
-	}
-	if _, _, err := s.AsOperator().FreeSlots(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
-		t.Fatalf("sealed policy selected a fallback: %v", err)
-	}
-}
-
 func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	s := authorityStore(t)
 	s.clock = func() time.Time { return time.Unix(1000, 0).UTC() }
@@ -48,7 +19,7 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initial.RateMicroPerSecond != DefaultCreditRateMicro || initial.RateTableSet || initial.WarmCPUClassCores != DefaultWarmCPUClassCores || initial.StorageRateMicroPerGBDay != 0 || initial.StorageFreeAllowanceBytes != 0 {
+	if initial.RateMicroPerSecond != DefaultCreditRateMicro || initial.RateTableSet || initial.WarmCPUClassCores != DefaultWarmCPUClassCores || initial.StorageRateMicroPerGBDay != 0 || initial.StorageFreeAllowanceBytes != defaultFreeAllowanceBytes {
 		t.Fatalf("defaults=%+v", initial)
 	}
 	table := CreditRateTable{{Cores: 8, MicroPerSecond: 40000}, {Cores: 4, MicroPerSecond: 20000}, {Cores: 2, MicroPerSecond: 10000}}

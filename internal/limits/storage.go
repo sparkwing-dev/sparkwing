@@ -19,8 +19,6 @@ const (
 	binaryBytes int64 = 100 << 20
 	// LocalBinaryCacheBytes bounds local binary-cache pruning budget.
 	LocalBinaryCacheBytes int64 = 2 << 30
-	// freeTeamSlots bounds teams that may hold a free storage allowance.
-	freeTeamSlots int = 200
 	// LocalBinaryCacheEntries bounds local binary-cache entries.
 	LocalBinaryCacheEntries int = 20
 	// MemoDefaultTTL bounds default memo TTL.

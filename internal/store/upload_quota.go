@@ -21,22 +21,6 @@ func uploadQuotaDimensions(id, run, period string, bytes, objects int64) []uploa
 	}
 }
 
-func reserveBlobUploadQuotaTx(ctx context.Context, tx *storeTx, team Team, id, run string, size, objects int64, expires time.Time) error {
-	policy, err := storageQuotaForTeamTx(ctx, tx, team)
-	if err != nil {
-		return err
-	}
-	dimensions := uploadQuotaDimensions(blobUploadQuotaID(id), run, tx.now(ctx).Format("2006-01"), size, objects)
-	dimensions[0].ceiling, dimensions[1].ceiling = policy.MaxBytesPerMonth, policy.MaxBytesPerRun
-	dimensions[2].ceiling = policy.MaxObjectsPerRun
-	for _, dimension := range dimensions {
-		if err := reserveUploadQuotaDimensionTx(ctx, tx, team, dimension, expires); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // safety: dimensions always lock monthly bytes before run bytes and objects.
 // Durable holds keep concurrent transfers from spending the same run capacity.
 func reserveUploadQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d uploadQuotaDimension, expires time.Time) error {
@@ -70,7 +54,7 @@ func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d
 		return "", authorityError(apierr.Conflict, "storage quota overflow")
 	}
 	if d.amount > 0 && d.ceiling > 0 && d.amount > d.ceiling-used-reserved {
-		return "", &StorageQuotaError{Principal: string(team), Limit: d.limitName, Unit: d.unit, Used: used + reserved, Allowed: d.ceiling, Requested: d.amount}
+		return "", &StorageQuotaError{Principal: string(team), Limit: d.limitName, Unit: d.unit, Used: used + reserved, Allowed: d.ceiling, Requested: d.amount, Remedy: storageLimitRemedy}
 	}
 	if _, err := tx.execContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND quota=? AND state='held' AND expires_at<=?", team, d.quota, tx.now(ctx).UnixNano()); err != nil {
 		return "", err

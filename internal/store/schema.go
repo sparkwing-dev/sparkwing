@@ -209,7 +209,6 @@ var schemaTables = []schemaTable{
 	{Name: "eval_units", Owner: schemaTenant},
 	{Name: "events", Owner: schemaTenant},
 	{Name: "flow_nonces", Owner: schemaOperator},
-	{Name: "free_slots", Owner: schemaTenant},
 	{Name: "git_credentials", Owner: schemaTenant},
 	{Name: "github_app_automation", Owner: schemaTenant},
 	{Name: "github_app_publications", Owner: schemaTenant},

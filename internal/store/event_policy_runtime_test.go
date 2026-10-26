@@ -13,22 +13,22 @@ func TestStoreDataEventsCapsCountKindAndUnchargedEvents(t *testing.T) {
 	if got, err := s.eventLimits(t.Context()); err != nil || got != defaultEventLimits() {
 		t.Fatalf("default caps=%+v: %v", got, err)
 	}
-	if _, err := tenant.AppendEventCharged(t.Context(), "run", "", "k", make([]byte, defaultEventLimits().MaxBytesPerEvent)); !errors.Is(err, ErrStorageQuota) {
+	if err := tenant.AppendEvent(t.Context(), "run", "", "k", make([]byte, defaultEventLimits().MaxBytesPerEvent)); !errors.Is(err, ErrStorageQuota) {
 		t.Fatalf("event kind escaped cap: %v", err)
 	}
 	if err := s.setEventLimits(t.Context(), eventLimits{MaxBytesPerEvent: 5, MaxBytesPerRun: 10, MaxEventsPerRun: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := appendEventTx(t.Context(), tx, tenant.team, "run", "", "k", []byte("1234567"), transactionTime(t, tx))
+		_, err := appendEventTx(t.Context(), tx, tenant.team, "run", "", "k", []byte("1234567"), transactionTime(t, tx), true)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.AppendEventCharged(t.Context(), "run", "", "kkk", nil); !errors.Is(err, ErrStorageQuota) {
+	if err := tenant.AppendEvent(t.Context(), "run", "", "kkk", nil); !errors.Is(err, ErrStorageQuota) {
 		t.Fatalf("uncharged bytes escaped run cap: %v", err)
 	}
-	if _, err := tenant.AppendEventCharged(t.Context(), "run", "", "kk", nil); err != nil {
+	if err := tenant.AppendEvent(t.Context(), "run", "", "kk", nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -40,7 +40,7 @@ func TestStoreDataEventsConcurrentCapsAndKindValidation(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, kind := range []string{"", strings.Repeat("k", maxEventKindBytes+1), "node started", "kind\n", "kind\x00"} {
-			if _, err := tenant.AppendEventCharged(t.Context(), "run", "", kind, nil); !errors.Is(err, errInvalidEventKind) {
+			if err := tenant.AppendEvent(t.Context(), "run", "", kind, nil); !errors.Is(err, errInvalidEventKind) {
 				t.Fatalf("invalid kind=%q: %v", kind, err)
 			}
 		}
@@ -48,7 +48,7 @@ func TestStoreDataEventsConcurrentCapsAndKindValidation(t *testing.T) {
 		results := make(chan error, 8)
 		for range 8 {
 			wg.Go(func() {
-				_, err := tenant.AppendEventCharged(t.Context(), "run", "", "k", []byte("x"))
+				err := tenant.AppendEvent(t.Context(), "run", "", "k", []byte("x"))
 				results <- err
 			})
 		}
@@ -69,28 +69,28 @@ func TestStoreDataEventsConcurrentCapsAndKindValidation(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, kind := range []string{strings.Repeat("k", maxEventKindBytes), "node_started", "sparkwing.step:log-1"} {
-			if _, err := tenant.AppendEventCharged(t.Context(), "run", "", kind, nil); err != nil {
+			if err := tenant.AppendEvent(t.Context(), "run", "", kind, nil); err != nil {
 				t.Fatalf("valid kind=%q: %v", kind, err)
 			}
 		}
 	}
 }
 
-func TestStoreDataEventsPreserveFundingAndFreeShare(t *testing.T) {
+func TestStoreDataEventsPreserveFundingAndFreeAllowance(t *testing.T) {
 	s, tenant, _, _ := resultFixture(t)
-	allowance := int64(1600)
-	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
+	allowance, rate := int64(100), int64(CloudStorageRateMicroPerGBDay)
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance, StorageRateMicroPerGBDay: &rate}); err != nil {
 		t.Fatal(err)
 	}
 	appendBytes := func(size int) error {
-		_, err := tenant.AppendEventCharged(t.Context(), "run", "", "k", bytes.Repeat([]byte("x"), size-1))
+		err := tenant.AppendEvent(t.Context(), "run", "", "k", bytes.Repeat([]byte("x"), size-1))
 		return err
 	}
 	if err := appendBytes(100); err != nil {
 		t.Fatal(err)
 	}
-	if err := appendBytes(1); !errors.Is(err, ErrStorageQuota) {
-		t.Fatalf("free share exceeded: %v", err)
+	if err := appendBytes(1); !errors.Is(err, ErrInsufficientCredits) {
+		t.Fatalf("free allowance exceeded: %v", err)
 	}
 	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, Reference: "funding-fixture", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
@@ -101,8 +101,9 @@ func TestStoreDataEventsPreserveFundingAndFreeShare(t *testing.T) {
 	if _, err := tenant.HoldByOperator(t.Context(), "operator", "held"); err != nil {
 		t.Fatal(err)
 	}
-	if err := appendBytes(1); !errors.Is(err, ErrStorageQuota) {
-		t.Fatalf("held team retained funded share: %v", err)
+	var held *InsufficientCreditsError
+	if err := appendBytes(1); !errors.As(err, &held) || held.Hold == "" {
+		t.Fatalf("held team kept its funding: %v", err)
 	}
 	if _, err := tenant.ReleaseOperatorHolds(t.Context(), "operator", "released"); err != nil {
 		t.Fatal(err)
@@ -118,18 +119,18 @@ func TestStoreDataEventsPricedStorageRequiresCreditWithOrWithoutQuota(t *testing
 		if err := tenant.SetStorageQuota(t.Context(), quota); err != nil {
 			t.Fatal(err)
 		}
-		rate := int64(CloudStorageRateMicroPerGBDay)
-		if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
+		rate, free := int64(CloudStorageRateMicroPerGBDay), int64(0)
+		if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
 			t.Fatal(err)
 		}
 		before := eventAccountingSnapshot(t, s)
-		if _, err := tenant.AppendEventCharged(t.Context(), "run", "job", "k", nil); !errors.Is(err, ErrInsufficientCredits) || eventAccountingSnapshot(t, s) != before {
+		if err := tenant.AppendEvent(t.Context(), "run", "job", "k", nil); !errors.Is(err, ErrInsufficientCredits) || eventAccountingSnapshot(t, s) != before {
 			t.Fatalf("priced storage admitted without credit: %v", err)
 		}
 		if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MicroCreditsPerCredit, Reference: "funding-fixture", CreatedBy: "operator"}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tenant.AppendEventCharged(t.Context(), "run", "job", "k", nil); err != nil {
+		if err := tenant.AppendEvent(t.Context(), "run", "job", "k", nil); err != nil {
 			t.Fatal(err)
 		}
 	}

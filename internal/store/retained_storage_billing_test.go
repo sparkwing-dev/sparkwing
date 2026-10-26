@@ -13,8 +13,9 @@ func retainedBillingFixture(t *testing.T) (*Store, *time.Time) {
 	s := authorityStore(t)
 	now := time.Unix(1_700_000_000, 0).UTC()
 	s.clock = func() time.Time { return now }
-	rate := int64(CloudStorageRateMicroPerGBDay)
-	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
+	// These cases price every retained byte; the default free allowance is covered where it is the subject.
+	rate, free := int64(CloudStorageRateMicroPerGBDay), int64(0)
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) SELECT name,'fund-'||name,'paid',?,1 FROM teams`, MaxCreditGrantMicro)

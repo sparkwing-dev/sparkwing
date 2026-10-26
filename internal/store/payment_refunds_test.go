@@ -199,7 +199,7 @@ func TestPaymentRefundIndependentClientsCannotOverReverse(t *testing.T) {
 			other := &Store{db: blobAccountingDB(t, path), dialect: DialectSQLite, clock: s.clock}
 			start := make(chan struct{})
 			type result struct {
-				reversal CreditReversal
+				reversal creditReversal
 				err      error
 			}
 			results := make(chan result, 2)

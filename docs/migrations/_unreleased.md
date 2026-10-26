@@ -42,6 +42,23 @@ satisfy the check: it measures a bucket and stores nothing. A
 `--cache-blob-store`. Set `controller.dataStore.s3URL`. A self-hosted install
 may instead switch to `controller.storage.type=pvc`; Cloud still requires S3.
 
+## Storage tiers replace free-tier slots
+
+Sparkwing Cloud no longer hands out free-tier slots. `--free-team-slots`, the
+`free_slots` table and the sign-up gate's `free_tier_closed` and
+`free_tier_unreadable` waitlist reasons are removed; drop the flag from
+controller arguments. Every team stores within its tier quota instead, and every
+write that grows stored data (run events, blob and source uploads, log
+segments) is checked against it, against holds and against an empty balance.
+Team standing JSON drops `cache_share_bytes`, `log_share_bytes` and
+`event_share_bytes`. `Tenant.AppendEventCharged` is removed; events append
+through `Tenant.AppendEvent`.
+
+## Operator refund route removed
+
+`POST /api/v1/operator/teams/{team}/refunds` is removed. Refund in the Stripe
+dashboard; the verified refund webhook reverses the credits once.
+
 ## Fleet-wide hourly run cap removed
 
 The optional `max_global_runs_per_hour` compute guard, and the
@@ -2784,12 +2801,12 @@ totals. A failed counter write emits an error. A controller crash before request
 completion can lose that request's egress sample. Thirteen months of reports stay
 available. There is no principal-based persistence or periodic flush.
 
-## Event charges use tenant handles and replica identity
+## Event charges use tenant handles
 
 `Store.AppendEventCharged` is removed. Obtain a tenant with `Store.ForTeam`,
-then call `Tenant.AppendEventCharged(ctx, replicaID, runID, nodeID, kind, payload)`.
-The replica ID is the controller's trusted identity. The caller no longer
-selects a charged principal. The tenant supplies the team and the store owns time.
+then call `Tenant.AppendEvent(ctx, runID, nodeID, kind, payload)`. The caller
+no longer selects a charged principal. The tenant supplies the team and the
+store owns time.
 
 Event writes, retained run counters, shared storage quotas and replica usage
 commit together. Pending uploads and events share monthly and run byte capacity.
@@ -2820,7 +2837,7 @@ authorized console refund transaction. `ValidCreditGrantKind` and
 
 `Tenant.AppendEventOnce` and the unused `Operator.DropCardAttempt` are removed.
 State events commit with their transition. External event ingestion uses
-`Tenant.AppendEventCharged`.
+`Tenant.AppendEvent`.
 
 Queued refund callbacks use verified provider settlement, which selects the
 persisted payment and exact refund object. `Operator.MarkCardRefundMade` applies
@@ -3237,9 +3254,8 @@ current key, including `github-app-webhook-secret.previous` on its own, stops
 startup.
 
 Startup binds every listener before it opens the store, and writes the
-bootstrap seed, `--payment-mode` and `--free-team-slots` only after every other
-check passes. Controllers sharing a store must declare the same payment mode
-and free team slots. `--external-url` follows the runners' rule:
+bootstrap seed and `--payment-mode` only after every other check passes.
+Controllers sharing a store must declare the same payment mode. `--external-url` follows the runners' rule:
 `https`, or `http` only on loopback or a Kubernetes Service. Without
 `--external-url`, the GitHub runner binding routes answer
 `capability_unsupported` rather than a workflow built from the request's host.
@@ -3271,8 +3287,7 @@ former controller's later writes abort and fail-stop. SQLite controllers and
 wingd share the home's `wingd/d.lock` OS file lock. A second owner fails fast,
 while admin remains available. Webhook ordering and bucket write guards use the active
 process's state, so cross-controller ordering and storage-state propagation do
-not apply. `--payment-mode` and `--free-team-slots` remain matching shared
-settings.
+not apply. `--payment-mode` remains a matching shared setting.
 
 Break-glass admin checks the actual table schema and transport endpoint,
 including Unix sockets, and keeps verification and writes on that connection.

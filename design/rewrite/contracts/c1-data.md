@@ -1269,8 +1269,7 @@ The controller and retained-storage billing share the same blob/log inventory
 owner. Historical usage counters never determine retained bytes.
 The raw `Store.StorageStandingFor` and `Store.TeamStorage` reads, their
 `TeamStorageUsage` type, and `Store.ReconcileFreeEventBytes` are removed.
-`free_slots` records only slot ownership and `taken_at`. Event bytes come from
-retained `runs.event_bytes`, including during event storage admission.
+Event bytes come from retained `runs.event_bytes`.
 `Store.ReleaseExpiredStorage` is removed. Upload expiry uses quota admission
 and the leased blob-maintenance pass.
 
@@ -2646,16 +2645,19 @@ and store clock. `Store.RecordEgressUsage`, `Store.ListEgressUsage` and the raw
 Account deletion leaves the tenant counters unchanged because they have no user
 identity. No schema or policy limit changes.
 
-`Tenant.AppendEventCharged` replaces the raw Store event writer. Its trusted
-replica identity comes from the controller. The method accepts no principal,
-team or clock. It locks the tenant's run and commits the event, retained run
-counters, shared storage admission and additive replica usage together. Event
-bytes include the kind and payload. Events consume monthly and lifetime run
-bytes alongside pending uploads, without consuming object capacity. Monthly
-admission resets with the store clock. Run capacity survives month changes.
-The existing event caps, free share, funding and claim fences remain in force.
-Usage is recorded even when no quota is configured. Failed writes and overflow
-return no sequence and roll back every accounting row.
+Every write that grows a team's stored data passes one storage rule,
+`admitStorageGrowthTx`, in the write's own transaction: run events
+(`appendEventTx`, so `Tenant.AppendEvent` and every state transition), blob and
+source upload reservations and tagged log segments. It refuses a held team,
+growth past the free storage allowance on an empty balance while storage is
+priced, and growth past the team's tier quota (monthly bytes, per-run bytes and
+objects), then counts the growth so a refused write records nothing. A run's
+own state events are counted but never refused, so a run past its limit can
+still finish. Sparkwing Cloud's store applies the automatic free or paid tier to
+teams without an explicit quota and prices storage at the published rate by
+default. One default free allowance, 1 GiB, serves billing, admission and the
+console. The free-tier slot table, its idle release, `AppendEventCharged` and
+the per-store free shares are removed.
 
 `Tenant.ChargeDownload` replaces `Store.ChargeDownload`. `DownloadCharge`
 carries the byte count, delivered-byte flag
@@ -2716,7 +2718,7 @@ The raw Store methods are removed with every caller.
 `Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
 also removed. Callers select a Tenant explicitly before grants and charge history.
 The unused `Tenant.AppendEventOnce` writer is removed. State events commit with
-their owning transition. External event ingestion uses `Tenant.AppendEventCharged`.
+their owning transition. External event ingestion uses `Tenant.AppendEvent`.
 
 `Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
 Store twins are removed. Burn windows use the store clock. A credit-state read

@@ -173,7 +173,7 @@ func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error
 	return st, nil
 }
 
-func configureDeployment(ctx context.Context, stateDB string, cfg deployment.Config, credentialsDir, epochDir string, st *store.Store, mode capability.PaymentMode, freeSlots int64) (string, error) {
+func configureDeployment(ctx context.Context, stateDB string, cfg deployment.Config, credentialsDir, epochDir string, st *store.Store, mode capability.PaymentMode) (string, error) {
 	body, err := deploymentRecordBytes(ctx, cfg, credentialsDir, epochDir, st)
 	if err != nil {
 		return "", err
@@ -184,7 +184,7 @@ func configureDeployment(ctx context.Context, stateDB string, cfg deployment.Con
 		return "", fmt.Errorf("read deployment record: %w", snapshotErr)
 	}
 	published := false
-	id, err := st.AsOperator().ConfigureDeployment(ctx, mode, freeSlots, func() error {
+	id, err := st.AsOperator().ConfigureDeployment(ctx, mode, func() error {
 		err := publishDeploymentRecord(stateDB, body)
 		published = published || err == nil
 		return err

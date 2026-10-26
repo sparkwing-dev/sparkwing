@@ -16,10 +16,10 @@ func (o *Operator) ChargeRetainedStorage(ctx context.Context) (StorageChargeSwee
 	var rate, free int64
 	if err := o.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		if rate, err = creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0); err != nil {
+		if rate, err = storageRateTx(ctx, tx); err != nil {
 			return err
 		}
-		free, err = creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, 0)
+		free, err = storageFreeAllowanceTx(ctx, tx)
 		return err
 	}); err != nil {
 		return out, err

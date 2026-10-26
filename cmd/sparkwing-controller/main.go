@@ -216,11 +216,6 @@ func run(args []string) error {
 			"s3://bucket/prefix. It is read on the reconciliation interval and never "+
 			"served, so the controller exposes none of it. Empty counts only the writes "+
 			"this process makes")
-	freeTeamSlots := fs.Int64("free-team-slots", store.DefaultFreeTeamSlots,
-		"teams without credits that may hold a free-tier slot on a multi-team controller. A team takes "+
-			"one when it first starts a run and keeps it until the team is deleted, so free storage never "+
-			"passes this many allowances; a team with neither credits nor a slot is refused. Lowering it "+
-			"takes no slot back")
 	cacheBlobStore := fs.String("cache-blob-store", "",
 		"the cache's --blob-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile what each "+
 			"team stores there and deletes a team's objects 30 days after they were last written; the operator's "+
@@ -404,9 +399,6 @@ func run(args []string) error {
 	}
 	if *teamDownloadFree < 0 || *teamDownloadFunded < 0 {
 		return fmt.Errorf("a team daily download cap must not be negative; pass 0 to turn it off")
-	}
-	if *freeTeamSlots < 0 {
-		return fmt.Errorf("--free-team-slots must not be negative; pass 0 to admit no team without credits")
 	}
 	if *bucketMeasurePages < 1 {
 		return fmt.Errorf("--bucket-measure-pages must be at least 1; a measurement that lists nothing can only be incomplete")
@@ -639,7 +631,7 @@ func run(args []string) error {
 	if paymentVerifier != nil {
 		configuredMode = cfg.PaymentMode()
 	}
-	deploymentID, err := configureDeployment(ctx, p.StateDB(), cfg, *credentialsDir, epochDir, st, configuredMode, *freeTeamSlots)
+	deploymentID, err := configureDeployment(ctx, p.StateDB(), cfg, *credentialsDir, epochDir, st, configuredMode)
 	if err != nil {
 		return fmt.Errorf("persist deployment configuration: %w", err)
 	}

@@ -62,10 +62,6 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 		if err := clearBlobTombstoneTx(ctx, tx, t.team, u.Blob.Digest); err != nil {
 			return u, err
 		}
-		policy, err := storageQuotaForTeamTx(ctx, tx, t.team)
-		if err != nil {
-			return u, err
-		}
 		reserved := u.Blob.Size
 		var own int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM source_uploads WHERE team=? AND authority_kind=? AND authority_id=? AND repo_key=? AND digest=? AND size=? AND committed_at>0 AND expires_at>?`, t.team, authority.Kind, authority.ID, u.Scope.Repository, u.Blob.Digest, u.Blob.Size, tx.now(ctx).UnixNano()).Scan(&own); err != nil {
@@ -74,16 +70,10 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 		if own > 0 {
 			reserved = 0
 		}
-		d := uploadQuotaDimension{id: blobUploadQuotaID(u.ID), quota: "storage", period: tx.now(ctx).Format("2006-01"), amount: reserved, ceiling: policy.MaxBytesPerMonth, limitName: storageLimitBytesPerMonth, unit: "bytes"}
-		if err := reserveUploadQuotaDimensionTx(ctx, tx, t.team, d, u.ExpiresAt); err != nil {
+		if err := admitStorageGrowthTx(ctx, tx, t.team, storageGrowth{reservation: blobUploadQuotaID(u.ID), expires: u.ExpiresAt, bytes: reserved}); err != nil {
 			return u, err
 		}
-		if u.Blob.Size > 0 {
-			if err := markFreeSlotActiveTx(ctx, tx, t.team); err != nil {
-				return u, err
-			}
-		}
-		_, err = tx.execContext(ctx, `INSERT INTO source_uploads(team,id,authority_kind,authority_id,repo_key,repo_display,execution_sha,pipeline_sha,digest,size,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, t.team, u.ID, authority.Kind, authority.ID, u.Scope.Repository, u.Scope.RepositoryDisplay, u.Scope.ExecutionSHA, u.Scope.PipelineSHA, u.Blob.Digest, u.Blob.Size, u.ExpiresAt.UnixNano())
+		_, err := tx.execContext(ctx, `INSERT INTO source_uploads(team,id,authority_kind,authority_id,repo_key,repo_display,execution_sha,pipeline_sha,digest,size,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, t.team, u.ID, authority.Kind, authority.ID, u.Scope.Repository, u.Scope.RepositoryDisplay, u.Scope.ExecutionSHA, u.Scope.PipelineSHA, u.Blob.Digest, u.Blob.Size, u.ExpiresAt.UnixNano())
 		if err != nil {
 			return u, err
 		}

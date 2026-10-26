@@ -36,18 +36,17 @@ type RetentionRequest struct {
 
 // RetentionResult reports committed removals and preserved pins; financial rows must always remain untouched.
 type RetentionResult struct {
-	AuditEvents       int64
-	Runs              int64
-	Metrics           int64
-	Records           int64
-	Capabilities      int64
-	Effects           int64
-	Invitations       int64
-	Sessions          int64
-	ReleasedBytes     int64
-	PinnedRuns        int64
-	PinnedOutputs     int64
-	FreeSlotsReleased int64
+	AuditEvents   int64
+	Runs          int64
+	Metrics       int64
+	Records       int64
+	Capabilities  int64
+	Effects       int64
+	Invitations   int64
+	Sessions      int64
+	ReleasedBytes int64
+	PinnedRuns    int64
+	PinnedOutputs int64
 }
 
 // MaintainRetention is the single deployment pass for run, metric, object and credential expiration.

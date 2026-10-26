@@ -42,7 +42,6 @@ func TestStartupMatrixRefusesBeforeTouchingTheStore(t *testing.T) {
 			[]string{"--payment-mode=test", "--bucket-measure-pages=0"},
 			"--bucket-measure-pages",
 		},
-		{"free slots, then a bad flag", nil, []string{"--free-team-slots=5", "--log-retention=nope"}, "--log-retention"},
 		{"external origin runners would refuse", nil, []string{"--external-url=http://controller.example.com"}, "unencrypted"},
 		{
 			"malformed listen address",
@@ -50,9 +49,9 @@ func TestStartupMatrixRefusesBeforeTouchingTheStore(t *testing.T) {
 			[]string{"--payment-mode=test", "--addr=nope"},
 			"--addr",
 		},
-		{"empty API address", nil, []string{"--free-team-slots=5", "--addr="}, "--addr"},
-		{"occupied port", nil, []string{"--free-team-slots=5", "--addr=" + taken.Addr().String()}, "--addr"},
-		{"occupied metrics port", nil, []string{"--free-team-slots=5", "--metrics-addr=" + taken.Addr().String()}, "--metrics-addr"},
+		{"empty API address", nil, []string{"--addr="}, "--addr"},
+		{"occupied port", nil, []string{"--addr=" + taken.Addr().String()}, "--addr"},
+		{"occupied metrics port", nil, []string{"--metrics-addr=" + taken.Addr().String()}, "--metrics-addr"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("SPARKWING_HOME", t.TempDir())
@@ -80,7 +79,7 @@ func TestStartupMatrixRefusesBeforeTouchingTheStore(t *testing.T) {
 
 func TestEmptyAPIAddressRefusesBeforeOpeningStore(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	if err := run([]string{"--addr=", "--free-team-slots=5"}); err == nil || !strings.Contains(err.Error(), "--addr") {
+	if err := run([]string{"--addr="}); err == nil || !strings.Contains(err.Error(), "--addr") {
 		t.Fatalf("empty --addr: %v", err)
 	}
 	p, err := paths.DefaultPaths()

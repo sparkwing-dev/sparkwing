@@ -96,10 +96,7 @@ live blob-upload holds. Historical usage counters and bucket listings do not
 replace those authoritative counts. Exact ticket replay never charges twice.
 Deployment reports sum usage by tenant and period.
 
-Retention releases a free-tier slot after thirty consecutive days with
-no runs or stored bytes. New run or storage activity restarts that clock.
 Expired staging uploads still count until garbage collection removes them.
-A team that stores data again competes for an available free slot.
 
 The controller's maintenance pass expires records, marks unreachable
 blobs and collects tombstones after the 24-hour grace period. New references
@@ -116,7 +113,12 @@ release pending capacity. A raw digest never grants read or attachment rights.
 Sparkwing Cloud applies a storage tier to every team without an explicit quota.
 A team that has bought credits at least once gets the paid tier; any other team
 gets the free tier. The deployment's default tier and a per-team quota set by
-the operator take precedence over both.
+the operator take precedence over both. Every write that grows stored data,
+whether a run event, a blob or source upload, or a log segment, passes the same
+check. A held team cannot grow its storage, and a team with an empty balance
+cannot grow past the free storage allowance (1 GiB unless the operator sets
+another) while storage is priced. Cloud prices stored bytes beyond that
+allowance at the published rate.
 
 | Tier | Per run | Per month | Objects per run |
 | --- | --- | --- | --- |

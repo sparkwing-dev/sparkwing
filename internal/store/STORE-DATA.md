@@ -86,16 +86,19 @@ usage, raw storage counters and other tenants cannot change retained byte totals
 Corrupt inventory or an overflowing total returns an error and no partial report.
 The controller's team storage report consumes this snapshot.
 
-`Tenant.AppendEventCharged` replaces the raw Store event writer. The method
-accepts no principal, team or clock. It locks the tenant's run and commits the
-event, retained run counters, shared storage admission and additive usage
-together. Event
-bytes include the kind and payload. Events consume monthly and lifetime run
-bytes alongside pending uploads, without consuming object capacity. Monthly
-admission resets with the store clock. Run capacity survives month changes.
-The existing event caps, free share, funding and claim fences remain in force.
-Usage is recorded even when no quota is configured. Failed writes and overflow
-return no sequence and roll back every accounting row.
+Every write that grows a team's stored data passes one storage rule,
+`admitStorageGrowthTx`, in the write's own transaction: run events
+(`appendEventTx`, so `Tenant.AppendEvent` and every state transition), blob and
+source upload reservations and tagged log segments. It refuses a held team,
+growth past the free storage allowance on an empty balance while storage is
+priced, and growth past the team's tier quota (monthly bytes, per-run bytes and
+objects), then counts the growth so a refused write records nothing. A run's
+own state events are counted but never refused, so a run past its limit can
+still finish. Sparkwing Cloud's store applies the automatic free or paid tier to
+teams without an explicit quota and prices storage at the published rate by
+default. One default free allowance, 1 GiB, serves billing, admission and the
+console. The free-tier slot table, its idle release, `AppendEventCharged` and
+the per-store free shares are removed.
 
 Download accounting uses `Tenant.ChargeDownload`. The raw Store method is
 removed. The request accepts the existing cap policy, with no team or caller
@@ -128,10 +131,7 @@ reader, separate prune and controller timer flush
 are removed. Deleting an account leaves tenant egress counters unchanged.
 
 `Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
-`Store.ReconcileFreeEventBytes` are removed. `free_slots` retains slot ownership
-and its timestamp. Its duplicate event-byte column and writer are removed.
-Event storage admission reads retained run counters under its existing free-tier
-lock. Run deletion releases retained event bytes without a repair pass. The
+`Store.ReconcileFreeEventBytes` are removed. Run deletion releases retained event bytes without a repair pass. The
 financial storage usage counters survive deletion and remain separate.
 `Store.ReleaseExpiredStorage` and its separate cross-team scan are removed.
 Final upload expiry uses quota admission and blob maintenance. Empty

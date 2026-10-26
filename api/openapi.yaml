@@ -6565,8 +6565,6 @@ components:
           type: string
         Kind:
           type: string
-        Name:
-          type: string
         RunID:
           type: string
         SourceGeneration:
@@ -6575,7 +6573,6 @@ components:
           type: string
       required:
         - Kind
-        - Name
         - RunID
         - SourceNodeID
         - SourceGeneration

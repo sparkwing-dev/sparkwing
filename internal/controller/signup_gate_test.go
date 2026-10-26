@@ -3,10 +3,8 @@ package controller_test
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -38,8 +36,7 @@ type signUpStatus struct {
 		LastDay    int `json:"last_day"`
 		Waitlisted int `json:"waitlisted"`
 	} `json:"counts"`
-	FreeTier        string `json:"free_tier"`
-	VelocityWarning bool   `json:"velocity_warning"`
+	VelocityWarning bool `json:"velocity_warning"`
 }
 
 func (f *identityFixture) signUpStatus() signUpStatus {
@@ -90,7 +87,7 @@ func TestSignUpGateRoutesAreTheOperators(t *testing.T) {
 	st := f.signUpStatus()
 	if st.State != "open" || st.Mode != "open" || st.Limits.HourlyLimit != store.DefaultSignUpHourlyLimit ||
 		st.Limits.DailyLimit != store.DefaultSignUpDailyLimit || st.Limits.HourlyWarn != store.DefaultSignUpHourlyWarn ||
-		st.Limits.GitHubMinAccountDays != store.DefaultGitHubMinAccountDays || st.FreeTier != "open" {
+		st.Limits.GitHubMinAccountDays != store.DefaultGitHubMinAccountDays {
 		t.Fatalf("default status = %+v", st)
 	}
 	owner := f.signIn(person("g-o", "owner@example.com", "Owner"))
@@ -235,30 +232,6 @@ func TestApprovingTheOldestRunsTheNotifier(t *testing.T) {
 	}
 }
 
-func TestAClosedFreeTierWaitlistsNewAccounts(t *testing.T) {
-	var mu sync.Mutex
-	state := controller.FreeTierState("closed")
-	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
-		s.WithFreeTier(freeTierFunc(func(context.Context) (controller.FreeTierState, error) {
-			mu.Lock()
-			defer mu.Unlock()
-			return state, nil
-		}))
-	}})
-	if out := f.signIn(person("g-1", "one@example.com", "One")); !out.Waitlisted {
-		t.Fatal("a new account was admitted while the free tier was closed")
-	}
-	if st := f.signUpStatus(); st.State != "waitlist" || st.FreeTier != "closed" || st.Mode != "open" {
-		t.Fatalf("status = %+v", st)
-	}
-	mu.Lock()
-	state = controller.FreeTierState("throttled")
-	mu.Unlock()
-	if out := f.signIn(person("g-2", "two@example.com", "Two")); out.Waitlisted || out.ActiveTeam == nil {
-		t.Fatalf("a throttled free tier waitlisted a new account: %+v", out)
-	}
-}
-
 func (f *identityFixture) metricValue(series string) float64 {
 	t := f.t
 	t.Helper()
@@ -374,69 +347,6 @@ func TestYoungGitHubAccountsAreWaitlistedAtSignIn(t *testing.T) {
 	}
 }
 
-// A free-tier report that cannot be read fails closed: new accounts wait
-// rather than take a free allowance nobody can vouch for.
-func TestAnUnreadableFreeTierWaitlistsNewAccounts(t *testing.T) {
-	var mu sync.Mutex
-	fail := true
-	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
-		s.WithFreeTier(freeTierFunc(func(context.Context) (controller.FreeTierState, error) {
-			mu.Lock()
-			defer mu.Unlock()
-			if fail {
-				return "", errors.New("storage pass unreadable")
-			}
-			return controller.FreeTierState("open"), nil
-		}))
-	}})
-	if out := f.signIn(person("g-u1", "u1@example.com", "U")); !out.Waitlisted {
-		t.Fatal("a new account was admitted while the free-tier report was unreadable")
-	}
-	st := f.signUpStatus()
-	if st.State != "waitlist" || st.FreeTier != "unreadable" || !slices.Contains(st.Reasons, store.WaitlistReasonFreeTierUnreadable) {
-		t.Fatalf("status = %+v", st)
-	}
-	mu.Lock()
-	fail = false
-	mu.Unlock()
-	// safety: the same source reading open admits again, the negative control.
-	if out := f.signIn(person("g-u2", "u2@example.com", "U")); out.Waitlisted {
-		t.Fatal("a readable open free tier waitlisted a new account")
-	}
-}
-
-// A multi-team controller with no free-tier source says so once at startup
-// and treats the free tier as open.
-func TestAnUnwiredFreeTierLogsOnceAtStartup(t *testing.T) {
-	var buf syncBuffer
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	f := newIdentityFixtureWith(t, fixtureOpts{
-		logger:    logger,
-		configure: func(s *controller.Server) { s.CheckFreeTierSource(); s.CheckFreeTierSource() },
-	})
-	if n := strings.Count(buf.String(), `"signup.free_tier_unwired"`); n != 1 {
-		t.Fatalf("signup.free_tier_unwired logged %d times, want once:\n%s", n, buf.String())
-	}
-	if out := f.signIn(person("g-w1", "w1@example.com", "W")); out.Waitlisted {
-		t.Fatal("an unwired free tier waitlisted a new account")
-	}
-
-	var wired syncBuffer
-	newIdentityFixtureWith(t, fixtureOpts{
-		logger: slog.New(slog.NewJSONHandler(&wired, nil)),
-		configure: func(s *controller.Server) {
-			s.WithFreeTier(freeTierFunc(func(context.Context) (controller.FreeTierState, error) {
-				return controller.FreeTierState("open"), nil
-			}))
-			s.CheckFreeTierSource()
-		},
-	})
-	// safety: a wired source logs nothing, the negative control.
-	if strings.Contains(wired.String(), "signup.free_tier_unwired") {
-		t.Fatalf("a wired free tier logged as unwired:\n%s", wired.String())
-	}
-}
-
 type syncBuffer struct {
 	mu sync.Mutex
 	b  strings.Builder
@@ -452,10 +362,4 @@ func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
-}
-
-type freeTierFunc func(context.Context) (controller.FreeTierState, error)
-
-func (f freeTierFunc) SignUpFreeTier(ctx context.Context) (controller.FreeTierState, error) {
-	return f(ctx)
 }

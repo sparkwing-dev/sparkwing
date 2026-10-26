@@ -38,7 +38,7 @@ func TestAnEarlyFraudWarningHoldsOnlyTheTeamItsPaymentFunded(t *testing.T) {
 	for _, payment := range []string{"pi_a", "pi_b", "pi_warned", "pi_returned"} {
 		provider.SettledCheckout(payment, false, "")
 	}
-	deployment, err := s.AsOperator().ConfigureDeployment(t.Context(), "", store.DefaultFreeTeamSlots, func() error { return nil })
+	deployment, err := s.AsOperator().ConfigureDeployment(t.Context(), "", func() error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

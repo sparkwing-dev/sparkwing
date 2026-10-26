@@ -776,7 +776,6 @@ func Registry() []Command {
 			{Name: "warn-bucket-bytes", Argument: "N"},
 			{Name: "warn-bucket-objects", Argument: "N"},
 			{Name: "bucket-store", Argument: "VALUE"},
-			{Name: "free-team-slots", Argument: "N"},
 			{Name: "blob-store", Argument: "VALUE"},
 			{Name: "log-retention", Argument: "VALUE"},
 			{Name: "team-daily-download-free-bytes", Argument: "N"},

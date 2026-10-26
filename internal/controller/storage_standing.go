@@ -32,23 +32,17 @@ func (s *Server) teamStorageStanding(r *http.Request, team store.Team) (*teamSta
 	}
 	return &teamStandingJSON{
 		Team: string(team), Tier: got.Tier, AllowanceBytes: got.AllowanceBytes,
-		CacheShareBytes: store.FreeCacheShare(got.AllowanceBytes),
-		LogShareBytes:   store.FreeLogShare(got.AllowanceBytes),
-		EventShareBytes: store.FreeEventShare(got.AllowanceBytes),
-		EventBytes:      got.EventBytes,
-		CacheBytes:      got.BlobBytes + got.ReservedBlobBytes,
-		LogBytes:        got.LogBytes,
+		EventBytes: got.EventBytes,
+		CacheBytes: got.BlobBytes + got.ReservedBlobBytes,
+		LogBytes:   got.LogBytes,
 	}, nil
 }
 
 type teamStandingJSON struct {
-	Team            string                `json:"team"`
-	Tier            store.TeamStorageTier `json:"tier"`
-	AllowanceBytes  int64                 `json:"allowance_bytes"`
-	CacheShareBytes int64                 `json:"cache_share_bytes"`
-	LogShareBytes   int64                 `json:"log_share_bytes"`
-	EventShareBytes int64                 `json:"event_share_bytes"`
-	EventBytes      int64                 `json:"event_bytes"`
-	CacheBytes      int64                 `json:"cache_bytes"`
-	LogBytes        int64                 `json:"log_bytes"`
+	Team           string                `json:"team"`
+	Tier           store.TeamStorageTier `json:"tier"`
+	AllowanceBytes int64                 `json:"allowance_bytes"`
+	EventBytes     int64                 `json:"event_bytes"`
+	CacheBytes     int64                 `json:"cache_bytes"`
+	LogBytes       int64                 `json:"log_bytes"`
 }

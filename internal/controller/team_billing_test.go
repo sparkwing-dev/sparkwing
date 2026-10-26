@@ -150,7 +150,7 @@ func TestTeamBilling_EveryMemberReadsTheActiveTeamsBilling(t *testing.T) {
 
 func TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam(t *testing.T) {
 	f, fc := billingFixture(t)
-	if _, err := f.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if _, err := f.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	owner, editor, reader := teamOf(f)
@@ -212,7 +212,7 @@ func (f *identityFixture) checkoutRequest(auth string, cents int64, key string) 
 
 func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 	f, fc := billingFixture(t)
-	if _, err := f.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if _, err := f.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	owner := f.user("o", "olga@example.com")

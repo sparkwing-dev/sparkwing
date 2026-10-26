@@ -59,7 +59,7 @@ const retrySourceManual = "manual"
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
 	creditMeteringOff  atomic.Bool
-	storageTiersOn     atomic.Bool
+	cloudStorage       atomic.Bool
 	controllerEpoch    int64
 	credentialEpoch    string
 	controllerFailStop func(error)
@@ -999,7 +999,11 @@ SELECT run_id, seq, node_id, kind, ts, payload
 // AppendEvent writes the run's next event in order.
 func (t *Tenant) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now(ctx))
+		// safety: the run lock serializes the event caps' read of the run's counters with this append.
+		if err := lockStateRunTx(ctx, tx, t.team, runID); err != nil {
+			return err
+		}
+		_, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now(ctx), false)
 		if errors.Is(err, sql.ErrNoRows) {
 			return notFound("run", runID)
 		}
@@ -1007,7 +1011,9 @@ func (t *Tenant) AppendEvent(ctx context.Context, runID, nodeID, kind string, pa
 	})
 }
 
-func appendEventTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {
+// appendEventTx appends a run's next event and admits its bytes through the storage rule. A lifecycle event, the
+// run's own state record, is counted but never refused, so a run past its storage limit can still finish.
+func appendEventTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, kind string, payload any, at time.Time, lifecycle bool) (int64, error) {
 	var raw []byte
 	var err error
 	switch value := payload.(type) {
@@ -1021,8 +1027,20 @@ func appendEventTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, k
 	if err != nil {
 		return 0, err
 	}
+	size := eventBytes(kind, raw)
+	if !lifecycle {
+		if err := validateEventKind(kind); err != nil {
+			return 0, err
+		}
+		if err := refuseEventOverLimitsTx(ctx, tx, team, runID, size); err != nil {
+			return 0, err
+		}
+	}
+	if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: runID, bytes: size, lifecycle: lifecycle}); err != nil {
+		return 0, err
+	}
 	var seq int64
-	if err := tx.QueryRowContext(ctx, `UPDATE runs SET event_bytes=event_bytes+?,event_count=event_count+1 WHERE team=? AND id=? RETURNING event_count`, eventBytes(kind, raw), team, runID).Scan(&seq); err != nil {
+	if err := tx.QueryRowContext(ctx, `UPDATE runs SET event_bytes=event_bytes+?,event_count=event_count+1 WHERE team=? AND id=? RETURNING event_count`, size, team, runID).Scan(&seq); err != nil {
 		return 0, err
 	}
 	_, err = tx.execContext(ctx, `

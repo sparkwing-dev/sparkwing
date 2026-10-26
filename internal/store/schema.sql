@@ -864,12 +864,6 @@ CREATE TABLE invitation_email_log (
     sent_at BIGINT NOT NULL
 );
 
-CREATE TABLE free_slots (
-    team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
-    taken_at BIGINT NOT NULL,
-    empty_since BIGINT NOT NULL DEFAULT 0
-);
-
 CREATE TABLE signup_gate (
     id BIGINT NOT NULL PRIMARY KEY CHECK (id = 1),
     mode TEXT NOT NULL CHECK (mode IN ('open', 'waitlist')),

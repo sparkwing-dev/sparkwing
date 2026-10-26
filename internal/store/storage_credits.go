@@ -26,6 +26,23 @@ const (
 	metaKeyStorageFreeAllowanceBytes = "storage_free_allowance_bytes"
 )
 
+// storageRateTx prices a stored gibibyte-day: the operator's setting, else the published rate on Sparkwing Cloud
+// and nothing on a self-hosted deployment.
+func storageRateTx(ctx context.Context, tx *storeTx) (int64, error) {
+	fallback := int64(0)
+	if tx.store.cloudStorage.Load() {
+		fallback = CloudStorageRateMicroPerGBDay
+	}
+	return creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, fallback)
+}
+
+// storageFreeAllowanceTx is the retained bytes a team stores without paying, shared by billing, admission and the
+// console.
+func storageFreeAllowanceTx(ctx context.Context, tx *storeTx) (int64, error) {
+	allowance, err := creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, defaultFreeAllowanceBytes)
+	return max(allowance, 0), err
+}
+
 // StorageChargeSweep is what one storage-charge pass billed.
 type StorageChargeSweep struct {
 	// Charges holds one row per team billed, in the order they were billed.
@@ -49,26 +66,6 @@ func validStorageFreeAllowance(bytes int64) error {
 			ErrInvalidCreditSetting, bytes)
 	}
 	return nil
-}
-
-// safety: the balance and the write that grows the team's bytes share one
-// transaction, so a refused write is never recorded.
-func refuseStorageGrowthOnEmptyBalanceTx(
-	ctx context.Context, tx *storeTx, team Team, bytes int64,
-) error {
-	if cause, err := teamHoldTx(ctx, tx, team); err != nil {
-		return err
-	} else if cause != "" {
-		return &InsufficientCreditsError{Hold: cause}
-	}
-	balance, err := creditBalanceTx(ctx, tx, team)
-	if err != nil || balance > 0 {
-		return err
-	}
-	return fmt.Errorf(
-		"%w: team %s cannot store %d more bytes on a balance of %s credits; "+
-			"add credits, and retention releases what is already stored",
-		ErrInsufficientCredits, team, bytes, FormatCredits(balance))
 }
 
 // safety: the product of a byte count, a rate and an interval outgrows int64

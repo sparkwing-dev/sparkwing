@@ -36,20 +36,16 @@ const (
 	WaitlistReasonDeployment     = "deployment"
 	WaitlistReasonLaunchCapacity = "launch_capacity"
 	WaitlistReasonOperator       = "operator"
-	WaitlistReasonFreeTier       = "free_tier_closed"
-	// WaitlistReasonFreeTierUnreadable is a free-tier report that failed, which
-	// the gate treats as closed.
-	WaitlistReasonFreeTierUnreadable = "free_tier_unreadable"
-	WaitlistReasonHourly             = "hourly_signups"
-	WaitlistReasonDaily              = "daily_signups"
-	WaitlistReasonGitHubAge          = "github_account_age"
+	WaitlistReasonHourly         = "hourly_signups"
+	WaitlistReasonDaily          = "daily_signups"
+	WaitlistReasonGitHubAge      = "github_account_age"
 )
 
 // WaitlistReasons lists every reason a new account can be waitlisted for.
 func WaitlistReasons() []string {
 	return []string{
-		WaitlistReasonDeployment, WaitlistReasonLaunchCapacity, WaitlistReasonOperator, WaitlistReasonFreeTier,
-		WaitlistReasonFreeTierUnreadable, WaitlistReasonHourly, WaitlistReasonDaily, WaitlistReasonGitHubAge,
+		WaitlistReasonDeployment, WaitlistReasonLaunchCapacity, WaitlistReasonOperator,
+		WaitlistReasonHourly, WaitlistReasonDaily, WaitlistReasonGitHubAge,
 	}
 }
 
@@ -111,12 +107,6 @@ type SignUpConditions struct {
 	// ForceWaitlist is the deployment's own setting, which no stored state
 	// overrides.
 	ForceWaitlist bool
-	// FreeTierClosed reports that the free storage the deployment offers is
-	// spent, so a new personal space would hold an allowance nobody can pay for.
-	FreeTierClosed bool
-	// FreeTierUnreadable reports that the free-tier report failed. The gate
-	// fails closed on it.
-	FreeTierUnreadable bool
 }
 
 // SignUpCounts are the accounts created over the two windows the gate reads,
@@ -340,10 +330,6 @@ func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpC
 			reason = WaitlistReasonOperator
 		}
 		return signUpDecision{reason: reason}, nil
-	case c.FreeTierClosed:
-		return signUpDecision{reason: WaitlistReasonFreeTier}, nil
-	case c.FreeTierUnreadable:
-		return signUpDecision{reason: WaitlistReasonFreeTierUnreadable}, nil
 	}
 	var admitted int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM accounts WHERE waitlisted_at=0`).Scan(&admitted); err != nil {
