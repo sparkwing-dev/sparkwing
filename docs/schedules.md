@@ -131,8 +131,10 @@ See [CLI schedules](cli-schedules.md) for the generated flag reference and
 Controller fires seal the repository, ref and effective arguments before they
 enter the run queue. Repeating the same due instant returns the original run.
 App-managed schedules require a live installation and repository automation
-consent. Members cannot pause, override or delete App-managed schedules,
-including through repository-wide deletion. Update their repository declaration
-or App automation instead. They follow the configured branch and resolve its
+consent. Team admins may pause and resume an App-managed schedule, and each
+pause or resume is audited. Nobody can override or delete one, including
+through repository-wide deletion, and other members cannot pause it either.
+Update the repository declaration or App automation instead. A later push
+keeps the schedule's pause state. They follow the configured branch and resolve its
 commit at fire time. An admin-armed default-branch fire
 without overrides carries verified default-branch trust.
