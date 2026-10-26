@@ -377,11 +377,13 @@ func TestFetchedGitHubRepositoryNeedsControllerFetchedBranchHead(t *testing.T) {
 		"code at another commit":  func(r *runspec.Request) { r.Source.Ref = fork },
 		"pull request ref":        func(r *runspec.Request) { r.Git.Ref = "refs/pull/7/head" },
 		"bare commit":             func(r *runspec.Request) { r.Git.Ref = "" },
-		"upload":                  func(r *runspec.Request) { r.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:x"} },
-		"working tree":            func(r *runspec.Request) { r.Source.WorkingTree = true },
-		"local checkout":          func(r *runspec.Request) { r.Source.Location.LocalCheckout = "/src" },
-		"no remote":               func(r *runspec.Request) { r.Source.Location.RemoteURL = "" },
-		"other host":              func(r *runspec.Request) { r.Git.Repository.Key = "git:git.example.com/acme/app" },
+		"upload": func(r *runspec.Request) {
+			r.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:x"}
+		},
+		"working tree":   func(r *runspec.Request) { r.Source.WorkingTree = true },
+		"local checkout": func(r *runspec.Request) { r.Source.Location.LocalCheckout = "/src" },
+		"no remote":      func(r *runspec.Request) { r.Source.Location.RemoteURL = "" },
+		"other host":     func(r *runspec.Request) { r.Git.Repository.Key = "git:git.example.com/acme/app" },
 		"here": func(r *runspec.Request) {
 			r.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 		},
