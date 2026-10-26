@@ -24,7 +24,7 @@ func newRecordingStore(t *testing.T) (*Store, *sqlStatementRecorder) {
 	if err := preparePrivateSQLite(path); err != nil {
 		t.Fatal(err)
 	}
-	st, err := openSQL(context.Background(), driverName, sqliteDSN(path), DialectSQLite, "delete "+path, nil)
+	st, err := openSQL(context.Background(), driverName, sqliteDSN(path), DialectSQLite, path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

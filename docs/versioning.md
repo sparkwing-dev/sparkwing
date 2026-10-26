@@ -120,7 +120,9 @@ admission socket remains a separate protocol. Unknown additive API fields and
 future canonical error codes remain readable. Required types still validate.
 
 Store incompatibility is an actionable refusal. It never silently opens another
-store. Explicit standalone CI mode uses the same controller code in process.
+store. v0.68.0 starts a new store and refuses one from v0.67 or earlier; later
+releases ship schema changes as forward migrations. See
+[Schema compatibility](backup-restore.md#schema-compatibility). Explicit standalone CI mode uses the same controller code in process.
 See [Local execution](local-execution.md) and [Controller HTTP API](api.md).
 
 <!-- design:end -->

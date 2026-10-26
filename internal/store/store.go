@@ -139,7 +139,7 @@ func Open(path string, opts ...Option) (*Store, error) {
 	} else if err := tightenExistingSQLite(path); err != nil {
 		return nil, err
 	}
-	st, err := openSQL(context.Background(), "sqlite", sqliteDSN(path), DialectSQLite, "delete "+path, opts)
+	st, err := openSQL(context.Background(), "sqlite", sqliteDSN(path), DialectSQLite, path, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -232,9 +232,9 @@ func sqliteURI(path string) string {
 
 // OpenPostgres initializes a Store against the Postgres database
 // identified by dsn (`postgres://user:pass@host:port/db?sslmode=...`).
-// Migrations run on first connect; concurrent OpenPostgres calls
-// against the same fresh database are coordinated by a transactional
-// advisory lock so exactly one runner applies the schema.
+// The first connect to an empty database creates the baseline schema;
+// a transactional advisory lock lets exactly one of several concurrent
+// openers create it. A store at any other schema version is refused.
 func OpenPostgres(ctx context.Context, dsn string, opts ...Option) (*Store, error) {
 	if dsn == "" {
 		return nil, errors.New("OpenPostgres: dsn is required")
@@ -248,7 +248,7 @@ func OpenPostgres(ctx context.Context, dsn string, opts ...Option) (*Store, erro
 
 func openPostgresConfig(ctx context.Context, cfg *pgx.ConnConfig, opts ...Option) (*Store, error) {
 	dsn := stdlib.RegisterConnConfig(cfg)
-	st, err := openSQL(ctx, "pgx", dsn, DialectPostgres, "drop the database", opts)
+	st, err := openSQL(ctx, "pgx", dsn, DialectPostgres, "", opts)
 	if err != nil {
 		stdlib.UnregisterConnConfig(dsn)
 		return nil, err
@@ -257,7 +257,7 @@ func openPostgresConfig(ctx context.Context, cfg *pgx.ConnConfig, opts ...Option
 	return st, nil
 }
 
-func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy string, opts []Option) (*Store, error) {
+func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, path string, opts []Option) (*Store, error) {
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, err
@@ -277,7 +277,7 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 			opt.apply(s)
 		}
 	}
-	if err := s.migrate(ctx, remedy); err != nil {
+	if err := s.migrate(ctx, path); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
 	if dialect == DialectPostgres {
@@ -1376,15 +1376,15 @@ func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error) {
 // baseline, so each takes this lock before looking.
 const migrateAdvisoryLock = `SELECT pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`
 
-// safety: remedy is how the operator discards a store at another version, since nothing upgrades one.
-func (s *Store) migrate(ctx context.Context, remedy string) error {
+// safety: path names the SQLite file in refusals, since nothing upgrades a store at another version.
+func (s *Store) migrate(ctx context.Context, path string) error {
 	if s.dialect == DialectPostgres {
-		return s.createBaseline(ctx, remedy)
+		return s.createBaseline(ctx, path)
 	}
-	return retryOnBusy(func() error { return s.createBaseline(ctx, remedy) })
+	return retryOnBusy(func() error { return s.createBaseline(ctx, path) })
 }
 
-func (s *Store) createBaseline(ctx context.Context, remedy string) error {
+func (s *Store) createBaseline(ctx context.Context, path string) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin schema setup: %w", err)
@@ -1412,7 +1412,15 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 				"(it holds tables but no sparkwing_schema_version); point sparkwing at an empty database")
 		}
 	default:
-		return schemaMismatchError(version, remedy)
+		// safety: only pre-rewrite stores have sparkwing_meta (schema 4, v0.10.0, onward); the rewrite never creates it.
+		preRewrite, err := tableExists(ctx, tx, "sparkwing_meta")
+		if err != nil {
+			return fmt.Errorf("inspect the store's schema: %w", err)
+		}
+		if preRewrite {
+			return preRewriteStoreError(version, path)
+		}
+		return schemaMismatchError(version, path)
 	}
 	translated, err := translateSchema(schemaNeutral, s.dialect)
 	if err == nil {
@@ -1439,17 +1447,22 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 }
 
 func recordedSchemaVersion(ctx context.Context, tx *storeTx) (int, error) {
-	exists := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sparkwing_schema_version'`
-	if tx.dialect == DialectPostgres {
-		exists = `SELECT COUNT(*) FROM (SELECT to_regclass('sparkwing_schema_version') AS t) r WHERE r.t IS NOT NULL`
-	}
-	var n int
-	if err := tx.QueryRowContext(ctx, exists).Scan(&n); err != nil || n == 0 {
+	if exists, err := tableExists(ctx, tx, "sparkwing_schema_version"); err != nil || !exists {
 		return 0, err
 	}
 	var version int
 	err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`).Scan(&version)
 	return version, err
+}
+
+func tableExists(ctx context.Context, tx *storeTx, name string) (bool, error) {
+	q := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`
+	if tx.dialect == DialectPostgres {
+		q = `SELECT COUNT(*) FROM (SELECT to_regclass(?) AS t) r WHERE r.t IS NOT NULL`
+	}
+	var n int
+	err := tx.QueryRowContext(ctx, q, name).Scan(&n)
+	return n > 0, err
 }
 
 // safety: a database with no version table may still be someone else's, and the baseline must not land beside it.

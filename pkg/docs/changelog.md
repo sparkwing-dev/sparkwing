@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** v0.68 starts a new store and cannot read or import one from v0.67 or earlier. It refuses an old store by name, leaves it unchanged, and says how to move it aside (local) or switch to an empty database (server). See [migration](docs/migrations/_unreleased.md#upgrading-from-v067-v068-starts-a-new-store).
 - **limits (Breaking):** The fleet-wide hourly run cap `max_global_runs_per_hour` (setting `operator.max_global_runs_per_hour`) is removed. Per-principal hourly limits and prepaid credits still bound intake. See [migration](docs/migrations/_unreleased.md#fleet-wide-hourly-run-cap-removed).
 - **chart (Breaking):** `controller.storage.type=emptyDir` requires `controller.store=postgres` and `controller.dataStore.s3URL`, and a `--deployment=cloud` controller refuses to start without an `s3://` `--cache-blob-store`, so state and blobs never live only on a pod's ephemeral `/data`. `controller.bucketCeiling.store` does not count. See [migration](docs/migrations/_unreleased.md#an-ephemeral-controller-home-needs-postgresql-and-s3).
 - **schedules:** Run now records the member who pressed it as the run's actor and creator, not the schedule's armer. Its asserted identity is unchanged.

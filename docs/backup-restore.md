@@ -41,10 +41,23 @@ Keep the binary matching a database backup. This build does not upgrade older
 schema baselines. A newer database needs its matching binary; rollback needs
 a matching backup in a separate database.
 
+v0.68.0 replaced the store. It cannot read or import a store written by v0.67
+or earlier, refuses one with the move-aside remedy below, and leaves it
+unchanged. See
+[Upgrading from v0.67](migrations/_unreleased.md#upgrading-from-v067-v068-starts-a-new-store).
+Releases after v0.68.0 ship schema changes as forward migrations that upgrade
+the store in place.
+
 <!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: store schema version 24 is older than this binary (expects 25); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> (or drop the database) and start again
+sparkwing: store schema version 24 is older than this binary (expects 25); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> and start again
+
+sparkwing: store schema version 24 is older than this binary (expects 25); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, drop the database and start again
 
 sparkwing: store schema version 26 is newer than this binary (expects 25); start a binary matching the store, or restore a backup matching this binary into a separate database
+
+sparkwing: ~/.sparkwing/state.db is a store from Sparkwing v0.67 or earlier (schema version 94); this release starts a new store and cannot read or import it, and left the old one unchanged; move it aside and run again: mv ~/.sparkwing/state.db ~/.sparkwing/state.db.v067 (move ~/.sparkwing/state.db-wal and ~/.sparkwing/state.db-shm with it if they exist)
+
+sparkwing: this database is a store from Sparkwing v0.67 or earlier (schema version 94); this release starts a new store and cannot read or import it, and left the old one unchanged; back up this database, then point the server at an empty database
 ```
 <!-- END GENERATED SCHEMA ERRORS -->

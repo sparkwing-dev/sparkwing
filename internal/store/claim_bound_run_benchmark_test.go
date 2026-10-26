@@ -36,7 +36,7 @@ func BenchmarkClaimBoundRun4000(b *testing.B) {
 			if err := base.Close(); err != nil {
 				b.Fatal(err)
 			}
-			s, err := openSQL(ctx, probe, sqliteDSN(filepath.Join(b.TempDir(), "claims.db")), DialectSQLite, "benchmark", nil)
+			s, err := openSQL(ctx, probe, sqliteDSN(filepath.Join(b.TempDir(), "claims.db")), DialectSQLite, "claims.db", nil)
 			if err != nil {
 				b.Fatal(err)
 			}
