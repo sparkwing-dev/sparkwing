@@ -1126,6 +1126,8 @@ CREATE TABLE card_refunds (
     -- safety: a refund Stripe reports failed or canceled is terminal and listed for the operator, never retried.
     status TEXT NOT NULL DEFAULT 'due' CHECK(status IN ('due','pending','succeeded','failed','canceled')),
     created_at BIGINT NOT NULL,
+    -- safety: set when the owners are emailed about a failed refund, so each refund is announced once.
+    owners_notified_at BIGINT,
     PRIMARY KEY (payment_mode, team, payment_intent)
 );
 
