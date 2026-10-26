@@ -210,18 +210,24 @@ const (
 func kubeletTargets(nodes []corev1.Node, own string) []string {
 	var targets []string
 	for _, node := range nodes {
-		port := int(node.Status.DaemonEndpoints.KubeletEndpoint.Port)
+		ports := []int{authenticatedKubeletPort, readOnlyKubeletPort}
+		if port := int(node.Status.DaemonEndpoints.KubeletEndpoint.Port); port > 0 {
+			ports = append(ports, port)
+		}
 		for _, address := range node.Status.Addresses {
-			if address.Type != corev1.NodeInternalIP {
+			if address.Type != corev1.NodeInternalIP && address.Type != corev1.NodeExternalIP {
 				continue
 			}
-			targets = append(targets, net.JoinHostPort(address.Address, strconv.Itoa(readOnlyKubeletPort)))
-			if port > 0 && (node.Name != own || port != authenticatedKubeletPort) {
+			for _, port := range ports {
+				if node.Name == own && address.Type == corev1.NodeInternalIP && port == authenticatedKubeletPort {
+					continue
+				}
 				targets = append(targets, net.JoinHostPort(address.Address, strconv.Itoa(port)))
 			}
 		}
 	}
-	return targets
+	slices.Sort(targets)
+	return slices.Compact(targets)
 }
 
 func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) (evidence CloudNetworkEvidence, err error) {

@@ -394,29 +394,24 @@ func TestProbeRolesNeverShareANamePrefix(t *testing.T) {
 	}
 }
 
-// The job's own node on the authenticated kubelet port is the one expected
-// reachable destination; every other kubelet port and node stays forbidden.
+// The job's own node's internal address on the authenticated kubelet port is
+// the one expected reachable destination; every other node address, internal
+// or external, and every other kubelet port stays forbidden.
 func TestKubeletTargetsExceptOnlyTheOwnNodesAuthenticatedPort(t *testing.T) {
-	node := func(name, ip string) corev1.Node {
+	node := func(name, internal, external string) corev1.Node {
 		n := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
-		n.Status.Addresses = []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: ip}, {Type: corev1.NodeExternalIP, Address: "203.0.113.9"}}
+		n.Status.Addresses = []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: internal}, {Type: corev1.NodeExternalIP, Address: external}, {Type: corev1.NodeHostName, Address: name}}
 		n.Status.DaemonEndpoints.KubeletEndpoint.Port = 10250
 		return n
 	}
-	targets := kubeletTargets([]corev1.Node{node("own", "10.0.0.1"), node("other", "10.0.0.2")}, "own")
-	for _, want := range []string{"10.0.0.1:10255", "10.0.0.2:10250", "10.0.0.2:10255"} {
-		if !slices.Contains(targets, want) {
-			t.Errorf("kubelet targets %v omit %s", targets, want)
-		}
+	targets := kubeletTargets([]corev1.Node{node("own", "10.0.0.1", "203.0.113.1"), node("other", "10.0.0.2", "203.0.113.2")}, "own")
+	want := []string{"10.0.0.1:10255", "10.0.0.2:10250", "10.0.0.2:10255", "203.0.113.1:10250", "203.0.113.1:10255", "203.0.113.2:10250", "203.0.113.2:10255"}
+	if !slices.Equal(targets, want) {
+		t.Fatalf("kubelet targets = %v, want %v", targets, want)
 	}
-	for _, allowed := range []string{"10.0.0.1:10250", "203.0.113.9:10250"} {
-		if slices.Contains(targets, allowed) {
-			t.Errorf("kubelet targets %v forbid %s", targets, allowed)
-		}
-	}
-	odd := node("own", "10.0.0.1")
+	odd := node("own", "10.0.0.1", "203.0.113.1")
 	odd.Status.DaemonEndpoints.KubeletEndpoint.Port = 10260
-	if got := kubeletTargets([]corev1.Node{odd}, "own"); !slices.Contains(got, "10.0.0.1:10260") {
-		t.Errorf("own node's kubelet on a nonstandard port %v was excepted", got)
+	if got := kubeletTargets([]corev1.Node{odd}, "own"); !slices.Contains(got, "10.0.0.1:10260") || slices.Contains(got, "10.0.0.1:10250") {
+		t.Errorf("own node with its kubelet on a nonstandard port = %v", got)
 	}
 }
