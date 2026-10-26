@@ -44,7 +44,7 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	f.Second = f.personalMachine(t, f.Member, "desktop")
 	actions := authorityRoot("actions", "a")
 	actions.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
-	actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: rankingSHA, WorkflowRunID: "77", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+	actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "refs/heads/main", SHA: rankingSHA, WorkflowRunID: "77", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 	authorityPersist(t, s, actions)
 	f.Actions = actions.Prefix
 	launcher := authorityRoot("launcher", "")
@@ -104,7 +104,7 @@ func (f *RankingFixture) Request(t *testing.T, mutate func(*runspec.Request)) {
 	provenance, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "owner"), request.Git.Ref, request.Git.SHA, request.Pipeline)
 	switch request.Origin {
 	case runspec.OriginApp:
-		provenance, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: f.now, Ref: request.Git.Ref, SHA: request.Git.SHA}, runspec.Optional[runspec.PullRequest]{}, request.Pipeline)
+		provenance, err = runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: f.now, Ref: request.Git.Ref, SHA: request.Git.SHA}, runspec.Optional[runspec.PullRequest]{}, request.Pipeline)
 	case runspec.OriginSchedule:
 		provenance, err = runspec.ScheduleProvenance("schedule", 1, "acme/repo", "main", request.Git.SHA, request.Pipeline)
 	}

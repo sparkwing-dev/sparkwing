@@ -100,7 +100,7 @@ func grantFixturePool(t *testing.T, s *Store, run, pool, branch string) {
 		pipeline = seal.Provenance.Pipeline()
 	}
 	ref := "refs/heads/" + branch
-	p, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "pool-delivery", VerifiedAt: time.Unix(1, 0).UTC(), Ref: ref, SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: branch == "main"}, runspec.Optional[runspec.PullRequest]{}, pipeline)
+	p, err := runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "pool-delivery", VerifiedAt: time.Unix(1, 0).UTC(), Ref: ref, SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: branch == "main"}, runspec.Optional[runspec.PullRequest]{}, pipeline)
 	if err != nil {
 		t.Fatal(err)
 	}

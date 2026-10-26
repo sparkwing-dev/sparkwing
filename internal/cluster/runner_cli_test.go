@@ -83,7 +83,7 @@ func TestActionsExchangeUsesCallerContextAndServerPushBinding(t *testing.T) {
 	ctx := context.WithValue(t.Context(), contextKey{}, "caller")
 	expires := time.Now().Add(time.Hour)
 	boundary := errors.New("runtime boundary")
-	push := capability.PushScope{RepositoryKey: "github.com/acme/project", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "actions-run", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}
+	push := capability.PushScope{RepositoryKey: "github.com/acme/project", Repository: "acme/repo", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "actions-run", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}
 	cli := RunnerCLI{
 		Actions: func(got context.Context, controller, team string) (capability.Issued, error) {
 			if got.Value(contextKey{}) != "caller" || controller != "https://controller.example" || team != "acme" {

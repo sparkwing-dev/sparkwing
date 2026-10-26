@@ -31,7 +31,7 @@ func TestOperatorSettingsRevalidateAuthorityProperty(t *testing.T) {
 					root.Team = "a"
 				case 5:
 					root.Team = "a"
-					root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: "commit", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+					root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "main", SHA: "commit", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 				case 6:
 					root.Team = "a"
 					root.Subject.Kind = capability.SubjectAccount

@@ -28,6 +28,7 @@ const (
 // it was granted and the team secrets it may select.
 type provenanceObservation struct {
 	Subject         string
+	Repository      string
 	SHA             string
 	Write           string
 	Reads           []string
@@ -134,7 +135,7 @@ func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObser
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := provenanceObservation{Subject: subject, SHA: facts.SHA, Write: scope.WriteRef, Reads: scope.ReadRefs, Secrets: []string{}}
+	out := provenanceObservation{Subject: subject, Repository: facts.Repository, SHA: facts.SHA, Write: scope.WriteRef, Reads: scope.ReadRefs, Secrets: []string{}}
 	err = tenant.s.inTx(t.Context(), func(tx *storeTx) error {
 		var err error
 		if out.Pools, _, err = runPoolsTx(t.Context(), tx, tenant.team, row.Request.Provenance); err != nil {
@@ -182,7 +183,7 @@ func appReference(t *testing.T, s *Store, ref, sha, pin string) (*Tenant, string
 	}
 	digest := "reference-" + strings.ReplaceAll(ref, "/", "-") + pin
 	s.testOnlyExec(t, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event,installation_id,connection_generation) SELECT ?,?,?,?,installation_id,connection_generation FROM github_app_installations WHERE installation_id=7`, digest, "delivery", now.UnixNano(), "push")
-	app := runspec.AppFacts{Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: ref, SHA: sha, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main", VerifiedAt: now}
+	app := runspec.AppFacts{Repository: "acme/repo", Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: ref, SHA: sha, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main", VerifiedAt: now}
 	in := GitHubAppAdmission{Installation: installation, Subscription: &sub, Event: "push", Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost,
 		Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:701", Display: "acme/app"}, Ref: ref, SHA: sha, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: app}},
@@ -298,7 +299,7 @@ func actionsReferenceRunning(t *testing.T, s *Store, source runspec.Source) (*Te
 	tenant := referenceWorld(t, s, "gh:701")
 	push := authorityRoot("actions-push", "a")
 	push.Grants = []capability.Grant{capability.RunsWrite}
-	push.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:701", Ref: "refs/heads/main", SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+	push.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:701", Repository: "acme/repo", Ref: "refs/heads/main", SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 	authorityPersist(t, s, push)
 	result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: push.Prefix}, IdempotencyKey: "actions", Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
@@ -351,7 +352,7 @@ func admitReferenceChild(t *testing.T, s *Store, parent runspec.Provenance, pare
 
 func referenceAppProvenance(t *testing.T, ref, sha string) (runspec.Provenance, runspec.Git) {
 	t.Helper()
-	app := runspec.AppFacts{Event: "push", DeliveryKey: "parent-delivery", RepositoryID: 1, Ref: ref, SHA: sha, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main", VerifiedAt: time.Unix(1, 0).UTC()}
+	app := runspec.AppFacts{Repository: "acme/repo", Event: "push", DeliveryKey: "parent-delivery", RepositoryID: 1, Ref: ref, SHA: sha, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main", VerifiedAt: time.Unix(1, 0).UTC()}
 	p, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "ci")
 	if err != nil {
 		t.Fatal(err)
@@ -374,8 +375,10 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 		write := "manual:" + writer + ":" + ref
 		return provenanceObservation{Subject: "team:a:repository_id::pipeline:" + pipeline + ":trigger:manual:runner:runner:ref:", Write: write, Reads: []string{write, "refs/heads/main"}, Pools: []string{}, Secrets: secrets}
 	}
-	verifiedSchedule := provenanceObservation{Subject: "team:a:repository_id:701:pipeline:nightly:trigger:cron:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:schedule/schedule-9:refs/heads/main", Reads: []string{"manual:schedule/schedule-9:refs/heads/main", "refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"team-token"}}
+	verifiedSchedule := provenanceObservation{Repository: "acme/repo-9", Subject: "team:a:repository_id:701:pipeline:nightly:trigger:cron:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:schedule/schedule-9:refs/heads/main", Reads: []string{"manual:schedule/schedule-9:refs/heads/main", "refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"team-token"}}
 	memberSchedule := verifiedSchedule
+	// safety: a manually registered schedule has no repository id on its row; fire-time resolution supplies the pair.
+	memberSchedule.Repository = "acme/app"
 	memberSchedule.Write, memberSchedule.Reads = "manual:schedule/{schedule}:refs/heads/main", []string{"manual:schedule/{schedule}:refs/heads/main", "refs/heads/main"}
 	rows := []struct {
 		name  string
@@ -387,14 +390,14 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return appReference(t, s, "refs/heads/main", referenceMain, "")
 			},
-			want: provenanceObservation{Subject: "team:a:repository_id:701:pipeline:ci:trigger:push:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "refs/heads/main", Reads: []string{"refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"ci-token", "team-token"}},
+			want: provenanceObservation{Repository: "acme/repo", Subject: "team:a:repository_id:701:pipeline:ci:trigger:push:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "refs/heads/main", Reads: []string{"refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
 			name: "app push to a feature branch is verified and reads the default branch",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return appReference(t, s, "refs/heads/feature", referenceFeature, "")
 			},
-			want: provenanceObservation{Subject: "team:a:repository_id:701:pipeline:ci:trigger:push:runner:runner:ref:refs/heads/feature", SHA: referenceFeature, Write: "refs/heads/feature", Reads: []string{"refs/heads/feature", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
+			want: provenanceObservation{Repository: "acme/repo", Subject: "team:a:repository_id:701:pipeline:ci:trigger:push:runner:runner:ref:refs/heads/feature", SHA: referenceFeature, Write: "refs/heads/feature", Reads: []string{"refs/heads/feature", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
 			name: "a branch source pin on main is demoted to asserted",
@@ -408,7 +411,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return appReference(t, s, "refs/heads/main", referenceMain, referencePin)
 			},
-			want: provenanceObservation{Subject: "team:a:repository_id:701:pipeline:ci:trigger:push:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "refs/heads/main", Reads: []string{"refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"ci-token", "team-token"}},
+			want: provenanceObservation{Repository: "acme/repo", Subject: "team:a:repository_id:701:pipeline:ci:trigger:push:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "refs/heads/main", Reads: []string{"refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
 			name: "a member's manual run naming main is asserted under that member",
@@ -455,7 +458,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 		{
 			name:  "a GitHub Actions push keeps its proven ref under its own scope",
 			admit: actionsReference,
-			want:  provenanceObservation{Subject: "team:a:repository_id:701:pipeline:ci:trigger:manual:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:actions:refs/heads/main", Reads: []string{"manual:actions:refs/heads/main", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
+			want:  provenanceObservation{Repository: "acme/repo", Subject: "team:a:repository_id:701:pipeline:ci:trigger:manual:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:actions:refs/heads/main", Reads: []string{"manual:actions:refs/heads/main", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
 			name: "attack: an Actions push running a commit it names itself is asserted",
@@ -475,7 +478,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 				}
 				return tenant, result.RunID
 			},
-			want: provenanceObservation{Subject: "team:a:repository_id:701:pipeline:ci:trigger:push:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "refs/heads/main", Reads: []string{"refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"ci-token", "team-token"}},
+			want: provenanceObservation{Repository: "acme/repo", Subject: "team:a:repository_id:701:pipeline:ci:trigger:push:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "refs/heads/main", Reads: []string{"refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
 			name: "a child at its parent's revision inherits the parent's identity and pipeline",
@@ -483,7 +486,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 				parent, git := referenceAppProvenance(t, "refs/heads/main", referenceMain)
 				return childReference(t, s, parent, git, childRequest("deploy", "refs/heads/main", referenceMain))
 			},
-			want: provenanceObservation{Subject: "team:a:repository_id:1:pipeline:ci:trigger:push:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "refs/heads/main", Reads: []string{"refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"ci-token", "team-token"}},
+			want: provenanceObservation{Repository: "acme/repo", Subject: "team:a:repository_id:1:pipeline:ci:trigger:push:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "refs/heads/main", Reads: []string{"refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
 			// 10#1 and 13 C1: a feature-branch job names main and the deploy pipeline
@@ -554,7 +557,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			for i := range want.Reads {
 				want.Reads[i] = fill(want.Reads[i])
 			}
-			if want.DefaultClaimant != got.DefaultClaimant || want.Subject != got.Subject || want.SHA != got.SHA || want.Write != got.Write || !slices.Equal(want.Reads, got.Reads) || !slices.Equal(want.Pools, got.Pools) || !slices.Equal(want.Secrets, got.Secrets) {
+			if want.DefaultClaimant != got.DefaultClaimant || want.Repository != got.Repository || want.Subject != got.Subject || want.SHA != got.SHA || want.Write != got.Write || !slices.Equal(want.Reads, got.Reads) || !slices.Equal(want.Pools, got.Pools) || !slices.Equal(want.Secrets, got.Secrets) {
 				t.Fatalf("observed %+v\nwant     %+v", got, want)
 			}
 		})

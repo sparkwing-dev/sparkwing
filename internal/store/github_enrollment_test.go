@@ -33,7 +33,7 @@ func actionsSpec(t *testing.T, s *Store, team Team, run string) capability.Provi
 		Kind: capability.ProvisionActions, Team: string(team), RegistrationID: "github:42:7",
 		Subject:      capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:" + run + ":1"},
 		Grants:       []capability.Grant{capability.NodesClaim, capability.TriggersClaim},
-		Binding:      capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "commit", WorkflowRunID: run, WorkflowRunAttempt: "1", WorkflowRef: "Acme/Widgets/.github/workflows/sparkwing.yaml@refs/heads/main"}},
+		Binding:      capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Repository: "acme/repo", Ref: "refs/heads/main", SHA: "commit", WorkflowRunID: run, WorkflowRunAttempt: "1", WorkflowRef: "Acme/Widgets/.github/workflows/sparkwing.yaml@refs/heads/main"}},
 		Repositories: []string{"gh:42"}, ExpiresAt: new(now.Add(time.Hour)),
 	}
 }

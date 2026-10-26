@@ -84,7 +84,7 @@ func SeedCacheScope(ctx context.Context, st *store.Store) (_ store.UploadReserva
 	}
 	attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: "upload", NodeID: "a", Attempt: 1, Generation: 7}}
 	request.Intent.Authority.Attempt, request.Intent.Identity.Attempt = attempt, attempt
-	app := runspec.AppFacts{Event: "pull_request", RepositoryID: 1, Ref: "refs/heads/feature", SHA: featureSHA, DeliveryKey: "feature-delivery", DefaultBranch: "main", VerifiedAt: time.Unix(1, 0).UTC()}
+	app := runspec.AppFacts{Repository: "acme/repo", Event: "pull_request", RepositoryID: 1, Ref: "refs/heads/feature", SHA: featureSHA, DeliveryKey: "feature-delivery", DefaultBranch: "main", VerifiedAt: time.Unix(1, 0).UTC()}
 	pr := runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{BaseRepo: "gh:1", BaseRef: "release"}}
 	provenance, err := runspec.AppProvenance(app, pr, "fixture")
 	if err != nil {

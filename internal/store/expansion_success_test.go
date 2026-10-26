@@ -125,7 +125,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 			spec.Declarations.Version = 1
 			spec.Request.RunID = string(request.Source.RunID)
 			spec.Request.Request.Pipeline = "p"
-			app := runspec.AppFacts{Event: "push", DeliveryKey: "delivery", RepositoryID: 1, Ref: "refs/heads/feature", SHA: fixtureOtherSHA, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0).UTC()}
+			app := runspec.AppFacts{Repository: "acme/repo", Event: "push", DeliveryKey: "delivery", RepositoryID: 1, Ref: "refs/heads/feature", SHA: fixtureOtherSHA, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0).UTC()}
 			provenance, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "p")
 			if err != nil {
 				t.Fatal(err)

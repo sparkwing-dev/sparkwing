@@ -62,7 +62,11 @@ func scheduleDisplay(schedule CronSchedule) (string, error) {
 	if schedule.GitHubRepositoryID == 0 {
 		return schedule.RepoPath, nil
 	}
-	remote, err := sourceurl.ValidateCloneURL(schedule.RepoPath)
+	return githubScheduleSlug(schedule.RepoPath)
+}
+
+func githubScheduleSlug(repoPath string) (string, error) {
+	remote, err := sourceurl.ValidateCloneURL(repoPath)
 	if err != nil {
 		return "", err
 	}

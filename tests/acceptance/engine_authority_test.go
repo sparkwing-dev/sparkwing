@@ -83,7 +83,7 @@ func TestEngineIntakeKeepsTaggedAuthority(t *testing.T) {
 		}
 		body := controllerwire.CreateRunRequest{IdempotencyKey: "same-intake", Request: runspec.Request{
 			Team: "team", Pipeline: "build", Actor: runspec.Actor{Kind: "operator", ID: "spoofed"},
-			Git: runspec.Git{App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "unverified", DefaultBranchPush: true}}},
+			Git: runspec.Git{App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", DeliveryKey: "unverified", DefaultBranchPush: true}}},
 		}}
 		got, err := controller.IntakeForStore(a, body)
 		if err != nil {

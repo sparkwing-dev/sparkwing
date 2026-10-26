@@ -54,7 +54,7 @@ func TestStoreSQLTrustLiterals(t *testing.T) {
 func TestDefaultBranchWorkSQLAgreesWithGo(t *testing.T) {
 	sha := strings.Repeat("a", 40)
 	app := func(event string, push bool) runspec.Provenance {
-		p, err := runspec.AppProvenance(runspec.AppFacts{Event: event, RepositoryID: 7, Ref: "refs/heads/main", SHA: sha, DefaultBranch: "main", DefaultBranchPush: push, DeliveryKey: "delivery", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, "ci")
+		p, err := runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: event, RepositoryID: 7, Ref: "refs/heads/main", SHA: sha, DefaultBranch: "main", DefaultBranchPush: push, DeliveryKey: "delivery", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, "ci")
 		if err != nil {
 			t.Fatal(err)
 		}

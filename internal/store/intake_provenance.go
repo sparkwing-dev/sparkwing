@@ -87,15 +87,11 @@ func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeReque
 		// default branch GitHub reported, whose commit the App resolved now, is verified.
 		defaultBranch := request.Request.Git.DefaultBranch
 		repository, err := strconv.ParseInt(strings.TrimPrefix(string(input.Git.Repository.Key), "gh:"), 10, 64)
-		app := err == nil && strings.HasPrefix(string(input.Git.Repository.Key), "gh:")
+		// safety: fire-time resolution proved the repository id from this same slug, so the pair seals together.
+		name, nameErr := githubScheduleSlug(s.RepoPath)
+		app := err == nil && nameErr == nil && strings.HasPrefix(string(input.Git.Repository.Key), "gh:")
 		if !app || !pinned || s.LockedRef != "" || s.Override != nil || !defaultBranch.Set || runspec.NormalizedBranch(s.GitBranch) != runspec.NormalizedBranch(defaultBranch.Value) {
 			return asserted(runspec.RunWriter(run))
-		}
-		name := ""
-		if s.GitHubRepositoryID == repository {
-			if name, err = scheduleDisplay(s); err != nil {
-				return runspec.Provenance{}, err
-			}
 		}
 		return refused(runspec.ScheduleProvenance(s.ID, repository, name, defaultBranch.Value, input.Git.SHA, input.Pipeline))
 	case p.Capability.Binding.Kind == capability.BindingPush && p.Capability.Binding.Push != nil:

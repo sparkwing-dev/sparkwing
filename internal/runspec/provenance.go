@@ -158,8 +158,8 @@ func (p Provenance) validate() error {
 	if p.identity.SHA != "" && !IsCommitID(p.identity.SHA) {
 		return errors.New("provenance commit must be a full commit ID")
 	}
-	if p.identity.Repository != "" && p.identity.RepositoryID <= 0 {
-		return errors.New("only a run bound to a GitHub repository names its repository")
+	if (p.identity.Repository != "") != (p.identity.Trust != TrustAsserted) {
+		return errors.New("a GitHub-proven run seals its repository id and name together, and an asserted run neither")
 	}
 	switch p.identity.Trust {
 	case TrustVerified, TrustVerifiedDefault:

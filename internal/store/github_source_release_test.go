@@ -76,7 +76,7 @@ func githubSourceFixture(t *testing.T, extra int64) (*Tenant, capability.Authori
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := runspec.AppFacts{Event: "push", RepositoryID: 1, InstallationID: 7, VerifiedAt: s.clock(), Ref: "refs/heads/main", SHA: fixtureFeatureSHA, DeliveryKey: "push-delivery", DefaultBranch: "main", DefaultBranchPush: true}
+	app := runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, InstallationID: 7, VerifiedAt: s.clock(), Ref: "refs/heads/main", SHA: fixtureFeatureSHA, DeliveryKey: "push-delivery", DefaultBranch: "main", DefaultBranchPush: true}
 	run.Request.Request.Git.Ref, run.Request.Request.Git.SHA = app.Ref, app.SHA
 	run.Request.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: app}
 	// A verified push to the default branch is the one provenance the owner's extra repositories reach.
