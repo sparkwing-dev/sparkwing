@@ -597,10 +597,12 @@ ledger lock. A refusal writes `billing_awards.stop_reason` and
 `drain_deadline_at` (one slice out) and cancels the metered job in the same
 transaction. A job stop leaves its owner orchestrating independent unmetered
 jobs. An owner-unit stop cancels the whole run. Placing a dispute, warning or
-operator hold, or revoking standing,
-also writes the stop and cancellation for active metered awards before the hold
-commits. Releasing a hold never clears that stop. These billing mutations use
-the same whole-transaction retry as other admin/work lock-order exceptions.
+operator hold records only the hold, whose `credit_freezes.drain_deadline_at`
+is one slice after it was placed; revoking standing records `billing_trust_at`,
+which bounds the drain the same way. Neither touches active awards. The award's
+next renewal is refused, and writes the stop with the earlier of its own slice
+and that recorded deadline, then cancels. Releasing a hold never clears that
+stop.
 `leaseBoundTx` in `lease_bound.go` is
 the only lease bound: every node, owner, eval and launcher-preparation lease is
 the earliest of the default lease, the capability expiry, revocation and binding deadline,
