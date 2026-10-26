@@ -918,15 +918,18 @@ Assigned to an Opus implementer (env 1087).
 ## WS4 integration: explicit refill payment operations
 
 The controller requires these authenticated checkout-service operations before
-refills can resume. Each uses the existing refill request fields (`team`,
-`deployment`, `refill_id`, `amount_cents`, `customer`, `payment_method`,
-`receipt_email`, `payment_intent`) and responds with `payment_intent` and
-`status`. A bound response must name the requested payment.
+refills can resume. Each uses the refill request fields `team`, `deployment`,
+`refill_id`, `amount_cents`, `customer` and `payment_intent`, and responds with
+`payment_intent` and `status`. A bound response must name the requested payment.
+Under decision 65 the controller sends no card or email: the service charges the
+customer's default payment method, or its newest card when it has no default.
 
 - `POST /internal/refill` creates an unconfirmed intent only, requires an empty
-  `payment_intent`, and returns `status=created`. It never confirms a payment.
+  `payment_intent`, and returns `status=created`. It answers 409 when the customer
+  has no card; the controller closes that refill as `no_card`, blocks refills
+  like a declined payment and notifies the owners. It never confirms a payment.
 - `POST /internal/refill/reconcile` retrieves the bound intent, validates its
-  refill identity, deployment, amount, customer and card, and returns its raw
+  refill identity, deployment, amount and customer, and returns its raw
   Stripe status. It never confirms or cancels a payment.
 - `POST /internal/refill/confirm` validates those same facts and confirms only a
   `requires_confirmation` intent, under the refill's existing confirmation
@@ -937,8 +940,12 @@ refills can resume. Each uses the existing refill request fields (`team`,
   Cancellation is replayable after a lost response. Reconciliation and
   cancellation accept legacy oversized reservations so they can be resolved;
   creation and confirmation enforce the $1,000 maximum.
+- `POST /internal/portal` takes `team`, `deployment` and `customer` and returns the
+  `url` of a Stripe customer portal session, where owners view, replace or remove
+  the card. `POST /internal/card-setup` also receives the team owner's `email`,
+  which only Stripe keeps, for receipts.
 
-The controller rechecks current card eligibility, refill opt-in, holds and
+The controller rechecks the team's Stripe customer, refill opt-in, holds and
 limits immediately before asking for confirmation. An ineligible unconfirmed
 intent is canceled. A `canceled` response closes the reservation while retaining
 its payment binding; no credit moves. Processing and succeeded payments keep

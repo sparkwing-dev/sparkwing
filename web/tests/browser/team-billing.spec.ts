@@ -248,7 +248,7 @@ test("an owner turns on automatic refill within the limits", async ({ page }) =>
   });
   await page.goto("/team/billing");
   await expect(page.getByRole("heading", { name: "Automatic refill" })).toBeVisible();
-  await expect(page.getByText(/Established standing allows at most \$200 per refill, 2 refills a day and \$500 a week/)).toBeVisible();
+  await expect(page.getByText(/Your payment history allows at most \$200 per refill, 2 refills a day and \$500 a week/)).toBeVisible();
   const toggle = page.getByLabel("Refill automatically");
   await expect(toggle).not.toBeChecked();
   await expect(page.getByLabel("When the balance is below")).toHaveValue("10");

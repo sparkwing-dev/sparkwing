@@ -77,11 +77,11 @@ inventory is:
 
 | Provider type | Kind | Required facts |
 | --- | --- | --- |
-| setup_intent.succeeded | card_setup | succeeded setup ID, customer, payment method, event creation time, fetched card fingerprint/brand/last4 |
-| payment_intent.succeeded | card_paid | succeeded intent, positive amount equal to received amount, currency, latest charge and fetched fingerprint |
+| setup_intent.succeeded | card_setup | succeeded setup ID, customer, the presence of a payment method (never stored) and event creation time; no provider read |
+| payment_intent.succeeded | card_paid | succeeded intent, positive amount equal to received amount, currency, latest charge and its fetched 3-D Secure result |
 | payment_intent.payment_failed | card_failed | failed intent in requires_payment_method, positive amount, currency and optional decline code |
 | refund.created / refund.updated / refund.failed | refund | individual refund ID, payment, charge, positive amount, currency and explicit pending/requires_action/succeeded/failed/canceled status |
-| radar.early_fraud_warning.created / updated | warning | warning ID, payment, charge, explicit actionable and fetched fingerprint |
+| radar.early_fraud_warning.created / updated | warning | warning ID, payment, charge and explicit actionable; no provider read |
 | charge.dispute.created | dispute_opened | dispute ID, payment, charge, positive amount, currency, reason and open status |
 | charge.dispute.closed | dispute_closed | same identities and amount, with won/lost/warning_closed status |
 

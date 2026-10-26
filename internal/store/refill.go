@@ -76,8 +76,8 @@ type RefillCaps struct {
 type RefillState struct {
 	RefillSettings
 	Caps RefillCaps
-	// FailedAt and Failure name the last refill that failed or was refused; refills wait until the card changes or an
-	// Add funds payment succeeds.
+	// FailedAt and Failure name the last refill that failed or was refused; refills wait until an Add funds payment
+	// succeeds or a new card setup completes. Changing the card in Stripe's portal does not resume them.
 	FailedAt time.Time
 	Failure  string
 	// Open reports a refill in flight.

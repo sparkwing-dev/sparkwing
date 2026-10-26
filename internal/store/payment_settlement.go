@@ -295,7 +295,8 @@ const refillOnCurrentCard = `kind = 'refill' AND opened_at >= (SELECT card_added
 
 // safety: a refused Add funds or refill payment closes its row without a grant and is queued for a full refund, whose
 // settlement finds the team through the checkout's payment and holds it for the warning. A refused refill records its
-// failure, so later passes do not charge again until the card changes or Add funds succeeds.
+// failure, so later passes do not charge again until Add funds succeeds or a new card setup completes; a change in
+// Stripe's portal does not resume them.
 func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, reason string) error {
 	team, now := checkout.result.Team, tx.now(ctx)
 	checkout.result.Refused = reason

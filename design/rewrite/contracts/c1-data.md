@@ -1091,7 +1091,7 @@ Purge final-settles every award from its retained intervals before deleting work
 Warnings and dispute holds write financial facts and a drain deadline only. Work
 renewal applies that deadline. Financial writers acquire no owner or work locks
 after the ledger. Refund binding uses the payer tombstone without an eligibility
-check. Purge and late callbacks remove saved-card copies from financial JSON.
+check. Financial JSON never holds card details, so purge scrubs nothing.
 
 `TestPaymentMutationsRollBackWithReceipt` exercises eight mutations against a
 failing receipt boundary and checks their financial state after reopening.
