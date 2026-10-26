@@ -130,10 +130,10 @@ func defaultCronHolder() string {
 }
 
 // safety: a store has one active controller, which holds a PostgreSQL session
-// advisory lock for its whole life (SQLite is single-process), so no second
-// controller ticks beside it; the tick lease only keeps a slow tick from
-// overlapping the next one. A tick that fails is logged so the next interval
-// still runs.
+// advisory lock for its whole life (SQLite is single-process). Ticks run
+// synchronously in this loop; the store lease fences any concurrent caller,
+// and its stored timestamp keeps a window from being ticked twice. A tick that
+// fails is logged so the next interval still runs.
 func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -150,8 +150,8 @@ func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 func (s *Server) cronTickOnce(ctx context.Context) {
 	var report crons.TickReport
 	ran, err := s.operator.RunCronTickLeased(ctx, s.cronHolder, cronTickLeaseTTL, func(tickCtx context.Context) error {
-		// safety: a tick that outlives the lease is a tick running beside
-		// whoever claimed the next minute, so it is cut at the lease instead.
+		// safety: the tick ends by the lease's expiry, so it never runs
+		// unfenced after another caller could acquire the lease.
 		deadline, cancel := context.WithTimeout(tickCtx, cronTickLeaseTTL)
 		defer cancel()
 		var terr error

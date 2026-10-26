@@ -388,8 +388,7 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 	return false
 }
 
-// controllerShutdownBudget is one deadline every listener's HTTP shutdown
-// shares; a request still running when it passes is cut off.
+// controllerShutdownBudget bounds how long ServeWith waits for listeners to drain.
 const controllerShutdownBudget = 5 * time.Second
 
 // Listeners are the sockets a Server serves on, bound by the caller before
@@ -407,7 +406,10 @@ type Listeners struct {
 // ServeWith runs a Server configured through its With options on ln,
 // refusing one whose engine has no runner admission policy. Once serving
 // starts, it closes every listener when it returns; a refusal before then
-// leaves them to the caller.
+// leaves them to the caller. On return it stops accepting connections and
+// waits up to controllerShutdownBudget, shared by every listener, for
+// in-flight requests to drain; it then stops waiting without closing the
+// requests still running.
 func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	metricsSrv := s.metricsServer()
 	switch {

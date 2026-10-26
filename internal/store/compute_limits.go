@@ -142,8 +142,8 @@ func (l ComputeLimits) Value(name string) (int64, bool) {
 
 func computeLimitKey(name string) string { return "compute_limit_" + name }
 
-// safety: one row per guard read one at a time is nine point-reads on the
-// claim path, so every guard is read in this one statement instead.
+// safety: the claim path reads every guard, so they are read in one statement
+// rather than one point-read per guard.
 var computeLimitsSQL, computeLimitKeyArgs = func() (string, []any) {
 	names := ComputeLimitNames()
 	args := make([]any, 0, len(names))

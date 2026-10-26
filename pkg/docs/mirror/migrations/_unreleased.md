@@ -9,8 +9,8 @@ because an emptyDir `/data` goes with the pod. Without them SQLite's
 would be lost on pod replacement. `controller.bucketCeiling.store` does not
 satisfy the check: it measures a bucket and stores nothing. A
 `--deployment=cloud` controller likewise refuses to start without an `s3://`
-`--cache-blob-store`. Set `controller.dataStore.s3URL`, or switch to
-`controller.storage.type=pvc`.
+`--cache-blob-store`. Set `controller.dataStore.s3URL`. A self-hosted install
+may instead switch to `controller.storage.type=pvc`; Cloud still requires S3.
 
 ## Fleet-wide hourly run cap removed
 
