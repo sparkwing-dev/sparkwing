@@ -2,20 +2,50 @@ package store
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// fixtureRepo is the repository key the store's asserted run fixtures carry.
+// fixtureRepo is the repository [proveFixtureRun] seals.
 const fixtureRepo = "gh:1"
+
+// proveFixtureRun reseals a fixture run as an App push to [fixtureRepo], the
+// proven repository identity pipeline secrets are released to (decision 68).
+func proveFixtureRun(t *testing.T, tenant *Tenant, run string) runspec.SealedRequest {
+	t.Helper()
+	var raw []byte
+	if err := tenant.s.db.QueryRowContext(t.Context(), `SELECT request_json FROM runs WHERE team=? AND id=?`, tenant.team, run).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var request runspec.SealedRequest
+	if err := json.Unmarshal(raw, &request); err != nil {
+		t.Fatal(err)
+	}
+	provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), DeliveryKey: "delivery-" + run, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, request.Provenance.Pipeline())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Provenance, request.Hash = provenance, ""
+	if request.Hash, err = runspec.CanonicalHash(request); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err = json.Marshal(request); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=?,request_hash=? WHERE team=? AND id=?`, raw, string(request.Hash), tenant.team, run)
+	return request
+}
 
 func seedSecret(t *testing.T, tenant *Tenant, row Secret, at time.Time) error {
 	t.Helper()

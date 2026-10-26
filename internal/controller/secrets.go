@@ -39,10 +39,10 @@ type secretJSON struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
-// secretRepository resolves the repository a pipeline secret belongs to the
-// way run intake resolves a run's, so the stored key is the one that run's
-// repository carries. It takes GitHub owner/name, a remote URL, host/path or
-// a repository key.
+// secretRepository resolves the GitHub repository a pipeline secret belongs
+// to, as owner/name or its gh: key, to the key a proven run's provenance
+// seals. Only runs GitHub proved read pipeline secrets (decision 68), so no
+// other host's repository can hold one.
 func (s *Server) secretRepository(ctx context.Context, team, repo, pipeline string) (runspec.Repository, error) {
 	if (repo == "") != (pipeline == "") {
 		return runspec.Repository{}, invalidEngineBody("a pipeline secret belongs to one repository: name both repo and pipeline, or neither for a team-wide secret")
@@ -51,19 +51,15 @@ func (s *Server) secretRepository(ctx context.Context, team, repo, pipeline stri
 		return runspec.Repository{}, nil
 	}
 	var request runspec.Request
-	switch {
-	case strings.HasPrefix(repo, "gh:") || strings.HasPrefix(repo, "git:") || strings.HasPrefix(repo, "local:"):
+	if strings.HasPrefix(repo, "gh:") {
 		if runspec.ValidateRepoUse(runspec.RepoKey(repo), runspec.RepoAccessRule) != nil {
-			return runspec.Repository{}, invalidEngineBody("invalid repository key; a repository without a remote cannot hold pipeline secrets")
+			return runspec.Repository{}, invalidEngineBody("invalid GitHub repository key")
 		}
 		request.Git.Repository.Key = runspec.RepoKey(repo)
-	default:
-		if _, ok := store.ParseGitHubRepo(repo); ok {
-			repo = "https://github.com/" + repo
-		} else if !strings.Contains(repo, ":") {
-			repo = "https://" + repo
-		}
-		request.Source.Location.RemoteURL = repo
+	} else if _, ok := store.ParseGitHubRepo(repo); ok {
+		request.Source.Location.RemoteURL = "https://github.com/" + repo
+	} else {
+		return runspec.Repository{}, invalidEngineBody("repo names a GitHub repository as owner/name or gh:<id>; only runs GitHub proves read pipeline secrets")
 	}
 	if err := s.resolveIntakeSource(ctx, team, &request); err != nil {
 		return runspec.Repository{}, err

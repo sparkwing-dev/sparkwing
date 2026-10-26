@@ -58,6 +58,7 @@ func TestBindingSecretRequiresTheSealedDeclarationAndGrantedPool(t *testing.T) {
 	tenant, request, _ := planFixture(t, runspec.DispatchHost)
 	request.Seal.Resolved.SecretNames = []string{"TOKEN"}
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,repo,pipeline,value,principal,masked,created_at,updated_at) VALUES ('a','TOKEN','gh:1','p','encrypted','owner',0,1,1)`)
+	request.Seal.Request = proveFixtureRun(t, tenant, request.RunID)
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}

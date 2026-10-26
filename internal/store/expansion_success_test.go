@@ -121,6 +121,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 	for _, mode := range []string{"allowed", "missing_requirement", "ungranted_pool", "here", "no_opener", "decrypt_error"} {
 		t.Run(mode, func(t *testing.T) {
 			tenant, request := successfulExpansionFixture(t)
+			proveFixtureRun(t, tenant, "run")
 			var spec runspec.Spec
 			spec.Declarations.Version = 1
 			spec.Request.RunID = string(request.Source.RunID)
@@ -174,6 +175,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 
 func TestExpansionReplayRechecksLeaseAfterSecretDecryption(t *testing.T) {
 	tenant, request := successfulExpansionFixture(t)
+	proveFixtureRun(t, tenant, "run")
 	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}

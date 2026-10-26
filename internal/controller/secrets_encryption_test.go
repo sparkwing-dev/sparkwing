@@ -21,7 +21,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
+// secretClaim claims a job of a run GitHub proved, an App push to gh:1.
 func secretClaim(t *testing.T, f *browserFixture, team store.Team, pipeline string, names ...string) string {
+	t.Helper()
+	return secretClaimAs(t, f, team, pipeline, true, names...)
+}
+
+func secretClaimAs(t *testing.T, f *browserFixture, team store.Team, pipeline string, verified bool, names ...string) string {
 	t.Helper()
 	id := string(team) + "-" + pipeline
 	if err := teststore.SeedRun(f.st, t.Context(), team, store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: pipeline, Status: "running"}}); err != nil {
@@ -31,6 +37,21 @@ func secretClaim(t *testing.T, f *browserFixture, team store.Team, pipeline stri
 	run, err := tenant.ReadRun(t.Context(), id)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if verified {
+		sha := strings.Repeat("a", 40)
+		provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: sha, DeliveryKey: "delivery-" + id, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, pipeline)
+		if err != nil {
+			t.Fatal(err)
+		}
+		run.Request.Provenance = provenance
+		request, err := json.Marshal(run.Request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `UPDATE runs SET request_json=? WHERE team=? AND id=?`, request, team, id); err != nil {
+			t.Fatal(err)
+		}
 	}
 	spec, err := json.Marshal(runspec.Spec{Request: run.Request, Resolved: runspec.Resolved{SecretNames: names}})
 	if err != nil {
@@ -325,13 +346,12 @@ func TestSecrets_MarkerContainingValuesAreAccepted(t *testing.T) {
 	}
 }
 
-// Decision 66: a run of one repository's ci pipeline never receives another
-// repository's ci secret, while its own repository's and team-wide shared
-// secrets still arrive.
-func TestSecrets_PipelineSecretBelongsToOneRepository(t *testing.T) {
+// Decisions 66 and 68: a manual run started with a member token, naming its
+// repository itself, reads no pipeline secret of that or any repository; only
+// team-wide shared secrets arrive. Pipeline rows name a GitHub repository.
+func TestSecrets_AssertedRunReadsOnlySharedSecrets(t *testing.T) {
 	f := newBrowserFixture(t, nil)
 	for _, write := range []map[string]any{
-		{"name": "OUTSIDER", "value": "outsider-value", "repo": "https://git.example.com/acme/other", "pipeline": "ci"},
 		{"name": "OWN", "value": "own-value", "repo": "gh:1", "pipeline": "ci"},
 		{"name": "TEAM", "value": "team-value", "shared": true},
 	} {
@@ -339,19 +359,20 @@ func TestSecrets_PipelineSecretBelongsToOneRepository(t *testing.T) {
 			t.Fatalf("write %v: HTTP %d %s", write["name"], code, body)
 		}
 	}
-	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "ORPHAN", "value": "v", "pipeline": "ci"}); code != http.StatusBadRequest {
-		t.Fatalf("pipeline without repository: HTTP %d %s", code, body)
+	for _, write := range []map[string]any{
+		{"name": "ORPHAN", "value": "v", "pipeline": "ci"},
+		{"name": "ORPHAN", "value": "v", "repo": "https://git.example.com/acme/other", "pipeline": "ci"},
+	} {
+		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", write); code != http.StatusBadRequest {
+			t.Fatalf("%v: HTTP %d %s", write, code, body)
+		}
 	}
-	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("OUTSIDER", "git:git.example.com/acme/other", "ci")
-	if err != nil || row.RepoName != "git.example.com/acme/other" {
-		t.Fatalf("outsider row: %+v %v", row, err)
-	}
-	claim := secretClaim(t, f, store.DefaultTeam, "ci", "OUTSIDER", "OWN", "TEAM")
-	for name, want := range map[string]string{"OUTSIDER": "", "OWN": "own-value", "TEAM": "team-value"} {
+	claim := secretClaimAs(t, f, store.DefaultTeam, "ci", false, "OWN", "TEAM")
+	for name, want := range map[string]string{"OWN": "", "TEAM": "team-value"} {
 		code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/"+name, claim, nil)
 		if want == "" {
-			if code == http.StatusOK || strings.Contains(body, "outsider-value") {
-				t.Fatalf("another repository's pipeline secret released: HTTP %d %s", code, body)
+			if code == http.StatusOK || strings.Contains(body, "own-value") {
+				t.Fatalf("asserted run read a pipeline secret: HTTP %d %s", code, body)
 			}
 			continue
 		}

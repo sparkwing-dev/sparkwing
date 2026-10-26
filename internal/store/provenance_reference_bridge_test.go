@@ -410,7 +410,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return appReference(t, s, "refs/heads/main", referenceMain, "pipelines")
 			},
-			want: asserted("ci", "run/{run}", "refs/heads/main", "ci-token", "team-token"),
+			want: asserted("ci", "run/{run}", "refs/heads/main", "team-token"),
 		},
 		{
 			name: "a full-commit source pin on main keeps verified-default",
@@ -424,7 +424,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return referenceWorld(t, s, "gh:701"), manualReference(t, s, "alice")
 			},
-			want: asserted("ci", "account/alice", "refs/heads/main", "ci-token", "team-token"),
+			want: asserted("ci", "account/alice", "refs/heads/main", "team-token"),
 		},
 		{
 			// A schedule an admin armed on the default branch, unmodified,
@@ -471,7 +471,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return actionsReferenceRunning(t, s, runspec.Source{Ref: referenceFeature, RequestedRef: referenceFeature})
 			},
-			want: asserted("ci", "run/{run}", "refs/heads/main", "ci-token", "team-token"),
+			want: asserted("ci", "run/{run}", "refs/heads/main", "team-token"),
 		},
 		{
 			name: "a retry by another member copies the App provenance whole",
@@ -533,7 +533,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 				git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "refs/heads/main", SHA: referenceMain}
 				return childReference(t, s, parent, git, childRequest("deploy", "refs/heads/main", referenceMain))
 			},
-			want: provenanceObservation{Subject: "team:a:repository_id::pipeline:ci:trigger:manual:runner:runner:ref:", Write: "manual:account/alice:refs/heads/main", Reads: []string{"manual:account/alice:refs/heads/main", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
+			want: provenanceObservation{Subject: "team:a:repository_id::pipeline:ci:trigger:manual:runner:runner:ref:", Write: "manual:account/alice:refs/heads/main", Reads: []string{"manual:account/alice:refs/heads/main", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"team-token"}},
 		},
 		{
 			name: "a child of an asserted run keeps its parent's writer",

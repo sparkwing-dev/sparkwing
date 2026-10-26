@@ -21,6 +21,7 @@ func TestPlanSecretPreflightNamesUnreadableScopes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	request.Seal.Request = proveFixtureRun(t, tenant, request.RunID)
 	request.Seal.Resolved.SecretNames = []string{"OWN", "SHARED", "ABSENT", "TEAM_ONLY", "ELSEWHERE"}
 	_, err := tenant.AcceptPlan(t.Context(), request)
 	var refused *secretPreflightError

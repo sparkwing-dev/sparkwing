@@ -28,6 +28,7 @@ func secretReadStoreFixture(t *testing.T) (*Tenant, capability.Authorized) {
 	if err := seedSecret(t, tenant, Secret{Name: "KEY", Value: "sealed", Repo: fixtureRepo, Pipeline: "p", Masked: true}, *now); err != nil {
 		t.Fatal(err)
 	}
+	req.Seal.Request = proveFixtureRun(t, tenant, req.RunID)
 	req.Seal.Resolved.SecretNames = []string{"KEY"}
 	tenant.s.planSecretOpener = fakePlanSecretOpener(func(_ context.Context, _ Team, row Secret) (string, error) { return row.Value, nil })
 	if _, err := tenant.AcceptPlan(t.Context(), req); err != nil {

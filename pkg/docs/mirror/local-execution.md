@@ -232,7 +232,7 @@ branch or tag pin, such as `origin/main`, runs code whoever can push that ref
 chooses, so unless it resolves to the execution commit itself the run is sealed
 as asserted: its OIDC token claims `trigger:manual` with no `repository_id`,
 `ref` or `sha`, it receives no reserved pool, and it writes under its own cache
-scope. It still receives its pipeline's scoped secrets; see
+scope. Like every asserted run it reads only team-wide shared secrets; see
 [secrets](secrets.md). Pin a full commit to keep an App, schedule or Actions
 run's identity. See [OIDC](oidc.md#what-each-value-proves).
 
@@ -564,7 +564,8 @@ machine `run.routing.local_secrets`. Repository `run.local_secrets` lists names
 only and cannot select requester sources or supply values. Machine secret
 classification also remains in force for local snapshots. The CLI reads those names from its captured environment at
 intake. Required missing values fail before submission. Other declared names
-use the team's normal secret provider. Values travel outside the sealed request
+use the team's normal secret provider; a local run reads only its team's
+`--shared` secrets, never a repository's pipeline secrets. Values travel outside the sealed request
 and bundle, stay in controller memory, and are released only to the live
 claiming process with masking enabled. The attached here host re-supplies values
 on authenticated owner heartbeats and when it resumes after a controller restart.

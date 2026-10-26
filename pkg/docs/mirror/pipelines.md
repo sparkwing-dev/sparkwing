@@ -490,8 +490,8 @@ before the first node runs, so a run never fails halfway through a deploy
 for a secret it could have named at the start.
 
 - **On a controller,** the run's plan is refused when a required secret is
-  neither set for the run's pipeline nor set team-wide and shared with
-  runs. A child at its parent's exact revision reads its parent pipeline's secrets, and any other child only shared ones (see [secrets](secrets.md)). The run fails before any of its nodes runs. Its error names the
+  neither set for the run's repository and pipeline (read only by runs
+  GitHub proved) nor set team-wide and shared with runs. A child at its parent's exact revision reads its parent pipeline's secrets, and any other child only shared ones (see [secrets](secrets.md)). The run fails before any of its nodes runs. Its error names the
   declared secrets the run cannot read, and `sparkwing runs status --run
   RUN_ID --profile PROFILE` shows the team which scope each is missing from
   and the command that fixes it: `sparkwing secrets set --secret NAME --file
