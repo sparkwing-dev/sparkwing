@@ -336,7 +336,11 @@ func freshPodWaitingExplanation(t *testing.T, open func(*testing.T) *Store) {
 					if err != nil || view.Waiting == nil {
 						t.Fatalf("waiting unit = %+v, %v", view.Waiting, err)
 					}
-					if got := view.Waiting.NoEligible == freshPodReason; got != (mismatch == "") {
+					want := "verified default-branch work on Kubernetes runs only on fresh pods; add a launcher pool or use Sparkwing Cloud"
+					if dispatch == runspec.DispatchHost {
+						want = "verified default-branch work on Kubernetes runs only on fresh pods; change the run's runner selection to a launcher pool or Sparkwing Cloud and start a new run"
+					}
+					if got := view.Waiting.NoEligible == want; got != (mismatch == "") {
 						t.Fatalf("waiting explanation = %q, mismatch=%q", view.Waiting.NoEligible, mismatch)
 					}
 				})
