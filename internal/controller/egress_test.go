@@ -45,6 +45,7 @@ type egressFixture struct {
 	store         *store.Store
 	objects       *egressLogObjects
 	handler       http.Handler
+	server        *Server
 	meter         *egress.Meter
 	claim, member string
 }
@@ -91,7 +92,7 @@ func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return egressFixture{handler: h, meter: meter, claim: raw, member: member, store: e.Store, objects: objects}
+	return egressFixture{handler: h, server: s, meter: meter, claim: raw, member: member, store: e.Store, objects: objects}
 }
 
 func (f egressFixture) request(method, path, credential string) *http.Request {
@@ -219,17 +220,12 @@ func TestHealthReportsTheAlarmWithoutUsage(t *testing.T) {
 				t.Fatalf("read: %d %s", w.Code, w.Body)
 			}
 		}
-		w := f.fetch("GET", "/api/v1/health", "")
-		var health struct {
-			Status   string         `json:"status"`
-			Problems []string       `json:"problems"`
-			Egress   map[string]any `json:"egress"`
-		}
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &health) != nil || len(health.Egress) != 2 || health.Egress["enabled"] != true || health.Egress["alarm"] != alarm {
-			t.Fatalf("health: %d %s", w.Code, w.Body)
+		health := OperatorHealth(t, f.server)
+		if len(health.Egress) != 2 || health.Egress["enabled"] != true || health.Egress["alarm"] != alarm {
+			t.Fatalf("health: %+v", health)
 		}
 		if alarm && (health.Status != "degraded" || len(health.Problems) != 1 || health.Problems[0] != "egress: daily alarm threshold reached") {
-			t.Fatalf("alarm: %s", w.Body)
+			t.Fatalf("alarm: %+v", health)
 		}
 	}
 }

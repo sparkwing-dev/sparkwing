@@ -15,7 +15,7 @@ import (
 func launcherQueueFixture(t *testing.T, unpaid, funded int) (*Store, UnitDemand) {
 	t.Helper()
 	s, demand, _ := meteredUnitFixture(t, true)
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b','older',number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,0,log_retention_class,log_retention_days FROM runs WHERE id='run'`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b','older',number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,created_principal,0,log_retention_class,log_retention_days FROM runs WHERE id='run'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT 'b','older',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
 	indexFixtureUnit(t, s, "b", UnitRef{Kind: capability.UnitTrigger, RunID: "older"})
 	for i := range unpaid {

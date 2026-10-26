@@ -23,7 +23,7 @@ func TestLocalPublicationSnapshotRequiresVerifiedPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default','local-history',1,'ci','success',?,'request',1,'repo','host','execute',?,'local',1,2,'r30',30)`, raw, []byte(`[]`))
+	engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default','local-history',1,'ci','success',?,'request',1,'repo','host','execute','local',1,2,'r30',30)`, raw)
 	services := s.HTTP()
 	peer, _ := localControllerIdentity(t)
 	listener := &localControllerListener{connections: make(chan net.Conn), done: make(chan struct{})}

@@ -17,6 +17,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
+// safety: the exchange is unauthenticated until GitHub's token verifies, so it reads
+// only a token request: a team slug and one GitHub ID token, a few kilobytes.
+const actionsExchangeBody = 16 << 10
+
 type actionsProofKey struct{}
 
 type actionsProof struct {
@@ -43,6 +47,7 @@ func (s *Server) verifyActionsExchange(r *http.Request) error {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "GitHub Actions verification is not configured"}
 	}
 	var request githubExchangeReq
+	r.Body = http.MaxBytesReader(nil, r.Body, actionsExchangeBody)
 	if err := decodeEngineRequest(r, &request); err != nil {
 		return err
 	}

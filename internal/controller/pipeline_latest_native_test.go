@@ -31,8 +31,8 @@ func TestPipelineLatestHTTPUsesNativeDeclaredJobReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,started_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','producer-run',2,'producer','success',?,?,?,'gh:1','host','execute',?,'account',?,?,?,'r30',30)`,
-		encoded, request.Hash, request.AdmittedAt.UnixNano(), []byte(`[]`), request.AdmittedAt.UnixNano(), request.AdmittedAt.UnixNano(), now.Add(-time.Minute).UnixNano())
+	engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,started_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','producer-run',2,'producer','success',?,?,?,'gh:1','host','execute','account',?,?,?,'r30',30)`,
+		encoded, request.Hash, request.AdmittedAt.UnixNano(), request.AdmittedAt.UnixNano(), request.AdmittedAt.UnixNano(), now.Add(-time.Minute).UnixNano())
 	response := engineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, 200)
 	var award controllerwire.ClaimResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {

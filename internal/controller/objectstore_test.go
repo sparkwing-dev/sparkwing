@@ -83,16 +83,12 @@ func TestObjectStoreResetBreaker_NeedsOperatorAuthority(t *testing.T) {
 func TestObjectStoreHealth_NamesTrippedClassesWithoutTheirLimits(t *testing.T) {
 	f := newCronsFixture(t)
 
-	var body struct {
-		ObjectStore map[string]any `json:"object_store"`
-		Problems    []string       `json:"problems"`
-	}
-	f.call(http.MethodGet, "/api/v1/health", "", nil, http.StatusOK, &body)
+	body := controller.OperatorHealth(t, f.server)
 	if body.ObjectStore["tripped"] != false {
 		t.Fatalf("a fresh controller reports tripped=%v", body.ObjectStore["tripped"])
 	}
 	if _, ok := body.ObjectStore["per_minute"]; ok {
-		t.Error("the unauthenticated health route carries the configured limits")
+		t.Error("the health summary carries the configured limits")
 	}
 	for _, p := range body.Problems {
 		if strings.ContainsAny(p, "0123456789") && strings.Contains(p, "object-store") {
@@ -195,12 +191,7 @@ func TestObjectStoreHealth_ReportsAFrozenCeilingWithoutItsTotals(t *testing.T) {
 	f := newCronsFixture(t)
 	freezeBucket(t, objectguard.CeilingLimit{MaxBytes: 1000}, 999999, 7)
 
-	var body struct {
-		Status      string         `json:"status"`
-		ObjectStore map[string]any `json:"object_store"`
-		Problems    []string       `json:"problems"`
-	}
-	f.call(http.MethodGet, "/api/v1/health", "", nil, http.StatusOK, &body)
+	body := controller.OperatorHealth(t, f.server)
 	ceiling, ok := body.ObjectStore["ceiling"].(map[string]any)
 	if !ok {
 		t.Fatalf("health carries no ceiling summary: %v", body.ObjectStore)
@@ -209,7 +200,7 @@ func TestObjectStoreHealth_ReportsAFrozenCeilingWithoutItsTotals(t *testing.T) {
 		t.Errorf("health reports frozen=%v on a bucket over its ceiling", ceiling["frozen"])
 	}
 	if _, leaked := ceiling["bytes"]; leaked {
-		t.Error("the unauthenticated health route carries the bucket's stored bytes")
+		t.Error("the health summary carries the bucket's stored bytes")
 	}
 	if body.Status != "degraded" {
 		t.Errorf("health status = %q while writes are frozen, want degraded", body.Status)

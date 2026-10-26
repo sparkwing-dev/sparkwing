@@ -235,3 +235,32 @@ func TestScheduleTickRejectsPausedOrUnconsentedSchedule(t *testing.T) {
 		})
 	}
 }
+
+// Run now is a manual run by the member who pressed it: it records that member,
+// not the schedule's armer, and keeps the asserted identity existing rules give it.
+func TestScheduleRunNowRecordsTheMemberWhoPressedIt(t *testing.T) {
+	tenant, armer, body, _ := consentedScheduleFixture(t)
+	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), armer, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presser := teamAuthorization(t, tenant.s, authorityMember(t, tenant.s, "presser", RoleEditor), tenant.team, "POST", "/api/v1/schedules/{schedule}/run")
+	_, id, _, err := tenant.RunAuthorizedSchedule(t.Context(), presser, ids[0], "pressed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := tenant.ReadRun(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var creator string
+	if err := tenant.s.db.QueryRow(`SELECT created_principal FROM runs WHERE id=?`, id).Scan(&creator); err != nil {
+		t.Fatal(err)
+	}
+	if actor := run.Request.Request.Actor; actor.ID != "presser" || creator != "presser" {
+		t.Fatalf("run now recorded actor %+v and creator %q, want the presser", actor, creator)
+	}
+	if p := run.Request.Provenance; p.Trust() != runspec.TrustAsserted || p.Writer() != runspec.PrincipalWriter("account", "presser") {
+		t.Fatalf("run now provenance = %s %s", p.Trust(), p.Writer())
+	}
+}

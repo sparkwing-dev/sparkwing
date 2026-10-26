@@ -810,6 +810,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        kubernetes:
+          type: boolean
         labels:
           anyOf:
             - items:
@@ -2356,6 +2358,39 @@ components:
         - requests_per_minute_alarm
       type: object
       x-sparkwing-go-type: controllerwire.OperatorBudgets
+    internal.controllerwire.OperatorHealth:
+      additionalProperties: true
+      properties:
+        database:
+          anyOf:
+            - additionalProperties: {}
+              type: object
+            - type: "null"
+        egress:
+          anyOf:
+            - additionalProperties: {}
+              type: object
+            - type: "null"
+        object_store:
+          anyOf:
+            - additionalProperties: {}
+              type: object
+            - type: "null"
+        problems:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        status:
+          type: string
+      required:
+        - status
+        - object_store
+        - database
+        - egress
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorHealth
     internal.controllerwire.OperatorLimits:
       additionalProperties: true
       properties:
@@ -3078,8 +3113,6 @@ components:
           $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
         policy:
           type: string
-        record:
-          $ref: '#/components/schemas/internal.blob.RecordKey'
         result:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.MaterializedResultSource'
@@ -3087,7 +3120,6 @@ components:
       required:
         - policy
         - attempt
-        - record
       type: object
       x-sparkwing-go-type: controllerwire.ReuseSource
     internal.controllerwire.RotatedToken:
@@ -5790,12 +5822,6 @@ components:
         admitted_at:
           format: date-time
           type: string
-        allowed_pools:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
         authority_ref:
           $ref: '#/components/schemas/internal.capability.AuthorityRef'
         ceilings:
@@ -5847,7 +5873,6 @@ components:
         - request
         - run_id
         - admitted_at
-        - allowed_pools
         - authority_ref
         - ceilings
         - provenance
@@ -6618,12 +6643,6 @@ components:
     internal.runstate.RunRow:
       additionalProperties: true
       properties:
-        AllowedPools:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
         CancelReason:
           type: string
         CancelRequestedAt:
@@ -6694,7 +6713,6 @@ components:
         - Plan
         - PlanHash
         - Dispatch
-        - AllowedPools
         - Owner
         - CreatedAt
         - CancelRequestedAt
@@ -8538,6 +8556,40 @@ paths:
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
+  /api/v1/operator/health:
+    get:
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.OperatorHealth'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Read the deployment's full health
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/operator/health
+        audience: controller
+        owner: deployment
+        authentication: capability
+        access:
+          - credential: deployment_admin
+            grants:
+              - operator.limits
+            binding: none
+            liveness: credential
+          - credential: operator_console_session
+            grants:
+              - operator.console
+            binding: none
+            liveness: credential
+        retry: safe
   /api/v1/operator/limits:
     get:
       responses:

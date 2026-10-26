@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -29,9 +28,6 @@ func materializationFixture(t *testing.T, policy runstate.SourcePolicy) (*Tenant
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES ('a','source','job',1,2,'past','past','runner','past','remote',1,2,'success')`)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET state_seq=1 WHERE run_id='source'`)
 	source := runstate.MaterializeSource{Kind: policy, Source: runspec.AttemptIdentity{Team: "a", RunID: "source", NodeID: "job", Attempt: 1, Generation: 2}}
-	if policy == runstate.SourceMemo {
-		source.Record = blob.RecordKey{Team: "a", Kind: blob.KindMemo, Scope: blob.Scope{Repo: "gh:1", Pipeline: "p", Job: "job"}, Name: "key"}
-	}
 	tenant.s.materializations = materializationRecordsFunc(func(_ context.Context, _ *storeTx, team Team, got runstate.Actor, ref runspec.NodeRef, s runstate.MaterializeSource) (materializedRecords, error) {
 		if team != "a" || got != actor || ref != (runspec.NodeRef{RunID: "run", NodeID: "job"}) || s != source {
 			t.Fatal("record copier did not receive the authenticated source and destination")
@@ -42,13 +38,10 @@ func materializationFixture(t *testing.T, policy runstate.SourcePolicy) (*Tenant
 }
 
 func TestReconcileMaterializesPersistedOutcomeOnce(t *testing.T) {
-	for _, policy := range []runstate.SourcePolicy{runstate.SourceManualRetry, runstate.SourceMemo, runstate.SourceCoalesced} {
+	for _, policy := range []runstate.SourcePolicy{runstate.SourceManualRetry, runstate.SourceCoalesced} {
 		t.Run(string(policy), func(t *testing.T) {
 			tenant, request := materializationFixture(t, policy)
 			want := runstate.NodeSuccess
-			if policy == runstate.SourceMemo {
-				want = runstate.NodeMemoized
-			}
 			got, err := tenant.ReconcileNode(t.Context(), request)
 			if err != nil || got.Kind != runstate.Materialize || got.Node.Outcome != want || got.Claim != nil || got.Node.StateSeq != 1 || got.Node.ClaimedBy != "" {
 				t.Fatalf("materialize: %+v, %v", got, err)
@@ -113,17 +106,8 @@ func TestMaterializationCannotSupplyAnOutcome(t *testing.T) {
 	rewriteSchemaCount(t, tenant.s.db, "events", 0)
 }
 
-func TestReconcileMemoSurvivesSourceRunRetention(t *testing.T) {
-	tenant, request := materializationFixture(t, runstate.SourceMemo)
-	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM runs WHERE id='source'`)
-	got, err := tenant.ReconcileNode(t.Context(), request)
-	if err != nil || got.Kind != runstate.Materialize || got.Node.Outcome != runstate.NodeMemoized {
-		t.Fatalf("retained memo: %+v, %v", got, err)
-	}
-}
-
 func TestReconcileRecordCopyRollsBackWithState(t *testing.T) {
-	tenant, request := materializationFixture(t, runstate.SourceMemo)
+	tenant, request := materializationFixture(t, runstate.SourceManualRetry)
 	copyErr := errors.New("corrupt manifest member")
 	tenant.s.materializations = materializationRecordsFunc(func(ctx context.Context, tx *storeTx, _ Team, _ runstate.Actor, _ runspec.NodeRef, _ runstate.MaterializeSource) (materializedRecords, error) {
 		if _, err := tx.execContext(ctx, `INSERT INTO settings(key,value) VALUES ('copied',?)`, []byte(`yes`)); err != nil {
@@ -169,14 +153,10 @@ func TestReconcileSourceDoesNotStealHeldWork(t *testing.T) {
 }
 
 func TestReconcileRetryCanReuseMaterializedResult(t *testing.T) {
-	for _, scenario := range []string{"retry", "memo", "memo_after_loss"} {
+	for _, scenario := range []string{"retry", "retry_after_loss"} {
 		t.Run(scenario, func(t *testing.T) {
-			policy := runstate.SourceManualRetry
-			if scenario != "retry" {
-				policy = runstate.SourceMemo
-			}
-			tenant, request := materializationFixture(t, policy)
-			if scenario == "memo_after_loss" {
+			tenant, request := materializationFixture(t, runstate.SourceManualRetry)
+			if scenario == "retry_after_loss" {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET generation=1,attempt=1,disruptions=1 WHERE run_id='run'`)
 				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason) VALUES ('a','run','job',1,1,'lost','lost','runner','lost','remote',1,2,'failed','agent_lost')`)
 			}

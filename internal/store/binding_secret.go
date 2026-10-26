@@ -66,7 +66,17 @@ func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 	if err != nil {
 		return err
 	}
-	if pool != "" && (run.Request.Request.Options.Runner.Set && run.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere || !slices.Contains(c.ReservedPools, pool) || !slices.Contains(run.AllowedPools, pool)) {
+	if pool == "" {
+		return nil
+	}
+	if run.Request.Request.Options.Runner.Set && run.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere || !slices.Contains(c.ReservedPools, pool) {
+		return bindingRefusal()
+	}
+	serving, err := unitPoolsTx(ctx, tx, Team(c.Team), run.ID, c.Unit, c.Binding.NodeID, []string{pool})
+	if err != nil {
+		return err
+	}
+	if len(serving) == 0 {
 		return bindingRefusal()
 	}
 	return nil

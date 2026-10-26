@@ -48,7 +48,7 @@ func FuzzDebugResumeClientRequiresCurrentAuthority(f *testing.F) {
 			runDigest, jobDigest := sha256.Sum256([]byte(run)), sha256.Sum256([]byte(job))
 			observed.RunID, observed.JobID = hex.EncodeToString(runDigest[:]), hex.EncodeToString(jobDigest[:])
 			engineSQL(t, s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
-			engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b',?,1,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, observed.RunID)
+			engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b',?,1,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, observed.RunID)
 			engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('b',?,?,'pending',?,?)`, observed.RunID, observed.JobID, []byte(`{}`), []byte(`{}`))
 			engineSQL(t, s.store, `INSERT INTO debug_pauses(team,run_id,node_id,reason,paused_at,expires_at) SELECT 'b',?,?,reason,paused_at,expires_at FROM debug_pauses WHERE team='a' AND run_id='run' AND node_id='job'`, observed.RunID, observed.JobID)
 		}

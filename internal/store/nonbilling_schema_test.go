@@ -24,7 +24,7 @@ func TestNonBillingSchemaRejectsCounterexamples(t *testing.T) {
 	exec(`INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (1,'a',1,'a','Organization',1,1),(2,'b',2,'b','Organization',1,1)`)
 	exec(`INSERT INTO github_app_automation(team,repository_id,repository,installation_id,enabled_by,enabled_at,repo_key) VALUES ('a',1,'a/repo',1,'account',1,'gh:1')`)
 	exec(`INSERT INTO github_app_triggers(team,repository_id,pipeline,repository,installation_id,created_at,repo_key) VALUES ('a',1,'p','a/repo',1,1,'gh:1')`)
-	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'p','pending',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{}`), []byte(`[]`))
+	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'p','pending',?,'request',1,'gh:1','host','execute','account',1,'r30',30)`, []byte(`{}`))
 	exec(`INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','job','pending',?,?)`, []byte(`{}`), []byte(`{}`))
 	exec(`INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES ('a','run','job',1,1,'holder','prefix','runner','runner','remote',1,2,'success')`)
 	exec(`INSERT INTO blobs(team,digest,size,created_at) VALUES ('a','digest',1,1)`)

@@ -18,8 +18,8 @@ var cronBase = time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 
 func cronRun(t *testing.T, st *store.Store, id string) {
 	t.Helper()
-	_, err := st.DB().ExecContext(t.Context(), storetest.Rebind(st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
-VALUES (?, ?, (SELECT COALESCE(MAX(number),0)+1 FROM runs WHERE team=?), 'nightly', 'pending', ?, 'request', 1, 'git:example.com/project', 'host', 'execute', ?, 'fixture', 1, 'r30', 30)`), store.DefaultTeam, id, store.DefaultTeam, []byte(`{}`), []byte(`[]`))
+	_, err := st.DB().ExecContext(t.Context(), storetest.Rebind(st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days)
+VALUES (?, ?, (SELECT COALESCE(MAX(number),0)+1 FROM runs WHERE team=?), 'nightly', 'pending', ?, 'request', 1, 'git:example.com/project', 'host', 'execute', 'fixture', 1, 'r30', 30)`), store.DefaultTeam, id, store.DefaultTeam, []byte(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

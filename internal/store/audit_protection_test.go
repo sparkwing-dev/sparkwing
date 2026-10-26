@@ -72,7 +72,7 @@ func TestEveryRunDeletionLeavesTombstone(t *testing.T) {
 			t.Cleanup(func() { _ = s.Close() })
 			rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
 			rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','person@example.test',1,1)`)
-			rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'p','success',?,'request',1,'gh:1','host','execute',?,'account',1,2,'r30',30)`, []byte(`{"version":1}`), []byte(`[]`))
+			rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'p','success',?,'request',1,'gh:1','host','execute','account',1,2,'r30',30)`, []byte(`{"version":1}`))
 			if mode == "raw" {
 				rewriteSchemaExec(t, s.db, `DELETE FROM runs WHERE team='a'`)
 			} else if err := s.inTx(t.Context(), func(tx *storeTx) error { return deleteTenantRowsTx(t.Context(), tx, "a") }); err != nil {

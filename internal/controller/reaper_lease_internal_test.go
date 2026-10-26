@@ -19,7 +19,7 @@ func TestReaperRunsInOneOfTwoOverlappingControllers(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := t.Context()
-	if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,'run',1,'p','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, store.DefaultTeam, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"p","writer":"account/fixture"}}`), []byte(`[]`)); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,'run',1,'p','running',?,'request',1,'gh:1','host','execute','account',1,'r30',30)`, store.DefaultTeam, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"p","writer":"account/fixture"}}`)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,capability_prefix,generation,attempt,started_at,lease_expires_at) VALUES (?,'run','job','running',?,?,'runner','claim',2,3,1,1)`, store.DefaultTeam, []byte(`{"id":"job"}`), []byte(`{}`)); err != nil {

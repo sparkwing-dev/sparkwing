@@ -99,13 +99,6 @@ func MaterializationTestFixture(t *testing.T, manifests BlobManifestReader, outp
 	if _, err := records.CommitRecord(t.Context(), artifacts); err != nil {
 		t.Fatal(err)
 	}
-	memo := out
-	memo.Key.Kind, memo.Key.Name, memo.Key.Scope.Key = blob.KindMemo, "output", fixtureMemoHash
-	memo.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: manifest.Digest}
-	memo.Members = artifacts.Members
-	if _, err := records.CommitRecord(t.Context(), memo); err != nil {
-		t.Fatal(err)
-	}
 	attempt := intent.Identity.Attempt.Value
 	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, NodeFence: runspec.NodeFence{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID), Holder: "machine", Generation: runspec.ClaimGeneration(attempt.Generation)}}
 	ref := runspec.NodeRef{RunID: runspec.RunID(attempt.RunID), NodeID: runspec.NodeID(attempt.NodeID)}
@@ -114,7 +107,6 @@ func MaterializationTestFixture(t *testing.T, manifests BlobManifestReader, outp
 		t.Fatal(err)
 	}
 	s, tenant, request := materializationTarget(t, s, records.tenant, ref)
-	request.Policy, request.Source = runstate.SourceMemo, &runstate.MaterializeSource{Kind: runstate.SourceMemo, Record: memo.Key}
 	return s, tenant, request
 }
 
@@ -199,47 +191,6 @@ func TestBlobMaterializationCannotOutliveOwnerProperty(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(709))}); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestBlobMaterializationMemoSelectsExactRecord(t *testing.T) {
-	s, tenant, request := blobMaterializationFixture(t)
-	request.Policy, request.Source = runstate.SourceMemo, seedMaterializationMemo(t, s, tenant)
-	got, err := tenant.ReconcileNode(t.Context(), request)
-	if err != nil || got.Node.Outcome != runstate.NodeMemoized || got.Node.OutputRecord == nil || got.Node.ManifestRecord == nil || got.Node.Attempt != 0 {
-		t.Fatalf("memo copy: %+v: %v", got, err)
-	}
-}
-
-func seedMaterializationMemo(t *testing.T, s *Store, tenant *Tenant) *runstate.MaterializeSource {
-	t.Helper()
-	source, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	key := *source.OutputRecord
-	key.Kind, key.Name, key.Scope.Key = blob.KindMemo, "output", fixtureMemoHash
-	namespace, err := blob.RecordNamespace(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = s.inTx(t.Context(), func(tx *storeTx) error {
-		originalKey := *source.OutputRecord
-		originalScope, err := blob.RecordNamespace(originalKey)
-		if err != nil {
-			return err
-		}
-		record, _, err := readBlobRecordTx(t.Context(), tx, originalKey, originalScope)
-		if err != nil {
-			return err
-		}
-		record.Key = key
-		record.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
-		return persistBlobRecordTx(t.Context(), tx, record, namespace, record.Source, nil)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &runstate.MaterializeSource{Kind: runstate.SourceMemo, Record: key}
 }
 
 func TestBlobMaterializationCoalescingRequiresPersistedReadAuthority(t *testing.T) {

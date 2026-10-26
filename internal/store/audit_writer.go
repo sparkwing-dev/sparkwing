@@ -239,6 +239,14 @@ type auditSecretRelease struct {
 	CapabilityPrefix auditDigest `json:"capability_digest"`
 	Holder           auditDigest `json:"holder_digest"`
 }
+
+// safety: audiences are relying-party identifiers a pipeline names, not people, so
+// the audience is kept plain while the job is a digest like other release events.
+type auditOIDCMint struct {
+	RunID    string      `json:"-"`
+	Node     auditDigest `json:"node_digest"`
+	Audience string      `json:"audience"`
+}
 type auditSourceRelease struct {
 	AccountID        string      `json:"-"`
 	RunID            string      `json:"-"`
@@ -284,6 +292,7 @@ func (auditRefillSettings) isAuditPayload()       {}
 func (auditRefill) isAuditPayload()               {}
 func (auditSecretRelease) isAuditPayload()        {}
 func (auditSourceRelease) isAuditPayload()        {}
+func (auditOIDCMint) isAuditPayload()             {}
 func (auditRefund) isAuditPayload()               {}
 
 func auditOneOf[T ~string](value T, choices ...string) bool {
@@ -398,6 +407,9 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 		ev.Kind, ev.SubjectID = businessEventRefillOpened, p.RefillID
 	case auditSecretRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "secret.released", p.Name.String(), p.RunID, true
+	case auditOIDCMint:
+		ev.Kind, ev.SubjectID, ev.RunID, repeat = "oidc.minted", p.Node.String(), p.RunID, true
+		valid = p.Audience != "" && !strings.ContainsAny(p.Audience, "\r\n\t ")
 	case auditSourceRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, ev.Account, repeat = "git_credential.released", p.CredentialID.String(), p.RunID, p.AccountID, true
 	case auditRefund:

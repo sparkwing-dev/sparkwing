@@ -135,8 +135,8 @@ func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) 
 		query string
 		args  []any
 	}{
-		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,spec_json,spec_hash,sealed_at,plan_json,plan_hash)
-VALUES (?,'run',1,'fixture','running',?,'request',?,'gh:1','https://github.com/team/repo','host','execute',?,'fixture',?,'r30',30,?,'spec',?,?,'plan')`, []any{store.DefaultTeam, request, now.UnixNano(), []byte(`[]`), now.UnixNano(), spec, now.UnixNano(), plan}},
+		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,spec_json,spec_hash,sealed_at,plan_json,plan_hash)
+VALUES (?,'run',1,'fixture','running',?,'request',?,'gh:1','https://github.com/team/repo','host','execute','fixture',?,'r30',30,?,'spec',?,?,'plan')`, []any{store.DefaultTeam, request, now.UnixNano(), now.UnixNano(), spec, now.UnixNano(), plan}},
 		{`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES (?,'run','trigger',?,?,?,?,?)`, []any{store.DefaultTeam, now.UnixNano(), now.UnixNano(), now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`)}},
 	} {
 		if _, err := teststore.Exec(t.Context(), s, statement.query, statement.args...); err != nil {

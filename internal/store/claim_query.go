@@ -11,12 +11,15 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
+
+const kubernetesEnrollmentRefusal = "this runner runs in a Kubernetes pod, but its credential was not enrolled as Kubernetes capacity; enroll it with `sparkwing runners add --platform kubernetes --no-service` and put the new credential in the runner's token Secret"
 
 type claimRepositoryPattern struct {
 	Key     string `json:"key"`
@@ -101,6 +104,12 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	observed, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
 	if err != nil {
 		return f, err
+	}
+	// safety: a self-hosted runner in a pod is persistent Kubernetes capacity, which
+	// never takes verified default-branch work; an enrollment that does not say so
+	// would let it, so the runner stops until it is enrolled correctly.
+	if demand.Kubernetes && root.Subject.Kind == capability.SubjectMachine && root.Parent == nil && root.Binding.Kind == capability.BindingNone && !capability.Launcher(root) && !observed.PersistentKubernetes {
+		return f, authorityError(apierr.Forbidden, kubernetesEnrollmentRefusal)
 	}
 	profile := match.Profile{}
 	if tx.store.claimProfiles != nil {
@@ -362,7 +371,7 @@ func (q *claimSQL) predicate() string {
 	}
 	live := `(` + n("current") + `=1 OR ((` + horizon + `)>0 AND ` + n("observed_at") + `>=clock.now-(` + horizon + `)))`
 	labels := q.requirementsMatchSQL("w.team", "w.requirements", func(alt string) string { return q.contains(f("labels"), alt) })
-	reservation := `(` + f("pools") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + `) OR EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + ` WHERE ` + q.contains("w.allowed_pools", q.text("pool.value")) + ` AND ` + q.anyAlternative("w.selectors", func(alt string) string { return alt + `='pool='||` + q.text("pool.value") }) + `))`
+	reservation := `(` + f("pools") + ` IS NULL OR NOT EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + `) OR EXISTS (SELECT 1 FROM ` + q.array(f("pools"), "pool") + ` WHERE ` + q.poolSatisfies(q.text("pool.value"), "w.team", "w.selectors", q.at("w.request", "provenance")) + `))`
 	scopes := `NOT EXISTS (SELECT 1 FROM ` + q.array(f("scopes"), "scope") + ` WHERE NOT EXISTS (SELECT 1 FROM ` + q.array("scope.value", "pattern") + ` WHERE (` + q.at("pattern.value", "key") + `=w.repo_key AND w.repo_key<>'') OR (` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `)))`
 	accepted := `(` + n("filter") + `=0 OR (w.kind IN ('node','eval') AND w.repo_display='' AND COALESCE(` + w("git", "repository", "display") + `,'')='') OR EXISTS (SELECT 1 FROM ` + q.array(f("accept"), "pattern") + ` WHERE ` + q.at("pattern.value", "like") + `<>'' AND w.repository LIKE ` + q.at("pattern.value", "like") + ` ESCAPE '\' AND length(w.repository)-length(replace(w.repository,'/',''))=` + q.number(q.at("pattern.value", "slashes")) + `))`
 	trust := q.poolTrust("w.team", f("pools"), f("trust"), n("launcher"), q.at("w.request", "provenance"))
@@ -651,14 +660,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	request := q.blob("r.request_json")
 	spec := q.blob("r.spec_json")
 	options := `COALESCE(` + q.at(spec, "resolved", "settings", "options") + `,` + q.at(request, "request", "options") + `,'{}')`
-	selectors := `CASE WHEN ready.kind='node' THEN COALESCE(` + q.at("ready.execution", "requires", "value") + `,'[]') ELSE COALESCE(` + q.at(options, "requires", "value") + `,'[]') END`
-	runnerKind := q.at(request, "request", "options", "runner", "value", "kind")
-	runnerValue := q.at(request, "request", "options", "runner", "value", "value")
-	appended := `json_insert(` + selectors + `,'$[#]',` + runnerValue + `)`
-	if q.dialect == DialectPostgres {
-		appended = `((` + selectors + `)::jsonb || jsonb_build_array(` + runnerValue + `))::text`
-	}
-	selectors = `CASE WHEN ` + runnerKind + `='label' THEN ` + appended + ` ELSE ` + selectors + ` END`
+	selectors := q.unitSelectors("ready.kind", "ready.execution", request, spec)
 	prefers := `CASE WHEN ready.kind='node' THEN COALESCE(` + q.at("ready.execution", "prefers", "value") + `,'[]') ELSE COALESCE(` + q.at(options, "prefers", "value") + `,'[]') END`
 	repository := "r.repo_identity"
 	class := `CAST(NULL AS BIGINT)`
@@ -675,7 +677,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	}
 	writer := q.at(request, "provenance", "writer")
 	account, machine := writerPrincipalSQL(writer, "account"), writerPrincipalSQL(writer, "machine")
-	raw := `SELECT ready.team,ready.run_id,ready.node_id,ready.source_generation,ready.arrived,ready.kind,ready.requirements,r.repo_key,r.repo_display,` + repository + ` AS repository,` + request + ` AS request,` + spec + ` AS spec,` + selectors + ` AS selectors,` + prefers + ` AS preferences,` + q.blob("r.allowed_pools") + ` AS allowed_pools,r.created_principal,tm.claim_ranking,tm.claim_award_ordinal,
+	raw := `SELECT ready.team,ready.run_id,ready.node_id,ready.source_generation,ready.arrived,ready.kind,ready.requirements,r.repo_key,r.repo_display,` + repository + ` AS repository,` + request + ` AS request,` + spec + ` AS spec,` + selectors + ` AS selectors,` + prefers + ` AS preferences,r.created_principal,tm.claim_ranking,tm.claim_award_ordinal,
  CASE WHEN (` + account + `)<>'' THEN ` + account + ` WHEN (` + machine + `)<>'' THEN (SELECT CASE WHEN COUNT(*)>0 AND COUNT(DISTINCT m.created_by)=1 AND MIN(CASE WHEN COALESCE(CAST(` + q.at(q.blob("m.authority_json"), "origin", "personal") + ` AS TEXT),'false') IN ('true','1') AND m.created_by<>'' THEN 1 ELSE 0 END)=1 THEN MIN(m.created_by) ELSE '' END FROM capabilities m WHERE m.team=r.team AND m.subject_id=(` + machine + `) AND m.subject_kind='machine' AND m.bind_kind='none' AND m.parent_id IS NULL) ELSE '' END AS requester
  FROM ready JOIN runs r ON r.team=ready.team AND r.id=ready.run_id JOIN teams tm ON tm.name=r.team,clock
  WHERE r.team IN (` + liveTeamsSQL + `) AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=clock.now)`

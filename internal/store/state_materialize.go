@@ -107,12 +107,6 @@ func materializationResultTx(ctx context.Context, tx *storeTx, team Team, run Ru
 	if err != nil {
 		return runstate.NodeResult{}, err
 	}
-	if source.Kind == runstate.SourceMemo {
-		if source.Record.Kind != blob.KindMemo {
-			return runstate.NodeResult{}, authorityError(apierr.BadRequest, "memo materialization requires a memo record")
-		}
-		return runstate.NodeResult{Outcome: runstate.NodeMemoized}, nil
-	}
 	if source.Kind == runstate.SourceResume && ref != target.Ref {
 		return runstate.NodeResult{}, holderRefusal()
 	}
@@ -177,15 +171,9 @@ func readStoredNodeResultTx(ctx context.Context, tx *storeTx, team Team, node ru
 }
 
 func materializationRef(team Team, source runstate.MaterializeSource) (runspec.NodeRef, error) {
-	if source.Kind == runstate.SourceMemo {
-		if source.Result != nil || source.Record.Team != string(team) || source.Record.Kind != blob.KindMemo {
-			return runspec.NodeRef{}, authorityError(apierr.BadRequest, "memo materialization requires a tenant memo record")
-		}
-		return runspec.NodeRef{}, nil
-	}
 	if source.Result != nil {
 		result := source.Result
-		if source.Source != (runspec.AttemptIdentity{}) || source.Kind == runstate.SourceMemo || result.Ref.RunID == "" || result.Ref.NodeID == "" || result.StateSeq <= 0 {
+		if source.Source != (runspec.AttemptIdentity{}) || result.Ref.RunID == "" || result.Ref.NodeID == "" || result.StateSeq <= 0 {
 			return runspec.NodeRef{}, authorityError(apierr.BadRequest, "invalid materialized result identity")
 		}
 		return result.Ref, nil

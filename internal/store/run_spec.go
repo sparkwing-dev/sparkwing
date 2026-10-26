@@ -95,7 +95,8 @@ type AcceptedExpansion struct {
 }
 
 // AdmitRun is the only intake for local, remote, retry, child and published runs.
-// It derives authority and allowed pools in the transaction; published runs receive no executable owner unit.
+// It derives authority in the transaction; pool access is decided at each use, not here.
+// Published runs receive no executable owner unit.
 // A nonempty idempotency key is scoped by server-derived team, principal and pipeline.
 // The canonical input digest (including retry lineage) and key commit on runs for
 // executable and published intake alike. Same key/body returns the original result;
@@ -103,7 +104,8 @@ type AcceptedExpansion struct {
 // Verified App redeliveries return the original run for that delivery and pipeline,
 // including when the caller supplies no idempotency key.
 // Retry intake loads Lineage.RetryOf from this Tenant, preserves code and inputs,
-// and reseals asserted writes for the retrier. The new execution ID stays outside the source envelope.
+// and keeps the source's sealed writer; the retrier is recorded only in lineage.
+// The new execution ID stays outside the source envelope.
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error) {
 	var result AdmissionResult
 	var installed *localRunSecrets
@@ -361,10 +363,6 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
-	pools, err := json.Marshal(snapshot.request.AllowedPools)
-	if err != nil {
-		return err
-	}
 	lineage, err := json.Marshal(snapshot.execution)
 	if err != nil {
 		return err
@@ -376,7 +374,7 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
-	_, err = tx.execContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,idempotency_scope,idempotency_key,idempotency_digest,request_sealed_at,trigger_source,git_branch,git_sha,provenance_sha,provenance_ref,repo_key,repo_display,repo_identity,retry_of,lineage_json,parent_run_id,parent_node_id,dispatch,intake_mode,admission,allowed_pools,created_subject_kind,created_principal,created_at,claim_wait_ns,log_retention_class,log_retention_days) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, result.Number, input.Pipeline, body, snapshot.request.Hash, scope, key, digest, snapshot.request.AdmittedAt.UnixNano(), input.Origin, input.Git.Ref, input.Git.SHA, snapshot.request.Provenance.SHA(), snapshot.request.Provenance.Ref(), input.Git.Repository.Key, input.Git.Repository.Display, identity, snapshot.execution.Lineage.RetryOf, lineage, snapshot.execution.Lineage.ParentRunID, snapshot.execution.Lineage.ParentJobID, input.Dispatch, input.Mode, input.Options.AdmissionClass.Value, pools, p.Capability.Subject.Kind, p.Capability.Subject.ID, now.UnixNano(), int64(input.Options.ClaimWait.Value), policy.LogRetentionClass, policy.LogRetentionDays)
+	_, err = tx.execContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,idempotency_scope,idempotency_key,idempotency_digest,request_sealed_at,trigger_source,git_branch,git_sha,provenance_sha,provenance_ref,repo_key,repo_display,repo_identity,retry_of,lineage_json,parent_run_id,parent_node_id,dispatch,intake_mode,admission,created_subject_kind,created_principal,created_at,claim_wait_ns,log_retention_class,log_retention_days) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, result.Number, input.Pipeline, body, snapshot.request.Hash, scope, key, digest, snapshot.request.AdmittedAt.UnixNano(), input.Origin, input.Git.Ref, input.Git.SHA, snapshot.request.Provenance.SHA(), snapshot.request.Provenance.Ref(), input.Git.Repository.Key, input.Git.Repository.Display, identity, snapshot.execution.Lineage.RetryOf, lineage, snapshot.execution.Lineage.ParentRunID, snapshot.execution.Lineage.ParentJobID, input.Dispatch, input.Mode, input.Options.AdmissionClass.Value, p.Capability.Subject.Kind, p.Capability.Subject.ID, now.UnixNano(), int64(input.Options.ClaimWait.Value), policy.LogRetentionClass, policy.LogRetentionDays)
 	if err != nil {
 		return err
 	}

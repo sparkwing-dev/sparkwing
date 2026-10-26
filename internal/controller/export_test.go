@@ -2,7 +2,12 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 
@@ -22,6 +27,21 @@ var (
 	AssertedProvenance     = assertedProvenance
 	SealWith               = sealWith
 )
+
+// OperatorHealth reads the report the operator health route serves, without
+// the route's authorization.
+func OperatorHealth(t *testing.T, s *Server) controllerwire.OperatorHealth {
+	t.Helper()
+	w := httptest.NewRecorder()
+	if err := s.handleOperatorHealth(w, httptest.NewRequest("GET", "/api/v1/operator/health", nil), capability.Authorized{}); err != nil {
+		t.Fatal(err)
+	}
+	var out controllerwire.OperatorHealth
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
 
 // SetHostKeyScan replaces the ssh host key read a new git credential makes,
 // so a test serves a key without dialing a host.

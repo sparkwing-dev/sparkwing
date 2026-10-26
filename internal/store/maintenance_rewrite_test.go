@@ -27,8 +27,8 @@ func maintenanceRun(t *testing.T, s *Store, id string, number int, state runstat
 		finished = s.now().UnixNano()
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,
-repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days)
-VALUES ('a',?,?,'pipeline',?,?,'request',1,'gh:1','host','execute',?,'account',1,?,'r30',30)`, id, number, state, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"pipeline","writer":"account/fixture"}}`), []byte(`[]`), finished)
+repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days)
+VALUES ('a',?,?,'pipeline',?,?,'request',1,'gh:1','host','execute','account',1,?,'r30',30)`, id, number, state, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"pipeline","writer":"account/fixture"}}`), finished)
 }
 
 func TestRewriteSingletonLeaseFencesExpiredOwners(t *testing.T) {

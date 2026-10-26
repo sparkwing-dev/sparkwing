@@ -118,7 +118,7 @@ func TestLogPersistencePublishedAttemptsRecheckAuthority(t *testing.T) {
 				case "foreign_repo":
 					c.Data.RepositoryKey = "gh:other"
 				case "foreign_run":
-					rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) SELECT team,'other',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
+					rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) SELECT team,'other',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
 					c.Binding.RunID, c.Data.RunID = "other", "other"
 				case "missing_grant":
 					c.Grants = nil

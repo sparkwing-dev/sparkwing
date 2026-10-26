@@ -20,7 +20,8 @@ type UnitRef struct {
 }
 
 // UnitDemand carries observed platform and labels. Identity, reservations and team
-// come from C2's capability; requirements and allowed pools come from persisted seals.
+// come from C2's capability; requirements come from persisted seals, and pool access is
+// decided at each use from the current pool rules.
 type UnitDemand struct {
 	// FreeSlots is remaining poll capacity; nil offers one slot. Awards consume it.
 	FreeSlots          *int
@@ -32,6 +33,8 @@ type UnitDemand struct {
 	Target             *UnitRef
 	OS                 string
 	Arch               string
+	// Kubernetes is the runner's report that it runs in a Kubernetes pod.
+	Kubernetes bool
 }
 
 // UnitClaim records the store-derived team and award; source generation remains distinct from eval claim generation.

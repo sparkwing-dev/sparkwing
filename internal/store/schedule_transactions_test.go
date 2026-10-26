@@ -69,7 +69,7 @@ func TestScheduledIntakeCommitsOneSealedRunAndHistoryPerDueInstant(t *testing.T)
 		t.Fatalf("concurrent replay diverged: %+v", results)
 	}
 	first := results[0]
-	if first.Request.Hash == "" || first.Request.Request.Origin != runspec.OriginSchedule || first.Request.Request.Actor.ID != "schedule-owner" || first.Request.Request.Git.App.Set || len(first.Request.AllowedPools) != 0 || !first.Request.AdmittedAt.Equal(due) {
+	if first.Request.Hash == "" || first.Request.Request.Origin != runspec.OriginSchedule || first.Request.Request.Actor.ID != "schedule-owner" || first.Request.Request.Git.App.Set || !first.Request.AdmittedAt.Equal(due) {
 		t.Fatalf("unsealed or untrusted schedule intake: %+v", first)
 	}
 	fires, err := tenant.ListCronFires(t.Context(), row.ID, 10)

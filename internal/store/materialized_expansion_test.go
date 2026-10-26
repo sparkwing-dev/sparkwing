@@ -10,7 +10,7 @@ import (
 )
 
 func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) {
-	tenant, request := materializationFixture(t, runstate.SourceMemo)
+	tenant, request := materializationFixture(t, runstate.SourceManualRetry)
 	owner := authorityRoot("owner", "a")
 	owner.Subject.ID = "host"
 	owner.Grants = []capability.Grant{capability.TriggerHost, capability.NodesClaim, capability.ExpansionSubmit}
@@ -32,7 +32,7 @@ func TestMaterializedGeneratorDelegatesAndSettlesAtGenerationZero(t *testing.T) 
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=?,spec_hash='spec',plan_hash='plan',plan_json=?,sealed_at=1 WHERE id='run'`, spec, plan)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET spec_json=?,expansion='expected' WHERE run_id='run'`, []byte(`{"id":"job","closures":{"generate":["group"]}}`))
 	materialized, err := tenant.ReconcileNode(t.Context(), request)
-	if err != nil || materialized.Kind != runstate.Materialize || materialized.Node.Generation != 0 || materialized.Node.Outcome != runstate.NodeMemoized || materialized.Node.Expansion != runstate.ExpansionExpected {
+	if err != nil || materialized.Kind != runstate.Materialize || materialized.Node.Generation != 0 || materialized.Node.Outcome != runstate.NodeSuccess || materialized.Node.Expansion != runstate.ExpansionExpected {
 		t.Fatalf("materialized source=%+v error=%v", materialized, err)
 	}
 	issued, err := tenant.s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{

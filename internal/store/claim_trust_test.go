@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -57,33 +58,17 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "job"}, Actor: plan.Actor}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET allowed_pools=? WHERE team=? AND id=?`, []byte(`["prod"]`), tenant.Team(), plan.RunID); err != nil {
-		t.Fatal(err)
-	}
 	if secret {
 		if _, err := s.DB().ExecContext(ctx, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES (?,'DEPLOY','ciphertext','account',1,1,1,'',0,'prod')`, tenant.Team()); err != nil {
 			t.Fatal(err)
 		}
 	}
+	branch := "feature"
 	if verified {
-		var body []byte
-		if err := s.DB().QueryRowContext(ctx, `SELECT request_json FROM runs WHERE team=? AND id=?`, tenant.Team(), plan.RunID).Scan(&body); err != nil {
-			t.Fatal(err)
-		}
-		var seal runspec.SealedRequest
-		if err := json.Unmarshal(body, &seal); err != nil {
-			t.Fatal(err)
-		}
-		seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "verified", VerifiedAt: time.Now(), Ref: "refs/heads/main", SHA: seal.Request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: true}, runspec.Optional[runspec.PullRequest]{}, seal.Request.Pipeline)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if body, err = json.Marshal(seal); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET request_json=? WHERE team=? AND id=?`, body, tenant.Team(), plan.RunID); err != nil {
-			t.Fatal(err)
-		}
+		branch = "main"
+	}
+	if err := grantPool(ctx, s, tenant.Team(), plan.RunID, "prod", branch); err != nil {
+		t.Fatal(err)
 	}
 	authority := plan.Seal.Request.AuthorityRef
 	grants := []capability.Grant{capability.NodesClaim}
@@ -130,4 +115,28 @@ func TestRunnerTrustIsAnAdminSetCredentialFact(t *testing.T) {
 	if err != nil || p.Capability.Trust != capability.TrustAny {
 		t.Fatalf("stored trust = %q, %v", p.Capability.Trust, err)
 	}
+}
+
+func grantPool(ctx context.Context, s *store.Store, team store.Team, run, pool, branch string) error {
+	var body []byte
+	if err := s.DB().QueryRowContext(ctx, `SELECT request_json FROM runs WHERE team=? AND id=?`, team, run).Scan(&body); err != nil {
+		return err
+	}
+	var seal runspec.SealedRequest
+	if err := json.Unmarshal(body, &seal); err != nil {
+		return err
+	}
+	var err error
+	seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "pool-delivery", VerifiedAt: time.Now(), Ref: "refs/heads/" + branch, SHA: seal.Request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: branch == "main"}, runspec.Optional[runspec.PullRequest]{}, seal.Request.Pipeline)
+	if err != nil {
+		return err
+	}
+	if body, err = json.Marshal(seal); err != nil {
+		return err
+	}
+	if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET request_json=? WHERE team=? AND id=?`, body, team, run); err != nil {
+		return err
+	}
+	_, err = s.DB().ExecContext(ctx, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES (?,?,?,'gh:1','owner',1)`, team, pool, pool)
+	return err
 }

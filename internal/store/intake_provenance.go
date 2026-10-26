@@ -49,7 +49,11 @@ func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeReque
 			return runspec.Provenance{}, authorityError(apierr.IntegrityFailure, "parent run has no sealed provenance")
 		}
 		from := parent.Request.Request
-		if input.Git.Repository.Key == from.Git.Repository.Key && input.Git.Ref == from.Git.Ref && input.Git.SHA == from.Git.SHA && input.Source.Ref == from.Source.Ref {
+		sameRepository := input.Git.Repository.Key == from.Git.Repository.Key
+		if sameRepository && input.Source.Location != from.Source.Location {
+			return runspec.Provenance{}, authorityError(apierr.Forbidden, "a child in its parent's repository uses its parent's source location")
+		}
+		if sameRepository && input.Git.Ref == from.Git.Ref && input.Git.SHA == from.Git.SHA && input.Source.Ref == from.Source.Ref {
 			return inherited, nil
 		}
 		writer := runspec.RunWriter(parent.ID)
@@ -89,10 +93,12 @@ func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeReque
 		}
 		return refused(runspec.ScheduleProvenance(s.ID, repository, defaultBranch.Value, input.Git.SHA, input.Pipeline))
 	case p.Capability.Binding.Kind == capability.BindingPush && p.Capability.Binding.Push != nil:
-		if !pinned {
+		push := p.Capability.Binding.Push
+		// safety: the ref and commit come from the push GitHub's token proved, while the
+		// submitter reports the code commit, so only that same commit keeps them.
+		if !strings.EqualFold(input.Source.Ref, push.SHA) {
 			return asserted(runspec.RunWriter(run))
 		}
-		push := p.Capability.Binding.Push
 		id, err := strconv.ParseInt(strings.TrimPrefix(push.RepositoryKey, "gh:"), 10, 64)
 		if err != nil || !strings.HasPrefix(push.RepositoryKey, "gh:") {
 			return runspec.Provenance{}, authorityError(apierr.Forbidden, "an Actions push binding names no GitHub repository")

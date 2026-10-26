@@ -174,8 +174,11 @@ branch in `refs/heads/`, so a tag with the same name cannot select its code.
 Reserved pools are granted only to verified App runs, the children and retries
 that inherit them, and admin-armed default-branch schedule fires, which receive
 only pools whose rules allow the default branch. A typed repository grants no
-pool. Owner-approved extra repositories join the source token only for a
-verified push to the default branch.
+pool. Access is checked against the rules as they stand at each use: placement,
+reserved secret release and OIDC tokens. Removing a rule cuts off every run of
+that repository at its next use, including retries of older runs.
+Owner-approved extra repositories join the source token only for a verified
+push to the default branch.
 
 On Kubernetes, verified default-branch work runs only on fresh, single-use pods.
 This includes admin-armed default-branch schedules, plus children and retries
@@ -197,6 +200,16 @@ refuses with `409` and conflict detail `limit` set to `max_child_depth` or
 budgets of whoever created its root, not the runner holding the parent's
 claim. See [limits](limits.md#execution-and-records).
 
+### Approvals
+
+An approval pauses a run until a team member with `approvals.write` (an editor,
+admin or owner, including the member who started the run) approves or denies
+it. It is a workflow step, not a security control. It does not enforce a
+separate reviewer, and it does not narrow what the run's code, secrets or OIDC
+tokens can reach. Protect a deployment target with that target's own controls,
+such as a protected branch, a reserved pool or the relying party's OIDC claim
+checks. Each decision is audited as `approval.decided`.
+
 ### Request audit log
 
 Audit records identify the route, operation, team, subject and public credential
@@ -214,6 +227,8 @@ Approval decisions, run and job cancellations, token minting and rotation,
 runner enrollment, and invitation acceptance commit their audit events in the
 same transaction. These events contain IDs and closed decision values, without
 approval comments, cancellation reasons, email addresses or other personal text.
+Each OIDC token a run mints is audited as `oidc.minted` before it is returned,
+naming the run, a digest of its job and the audience.
 Restricted claims and sealed execution inputs must never be rendered as details.
 Run creation and retry return display inputs, not the execution seal. Schedule
 declarations, overrides, effective arguments and fire history hide every argument

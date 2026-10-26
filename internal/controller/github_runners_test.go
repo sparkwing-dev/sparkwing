@@ -1,7 +1,9 @@
 package controller_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -225,6 +227,33 @@ func TestGitHubRunnerCredentialClaimsOnlyItsOwnPush(t *testing.T) {
 		var response controllerwire.ClaimResponse
 		if code := f.call("POST", "/api/v1/runners/claim", runner, githubClaimBody(kind, "", ""), &response); code != http.StatusOK || response.Claim == nil || response.Claim.RunID != "run-feature" {
 			t.Fatalf("own %s = %d %+v", kind, code, response)
+		}
+	}
+}
+
+// The exchange is unauthenticated until GitHub's token verifies, so it reads no
+// more than a token request needs.
+func TestGitHubRunnerExchangeReadsOnlyATokenSizedBody(t *testing.T) {
+	f := newGHFixture(t)
+	owner := f.user("o", "olga@example.com")
+	f.bind(owner, widgetsJob)
+	body, err := json.Marshal(map[string]string{"id_token": f.gh.Token(widgetsJob, ghAudience), "team": owner.team})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, padding := range []int{0, 64 << 10} {
+		request, err := http.NewRequest("POST", f.url+"/api/v1/runners/github/exchange", bytes.NewReader(append(body, bytes.Repeat([]byte(" "), padding)...)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if want := map[bool]int{true: http.StatusCreated, false: http.StatusBadRequest}[padding == 0]; response.StatusCode != want {
+			t.Fatalf("padding %d: HTTP %d, want %d", padding, response.StatusCode, want)
 		}
 	}
 }

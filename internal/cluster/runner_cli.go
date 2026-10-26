@@ -110,6 +110,7 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	transport := client.EngineOptions{URL: *options.Config.Controller, Bearer: options.Bearer}
 	loop := options.Loop
 	loop.Kinds, loop.Labels = slices.Clone(loop.Kinds), slices.Clone(loop.Labels)
+	loop.Kubernetes = runners.InKubernetesPod()
 	runtimeConfig, err := cli.Factory(ctx, options)
 	if err != nil {
 		return err

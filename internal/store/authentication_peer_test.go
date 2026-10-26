@@ -129,7 +129,7 @@ func TestPeerIntakeAndClaimUseSharedRelations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('default','local-run',1,'ci','pending',?,'request',1,'gh:1','https://github.com/acme/repo','host','execute',?,'local',1,'r30',30)`, request, []byte(`[]`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('default','local-run',1,'ci','pending',?,'request',1,'gh:1','https://github.com/acme/repo','host','execute','local',1,'r30',30)`, request)
 	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,needs_labels,prefers_labels) VALUES ('default','local-run','trigger',1,1,?,?)`, []byte(`[]`), []byte(`[]`))
 	for _, path := range []string{"/api/v1/runs", "/api/v1/runs/{run}/claim", "/api/v1/runners/claim"} {
 		t.Run(path, func(t *testing.T) {

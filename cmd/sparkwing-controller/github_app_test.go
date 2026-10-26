@@ -192,7 +192,8 @@ func TestGitHubAppStartupAvailability(t *testing.T) {
 				if path == "/api/v1/health" {
 					wantStatus = http.StatusOK
 				}
-				if err != nil || resp.StatusCode != wantStatus || !strings.Contains(string(body), "GitHub App unavailable") || strings.Contains(string(body), tc.want) {
+				named := strings.Contains(string(body), "GitHub App unavailable") == (path != "/api/v1/health")
+				if err != nil || resp.StatusCode != wantStatus || !named || strings.Contains(string(body), tc.want) {
 					t.Fatalf("%s = %d %s, %v; want generic unavailable hiding %q", path, resp.StatusCode, body, err, tc.want)
 				}
 			}
@@ -225,7 +226,8 @@ func TestGitHubOnlyInvalidRedirectKeepsControllerAvailable(t *testing.T) {
 				}
 				w := httptest.NewRecorder()
 				srv.Handler().ServeHTTP(w, httptest.NewRequest(method, path, nil))
-				if w.Code != status || !strings.Contains(w.Body.String(), "GitHub App unavailable") || strings.Contains(w.Body.String(), "oauth-redirect-uris") {
+				named := strings.Contains(w.Body.String(), "GitHub App unavailable") == (path != "/api/v1/health")
+				if w.Code != status || !named || strings.Contains(w.Body.String(), "oauth-redirect-uris") {
 					t.Fatalf("%s: HTTP %d %s", path, w.Code, w.Body)
 				}
 			}

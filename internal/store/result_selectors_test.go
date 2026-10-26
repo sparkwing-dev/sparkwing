@@ -14,7 +14,7 @@ import (
 
 func TestTerminalRecordSelectorsProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(8341, 72))
-	for _, policy := range []runstate.SourcePolicy{runstate.SourceNone, runstate.SourceMemo, runstate.SourceManualRetry, runstate.SourceCoalesced} {
+	for _, policy := range []runstate.SourcePolicy{runstate.SourceNone, runstate.SourceManualRetry, runstate.SourceCoalesced} {
 		t.Run(string(policy), func(t *testing.T) {
 			for i := range 8 {
 				t.Run(fmt.Sprint(i), func(t *testing.T) {

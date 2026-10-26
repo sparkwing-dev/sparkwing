@@ -126,9 +126,15 @@ Startup refuses, before it opens the store or writes any setting, when:
 
 A license that expires while the controller runs does not change the
 deployment. Metering, the free tier and sign-in keep working, and
-`GET /api/v1/health` reports `degraded` with a `license: expired` problem
-while the controller logs an error every hour. The next start refuses until the
+`GET /api/v1/operator/health` reports `degraded` with a `license: expired`
+problem while the controller logs an error every hour. The next start refuses until the
 license is renewed.
+
+`GET /api/v1/health` answers without a credential and reports liveness and
+readiness only: `{"status":"ok","auth":"enabled"}`, or HTTP 503 when the
+database is unreachable. License, secret rotation, bucket, database size,
+egress and GitHub App state are on `GET /api/v1/operator/health`, which
+requires `operator.limits` or an operator console session.
 
 Without `--external-url`, the GitHub runner binding routes answer
 `capability_unsupported` instead of handing out a workflow that points at
@@ -141,7 +147,7 @@ whatever host name the request used.
 that is absent leaves the feature it guards off, and a file that is present
 but empty or only whitespace stops startup, naming the file. GitHub App and
 GitHub OAuth credential errors instead disable those features and appear in
-health and doctor (see [GitHub App configuration](github-app.md#operator-configuration)). A file whose name
+operator health and doctor (see [GitHub App configuration](github-app.md#operator-configuration)). A file whose name
 is not in the table below also stops startup, so a misspelled `pg_url` cannot
 leave the controller on an empty SQLite store. A `.previous` or `.published`
 file without its current key stops startup too, except for the optional GitHub
@@ -515,7 +521,7 @@ each pipeline's newest successful run and outputs. Financial rows and recorded
 usage survive run deletion. Metrics expire under their independent window.
 
 `database_alarm_bytes` sets a warning threshold. Passing it logs a warning and
-sets `database.alarm` on `GET /api/v1/health`. Sizes and table names appear only
+sets `database.alarm` on `GET /api/v1/operator/health`. Sizes and table names appear only
 on `GET /api/v1/operator/object-store` with `operator.object_store`.
 
 SQLite samples allocated pages minus its free pages. Removing data can lower

@@ -28,7 +28,6 @@ type matchingRun struct {
 	display string
 	request runspec.SealedRequest
 	spec    *runspec.Spec
-	pools   []byte
 	err     error
 }
 
@@ -76,7 +75,7 @@ func (op *Operator) loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, 
 	run.profile = authenticatedClaimProfile(p.Capability, run.profile, run.here)
 	var repo, display string
 	var requestBody, specBody []byte
-	err = tx.QueryRowContext(ctx, `SELECT team,repo_key,repo_display,request_json,spec_json,allowed_pools FROM runs WHERE id=?`, runID).Scan(&run.team, &repo, &display, &requestBody, &specBody, &run.pools)
+	err = tx.QueryRowContext(ctx, `SELECT team,repo_key,repo_display,request_json,spec_json FROM runs WHERE id=?`, runID).Scan(&run.team, &repo, &display, &requestBody, &specBody)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.CloudLauncher(p.Capability) && p.Capability.Team != run.team {
 		run.err = bindingRefusal()
 		return run
@@ -121,7 +120,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if run.err != nil {
 		return profile, match.Demand{}, run.err
 	}
-	chain, here, team, display, requestSeal, pools := run.chain, run.here, run.team, run.display, run.request, run.pools
+	chain, here, team, display, requestSeal := run.chain, run.here, run.team, run.display, run.request
 	var err error
 	if requestSeal.Request.Burst != nil {
 		if err := checkBurstClaimantTx(ctx, tx, Team(team), chain, unit); err != nil {
@@ -142,9 +141,6 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if demand.Repo.URL == "" {
 		demand.Repo.URL = requestSeal.Request.Git.Repository.Display
 	}
-	if err = json.Unmarshal(pools, &demand.AllowedPools); err != nil {
-		return profile, demand, err
-	}
 	if unit.Kind == capability.UnitNode {
 		var body []byte
 		if err = tx.QueryRowContext(ctx, `SELECT execution_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&body); err != nil {
@@ -155,6 +151,9 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 			return profile, demand, err
 		}
 		demand.Selector = slices.Clone(execution.Requires.Value)
+	}
+	if demand.AllowedPools, err = unitPoolsTx(ctx, tx, Team(team), string(unit.RunID), unit.Kind, string(unit.NodeID), profile.ReservedPools); err != nil {
+		return profile, demand, err
 	}
 	switch selected := requestSeal.Request.Options.Runner.Value; selected.Kind {
 	case runspec.RunnerName:

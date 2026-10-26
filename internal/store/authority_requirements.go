@@ -83,6 +83,8 @@ func checkAuthorityRequirementTx(ctx context.Context, tx *storeTx, team string, 
 	return nil
 }
 
+const adminTokenLifetime = 30 * 24 * time.Hour
+
 func memberIssuancePolicy(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec, c capability.Capability) (capability.Capability, error) {
 	admin := slices.Contains(c.Grants, capability.TeamAdmin)
 	maximum := 90 * 24 * time.Hour
@@ -90,7 +92,7 @@ func memberIssuancePolicy(ctx context.Context, tx *storeTx, spec capability.Prov
 		if !spec.AllowTeamAdmin {
 			return c, authorityError(apierr.Forbidden, "team.admin requires explicit authorization and an expiry of at most 30 days")
 		}
-		maximum = 30 * 24 * time.Hour
+		maximum = adminTokenLifetime
 	}
 	ceiling := tx.now(ctx).Add(maximum)
 	if c.ExpiresAt == nil {

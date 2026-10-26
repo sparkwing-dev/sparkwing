@@ -344,7 +344,8 @@ type Concurrency struct {
 }
 
 // safety: Request is submitted to the one intake transaction on every placement.
-// App facts, allowed pools and authority references are derived by intake, not trusted from JSON.
+// App facts and authority references are derived by intake, not trusted from JSON; pool access is
+// decided at each use from current access rules, never sealed.
 // Raw requested argument values are restricted execution inputs, not a display document.
 // SecretArgs is unset before describe. Display must then redact every requested value.
 type Request struct {
@@ -378,7 +379,6 @@ type Request struct {
 type IntakeFacts struct {
 	RunID        string
 	AdmittedAt   time.Time
-	AllowedPools []string
 	AuthorityRef capability.AuthorityRef
 	Ceilings     Ceilings
 	Provenance   Provenance
@@ -390,7 +390,6 @@ type SealedRequest struct {
 	Request      Request                 `json:"request"`
 	RunID        string                  `json:"run_id"`
 	AdmittedAt   time.Time               `json:"admitted_at"`
-	AllowedPools []string                `json:"allowed_pools"`
 	AuthorityRef capability.AuthorityRef `json:"authority_ref"`
 	Ceilings     Ceilings                `json:"ceilings"`
 	Provenance   Provenance              `json:"provenance"`
@@ -482,7 +481,6 @@ type projections struct {
 	Ref           string
 	DefaultBranch string
 	Dispatch      Dispatch
-	AllowedPools  []string
 	RequestHash   Hash
 	SpecHash      Hash
 	PlanHash      Hash
@@ -497,7 +495,8 @@ type RetryInput struct {
 	SourceRunID string
 }
 
-// safety: RetrySnapshot preserves source trust and keys asserted writes to the retrier.
+// safety: RetrySnapshot keeps the source's sealed identity whole, including the writer whose cache scope
+// the retry reads and writes; the retrier is recorded only in Lineage.
 type RetrySnapshot struct {
 	Request SealedRequest
 	Spec    Optional[Spec]

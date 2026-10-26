@@ -676,11 +676,10 @@ reset-breaker` reaches the controller process and nothing else, so a
 refusal inside a local `sparkwing run` clears when its window rolls or
 the process restarts. The refusal message names the controller's remedies.
 
-The controller reports its own budget on `GET /api/v1/health` under
+The controller reports its own budget on `GET /api/v1/operator/health` under
 `object_store`, names every tripped class in `problems`, and exports the
 three `sparkwing_object_store_*` metrics above. The health summary names
-the classes and not their limits, because that route answers without a
-token.
+the classes and not their limits.
 
 Read a controller's budget, and clear a tripped one, with:
 
@@ -760,10 +759,9 @@ reporting incomplete wants a higher `--bucket-measure-pages`, which is
 the bound that binds first, and then a narrower prefix or S3 Inventory
 in place of the listing.
 
-`GET /api/v1/health` reports `object_store.ceiling` as `enforced`,
+`GET /api/v1/operator/health` reports `object_store.ceiling` as `enforced`,
 `frozen`, `warning`, `measurement_incomplete` and `measured_at` alone,
-whenever a ceiling is set or a bucket is measured, because that route
-answers without a token; the totals
+whenever a ceiling is set or a bucket is measured; the totals
 and the ceilings sit behind the admin-scoped
 `GET /api/v1/operator/object-store/breaker` and on `sparkwing operator object-store status`, which also reports `counted_at` (when the running
 count last moved) and `reconciled_at` (when the bucket was last

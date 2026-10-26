@@ -84,7 +84,8 @@ type Profile struct {
 type Demand struct {
 	// Selector is the sealed, resolved requires list, including inherited run requirements.
 	Selector []string
-	// AllowedPools is the intake snapshot of team-admin access, never caller input.
+	// AllowedPools are the pools team-admin access rules grant this work when it is
+	// evaluated, never caller input.
 	AllowedPools []string
 	// Repo is the run's repository, or nil when the caller did not resolve it
 	// because no filter could turn on it.

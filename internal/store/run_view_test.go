@@ -38,7 +38,7 @@ func TestRunViewPagesKeepNumberBoundsOrderAndTenant(t *testing.T) {
 		id     string
 		number int
 	}{{"second", 2}, {"fourth", 4}} {
-		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,?,?,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team=? AND id='run'`, row.id, row.number, tenant.team)
+		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,?,?,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team=? AND id='run'`, row.id, row.number, tenant.team)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET error='masked failure' WHERE team=? AND id='run'`, tenant.team)
 	for _, tc := range []struct {

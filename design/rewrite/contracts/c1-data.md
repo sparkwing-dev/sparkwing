@@ -840,7 +840,7 @@ runner selection keeps its label-term alternatives.
 `claim_contexts` assigns immutable policy contexts to source rows at intake,
 plan acceptance and expansion insertion. A context hash includes the request,
 provenance, resolved options and guards, job execution settings, repository
-scope, allowed pools and creator. Seal identities, source revisions, timestamps and unrelated job declarations
+scope and creator (pool access is read at each use, not hashed). Seal identities, source revisions, timestamps and unrelated job declarations
 do not split otherwise equal contexts. The context row stores its identity,
 requirement set and unit kind, and copies the overflow account and minute limit
 for indexed budget checks. Finished sources clear their context reference in the
@@ -2164,10 +2164,12 @@ fail projection. Both owners pass this result to the same pure `Decide`.
 C1 owns placement input construction. `matchingInputsTx` derives `match.Profile`
 identity and `ReservedPools` from the live capability and its enrollment facts.
 It derives `match.Demand.Selector` and `Prefers` from resolved execution
-settings and `AllowedPools` from intake. Every named, queued and self claim
+settings, and `AllowedPools` from the shared reservation predicate, which reads
+the current access rules against the run's sealed provenance and the unit's
+resolved requirements. Every named, queued and self claim
 checks the shared SQL predicate with those inputs. `UnitDemand.Target` selects a named unit;
 absence selects the ordered eligible queue. Reservations require an explicitly
-required granted pool that intake allowed. A self-asserted `pool=` label grants
+required granted pool that a current access rule allows. A self-asserted `pool=` label grants
 nothing. Preference holds apply only between eligible claimants. The shared SQL
 query orders jobs by team award ordinal, arrival and identity. It does not score
 queued jobs by preferences or match CPU and memory observations.
@@ -2191,7 +2193,7 @@ identifies that capability. Its profile combines enrollment with the same grante
 identity and pools used for claims. Online presence replaces observed labels and
 platform only. `ListWaitingNodes` pages ready host-owned jobs from their sealed
 execution demand and request runner selection. `WaitingNode.AllowedPools` carries
-the intake-authorized pools into the advisory matcher. Advisory results grant no
+the pools current access rules grant into the advisory matcher. Advisory results grant no
 authority to claim or mutate a job.
 
 `ReconciledNode.Bearer` carries the new self-claim credential after commit and
@@ -3142,7 +3144,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `RunnerSelectionKind` | Select the closed route vocabulary; here requests C2's run-bound Award. |
 | `Options` | Options carries request winners and resolved values without zero-as-default rules. |
 | `Ceilings` | Ceilings snapshots operator bounds for C4 to enforce without silent clamping. |
-| `Request` | Request is submitted to the one intake transaction on every placement. App facts, allowed pools and authority references are derived by intake, not trusted from JSON. Raw requested argument values are restricted execution inputs, not a display document. SecretArgs is unset before describe. Display must then redact every requested value. |
+| `Request` | Request is submitted to the one intake transaction on every placement. App facts and authority references are derived by intake, not trusted from JSON; pool access is decided at each use. Raw requested argument values are restricted execution inputs, not a display document. SecretArgs is unset before describe. Display must then redact every requested value. |
 | `IntakeFacts` | IntakeFacts are server-derived, with opaque authority IDs resolved only by C2. |
 | `SealedRequest` | SealedRequest is immutable at intake, even when later settings resolve from code. |
 | `SealRequest` | SealRequest canonicalizes immutable intake data after the intake owner authorizes it. |
@@ -3402,7 +3404,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `ExpansionSubmission` | ExpansionSubmission uses owner or eval authority after the source job's claim has ended. |
 | `ExpansionFailure` | ExpansionFailure resolves the barrier without inventing generated topology on a generator error. |
 | `AcceptedExpansion` | AcceptedExpansion reports persisted topology; deterministic code reconstruction must reproduce each SpecHash. |
-| `Tenant.AdmitRun` | AdmitRun is the only intake for local, remote, retry, child and published runs. It derives authority and allowed pools in the transaction; published runs receive no executable owner unit. Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them. |
+| `Tenant.AdmitRun` | AdmitRun is the only intake for local, remote, retry, child and published runs. It derives authority in the transaction; published runs receive no executable owner unit. Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them. |
 | `Tenant.AcceptPlan` | AcceptPlan validates the C3 plan, ceilings and declared secrets, then seals spec and inserts nodes atomically. Neither a request field nor an existing seal may change; a differing sealed hash returns spec_drift. Published plans require live publisher authority and create importable jobs without awarding an executable claim. |
 | `Tenant.AcceptExpansion` | Atomically accepts exactly one success body or structured failure, rechecking authority and persisting its canonical hash. |
 

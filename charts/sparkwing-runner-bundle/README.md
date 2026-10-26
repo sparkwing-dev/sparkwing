@@ -27,7 +27,10 @@ sparkwing runners add --profile prod --runner pool-1 --repos github.com/your-org
 ```
 
 Replace existing persistent chart credentials with this enrollment. The platform
-stays on the credential through rotation. Create the controller credential Secret
+stays on the credential through rotation. A runner reports to the controller
+that it runs in a pod, and the controller refuses the claims of a credential
+enrolled without `--platform kubernetes`, so the runner stops at its first poll
+with an error naming this command rather than serving as a plain machine. Create the controller credential Secret
 separately. Persistent runners mount it
 in their credentials directory, where pipeline code under the same uid can read
 it. Verified pools mount it only in the launcher.

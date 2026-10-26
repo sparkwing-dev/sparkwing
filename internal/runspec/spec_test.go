@@ -10,7 +10,7 @@ import (
 
 func fixture(t *testing.T) Spec {
 	t.Helper()
-	req, err := SealRequest(Request{Version: 1, Team: "team", Pipeline: "build", Mode: IntakeExecute, Dispatch: DispatchHost, Origin: OriginApp, RequestedArgs: map[string]string{"token": "private-token", "count": "42"}, Git: Git{Repository: Repository{Key: "gh:42", Display: "owner/repo"}, SHA: strings.Repeat("a", 40), DefaultBranch: Optional[string]{Set: true, Value: "main"}, App: Optional[AppFacts]{Set: true, Value: AppFacts{RepositoryID: 42, SHA: strings.Repeat("a", 40), DefaultBranch: "main", DefaultBranchPush: true}}}, Source: Source{Ref: strings.Repeat("a", 40)}, Actor: Actor{ID: "original"}, PullRequest: Optional[PullRequest]{Set: true, Value: PullRequest{Action: "synchronize", BaseSHA: "base-sha", Number: 3, BaseRef: "main", HeadRef: "feature", HeadSHA: strings.Repeat("a", 40)}}}, IntakeFacts{RunID: "source", AdmittedAt: time.Unix(1, 0), AllowedPools: []string{"private"}})
+	req, err := SealRequest(Request{Version: 1, Team: "team", Pipeline: "build", Mode: IntakeExecute, Dispatch: DispatchHost, Origin: OriginApp, RequestedArgs: map[string]string{"token": "private-token", "count": "42"}, Git: Git{Repository: Repository{Key: "gh:42", Display: "owner/repo"}, SHA: strings.Repeat("a", 40), DefaultBranch: Optional[string]{Set: true, Value: "main"}, App: Optional[AppFacts]{Set: true, Value: AppFacts{RepositoryID: 42, SHA: strings.Repeat("a", 40), DefaultBranch: "main", DefaultBranchPush: true}}}, Source: Source{Ref: strings.Repeat("a", 40)}, Actor: Actor{ID: "original"}, PullRequest: Optional[PullRequest]{Set: true, Value: PullRequest{Action: "synchronize", BaseSHA: "base-sha", Number: 3, BaseRef: "main", HeadRef: "feature", HeadSHA: strings.Repeat("a", 40)}}}, IntakeFacts{RunID: "source", AdmittedAt: time.Unix(1, 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,10 +272,6 @@ func TestProjectionAndContext(t *testing.T) {
 	p := project(s)
 	if p.RepoKey != "gh:42" || p.SHA != strings.Repeat("a", 40) || p.DefaultBranch != "main" || p.RequestHash != s.Request.Hash || p.SpecHash != s.Hash || p.PlanHash != s.PlanHash {
 		t.Fatalf("projection lost inputs: %+v", p)
-	}
-	p.AllowedPools[0] = "mutated"
-	if s.Request.AllowedPools[0] != "private" {
-		t.Fatal("projection aliases seal")
 	}
 	c := s.runContext()
 	if !c.DryRun || c.Source.Entrypoint != "ci/main.go" || !reflect.DeepEqual(c, s.GuardContext()) {

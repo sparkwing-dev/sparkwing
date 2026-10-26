@@ -135,7 +135,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 		assertMatchingRefusal(t, refused, named)
 		demand.Labels = []string{"gpu"}
 	case "pool_toleration":
-		if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET allowed_pools=? WHERE team=? AND id=?`, []byte(`["prod"]`), tenant.Team(), plan.RunID); err != nil {
+		if err := grantPool(ctx, s, tenant.Team(), plan.RunID, "prod", "feature"); err != nil {
 			t.Fatal(err)
 		}
 	case "metered_runner", "pool_label":

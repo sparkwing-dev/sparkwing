@@ -21,8 +21,8 @@ func childLimitsFixture(t *testing.T, s *Store, children int) time.Time {
 	s.testOnlyExec(t, `DELETE FROM runs WHERE team='a'`)
 	insert := func(id, parent, root string) {
 		lineage := fmt.Sprintf(`{"admission_subject":{"kind":"account","id":"alice"},"parent_run_id":%q,"root_run_id":%q,"parent_job_id":"","retry_of":"","retrier":{"set":false,"value":{"kind":"","id":"","display":""}}}`, parent, root)
-		s.testOnlyExec(t, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_subject_kind,created_principal,created_at,parent_run_id,retry_of,lineage_json,log_retention_class,log_retention_days) VALUES ('a',?,(SELECT COALESCE(MAX(number),0)+1 FROM runs),'ci','running',?,'request',1,'gh:1','host','execute',?,?,?,?,?,'',?,'r30',30)`,
-			id, []byte(`{"version":1,"request":{"actor":{"kind":"account","id":"alice"}}}`), []byte(`[]`), map[bool]string{true: "account", false: "machine"}[parent == ""], map[bool]string{true: "alice", false: "runner"}[parent == ""], now.UnixNano(), parent, []byte(lineage))
+		s.testOnlyExec(t, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_subject_kind,created_principal,created_at,parent_run_id,retry_of,lineage_json,log_retention_class,log_retention_days) VALUES ('a',?,(SELECT COALESCE(MAX(number),0)+1 FROM runs),'ci','running',?,'request',1,'gh:1','host','execute',?,?,?,?,'',?,'r30',30)`,
+			id, []byte(`{"version":1,"request":{"actor":{"kind":"account","id":"alice"}}}`), map[bool]string{true: "account", false: "machine"}[parent == ""], map[bool]string{true: "alice", false: "runner"}[parent == ""], now.UnixNano(), parent, []byte(lineage))
 	}
 	insert("root", "", "")
 	for i := range children {

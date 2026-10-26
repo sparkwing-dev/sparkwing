@@ -201,6 +201,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"POST", "/api/v1/data/depcache/lookup", "controller", "team", "capability", []string{"awarded_or_delegated_claim|data.read|data|sensitive", "awarded_or_delegated_claim|data.read|data|expansion", "repo_cache_reader|data.read|data|credential"}},
 		{"POST", "/api/v1/data/memo/copy", "controller", "team", "capability", []string{"awarded_or_delegated_claim|data.read,data.write|data|sensitive"}},
 		{"GET", "/api/v1/data/capabilities", "controller", "team", "capability", []string{"discovery||none|credential"}},
+		{"GET", "/api/v1/operator/health", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"GET", "/api/v1/operator/limits", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"PUT", "/api/v1/operator/limits", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"GET", "/api/v1/operator/signups", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},

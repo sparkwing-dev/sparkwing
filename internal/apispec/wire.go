@@ -35,6 +35,7 @@ func wireOperations() map[string]wireOperation {
 	result := map[string]wireOperation{
 		"GET /api/v1/overflow":                                 operation("Read the account overflow allowance", nil, wire.OverflowControl{}),
 		"PUT /api/v1/overflow":                                 operation("Set the account overflow allowance", wire.OverflowControlWrite{}, wire.OverflowControl{}),
+		"GET /api/v1/operator/health":                          operation("Read the deployment's full health", nil, wire.OperatorHealth{}),
 		"GET /api/v1/operator/limits":                          operation("Read deployment operational guards", nil, wire.OperatorLimits{}),
 		"PUT /api/v1/operator/limits":                          operation("Set deployment operational guards", wire.OperatorLimitsWrite{}, wire.OperatorLimits{}),
 		"GET /api/v1/operator/object-store/breaker":            operation("Read object-store request budgets", nil, wire.ObjectStoreBreaker{}),

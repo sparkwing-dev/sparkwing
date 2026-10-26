@@ -38,8 +38,8 @@ func SeedUpload(ctx context.Context, st *store.Store) (store.UploadReservationRe
 	if err != nil {
 		return store.UploadReservationRequest{}, err
 	}
-	if _, err := Exec(ctx, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
-VALUES (?,'upload',1,'fixture','running',?,'fixture',?,'gh:1','host','publish',?,'publisher',?,'r30',30)`, store.DefaultTeam, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"fixture","writer":"account/fixture"}}`), now.UnixNano(), []byte(`[]`), now.UnixNano()); err != nil {
+	if _, err := Exec(ctx, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days)
+VALUES (?,'upload',1,'fixture','running',?,'fixture',?,'gh:1','host','publish','publisher',?,'r30',30)`, store.DefaultTeam, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"fixture","writer":"account/fixture"}}`), now.UnixNano(), now.UnixNano()); err != nil {
 		return store.UploadReservationRequest{}, err
 	}
 	_, err = Exec(ctx, st, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,reserved_pools,created_at,created_by,repo_key,repo_scope)

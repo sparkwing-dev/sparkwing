@@ -502,13 +502,13 @@ func checkRecoveryReconciliation(t *testing.T, order string) error {
 		return err
 	}
 	probe := request
-	probe.Policy, probe.MaterializeOnly = runstate.SourceMemo, true
+	probe.Policy, probe.Source, probe.MaterializeOnly = runstate.SourceNone, nil, true
 	miss, err := f.tenant.ReconcileNode(ctx, probe)
 	if err != nil {
 		return err
 	}
 	if miss.Kind != runstate.Dispatch || miss.Claim != nil || len(miss.Bearer) != 0 || miss.Node.Status != runstate.StatusPending || miss.Node.StateSeq != f.seq+2 {
-		return fmt.Errorf("missing memo fabricated a result or execution award: %+v", miss)
+		return fmt.Errorf("materialize-only probe fabricated a result or execution award: %+v", miss)
 	}
 	var wg sync.WaitGroup
 	results := make([]runstate.ReconciledNode, 2)

@@ -40,9 +40,6 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "child source is outside the parent claim's declared children")
 	}
 	sameRepository := request.Git.Repository.Key == from.Git.Repository.Key
-	if sameRepository && request.Source.Location != from.Source.Location {
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "an inherited repository uses its parent's source location")
-	}
 	if request.Git.SHA != "" {
 		if sameRepository && (request.Git.SHA != from.Git.SHA || request.Git.Ref != from.Git.Ref || request.Source.Ref != from.Source.Ref) {
 			return apierr.Authorization(apierr.ReasonBinding, "a child runs its parent's revision or a branch the controller resolves")
@@ -54,6 +51,11 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 	}
 	request.Source.WorkingTree, request.Source.CommittedCheckout = false, true
 	request.Source.BundleDigest = runspec.Optional[string]{}
+	if sameRepository {
+		// safety: intake refuses another location for the same repository, so the branch
+		// resolves where the parent fetched and never at a requested address.
+		request.Source.Location = from.Source.Location
+	}
 	git, code, err := s.selectIntakeSource(ctx, store.Team(a.Target.Team), *request, nil)
 	if err != nil {
 		return err

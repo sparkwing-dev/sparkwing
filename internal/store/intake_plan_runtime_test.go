@@ -242,8 +242,8 @@ func TestAdmissionPoolTrustRequiresIndependentFacts(t *testing.T) {
 					t.Fatal("App facts were not sealed")
 				}
 			}
-			if !reflect.DeepEqual(result.Request.AllowedPools, want) {
-				t.Fatalf("pools=%v want=%v", result.Request.AllowedPools, want)
+			if got := testAllowedPools(t, tenant.s, "a", result.Request.Provenance); !reflect.DeepEqual(got, want) {
+				t.Fatalf("pools=%v want=%v", got, want)
 			}
 			if mode != "app" && result.Request.Request.Git.App.Set {
 				t.Fatal("typed App facts survived intake")
@@ -729,8 +729,9 @@ func TestAdmissionRouteNarrowsSealedRequirements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Request.Request.Options.Requires.Value, []string{"linux", "pool=prod"}) || !reflect.DeepEqual(result.Request.AllowedPools, []string{"prod"}) || result.Request.Request.Options.Requires.Origin.Layer != runspec.LayerFlag {
-		t.Fatalf("routing=%+v pools=%v", result.Request.Request.Options.Requires, result.Request.AllowedPools)
+	pools := testAllowedPools(t, s, "a", result.Request.Provenance)
+	if !reflect.DeepEqual(result.Request.Request.Options.Requires.Value, []string{"linux", "pool=prod"}) || !reflect.DeepEqual(pools, []string{"prod"}) || result.Request.Request.Options.Requires.Origin.Layer != runspec.LayerFlag {
+		t.Fatalf("routing=%+v pools=%v", result.Request.Request.Options.Requires, pools)
 	}
 	if !reflect.DeepEqual(request.Request.Options.Requires.Value, []string{"linux"}) {
 		t.Fatal("intake mutated caller options")

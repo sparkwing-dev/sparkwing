@@ -20,52 +20,48 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
+// safety: public health answers liveness and readiness only. License expiry,
+// secret rotation, bucket, storage, egress and GitHub App state describe the
+// deployment to anyone who asks, so they are on the operator health route.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	var problems []string
-
-	authState := "enabled"
-
 	if err := s.operator.Ping(r.Context()); err != nil {
 		apierr.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"status":   "degraded",
-			"auth":     authState,
-			"problems": []string{"db: unavailable"},
-		})
+		writeJSON(w, http.StatusServiceUnavailable, health.Response{Status: "degraded", Auth: "enabled", Problems: []string{"db: unavailable"}})
 		return
 	}
+	writeJSON(w, http.StatusOK, health.Response{Status: "ok", Auth: "enabled"})
+}
 
-	objectStore, objectStoreProblems := objectStoreHealth(s.bucketMeasured())
-	problems = append(problems, objectStoreProblems...)
-
-	egressState, egressProblems := s.egressHealth()
-	problems = append(problems, egressProblems...)
-
-	if problem := s.deployment.LicenseProblem(time.Now()); problem != "" {
-		problems = append(problems, problem)
+func (s *Server) handleOperatorHealth(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+	out := controllerwire.OperatorHealth{Status: "ok", Database: s.storageHealth()}
+	if err := s.operator.Ping(r.Context()); err != nil {
+		apierr.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
+		out.Problems = append(out.Problems, "db: unavailable")
 	}
-
+	var problems []string
+	out.ObjectStore, problems = objectStoreHealth(s.bucketMeasured())
+	out.Problems = append(out.Problems, problems...)
+	out.Egress, problems = s.egressHealth()
+	out.Problems = append(out.Problems, problems...)
+	if problem := s.deployment.LicenseProblem(time.Now()); problem != "" {
+		out.Problems = append(out.Problems, problem)
+	}
 	if s.githubAppProblem != nil {
-		problems = append(problems, errGitHubAppUnavailable.Error())
+		out.Problems = append(out.Problems, errGitHubAppUnavailable.Error())
 	}
 	if s.hasPreviousWebhookSecret() {
-		problems = append(problems, previousWebhookSecretWarning)
+		out.Problems = append(out.Problems, previousWebhookSecretWarning)
 	}
-
-	resp := map[string]any{
-		"status": "ok", "auth": authState,
-		"object_store": objectStore, "database": s.storageHealth(),
-		"egress": egressState,
+	if len(out.Problems) > 0 {
+		out.Status = "degraded"
 	}
-	if len(problems) > 0 {
-		resp["status"] = "degraded"
-		resp["problems"] = problems
-	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 // safety: a stored sha reaches a runner's git as a revision argument, so only an object id may pass.

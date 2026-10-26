@@ -25,7 +25,7 @@ func storageRetentionServer(t *testing.T, multiTeam bool) (*store.Store, *contro
 		}
 	})
 	old := time.Now().Add(-120 * 24 * time.Hour).UnixNano()
-	if _, err := teststore.SQL(t, s).Exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'old',1,'fixture','failed',?,'fixture',1,'gh:1','host','execute',?,'fixture',?,?,'r30',30)`, store.DefaultTeam, []byte(`{}`), []byte(`[]`), old, old); err != nil {
+	if _, err := teststore.SQL(t, s).Exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'old',1,'fixture','failed',?,'fixture',1,'gh:1','host','execute','fixture',?,?,'r30',30)`, store.DefaultTeam, []byte(`{}`), old, old); err != nil {
 		t.Fatal(err)
 	}
 	var cfg deployment.Config

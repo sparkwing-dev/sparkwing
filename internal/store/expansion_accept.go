@@ -199,7 +199,14 @@ func checkExpansionSecretPoolsTx(ctx context.Context, tx *storeTx, team Team, sp
 		if pool == "" {
 			continue
 		}
-		if spec.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere || !slices.Contains(spec.Request.AllowedPools, pool) {
+		if spec.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere {
+			return authorityError(apierr.Forbidden, "restricted secret requires an authorized pool")
+		}
+		allowed, _, err := runPoolsTx(ctx, tx, team, spec.Request.Provenance)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(allowed, pool) {
 			return authorityError(apierr.Forbidden, "restricted secret requires an authorized pool")
 		}
 		for _, job := range jobs {

@@ -18,17 +18,18 @@ import (
 
 func TestGitHubAppUnavailablePublicResponsesHideConfiguration(t *testing.T) {
 	s := New(newStoreForAuth(t), nil).WithGitHubAppUnavailable(errors.New("read /private/credentials/app-4242: permission denied"))
-	for _, path := range []string{"/api/v1/health", "/webhooks/github-app"} {
-		method := http.MethodGet
-		if path == "/webhooks/github-app" {
-			method = http.MethodPost
-		}
-		w := httptest.NewRecorder()
-		s.Handler().ServeHTTP(w, httptest.NewRequest(method, path, nil))
-		body := w.Body.String()
-		if !strings.Contains(body, "GitHub App unavailable") || strings.Contains(body, "private") || strings.Contains(body, "4242") {
-			t.Errorf("%s exposes configuration: %s", path, body)
-		}
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/webhooks/github-app", nil))
+	if body := w.Body.String(); !strings.Contains(body, "GitHub App unavailable") || strings.Contains(body, "private") || strings.Contains(body, "4242") {
+		t.Errorf("webhook exposes configuration: %s", body)
+	}
+	w = httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+	if body := w.Body.String(); strings.Contains(body, "GitHub App") || strings.Contains(body, "private") {
+		t.Errorf("public health describes the GitHub App: %s", body)
+	}
+	if problems := strings.Join(OperatorHealth(t, s).Problems, ";"); !strings.Contains(problems, "GitHub App unavailable") || strings.Contains(problems, "private") || strings.Contains(problems, "4242") {
+		t.Errorf("operator health exposes configuration: %s", problems)
 	}
 }
 
@@ -78,12 +79,10 @@ func TestGitHubAppPreviousSecretWarnsUntilRemoved(t *testing.T) {
 				s.WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: current, PreviousWebhookSecret: tc.previous})
 			}
 			s.WithLocalSessions(t.TempDir())
-			w := httptest.NewRecorder()
-			s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
-			if strings.Contains(w.Body.String(), "remove the previous webhook secret after rotation") != (tc.previous != "") {
-				t.Errorf("health: %s", w.Body)
+			if problems := strings.Join(OperatorHealth(t, s).Problems, ";"); strings.Contains(problems, "remove the previous webhook secret after rotation") != (tc.previous != "") {
+				t.Errorf("operator health: %s", problems)
 			}
-			w = httptest.NewRecorder()
+			w := httptest.NewRecorder()
 			r := httptest.NewRequest(http.MethodPost, "/api/v1/local/doctor", strings.NewReader(`{"dry_run":true}`))
 			r.Header.Set("Content-Type", "application/json")
 			r = r.WithContext(localhostwire.WithLocalPeer(r.Context(), localhostwire.LocalPeerIdentity{}))
