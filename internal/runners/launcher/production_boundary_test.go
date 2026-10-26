@@ -369,8 +369,8 @@ func TestProductionBoundaryMeasuresIngressAndDeniedEndpoints(t *testing.T) {
 }
 
 // The EKS network-policy agent shares policy among Pods whose names match up
-// to the last '-', so no two probe roles may share that part.
-func TestProbeRolesNeverShareANamePrefix(t *testing.T) {
+// to the last '-', so no two probes, of one role or two, may share that part.
+func TestProbesNeverShareANamePrefix(t *testing.T) {
 	_, kube := boundaryFixture()
 	p := &productionBoundary{kube: kube, cfg: productionBoundaryConfig(), required: "controller.example:443", api: "kubernetes.default:443"}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Hour)
@@ -380,7 +380,7 @@ func TestProbeRolesNeverShareANamePrefix(t *testing.T) {
 	for range 20 {
 		for role, pod := range map[string]*corev1.Pod{"control": p.canary(ctx, r, "nonce"), "peer": p.peer(ctx, r, "nonce"), "witness": p.witness(ctx, r, "nonce", "10.0.0.1", "10.0.0.2"), "measure": p.measure(ctx, r, nil, "10.0.0.1:18888")} {
 			prefix := pod.Name[:strings.LastIndex(pod.Name, "-")]
-			if owner, seen := owners[prefix]; seen && owner != role {
+			if owner, seen := owners[prefix]; seen {
 				t.Fatalf("%s and %s share the name prefix %q", owner, role, prefix)
 			}
 			owners[prefix] = role
@@ -389,7 +389,7 @@ func TestProbeRolesNeverShareANamePrefix(t *testing.T) {
 			}
 		}
 	}
-	if len(owners) != 4 {
+	if len(owners) != 80 {
 		t.Fatalf("probe name prefixes = %v", owners)
 	}
 }
@@ -416,16 +416,3 @@ func TestKubeletTargetsExceptOnlyTheOwnNodesAuthenticatedPort(t *testing.T) {
 	}
 }
 
-// Probe names differ before their final '-', across roles and across
-// reservations of one role, so the CNI never shares a policy map between them.
-func TestBoundaryNamesAreUniqueBeforeTheFinalSeparator(t *testing.T) {
-	seen := map[string]bool{}
-	for _, role := range []string{"control", "control", "peer", "peer", "witness", "measure"} {
-		name := boundaryName(role)
-		key := name[:strings.LastIndex(name, "-")]
-		if seen[key] || len(name) > 63 {
-			t.Fatalf("probe name %q shares its CNI key or exceeds 63 characters", name)
-		}
-		seen[key] = true
-	}
-}
