@@ -39,6 +39,7 @@ import {
 } from "@/lib/teams";
 import { fmtDateTime } from "@/lib/timeFormat";
 import { refreshTeamState } from "@/lib/useTeam";
+import { LimitHelp } from "@/components/HelpMenu";
 
 export default function TeamMembersPage() {
   return <TeamShell>{(me) => <Members me={me} />}</TeamShell>;
@@ -143,6 +144,7 @@ function Members({ me }: { me: Me }) {
               className={`${inputClass} w-24`}
             />
             <button type="submit" className={buttonClass} disabled={!owner || busy !== null}>Save</button>
+            <LimitHelp />
           </form>
         )}
       </Panel>

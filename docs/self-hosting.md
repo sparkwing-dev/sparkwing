@@ -52,6 +52,13 @@ When isolating the CLI with `SPARKWING_HOME`, set `SPARKWING_CONFIG` to a privat
 config path before saving a profile. The runtime home does not relocate the
 machine config.
 
+### Console help contact
+
+`--support-contact` names an email address or an http(s) URL. The dashboard's
+Help button, at the top right of every page, and its limit messages show it.
+Without it they tell people to contact their Sparkwing administrator. Startup
+refuses any other value.
+
 ### Node log retention
 
 The log storage contract assigns a retention class before signing segment
@@ -557,7 +564,7 @@ curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme" \
   -d '{"tier":"paid"}'
 ```
 
-Monthly reports sum each team's replica counters. They are historical usage,
+Monthly reports read each team's usage counters. They are historical usage,
 so deleting a run does not lower them. `retained_bytes` measures the team's
 unique committed blobs and stored log segments. Multiple references to the
 same blob count once. Each team accounts for its own copy.
