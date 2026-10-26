@@ -224,7 +224,6 @@ type ExpansionAccepted struct {
 type ReuseSource struct {
 	Policy  string                    `json:"policy"`
 	Attempt runspec.AttemptIdentity   `json:"attempt"`
-	Record  blob.RecordKey            `json:"record"`
 	Result  *MaterializedResultSource `json:"result,omitempty"`
 }
 

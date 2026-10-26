@@ -35,8 +35,7 @@ func TestMemoIsNotReusableWhileItsProducerRuns(t *testing.T) {
 func TestCoordinatorReconciliationRefusesMemoSources(t *testing.T) {
 	s, records, change := blobResultFixture(t)
 	_, tenant, request := materializationTarget(t, s, records.tenant, change.Ref)
-	memo := blob.RecordKey{Team: "a", Kind: blob.KindMemo, Name: "output"}
-	for _, source := range []*runstate.MaterializeSource{nil, {Kind: runstate.SourcePolicy("memo"), Record: memo}} {
+	for _, source := range []*runstate.MaterializeSource{nil, {Kind: runstate.SourcePolicy("memo")}} {
 		request.Policy, request.Source, request.MaterializeOnly = runstate.SourcePolicy("memo"), source, true
 		if got, err := tenant.ReconcileNode(t.Context(), request); err == nil {
 			t.Fatalf("coordinator reconciled a memo source: %+v", got)

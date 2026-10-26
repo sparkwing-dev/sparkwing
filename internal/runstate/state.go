@@ -203,7 +203,6 @@ type NodeResult struct {
 type MaterializeSource struct {
 	Kind   SourcePolicy
 	Source runspec.AttemptIdentity
-	Record blob.RecordKey
 	Result *MaterializedResultSource
 }
 

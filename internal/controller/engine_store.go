@@ -10,7 +10,7 @@ import (
 )
 
 func reconcileSourceForStore(source controllerwire.ReuseSource) runstate.MaterializeSource {
-	result := runstate.MaterializeSource{Kind: runstate.SourcePolicy(source.Policy), Source: source.Attempt, Record: source.Record}
+	result := runstate.MaterializeSource{Kind: runstate.SourcePolicy(source.Policy), Source: source.Attempt}
 	if source.Result != nil {
 		result.Result = &runstate.MaterializedResultSource{Ref: runspec.NodeRef{RunID: runspec.RunID(source.Result.RunID), NodeID: runspec.NodeID(source.Result.JobID)}, StateSeq: source.Result.StateSeq}
 	}
@@ -18,7 +18,7 @@ func reconcileSourceForStore(source controllerwire.ReuseSource) runstate.Materia
 }
 
 func engineReuseSource(source runstate.MaterializeSource) controllerwire.ReuseSource {
-	result := controllerwire.ReuseSource{Policy: string(source.Kind), Attempt: source.Source, Record: source.Record}
+	result := controllerwire.ReuseSource{Policy: string(source.Kind), Attempt: source.Source}
 	if source.Result != nil {
 		result.Result = &controllerwire.MaterializedResultSource{RunID: string(source.Result.Ref.RunID), JobID: string(source.Result.Ref.NodeID), StateSeq: source.Result.StateSeq}
 	}

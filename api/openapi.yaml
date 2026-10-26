@@ -3113,8 +3113,6 @@ components:
           $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
         policy:
           type: string
-        record:
-          $ref: '#/components/schemas/internal.blob.RecordKey'
         result:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.MaterializedResultSource'
@@ -3122,7 +3120,6 @@ components:
       required:
         - policy
         - attempt
-        - record
       type: object
       x-sparkwing-go-type: controllerwire.ReuseSource
     internal.controllerwire.RotatedToken:

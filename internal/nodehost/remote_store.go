@@ -29,7 +29,7 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 		if request.Policy != request.Source.Kind {
 			return runstate.ReconciledNode{}, errors.New("reconciliation source policy differs from its read edge")
 		}
-		body.Source = &controllerwire.ReuseSource{Policy: string(request.Source.Kind), Attempt: request.Source.Source, Record: request.Source.Record}
+		body.Source = &controllerwire.ReuseSource{Policy: string(request.Source.Kind), Attempt: request.Source.Source}
 		if result := request.Source.Result; result != nil {
 			body.Source.Result = &controllerwire.MaterializedResultSource{RunID: string(result.Ref.RunID), JobID: string(result.Ref.NodeID), StateSeq: result.StateSeq}
 		}
@@ -44,7 +44,7 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	}
 	result := runstate.ReconciledNode{Kind: runstate.ReconcileKind(wire.Kind), Node: row}
 	if wire.Source != nil {
-		result.Source = &runstate.MaterializeSource{Kind: runstate.SourcePolicy(wire.Source.Policy), Source: wire.Source.Attempt, Record: wire.Source.Record}
+		result.Source = &runstate.MaterializeSource{Kind: runstate.SourcePolicy(wire.Source.Policy), Source: wire.Source.Attempt}
 		if source := wire.Source.Result; source != nil {
 			result.Source.Result = &runstate.MaterializedResultSource{Ref: runspec.NodeRef{RunID: runspec.RunID(source.RunID), NodeID: runspec.NodeID(source.JobID)}, StateSeq: source.StateSeq}
 		}
