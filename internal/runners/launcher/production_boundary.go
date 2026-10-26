@@ -177,13 +177,7 @@ func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservatio
 	if err != nil {
 		return "", nil, err
 	}
-	for _, node := range nodes.Items {
-		for _, address := range node.Status.Addresses {
-			if address.Type == corev1.NodeInternalIP && node.Status.DaemonEndpoints.KubeletEndpoint.Port > 0 {
-				targets = append(targets, net.JoinHostPort(address.Address, strconv.Itoa(int(node.Status.DaemonEndpoints.KubeletEndpoint.Port))))
-			}
-		}
-	}
+	targets = append(targets, kubeletTargets(nodes.Items, r.NodeName)...)
 	slices.Sort(targets)
 	targets = slices.Compact(targets)
 	if slices.Contains(targets, p.required) {
@@ -200,6 +194,34 @@ func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservatio
 	}
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:]), targets, nil
+}
+
+// Kubelet ports every probe must find closed. The AWS VPC CNI network policy
+// cannot stop a pod reaching its own node's kubelet, so the job's own node on
+// the authenticated kubelet port 10250 is the one exception: that kubelet
+// refuses anonymous requests, Cloud pods mount no service-account token, and
+// a Cloud node serves one run. The read-only port 10255, any other kubelet
+// port, and every other node's kubelet still count as escapes.
+const (
+	authenticatedKubeletPort = 10250
+	readOnlyKubeletPort      = 10255
+)
+
+func kubeletTargets(nodes []corev1.Node, own string) []string {
+	var targets []string
+	for _, node := range nodes {
+		port := int(node.Status.DaemonEndpoints.KubeletEndpoint.Port)
+		for _, address := range node.Status.Addresses {
+			if address.Type != corev1.NodeInternalIP {
+				continue
+			}
+			targets = append(targets, net.JoinHostPort(address.Address, strconv.Itoa(readOnlyKubeletPort)))
+			if port > 0 && (node.Name != own || port != authenticatedKubeletPort) {
+				targets = append(targets, net.JoinHostPort(address.Address, strconv.Itoa(port)))
+			}
+		}
+	}
+	return targets
 }
 
 func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) (evidence CloudNetworkEvidence, err error) {

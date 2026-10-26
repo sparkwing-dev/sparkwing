@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -390,5 +391,32 @@ func TestProbeRolesNeverShareANamePrefix(t *testing.T) {
 	}
 	if len(owners) != 4 {
 		t.Fatalf("probe name prefixes = %v", owners)
+	}
+}
+
+// The job's own node on the authenticated kubelet port is the one expected
+// reachable destination; every other kubelet port and node stays forbidden.
+func TestKubeletTargetsExceptOnlyTheOwnNodesAuthenticatedPort(t *testing.T) {
+	node := func(name, ip string) corev1.Node {
+		n := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		n.Status.Addresses = []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: ip}, {Type: corev1.NodeExternalIP, Address: "203.0.113.9"}}
+		n.Status.DaemonEndpoints.KubeletEndpoint.Port = 10250
+		return n
+	}
+	targets := kubeletTargets([]corev1.Node{node("own", "10.0.0.1"), node("other", "10.0.0.2")}, "own")
+	for _, want := range []string{"10.0.0.1:10255", "10.0.0.2:10250", "10.0.0.2:10255"} {
+		if !slices.Contains(targets, want) {
+			t.Errorf("kubelet targets %v omit %s", targets, want)
+		}
+	}
+	for _, allowed := range []string{"10.0.0.1:10250", "203.0.113.9:10250"} {
+		if slices.Contains(targets, allowed) {
+			t.Errorf("kubelet targets %v forbid %s", targets, allowed)
+		}
+	}
+	odd := node("own", "10.0.0.1")
+	odd.Status.DaemonEndpoints.KubeletEndpoint.Port = 10260
+	if got := kubeletTargets([]corev1.Node{odd}, "own"); !slices.Contains(got, "10.0.0.1:10260") {
+		t.Errorf("own node's kubelet on a nonstandard port %v was excepted", got)
 	}
 }

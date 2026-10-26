@@ -191,6 +191,16 @@ under the same OS user, so job code can read runner credentials and leave host
 state for later jobs. Launcher pods, Cloud pods and Actions job runners are
 unaffected.
 
+Before a Cloud node runs a job, the launcher probes from a pod on that node
+that default-deny egress holds: the Kubernetes API, instance metadata, the Pod
+Identity agent, every DaemonSet port and every node's kubelet ports (10250 and
+the read-only 10255) must be unreachable, or the job does not start. The one
+expected exception is the job's own node's kubelet on port 10250, which the AWS
+VPC CNI network policy cannot block from that node's pods. That kubelet refuses
+anonymous requests, Cloud pods mount no service-account token, and a Cloud node
+serves one run, so the connection reaches nothing the job may use. Port 10255
+on the same node, and port 10250 on any other node, still fail the check.
+
 Child runs nest at most 10 levels deep counting the root, and one root run
 uses the team-set descendant ceiling, from 1 to 1000, default 50 at every depth, retries excluded.
 Team admins change the ceiling in Team settings or with
