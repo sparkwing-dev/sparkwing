@@ -129,9 +129,11 @@ func defaultCronHolder() string {
 	return host
 }
 
-// safety: the lease the store hands one holder at a time is what keeps several
-// controllers sharing a store from firing one due instant twice; a tick that
-// fails is logged so the next interval still runs.
+// safety: a store has one active controller, which holds a PostgreSQL session
+// advisory lock for its whole life (SQLite is single-process), so no second
+// controller ticks beside it; the tick lease only keeps a slow tick from
+// overlapping the next one. A tick that fails is logged so the next interval
+// still runs.
 func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

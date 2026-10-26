@@ -183,7 +183,8 @@ controller:
     name: ""
     key: key
 
-  # Seed the once-only operator bootstrap gate before the listener binds.
+  # Seed the once-only operator bootstrap gate at startup, after the listeners
+  # bind and before the controller serves a request.
   # The controller always runs with --require-auth, so a fresh install with no
   # administrator needs this or bootstrap-admin-token in credentialsSecret.
   # Once the seed is consumed it may be removed; a consumed seed left mounted

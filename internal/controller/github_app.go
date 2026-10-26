@@ -537,8 +537,10 @@ func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request, a
 	return nil
 }
 
-// safety: the operator's route is how a binding moves between teams: an
-// owner of the new team connects once the old binding is gone.
+// safety: a verified current GitHub administrator moves a binding by
+// reconnecting it to their own team, so this route is for detaching one no
+// team should keep, such as an abused installation, when no administrator
+// acts. It unbinds without uninstalling the App from GitHub.
 func (s *Server) handleOperatorGitHubAppUnbind(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	if s.githubApp == nil {
 		return s.writeGitHubAppUnavailable(w)

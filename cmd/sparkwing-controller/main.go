@@ -831,8 +831,9 @@ func checkRequireAuth(ctx context.Context, reader deploymentAdminReader, require
 	return nil
 }
 
-// safety: a free team is held to its allowance only by counters kept over the object
-// store; the disk-backed cache and log volume enforce no allowance at all. The hosted
+// safety: uploads reserve team quota through the store whatever the blob backend,
+// but without --bucket-store the bucket ceiling counts only this process's writes,
+// so a multi-team controller must measure the bucket itself. The hosted
 // controller's home is replaced with its pod while PostgreSQL keeps the records of
 // every blob, so its blobs must live in S3; --bucket-store only measures a bucket.
 func checkMultiTeamObjectStore(cfg deployment.Config, bucketStoreURL, cacheBlobStore string) error {
@@ -843,8 +844,8 @@ func checkMultiTeamObjectStore(cfg deployment.Config, bucketStoreURL, cacheBlobS
 	if !cfg.MultiTeam() || strings.TrimSpace(bucketStoreURL) != "" {
 		return nil
 	}
-	return errors.New("a multi-team deployment needs an object store: set --bucket-store " +
-		"to the s3:// store the cache (--blob-store) keeps its objects in, because free-tier allowances are enforced only there")
+	return errors.New("a multi-team deployment needs --bucket-store set to the store --cache-blob-store " +
+		"keeps its objects in, so the bucket ceiling measures every object rather than only this process's writes")
 }
 
 func checkInsecureCookies(cfg deployment.Config, insecure bool) error {

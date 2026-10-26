@@ -95,7 +95,8 @@ const CreditHistoryMaxLimit = 1000
 
 const creditHistoryDefaultLimit = 200
 
-// CreditGrant is one row of credit_grants: credits the operator added.
+// CreditGrant is one row of credit_grants: an operator grant, a paid grant
+// written when a payment settles, or a reversal of either.
 type CreditGrant struct {
 	ID string
 	// Team is whose balance the grant pays for.

@@ -235,7 +235,8 @@ func (s *Server) identifyPeer(r *http.Request) (capability.Presentation, error) 
 	return capability.Presentation{}, sessionUnavailable()
 }
 
-// Handler returns the HTTP router; callers must call Shutdown to drain server-owned background work.
+// Handler returns the HTTP router. It starts no background work; ServeWith
+// runs that and stops it when its context ends.
 func (s *Server) Handler() http.Handler {
 	var handler http.Handler = s.handler()
 	if s.dashboard != nil {
@@ -387,9 +388,8 @@ func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
 	return false
 }
 
-// safety: the HTTP drain and the commit-status drain each get this whole
-// budget, so a request still folding a run's profiles is not cut off by
-// time the listener's own shutdown already spent.
+// controllerShutdownBudget is one deadline every listener's HTTP shutdown
+// shares; a request still running when it passes is cut off.
 const controllerShutdownBudget = 5 * time.Second
 
 // Listeners are the sockets a Server serves on, bound by the caller before

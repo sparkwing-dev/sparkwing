@@ -166,7 +166,7 @@ export interface Refill {
   min_amount_cents: number;
   max_amount_cents: number;
   caps: RefillCaps;
-  // Unix seconds of the last failed or refused refill; refills wait until the card changes or Add funds succeeds.
+  // Unix seconds of the last failed or refused refill; refills resume after Add funds succeeds or a new card setup completes, not after a card change in the Stripe portal.
   failed_at?: number;
   failure?: string;
   open: boolean;
