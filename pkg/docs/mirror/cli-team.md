@@ -43,7 +43,7 @@ Manage team settings
 
 Change the team's enrollment, claim ranking and child-run settings
 
-Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or --max-children-per-root, separately or together. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.
+Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or --max-children-per-root, separately or together. False requires administration for personal enrollment and ends personal machines that members without administration enrolled; setting it back to true does not revive them. Shared runner registration, token minting and revocation always require administration.
 
 --max-children-per-root takes an integer from 1 to 1000 (default 50) and limits descendants across every depth, excluding retries. --claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it.
 

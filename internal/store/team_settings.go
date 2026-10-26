@@ -74,7 +74,8 @@ func (t *Tenant) SetAuthorizedTeamSettings(ctx context.Context, a capability.Aut
 		if next.MembersCanAddMachines == previous.MembersCanAddMachines && next.MaxChildrenPerRoot == previous.MaxChildrenPerRoot && string(ranking) == stored {
 			return nil
 		}
-		if _, err := tx.execContext(ctx, `UPDATE teams SET members_can_add_machines=?,claim_ranking=?,max_children_per_root=?,updated_at=? WHERE name=?`, boolInt(next.MembersCanAddMachines), string(ranking), next.MaxChildrenPerRoot, tx.now(ctx).UnixNano(), t.team); err != nil {
+		closed := previous.MembersCanAddMachines && !next.MembersCanAddMachines
+		if _, err := tx.execContext(ctx, `UPDATE teams SET members_can_add_machines=?,member_machines_epoch=member_machines_epoch+?,claim_ranking=?,max_children_per_root=?,updated_at=? WHERE name=?`, boolInt(next.MembersCanAddMachines), boolInt(closed), string(ranking), next.MaxChildrenPerRoot, tx.now(ctx).UnixNano(), t.team); err != nil {
 			return err
 		}
 		id, err := newIdentityID()

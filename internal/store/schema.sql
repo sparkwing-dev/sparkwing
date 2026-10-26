@@ -9,6 +9,8 @@ CREATE TABLE teams (
     display_name TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL DEFAULT '',
     members_can_add_machines BIGINT NOT NULL DEFAULT 1 CHECK(members_can_add_machines IN (0,1)),
+    -- safety: counts the times members_can_add_machines was turned off, so turning it back on never revives a machine enrolled before.
+    member_machines_epoch BIGINT NOT NULL DEFAULT 0 CHECK(member_machines_epoch >= 0),
     claim_ranking TEXT NOT NULL DEFAULT '',
     max_children_per_root BIGINT NOT NULL DEFAULT 50 CHECK(max_children_per_root BETWEEN 1 AND 1000),
     claim_award_ordinal BIGINT NOT NULL DEFAULT 0 CHECK(claim_award_ordinal >= 0),

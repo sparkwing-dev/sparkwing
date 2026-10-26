@@ -316,7 +316,8 @@ rotation and revocation. Members enroll their own personal machines through
 session. The team setting `members_can_add_machines` defaults to true. When it
 is false, personal enrollment requires administration too. A personal runner
 records the membership epoch, grant and setting that authorized enrollment.
-Every use checks them again. Removing and re-adding the member cannot revive
+Every use checks them again, and turning the setting off ends members' personal
+runners for good: turning it back on does not revive them. Removing and re-adding the member cannot revive
 an old credential. Shared runners belong to the team and survive the
 registrar's demotion or removal. Revoke a departing registrar's shared runners if they still control the machines or bearer credentials.
 
