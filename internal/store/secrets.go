@@ -27,11 +27,14 @@ type Secret struct {
 	RepoName  string
 	Pipeline  string
 	// OnlyOn is the reserved pool the secret is released on, or "".
-	OnlyOn    string
-	Masked    bool
-	Shared    bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	OnlyOn string
+	// KeepOnlyOn writes the value without touching an existing row's pool, so
+	// a replacement that names no pool never lifts a restriction.
+	KeepOnlyOn bool `json:"-"`
+	Masked     bool
+	Shared     bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // A signed-up team's secrets are rows the operator stores for free, so they

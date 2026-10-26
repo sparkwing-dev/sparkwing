@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -346,37 +347,48 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 	}
 }
 
-// Decision 68: only code the controller fetches through the team's GitHub App
-// at a branch or tag head proves the repository for its pipeline secrets;
-// anything the submitter supplies, a raw commit GitHub may serve from a fork,
-// a pull request ref, or a controller without the App proves nothing.
-func TestFetchedGitHubRepositoryNeedsControllerFetchedBranchHead(t *testing.T) {
-	head := strings.Repeat("a", 40)
-	fork := strings.Repeat("f", 40)
-	resolve := func(_ context.Context, ref string) (string, error) {
-		if ref == "refs/heads/main" || ref == "refs/tags/v1" {
-			return head, nil
-		}
-		return "", nil
+// Decision 68: only code the controller fetches through the team's GitHub App,
+// as source selection resolves it, proves the repository for its pipeline
+// secrets. Requests take the CLI's shape: an unqualified current branch with
+// the locally resolved commits, and a configured source: pin.
+func TestFetchedGitHubRepositoryFollowsSourceSelection(t *testing.T) {
+	head, pinned, fork := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("f", 40)
+	refs := map[string]string{"refs/heads/main": head, "refs/tags/v1": head, "refs/heads/release": pinned, "refs/heads/pinned": head}
+	configs := map[string]string{head: "pipelines:\n  - name: ci\n    entrypoint: CI\n  - name: deploy\n    entrypoint: Deploy\n    source: release\n"}
+	selectSource := func(ctx context.Context, request runspec.Request) (runspec.Git, runspec.Source, error) {
+		git, code, _, err := source.Select(ctx, source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL}, request.Pipeline, request.Git, request.Source, "", source.Options{
+			ResolveRef: func(_ context.Context, ref string) (string, error) { return refs[ref], nil },
+			ReadFile: func(_ context.Context, sha, _ string) ([]byte, bool, error) {
+				config, ok := configs[sha]
+				return []byte(config), ok, nil
+			},
+		})
+		return git, code, err
 	}
-	fetched := runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "refs/heads/main", SHA: head}, Source: runspec.Source{Ref: head, Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app"}}}
+	cli := runspec.Request{Pipeline: "ci", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "main", SHA: head}, Source: runspec.Source{Ref: head, Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app"}}}
 	app := &Server{githubApp: &githubAppState{}}
 	for name, change := range map[string]func(*runspec.Request){
-		"branch head":            func(*runspec.Request) {},
-		"branch, commit unnamed": func(r *runspec.Request) { r.Git.SHA, r.Source.Ref = "", "" },
-		"tag head":               func(r *runspec.Request) { r.Git.Ref = "refs/tags/v1" },
+		"unqualified current branch": func(*runspec.Request) {},
+		"qualified branch":           func(r *runspec.Request) { r.Git.Ref = "refs/heads/main" },
+		"unqualified tag":            func(r *runspec.Request) { r.Git.Ref = "v1" },
+		"branch, commit unnamed":     func(r *runspec.Request) { r.Git.SHA, r.Source.Ref = "", "" },
+		"configured source pin": func(r *runspec.Request) {
+			r.Pipeline, r.Source.Ref, r.Source.RequestedRef = "deploy", pinned, "release"
+		},
 	} {
-		request := fetched
+		request := cli
 		change(&request)
-		if got := app.fetchedGitHubRepository(t.Context(), request, resolve); got != 701 {
+		if got := app.fetchedGitHubRepository(t.Context(), request, selectSource); got != 701 {
 			t.Errorf("%s = %d", name, got)
 		}
 	}
 	for name, change := range map[string]func(*runspec.Request){
-		"fork commit on a branch": func(r *runspec.Request) { r.Git.SHA, r.Source.Ref = fork, fork },
-		"code at another commit":  func(r *runspec.Request) { r.Source.Ref = fork },
-		"pull request ref":        func(r *runspec.Request) { r.Git.Ref = "refs/pull/7/head" },
-		"bare commit":             func(r *runspec.Request) { r.Git.Ref = "" },
+		"fork commit on a branch":         func(r *runspec.Request) { r.Git.SHA, r.Source.Ref = fork, fork },
+		"code at a commit no pin selects": func(r *runspec.Request) { r.Source.Ref = fork },
+		"source pin bypassed":             func(r *runspec.Request) { r.Pipeline = "deploy" },
+		"pull request ref":                func(r *runspec.Request) { r.Git.Ref = "refs/pull/7/head" },
+		"bare commit":                     func(r *runspec.Request) { r.Git.Ref = fork },
+		"no ref":                          func(r *runspec.Request) { r.Git.Ref = "" },
 		"upload": func(r *runspec.Request) {
 			r.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:x"}
 		},
@@ -388,13 +400,13 @@ func TestFetchedGitHubRepositoryNeedsControllerFetchedBranchHead(t *testing.T) {
 			r.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 		},
 	} {
-		request := fetched
+		request := cli
 		change(&request)
-		if got := app.fetchedGitHubRepository(t.Context(), request, resolve); got != 0 {
+		if got := app.fetchedGitHubRepository(t.Context(), request, selectSource); got != 0 {
 			t.Errorf("%s proved repository %d", name, got)
 		}
 	}
-	if got := (&Server{}).fetchedGitHubRepository(t.Context(), fetched, resolve); got != 0 {
+	if got := (&Server{}).fetchedGitHubRepository(t.Context(), cli, selectSource); got != 0 {
 		t.Fatalf("controller without the App proved repository %d", got)
 	}
 }

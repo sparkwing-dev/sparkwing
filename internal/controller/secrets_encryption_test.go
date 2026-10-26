@@ -398,6 +398,9 @@ func TestSecrets_WriteKeepsOnlyOnPool(t *testing.T) {
 	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets", "", nil); code != http.StatusOK || !strings.Contains(body, `"only_on":"prod"`) {
 		t.Fatalf("list lost the pool: HTTP %d %s", code, body)
 	}
+	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "DEPLOY", "value": "replaced-value", "repo": "gh:1", "pipeline": "ci"}); code != http.StatusOK || !strings.Contains(body, `"only_on":"prod"`) {
+		t.Fatalf("replacement without a pool lifted the restriction: HTTP %d %s", code, body)
+	}
 	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "DEPLOY", "value": "v", "only_on": "bad pool\n"}); code != http.StatusBadRequest {
 		t.Fatalf("invalid pool: HTTP %d %s", code, body)
 	}

@@ -193,6 +193,13 @@ describe("write bodies", () => {
       secrets.updateBody(row({ name: "B", shared: true, masked: false }), "n"),
       { name: "B", value: "n", masked: false, shared: true },
     );
+    assert.deepEqual(
+      secrets.updateBody(
+        row({ name: "D", shared: true, only_on: "prod" }),
+        "n",
+      ),
+      { name: "D", value: "n", masked: true, shared: true, only_on: "prod" },
+    );
     assert.deepEqual(secrets.updateBody(row({ name: "C" }), "n"), {
       name: "C",
       value: "n",

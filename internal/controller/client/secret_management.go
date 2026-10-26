@@ -54,7 +54,7 @@ func (c *engineClient) WriteSecret(ctx context.Context, input controllerwire.Sec
 	}
 	err := c.request(ctx, "POST", "/api/v1/secrets", "/api/v1/secrets", input.IdempotencyKey, input, &result)
 	got := result.Secret
-	if err == nil && (!validSecretMetadata(got) || got.Name != input.Name || got.Pipeline != input.Pipeline || got.Masked != input.Masked || got.Shared != input.Shared || got.OnlyOn != input.OnlyOn || !got.Bound) {
+	if err == nil && (!validSecretMetadata(got) || got.Name != input.Name || got.Pipeline != input.Pipeline || got.Masked != input.Masked || got.Shared != input.Shared || input.OnlyOn != "" && got.OnlyOn != input.OnlyOn || !got.Bound) {
 		err = secretProtocolError("controller did not confirm encrypted secret scope and placement")
 	}
 	return result, err

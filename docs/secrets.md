@@ -31,7 +31,8 @@ keeps its manual trust class for reserved pools, OIDC claims and cache scopes.
 `--shared` secrets are team-wide, like a GitHub organization secret with no
 repository allow-list: every pipeline of every repository in the team reads
 them. Protect deploy secrets with a [reserved pool](scheduling.md#reserved-pools)
-or `--only-on`, which only verified runs receive.
+or `--only-on`, which only verified runs receive. Replacing a secret's value
+without `--only-on` keeps its pool.
 
 `--repo` takes a GitHub `owner/name` or a repository key such as `gh:12345`
 from `sparkwing secrets list -o json`. The controller resolves it to the

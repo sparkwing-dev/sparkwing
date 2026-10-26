@@ -5835,6 +5835,8 @@ components:
               type: string
             event:
               type: string
+            fetched_repository_id:
+              type: integer
             pipeline:
               type: string
             pull_request_base:

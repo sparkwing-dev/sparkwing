@@ -20,7 +20,9 @@ type secretSetReq struct {
 	Repo     string `json:"repo,omitempty"`
 	Pipeline string `json:"pipeline,omitempty"`
 	// OnlyOn is a reserved pool; plan acceptance and release enforce it.
-	OnlyOn string `json:"only_on,omitempty"`
+	// safety: nil keeps a replaced row's pool, so a write never silently lifts
+	// a restriction; only an explicit value, "" included, changes it.
+	OnlyOn *string `json:"only_on,omitempty"`
 	// safety: nil defaults to masked; only an explicit false stores plain config.
 	Masked *bool `json:"masked,omitempty"`
 	// safety: an unscoped secret answers a run only when an admin marked it shared.
@@ -78,7 +80,11 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 	if err := secrets.ValidateName(req.Name); err != nil {
 		return invalidEngineBody("invalid secret name")
 	}
-	if req.OnlyOn != "" && controllerwire.ValidateQueueGroupName(req.OnlyOn) != nil {
+	onlyOn := ""
+	if req.OnlyOn != nil {
+		onlyOn = *req.OnlyOn
+	}
+	if onlyOn != "" && controllerwire.ValidateQueueGroupName(onlyOn) != nil {
 		return invalidEngineBody("invalid only_on pool")
 	}
 	if req.Shared && req.Pipeline != "" {
@@ -105,7 +111,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 	}
 	stored, err := store.SealSecret(cipher, tn.Team(), store.Secret{
 		Name: req.Name, Value: req.Value, Principal: a.Principal.Capability.Subject.ID,
-		Repo: string(repo.Key), RepoName: repo.Display, Pipeline: req.Pipeline, OnlyOn: req.OnlyOn, Masked: masked, Shared: req.Shared,
+		Repo: string(repo.Key), RepoName: repo.Display, Pipeline: req.Pipeline, OnlyOn: onlyOn, KeepOnlyOn: req.OnlyOn == nil, Masked: masked, Shared: req.Shared,
 	})
 	if err != nil {
 		return credentialWriteError(err)

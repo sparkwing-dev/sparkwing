@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -110,25 +111,19 @@ func (s *Server) keyedRepositoryDisplay(ctx context.Context, team string, reques
 }
 
 // fetchedGitHubRepository is the GitHub repository the controller itself fetches
-// a run's code from, through the team's App installation that resolved it, at
-// the head of one of its branches or tags. It is zero when the submitter
-// supplies the code (an upload, a working tree, a local checkout or a run on
-// the submitter's own machine) or names a commit the branch does not point at,
-// which GitHub may serve from a fork, or a pull request ref.
-func (s *Server) fetchedGitHubRepository(ctx context.Context, request runspec.Request, resolve func(context.Context, string) (string, error)) int64 {
-	source := request.Source
+// a run's code from through the team's App installation, proven by source
+// selection: the App resolves the run's branch or tag (unqualified or
+// qualified) to its head, reads that commit's configuration and resolves any
+// configured source pin, and the request must run exactly that commit and that
+// code. It is zero when the submitter supplies the code (an upload, a working
+// tree, a local checkout or a run on the submitter's own machine), names a
+// commit no branch head selects (GitHub may serve it from a fork) or a pull
+// request ref, or when selection disagrees with the request.
+func (s *Server) fetchedGitHubRepository(ctx context.Context, request runspec.Request, selectSource func(context.Context, runspec.Request) (runspec.Git, runspec.Source, error)) int64 {
+	code := request.Source
 	here := request.Options.Runner.Set && request.Options.Runner.Value.Kind == runspec.RunnerHere
-	if s.githubApp == nil || source.Location.RemoteURL == "" || source.BundleDigest.Set || source.WorkingTree || source.Location.LocalCheckout != "" || here {
+	if s.githubApp == nil || code.Location.RemoteURL == "" || code.BundleDigest.Set || code.WorkingTree || code.Location.LocalCheckout != "" || here {
 		return 0
-	}
-	ref := request.Git.Ref
-	if !strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/") || source.Ref != "" && !strings.EqualFold(source.Ref, request.Git.SHA) {
-		return 0
-	}
-	if request.Git.SHA != "" {
-		if head, err := resolve(ctx, ref); err != nil || !strings.EqualFold(head, request.Git.SHA) {
-			return 0
-		}
 	}
 	key, ok := strings.CutPrefix(string(request.Git.Repository.Key), "gh:")
 	if !ok {
@@ -138,7 +133,35 @@ func (s *Server) fetchedGitHubRepository(ctx context.Context, request runspec.Re
 	if err != nil {
 		return 0
 	}
+	ref := request.Git.Ref
+	if ref == "" || runspec.IsCommitID(ref) || strings.HasPrefix(ref, "refs/") && !strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/") {
+		return 0
+	}
+	probe := request
+	probe.Git.SHA, probe.Source.Ref, probe.Source.RequestedRef = "", "", ""
+	git, selected, err := selectSource(ctx, probe)
+	if err != nil || request.Git.SHA != "" && !strings.EqualFold(git.SHA, request.Git.SHA) || code.Ref != "" && !strings.EqualFold(selected.Ref, code.Ref) {
+		return 0
+	}
 	return id
+}
+
+// appSourceSelector selects a remote run's source the way a schedule fire
+// does: refs resolve, and configuration is read, through the team's App.
+func (s *Server) appSourceSelector(team store.Team) func(context.Context, runspec.Request) (runspec.Git, runspec.Source, error) {
+	return func(ctx context.Context, request runspec.Request) (runspec.Git, runspec.Source, error) {
+		access := &intakeRevisionAccess{server: s, team: team}
+		spec := source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL}
+		installation, repository, err := access.githubAppRepository(ctx, spec)
+		if err != nil {
+			return runspec.Git{}, runspec.Source{}, err
+		}
+		repo, _ := store.ParseGitHubRepo(repository.FullName)
+		read := func(ctx context.Context, sha, name string) ([]byte, bool, error) {
+			return s.githubApp.client.FileAtCommit(ctx, installation.InstallationID, repository.ID, repo.Owner, repo.Name, sha, name)
+		}
+		return s.selectIntakeSource(ctx, team, request, read)
+	}
 }
 
 var errUncoveredGitHubRepository = errors.New("no GitHub App installation of this team covers the repository")

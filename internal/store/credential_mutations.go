@@ -18,7 +18,8 @@ func (t *Tenant) mutateCredentials(ctx context.Context, a capability.Authorized,
 }
 
 // WriteSecret stores a secret under current tenant administration authority and returns its committed metadata.
-// A rewrite named by bare repository key keeps the row's repository name.
+// A rewrite named by bare repository key keeps the row's repository name, and
+// one with KeepOnlyOn keeps the row's pool.
 func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, sealed SealedSecret) (Secret, error) {
 	if sealed.team != t.team || sealed.team == "" || !secrets.IsBound(sealed.row.Value) {
 		return Secret{}, ErrInvalidInput
@@ -47,7 +48,7 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 		at := tx.now(ctx).UnixNano()
 		var masked, shared int
 		var created, updated int64
-		err := tx.QueryRowContext(ctx, `INSERT INTO secrets(team,name,value,principal,repo,repo_name,pipeline,only_on,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,name,repo,pipeline) DO UPDATE SET value=excluded.value,principal=excluded.principal,repo_name=CASE WHEN excluded.repo_name=excluded.repo THEN secrets.repo_name ELSE excluded.repo_name END,only_on=excluded.only_on,masked=excluded.masked,shared=excluded.shared,updated_at=excluded.updated_at RETURNING name,principal,repo,repo_name,pipeline,only_on,masked,shared,created_at,updated_at`, t.team, row.Name, row.Value, actor, row.Repo, row.RepoName, row.Pipeline, row.OnlyOn, boolInt(row.Masked), boolInt(row.Shared), at, at).Scan(&out.Name, &out.Principal, &out.Repo, &out.RepoName, &out.Pipeline, &out.OnlyOn, &masked, &shared, &created, &updated)
+		err := tx.QueryRowContext(ctx, `INSERT INTO secrets(team,name,value,principal,repo,repo_name,pipeline,only_on,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,name,repo,pipeline) DO UPDATE SET value=excluded.value,principal=excluded.principal,repo_name=CASE WHEN excluded.repo_name=excluded.repo THEN secrets.repo_name ELSE excluded.repo_name END,only_on=CASE WHEN ?=1 THEN secrets.only_on ELSE excluded.only_on END,masked=excluded.masked,shared=excluded.shared,updated_at=excluded.updated_at RETURNING name,principal,repo,repo_name,pipeline,only_on,masked,shared,created_at,updated_at`, t.team, row.Name, row.Value, actor, row.Repo, row.RepoName, row.Pipeline, row.OnlyOn, boolInt(row.Masked), boolInt(row.Shared), at, at, boolInt(row.KeepOnlyOn)).Scan(&out.Name, &out.Principal, &out.Repo, &out.RepoName, &out.Pipeline, &out.OnlyOn, &masked, &shared, &created, &updated)
 		out.Masked, out.Shared = masked != 0, shared != 0
 		out.CreatedAt, out.UpdatedAt = time.Unix(0, created).UTC(), time.Unix(0, updated).UTC()
 		return err

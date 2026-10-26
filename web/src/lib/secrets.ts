@@ -13,6 +13,7 @@ export interface StoredSecret {
   pipeline?: string;
   masked: boolean;
   shared?: boolean;
+  only_on?: string;
   bound: boolean;
   created_at: number;
   updated_at: number;
@@ -36,6 +37,7 @@ export interface SecretWriteBody {
   repo?: string;
   pipeline?: string;
   shared?: boolean;
+  only_on?: string;
 }
 
 // Local mode drops team wording because its built-in team is this machine.
@@ -127,10 +129,11 @@ export function draftBody(draft: SecretDraft): SecretWriteBody {
   };
 }
 
-// An update rewrites one existing row, so it keeps that row's scope, sharing
-// and kind and changes only the value.
+// An update rewrites one existing row's value and names its scope, sharing,
+// kind and pool again, so the replacement keeps every restriction the row had.
 export function updateBody(row: StoredSecret, value: string): SecretWriteBody {
   const body: SecretWriteBody = { name: row.name, value, masked: row.masked };
+  if (row.only_on) body.only_on = row.only_on;
   if (row.pipeline) {
     body.repo = row.repo_key;
     body.pipeline = row.pipeline;

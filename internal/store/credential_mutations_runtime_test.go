@@ -280,3 +280,33 @@ func TestCredentialMutationsDeletionPreservesOtherScopesProperty(t *testing.T) {
 		}
 	}
 }
+
+// A replacement that names no pool keeps the row's reserved-pool restriction;
+// only an explicit pool, empty included, changes it.
+func TestWriteSecretReplacementKeepsOnlyOnUnlessChanged(t *testing.T) {
+	tenant, a := credentialMaintenanceFixture(t)
+	write := func(row Secret) Secret {
+		t.Helper()
+		out, err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, row))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	base := Secret{Name: "DEPLOY", Value: "first", Shared: true, Masked: true}
+	restricted := base
+	restricted.OnlyOn = "prod"
+	if got := write(restricted); got.OnlyOn != "prod" {
+		t.Fatalf("restricted write: %+v", got)
+	}
+	replacement := base
+	replacement.Value, replacement.KeepOnlyOn = "second", true
+	if got := write(replacement); got.OnlyOn != "prod" {
+		t.Fatalf("replacement lifted the restriction: %+v", got)
+	}
+	cleared := base
+	cleared.Value = "third"
+	if got := write(cleared); got.OnlyOn != "" {
+		t.Fatalf("explicit clear kept the pool: %+v", got)
+	}
+}
