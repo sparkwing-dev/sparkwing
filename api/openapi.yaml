@@ -4114,6 +4114,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        high_trust:
+          type: boolean
         max_children_per_root:
           maximum: 1000
           minimum: 1
@@ -4124,6 +4126,7 @@ components:
         - members_can_add_machines
         - claim_ranking
         - max_children_per_root
+        - high_trust
       type: object
       x-sparkwing-go-type: controllerwire.TeamSettings
     internal.controllerwire.TeamSettingsUpdate:
@@ -4136,6 +4139,10 @@ components:
                     type: string
                   type: array
                 - type: "null"
+            - type: "null"
+        high_trust:
+          anyOf:
+            - type: boolean
             - type: "null"
         max_children_per_root:
           anyOf:
