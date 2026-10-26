@@ -1,17 +1,3 @@
 # pkg/backends
 
 const MigrationGuideURL = "https://sparkwing.dev/docs/migration-guide/"
-type Spec struct {
-	Type   string
-	Prefix string
-	Path   string
-	URL    string
-	Token  string
-
-	TokenEnv string
-}
-func (s *Spec) ResolvedToken() string
-const TypeController = "controller"
-const TypeEnv = "env"
-const TypeFilesystem = "filesystem"
-const TypeNone = "none"

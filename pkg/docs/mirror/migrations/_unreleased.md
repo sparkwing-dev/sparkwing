@@ -2170,7 +2170,8 @@ kept for S3 and Postgres state profiles.
   `NewLoopback`; a local run's node processes reach the full controller.
   `pkg/backends` drops `TypePostgres`, `Spec.Binaries` and
   `Surfaces.BinaryCache` and `Spec.URLSource` and adds
-  `MigrationGuideURL`. `stdoutlogs.CheckSpec` drops its `urlSource`
+  `MigrationGuideURL`. It also drops `Spec`, `Spec.ResolvedToken` and the
+  `Type*` constants; `MigrationGuideURL` is all that remains. `stdoutlogs.CheckSpec` drops its `urlSource`
   parameter.
   `storeurl.OpenStateStoreFromSpec` is removed.
   `pkg/localws` drops `Options.NoLocalStore`. `pkg/pipelines` drops
