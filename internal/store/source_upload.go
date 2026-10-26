@@ -33,12 +33,12 @@ type SourceUpload struct {
 }
 
 func sourceUploaderTx(ctx context.Context, tx *storeTx, team Team, authority capability.AuthorityRef, scope SourceUploadScope) (capability.Principal, error) {
-	p, err := tx.ResolveAuthority(ctx, authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, team, authority, sameTeam)
 	if err != nil {
 		return p, err
 	}
 	c := p.Capability
-	if c.Team != string(team) || c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || !slices.Contains(c.Grants, capability.RunsWrite) || !capability.RepositoryAllowed(c.Repositories, capability.RepositoryIdentity{Key: string(scope.Repository), Display: scope.RepositoryDisplay}) {
+	if c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || !slices.Contains(c.Grants, capability.RunsWrite) || !capability.RepositoryAllowed(c.Repositories, capability.RepositoryIdentity{Key: string(scope.Repository), Display: scope.RepositoryDisplay}) {
 		return p, authorityError(apierr.Forbidden, "source upload requires repository-bound run submission authority")
 	}
 	return p, nil

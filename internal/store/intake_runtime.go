@@ -353,12 +353,12 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 			}
 		}
 	}
-	p, err := tx.ResolveAuthority(ctx, request.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, team, request.Authority, sameTeam)
 	if err != nil {
 		return p, err
 	}
 	c := p.Capability
-	if c.Team != string(team) || c.Audience != capability.Controller || request.Request.Team != "" && request.Request.Team != string(team) || request.CapabilityPrefix != "" && request.CapabilityPrefix != c.Prefix {
+	if c.Audience != capability.Controller || request.Request.Team != "" && request.Request.Team != string(team) || request.CapabilityPrefix != "" && request.CapabilityPrefix != c.Prefix {
 		return p, authorityError(apierr.Forbidden, "intake authority does not match the team")
 	}
 	dispatch := request.Request.Dispatch
@@ -660,7 +660,7 @@ func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.P
 	if err != nil {
 		return "", err
 	}
-	machine, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+	machine, err := resolveTeamAuthorityTx(ctx, tx, team, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, sameTeam)
 	var denied *apierr.Error
 	if errors.As(err, &denied) {
 		return "", nil
@@ -670,7 +670,7 @@ func originMachineTx(ctx context.Context, tx *storeTx, team Team, p capability.P
 	}
 	c := machine.Capability
 	facts, err := claimantFactsTx(ctx, tx, []authorityNode{{principal: machine}}, runspec.Request{})
-	if err != nil || !facts.Personal || c.Team != string(team) || c.Binding.Kind != capability.BindingNone || owner == "" || owner != p.Capability.Subject.ID {
+	if err != nil || !facts.Personal || c.Binding.Kind != capability.BindingNone || owner == "" || owner != p.Capability.Subject.ID {
 		return "", err
 	}
 	return c.Subject.ID, nil

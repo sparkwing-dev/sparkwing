@@ -20,13 +20,13 @@ type OverflowControl struct {
 }
 
 func overflowAccountTx(ctx context.Context, tx *storeTx, team Team, authority capability.AuthorityRef, grant capability.Grant) (string, error) {
-	p, err := tx.ResolveAuthority(ctx, authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, team, authority, sameTeam)
 	if err != nil {
 		return "", err
 	}
 	c := p.Capability
 	allowed := slices.Contains(c.Grants, grant) || grant == capability.RunsRead && slices.Contains(c.Grants, capability.RunsWrite)
-	if c.Subject.Kind != capability.SubjectAccount || c.Team != string(team) || c.Binding.Kind != capability.BindingNone || c.Unit != "" || !allowed {
+	if c.Subject.Kind != capability.SubjectAccount || c.Binding.Kind != capability.BindingNone || c.Unit != "" || !allowed {
 		return "", bindingRefusal()
 	}
 	return c.Subject.ID, nil

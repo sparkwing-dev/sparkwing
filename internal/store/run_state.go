@@ -118,7 +118,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 		return runstate.Applied{}, err
 	}
 	if change.Actor.Kind == runstate.ActorRunHost {
-		principal, err := tx.ResolveAuthority(ctx, change.Actor.Authority)
+		principal, err := resolveTeamAuthorityTx(ctx, tx, team, change.Actor.Authority, sameTeam)
 		if err != nil {
 			return runstate.Applied{}, err
 		}

@@ -258,12 +258,12 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 			return err
 		}
 	}
-	chain, err := authorityChainTx(ctx, tx, request.Actor.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, team, request.Actor.Authority, true)
 	if err != nil {
 		return err
 	}
 	c := chain[0].principal.Capability
-	if c.Team != string(team) || c.Prefix != request.Actor.CapabilityPrefix || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.ExpansionSubmit) || c.Binding.Kind != capability.BindingNode || runspec.RunID(c.Binding.RunID) != request.Source.RunID || runspec.NodeID(c.Binding.NodeID) != request.Source.NodeID || runspec.ClaimGeneration(c.Binding.Generation) != request.SourceGeneration {
+	if c.Prefix != request.Actor.CapabilityPrefix || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.ExpansionSubmit) || c.Binding.Kind != capability.BindingNode || runspec.RunID(c.Binding.RunID) != request.Source.RunID || runspec.NodeID(c.Binding.NodeID) != request.Source.NodeID || runspec.ClaimGeneration(c.Binding.Generation) != request.SourceGeneration {
 		return holderRefusal()
 	}
 	lease = c.Binding.Expansion

@@ -556,6 +556,48 @@ func (tx *storeTx) ResolveAuthority(ctx context.Context, ref capability.Authorit
 	return chain[0].principal, nil
 }
 
+type teamAuthority int
+
+const (
+	sameTeam teamAuthority = iota
+	// safety: a Cloud launcher holds no team and serves every team's work; only claimant paths opt in.
+	sameTeamOrCloudLauncher
+)
+
+// safety: the one foreign-team refusal for team-scoped store functions;
+// TestTeamScopedFunctionsResolveThroughTeam forbids the bare resolvers inside them.
+func resolveTeamAuthorityTx(ctx context.Context, tx *storeTx, team Team, ref capability.AuthorityRef, accept teamAuthority) (capability.Principal, error) {
+	return teamPrincipal(tx.ResolveAuthority(ctx, ref))(team, accept)
+}
+
+func resolveTeamActorTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, accept teamAuthority) (capability.Principal, error) {
+	return teamPrincipal(resolveActorTx(ctx, tx, actor))(team, accept)
+}
+
+func teamAuthorityChainTx(ctx context.Context, tx *storeTx, team Team, ref capability.AuthorityRef, lock bool) ([]authorityNode, error) {
+	chain, err := authorityChainTx(ctx, tx, ref, lock)
+	if err != nil {
+		return nil, err
+	}
+	if len(chain) == 0 {
+		return nil, bindingRefusal()
+	}
+	_, err = teamPrincipal(chain[0].principal, nil)(team, sameTeam)
+	return chain, err
+}
+
+func teamPrincipal(p capability.Principal, err error) func(Team, teamAuthority) (capability.Principal, error) {
+	return func(team Team, accept teamAuthority) (capability.Principal, error) {
+		if err != nil {
+			return capability.Principal{}, err
+		}
+		if p.Capability.Team != string(team) && !(accept == sameTeamOrCloudLauncher && capability.CloudLauncher(p.Capability)) {
+			return capability.Principal{}, bindingRefusal()
+		}
+		return p, nil
+	}
+}
+
 func resolveActorTx(ctx context.Context, tx *storeTx, actor runstate.Actor) (capability.Principal, error) {
 	if (actor.Authority.Kind == capability.AuthoritySession && actor.CapabilityPrefix != "") || (actor.Authority.Kind == capability.AuthorityCapability && actor.CapabilityPrefix != "" && actor.CapabilityPrefix != actor.Authority.ID) {
 		return capability.Principal{}, authorityError(apierr.Forbidden, "actor authority and fence disagree")
@@ -569,11 +611,11 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor runstate.Actor, targ
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority, target}, target.ID); err != nil {
 			return err
 		}
-		p, err := resolveActorTx(ctx, tx, actor)
+		p, err := resolveTeamActorTx(ctx, tx, t.team, actor, sameTeam)
 		if err != nil {
 			return err
 		}
-		if p.Capability.Team != string(t.team) || p.Capability.Binding.Kind != capability.BindingNone {
+		if p.Capability.Binding.Kind != capability.BindingNone {
 			return authorityError(apierr.Forbidden, "revocation requires unbound tenant authority")
 		}
 		targetNode, err := tx.operator.readAuthorityTx(ctx, tx, target, true)

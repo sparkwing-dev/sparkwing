@@ -79,13 +79,13 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 	if err := lockClaimControllerTx(ctx, tx); err != nil {
 		return capability.SourceReleaseRequest{}, err
 	}
-	chain, err := authorityChainTx(ctx, tx, authorized.Principal.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, t.team, authorized.Principal.Authority, true)
 	if err != nil {
 		return capability.SourceReleaseRequest{}, err
 	}
 	p := chain[0].principal
 	c, b := p.Capability, p.Capability.Binding
-	if c.Team != string(t.team) || c.Audience != capability.Controller || c.Unit == "" || b.RunID == "" || authorized.Target.Team != "" && authorized.Target.Team != c.Team || authorized.Target.RunID != b.RunID || authorized.Target.NodeID != "" && authorized.Target.NodeID != b.NodeID {
+	if c.Audience != capability.Controller || c.Unit == "" || b.RunID == "" || authorized.Target.Team != "" && authorized.Target.Team != c.Team || authorized.Target.RunID != b.RunID || authorized.Target.NodeID != "" && authorized.Target.NodeID != b.NodeID {
 		return capability.SourceReleaseRequest{}, bindingRefusal()
 	}
 	unit := UnitRef{Kind: c.Unit, RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID), SourceGeneration: b.Generation}

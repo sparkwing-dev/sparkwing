@@ -33,11 +33,11 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor runstate.Actor, cha
 		}); err != nil {
 			return err
 		}
-		p, err := resolveActorTx(ctx, tx, actor)
+		p, err := resolveTeamActorTx(ctx, tx, t.team, actor, sameTeam)
 		if err != nil {
 			return err
 		}
-		if p.Capability.Team != string(t.team) || p.Capability.Binding.Kind != capability.BindingNone || p.Capability.Subject.Kind != capability.SubjectAccount {
+		if p.Capability.Binding.Kind != capability.BindingNone || p.Capability.Subject.Kind != capability.SubjectAccount {
 			return authorityError(apierr.Forbidden, "membership changes require an account")
 		}
 		selfRemoval := change.Role == nil && p.Capability.Subject.ID == change.AccountID
