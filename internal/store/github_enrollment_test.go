@@ -388,3 +388,39 @@ func TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "capabilities", maxGitHubRunnerCredentials+1)
 }
+
+// Losing an installation ends everything the team held through it, and
+// connecting it again restores none of it.
+func TestInstallationUnbindEndsActionsConsentAndAutomation(t *testing.T) {
+	tenant, a := credentialMaintenanceFixture(t)
+	s := tenant.s
+	now, err := s.databaseNow(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation := GitHubAppInstallation{InstallationID: 9, AccountID: 7, AccountLogin: "Acme", AccountType: "Organization"}
+	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), installation, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.RegisterGitHubRunner(t.Context(), a, GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "Acme/Widgets", InstallationID: 9}); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_automation(team,repository_id,repository,installation_id,enabled_by,enabled_at,repo_key) VALUES ('a',42,'Acme/Widgets',9,'owner',1,'gh:42')`)
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, "a", "1000"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AsOperator().UnbindGitHubAppInstallation(t.Context(), 9); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}); err == nil {
+		t.Fatal("an Actions credential outlived the installation")
+	}
+	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), installation, now); err != nil {
+		t.Fatal(err)
+	}
+	var automation, bindings int
+	if err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM github_app_automation WHERE team='a'),(SELECT COUNT(*) FROM github_runner_bindings WHERE team='a')`).Scan(&automation, &bindings); err != nil || automation != 0 || bindings != 0 {
+		t.Fatalf("consent after reconnecting: automation=%d bindings=%d %v", automation, bindings, err)
+	}
+}

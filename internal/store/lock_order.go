@@ -390,6 +390,38 @@ func (op *Operator) discoverInstallationLocks(ctx context.Context, tx *storeTx, 
 	return set
 }
 
+// discoverInstallationTeardownLocks adds the Actions credentials an
+// installation's teardown revokes to [discoverInstallationLocks].
+func (op *Operator) discoverInstallationTeardownLocks(ctx context.Context, tx *storeTx, set lockSet, installation int64) lockSet {
+	set = op.discoverInstallationLocks(ctx, tx, set, installation)
+	if set.err != nil {
+		return set
+	}
+	team, _, err := op.githubInstallationConnectionTx(ctx, tx, installation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return set
+	}
+	if err != nil {
+		set.err = err
+		return set
+	}
+	prefixes, err := installationActionsRootsTx(ctx, tx, team, installation)
+	if err != nil {
+		set.err = err
+		return set
+	}
+	if len(prefixes) == 0 {
+		return set
+	}
+	leaves := make([]capability.AuthorityRef, len(prefixes))
+	for i, prefix := range prefixes {
+		leaves[i] = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
+	}
+	roots := discoverAuthorityLocks(ctx, tx, leaves, prefixes...)
+	set.rows, set.err = append(set.rows, roots.rows...), roots.err
+	return set
+}
+
 func (op *Operator) discoverAccountTeams(ctx context.Context, tx *storeTx, set lockSet, account string) lockSet {
 	if set.err != nil {
 		return set

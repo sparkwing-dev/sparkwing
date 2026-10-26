@@ -290,6 +290,7 @@ func TestGitHubVerifiedAdministratorCanReclaimInstallation(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_triggers(team,repository_id,pipeline,repository,installation_id,created_at,repo_key) VALUES ('b',42,'build','acme/repo',8,1,'gh:42')`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,installation_id,created_at,repo_key) VALUES ('b',42,70,'acme/repo',8,1,'gh:42')`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('prior-owner-1','first@example.test',1,1,1),('prior-owner-2','second@example.test',1,1,1),('prior-reader','reader@example.test',1,1,1),('prior-unverified','unverified@example.test',0,1,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','prior-owner-1','owner',1),('b','prior-owner-2','owner',1),('b','prior-reader','reader',1),('b','prior-unverified','owner',1)`)
 	row.Reclaim = true
@@ -315,7 +316,7 @@ func TestGitHubVerifiedAdministratorCanReclaimInstallation(t *testing.T) {
 		t.Fatalf("same team notified again: %+v %v", refreshed, err)
 	}
 	var remaining int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM github_app_triggers WHERE team='b' AND installation_id=8`).Scan(&remaining); err != nil || remaining != 0 {
+	if err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM github_app_triggers WHERE team='b') + (SELECT COUNT(*) FROM github_runner_bindings WHERE team='b')`).Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("former subscriptions=%d: %v", remaining, err)
 	}
 }

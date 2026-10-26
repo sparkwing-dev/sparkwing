@@ -747,17 +747,6 @@ CREATE TABLE github_actions_exchanges (
     PRIMARY KEY (team, repository_key, run_id, run_attempt)
 );
 
-CREATE TABLE github_runner_bindings (
-    team TEXT NOT NULL REFERENCES teams(name),
-    repository_id BIGINT NOT NULL,
-    repository_owner_id BIGINT NOT NULL,
-    repository TEXT NOT NULL,
-    created_by TEXT NOT NULL DEFAULT '',
-    created_at BIGINT NOT NULL,
-    repo_key TEXT NOT NULL,
-    PRIMARY KEY (team, repository_id)
-);
-
 CREATE TABLE github_app_installations (
     connection_generation TEXT NOT NULL DEFAULT '',
     installation_id BIGINT NOT NULL PRIMARY KEY CHECK(installation_id > 0),
@@ -771,6 +760,20 @@ CREATE TABLE github_app_installations (
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
     UNIQUE(team,installation_id)
+);
+
+CREATE TABLE github_runner_bindings (
+    team TEXT NOT NULL REFERENCES teams(name),
+    repository_id BIGINT NOT NULL,
+    repository_owner_id BIGINT NOT NULL,
+    repository TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at BIGINT NOT NULL,
+    repo_key TEXT NOT NULL,
+    -- safety: consent given through an App installation ends with the team's hold on it; NULL only where the controller runs without the App.
+    installation_id BIGINT,
+    PRIMARY KEY (team, repository_id),
+    FOREIGN KEY(team,installation_id) REFERENCES github_app_installations(team,installation_id) ON DELETE CASCADE
 );
 
 CREATE TABLE github_app_triggers (
@@ -1732,6 +1735,7 @@ CREATE INDEX idx_payment_refunds_intent ON payment_refunds(payment_intent);
 CREATE INDEX idx_github_app_deliveries_received ON github_app_deliveries(received_at);
 
 CREATE INDEX idx_github_app_automation_installation ON github_app_automation(team,installation_id);
+CREATE INDEX idx_github_runner_bindings_installation ON github_runner_bindings(team,installation_id);
 
 CREATE INDEX idx_log_streams_unsealed ON log_streams(team,updated_at) WHERE sealed_at IS NULL;
 
