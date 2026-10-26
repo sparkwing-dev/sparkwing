@@ -341,14 +341,14 @@ type AcceptedExpansionRow struct {
 	Registration     runspec.SecretRegistration
 }
 
-// SourcePolicy keeps resume, retry, memo and coalescing authority distinct at reconciliation.
+// SourcePolicy keeps resume, retry and coalescing authority distinct at reconciliation.
+// A memo hit is not a source: it settles through the executing holder's start permit.
 type SourcePolicy string
 
 const (
 	SourceNone        SourcePolicy = "none"
 	SourceResume      SourcePolicy = "resume"
 	SourceManualRetry SourcePolicy = "manual_retry"
-	SourceMemo        SourcePolicy = "memo"
 	SourceCoalesced   SourcePolicy = "coalesced"
 )
 

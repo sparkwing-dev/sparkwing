@@ -122,7 +122,7 @@ func TestEngineMaterializeOnlyReturnsPrivateExecutionStateWithoutAward(t *testin
 	server, _ := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
 	engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json) VALUES ('a','run','job','pending',?,'declaration',?)`, []byte(`{"id":"job"}`), []byte(`{"retry":{"set":true,"value":2}}`))
-	got, err := server.ReconcileJob(t.Context(), owner, controllerwire.ReconcileRequest{Policy: "memo", MaterializeOnly: true})
+	got, err := server.ReconcileJob(t.Context(), owner, controllerwire.ReconcileRequest{Policy: "none", MaterializeOnly: true})
 	if err != nil || got.Kind != "dispatch" || got.Claim != nil || got.Job.SpecHash != "declaration" || got.Job.Execution.Retry.Value != 2 || got.Job.Attempt != 0 || string(got.Job.Spec) != `{"id":"job"}` {
 		t.Fatalf("materialization probe: %+v, %v", got, err)
 	}

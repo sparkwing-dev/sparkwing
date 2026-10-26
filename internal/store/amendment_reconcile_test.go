@@ -22,7 +22,7 @@ func TestReconcileMaterializeOnlyMissDoesNotAwardOrRelease(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: before.Ref, Actor: actor, Policy: runstate.SourceMemo, MaterializeOnly: true})
+			got, err := tenant.ReconcileNode(t.Context(), ReconcileRequest{Ref: before.Ref, Actor: actor, Policy: runstate.SourceNone, MaterializeOnly: true})
 			if err != nil || got.Kind != runstate.Dispatch || got.Claim != nil || len(got.Bearer) != 0 || !reflect.DeepEqual(got.Node, before) {
 				t.Fatalf("probe changed execution authority: %+v, %v", got, err)
 			}

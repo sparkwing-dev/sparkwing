@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -57,10 +56,7 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 			return result, blob.ErrDigestNotReadable
 		}
 		if record.Key.Scope.Ref != a.authority.Ref.Scope {
-			facts := record.RefFacts
-			if source.Kind != runstate.SourceMemo || !facts.DefaultBranchVerified || !facts.Scope.Verified || facts.AppDeliveryKey == "" || facts.SHA == "" || facts.Scope.Ref != a.authority.Ref.DefaultBranch || !slices.Contains(a.capability.Data.ReadRefs, facts.Scope.CapabilityScope()) {
-				return result, blob.ErrDigestNotReadable
-			}
+			return result, blob.ErrDigestNotReadable
 		}
 		members, err := records.readMembers(ctx, tx, record)
 		if err != nil {
@@ -70,12 +66,6 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 			kind   blob.Kind
 			digest blob.Digest
 		}{{key.Kind, record.Digest}}
-		if key.Kind == blob.KindMemo {
-			parts[0].kind = blob.KindOutput
-			if key.Name == "manifest" {
-				parts = nil
-			}
-		}
 		if record.ManifestDigest.Set {
 			parts = append(parts, struct {
 				kind   blob.Kind
@@ -173,14 +163,6 @@ func materializedKey(team Team, a blobActor, row runstate.NodeRow, kind blob.Kin
 func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobActor, target runstate.NodeRow, source runstate.MaterializeSource) ([]blob.RecordKey, error) {
 	if source.Kind == runstate.SourceCoalesced {
 		return nil, authorityError(apierr.Unavailable, "coalesced source read-edge authority is not configured")
-	}
-	if source.Kind == runstate.SourceMemo {
-		key := source.Record
-		var spec nodeproto.JobSpec
-		if json.Unmarshal(target.Spec, &spec) != nil || spec.Memo == nil || key.Team != string(team) || key.Kind != blob.KindMemo || key.Scope.Repo != a.authority.Repo || key.Scope.Pipeline != a.pipeline || runspec.NodeID(key.Scope.Job) != target.Ref.NodeID || !slices.Contains(a.capability.Data.ReadRefs, key.Scope.Ref.CapabilityScope()) || key.Name != "output" && key.Name != "manifest" {
-			return nil, blob.ErrDigestNotReadable
-		}
-		return []blob.RecordKey{key}, nil
 	}
 	ref, err := materializationRef(team, source)
 	if err != nil {

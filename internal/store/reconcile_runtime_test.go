@@ -74,9 +74,9 @@ func TestReconcileRechecksOwnerAndSourcePolicy(t *testing.T) {
 			case "kind":
 				request.Actor.Kind = runstate.ActorHolder
 			case "source_none":
-				request.Source = &runstate.MaterializeSource{Kind: runstate.SourceMemo}
+				request.Source = &runstate.MaterializeSource{Kind: runstate.SourceCoalesced}
 			case "source_mismatch":
-				request.Policy, request.Source = runstate.SourceMemo, &runstate.MaterializeSource{Kind: runstate.SourceManualRetry}
+				request.Policy, request.Source = runstate.SourceCoalesced, &runstate.MaterializeSource{Kind: runstate.SourceManualRetry}
 			case "policy":
 				request.Policy = "any"
 			}

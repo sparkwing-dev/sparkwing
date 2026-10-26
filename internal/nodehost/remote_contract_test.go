@@ -60,8 +60,8 @@ func TestRemoteReconciliationRetainsPrivateAwardAndExecutionState(t *testing.T) 
 			Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "holder", Generation: 4},
 		},
 	}}
-	source := &runstate.MaterializeSource{Kind: runstate.SourceMemo, Source: runspec.AttemptIdentity{RunID: "previous", NodeID: "source", Attempt: 7, Generation: 2}}
-	request := store.ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Policy: runstate.SourceMemo, Source: source}
+	source := &runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Source: runspec.AttemptIdentity{RunID: "previous", NodeID: "source", Attempt: 7, Generation: 2}}
+	request := store.ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Policy: runstate.SourceManualRetry, Source: source}
 	got, err := (&RemoteOwnerStore{Controller: f}).ReconcileNode(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestRemoteReconciliationRetainsPrivateAwardAndExecutionState(t *testing.T) 
 	if string(got.Bearer) != "private-award" || got.Node.OwnerCapabilityPrefix != "owner-prefix" || got.Node.ApplicationRetries != 2 || got.Node.Disruptions != 1 || got.Node.StateSeq != 11 || got.Node.ExpansionDigest != "accepted-body" || got.Node.Attempt != 0 || !reflect.DeepEqual(got.Node.Execution, job.Execution) || !bytes.Equal(got.Node.Spec, job.Spec) {
 		t.Fatalf("lost execution state: %+v", got)
 	}
-	if f.run != "run" || f.job != "job" || f.request.Source.Attempt != source.Source || f.request.Policy != "memo" {
+	if f.run != "run" || f.job != "job" || f.request.Source.Attempt != source.Source || f.request.Policy != "manual_retry" {
 		t.Fatal("changed reconciliation request")
 	}
 	originalResponse := f.reconcile

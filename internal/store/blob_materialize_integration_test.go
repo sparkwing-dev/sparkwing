@@ -135,7 +135,7 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 		return
 	}
 
-	if err != nil || result.Kind != runstate.Materialize || result.Node.Outcome != runstate.NodeMemoized || result.Node.Attempt != 0 || result.Node.OutputRecord == nil || result.Node.ManifestRecord == nil {
+	if err != nil || result.Kind != runstate.Materialize || result.Node.Outcome != runstate.NodeSuccess || result.Node.Attempt != 0 || result.Node.OutputRecord == nil || result.Node.ManifestRecord == nil {
 		t.Fatalf("controller materialization: %+v: %v", result, err)
 	}
 	if _, err := s.DB().Exec("DELETE FROM runs WHERE team='a' AND id='run'"); err != nil {

@@ -129,7 +129,7 @@ func validateReconcileRequest(request ReconcileRequest) error {
 	if request.Ref.RunID == "" || request.Ref.NodeID == "" || request.Actor.Kind != runstate.ActorRunHost {
 		return authorityError(apierr.BadRequest, "reconciliation requires a job and run host")
 	}
-	if !slices.Contains([]runstate.SourcePolicy{runstate.SourceNone, runstate.SourceResume, runstate.SourceManualRetry, runstate.SourceMemo, runstate.SourceCoalesced}, request.Policy) {
+	if !slices.Contains([]runstate.SourcePolicy{runstate.SourceNone, runstate.SourceResume, runstate.SourceManualRetry, runstate.SourceCoalesced}, request.Policy) {
 		return authorityError(apierr.BadRequest, "unknown reconciliation source policy")
 	}
 	if request.Source != nil && (request.Policy == runstate.SourceNone || request.Source.Kind != request.Policy) {
@@ -145,9 +145,7 @@ func lockReconcileRunsTx(ctx context.Context, tx *storeTx, team Team, ref runspe
 		if err != nil {
 			return err
 		}
-		if source.Kind != runstate.SourceMemo {
-			ids = append(ids, string(sourceRef.RunID))
-		}
+		ids = append(ids, string(sourceRef.RunID))
 	}
 	slices.Sort(ids)
 	for _, id := range slices.Compact(ids) {

@@ -67,8 +67,9 @@ Outputs use the terminal result's committed record selector and verified blob
 bytes. Native hosts consume `StorageBinding`
 and `OutputRecords.ReadResult`.
 
-Memo materialization authorizes and copies output and manifest records in one
-transaction.
+A memo hit copies output and manifest records in one transaction under the
+executing job's own claim, which then settles the job as memoized. The
+coordinator never settles a memo.
 
 Dependency-cache keys use the declaration, platform and the first present
 lockfile inside the workspace. The SDK's `DirCache.Key` and host share that
