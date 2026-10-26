@@ -44,8 +44,8 @@ type KubernetesBoundary struct {
 }
 
 func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBinding, job string) (CloudNodeReservation, CloudNetworkEvidence, error) {
-	if b.Kube == nil || b.Namespace == "" || b.Probe == nil || b.Clear == nil || binding.Team == "" || job == "" {
-		return CloudNodeReservation{}, CloudNetworkEvidence{}, errors.New("Cloud boundary requires Kubernetes, namespace, network probe, node cleanup, team and Job")
+	if b.Kube == nil || b.Namespace == "" || b.Probe == nil || b.Clear == nil || binding.Team == "" || binding.RunID == "" || job == "" {
+		return CloudNodeReservation{}, CloudNetworkEvidence{}, errors.New("Cloud boundary requires Kubernetes, namespace, network probe, node cleanup, team, run and Job")
 	}
 	if _, err := cloudDeadline(time.Now(), binding); err != nil {
 		return CloudNodeReservation{}, CloudNetworkEvidence{}, err
@@ -90,6 +90,10 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 	if err := b.verifyNodeTeam(ctx, &node, team); err != nil {
 		return CloudNodeReservation{}, err
 	}
+	run := runNodeValue(b.Namespace, binding.RunID)
+	if (node.Labels[usedTeamLabel] != "" || node.Labels[usedRunLabel] != "") && node.Labels[usedRunLabel] != run {
+		return CloudNodeReservation{}, ErrNoDedicatedNode
+	}
 	// safety: replay must validate the binding too, even when quarantine could not persist.
 	if reservationEvidence(&node) {
 		held, recorded, ok := nodeReservation(&node)
@@ -117,6 +121,7 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 		node.Annotations = map[string]string{}
 	}
 	node.Labels[usedTeamLabel] = TeamNodeValue(b.Namespace, team)
+	node.Labels[usedRunLabel] = run
 	node.Annotations[reservationAnnotation] = string(raw)
 	node.Annotations[reservationNamespaceAnnotation] = b.Namespace
 	node.Annotations[bindingAnnotation] = string(bindingJSON)

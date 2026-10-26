@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -495,5 +496,78 @@ func TestBoundarySkipsErasedReservationIdentity(t *testing.T) {
 				t.Fatalf("suspect node accepted placement: %v", err)
 			}
 		})
+	}
+}
+
+// A warm Cloud node serves only the run that first used it: that run's later
+// jobs may reuse it, while another run of the same team, a child run included,
+// never does. A used node that lacks the run label is refused.
+func TestBoundaryReusesAWarmNodeOnlyWithinItsRun(t *testing.T) {
+	b, kube := boundaryFixture()
+	r, _, err := b.Reserve(t.Context(), boundaryBinding("team"), "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = b.Release(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	r, _, err = b.Reserve(t.Context(), boundaryBinding("team"), "second")
+	if err != nil {
+		t.Fatalf("the same run's next job refused its warm node: %v", err)
+	}
+	if err = b.Release(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	other := boundaryBinding("team")
+	other.RunID = "child-run"
+	if _, _, err = b.Reserve(t.Context(), other, "foreign"); !errors.Is(err, ErrNoDedicatedNode) {
+		t.Fatalf("another run took a used node: %v", err)
+	}
+	node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(node.Labels, usedRunLabel)
+	if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = b.Reserve(t.Context(), boundaryBinding("team"), "third"); !errors.Is(err, ErrNoDedicatedNode) {
+		t.Fatalf("a used node without its run label was reused: %v", err)
+	}
+}
+
+// A capacity request selects only an unused node or its own run's node, so it
+// never parks on another run's warm node where reservation would refuse it.
+func TestCapacityRequestAvoidsOtherRunsNodes(t *testing.T) {
+	pod, err := capacityPod(CloudJobConfig{Namespace: "cloud", CPUCeiling: 2, MemoryCeiling: 8 << 30}, capacityDemand{Binding: boundaryBinding("team"), CPUCores: 1, Memory: 1 << 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	matches := func(labels map[string]string) bool {
+		for _, term := range terms {
+			ok := true
+			for _, r := range term.MatchExpressions {
+				value, has := labels[r.Key]
+				switch r.Operator {
+				case corev1.NodeSelectorOpDoesNotExist:
+					ok = ok && !has
+				case corev1.NodeSelectorOpIn:
+					ok = ok && has && slices.Contains(r.Values, value)
+				default:
+					t.Fatalf("unexpected operator %s", r.Operator)
+				}
+			}
+			if ok {
+				return true
+			}
+		}
+		return false
+	}
+	if !matches(map[string]string{}) || !matches(map[string]string{usedRunLabel: runNodeValue("cloud", "run")}) {
+		t.Fatal("capacity request refused a fresh node or its own run's node")
+	}
+	if matches(map[string]string{usedRunLabel: runNodeValue("cloud", "other-run")}) {
+		t.Fatal("capacity request selected another run's node")
 	}
 }

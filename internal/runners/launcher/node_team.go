@@ -2,6 +2,8 @@ package launcher
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 
@@ -10,9 +12,21 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-const usedTeamLabel = "node-restriction.kubernetes.io/sparkwing-used-team"
+const (
+	usedTeamLabel = "node-restriction.kubernetes.io/sparkwing-used-team"
+	// usedRunLabel records the one run a node may serve: a job of another run
+	// must never find state an earlier run's job left behind, even within a team.
+	usedRunLabel = "node-restriction.kubernetes.io/sparkwing-used-run"
+)
+
+func runNodeValue(namespace string, run runspec.RunID) string {
+	sum := sha256.Sum256([]byte(namespace + "/" + string(run)))
+	return "run-" + hex.EncodeToString(sum[:20])
+}
 
 var (
 	nodeClaims = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}

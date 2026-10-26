@@ -69,6 +69,12 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 		},
 		Spec: corev1.PodSpec{
 			Tolerations: teamTolerations(cfg.Namespace, b.Team), NodeSelector: map[string]string{TeamNodeLabel: TeamNodeValue(cfg.Namespace, b.Team)},
+			// safety: a request that fit on another run's warm node would hold it without ever
+			// being placed there, and Karpenter would add no node for it.
+			Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpDoesNotExist}}},
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{runNodeValue(cfg.Namespace, b.RunID)}}}},
+			}}}},
 			ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: ptr(int64(1)),
 			SecurityContext:               probePodSecurity(),

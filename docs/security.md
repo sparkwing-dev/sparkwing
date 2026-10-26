@@ -213,6 +213,13 @@ trusted, to let them write the shared verified scope. A verified default-branch
 run reads only cache records that carry default-branch evidence, including in
 its own ref scope.
 
+Each Sparkwing Cloud node serves one team and one run. Later jobs of the same
+run may reuse a warm node; every other run, a child run included, gets a node no
+other run has used, so nothing one run's job leaves on a node reaches another
+run. A node's team and run are recorded in labels the node itself cannot
+change, and a used node missing either label is never reused. Cloud nodes may
+pull only Sparkwing's own images.
+
 Before a Cloud node runs a job, the launcher probes from a pod on that node
 that default-deny egress holds: the Kubernetes API, instance metadata, the Pod
 Identity agent, every DaemonSet port and every node's kubelet ports (10250 and

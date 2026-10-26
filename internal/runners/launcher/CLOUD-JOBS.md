@@ -220,7 +220,7 @@ The launcher's ClusterRole grants `update` and `patch` on every Node, and RBAC c
 narrow it. `resourceNames` needs names known at install, while Karpenter names
 nodes at launch, and RBAC has no label selectors or field restrictions. A
 ValidatingAdmissionPolicy on Node UPDATE by the launcher identity could confine
-it to team nodes and the reservation keys, taint, used-team label and cordon.
+it to team nodes and the reservation keys, taint, used-team and used-run labels and cordon.
 That policy is not built.
 
 Sync skips nodes reserved under another job namespace and logs each one. When
@@ -613,10 +613,14 @@ the rationale.
 team NoSchedule taint key. Enable Node authorizer and NodeRestriction. Reservation
 checks the node's owning NodeClaim UID, status node name and provider ID, plus
 that claim's owning NodePool UID and protected template label. Both must match
-the award's team value. A second protected label,
-`node-restriction.kubernetes.io/sparkwing-used-team`, records first use and is
-never cleared. Neither reservation cleanup nor a NodePool template change can
-move a used node to another team. No LimitRange read permission is needed.
+the award's team value. Two more protected labels,
+`node-restriction.kubernetes.io/sparkwing-used-team` and
+`node-restriction.kubernetes.io/sparkwing-used-run`, record first use and are
+never cleared. A warm node is reused only by later jobs of the same run; a child
+run is another run and gets its own node. A used node missing either label is
+refused. Neither reservation cleanup nor a NodePool template change can move a
+used node to another team or run; Karpenter consolidation removes nodes a
+finished run leaves empty. No LimitRange read permission is needed.
 
 The launcher rereads its private agent-token file for every controller request.
 A missing, unreadable or empty rotated file fails the request. The launcher does
