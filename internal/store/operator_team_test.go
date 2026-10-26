@@ -34,3 +34,24 @@ func TestOperatorTeamAdminOriginCannotMintIntoExistingTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The first administrator of an operator-created team holds team.admin like any
+// other admin token, so it has the same 30-day ceiling and is rotated to renew.
+func TestOperatorTeamAdminExpiresLikeOtherAdminTokens(t *testing.T) {
+	s := authorityStore(t)
+	spec := bootstrapSpec(sha256.Sum256([]byte(t.Name())))
+	if _, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	operator, err := s.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(spec.Seed)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := s.AsOperator().CreateOperatorTeam(t.Context(), capability.Authorized{Principal: operator}, "expiring-team", "Expiring team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := s.now().Add(adminTokenLifetime); issued.Capability.ExpiresAt == nil || !issued.Capability.ExpiresAt.Equal(want) {
+		t.Fatalf("operator team admin expiry = %v, want %v", issued.Capability.ExpiresAt, want)
+	}
+}

@@ -46,10 +46,11 @@ func (o *Operator) CreateOperatorTeam(ctx context.Context, a capability.Authoriz
 		for _, scope := range ScopesForRole(RoleOwner) {
 			grants = append(grants, capability.Grant(scope))
 		}
+		expires := tx.now(ctx).Add(adminTokenLifetime)
 		issued, err = o.s.issue(ctx, tx, capability.IssueRequest{Kind: capability.Delegate, Provision: &capability.ProvisionSpec{
 			Kind: capability.ProvisionTeamAdmin, Authority: &p.Authority, ConsoleProof: capability.ProofForConsole(p),
 			Team: slug, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: account},
-			Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},
+			Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: &expires,
 		}})
 		return err
 	})

@@ -26,8 +26,9 @@ One transaction creates the team, a dedicated account without a provider
 identity, its owner membership, the first team-admin capability and a
 `team.created` audit record naming the operator. The credential has the owner's
 team permissions and no deployment permissions. Its membership and revocation
-remain live authorization checks. Rotate and revoke it through the team token
-commands.
+remain live authorization checks. Like every token holding `team.admin`, it
+expires after 30 days. Rotate it before then, or revoke it, through the team
+token commands; an expired one cannot be rotated.
 
 JSON returns `team`, `account_id`, `capability`, `prefix` and `grants`.
 Plain and pretty output print the capability once. Store that credential in

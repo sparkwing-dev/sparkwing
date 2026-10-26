@@ -119,7 +119,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		if tx.rotatingRoot != nil {
 			return checkMemberProvision(ctx, tx, spec, p)
 		}
-		if !deployment || tx.createdTeam == nil || spec.Team != string(tx.createdTeam.Slug) || spec.Subject != (capability.Subject{Kind: capability.SubjectAccount, ID: tx.createdTeam.CreatedBy}) || spec.Metered || spec.ExpiresAt != nil || len(spec.ReservedPools) != 0 || spec.Repositories != nil || spec.Binding != (capability.Binding{Kind: capability.BindingNone}) || spec.Data != nil || spec.RegistrationID != "" {
+		if !deployment || tx.createdTeam == nil || spec.Team != string(tx.createdTeam.Slug) || spec.Subject != (capability.Subject{Kind: capability.SubjectAccount, ID: tx.createdTeam.CreatedBy}) || spec.Metered || spec.ExpiresAt == nil || spec.ExpiresAt.After(tx.now(ctx).Add(adminTokenLifetime)) || len(spec.ReservedPools) != 0 || spec.Repositories != nil || spec.Binding != (capability.Binding{Kind: capability.BindingNone}) || spec.Data != nil || spec.RegistrationID != "" {
 			return bindingRefusal()
 		}
 		allowed := ScopesForRole(RoleOwner)
