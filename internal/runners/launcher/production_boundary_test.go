@@ -415,4 +415,3 @@ func TestKubeletTargetsExceptOnlyTheOwnNodesAuthenticatedPort(t *testing.T) {
 		t.Errorf("own node with its kubelet on a nonstandard port = %v", got)
 	}
 }
-
