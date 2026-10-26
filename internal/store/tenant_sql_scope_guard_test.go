@@ -93,7 +93,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).reconcilePaymentStateTx":   "the payment owner resolves the payer by mode and provider payment identity before settling its normalized state",
 	"(*Operator).paymentTeamTx":             "a provider payment identity is resolved to the checkout or refill that took it before its team is known",
 	"(*Operator).CreditLedgerTotals":        "the deployment credit sampler totals every team's ledger in one snapshot",
-	"(*Operator).DueRefills":                "the elected refill worker lists teams with refill on and open refills, then opens or resumes each under that team's lock",
+	"(*Operator).EachDueRefill":             "the elected refill worker lists teams with refill on and open refills, then authorizes each under that team's lock immediately before its call",
 	"(*Operator).applyCheckoutPaymentTx":    "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 
 	"(*Operator).DueCardRefunds":            "the payment worker lists every team's queued refunds in one pass",
