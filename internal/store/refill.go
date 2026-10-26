@@ -302,7 +302,7 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	}
 	if closed != "" {
 		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?
-		    WHERE team = ? AND id = ? AND payment_id = ''`, now.UnixNano(), closed, string(team), r.ID); err != nil {
+		    WHERE team = ? AND payment_mode = ? AND id = ? AND payment_id = ''`, now.UnixNano(), closed, string(team), mode, r.ID); err != nil {
 			return nil, err
 		}
 		if st, err = spendStandingTx(ctx, tx, team, now); err != nil {

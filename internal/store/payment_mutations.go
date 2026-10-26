@@ -191,8 +191,12 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, setup strin
 	if saved == 0 {
 		return errStaleCardSetup
 	}
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0
-	    WHERE team = ? AND refill_blocked = 1 AND opened_at < ?`, string(team), addedAt); err != nil {
+	    WHERE team = ? AND payment_mode = ? AND refill_blocked = 1 AND opened_at < ?`, string(team), mode, addedAt); err != nil {
 		return err
 	}
 	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(setup), Operation: businessEventCardAdded}); err != nil {
