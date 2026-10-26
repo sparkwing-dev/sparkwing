@@ -69,7 +69,7 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 			return err
 		}
 		page = capability.BillingPage{Kind: kind, Team: string(t.team), ExpiresAt: tx.now(ctx).Add(billingPageLife)}
-		if err := tx.QueryRowContext(ctx, `SELECT t.card_customer,a.email FROM teams t JOIN accounts a ON a.id=? WHERE t.name=?`, p.Capability.Subject.ID, t.team).Scan(&page.Customer, &page.Email); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT card_customer FROM teams WHERE name=?`, t.team).Scan(&page.Customer); err != nil {
 			return err
 		}
 		switch kind {

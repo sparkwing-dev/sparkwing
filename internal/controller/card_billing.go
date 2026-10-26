@@ -2,11 +2,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"html"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -31,6 +33,32 @@ func (s *Server) handleTeamBillingCard(w http.ResponseWriter, r *http.Request, a
 		return err
 	}
 	return s.openBillingPage(w, r, a, capability.BillingPageCard, 0)
+}
+
+func (s *Server) handleTeamBillingPortal(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if err := emptyBillingBody(r); err != nil {
+		return err
+	}
+	if s.checkout == nil {
+		return &apierr.Error{Code: apierr.Unavailable, Message: "this controller opens no payment pages", Details: map[string]any{"reason": checkoutUnavailableCode}}
+	}
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
+	}
+	spend, err := t.SpendStanding(r.Context())
+	if err != nil {
+		return engineLookupError(err)
+	}
+	if spend.Card.Customer == "" {
+		return &apierr.Error{Code: apierr.Conflict, Message: store.ErrNoCard.Error(), Details: map[string]any{"reason": noCardCode}}
+	}
+	url, err := s.checkout.portal(r.Context(), s.paymentDeployment, a.Target.Team, spend.Card.Customer)
+	if err != nil {
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the card page could not be opened; try again"}, err)
+	}
+	writeJSON(w, http.StatusOK, hostedPageJSON{URL: url})
+	return nil
 }
 
 type teamRefillReq struct {
@@ -71,14 +99,14 @@ func (s *Server) reportPaymentSettlement(ctx context.Context, settled store.Paym
 			append(attrs, "alert", cardPaymentRefusedAlert, "reason", settled.Refused)...)
 		if settled.RefillFailed != "" {
 			s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill was refused",
-				"We queued a full refund for an automatic refill because the card cannot pay for this team ("+settled.Refused+"). "+
-					"This refill did not add credits. Check your saved card or use Add funds to keep Cloud work funded:", s.billingPageURL())
+				"We queued a full refund for an automatic refill because the card issuer reported possible fraud on it ("+settled.Refused+"). "+
+					"This refill did not add credits, and Cloud work is held; see the billing page:", s.billingPageURL())
 		}
 	case settled.RefillFailed != "":
 		s.logger.Warn("billing alert: an automatic refill failed", append(attrs, "alert", "refill_failed", "decline_code", settled.RefillFailed)...)
 		s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill failed",
 			"We could not charge your card for an automatic refill ("+settled.RefillFailed+"). "+
-				"Refills stop until you change the saved card or Add funds succeeds; Cloud work stops when the credits run out:", s.billingPageURL())
+				"Update your card with Manage card on the billing page; refills stop until Add funds succeeds, and Cloud work stops when the credits run out:", s.billingPageURL())
 	case settled.Granted:
 		s.logger.Info("payment granted", append(attrs, "grant", settled.GrantID, "amount_micro", settled.AmountMicro)...)
 	}

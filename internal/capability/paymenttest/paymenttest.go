@@ -21,19 +21,24 @@ func (p Provider) RoundTrip(r *http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 }
 
-// SettledCheckout adds the payment intent and charge a paid checkout reads, with the charge's 3-D Secure result; an empty result reports none.
-func (p Provider) SettledCheckout(paymentIntent string, live bool, threeDSecure string) Provider {
-	return p.Charge(paymentIntent, live, threeDSecure, "fp_ch_"+strings.TrimPrefix(paymentIntent, "pi_"))
-}
+// Card details every fixture charge carries, as Stripe sends them; Sparkwing must store none of them.
+const (
+	CardFingerprint = "fpSentinelCard"
+	CardBrand       = "brandsentinel"
+	CardLast4       = "4931"
+	CardMethod      = "pm_sentinel_card"
+	PayerEmail      = "payer-sentinel@example.test"
+)
 
-// Charge adds a payment intent and its charge ch_<intent without pi_>, paid by the card fingerprint.
-func (p Provider) Charge(paymentIntent string, live bool, threeDSecure, fingerprint string) Provider {
+// SettledCheckout adds a payment intent and its charge ch_<intent without pi_>, with the charge's 3-D Secure result; an empty result reports none.
+func (p Provider) SettledCheckout(paymentIntent string, live bool, threeDSecure string) Provider {
 	charge := "ch_" + strings.TrimPrefix(paymentIntent, "pi_")
-	p["/v1/payment_intents/"+paymentIntent] = fmt.Sprintf(`{"id":%q,"object":"payment_intent","livemode":%t,"latest_charge":%q}`, paymentIntent, live, charge)
+	p["/v1/payment_intents/"+paymentIntent] = fmt.Sprintf(`{"id":%q,"object":"payment_intent","livemode":%t,"latest_charge":%q,"payment_method":%q,"receipt_email":%q}`, paymentIntent, live, charge, CardMethod, PayerEmail)
 	secure := "null"
 	if threeDSecure != "" {
 		secure = fmt.Sprintf(`{"result":%q}`, threeDSecure)
 	}
-	p["/v1/charges/"+charge] = fmt.Sprintf(`{"id":%q,"object":"charge","livemode":%t,"payment_intent":%q,"payment_method_details":{"card":{"fingerprint":%q,"three_d_secure":%s}}}`, charge, live, paymentIntent, fingerprint, secure)
+	p["/v1/charges/"+charge] = fmt.Sprintf(`{"id":%q,"object":"charge","livemode":%t,"payment_intent":%q,"payment_method":%q,"billing_details":{"email":%q},"payment_method_details":{"card":{"brand":%q,"last4":%q,"fingerprint":%q,"three_d_secure":%s}}}`,
+		charge, live, paymentIntent, CardMethod, PayerEmail, CardBrand, CardLast4, CardFingerprint, secure)
 	return p
 }

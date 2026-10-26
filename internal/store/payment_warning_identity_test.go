@@ -11,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func TestPaymentWarningCannotChangePaymentOrCardProperty(t *testing.T) {
+func TestPaymentWarningCannotChangePaymentProperty(t *testing.T) {
 	s, event := paymentFixture(t, capability.PaymentTest)
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)
@@ -25,7 +25,7 @@ func TestPaymentWarningCannotChangePaymentOrCardProperty(t *testing.T) {
 	index := 0
 	property := func(seed uint64) bool {
 		index++
-		warning := paymentWarning{WarningID: fmt.Sprintf("warning-%d-%x", index, seed), PaymentIntent: event.PaymentID, Fingerprint: fmt.Sprintf("card-%x", seed), Actionable: true}
+		warning := paymentWarning{WarningID: fmt.Sprintf("warning-%d-%x", index, seed), PaymentIntent: event.PaymentID, Actionable: true}
 		owner, stranger := Team("a"), Team("b")
 		if seed&1 != 0 {
 			warning.PaymentIntent, owner, stranger = other.PaymentID, stranger, owner
@@ -35,21 +35,14 @@ func TestPaymentWarningCannotChangePaymentOrCardProperty(t *testing.T) {
 			t.Logf("first warning: %q, %v", team, err)
 			return false
 		}
-		for _, mutate := range []func(*paymentWarning){
-			func(w *paymentWarning) {
-				w.PaymentIntent = other.PaymentID
-				if owner == "b" {
-					w.PaymentIntent = event.PaymentID
-				}
-			},
-			func(w *paymentWarning) { w.Fingerprint += "-other" },
-		} {
-			changed := warning
-			mutate(&changed)
-			if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), changed, now); !errors.Is(err, ErrCreditGrantConflict) {
-				t.Logf("changed warning accepted: %+v, %v", changed, err)
-				return false
-			}
+		changed := warning
+		changed.PaymentIntent = other.PaymentID
+		if owner == "b" {
+			changed.PaymentIntent = event.PaymentID
+		}
+		if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), changed, now); !errors.Is(err, ErrCreditGrantConflict) {
+			t.Logf("changed warning accepted: %+v, %v", changed, err)
+			return false
 		}
 		var foreign int
 		if err := s.db.QueryRow(`SELECT COUNT(*) FROM credit_freezes WHERE team=? AND reason=?`, stranger, "early fraud warning "+warning.WarningID).Scan(&foreign); err != nil || foreign != 0 {
@@ -73,7 +66,7 @@ func TestPaymentWarningHoldAndAuditRollbackAndReplayAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := blobAccountingDiskStore(t, s)
-	warning := paymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Fingerprint: "card", Actionable: true}
+	warning := paymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: true}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_warning_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); err == nil {
 		t.Fatal("warning committed without its audit")

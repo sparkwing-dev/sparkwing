@@ -171,6 +171,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `POST` | `/api/v1/team/billing/checkout` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/team/billing/standing-request` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/team/billing/card` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/team/billing/portal` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `PUT` | `/api/v1/team/billing/refill` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `DELETE` | `/api/v1/team/members/{account}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `selfOrTeamAdmin` / `credential` |
 | `GET` | `/api/v1/overflow` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |

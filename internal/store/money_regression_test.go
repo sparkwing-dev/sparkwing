@@ -11,8 +11,8 @@ import (
 
 func TestDeletionRetainsFailedRefundAfterCheckoutExpiry(t *testing.T) {
 	s, _, now := providerPaymentFixture(t)
-	rewriteSchemaExec(t, s.db, `INSERT INTO payment_cards(fingerprint,first_team,payment_intent,pinned_at) VALUES ('pinned','b','original',1)`)
-	event := capability.PaymentEvent{EventID: "refused", CheckoutID: "provider-session", PaymentID: "payment", Currency: "usd", AmountMinor: 100, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid, Fingerprint: "pinned"}
+	rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings(payment_mode,warning_id,payment_intent,actionable,created_at) VALUES ('test','issfr_refused','payment',1,1)`)
+	event := capability.PaymentEvent{EventID: "refused", CheckoutID: "provider-session", PaymentID: "payment", Currency: "usd", AmountMinor: 100, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid}
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)
 	}

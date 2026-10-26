@@ -16,20 +16,17 @@ CREATE TABLE teams (
     billing_trust_reason TEXT NOT NULL DEFAULT '',
     billing_trust TEXT NOT NULL DEFAULT '' CHECK(billing_trust IN ('','granted','revoked')),
     billing_trust_by TEXT NOT NULL DEFAULT '',
+    -- safety: Stripe holds every card detail; a team keeps only its customer and when a card setup last completed.
     card_customer TEXT NOT NULL DEFAULT '',
-    card_payment_method TEXT NOT NULL DEFAULT '',
-    card_fingerprint TEXT NOT NULL DEFAULT '',
-    card_brand TEXT NOT NULL DEFAULT '',
     card_added_at BIGINT NOT NULL DEFAULT 0,
-    card_last4 TEXT NOT NULL DEFAULT '',
     refill_enabled BIGINT NOT NULL DEFAULT 0 CHECK(refill_enabled IN (0,1)),
     refill_threshold_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_threshold_cents >= 0),
     refill_amount_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_amount_cents = 0 OR refill_amount_cents >= 1000),
     refill_week_limit_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_week_limit_cents >= 0),
     refill_month_limit_cents BIGINT NOT NULL DEFAULT 0 CHECK(refill_month_limit_cents >= 0),
     next_run_number BIGINT NOT NULL DEFAULT 1 CHECK(next_run_number > 0),
-    CHECK((card_payment_method = '') = (card_fingerprint = '') AND (card_payment_method = '') = (card_customer = '')),
-    CHECK(refill_enabled = 0 OR (refill_amount_cents >= 1000 AND card_payment_method <> ''))
+    CHECK((card_added_at = 0) = (card_customer = '')),
+    CHECK(refill_enabled = 0 OR (refill_amount_cents >= 1000 AND card_added_at <> 0))
 );
 
 CREATE TABLE claim_awards (
@@ -916,11 +913,7 @@ CREATE TABLE credit_checkouts (
     liability_shift INTEGER CHECK(liability_shift IN (0,1)),
     kind TEXT NOT NULL DEFAULT 'checkout' CHECK(kind IN ('checkout','refill')),
     customer_id TEXT NOT NULL DEFAULT '',
-    payment_method TEXT NOT NULL DEFAULT '',
-    receipt_email TEXT NOT NULL DEFAULT '',
     failure TEXT NOT NULL DEFAULT '',
-    -- Foreign-payment warnings retain the refused payer's hold after its card is forgotten.
-    warning_id TEXT NOT NULL DEFAULT '',
     refill_blocked INTEGER NOT NULL DEFAULT 0 CHECK(refill_blocked IN (0,1)),
     UNIQUE(team,id,payment_mode),
     UNIQUE(payment_mode,session_id),
@@ -1143,7 +1136,6 @@ CREATE TABLE payment_warnings (
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     warning_id TEXT NOT NULL,
     payment_intent TEXT NOT NULL,
-    fingerprint TEXT NOT NULL DEFAULT '',
     actionable BIGINT NOT NULL DEFAULT 1,
     created_at BIGINT NOT NULL,
     PRIMARY KEY(payment_mode,warning_id)
@@ -1161,10 +1153,6 @@ CREATE TABLE payment_setups (
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     intent_id TEXT NOT NULL CHECK(intent_id <> ''),
     customer_id TEXT NOT NULL CHECK(customer_id <> ''),
-    payment_method TEXT NOT NULL CHECK(payment_method <> ''),
-    fingerprint TEXT NOT NULL CHECK(fingerprint <> ''),
-    brand TEXT NOT NULL,
-    last4 TEXT NOT NULL,
     created_at BIGINT NOT NULL CHECK(created_at > 0),
     applied BIGINT NOT NULL DEFAULT 0 CHECK(applied IN (0,1)),
     PRIMARY KEY(payment_mode,intent_id)
@@ -1187,13 +1175,6 @@ CREATE TABLE console_refund_receipts (
     request_digest TEXT NOT NULL CHECK(length(request_digest)=64),
     result_json BLOB NOT NULL,
     PRIMARY KEY(team,receipt_id)
-);
-
-CREATE TABLE payment_cards (
-    fingerprint TEXT NOT NULL PRIMARY KEY,
-    first_team TEXT NOT NULL,
-    payment_intent TEXT NOT NULL,
-    pinned_at BIGINT NOT NULL
 );
 
 CREATE TABLE github_app_automation (
@@ -1747,7 +1728,6 @@ CREATE INDEX idx_triggers_team_pending ON triggers(team, status) WHERE status = 
 CREATE INDEX idx_payment_warnings_intent ON payment_warnings(payment_intent);
 CREATE INDEX idx_payment_refunds_intent ON payment_refunds(payment_intent);
 
-CREATE INDEX idx_payment_warnings_card ON payment_warnings(fingerprint);
 
 CREATE INDEX idx_github_app_deliveries_received ON github_app_deliveries(received_at);
 

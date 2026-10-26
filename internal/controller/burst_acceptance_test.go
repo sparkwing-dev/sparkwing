@@ -75,7 +75,7 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 	cloudWorker := strings.HasPrefix(placement, "cloud")
 	clock := &testClock{}
 	s, options, input, memberBearer := sourceUploadFixture(t, clock.option())
-	engineSQL(t, s.store, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='fp' WHERE name='a'`)
+	engineSQL(t, s.store, `UPDATE teams SET card_customer='customer',card_added_at=1 WHERE name='a'`)
 	engineSQL(t, s.store, `INSERT INTO credit_grants(team,id,kind,amount_micro,reference,created_by,created_at) VALUES ('a','funded-a','free',?,'test','operator',1)`, 1_500*store.MicroCreditsPerCent)
 	now := time.Now().UTC()
 	clock.pin(func() time.Time { return now })

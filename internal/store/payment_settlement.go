@@ -45,12 +45,8 @@ func (op *Operator) setPaymentModeTx(ctx context.Context, tx *storeTx, mode capa
 	if _, err := tx.execContext(ctx, `UPDATE team_storage SET storage_charged_through=? WHERE store IN ('cache','logs')`, tx.now(ctx).UnixNano()); err != nil {
 		return err
 	}
-	if _, err := tx.execContext(ctx, `UPDATE teams SET card_customer='',card_payment_method='',card_fingerprint='',
-	    card_brand='',card_last4='',card_added_at=0,refill_enabled=0`); err != nil {
-		return err
-	}
-	// Card pins are test-provider state; payment and ledger history stay intact.
-	if _, err := tx.execContext(ctx, `DELETE FROM payment_cards`); err != nil {
+	// Test customers do not exist in live mode; payment and ledger history stay intact.
+	if _, err := tx.execContext(ctx, `UPDATE teams SET card_customer='',card_added_at=0,refill_enabled=0`); err != nil {
 		return err
 	}
 	data, err := json.Marshal(mode)
@@ -237,25 +233,13 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		return err
 	}
 	event.LiabilityShift = shifted == 1
-	refusal, err := claimCardTx(ctx, tx, team, event.PaymentID, event.Fingerprint, now)
+	warned, err := paymentWarnedTx(ctx, tx, event.Mode, event.PaymentID)
 	if err != nil {
 		return err
 	}
-	if refusal.warning != "" && event.LiabilityShift {
-		var warnedPayment string
-		if err := tx.QueryRowContext(ctx, `SELECT payment_intent FROM payment_warnings WHERE payment_mode=? AND warning_id = ? AND actionable=1`, event.Mode, refusal.warning).Scan(&warnedPayment); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		// A warning can precede its paid event; protect that payment while keeping the team held.
-		if warnedPayment == event.PaymentID {
-			refusal, err = claimCardPinTx(ctx, tx, team, event.PaymentID, event.Fingerprint, now)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if refusal.reason != "" {
-		return refuseCheckoutTx(ctx, tx, event, checkout, refusal)
+	// A warning can precede its paid event; a liability-shifted payment keeps its credit while the warning holds the team.
+	if warned && !event.LiabilityShift {
+		return refuseCheckoutTx(ctx, tx, event, checkout, CardRefusedWarning)
 	}
 	id, err := newCreditID("paid")
 	if err != nil {
@@ -296,7 +280,7 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 	}
 	// A successful Add funds supersedes failures from earlier refill reservations, including delayed outcomes.
 	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?,
-	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team)
+	    refill_blocked = CASE WHEN `+refillOnCurrentCard+`
 	      AND NOT EXISTS (SELECT 1 FROM credit_checkouts recovery WHERE recovery.team = credit_checkouts.team AND recovery.payment_mode = credit_checkouts.payment_mode
 	        AND recovery.kind = 'checkout' AND recovery.paid_at > credit_checkouts.opened_at) THEN 1 ELSE 0 END
 	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), failure, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
@@ -305,27 +289,28 @@ func closeUnpaidTx(ctx context.Context, tx *storeTx, event capability.PaymentEve
 	return tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: auditActor{system: auditPaymentProvider}}, auditCheckout{CheckoutID: checkout.result.CheckoutID, Outcome: auditCheckoutOutcome(kind), PaymentMode: auditPaymentMode(event.Mode), EventID: digestAudit(event.EventID)})
 }
 
+// refillOnCurrentCard matches a refill opened since the team's current card setup, so a failure from before a newer
+// setup does not stop refills on the new card.
+const refillOnCurrentCard = `kind = 'refill' AND opened_at >= (SELECT card_added_at FROM teams WHERE name = credit_checkouts.team)`
+
 // safety: a refused Add funds or refill payment closes its row without a grant and is queued for a full refund, whose
-// settlement finds the team through the checkout's payment; a warned card also holds the team. Refusal removes the
-// matching saved card, and a refused refill records its failure, so later passes cannot charge it again.
-func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, refusal cardRefusal) error {
+// settlement finds the team through the checkout's payment and holds it for the warning. A refused refill records its
+// failure, so later passes do not charge again until the card changes or Add funds succeeds.
+func refuseCheckoutTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, checkout *paymentCheckout, reason string) error {
 	team, now := checkout.result.Team, tx.now(ctx)
-	checkout.result.Refused = refusal.reason
-	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?), failure = ?, warning_id=?,
-	    refill_blocked = CASE WHEN kind = 'refill' AND payment_method = (SELECT card_payment_method FROM teams WHERE name = credit_checkouts.team) THEN 1 ELSE 0 END
-	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), refusal.reason, refusal.warning, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+	checkout.result.Refused = reason
+	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = COALESCE(closed_at, ?), failure = ?,
+	    refill_blocked = CASE WHEN `+refillOnCurrentCard+` THEN 1 ELSE 0 END
+	    WHERE team = ? AND id = ? AND payment_mode = ?`, now.UnixNano(), reason, string(team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
 		return err
 	}
 	if checkout.kind == checkoutKindRefill {
-		checkout.result.RefillFailed = refusal.reason
-	}
-	if err := forgetTeamCardTx(ctx, tx, team, event.Fingerprint, refusal.reason, now); err != nil {
-		return err
+		checkout.result.RefillFailed = reason
 	}
 	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditPaymentProvider}, At: now}, auditCard{Reference: digestAudit(checkout.result.CheckoutID), Operation: businessEventCardRefused}); err != nil {
 		return err
 	}
-	return queueCardRefundTx(ctx, tx, team, event.PaymentID, event.AmountMinor, refusal.reason, now)
+	return queueCardRefundTx(ctx, tx, team, event.PaymentID, event.AmountMinor, reason, now)
 }
 
 func deploymentIDTx(ctx context.Context, tx *storeTx) (string, error) {

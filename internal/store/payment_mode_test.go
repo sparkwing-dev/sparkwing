@@ -48,7 +48,7 @@ func TestPaymentModeTestActivityCanSwitchToLive(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "refill":
-				rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='card',refill_enabled=1,refill_threshold_cents=1000,refill_amount_cents=1000 WHERE name='a'`)
+				rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='customer',card_added_at=1,refill_enabled=1,refill_threshold_cents=1000,refill_amount_cents=1000 WHERE name='a'`)
 				if err := s.inTx(t.Context(), func(tx *storeTx) error {
 					refill, err := dueRefillTx(t.Context(), tx, "a")
 					if err == nil && refill == nil {
@@ -243,16 +243,15 @@ func TestLiveCutoverExcludesTestStandingHoldsRefillsAndCards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='test-customer',card_payment_method='test-method',card_fingerprint='shared',refill_enabled=1,refill_threshold_cents=1000,refill_amount_cents=1000 WHERE name='a'`)
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at,customer_id,payment_method,kind,closed_at) VALUES ('test-open','a','test-open','test','usd',1000,?, ?,?,'test-customer','test-method','refill',1)`, 1000*MicroCreditsPerCent, now.UnixNano(), now.Add(time.Hour).UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at,customer_id,payment_method,kind,closed_at,failure,refill_blocked,payment_id) VALUES ('test-failed','a','test-failed','test','usd',1000,?, ?,?,'test-customer','test-method','refill',?,'declined',1,'test-payment')`, 1000*MicroCreditsPerCent, now.UnixNano(), now.Add(time.Hour).UnixNano(), now.UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO payment_cards(fingerprint,first_team,payment_intent,pinned_at) VALUES ('shared','b','test-payment',1)`)
-	rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings(payment_mode,warning_id,payment_intent,fingerprint,actionable,created_at) VALUES ('test','test-warning','test-payment','shared',1,1)`)
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='test-customer',card_added_at=1,refill_enabled=1,refill_threshold_cents=1000,refill_amount_cents=1000 WHERE name='a'`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at,customer_id,kind,closed_at) VALUES ('test-open','a','test-open','test','usd',1000,?, ?,?,'test-customer','refill',1)`, 1000*MicroCreditsPerCent, now.UnixNano(), now.Add(time.Hour).UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at,customer_id,kind,closed_at,failure,refill_blocked,payment_id) VALUES ('test-failed','a','test-failed','test','usd',1000,?, ?,?,'test-customer','refill',?,'declined',1,'test-payment')`, 1000*MicroCreditsPerCent, now.UnixNano(), now.Add(time.Hour).UnixNano(), now.UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings(payment_mode,warning_id,payment_intent,actionable,created_at) VALUES ('test','test-warning','test-payment',1,1)`)
 	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
 		t.Fatal(err)
 	}
 	standing, err := tenant.SpendStanding(t.Context())
-	if err != nil || standing.BalanceMicro != 0 || standing.Billing.Tier != "New" || standing.Billing.History.PaidMicro != 0 || !standing.Billing.History.FirstPaidAt.IsZero() || !standing.Billing.History.LastIncidentAt.IsZero() || standing.Billing.HoldCause != "" || standing.Card.PaymentMethod != "" || standing.Refill.Enabled || standing.Refill.Open || standing.Refill.DayCount != 0 || !standing.Refill.FailedAt.IsZero() {
+	if err != nil || standing.BalanceMicro != 0 || standing.Billing.Tier != "New" || standing.Billing.History.PaidMicro != 0 || !standing.Billing.History.FirstPaidAt.IsZero() || !standing.Billing.History.LastIncidentAt.IsZero() || standing.Billing.HoldCause != "" || !standing.Card.AddedAt.IsZero() || standing.Refill.Enabled || standing.Refill.Open || standing.Refill.DayCount != 0 || !standing.Refill.FailedAt.IsZero() {
 		t.Fatalf("live standing contains test activity: %+v: %v", standing, err)
 	}
 	freeze, err := tenant.CreditFreeze(t.Context())
@@ -263,7 +262,7 @@ func TestLiveCutoverExcludesTestStandingHoldsRefillsAndCards(t *testing.T) {
 		t.Fatalf("live release changed a test hold: %d: %v", released, err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		if err := saveCardTx(t.Context(), tx, "a", Card{Customer: "live-customer", PaymentMethod: "live-method", Fingerprint: "shared"}, auditActor{system: auditPaymentProvider}, now); err != nil {
+		if err := saveCardTx(t.Context(), tx, "a", Card{Customer: "live-customer"}, "seti_live", auditActor{system: auditPaymentProvider}, now); err != nil {
 			return err
 		}
 		return setRefillTx(t.Context(), tx, "a", RefillSettings{Enabled: true, ThresholdCents: 1000, AmountCents: 1000}, auditAccountActor("operator"))
@@ -289,7 +288,7 @@ func TestLiveCutoverRollsBackIfDeploymentPublicationFails(t *testing.T) {
 	if _, err := (&Tenant{s: s, team: "a"}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 1, Reference: "test", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='test-customer',card_payment_method='test-method',card_fingerprint='test-card' WHERE name='a'`)
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='test-customer',card_added_at=1 WHERE name='a'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO team_storage(team,store,updated_at,storage_charged_through) VALUES ('a','cache',1,7),('a','logs',1,7)`)
 	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, DefaultFreeTeamSlots, func() error { return context.Canceled }); err != context.Canceled {
 		t.Fatalf("publication failure=%v", err)

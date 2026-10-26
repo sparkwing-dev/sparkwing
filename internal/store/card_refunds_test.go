@@ -19,7 +19,7 @@ func cardFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 	if _, _, err := tenant.TestOnlySetBillingTrust(t.Context(), BillingTrustChange{Trust: billingTrustGranted, Actor: "console", Reason: "customer"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_1", PaymentMethod: "pm_1", Fingerprint: "fp_1", Brand: "visa", Last4: "4242"}, "billing", now); err != nil {
+	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_1"}, "billing", now); err != nil {
 		t.Fatal(err)
 	}
 	return s, tenant, now
@@ -52,7 +52,7 @@ func openRefill(t *testing.T, s *Store, team Team, cents int64, payment string) 
 func refillPaid(now time.Time, payment string, cents int64) capability.PaymentEvent {
 	e := providerPaymentEvent(now, capability.PaymentCardPaid)
 	e.EventID, e.PaymentID, e.ObjectID, e.AmountMinor = "paid-"+payment, payment, payment, cents
-	e.CustomerID, e.MethodID, e.Status, e.Fingerprint = "cus_1", "pm_1", "succeeded", "fp_1"
+	e.CustomerID, e.Status = "cus_1", "succeeded"
 	return e
 }
 
@@ -61,7 +61,7 @@ func queuedRefundFixture(t *testing.T, paidFirst bool) (*Store, *Tenant, time.Ti
 	s, tenant, now := cardFixture(t)
 	openRefill(t, s, "a", 1_000, "payment")
 	warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
-	warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
+	warning.AmountMinor, warning.Currency, warning.Actionable = 0, "", true
 	events := []capability.PaymentEvent{warning, refillPaid(now, "payment", 1_000)}
 	if paidFirst {
 		events[0], events[1] = events[1], events[0]
@@ -132,7 +132,7 @@ func TestPartialRefundThenWarningRefundFailureIsRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
-	warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
+	warning.AmountMinor, warning.Currency, warning.Actionable = 0, "", true
 	if _, err := s.settlePaymentFacts(ctx, warning); err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestAWarningBeforeItsRefillIsPaidQueuesNoEmptyRefund(t *testing.T) {
 	s, _, now := cardFixture(t)
 	openRefill(t, s, "a", 1_000, "payment")
 	warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
-	warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
+	warning.AmountMinor, warning.Currency, warning.Actionable = 0, "", true
 	if _, err := s.settlePaymentFacts(t.Context(), warning); err != nil {
 		t.Fatal(err)
 	}
@@ -376,9 +376,9 @@ func TestAWarningBeforeItsRefillIsPaidQueuesNoEmptyRefund(t *testing.T) {
 func TestALostDisputeOnARefusedPaymentSettles(t *testing.T) {
 	s, _, now := cardFixture(t)
 	openRefill(t, s, "a", 1_000, "payment")
-	rewriteSchemaExec(t, s.db, `INSERT INTO payment_cards(fingerprint,first_team,payment_intent,pinned_at) VALUES ('fp_1','b','pi_b',1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings(payment_mode,warning_id,payment_intent,actionable,created_at) VALUES ('test','issfr_refused','payment',1,1)`)
 	if got, err := s.settlePaymentFacts(t.Context(), refillPaid(now, "payment", 1_000)); err != nil || got.Refused == "" {
-		t.Fatalf("refill on a pinned card = %+v, %v", got, err)
+		t.Fatalf("refill named by an earlier warning = %+v, %v", got, err)
 	}
 	lost := providerPaymentEvent(now, capability.PaymentDisputeClosed)
 	lost.ObjectID, lost.Reason, lost.Status = "dp_lost", "fraudulent", "lost"

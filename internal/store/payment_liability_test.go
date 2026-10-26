@@ -10,7 +10,7 @@ import (
 
 func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 	s, event := paymentFixture(t, capability.PaymentTest)
-	event.LiabilityShift, event.ThreeDS, event.Fingerprint = true, "authenticated", "fp_protected"
+	event.LiabilityShift, event.ThreeDS = true, "authenticated"
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 	}
 	retainedBlob(t, s, "a", "a", StorageBytesPerGB, now)
 	retainedBill(t, s, lease)
-	warning := paymentWarning{WarningID: "protected", PaymentIntent: event.PaymentID, Fingerprint: event.Fingerprint, Actionable: true}
+	warning := paymentWarning{WarningID: "protected", PaymentIntent: event.PaymentID, Actionable: true}
 	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, now); err != nil {
 		t.Fatal(err)
 	}
@@ -57,28 +57,5 @@ func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 	now = now.Add(24 * time.Hour)
 	if billed := retainedBill(t, s, lease); len(billed.Charges) != 1 || billed.ChargedMicro != min(before, rate) {
 		t.Fatalf("released storage = %+v; want only the released day charged", billed)
-	}
-}
-
-func TestProtectedWarningCannotMoveACardToAnotherTeam(t *testing.T) {
-	s, event := paymentFixture(t, capability.PaymentTest)
-	event.Fingerprint, event.LiabilityShift = "fp_shared", true
-	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
-		t.Fatal(err)
-	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('other','b','other-session','test','usd',100,1000000,1,2)`)
-	other := event
-	other.EventID, other.CheckoutID, other.PaymentID = "other-event", "other-session", "other-payment"
-	warning := paymentWarning{WarningID: "other-warning", PaymentIntent: other.PaymentID, Fingerprint: other.Fingerprint, Actionable: true}
-	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); err != nil {
-		t.Fatal(err)
-	}
-	settlement, err := s.settlePaymentFacts(t.Context(), other)
-	if err != nil || settlement.Granted || settlement.Refused != CardRefusedPinned {
-		t.Fatalf("protected payment bypassed card pin: %+v: %v", settlement, err)
-	}
-	refunds, err := s.AsOperator().DueCardRefunds(t.Context())
-	if err != nil || len(refunds) != 1 || refunds[0].Team != "b" || refunds[0].PaymentIntent != other.PaymentID {
-		t.Fatalf("refused payment refunds = %+v: %v", refunds, err)
 	}
 }

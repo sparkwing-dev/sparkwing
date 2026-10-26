@@ -451,7 +451,7 @@ function CardPanel({ billing }: { billing: Billing }) {
     setBusy(true);
     setError("");
     try {
-      window.location.assign(await openCardPage());
+      window.location.assign(await openCardPage(!!billing.card));
     } catch (err) {
       setError(errorText(err));
       setBusy(false);
@@ -463,7 +463,8 @@ function CardPanel({ billing }: { billing: Billing }) {
       <div className="p-4 space-y-2 text-sm">
         {billing.card ? (
           <p>
-            {billing.card.brand} ending {billing.card.last4}
+            Your card is saved with Stripe. Stripe shows and changes it; Sparkwing
+            stores no card details.
           </p>
         ) : (
           <p className="text-[var(--muted)]">
@@ -478,7 +479,7 @@ function CardPanel({ billing }: { billing: Billing }) {
               disabled={busy}
               onClick={go}
             >
-              {billing.card ? "Replace card" : "Add a card"}
+              {billing.card ? "Manage card" : "Add a card"}
             </button>
           </div>
         ) : null}

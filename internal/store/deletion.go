@@ -477,9 +477,6 @@ func requireDeletionLeaseTx(ctx context.Context, tx *storeTx, team Team, holder,
 // Run dependents go first to avoid a large cascade; requirement sets follow
 // the work rows that reference them.
 func deleteTenantRowsTx(ctx context.Context, tx *storeTx, team Team) error {
-	if err := scrubTeamPaymentDataTx(ctx, tx, team); err != nil {
-		return err
-	}
 	tables := []string{"capabilities", "sessions"}
 	for _, table := range schemaTables {
 		if table.Owner == schemaTenant && !table.RetainOnTeamDeletion {
@@ -495,29 +492,6 @@ func deleteTenantRowsTx(ctx context.Context, tx *storeTx, team Team) error {
 		}
 	}
 	return nil
-}
-
-func scrubTeamPaymentDataTx(ctx context.Context, tx *storeTx, team Team) error {
-	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET receipt_email='', payment_method='' WHERE team=?`, team); err != nil {
-		return err
-	}
-	if _, err := tx.execContext(ctx, `DELETE FROM payment_setups WHERE EXISTS
-	    (SELECT 1 FROM payment_correlations c WHERE c.team=? AND c.payment_mode=payment_setups.payment_mode AND c.provider_id=payment_setups.intent_id)`, team); err != nil {
-		return err
-	}
-	// Event identity and financial facts survive; saved-card copies do not.
-	scrub := `json_remove(event_json, '$.MethodID', '$.Fingerprint', '$.Brand', '$.Last4')`
-	if tx.dialect == DialectPostgres {
-		scrub = `(event_json::jsonb - 'MethodID' - 'Fingerprint' - 'Brand' - 'Last4')::text`
-	}
-	_, err := tx.execContext(ctx, `UPDATE payment_events SET event_json=`+scrub+` WHERE team=? OR EXISTS
-	    (SELECT 1 FROM payment_correlations c WHERE c.team=? AND c.payment_mode=payment_events.payment_mode AND c.provider_id=payment_events.object_id)`, team, team)
-	if err != nil {
-		return err
-	}
-	_, err = tx.execContext(ctx, `UPDATE payment_states SET outcome_json=`+strings.ReplaceAll(scrub, "event_json", "outcome_json")+` WHERE EXISTS
-	    (SELECT 1 FROM credit_checkouts c WHERE c.team=? AND c.payment_mode=payment_states.payment_mode AND c.payment_id=payment_states.payment_id)`, team)
-	return err
 }
 
 // PurgeTeam removes operational data and clears the team to a tombstone.
@@ -553,7 +527,7 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, rech
 		if _, err := tx.execContext(ctx, `UPDATE teams SET display_name='', created_by='', members_can_add_machines=1,
 		    claim_ranking='', max_children_per_root=50, claim_award_ordinal=0,
 		    billing_trust_at=0, billing_trust_reason='', billing_trust='', billing_trust_by='',
-		    card_customer='', card_payment_method='', card_fingerprint='', card_brand='', card_last4='', card_added_at=0,
+		    card_customer='', card_added_at=0,
 		    refill_enabled=0, refill_threshold_cents=0, refill_amount_cents=0, refill_week_limit_cents=0, refill_month_limit_cents=0,
 		    next_run_number=1 WHERE name = ?`, string(team)); err != nil {
 			return err

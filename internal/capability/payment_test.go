@@ -61,7 +61,7 @@ func TestPaymentProof(t *testing.T) {
 			}
 			want := PaymentEvent{EventID: "evt_fixture", CheckoutID: "cs_fixture", PaymentID: "pi_fixture", Currency: "usd", AmountMinor: 1200, Mode: PaymentTest, Kind: tc.want}
 			if tc.want == PaymentCheckoutPaid {
-				want.ThreeDS, want.Fingerprint = "authenticated", "fp_ch_fixture"
+				want.ThreeDS = "authenticated"
 				want.LiabilityShift = true
 			}
 			if proof == nil || proof.Event() != want {
@@ -147,7 +147,7 @@ func (h *paymentHeaders) RoundTrip(r *http.Request) (*http.Response, error) {
 	return h.next.RoundTrip(r)
 }
 
-func TestPaidCheckoutReadsThreeDSecureAndCardFromTheSettledCharge(t *testing.T) {
+func TestPaidCheckoutReadsThreeDSecureFromTheSettledCharge(t *testing.T) {
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	secret := "whsec_fixture_only"
 	body := paymentBody("checkout.session.completed", "paid", false)
@@ -162,7 +162,7 @@ func TestPaidCheckoutReadsThreeDSecureAndCardFromTheSettledCharge(t *testing.T) 
 	for _, result := range []string{"authenticated", "attempt_acknowledged", "failed", "processing_error", "exempted", "not_supported", "unknown", ""} {
 		proof, versions, err := verify(paymenttest.Provider{}.SettledCheckout("pi_fixture", false, result))
 		shifted := result == "authenticated"
-		if err != nil || proof == nil || proof.Event().ThreeDS != result || proof.Event().LiabilityShift != shifted || proof.Event().Fingerprint != "fp_ch_fixture" {
+		if err != nil || proof == nil || proof.Event().ThreeDS != result || proof.Event().LiabilityShift != shifted {
 			t.Fatalf("%q: proof=%+v err=%v", result, proof, err)
 		}
 		if len(versions) != 2 || versions[0] != paymentProviderAPIVersion || versions[1] != paymentProviderAPIVersion {

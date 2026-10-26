@@ -239,7 +239,6 @@ var schemaTables = []schemaTable{
 	{Name: "payment_correlations", Owner: schemaTenant},
 	{Name: "payment_events", Owner: schemaOperator},
 	{Name: "payment_warnings", Owner: schemaOperator},
-	{Name: "payment_cards", Owner: schemaOperator},
 	{Name: "payment_refunds", Owner: schemaOperator},
 	{Name: "payment_setups", Owner: schemaOperator},
 	{Name: "payment_states", Owner: schemaOperator},

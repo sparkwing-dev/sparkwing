@@ -95,11 +95,11 @@ func TestBillingPagesImmutableReservationProperty(t *testing.T) {
 		case 2:
 			page.Customer = "forged"
 		case 3:
-			page.Email = "forged@example.test"
+			page.ProviderID = ""
 		case 4:
 			page.AmountCents--
 		case 5:
-			page.Email = ""
+			page.URL = "http://checkout.test/page"
 		case 6:
 			page.Kind = capability.BillingPageCard
 		case 7:

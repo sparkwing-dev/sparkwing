@@ -88,7 +88,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).deleteRetentionIdentityTx": "the elected deployment maintenance pass expires every team's spent identity rows while preserving session ancestry",
 	"(*Operator).closeRefundedQueueTx":      "a provider refund names a payment identity, and a queued refund it covers is settled for whichever team queued it",
 	"(*Operator).reconcileSetupStateTx":     "a verified setup event resolves its payer from the setup correlation committed before payment",
-	"(*Operator).discoverPaymentTeamsTx":    "payment identity and card fingerprint discover the complete affected team set before taking team and ledger locks",
+	"(*Operator).discoverPaymentTeamsTx":    "payment identity discovers the affected team set before taking team and ledger locks",
 	"(*Operator).reducePaymentStateTx":      "a verified refill payment names its provider payment, which resolves the one refill that recorded it",
 	"(*Operator).reconcilePaymentStateTx":   "the payment owner resolves the payer by mode and provider payment identity before settling its normalized state",
 	"(*Operator).paymentTeamTx":             "a provider payment identity is resolved to the checkout or refill that took it before its team is known",

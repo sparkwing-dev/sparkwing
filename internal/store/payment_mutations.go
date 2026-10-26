@@ -165,9 +165,10 @@ func releaseCreditFreezesTx(ctx context.Context, tx *storeTx, team Team, dispute
 	return int64(len(released)), nil
 }
 
-func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor auditActor, now time.Time) error {
-	if c.Customer == "" || c.PaymentMethod == "" || c.Fingerprint == "" {
-		return fmt.Errorf("%w: a card names its customer, payment method and fingerprint", ErrInvalidInput)
+// saveCardTx records that the setup gave the team's customer a card; setup names the setup intent for the audit.
+func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, setup string, actor auditActor, now time.Time) error {
+	if c.Customer == "" || setup == "" {
+		return fmt.Errorf("%w: a card setup names its customer and setup", ErrInvalidInput)
 	}
 	if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
 		return err
@@ -175,21 +176,12 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor audit
 	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 		return err
 	}
-	refusal, err := cardRefusalTx(ctx, tx, team, "", c.Fingerprint)
-	if err != nil {
-		return err
-	}
-	if refusal.reason != "" {
-		return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: businessEventCardRefused})
-	}
 	addedAt := now.UnixNano()
 	if !c.AddedAt.IsZero() {
 		addedAt = c.AddedAt.UnixNano()
 	}
-	res, err := tx.execContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
-	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ?
-	    WHERE name = ? AND card_added_at <= ?`,
-		c.Customer, c.PaymentMethod, c.Fingerprint, c.Brand, c.Last4, addedAt, string(team), addedAt)
+	res, err := tx.execContext(ctx, `UPDATE teams SET card_customer = ?, card_added_at = ?
+	    WHERE name = ? AND card_added_at <= ?`, c.Customer, addedAt, string(team), addedAt)
 	if err != nil {
 		return err
 	}
@@ -201,10 +193,10 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, actor audit
 		return errStaleCardSetup
 	}
 	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0
-	    WHERE team = ? AND refill_blocked = 1 AND payment_method <> ?`, string(team), c.PaymentMethod); err != nil {
+	    WHERE team = ? AND refill_blocked = 1 AND opened_at < ?`, string(team), addedAt); err != nil {
 		return err
 	}
-	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(c.PaymentMethod), Operation: businessEventCardAdded}); err != nil {
+	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(setup), Operation: businessEventCardAdded}); err != nil {
 		return err
 	}
 	return nil

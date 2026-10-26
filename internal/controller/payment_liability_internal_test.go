@@ -31,13 +31,13 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					engineSQL(t, s, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_payment_method,card_fingerprint) VALUES ('b',1,1,'cus_b','pm_b','fp_refill')`)
+					engineSQL(t, s, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at) VALUES ('b',1,1,'cus_b',1)`)
 					deployment, err := s.AsOperator().ConfigureDeployment(t.Context(), "", store.DefaultFreeTeamSlots, func() error { return nil })
 					if err != nil {
 						t.Fatal(err)
 					}
 					warning := strings.TrimSuffix(stolenCardWarning("issfr_refill", payment), "}") + fmt.Sprintf(`,"metadata":{"sparkwing_deployment":%q}}`, deployment)
-					provider := paymenttest.Provider{}.Charge(payment, false, result, "fp_refill")
+					provider := paymenttest.Provider{}.SettledCheckout(payment, false, result)
 					_, deliver := billingModelProviderDelivery(t, e, provider, func(s *Server) *Server { return s.WithPaymentDeployment(deployment) })
 					accept := func(id, kind, object string) {
 						t.Helper()
@@ -51,9 +51,9 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 						opposite = "failed"
 					}
 					if warningFirst {
-						provider.Charge(payment, false, opposite, "fp_refill")
+						provider.SettledCheckout(payment, false, opposite)
 						accept("evt_warning", "radar.early_fraud_warning.created", warning)
-						provider.Charge(payment, false, result, "fp_refill")
+						provider.SettledCheckout(payment, false, result)
 					}
 					accept("evt_paid", paidKind, paidObject)
 					var spent int64
@@ -61,7 +61,7 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 						spent = 500 * store.MicroCreditsPerCent
 						engineSQL(t, s, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('spent','a','run','one','cloud','usage',60,?,1)`, spent)
 					}
-					provider.Charge(payment, false, opposite, "fp_refill")
+					provider.SettledCheckout(payment, false, opposite)
 					accept("evt_warning", "radar.early_fraud_warning.created", warning)
 					accept("evt_warning_again", "radar.early_fraud_warning.created", warning)
 					accept("evt_paid", paidKind, paidObject)
@@ -86,12 +86,13 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 					if err != nil || !freeze.Frozen || len(freeze.Disputes) != 1 || len(freeze.Causes) != 1 || freeze.Causes[0] != store.HoldCauseWarning {
 						t.Fatalf("payment hold = %+v: %v", freeze, err)
 					}
-					var heldPayment, savedCard string
+					var heldPayment string
+					var otherCard, otherHolds int
 					if err := teststore.SQL(t, s).QueryRow(`SELECT payment_id FROM credit_freezes WHERE team='a' AND released_at IS NULL`).Scan(&heldPayment); err != nil || heldPayment != payment {
 						t.Fatalf("held payment = %q: %v", heldPayment, err)
 					}
-					if err := teststore.SQL(t, s).QueryRow(`SELECT card_payment_method FROM teams WHERE name='b'`).Scan(&savedCard); err != nil || savedCard != "" {
-						t.Fatalf("deployment card block = %q: %v", savedCard, err)
+					if err := teststore.SQL(t, s).QueryRow(`SELECT card_added_at,(SELECT COUNT(*) FROM credit_freezes WHERE team='b') FROM teams WHERE name='b'`).Scan(&otherCard, &otherHolds); err != nil || otherCard == 0 || otherHolds != 0 {
+						t.Fatalf("the warning reached another team: card %d holds %d: %v", otherCard, otherHolds, err)
 					}
 					standing, err := tenant.BillingStanding(t.Context())
 					if err != nil || standing.Tier != "Held" || standing.CloudVCPU != 0 {

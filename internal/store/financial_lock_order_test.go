@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -191,29 +189,4 @@ func TestFinancialLockOrderRejectsUpgradesAndLateTeams(t *testing.T) {
 			t.Fatalf("%s locks must follow teams and precede ledgers", work)
 		}
 	}
-}
-
-func TestWarningLocksSavedCardTeamsBeforeClearingCards(t *testing.T) {
-	s, recorder := newRecordingStore(t)
-	if err := s.AsOperator().setPaymentMode(t.Context(), "test"); err != nil {
-		t.Fatal(err)
-	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_payment_method,card_fingerprint,refill_enabled,refill_amount_cents) VALUES ('z',1,1,'customer','method','card',1,1000),('a',1,1,'customer','method','card',1,1000)`)
-	recorder.reset()
-	if _, err := s.settlePaymentFacts(t.Context(), capability.PaymentEvent{Mode: capability.PaymentTest, EventID: "warning", ObjectID: "warning", PaymentID: "payment", Kind: capability.PaymentWarningEvent, Fingerprint: "card", Actionable: true, Created: 1}); err != nil {
-		t.Fatal(err)
-	}
-	var teams []string
-	for _, call := range recorder.snapshotCalls() {
-		if strings.HasPrefix(call.statement, "UPDATE teams SET card_customer") {
-			break
-		}
-		if call.statement == "SELECT name FROM teams WHERE name=?" {
-			teams = append(teams, fmt.Sprint(call.args[0].Value))
-		}
-	}
-	if !slices.Equal(teams, []string{"a", "z"}) {
-		t.Fatalf("team locks before card clearing=%v, want [a z]", teams)
-	}
-	rewriteSchemaCount(t, s.db, "teams WHERE card_fingerprint<>'' OR refill_enabled<>0", 0)
 }

@@ -91,14 +91,10 @@ type PaymentEvent struct {
 	Kind           PaymentEventKind
 	ObjectID       string
 	CustomerID     string
-	MethodID       string
 	ChargeID       string
 	Status         string
 	Reason         string
 	DeclineCode    string
-	Fingerprint    string
-	Brand          string
-	Last4          string
 	ThreeDS        string
 	LiabilityShift bool
 	IntentID       string
@@ -106,10 +102,10 @@ type PaymentEvent struct {
 	Actionable     bool
 }
 
-// Identity is the event as Stripe signed it. Settlement snapshots card facts and protection policy
-// after verification, so a replay identifies the event without them.
+// Identity is the event as Stripe signed it. Settlement snapshots protection policy after
+// verification, so a replay identifies the event without it.
 func (e PaymentEvent) Identity() PaymentEvent {
-	e.Fingerprint, e.Brand, e.Last4, e.ThreeDS = "", "", "", ""
+	e.ThreeDS = ""
 	e.LiabilityShift = false
 	return e
 }
@@ -316,7 +312,7 @@ func (a *paymentAuthenticator) checkoutEvent(ctx context.Context, id string, bod
 	return &VerifiedPaymentEvent{event: event}, nil
 }
 
-// safety: the fingerprint of the card that paid pins it to the team or refuses the payment.
+// paidCard reads the 3-D Secure outcome of the charge that paid, which decides whether a warned payment keeps its credit.
 func (a *paymentAuthenticator) paidCard(ctx context.Context, event *PaymentEvent) error {
 	intent, err := a.provider.read(ctx, "payment_intents", event.PaymentID, "payment_intent", a.mode)
 	if err != nil {

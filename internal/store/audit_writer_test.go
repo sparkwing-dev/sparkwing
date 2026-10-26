@@ -161,8 +161,8 @@ func TestAuditWriterRejectsSystemActorsForOtherKinds(t *testing.T) {
 		{"free", auditGrant{Kind: CreditGrantFree}, []auditSystem{auditBreakGlass}},
 		{"reversal", auditGrant{Kind: creditGrantReversal}, []auditSystem{auditPaymentProvider, auditBreakGlass}},
 		{"hold", auditHold{}, []auditSystem{auditController, auditPaymentProvider, auditBreakGlass}},
-		{"card", auditCard{Operation: businessEventCardBlocked}, []auditSystem{auditPaymentProvider}},
 		{"refill", auditRefill{}, []auditSystem{auditController}},
+		{"card", auditCard{Operation: businessEventCardAdded}, []auditSystem{auditPaymentProvider}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, system := range []auditSystem{auditController, auditPaymentProvider, auditBreakGlass} {

@@ -205,9 +205,8 @@ func acquireLockSet(ctx context.Context, tx *storeTx, discover func() lockSet) e
 	return nil
 }
 
-// Financial writers lock the complete team set before any ledger. A warning
-// includes every team whose saved card it clears. Existing weaker locks cannot
-// be upgraded, and no new team may be discovered after a ledger is held.
+// Financial writers lock the complete team set before any ledger. Existing weaker
+// locks cannot be upgraded, and no new team may be discovered after a ledger is held.
 func lockFinancialTeamsTx(ctx context.Context, tx *storeTx, teams ...Team) error {
 	teams = slices.Compact(slices.Sorted(slices.Values(teams)))
 	for _, team := range teams {

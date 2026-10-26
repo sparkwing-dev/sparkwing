@@ -105,7 +105,7 @@ func TestPostgresConcurrencyMaintenanceLocksTeamBeforeCapacity(t *testing.T) {
 	b.release(1)
 }
 
-func TestPostgresSettlementsLockAllWarningTeamsBeforeLedger(t *testing.T) {
+func TestPostgresWarningLocksItsTeamBeforeLedger(t *testing.T) {
 	s := storetest.OpenPostgres(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
@@ -113,27 +113,28 @@ func TestPostgresSettlementsLockAllWarningTeamsBeforeLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
-		`INSERT INTO teams(name,created_at,updated_at,card_customer,card_payment_method,card_fingerprint,refill_enabled,refill_amount_cents) VALUES ('a',1,1,'customer','method','card',1,1000),('z',1,1,'customer','method','card',1,1000)`,
+		`INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at,refill_enabled,refill_amount_cents) VALUES ('a',1,1,'customer',1,1,1000),('z',1,1,'customer',1,1,1000)`,
 		`INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('one','a','session-one','test','usd',100,100000000,1,2),('two','a','session-two','test','usd',100,100000000,1,2)`,
 	} {
 		if _, err := s.DB().ExecContext(ctx, q); err != nil {
 			t.Fatal(err)
 		}
 	}
-	paid := capability.PaymentEvent{EventID: "paid-one", CheckoutID: "session-one", PaymentID: "payment-one", Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid, Currency: "usd", AmountMinor: 100, Fingerprint: "card"}
+	paid := capability.PaymentEvent{EventID: "paid-one", CheckoutID: "session-one", PaymentID: "payment-one", Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid, Currency: "usd", AmountMinor: 100}
 	if err := s.TestOnlySettleRefund(ctx, paid); err != nil {
 		t.Fatal(err)
 	}
 	b := blockFinancialLedger(t, ctx, s, "a")
-	warning := capability.PaymentEvent{EventID: "warning", ObjectID: "warning", PaymentID: "payment-one", Mode: capability.PaymentTest, Kind: capability.PaymentWarningEvent, Fingerprint: "card", Actionable: true, Created: time.Now().Unix()}
+	warning := capability.PaymentEvent{EventID: "warning", ObjectID: "warning", PaymentID: "payment-one", Mode: capability.PaymentTest, Kind: capability.PaymentWarningEvent, Actionable: true, Created: time.Now().Unix()}
 	b.start(func() error { return s.TestOnlySettleRefund(ctx, warning) })
 	b.waitBlocked(1)
-	for _, team := range []string{"a", "z"} {
-		if !b.held(`SELECT name FROM teams WHERE name='` + team + `' FOR KEY SHARE`) {
-			t.Fatalf("warning waits for ledger without FOR UPDATE on team %s", team)
-		}
+	if !b.held(`SELECT name FROM teams WHERE name='a' FOR KEY SHARE`) {
+		t.Fatal("warning waits for ledger without FOR UPDATE on its team")
 	}
-	paid.EventID, paid.CheckoutID, paid.PaymentID, paid.Fingerprint = "paid-two", "session-two", "payment-two", ""
+	if b.held(`SELECT name FROM teams WHERE name='z' FOR KEY SHARE`) {
+		t.Fatal("warning locked a team its payment did not fund")
+	}
+	paid.EventID, paid.CheckoutID, paid.PaymentID = "paid-two", "session-two", "payment-two"
 	b.start(func() error { return s.TestOnlySettleRefund(ctx, paid) })
 	b.waitBlocked(2)
 	b.release(2)
@@ -141,10 +142,7 @@ func TestPostgresSettlementsLockAllWarningTeamsBeforeLedger(t *testing.T) {
 	if err := s.DB().QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants WHERE team='a'`).Scan(&balance); err != nil || balance != 100000000 {
 		t.Fatalf("balance=%d: %v", balance, err)
 	}
-	var cards, refunds, receipts int
-	if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM teams WHERE card_fingerprint<>'' OR refill_enabled<>0`).Scan(&cards); err != nil || cards != 0 {
-		t.Fatalf("saved cards=%d: %v", cards, err)
-	}
+	var refunds, receipts int
 	if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM card_refunds WHERE team='a' AND payment_intent='payment-one' AND status='due'`).Scan(&refunds); err != nil || refunds != 1 {
 		t.Fatalf("refund obligations=%d: %v", refunds, err)
 	}

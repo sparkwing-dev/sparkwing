@@ -46,7 +46,7 @@ func TestLateBoundRefillOutcomesKeepTheirSpendingWindows(t *testing.T) {
 				paid := refillPaid(now, "pi_late", 1_000)
 				switch outcome {
 				case "refused":
-					rewriteSchemaExec(t, s.db, `INSERT INTO payment_cards(fingerprint,first_team,payment_intent,pinned_at) VALUES ('fp_1','b','pi_b',1)`)
+					rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings(payment_mode,warning_id,payment_intent,actionable,created_at) VALUES ('test','issfr_late',?,1,1)`, paid.PaymentID)
 				case "declined":
 					paid.Kind, paid.DeclineCode = capability.PaymentCardFailed, "insufficient_funds"
 				}
@@ -54,7 +54,7 @@ func TestLateBoundRefillOutcomesKeepTheirSpendingWindows(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if outcome == "refused" && settled.Refused != CardRefusedPinned {
+				if outcome == "refused" && settled.Refused != CardRefusedWarning {
 					t.Fatalf("refill refusal = %+v", settled)
 				}
 				if outcome == "refunded" {
@@ -108,10 +108,10 @@ func TestLatePaidRefillReplacesItsEarlierFailureWindow(t *testing.T) {
 			now = now.Add(32 * refillDay)
 			s.clock = func() time.Time { return now }
 			if refused {
-				rewriteSchemaExec(t, s.db, `INSERT INTO payment_cards(fingerprint,first_team,payment_intent,pinned_at) VALUES ('fp_1','b','pi_b',1)`)
+				rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings(payment_mode,warning_id,payment_intent,actionable,created_at) VALUES ('test','issfr_recovered','pi_recovered',1,1)`)
 			}
 			settled, err := s.settlePaymentFacts(t.Context(), refillPaid(now, "pi_recovered", 1_000))
-			if err != nil || refused && settled.Refused != CardRefusedPinned || !refused && !settled.Granted {
+			if err != nil || refused && settled.Refused != CardRefusedWarning || !refused && !settled.Granted {
 				t.Fatalf("late paid outcome = %+v: %v", settled, err)
 			}
 			tenant.s.SetTestClock(t, func() time.Time { return now })

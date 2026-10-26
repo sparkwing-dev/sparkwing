@@ -54,7 +54,7 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, deployment strin
 		body["amount_cents"] = page.AmountCents
 	case capability.BillingPageCard:
 		path = "/internal/card-setup"
-		body["setup_id"], body["customer"], body["email"] = page.ReservationID, page.Customer, page.Email
+		body["setup_id"], body["customer"] = page.ReservationID, page.Customer
 	default:
 		return routepolicy.MissingEndpointPolicy()
 	}
@@ -134,12 +134,24 @@ func (c *billingCheckout) refill(ctx context.Context, deployment string, r store
 	}
 	err := c.post(ctx, path, map[string]any{
 		"team": string(r.Team), "deployment": deployment, "refill_id": r.ID, "amount_cents": r.AmountCents,
-		"customer": r.Customer, "payment_method": r.PaymentMethod, "receipt_email": r.ReceiptEmail, "payment_intent": r.PaymentIntent,
+		"customer": r.Customer, "payment_intent": r.PaymentIntent,
 	}, &out)
 	if err == nil && (out.PaymentIntent == "" || out.Status == "" || r.PaymentIntent != "" && out.PaymentIntent != r.PaymentIntent) {
 		err = fmt.Errorf("%w: missing or mismatched payment or status", errCheckoutRefused)
 	}
 	return out, err
+}
+
+// portal opens a Stripe customer portal session, where the team views and changes its card; Sparkwing never sees it.
+func (c *billingCheckout) portal(ctx context.Context, deployment, team, customer string) (string, error) {
+	var out hostedPageJSON
+	if err := c.post(ctx, "/internal/portal", map[string]any{"team": team, "deployment": deployment, "customer": customer}, &out); err != nil {
+		return "", err
+	}
+	if !validBillingPageURL(out.URL) {
+		return "", fmt.Errorf("%w: non-https portal page", errCheckoutRefused)
+	}
+	return out.URL, nil
 }
 
 func (c *billingCheckout) refund(ctx context.Context, paymentIntent, key, reason string) (string, string, error) {

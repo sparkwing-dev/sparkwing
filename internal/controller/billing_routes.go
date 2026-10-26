@@ -34,6 +34,7 @@ func (s *Server) billingEndpoints() []controllerwire.Endpoint {
 		{Method: "POST", Pattern: "/api/v1/team/billing/checkout", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingCheckout)},
 		{Method: "POST", Pattern: "/api/v1/team/billing/standing-request", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamStandingRequest)},
 		{Method: "POST", Pattern: "/api/v1/team/billing/card", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingCard)},
+		{Method: "POST", Pattern: "/api/v1/team/billing/portal", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingPortal)},
 		{Method: "PUT", Pattern: "/api/v1/team/billing/refill", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.meteredOnly(s.handleTeamBillingRefill)},
 	}
 }

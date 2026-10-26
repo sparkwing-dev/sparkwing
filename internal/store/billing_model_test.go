@@ -19,7 +19,7 @@ func billingModelFixture(t *testing.T) (*Store, UnitDemand, *time.Time) {
 	s, demand, now := meteredUnitFixture(t, true)
 	rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET kind='free'`)
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=?`, now.Add(24*time.Hour).UnixNano())
-	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='card',card_added_at=? WHERE name='a'`, now.UnixNano())
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='customer',card_added_at=1,card_added_at=? WHERE name='a'`, now.UnixNano())
 	return s, demand, now
 }
 

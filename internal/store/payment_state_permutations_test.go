@@ -15,7 +15,7 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 			for _, order := range deliveryOrders("pay", "pending", "terminal", "warning") {
 				t.Run(fmt.Sprintf("refill=%t/%s/%s", refill, outcome, strings.Join(order, "-")), func(t *testing.T) {
 					s, tenant, now := providerPaymentFixture(t)
-					pay := capability.PaymentEvent{EventID: "paid", CheckoutID: "provider-session", PaymentID: "payment", Currency: "usd", AmountMinor: 100, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid, Fingerprint: "fp_1"}
+					pay := capability.PaymentEvent{EventID: "paid", CheckoutID: "provider-session", PaymentID: "payment", Currency: "usd", AmountMinor: 100, Mode: capability.PaymentTest, Kind: capability.PaymentCheckoutPaid}
 					if refill {
 						pay = providerRefillEvent(t, s, now, capability.PaymentCardPaid)
 					}
@@ -24,7 +24,7 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 					terminal := pending
 					terminal.EventID, terminal.Status = "refund-terminal", outcome
 					warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
-					warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
+					warning.AmountMinor, warning.Currency, warning.Actionable = 0, "", true
 					events := map[string]capability.PaymentEvent{"pay": pay, "pending": pending, "terminal": terminal, "warning": warning}
 					for _, name := range order {
 						for range 2 {
@@ -148,7 +148,7 @@ func TestPaymentStateEverySetupDeliveryPermutation(t *testing.T) {
 			s, tenant, now := providerPaymentFixture(t)
 			rewriteSchemaExec(t, s.db, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES ('test','setup-page','setup_session','a','cus_1')`)
 			page := capability.PaymentEvent{EventID: "page-completed", ObjectID: "setup-page", IntentID: "setup-intent", CustomerID: "cus_1", Mode: capability.PaymentTest, Kind: capability.PaymentPageCompleted, Created: now.Unix() + 1}
-			setup := capability.PaymentEvent{EventID: "setup-completed", ObjectID: "setup-intent", CustomerID: "cus_1", MethodID: "new-method", Fingerprint: "new-fingerprint", Brand: "visa", Last4: "4242", Status: "succeeded", Mode: capability.PaymentTest, Kind: capability.PaymentCardSetup, Created: now.Unix() + 2}
+			setup := capability.PaymentEvent{EventID: "setup-completed", ObjectID: "setup-intent", CustomerID: "cus_1", Status: "succeeded", Mode: capability.PaymentTest, Kind: capability.PaymentCardSetup, Created: now.Unix() + 2}
 			events := map[string]capability.PaymentEvent{"page": page, "setup": setup}
 			for _, name := range order {
 				for range 2 {
@@ -159,7 +159,7 @@ func TestPaymentStateEverySetupDeliveryPermutation(t *testing.T) {
 			}
 			tenant.s.SetTestClock(t, func() time.Time { return now })
 			standing, err := tenant.SpendStanding(t.Context())
-			if err != nil || standing.Card.PaymentMethod != "new-method" {
+			if err != nil || !standing.Card.AddedAt.Equal(time.Unix(now.Unix()+2, 0)) {
 				t.Fatalf("setup was lost before page association: %+v: %v", standing.Card, err)
 			}
 		})
@@ -182,7 +182,7 @@ func TestPaymentStateEveryRefillAssociationPermutation(t *testing.T) {
 			paid := refillPaid(now, "payment", 15_000)
 			failed := paid
 			failed.Kind, failed.EventID, failed.Status, failed.DeclineCode = capability.PaymentCardFailed, "failed", "requires_payment_method", "card_declined"
-			failed.Fingerprint, failed.ChargeID = "", ""
+			failed.ChargeID = ""
 			for _, name := range order {
 				for range 2 {
 					if name == "bind" {

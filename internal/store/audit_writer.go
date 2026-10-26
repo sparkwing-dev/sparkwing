@@ -369,7 +369,7 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 	case auditCard:
 		actorAllowed = c.Actor.system == auditPaymentProvider
 		ev.Kind, ev.SubjectID = string(p.Operation), p.Reference.String()
-		valid = auditOneOf(p.Operation, businessEventCardAdded, businessEventCardRefused, businessEventCardBlocked, businessEventCardRefundDue)
+		valid = auditOneOf(p.Operation, businessEventCardAdded, businessEventCardRefused, businessEventCardRefundDue)
 	case auditTrust:
 		actorAllowed = actorAllowed || c.Actor.system == auditBreakGlass
 		ev.Kind, ev.SubjectID = BusinessEventBillingTrustChanged, p.ReceiptID

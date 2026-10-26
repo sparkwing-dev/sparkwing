@@ -113,7 +113,7 @@ func TestPaymentHTTPAuthenticationBoundary(t *testing.T) {
 					}
 					want := capability.PaymentEvent{EventID: "evt_verified", CheckoutID: "cs_committed", PaymentID: "pi_committed", Currency: "usd", AmountMinor: 2500, Mode: mode, Kind: tc.want}
 					if tc.want == capability.PaymentCheckoutPaid {
-						want.ThreeDS, want.Fingerprint = "authenticated", "fp_ch_committed"
+						want.ThreeDS = "authenticated"
 						want.LiabilityShift = true
 					}
 					if len(ledger.events) != 1 || ledger.events[0] != want {

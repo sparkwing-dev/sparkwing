@@ -35,7 +35,6 @@ func TestPaymentConsequencesSurviveEveryDeliveryOrder(t *testing.T) {
 	kinds := map[string]func(t *testing.T) fixture{
 		"add funds": func(t *testing.T) fixture {
 			s, pay := paymentFixture(t, capability.PaymentTest)
-			pay.Fingerprint = "fp_1"
 			tenant, err := s.ForTeam(t.Context(), "a")
 			if err != nil {
 				t.Fatal(err)
@@ -60,7 +59,7 @@ func TestPaymentConsequencesSurviveEveryDeliveryOrder(t *testing.T) {
 					refund := providerPaymentEvent(f.now, capability.PaymentRefund)
 					refund.Status, refund.AmountMinor = cardRefundSucceeded, f.pay.AmountMinor
 					warning := providerPaymentEvent(f.now, capability.PaymentWarningEvent)
-					warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
+					warning.AmountMinor, warning.Currency, warning.Actionable = 0, "", true
 					events := map[string]capability.PaymentEvent{"pay": f.pay, "refund": refund, "warning": warning}
 					for range 2 {
 						for _, name := range order {
@@ -98,7 +97,7 @@ func TestAWarningReplaysAfterItsRefundCompleted(t *testing.T) {
 	s, pay := paymentFixture(t, capability.PaymentTest)
 	now := s.now()
 	warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
-	warning.AmountMinor, warning.Currency, warning.Fingerprint, warning.Actionable = 0, "", "fp_1", true
+	warning.AmountMinor, warning.Currency, warning.Actionable = 0, "", true
 	refund := providerPaymentEvent(now, capability.PaymentRefund)
 	refund.Status, refund.AmountMinor = cardRefundSucceeded, pay.AmountMinor
 	for _, e := range []capability.PaymentEvent{pay, warning, refund} {
@@ -107,7 +106,7 @@ func TestAWarningReplaysAfterItsRefundCompleted(t *testing.T) {
 		}
 	}
 	replay := warning
-	replay.Brand, replay.Last4 = "visa", "4242"
+
 	got, err := s.settlePaymentFacts(t.Context(), replay)
 	if err != nil || !got.Replayed {
 		t.Fatalf("replay = %+v, %v; want the recorded warning", got, err)
