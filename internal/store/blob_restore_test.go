@@ -291,3 +291,42 @@ func TestBlobRecordsReadSetEnforcesCacheFallbackProvenance(t *testing.T) {
 		}
 	}
 }
+
+// A verified default-branch run reads its own branch scope only where the record
+// carries default-branch evidence too: a verified push to a branch named main
+// before it became the default, or a merged pull request's run, writes there
+// without it.
+func TestVerifiedDefaultReaderRequiresDefaultEvidenceInItsOwnScope(t *testing.T) {
+	s, records, intent := blobRecordFixture(t)
+	intent.Authority.Ref = blob.RefFacts{}
+	app := runspec.AppFacts{Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: fixtureFeatureSHA, DeliveryKey: "main-delivery", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: time.Unix(1, 0).UTC()}
+	verified, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "ci")
+	if err != nil || verified.Trust() != runspec.TrustVerifiedDefault {
+		t.Fatalf("fixture provenance %v: %v", verified.Trust(), err)
+	}
+	body := sealWith(t, runspec.SealedRequest{Version: 1, Request: runspec.Request{
+		Git: runspec.Git{Ref: app.Ref, SHA: app.SHA, DefaultBranch: runspec.Optional[string]{Set: true, Value: "main"}, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: app}},
+	}}, verified)
+	rewriteSchemaExec(t, s.db, "UPDATE runs SET request_json=? WHERE team='a' AND id='run'", body)
+	if err := s.db.QueryRow("SELECT authority_json FROM capabilities WHERE prefix=?", intent.Authority.CapabilityRef).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	var record CapabilityRecord
+	if err := json.Unmarshal(body, &record); err != nil {
+		t.Fatal(err)
+	}
+	record.Value.Data.ReadRefs, record.Value.Data.WriteRef = []string{"refs/heads/main"}, "refs/heads/main"
+	if body, err = json.Marshal(record); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=?,ref_scope='refs/heads/main' WHERE prefix=?", body, intent.Authority.CapabilityRef)
+	request := blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "refs/heads/main", Verified: true}, Name: "modules", Key: fixtureMemoHash}}
+	plantBlobRestore(t, s, records, intent, blob.KindDepcache, "refs/heads/main", restoreFacts("refs/heads/main", false), false)
+	if hit, err := records.LookupDepcache(t.Context(), request); err != nil || hit.Found {
+		t.Fatalf("verified main restored a record without default-branch evidence: %+v %v", hit, err)
+	}
+	plantBlobRestore(t, s, records, intent, blob.KindDepcache, "refs/heads/main", restoreFacts("refs/heads/main", true), false)
+	if hit, err := records.LookupDepcache(t.Context(), request); err != nil || !hit.Found {
+		t.Fatalf("verified main missed its own default-branch record: %+v %v", hit, err)
+	}
+}

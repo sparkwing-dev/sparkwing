@@ -84,7 +84,9 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	if !found || (record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.now(ctx))) {
 		return result, nil
 	}
-	if request.VerifiedDefaultOnly {
+	// safety: a verified default-branch reader shares its ref with merged pull requests and with pushes made
+	// before a rename, so it takes cache records only when they carry the same default-branch evidence.
+	if request.VerifiedDefaultOnly || a.authority.Ref.DefaultBranchVerified && (key.Kind == blob.KindMemo || key.Kind == blob.KindDepcache) {
 		facts := record.RefFacts
 		if !record.VerifiedDefault() || (a.authority.Ref.DefaultBranch != "" && facts.Scope.Ref != a.authority.Ref.DefaultBranch) {
 			return result, nil

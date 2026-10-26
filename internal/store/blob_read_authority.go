@@ -154,7 +154,7 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 		return edge, c.source == a.source, nil
 	}
 	if c.kind == blob.KindMemo || c.kind == blob.KindDepcache {
-		allowed := slices.Contains(scope.ReadRefs, c.ref)
+		allowed := slices.Contains(scope.ReadRefs, c.ref) && (!a.authority.Ref.DefaultBranchVerified || c.facts.DefaultBranchVerified)
 		if c.ref != a.authority.Ref.Scope.CapabilityScope() {
 			verifiedDefault := c.facts.DefaultBranchVerified && c.facts.Scope.Ref == a.authority.Ref.DefaultBranch
 			verifiedBase := c.kind == blob.KindDepcache && a.authority.Ref.PullRequestBase.Set && c.facts.Scope.Ref == a.authority.Ref.PullRequestBase.Value
