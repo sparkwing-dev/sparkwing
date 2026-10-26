@@ -1139,3 +1139,10 @@ separate operations; no database transaction stays open across a provider call.
 ## 2026-10-26 Korey decision 69: a Cloud pod may reach its own node's kubelet
 
 - The AWS VPC CNI network policy cannot block a pod from reaching its own node. The launcher's pre-job egress check treats exactly the job's own node IP on port 10250 as an expected exception; any other node, any other port (including the read-only 10255) still fails closed. Basis, verified on staging EKS nodes 2026-10-26: kubelet anonymous authentication is disabled, webhook authentication and authorization are on, Cloud pods mount no service-account token, and a Cloud node serves only one run (decision 68). A node-level firewall rule may be added after launch for defence in depth.
+
+## 2026-10-26 Korey decision 70: OIDC claims for host kind, fetched repositories and Actions
+
+- OIDC tokens carry a runner environment claim saying whether the job ran on a fresh host (launcher pod, Cloud pod, GitHub Actions job) or a persistent one (plain machine, persistent runner, personal machine, here), like GitHub's runner_environment, so deploy roles can require fresh hosts.
+- Runs whose repository is proven because Sparkwing fetched the code from it (decision 68 run-now refinement) carry the repository claim; ref and sha claims stay off for them because their trust class is manual.
+- Runs from GitHub Actions bindings say trigger:actions in their subject, not trigger:manual.
+- Decision 68's secrets rule reads: pipeline secrets go to runs whose repository is proven, either verified (App delivery, Actions, admin-armed schedule) or fetched by Sparkwing from the repository at a branch or tag head (run-now, console runs, unlocked schedules); uploads, local, here, raw commits and pull request refs get shared secrets only.
