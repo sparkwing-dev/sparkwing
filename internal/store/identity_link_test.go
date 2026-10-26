@@ -680,3 +680,63 @@ func TestLinkAccountIdentityRequiresItsConsumedBinding(t *testing.T) {
 		t.Fatalf("account email changed: %+v %v", account, err)
 	}
 }
+
+// An address proves itself only through a sign-in the account still holds:
+// once the identity that verified it is unlinked, its invitations are neither
+// listed nor accepted there, and the next holder of the address can sign up.
+func TestUnlinkingTheProvingIdentityReleasesTheAddress(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	mallory := signIn(t, st, "g-mallory", "devops@corp.example")
+	if _, err := st.LinkIdentity(ctx, mallory.Account.ID, gh("gh-mallory", "mallory@home.example"), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	owner := signIn(t, st, "g-owner", "owner@corp.example")
+	before, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "devops@corp.example", store.RoleReader, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, mallory.Account.ID); err != nil || len(listed) != 1 || listed[0].ID != before.ID {
+		t.Fatalf("control: invitations listed while Google proves the address = %+v, %v", listed, err)
+	}
+
+	if _, err := st.AsOperator().UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, mallory.Account.ID), store.ProviderGoogle); err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, mallory.Account.ID); err != nil || len(listed) != 0 {
+		t.Fatalf("invitations listed after unlinking the proving identity = %+v, %v", listed, err)
+	}
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, mallory.Account.ID), before.ID); !errors.Is(err, store.ErrEmailMismatch) {
+		t.Fatalf("accepting after unlinking the proving identity = %v, want ErrEmailMismatch", err)
+	}
+
+	hire := signIn(t, st, "g-hire", "devops@corp.example")
+	if hire.Account.ID == mallory.Account.ID || !hire.NewAccount {
+		t.Fatalf("the address's next holder = %+v, want a new account", hire)
+	}
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, hire.Account.ID), before.ID); err != nil {
+		t.Fatalf("the new holder accepting = %v", err)
+	}
+}
+
+// A linked sign-in's verified address counts as the account's own for
+// invitations, because its provider proves it just as a primary one does.
+func TestLinkedIdentityProvesItsAddressForInvitations(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acct := signIn(t, st, "g-acct", "primary@example.com")
+	if _, err := st.LinkIdentity(ctx, acct.Account.ID, gh("gh-acct", "work@corp.example"), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	owner := signIn(t, st, "g-owner", "owner@corp.example")
+	inv, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "work@corp.example", store.RoleReader, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, acct.Account.ID); err != nil || len(listed) != 1 {
+		t.Fatalf("invitations to the linked address = %+v, %v", listed, err)
+	}
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID); err != nil {
+		t.Fatalf("accepting through the linked address = %v", err)
+	}
+}

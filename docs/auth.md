@@ -327,7 +327,10 @@ Rejoining or promotion cannot revive them. `team.admin` requires
 `--allow-team-admin` (`allow_team_admin` in the API) and expires within 30 days.
 Omitted expiry uses the applicable ceiling. A requested expiry beyond that
 ceiling is refused, including during rotation.
-Invitation acceptance checks that the inviter still holds team administration.
+Invitation acceptance checks that the inviter still holds team administration,
+and that one of the account's current sign-ins verifies the invited address.
+Unlinking the sign-in that verified an address stops the account seeing or
+accepting invitations to it, and frees the address for its next holder.
 
 `GET /api/v1/team/settings` returns `members_can_add_machines` and
 `claim_ranking` under `runs.read`. `PUT /api/v1/team/settings` requires

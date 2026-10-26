@@ -252,6 +252,11 @@ func (op *Operator) unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, ac
 			`INSERT INTO identity_unlinks (provider, subject, account_id, unlinked_at) VALUES (?, ?, ?, ?)`,
 			[]any{provider, subject, accountID, at},
 		},
+		{
+			`UPDATE accounts SET email_verified = 0, updated_at = ? WHERE id = ? AND NOT EXISTS (SELECT 1
+				FROM identities i WHERE i.account_id = accounts.id AND i.email = accounts.email AND i.email_verified = 1)`,
+			[]any{at, accountID},
+		},
 	} {
 		if _, err := tx.execContext(ctx, stmt.sql, stmt.args...); err != nil {
 			return IdentityUnlink{}, err

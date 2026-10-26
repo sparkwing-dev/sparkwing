@@ -42,9 +42,14 @@ func claimEmailTx(ctx context.Context, tx *storeTx, accountID, email string, at 
 }
 
 func releaseEmailTx(ctx context.Context, tx *storeTx, email, keepID string, at int64) error {
-	_, err := tx.execContext(ctx, `
+	if _, err := tx.execContext(ctx, `
 		UPDATE accounts SET email_verified = 0, updated_at = ?
-		WHERE email = ? AND email_verified = 1 AND id <> ?`, at, email, keepID)
+		WHERE email = ? AND email_verified = 1 AND id <> ?`, at, email, keepID); err != nil {
+		return err
+	}
+	_, err := tx.execContext(ctx, `
+		UPDATE identities SET email_verified = 0
+		WHERE email = ? AND email_verified = 1 AND account_id <> ?`, email, keepID)
 	return err
 }
 
@@ -681,9 +686,9 @@ func (o *Operator) AccountMemberships(ctx context.Context, accountID string) (_ 
 	return out, rows.Err()
 }
 
-// OpenInvitationsForEmail lists the unaccepted, unexpired invitations to an
-// address, from every team.
-func (o *Operator) OpenInvitationsForEmail(ctx context.Context, email string) (out []Invitation, err error) {
+// OpenInvitationsForAccount lists the unaccepted, unexpired invitations, from
+// every team, to the addresses the account's current sign-ins verify.
+func (o *Operator) OpenInvitationsForAccount(ctx context.Context, accountID string) (out []Invitation, err error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return out, err
@@ -691,8 +696,9 @@ func (o *Operator) OpenInvitationsForEmail(ctx context.Context, email string) (o
 	defer rollbackOrLog(tx)
 
 	rows, err := tx.queryContext(ctx, invitationSelect+`
-		WHERE i.email = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, normalizeEmail(email), tx.now(ctx).UTC().UnixNano())
+		WHERE i.email IN (SELECT email FROM identities WHERE account_id = ? AND email_verified = 1)
+		  AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
+		ORDER BY i.created_at`, accountID, tx.now(ctx).UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -751,8 +757,15 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 		return none, err
 	}
 	// safety: the address check runs before the expiry and use checks, so a
-	// holder of someone else's invitation learns nothing about its state.
-	if !acct.EmailVerified || acct.Email != email {
+	// holder of someone else's invitation learns nothing about its state. Only a
+	// current sign-in proves an address; the account row's copy outlives the
+	// identity that verified it.
+	var proves bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM identities
+		WHERE account_id = ? AND email = ? AND email_verified = 1)`, accountID, email).Scan(&proves); err != nil {
+		return none, err
+	}
+	if !proves {
 		return none, ErrEmailMismatch
 	}
 	// safety: the gate row is locked before the member count and the admission
