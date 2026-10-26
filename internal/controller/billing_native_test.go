@@ -36,7 +36,7 @@ func billingNativeServer(t *testing.T) (*serverFixture, string, string) {
 	e, _ := engineRuntimeStore(t, fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) }))
 	fixture.engine = e
 	s := fixture
-	engineSQL(t, s.store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('owner','owner@example.test',1,1)`)
+	engineSQL(t, s.store, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('owner','owner@example.test',1,1,1)`)
 	engineSQL(t, s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','owner','owner',1)`)
 	session, csrf, _, err := s.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "owner"}, "a", time.Hour)
 	if err != nil {
@@ -180,7 +180,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 		body := ""
 		switch r.URL.Path {
 		case "/internal/card-setup":
-			if _, email := in["email"]; in["setup_id"] != in["key"] || email {
+			if in["setup_id"] != in["key"] || in["email"] != "owner@example.test" {
 				t.Fatalf("setup=%v", in)
 			}
 			body = `{"id":"cs_setup","customer":"cus_native","url":"https://checkout.test/setup"}`
@@ -254,6 +254,10 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	refilled := `{"id":"pi_auto","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_refill",` + stamp + `},"status":"succeeded","amount":1000,"amount_received":1000,"currency":"usd","customer":"cus_native","latest_charge":"ch_auto"}`
 	for range 2 {
 		call("card", "", 200)
+	}
+	var stored int
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM billing_pages WHERE CAST(page_json AS TEXT) LIKE '%owner@example.test%'`).Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("the receipt email reached the page record: %d, %v", stored, err)
 	}
 	webhook("evt_setup", "setup_intent.succeeded", setupIntent)
 	tenant, err := s.store.ForTeam(t.Context(), "a")

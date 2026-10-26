@@ -44,7 +44,8 @@ in `payment_events` and `payment_states` no longer carry a payment method or
 card details.
 
 The checkout service contract changes with this controller. `POST
-/internal/card-setup` no longer receives `email`. `POST /internal/refill` and its
+/internal/card-setup` receives the team owner's account `email`, which only Stripe
+keeps, for its receipts. `POST /internal/refill` and its
 reconcile, confirm and cancel operations receive the Stripe `customer` without
 `payment_method` or `receipt_email`; the service must charge the customer's
 default payment method off-session. The new `POST /internal/portal` receives

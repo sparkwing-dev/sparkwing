@@ -20,6 +20,7 @@ type billingWriter interface {
 	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
 	RecordAuthorizedBillingPageFailure(context.Context, capability.Authorized, capability.BillingPage) error
 	SetAuthorizedRefill(context.Context, capability.Authorized, store.RefillSettings) error
+	TeamOwnerEmails(context.Context) ([]string, error)
 	RequestAuthorizedStanding(context.Context, capability.Authorized, string, string) (store.StandingRequest, error)
 }
 
@@ -62,7 +63,18 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 		return routepolicy.MissingEndpointPolicy()
 	}
 	if page.URL == "" {
-		if err := s.checkout.openReservedPage(r.Context(), s.paymentDeployment, &page); err != nil {
+		// safety: the owner's email goes only to Stripe, for receipts; the page record never holds it.
+		var email string
+		if kind == capability.BillingPageCard {
+			owners, err := writer.TeamOwnerEmails(r.Context())
+			if err != nil {
+				return err
+			}
+			if len(owners) > 0 {
+				email = owners[0]
+			}
+		}
+		if err := s.checkout.openReservedPage(r.Context(), s.paymentDeployment, &page, email); err != nil {
 			recordErr := writer.RecordAuthorizedBillingPageFailure(r.Context(), a, page)
 			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the payment page could not be opened; try again"}, err, recordErr)
 		}

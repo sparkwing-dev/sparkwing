@@ -46,7 +46,9 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 
 var errCheckoutRefused = errors.New("the checkout service refused the session")
 
-func (c *billingCheckout) openReservedPage(ctx context.Context, deployment string, page *capability.BillingPage) error {
+// openReservedPage opens the provider page for a reservation; email, the team owner's address for Stripe's receipts,
+// is sent with a card setup and never stored.
+func (c *billingCheckout) openReservedPage(ctx context.Context, deployment string, page *capability.BillingPage, email string) error {
 	path := "/internal/checkout"
 	body := map[string]any{"team": page.Team, "key": page.ReservationID, "deployment": deployment, "expires_at": page.ExpiresAt.Unix()}
 	switch page.Kind {
@@ -54,7 +56,7 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, deployment strin
 		body["amount_cents"] = page.AmountCents
 	case capability.BillingPageCard:
 		path = "/internal/card-setup"
-		body["setup_id"], body["customer"] = page.ReservationID, page.Customer
+		body["setup_id"], body["customer"], body["email"] = page.ReservationID, page.Customer, email
 	default:
 		return routepolicy.MissingEndpointPolicy()
 	}

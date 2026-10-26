@@ -111,7 +111,9 @@ customer ID and when a card setup last completed, plus the checkout, payment and
 refund IDs, amounts, modes and statuses its credit ledger needs. Once a team has
 a card, the billing page's Manage card button (`POST /api/v1/team/billing/portal`)
 opens Stripe's customer portal, where owners view, replace or remove it.
-Automatic refill charges the customer's default payment method in Stripe.
+Automatic refill charges the customer's default payment method in Stripe. When
+a card is set up, the controller passes the team owner's email to Stripe for its
+receipts without storing it.
 
 Each Add funds payment and automatic refill is at most $1,000, at every standing
 tier including High. Larger amounts are refused before a payment starts. Use
