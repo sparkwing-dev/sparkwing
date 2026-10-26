@@ -83,44 +83,6 @@ func installDarwin(ctx context.Context, h Host) (State, error) {
 	return state, nil
 }
 
-func statusDarwin(ctx context.Context, h Host) (State, error) {
-	path, err := darwinPlistPath(h)
-	if err != nil {
-		return State{}, err
-	}
-	plist, err := readManaged(path)
-	if err != nil {
-		return State{}, err
-	}
-	state := State{Path: path}
-	switch {
-	case plist.exists && !plist.ours:
-		state.Foreign = true
-		state.Detail = foreignDetail(path)
-		return state, nil
-	case !plist.exists:
-		state.Detail = "no sparkwing cron agent is installed here"
-		return state, nil
-	}
-	state = commandState(h, path, plist.body)
-	if timerHome(unitfile.PlistArguments([]byte(plist.body))) != h.SparkwingHome {
-		state.Detail = otherHomeDetail(h, path)
-		return state, nil
-	}
-
-	out, err := h.run(ctx, "launchctl", "print", h.serviceTarget())
-	if err == nil {
-		state.Enabled = true
-		state.Detail = fmt.Sprintf("%s is loaded and runs %s __tick every minute", h.label(), state.Binary)
-	} else {
-		state.Detail = fmt.Sprintf("%s is installed but launchd does not report it loaded: %s", h.label(), joinOutput(out))
-	}
-	if state.Stale {
-		state.Detail += fmt.Sprintf("; it runs %s, not %s", state.Binary, h.Binary)
-	}
-	return state, nil
-}
-
 func uninstallDarwin(ctx context.Context, h Host) (State, error) {
 	path, err := darwinPlistPath(h)
 	if err != nil {
@@ -173,8 +135,8 @@ func agentPlist(h Host) string {
 	b.WriteString("  </array>\n\n")
 	b.WriteString("  <key>StartInterval</key>\n  <integer>60</integer>\n")
 	b.WriteString("  <key>RunAtLoad</key>\n  <false/>\n")
-	// safety: launchd reaps the job's process group when the tick exits unless told to
-	// leave it, and the run consumer the tick starts lives in that group.
+	// safety: __tick ensures the local controller, then invokes its tick.
+	// Keep that controller alive after launchd reaps the tick process.
 	b.WriteString("  <key>AbandonProcessGroup</key>\n  <true/>\n\n")
 	if pairs := envPairs(h); len(pairs) > 0 {
 		b.WriteString("  <key>EnvironmentVariables</key>\n  <dict>\n")

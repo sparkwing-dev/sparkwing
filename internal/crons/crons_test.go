@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
-	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -314,7 +314,7 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
 		t.Fatalf("cursor = %v, want the arming instant", sched.CursorAt)
 	}
 
-	if err := h.svc.pause(ctx, id); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), id, true); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	h.clock.set(at(t, "2026-01-01T02:00:30Z"))
@@ -427,7 +427,7 @@ func TestDisarmRemovesEverySchedulOfTheRepo(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, other, ArmOptions{}); err != nil {
 		t.Fatalf("Arm other: %v", err)
 	}
-	removed, err := h.svc.disarmRepo(ctx, root)
+	removed, err := teststore.ForTeam(t, h.store, store.DefaultTeam).DeleteAuthorizedSchedules(ctx, scheduleAuthorization(t, h.store), root)
 	if err != nil {
 		t.Fatalf("Disarm: %v", err)
 	}
@@ -796,7 +796,7 @@ func TestTickAdvancesAPausedScheduleWithoutFiring(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	sched := armOne(t, h, writeRepo(t, "svc", everyMinute))
-	if err := h.svc.pause(ctx, sched.ID); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), sched.ID, true); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	h.clock.set(at(t, "2026-01-01T00:05:05Z"))
@@ -833,12 +833,12 @@ func TestResumeDoesNotReplayThePauseWindow(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	sched := armOne(t, h, writeRepo(t, "svc", everyMinute))
-	if err := h.svc.pause(ctx, sched.ID); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), sched.ID, true); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	// safety: no tick lands during the pause, so only Resume can move the cursor.
 	h.clock.set(at(t, "2026-01-08T00:00:30Z"))
-	if err := h.svc.resume(ctx, sched.ID); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), sched.ID, false); err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
 	h.clock.set(at(t, "2026-01-08T00:01:05Z"))
@@ -1074,7 +1074,7 @@ func TestListAndShowDeriveNameStateAndZone(t *testing.T) {
 	if rows[0].Location != time.UTC {
 		t.Errorf("location = %v, want UTC", rows[0].Location)
 	}
-	if err := h.svc.pause(ctx, sched.ID); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), sched.ID, true); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	row, fires, err := h.svc.Show(ctx, sched.ID, 5)
@@ -1084,83 +1084,11 @@ func TestListAndShowDeriveNameStateAndZone(t *testing.T) {
 	if row.State != statePaused || len(fires) != 0 {
 		t.Fatalf("show: %+v %+v", row, fires)
 	}
-	if err := h.svc.resume(ctx, sched.ID); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).PauseAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), sched.ID, false); err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
 	if row, _, err = h.svc.Show(ctx, sched.ID, 5); err != nil || row.State != stateArmed {
 		t.Fatalf("resume: %v %+v", err, row)
-	}
-}
-
-func TestHealthReportsAStaleTick(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
-	armOne(t, h, writeRepo(t, "svc", everyMinute))
-
-	timer := fakeTimerHost(t, h.home, true)
-	fresh, err := h.svc.health(ctx, timer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if !fresh.Timer.Enabled {
-		t.Fatalf("timer: %+v", fresh.Timer)
-	}
-	if !fresh.TickStale {
-		t.Error("a home that has never ticked with an enabled timer is stale")
-	}
-
-	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
-	if _, err := h.svc.Tick(ctx, false); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	ticked, err := h.svc.health(ctx, timer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if ticked.TickStale || !ticked.healthy() {
-		t.Fatalf("a home that just ticked: %+v", ticked)
-	}
-	if ticked.Armed != 1 || ticked.Schedules != 1 {
-		t.Errorf("counts: %+v", ticked)
-	}
-
-	h.clock.set(at(t, "2026-01-01T00:10:00Z"))
-	stale, err := h.svc.health(ctx, timer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if !stale.TickStale || stale.healthy() {
-		t.Fatalf("ten minutes without a tick: %+v", stale)
-	}
-	if !strings.Contains(stale.Detail, "crons.log") {
-		t.Errorf("detail = %q, want the log named", stale.Detail)
-	}
-}
-
-func TestHealthIsUnhealthyWhenTheLastTickReportedAnError(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
-	armOne(t, h, writeRepo(t, "svc", everyMinute))
-	timer := fakeTimerHost(t, h.home, true)
-
-	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
-	if err := h.store.AsOperator().RecordCronTick(ctx, store.CronTick{
-		At: h.clock.now(), Host: "test-host", Error: "svc/every-minute: consumer will not start",
-	}); err != nil {
-		t.Fatalf("RecordCronTick: %v", err)
-	}
-	health, err := h.svc.health(ctx, timer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if health.TickStale {
-		t.Fatalf("the tick just landed: %+v", health)
-	}
-	if health.healthy() {
-		t.Fatal("a tick that reported a failure read as healthy")
-	}
-	if !strings.Contains(health.Detail, "consumer will not start") {
-		t.Errorf("detail = %q, want the tick's own reason", health.Detail)
 	}
 }
 
@@ -1169,65 +1097,6 @@ func nativeTimerFixtureBinary() string {
 		return filepath.VolumeName(os.TempDir()) + "/usr/local/bin/sparkwing"
 	}
 	return "/usr/local/bin/sparkwing"
-}
-
-func fakeTimerHost(t *testing.T, home string, installed bool) crontimer.Host {
-	t.Helper()
-	root := t.TempDir()
-	h := crontimer.Host{
-		GOOS:          "linux",
-		Home:          root,
-		ConfigHome:    filepath.Join(root, ".config"),
-		Binary:        nativeTimerFixtureBinary(),
-		PathEnv:       "/usr/bin:/bin",
-		SparkwingHome: home,
-		Version:       "v1.2.3",
-		LogPath:       filepath.Join(home, "crons.log"),
-		UID:           1000,
-		Exec:          func(context.Context, string, ...string) (string, error) { return "", nil },
-	}
-	if installed {
-		if _, err := crontimer.Install(t.Context(), h); err != nil {
-			t.Fatalf("install the timer fixture: %v", err)
-		}
-	}
-	return h
-}
-
-func TestHealthAcceptsAHostTickingFromItsOwnScheduler(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
-	armOne(t, h, writeRepo(t, "svc", everyMinute))
-	noTimer := fakeTimerHost(t, h.home, false)
-
-	before, err := h.svc.health(ctx, noTimer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if before.healthy() {
-		t.Fatalf("an armed host with no timer and no tick: %+v", before)
-	}
-
-	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
-	if _, err := h.svc.Tick(ctx, false); err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	ticked, err := h.svc.health(ctx, noTimer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if !ticked.healthy() || ticked.TickStale {
-		t.Fatalf("a host ticking from its own scheduler: %+v", ticked)
-	}
-
-	h.clock.set(at(t, "2026-01-01T01:00:00Z"))
-	lapsed, err := h.svc.health(ctx, noTimer)
-	if err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if !lapsed.TickStale || lapsed.healthy() {
-		t.Fatalf("an hour after the last external tick: %+v", lapsed)
-	}
 }
 
 func TestTeamScheduleIDKeepsTheOperatorsIDsAndSeparatesTeams(t *testing.T) {
@@ -1276,4 +1145,13 @@ func TestTickRetriesAbortedIntakeWithoutConsumingTheDueInstant(t *testing.T) {
 			}
 		})
 	}
+}
+
+func scheduleAuthorization(t *testing.T, st *store.Store) capability.Authorized {
+	t.Helper()
+	snapshot, err := st.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: "test-peer"}}, capability.RequestEvidence{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return capability.Authorized{Principal: snapshot.Authorities[0].Principal, Target: capability.Target{Team: string(store.DefaultTeam)}}
 }

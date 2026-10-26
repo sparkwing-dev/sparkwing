@@ -30,82 +30,6 @@ func renderQueueAt(w io.Writer, qs wingwire.QueueState, format string, now time.
 	}
 }
 
-const (
-	reachServing = "serving"
-
-	reachAbsent = "absent"
-
-	reachUnreachable = "unreachable"
-)
-
-type daemonReach struct {
-	Reachable bool   `json:"reachable"`
-	State     string `json:"state"`
-
-	Detail string `json:"detail,omitempty"`
-}
-
-func serving() daemonReach {
-	return daemonReach{Reachable: true, State: reachServing}
-}
-
-func absent() daemonReach {
-	return daemonReach{State: reachAbsent, Detail: "no admission daemon is running for this home, so nothing is queued"}
-}
-
-func unreachable(cause error) daemonReach {
-	detail := "the admission daemon socket could not be reached"
-	if cause != nil {
-		detail = cause.Error()
-	}
-	return daemonReach{State: reachUnreachable, Detail: detail}
-}
-
-type queueView struct {
-	queueStateView
-	Daemon daemonReach `json:"daemon"`
-}
-
-func renderLocalQueue(w io.Writer, qs wingwire.QueueState, reach daemonReach, format string) error {
-	return renderLocalQueueAt(w, qs, reach, format, time.Now())
-}
-
-// renderLocalQueueAt renders the local queue as of now, which fixes the clock
-// the expected-finish times are projected from.
-func renderLocalQueueAt(w io.Writer, qs wingwire.QueueState, reach daemonReach, format string, now time.Time) error {
-	switch format {
-	case "json":
-		enc := json.NewEncoder(w)
-		return enc.Encode(queueView{queueStateView: queueStateViewOf(qs, now), Daemon: reach})
-	case "plain":
-		fmt.Fprintf(w, "daemon\t%s\n", reach.State)
-		if reach.State != reachServing {
-			return nil
-		}
-		return renderQueuePlain(w, qs, now)
-	default:
-		switch reach.State {
-		case reachAbsent:
-			fmt.Fprintln(w, "no admission daemon running; nothing is queued")
-			return nil
-		case reachUnreachable:
-			fmt.Fprintf(w, "cannot reach the admission daemon: %s\n", reach.Detail)
-			fmt.Fprintln(w, "the local queue is unknown, not empty -- nothing here says whether runs are holding or waiting")
-			return nil
-		default:
-			return renderQueuePrettyAt(w, qs, now)
-		}
-	}
-}
-
-func RenderNoDaemon(w io.Writer, format string) error {
-	return renderLocalQueue(w, wingwire.QueueState{}, absent(), format)
-}
-
-func renderUnreachableDaemon(w io.Writer, format string, cause error) error {
-	return renderLocalQueue(w, wingwire.QueueState{}, unreachable(cause), format)
-}
-
 func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error {
 	if qs.AdmissionMode != "" {
 		fmt.Fprintf(w, "admission\t%s\n", qs.AdmissionMode)
@@ -185,10 +109,6 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 		fmt.Fprintf(w, "runner\t%s\t%.3f\t%d\t%d\n", r.Name, r.Cores, r.MemoryBytes, r.QueueDepth)
 	}
 	return nil
-}
-
-func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
-	return renderQueuePrettyAt(out, qs, time.Now())
 }
 
 func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) error {

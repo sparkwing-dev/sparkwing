@@ -113,7 +113,7 @@ func TestExternalIgnoredNote_NamesTheSetting(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueue(&buf, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	if !strings.Contains(buf.String(), "/home/op/.config/sparkwing/config.yaml admission.budget") {

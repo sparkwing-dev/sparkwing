@@ -60,7 +60,7 @@ func verifyWithKey(publicKey ed25519.PublicKey, manifest, manifestSignature []by
 	if !ed25519.Verify(publicKey, asset, assetSignature) {
 		return Verified{}, fmt.Errorf("signature is invalid for %s", name)
 	}
-	digest, err := ManifestDigest(manifest, name)
+	digest, err := manifestDigest(manifest, name)
 	if err != nil {
 		return Verified{}, err
 	}
@@ -88,8 +88,8 @@ func ManifestSignedBy(publicKeys []ed25519.PublicKey, manifest, signature []byte
 	return false
 }
 
-// ManifestDigest returns one unambiguous lowercase SHA-256 digest.
-func ManifestDigest(manifest []byte, assetName string) (string, error) {
+// manifestDigest returns one unambiguous lowercase SHA-256 digest.
+func manifestDigest(manifest []byte, assetName string) (string, error) {
 	var digest string
 	for _, line := range strings.Split(string(manifest), "\n") {
 		fields := strings.Fields(line)

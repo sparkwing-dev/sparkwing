@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -453,85 +454,6 @@ func TestRefreshFollowsTheCheckoutForAnUnlockedSchedule(t *testing.T) {
 	}
 }
 
-func TestOverrideRunsTheHostsValuesAndGoesStaleWhenTheRepoMoves(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
-	root := writeRepo(t, "svc", everyMinute)
-	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true}); err != nil {
-		t.Fatalf("Arm: %v", err)
-	}
-	id := scheduleID(root, "every-minute", "")
-
-	cron := "*/5 * * * *"
-	catchUp := 6 * time.Hour
-	row, err := h.svc.setOverride(ctx, id, override{
-		Cron:    &cron,
-		CatchUp: &catchUp,
-		Args:    map[string]string{"depth": "deep"},
-	})
-	if err != nil {
-		t.Fatalf("SetOverride: %v", err)
-	}
-	if row.Effective.Cron != cron || row.Effective.CatchUp != catchUp {
-		t.Fatalf("effective cadence: %+v", row.Effective)
-	}
-	if row.Cron != "* * * * *" {
-		t.Errorf("the declaration moved: %q", row.Cron)
-	}
-	if row.Effective.Args["depth"] != "deep" || row.OverrideStale {
-		t.Errorf("override: %+v stale=%v", row.Effective.Args, row.OverrideStale)
-	}
-	if strings.Join(row.OverrideFields, ",") != "cron,catch_up,args" {
-		t.Errorf("override fields = %v", row.OverrideFields)
-	}
-
-	tz := "America/Denver"
-	if row, err = h.svc.setOverride(ctx, id, override{TZ: &tz}); err != nil {
-		t.Fatalf("SetOverride: %v", err)
-	}
-	if row.Effective.Cron != cron || row.Effective.TZ != tz {
-		t.Fatalf("the second override dropped the first: %+v", row.Effective)
-	}
-
-	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"),
-		[]byte("pipelines:\n"+strings.Replace(everyMinute, `"* * * * *"`, `"0 2 * * *"`, 1)), 0o644); err != nil {
-		t.Fatalf("rewrite config: %v", err)
-	}
-	if _, err := h.svc.refresh(ctx); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
-	rows, err := h.svc.List(ctx)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if !rows[0].OverrideStale {
-		t.Fatal("an override set against a declaration that has moved is not stale")
-	}
-	if rows[0].Effective.Cron != cron {
-		t.Errorf("a stale override stopped applying: %q", rows[0].Effective.Cron)
-	}
-
-	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true}); err != nil {
-		t.Fatalf("re-Arm: %v", err)
-	}
-	if rows, err = h.svc.List(ctx); err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if rows[0].OverrideStale {
-		t.Error("re-arming did not re-base the override")
-	}
-	if rows[0].Effective.Cron != cron {
-		t.Errorf("re-arming dropped the override: %q", rows[0].Effective.Cron)
-	}
-
-	if row, err = h.svc.clearOverride(ctx, id); err != nil {
-		t.Fatalf("ClearOverride: %v", err)
-	}
-	if row.Effective.Cron != "0 2 * * *" || len(row.OverrideFields) != 0 {
-		t.Fatalf("reset: %+v", row)
-	}
-}
-
 func TestSetOverrideRefusesACadenceThatWouldNotEvaluate(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
@@ -541,7 +463,7 @@ func TestSetOverrideRefusesACadenceThatWouldNotEvaluate(t *testing.T) {
 	}
 	id := scheduleID(root, "every-minute", "")
 	bad := "not a cron"
-	if _, err := h.svc.setOverride(ctx, id, override{Cron: &bad}); err == nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).OverrideAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), id, &cronspec.Override{Cron: &bad}); err == nil {
 		t.Fatal("an unparseable cron was accepted")
 	}
 	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
@@ -570,9 +492,9 @@ func TestTickFiresTheEffectiveCadenceAndRecordsItsArgs(t *testing.T) {
 	}
 	id := scheduleID(root, "sweep", "")
 	cron := "* * * * *"
-	if _, err := h.svc.setOverride(ctx, id, override{
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).OverrideAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), id, &cronspec.Override{
 		Cron: &cron,
-		Args: map[string]string{"depth": "deep", "dry-run": "true"},
+		Args: &map[string]string{"depth": "deep", "dry-run": "true"},
 	}); err != nil {
 		t.Fatalf("SetOverride: %v", err)
 	}
@@ -742,7 +664,7 @@ func TestHealthCountsLocksFollowersAndStaleOverrides(t *testing.T) {
 
 	cron := "*/5 * * * *"
 	id := scheduleID(following, "every-minute", "")
-	if _, err := h.svc.setOverride(ctx, id, override{Cron: &cron}); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).OverrideAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), id, &cronspec.Override{Cron: &cron}); err != nil {
 		t.Fatalf("SetOverride: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(following, ".sparkwing", "sparkwing.yaml"),
@@ -753,7 +675,17 @@ func TestHealthCountsLocksFollowersAndStaleOverrides(t *testing.T) {
 		t.Fatalf("Refresh: %v", err)
 	}
 
-	health, err := h.svc.health(ctx, fakeTimerHost(t, h.home, true))
+	rows, err := h.svc.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.ID == id && (!row.OverrideStale || row.Effective.Cron != cron || strings.Join(row.OverrideFields, ",") != "cron") {
+			t.Fatalf("stale override view: %+v", row)
+		}
+	}
+
+	health, err := h.svc.ControllerHealth(ctx)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
@@ -858,7 +790,7 @@ func TestArmReportsTheOverridesItReBased(t *testing.T) {
 	}
 	id := scheduleID(root, "every-minute", "")
 	cron := "*/5 * * * *"
-	if _, err := h.svc.setOverride(ctx, id, override{Cron: &cron}); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).OverrideAuthorizedSchedule(ctx, scheduleAuthorization(t, h.store), id, &cronspec.Override{Cron: &cron}); err != nil {
 		t.Fatalf("SetOverride: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"),

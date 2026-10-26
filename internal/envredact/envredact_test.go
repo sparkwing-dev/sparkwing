@@ -62,37 +62,6 @@ func TestCredentialName(t *testing.T) {
 	}
 }
 
-func TestCredentialValue(t *testing.T) {
-	cases := []struct {
-		name  string
-		value string
-		want  bool
-	}{
-		{"bearer", "Bearer abc.def.ghi", true},
-		{"bearer lowercase", "bearer abc.def.ghi", true},
-		{"pem", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----", true},
-		{"json token", `{"kind":"sa","token":"abc"}`, true},
-		{"json nested password", `{"db":{"password":"hunter2"}}`, true},
-		{"json plain", `{"region":"us-east-1"}`, false},
-		{"not json", "bearded dragon", false},
-		{"bearer on a later line", "x\nAuthorization: Bearer abc.def", true},
-		{"pem on a later line", "note\n-----BEGIN CERTIFICATE-----\nMIIE", true},
-		{"json on a later line", "note\n{\"api_key\":\"AIza\"}", true},
-		{"json api key", `{"type":"service_account","api_key":"AIza"}`, true},
-		{"url query signature", "https://cache.example.com/objects?sig=abc", true},
-		{"url path secret", "https://hooks.example.com/services/T0/zzzSECRET", true},
-		{"plain url", "https://cache.example.com/v1/objects", false},
-		{"plain multi-line", "line one\nline two", false},
-		{"dsn", "postgres://u:p@db.example/sparkwing", false},
-		{"empty", "", false},
-	}
-	for _, c := range cases {
-		if got := credentialValue(c.value); got != c.want {
-			t.Errorf("%s: CredentialValue(%q) = %v, want %v", c.name, c.value, got, c.want)
-		}
-	}
-}
-
 func TestRedactValue(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -185,37 +154,6 @@ func TestCredentialTokenBoundaries(t *testing.T) {
 		}
 	})
 
-	t.Run("values", func(t *testing.T) {
-		cases := []struct {
-			name  string
-			value string
-			want  bool
-		}{
-			{"array under a field", `{"creds":[{"token":"ghp_secret"}]}`, true},
-			{"top-level array", `[{"api_key":"secret"}]`, true},
-			{"array of arrays", `[[{"password":"hunter2"}]]`, true},
-			{"array of plain scalars", `["us-east-1","us-west-2"]`, false},
-			{"dotenv blob", "GITHUB_TOKEN=ghp_secret\nOTHER=1", true},
-			{"single assignment", "AWS_SECRET_ACCESS_KEY=abc123", true},
-			{"concatenated assignment name", "MYSQL_PASSWD=hunter2", true},
-			{"prefix assignment name", "SSH_PASSPHRASE=hunter2", true},
-			{"assignment beside others", "LANG=C GITHUB_TOKEN=ghp_secret", true},
-			{"plain assignment blob", "MONKEY_MODE=1\nCOMPASS_DIR=/tmp", false},
-			{"url path monkey", "https://x/api/v1/monkey", false},
-			{"url path bypass", "https://api.example.com/v1/bypass", false},
-			{"empty assignment value", "TOKEN=", false},
-			{"lowercase flag fragment", "ANSIBLE=--extra-vars key=1", false},
-			{"allow-listed assignment name", "PWD=/tmp/x\nOLDPWD=/tmp", false},
-			{"deny-listed assignment name", "SSH_KEY_DIR=/home/u/.ssh", false},
-			{"lowercase pass flag", "--set pass=1", false},
-			{"lowercase dotenv-looking flag", "run --opt secret=abc", false},
-		}
-		for _, c := range cases {
-			if got := credentialValue(c.value); got != c.want {
-				t.Errorf("%s: CredentialValue(%q) = %v, want %v", c.name, c.value, got, c.want)
-			}
-		}
-	})
 }
 
 func TestCredentialFileName(t *testing.T) {

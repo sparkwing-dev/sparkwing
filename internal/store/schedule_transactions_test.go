@@ -558,3 +558,64 @@ func TestMemberCannotMutateAppSchedule(t *testing.T) {
 		})
 	}
 }
+
+func TestScheduleOverrideReplacesPreviousEditAndResetsToDeclaration(t *testing.T) {
+	tenant, a, body, _ := consentedScheduleFixture(t)
+	body.Schedules[0].TZ = "UTC"
+	body.Schedules[0].Args = map[string]string{"depth": "shallow"}
+	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := ids[0]
+	cron, catchUp := "*/5 * * * *", "6h"
+	args := map[string]string{"depth": "deep"}
+	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), a, id, &cronspec.Override{Cron: &cron, CatchUp: &catchUp, Args: &args}); err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.GetCronSchedule(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective := row.Effective()
+	if row.Cron != "* * * * *" || effective.Cron != cron || effective.CatchUp != 6*time.Hour || effective.Args["depth"] != "deep" {
+		t.Fatalf("first override: %+v", row)
+	}
+	tz := "America/Denver"
+	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), a, id, &cronspec.Override{TZ: &tz}); err != nil {
+		t.Fatal(err)
+	}
+	row, err = tenant.GetCronSchedule(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective = row.Effective()
+	if effective.Cron != row.Cron || effective.TZ != tz || effective.CatchUp != row.CatchUp || !reflect.DeepEqual(effective.Args, row.Args) {
+		t.Fatalf("replacement retained previous edit: %+v", effective)
+	}
+	bad := "not a cron"
+	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), a, id, &cronspec.Override{Cron: &bad}); err == nil {
+		t.Fatal("accepted invalid cadence")
+	}
+	after, err := tenant.GetCronSchedule(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(row, after) {
+		t.Fatal("refused edit changed the stored schedule")
+	}
+	body.Schedules[0].Cron = "0 2 * * *"
+	if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), a, id, nil); err != nil {
+		t.Fatal(err)
+	}
+	row, err = tenant.GetCronSchedule(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Override != nil || row.Effective().Cron != "0 2 * * *" || !reflect.DeepEqual(row.Effective().Args, body.Schedules[0].Args) {
+		t.Fatalf("reset: %+v", row)
+	}
+}

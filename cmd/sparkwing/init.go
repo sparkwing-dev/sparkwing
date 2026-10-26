@@ -228,11 +228,6 @@ func ensureGitignoreEntry(sparkwingDir, entry string) (err error) {
 	return err
 }
 
-func dirExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.IsDir()
-}
-
 func tidySkeleton(ctx context.Context, sparkwingDir string) (bool, error) {
 	if !goOnPath() {
 		return false, nil

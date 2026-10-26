@@ -134,10 +134,3 @@ func writeRepositoryMutation(inv clisurface.Invocation, action, path string, cou
 	_, err := fmt.Fprintln(os.Stdout, path)
 	return err
 }
-
-func entryWord(n int) string {
-	if n == 1 {
-		return "entry"
-	}
-	return "entries"
-}

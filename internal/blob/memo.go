@@ -32,7 +32,7 @@ func ReadMemo(ctx context.Context, get func(context.Context, Digest) (VerifiedRe
 	if _, err := copyMemoBlob(ctx, get, hit.Manifest.Value, &manifest, -1); err != nil {
 		return nil, nil, err
 	}
-	if _, err := DecodeManifest(manifest.Bytes(), hit.Manifest.Value, team, hit.Members); err != nil {
+	if _, err := decodeManifest(manifest.Bytes(), hit.Manifest.Value, team, hit.Members); err != nil {
 		return nil, nil, err
 	}
 	verified := make(map[Digest]int64)

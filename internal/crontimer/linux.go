@@ -80,43 +80,6 @@ func installLinux(ctx context.Context, h Host) (State, error) {
 	return state, nil
 }
 
-func statusLinux(ctx context.Context, h Host) (State, error) {
-	servicePath, timerPath, err := linuxPaths(h)
-	if err != nil {
-		return State{}, err
-	}
-	service, timer, err := readLinuxFiles(servicePath, timerPath)
-	if err != nil {
-		return State{}, err
-	}
-	state := linuxFileState(h, service, timer)
-	if !state.Installed {
-		return state, nil
-	}
-	if timerHome(unitfile.Arguments("linux", service.body)) != h.SparkwingHome {
-		state.Detail = otherHomeDetail(h, servicePath)
-		return state, nil
-	}
-	if loaded := loadedElsewhere(ctx, h, timerPath); loaded != "" {
-		state.Detail = fmt.Sprintf("systemd runs %s from %s, not from %s", h.timerName(), loaded, timerPath)
-		return state, nil
-	}
-	enabledOut, enabledErr := h.run(ctx, "systemctl", "--user", "is-enabled", h.timerName())
-	activeOut, activeErr := h.run(ctx, "systemctl", "--user", "is-active", h.timerName())
-	switch {
-	case enabledErr == nil && activeErr == nil:
-		state.Enabled = true
-		state.Detail = fmt.Sprintf("%s is enabled and active, running %s __tick every minute", h.timerName(), state.Binary)
-	default:
-		state.Detail = fmt.Sprintf("%s is installed but systemd does not report it running: %s", h.timerName(),
-			joinOutput(enabledOut, activeOut))
-	}
-	if state.Stale {
-		state.Detail += fmt.Sprintf("; it runs %s, not %s", state.Binary, h.Binary)
-	}
-	return state, nil
-}
-
 func uninstallLinux(ctx context.Context, h Host) (State, error) {
 	servicePath, timerPath, err := linuxPaths(h)
 	if err != nil {
@@ -169,20 +132,6 @@ func readLinuxFiles(servicePath, timerPath string) (service, timer managed, err 
 	return service, timer, nil
 }
 
-func linuxFileState(h Host, service, timer managed) State {
-	state := State{Path: timer.path}
-	if foreign := firstForeign(service, timer); foreign != "" {
-		state.Foreign = true
-		state.Detail = foreignDetail(foreign)
-		return state
-	}
-	if !service.ours || !timer.ours {
-		state.Detail = "no sparkwing cron timer is installed here"
-		return state
-	}
-	return commandState(h, timer.path, service.body)
-}
-
 func firstForeign(files ...managed) string {
 	for _, f := range files {
 		if f.exists && !f.ours {
@@ -196,25 +145,12 @@ func foreignDetail(path string) string {
 	return fmt.Sprintf("%s exists but sparkwing did not write it, so sparkwing will not touch it", path)
 }
 
-func joinOutput(outs ...string) string {
-	var parts []string
-	for _, o := range outs {
-		if o = strings.TrimSpace(o); o != "" {
-			parts = append(parts, o)
-		}
-	}
-	if len(parts) == 0 {
-		return "systemctl said nothing"
-	}
-	return strings.Join(parts, "; ")
-}
-
 func serviceUnit(h Host) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n", Marker)
 	b.WriteString("[Unit]\nDescription=sparkwing __tick\n\n")
-	// safety: a oneshot's cgroup is killed when its main process exits, which would take
-	// the run consumer and the admission daemon the tick just started with it.
+	// safety: __tick ensures the local controller, then invokes its tick.
+	// Keep that controller alive after the oneshot exits.
 	b.WriteString("[Service]\nType=oneshot\nKillMode=process\n")
 	// safety: a tick that hangs on a lock or a store would otherwise hold the
 	// unit active and swallow every following minute.

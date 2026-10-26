@@ -33,9 +33,9 @@ func TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			cfg := &config{FallbackPaths: []string{"~/code"}}
+			cfg := &userconfig.ReposConfig{FallbackPaths: []string{"~/code"}}
 			for j := 0; j <= i*8; j++ {
-				cfg.Repos = append(cfg.Repos, &entry{Path: fmt.Sprintf("/checkout/number-%d-%d", i, j)})
+				cfg.Repos = append(cfg.Repos, userconfig.RepoPath{Path: fmt.Sprintf("/checkout/number-%d-%d", i, j)})
 			}
 			<-start
 			errs[i] = Save(path, cfg)
@@ -71,7 +71,7 @@ func TestSave_LeavesNoStagingFilesBehind(t *testing.T) {
 	dir := t.TempDir()
 	path := savedAt(t, filepath.Join(dir, "config.yaml"))
 	for i := range 5 {
-		if err := Save(path, &config{Repos: []*entry{{Path: fmt.Sprintf("/r%d", i)}}}); err != nil {
+		if err := Save(path, &userconfig.ReposConfig{Repos: []userconfig.RepoPath{{Path: fmt.Sprintf("/r%d", i)}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -89,7 +89,7 @@ func TestSave_LeavesNoStagingFilesBehind(t *testing.T) {
 func TestSave_AFailedWriteLeavesThePreviousRegistryIntact(t *testing.T) {
 	dir := t.TempDir()
 	path := savedAt(t, filepath.Join(dir, "config.yaml"))
-	good := &config{Repos: []*entry{{Path: "/keep/me"}}, FallbackPaths: []string{"~/code"}}
+	good := &userconfig.ReposConfig{Repos: []userconfig.RepoPath{{Path: "/keep/me"}}, FallbackPaths: []string{"~/code"}}
 	if err := Save(path, good); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestSave_AFailedWriteLeavesThePreviousRegistryIntact(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	}
-	if err := Save(path, &config{Repos: []*entry{{Path: "/never/lands"}}}); err == nil {
+	if err := Save(path, &userconfig.ReposConfig{Repos: []userconfig.RepoPath{{Path: "/never/lands"}}}); err == nil {
 		t.Fatal("Save into a read-only directory reported success")
 	}
 
@@ -149,7 +149,7 @@ func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T
 
 	dir := t.TempDir()
 	path := savedAt(t, filepath.Join(dir, "config.yaml"))
-	good := &config{Repos: []*entry{{Path: "/keep/me"}}, FallbackPaths: []string{"~/code"}}
+	good := &userconfig.ReposConfig{Repos: []userconfig.RepoPath{{Path: "/keep/me"}}, FallbackPaths: []string{"~/code"}}
 	if err := Save(path, good); err != nil {
 		t.Fatal(err)
 	}
@@ -194,9 +194,9 @@ func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T
 }
 
 func saveUntilKilled(path string) {
-	cfg := &config{FallbackPaths: []string{"~/code"}, Repos: make([]*entry, 0, killedSaveEntries)}
+	cfg := &userconfig.ReposConfig{FallbackPaths: []string{"~/code"}, Repos: make([]userconfig.RepoPath, 0, killedSaveEntries)}
 	for i := range killedSaveEntries {
-		cfg.Repos = append(cfg.Repos, &entry{Path: fmt.Sprintf("/child/checkout-%06d", i)})
+		cfg.Repos = append(cfg.Repos, userconfig.RepoPath{Path: fmt.Sprintf("/child/checkout-%06d", i)})
 	}
 	for {
 		if err := Save(path, cfg); err != nil {
@@ -205,17 +205,17 @@ func saveUntilKilled(path string) {
 	}
 }
 
-func isOriginalRegistry(cfg *config) bool {
+func isOriginalRegistry(cfg *userconfig.ReposConfig) bool {
 	return len(cfg.FallbackPaths) == 1 && cfg.FallbackPaths[0] == "~/code" &&
-		len(cfg.Repos) == 1 && cfg.Repos[0] != nil && cfg.Repos[0].Path == "/keep/me"
+		len(cfg.Repos) == 1 && cfg.Repos[0].Path == "/keep/me"
 }
 
-func isKilledChildRegistry(cfg *config) bool {
+func isKilledChildRegistry(cfg *userconfig.ReposConfig) bool {
 	if len(cfg.FallbackPaths) != 1 || cfg.FallbackPaths[0] != "~/code" || len(cfg.Repos) != killedSaveEntries {
 		return false
 	}
 	for i, entry := range cfg.Repos {
-		if entry == nil || entry.Path != fmt.Sprintf("/child/checkout-%06d", i) {
+		if entry.Path != fmt.Sprintf("/child/checkout-%06d", i) {
 			return false
 		}
 	}
@@ -242,6 +242,6 @@ func waitForStagingFile(t *testing.T, dir string) {
 
 // Save replaces the repos section of the config.yaml at path with cfg,
 // keeping every other section; see [userconfig.Write].
-func Save(path string, cfg *config) error {
+func Save(path string, cfg *userconfig.ReposConfig) error {
 	return userconfig.Write(path, userconfig.Repos, "the repo registry", cfg)
 }

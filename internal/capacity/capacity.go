@@ -59,15 +59,6 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 	return resolve(pin, profile, numCPU, planHash, cores, previous)
 }
 
-// resolvePeak uses peak CPU demand for an enforced allocation.
-func resolvePeak(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
-	var cores, previous float64
-	if profile != nil {
-		cores, previous = profile.PeakCores, profile.PrevPeakCores
-	}
-	return resolve(pin, profile, numCPU, planHash, cores, previous)
-}
-
 func resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string, cores, previous float64) Resolution {
 	res := Resolution{}
 	if profile != nil {
@@ -144,56 +135,6 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 	}
 	res.MemoryBytes = max(prevMem, floorMemory)
 	return res
-}
-
-func applyHostCeiling(res Resolution, pipeline string, machineCores, grantableCores float64, grantableMemoryBytes int64) (Resolution, string) {
-	warning := ""
-	if res.Source == store.CostSourcePin {
-		if machineCores > 0 && res.Cores > machineCores {
-			warning = fmt.Sprintf("pin %.1f cores exceeds this machine (%.1f); use a smaller pin or a larger machine",
-				res.Cores, machineCores)
-		}
-		return res, warning
-	}
-	measuring := res.Source == store.CostSourceFloor || res.Source == store.CostSourceMeasuring
-	clamped := applyCeiling(res, grantableCores, grantableMemoryBytes)
-	switch {
-	case measuring && clamped.Cores < res.Cores:
-		warning = fmt.Sprintf("measuring charge %.1f cores exceeds this machine's grantable %.1f, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline %s",
-			res.Cores, grantableCores, pipeline)
-	case measuring && clamped.MemoryBytes < res.MemoryBytes:
-		warning = fmt.Sprintf("measuring charge %s exceeds this machine's grantable %s, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline %s",
-			gib(res.MemoryBytes), gib(grantableMemoryBytes), pipeline)
-	}
-	return clamped, warning
-}
-
-// applyCeiling caps a resolution at a hard ceiling, whatever its source. A
-// zero ceiling in either dimension leaves that dimension alone. Unlike
-// [applyHostCeiling], a pin is capped too: on a backend that turns the
-// resolution into an enforced allocation, an operator ceiling outranks a
-// pipeline's own declaration.
-func applyCeiling(res Resolution, ceilingCores float64, ceilingMemoryBytes int64) Resolution {
-	if ceilingCores > 0 && res.Cores > ceilingCores {
-		res.Cores = ceilingCores
-	}
-	if ceilingMemoryBytes > 0 && res.MemoryBytes > ceilingMemoryBytes {
-		res.MemoryBytes = ceilingMemoryBytes
-	}
-	return res
-}
-
-func floorPoisoned(profile *store.PipelineProfile, grantableCores float64) bool {
-	if profile == nil || !profile.CPUMeasured || grantableCores <= 0 {
-		return false
-	}
-	if profile.PinnedCores > 0 || profile.PinnedMemoryBytes > 0 {
-		return false
-	}
-	if profile.SampleCount >= MinSamples {
-		return false
-	}
-	return profile.FloorCores > 0 && SafetyMultiple*profile.FloorCores >= grantableCores
 }
 
 func coldStartCores(numCPU int) float64 {

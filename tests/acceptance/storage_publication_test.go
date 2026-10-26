@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -66,7 +67,7 @@ func checkStoragePublication(t *testing.T, objects blob.ObjectBackend, transfers
 			t.Fatalf("published output: %q, %v", got, err)
 		}
 		destination := t.TempDir()
-		if n, err := artifacts.Stage(t.Context(), data, destination, []artifacts.Edge{{Record: manifest.Key}}); err != nil || n != 1 {
+		if n, err := (nodehost.ArtifactRecords{Blobs: data.Bytes, Records: data.Records}).Stage(t.Context(), blob.RecordLookup{Authority: data.Authority, Key: manifest.Key, Budget: data.Budget}, destination, ""); err != nil || n != 1 {
 			t.Fatalf("published artifact: %d, %v", n, err)
 		}
 		if got, err := os.ReadFile(filepath.Join(destination, "result")); err != nil || !bytes.Equal(got, payload) {

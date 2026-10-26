@@ -1,11 +1,8 @@
 package paths
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
@@ -67,48 +64,6 @@ func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 // by the node that started it, so a sweep can end sessions whose node died
 // without reaping them.
 func (p Paths) SessionLedgerDir() string { return filepath.Join(p.Root, "sessions") }
-
-// refWorktreesDir holds the git worktrees `run --sw-detached --sw-ref` checks out for
-// detached runs. Every one sits under this root, which is what lets a sweep
-// decide ownership by containment rather than by a record it has to trust.
-func (p Paths) refWorktreesDir() string { return filepath.Join(p.Root, "ref-worktrees") }
-
-// standaloneDir holds the runs stores written by pipeline binaries that could
-// not reach the admission daemon.
-func (p Paths) standaloneDir() string { return filepath.Join(p.Root, "standalone") }
-
-// standaloneStateDB is the store standalone runs share.
-func (p Paths) standaloneStateDB() string {
-	return filepath.Join(p.standaloneDir(), "state.db")
-}
-
-// standaloneSchemaDir is where a build before the store baseline kept a
-// standalone store the shared one refused, one directory per schema version.
-func (p Paths) standaloneSchemaDir(version int) string {
-	return filepath.Join(p.standaloneDir(), fmt.Sprintf("schema-%d", version))
-}
-
-func standaloneSchemaOf(entry os.DirEntry) (int, bool) {
-	if !entry.IsDir() {
-		return 0, false
-	}
-	rest, found := strings.CutPrefix(entry.Name(), "schema-")
-	if !found {
-		return 0, false
-	}
-	schema, err := strconv.Atoi(rest)
-	if err != nil || schema <= 0 {
-		return 0, false
-	}
-	return schema, true
-}
-
-// safety: Lstat, because a symlink into another home's store is not this
-// home's standalone run and must not be read as one.
-func isRegularFile(path string) bool {
-	info, err := os.Lstat(path)
-	return err == nil && info.Mode().IsRegular()
-}
 
 func (p Paths) versionStampDir() string { return filepath.Join(p.Root, "last-version.d") }
 

@@ -11,24 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
-type entry struct {
-	Path string `yaml:"path"`
-}
-
-type config struct {
-	Repos []*entry `yaml:"repos,omitempty"`
-
-	FallbackPaths []string `yaml:"fallback_paths,omitempty"`
-
-	// AutoRegister false stops `sparkwing run` registering the checkout it
-	// runs in; unset means true.
-	AutoRegister *bool `yaml:"auto_register,omitempty"`
-
-	// IncludeWorktrees lets automatic registration take a linked git
-	// worktree, which it otherwise skips.
-	IncludeWorktrees bool `yaml:"include_worktrees,omitempty"`
-}
-
 // defaultPath reports the config.yaml the repo registry is read from and
 // written to; see [userconfig.Path].
 func defaultPath() (string, error) {
@@ -37,8 +19,8 @@ func defaultPath() (string, error) {
 
 // load reads the repos section of the config.yaml at path. An absent file or
 // section is an empty registry.
-func load(path string) (*config, error) {
-	var cfg config
+func load(path string) (*userconfig.ReposConfig, error) {
+	var cfg userconfig.ReposConfig
 	if _, err := userconfig.Read(path, userconfig.Repos, &cfg); err != nil {
 		return nil, err
 	}
@@ -47,12 +29,12 @@ func load(path string) (*config, error) {
 
 // safety: the registry changes under the settings file's lock, so two
 // registrations racing each keep their entry.
-func update(change func(cfg *config) (bool, error)) error {
+func update(change func(cfg *userconfig.ReposConfig) (bool, error)) error {
 	path, err := defaultPath()
 	if err != nil {
 		return err
 	}
-	var cfg config
+	var cfg userconfig.ReposConfig
 	errUnchanged := errors.New("unchanged")
 	err = userconfig.Update(path, userconfig.Repos, "the repo registry", &cfg, func(bool) error {
 		changed, err := change(&cfg)
@@ -67,47 +49,6 @@ func update(change func(cfg *config) (bool, error)) error {
 	return err
 }
 
-func autoRegister(absPath string) error {
-	path, err := defaultPath()
-	if err != nil {
-		return err
-	}
-	settings, err := load(path)
-	if err != nil {
-		return err
-	}
-	if settings.AutoRegister != nil && !*settings.AutoRegister {
-		return nil
-	}
-	if absPath == "" {
-		return errors.New("AutoRegister: empty path")
-	}
-	abs, err := filepath.Abs(absPath)
-	if err != nil {
-		return fmt.Errorf("absolute %s: %w", absPath, err)
-	}
-	if underTempDir(abs) {
-		return nil
-	}
-	kind, err := repoKind(abs)
-	if err != nil {
-		return err
-	}
-	if kind == repoKindWorktree && !settings.IncludeWorktrees {
-		return nil
-	}
-
-	return update(func(cfg *config) (bool, error) {
-		for _, e := range cfg.Repos {
-			if pathsEqual(e.Path, abs) {
-				return false, nil
-			}
-		}
-		cfg.Repos = append(cfg.Repos, &entry{Path: abs})
-		return true, nil
-	})
-}
-
 func Add(absPath string) error {
 	abs, err := filepath.Abs(absPath)
 	if err != nil {
@@ -116,13 +57,13 @@ func Add(absPath string) error {
 	if _, err := repoKind(abs); err != nil {
 		return err
 	}
-	return update(func(cfg *config) (bool, error) {
+	return update(func(cfg *userconfig.ReposConfig) (bool, error) {
 		for _, e := range cfg.Repos {
 			if pathsEqual(e.Path, abs) {
 				return false, nil
 			}
 		}
-		cfg.Repos = append(cfg.Repos, &entry{Path: abs})
+		cfg.Repos = append(cfg.Repos, userconfig.RepoPath{Path: abs})
 		return true, nil
 	})
 }
@@ -130,7 +71,7 @@ func Add(absPath string) error {
 func Remove(match string) (int, error) {
 	matchAbs, _ := filepath.Abs(match)
 	removed := 0
-	err := update(func(cfg *config) (bool, error) {
+	err := update(func(cfg *userconfig.ReposConfig) (bool, error) {
 		keep := cfg.Repos[:0]
 		for _, e := range cfg.Repos {
 			if pathsEqual(e.Path, matchAbs) || filepath.Base(e.Path) == match {
@@ -150,7 +91,7 @@ func Remove(match string) (int, error) {
 
 func Prune() ([]string, error) {
 	var dropped []string
-	err := update(func(cfg *config) (bool, error) {
+	err := update(func(cfg *userconfig.ReposConfig) (bool, error) {
 		keep := cfg.Repos[:0]
 		for _, e := range cfg.Repos {
 			if !hasSparkwingDir(e.Path) {
@@ -283,42 +224,6 @@ func hasSparkwingDir(absPath string) bool {
 		return false
 	}
 	return fi.IsDir()
-}
-
-func underTempDir(abs string) bool {
-	// macOS hands out a per-user TMPDIR, so scratch trees under the shared
-	// /tmp (really /private/tmp) slipped past a TMPDIR-only check. The
-	// resolved form is named too, so the rule reads the same on a host
-	// where /tmp is a plain directory and /private/tmp does not exist.
-	roots := append(symlinkForms(os.TempDir()), symlinkForms("/tmp")...)
-	roots = append(roots, symlinkForms("/private/tmp")...)
-	targets := symlinkForms(abs)
-	for _, root := range roots {
-		for _, target := range targets {
-			if withinDir(root, target) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func symlinkForms(p string) []string {
-	out := []string{filepath.Clean(p)}
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		if c := filepath.Clean(r); c != out[0] {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-func withinDir(dir, target string) bool {
-	rel, err := filepath.Rel(dir, target)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func pathsEqual(a, b string) bool {
