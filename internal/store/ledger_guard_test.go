@@ -184,7 +184,7 @@ var paymentModeAcrossModes = map[string]string{
 	"(*Tenant).GetNode|credit_charges":              "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
 	"(*Operator).ComputeUsage|credit_charges":       "counts running metered awards per principal, a capacity fact rather than money",
 	"billingPriceTx|credit_charges":                 "reads one award's reservation by its id",
-	"paidBillingTx|credit_charges":                  "settles one award against everything charged to it; the one-way switch can split a single slice across modes (runbook)",
+	"paidBillingTx|credit_charges":                  "settles one award against everything charged to it; cutover refuses to start while any award is unsettled, so an award's charges share one mode",
 	"settledBillingResultTx|credit_charges":         "reports one award's billed seconds, in whatever mode they were charged",
 }
 

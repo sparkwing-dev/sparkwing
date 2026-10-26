@@ -232,7 +232,8 @@ func (p Provenance) SHA() string { return p.identity.SHA }
 func (p Provenance) Pipeline() string { return p.identity.Pipeline }
 
 // DefaultBranch is the repository's default branch: from the delivery for a verified
-// run, and from verified records for any other run, which reads its cache from there.
+// run, from the GitHub App's fire-time resolution for an admin-armed schedule, and
+// from verified records for any other run, which reads its cache from there.
 func (p Provenance) DefaultBranch() string { return p.identity.DefaultBranch }
 
 // PullRequestBase is the base branch name of a verified pull request delivery.
