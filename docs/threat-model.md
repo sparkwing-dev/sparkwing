@@ -32,9 +32,9 @@ forwards controller operations under the corresponding claim authority.
 Secret release requires an accepted declaration and current bound authority.
 A declaration does not widen the secret's pipeline/shared or pool scope. An
 authorized branch can declare and use its permitted secrets, so everyone who
-can change and run that code must be trusted with those secrets. Pipeline secrets reach only runs whose
-repository GitHub proved; CLI, API and local runs read only team-wide shared
-secrets. A child at its parent's exact revision reads its parent's pipeline
+can change and run that code must be trusted with those secrets. Pipeline secrets reach only runs whose code
+Sparkwing fetched from the repository or whose repository GitHub Actions proved;
+uploaded, local and `here` runs read only team-wide shared secrets. A child at its parent's exact revision reads its parent's pipeline
 secrets; any other child reads only team-wide shared secrets. See [secrets](secrets.md).
 
 The teammate's run is sealed as asserted: its OIDC token claims

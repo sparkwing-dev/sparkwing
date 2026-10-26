@@ -345,3 +345,35 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Decision 68: only code the controller fetches through the team's GitHub App
+// proves the repository for its pipeline secrets; anything the submitter
+// supplies, or a controller without the App, proves nothing.
+func TestFetchedGitHubRepositoryNeedsControllerFetchedCode(t *testing.T) {
+	fetched := runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701"}}, Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app"}}}
+	app := &Server{githubApp: &githubAppState{}}
+	if got := app.fetchedGitHubRepository(fetched); got != 701 {
+		t.Fatalf("remote fetch = %d", got)
+	}
+	for name, change := range map[string]func(*runspec.Request){
+		"upload": func(r *runspec.Request) {
+			r.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:x"}
+		},
+		"working tree":   func(r *runspec.Request) { r.Source.WorkingTree = true },
+		"local checkout": func(r *runspec.Request) { r.Source.Location.LocalCheckout = "/src" },
+		"no remote":      func(r *runspec.Request) { r.Source.Location.RemoteURL = "" },
+		"other host":     func(r *runspec.Request) { r.Git.Repository.Key = "git:git.example.com/acme/app" },
+		"here": func(r *runspec.Request) {
+			r.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
+		},
+	} {
+		request := fetched
+		change(&request)
+		if got := app.fetchedGitHubRepository(request); got != 0 {
+			t.Errorf("%s proved repository %d", name, got)
+		}
+	}
+	if got := (&Server{}).fetchedGitHubRepository(fetched); got != 0 {
+		t.Fatalf("controller without the App proved repository %d", got)
+	}
+}

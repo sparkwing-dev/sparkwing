@@ -42,10 +42,11 @@ func runSecretSelection(r runspec.SealedRequest) (secretSelection, error) {
 
 // secretRepository is the one repository identity pipeline secrets are
 // released to: the GitHub repository a verified delivery, an Actions push or an
-// admin-armed schedule proved. An asserted run (CLI, API, member token, local,
-// here) proves none, so it reads only shared team-wide secrets (decision 68).
+// admin-armed schedule proved, or the one the controller fetched an asserted
+// run's code from. A run whose code or repository the submitter supplied
+// proves none, so it reads only shared team-wide secrets (decision 68).
 func secretRepository(r runspec.SealedRequest) string {
-	if id := r.Provenance.RepositoryID(); id > 0 {
+	if id := r.Provenance.SecretRepositoryID(); id > 0 {
 		return "gh:" + strconv.FormatInt(id, 10)
 	}
 	return ""

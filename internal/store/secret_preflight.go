@@ -60,8 +60,8 @@ func (e *secretPreflightError) detail() string {
 		scoped := fmt.Sprintf("%s --repo %s --pipeline %s", set, e.Repo, e.Pipeline)
 		switch {
 		case e.sharedOnly:
-			fmt.Fprintf(&b, "\n- %s is unavailable: GitHub did not prove this run's repository (a CLI, API, local or changed-revision child run), so it reads only shared team-wide secrets."+
-				"\n  Fix: %s --shared\n   or: start the run from a GitHub push, pull request, Actions job or admin-armed schedule", p.Name, set)
+			fmt.Fprintf(&b, "\n- %s is unavailable: this run's code did not come from a repository Sparkwing fetched (an uploaded, local, here or changed-revision child run), so it reads only shared team-wide secrets."+
+				"\n  Fix: %s --shared\n   or: run it from the connected GitHub repository instead of an upload", p.Name, set)
 		case p.Unshared:
 			fmt.Fprintf(&b, "\n- %s is set team-wide but not shared with runs, so only an admin can read it."+
 				"\n  Fix: %s --shared\n   or: %s", p.Name, set, scoped)

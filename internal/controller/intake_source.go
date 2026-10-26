@@ -109,6 +109,27 @@ func (s *Server) keyedRepositoryDisplay(ctx context.Context, team string, reques
 	return "", invalidEngineBody("unknown repository key")
 }
 
+// fetchedGitHubRepository is the GitHub repository the controller itself fetches
+// a run's code from, through the team's App installation that resolved it, or
+// zero when the submitter supplies the code: an upload, a working tree, a local
+// checkout or a run on the submitter's own machine.
+func (s *Server) fetchedGitHubRepository(request runspec.Request) int64 {
+	source := request.Source
+	here := request.Options.Runner.Set && request.Options.Runner.Value.Kind == runspec.RunnerHere
+	if s.githubApp == nil || source.Location.RemoteURL == "" || source.BundleDigest.Set || source.WorkingTree || source.Location.LocalCheckout != "" || here {
+		return 0
+	}
+	key, ok := strings.CutPrefix(string(request.Git.Repository.Key), "gh:")
+	if !ok {
+		return 0
+	}
+	id, err := strconv.ParseInt(key, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
 var errUncoveredGitHubRepository = errors.New("no GitHub App installation of this team covers the repository")
 
 func (s *Server) githubAppRepositoryDisplay(ctx context.Context, team, rawID string) (string, error) {

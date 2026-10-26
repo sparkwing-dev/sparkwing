@@ -199,6 +199,7 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 			return err
 		}
 		request.Intent = &intent.Request
+		request.FetchedRepositoryID = s.fetchedGitHubRepository(body.Request)
 		response, err := admitWithFlood(ctx, s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.admitRun(ctx, a.Target.Team, request)
 		})

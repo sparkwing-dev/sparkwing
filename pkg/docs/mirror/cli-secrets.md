@@ -106,7 +106,7 @@ Restricted --only-on secrets require matching pool demands at seal and reserved 
 
 If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.
 
-A pipeline secret belongs to one GitHub repository and one pipeline: --repo and --pipeline go together, and only runs GitHub proved for that repository's pipeline read it (App push or pull request, Actions, admin-armed schedules); CLI, API and local runs read only --shared secrets. --repo takes owner/name or a gh:<id> key. --shared stores a team-wide secret every pipeline of every repository in the team reads.
+A pipeline secret belongs to one GitHub repository and one pipeline: --repo and --pipeline go together, and only runs whose code Sparkwing fetched from that repository through the team's GitHub App, or whose repository a GitHub Actions job proved, read it; uploaded, local and --runner here runs read only --shared secrets. --repo takes owner/name or a gh:<id> key. --shared stores a team-wide secret every pipeline of every repository in the team reads.
 
 Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. Saving a short secret prints one warning line on stderr. Read `sparkwing docs read --topic secrets` for the masking length rule. JSON returns metadata and replay without the value; plain emits the name.
 

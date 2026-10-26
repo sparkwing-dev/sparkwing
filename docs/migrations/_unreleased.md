@@ -57,9 +57,11 @@ A pipeline secret now belongs to one GitHub repository and one pipeline, like a
 GitHub repository secret. Before, a secret set with `--pipeline ci` reached every
 repository's pipeline named `ci`, so anyone who could push to one repository
 could read another repository's `ci` secrets. Pipeline secrets now reach only
-runs whose repository GitHub proved: App pushes and pull requests, Actions jobs
-and schedules a team admin armed. CLI, API, dashboard, local and `--runner here`
-runs, and runs whose `source:` pins a branch, read only `--shared` secrets.
+runs whose code Sparkwing fetched from the repository through the team's GitHub
+App (pushes, pull requests, schedule fires, run-now and dashboard or CLI runs of
+a connected repository) or whose repository a GitHub Actions job proved.
+Uploaded, working-tree, local and `--runner here` runs read only `--shared`
+secrets.
 
 - `sparkwing secrets set`, `get` and `delete` take `--repo OWNER/NAME` together
   with `--pipeline`; `--pipeline` alone is refused. `--repo` also takes a

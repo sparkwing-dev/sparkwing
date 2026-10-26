@@ -21,8 +21,16 @@ import (
 // may read verified cache records from but never writes as.
 func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal, input runspec.Request, run string) (runspec.Provenance, error) {
 	sealed, err := identityTx(ctx, tx, team, request, p, input, run)
-	if err != nil || sealed.Verified() || sealed.DefaultBranch() != "" {
+	if err != nil {
 		return sealed, err
+	}
+	if id := fetchedRepositoryTx(tx, request, input); id > 0 && sealed.Trust() == runspec.TrustAsserted && !sealed.SharedSecretsOnly() && input.Lineage.ParentRunID == "" && input.Git.Repository.Key == runspec.RepoKey("gh:"+strconv.FormatInt(id, 10)) {
+		if sealed, err = refused(sealed.FetchedFrom(id)); err != nil {
+			return sealed, err
+		}
+	}
+	if sealed.Verified() || sealed.DefaultBranch() != "" {
+		return sealed, nil
 	}
 	var scope string
 	err = tx.QueryRowContext(ctx, `SELECT ref_scope FROM blob_records WHERE team=? AND repo_key=? AND verified_default_branch=1 ORDER BY created_at DESC LIMIT 1`, team, input.Git.Repository.Key).Scan(&scope)
@@ -33,6 +41,24 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 		return runspec.Provenance{}, err
 	}
 	return refused(sealed.ReadingDefault(scope))
+}
+
+// fetchedRepositoryTx names the GitHub repository the controller itself fetches
+// this run's code from through the team's App installation: a signed delivery's
+// repository, an App-bound schedule's (its fires, overrides and run-now), or a
+// remote source the controller resolved through the installation. Zero when
+// the submitter supplies the code or the repository claim.
+func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Request) int64 {
+	switch {
+	case input.Origin == runspec.OriginApp && request.VerifiedDeliveryID != "" && input.Git.App.Set:
+		return input.Git.App.Value.RepositoryID
+	case input.Origin == runspec.OriginSchedule && tx.scheduleAdmission != nil && tx.scheduleAdmission.authority() == request.Authority:
+		if s := tx.scheduleAdmission.schedule; s.GitHubInstallationID > 0 {
+			return s.GitHubRepositoryID
+		}
+		return 0
+	}
+	return request.FetchedRepositoryID
 }
 
 func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal, input runspec.Request, run string) (runspec.Provenance, error) {

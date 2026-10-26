@@ -42,9 +42,9 @@ export interface SecretWriteBody {
 export type SecretsAudience = "team" | "local";
 
 export const scopeHelp: Record<SecretsAudience, string> = {
-  team: "A pipeline secret belongs to one GitHub repository and one pipeline, like a GitHub repository secret: only runs GitHub proved for that pipeline in that repository read it, never CLI or local runs. Team-wide rows answer every pipeline of every repository in the team, like a GitHub organization secret with no repository list.",
+  team: "A pipeline secret belongs to one GitHub repository and one pipeline, like a GitHub repository secret: only runs whose code Sparkwing fetched from that repository read it, never uploaded or local runs. Team-wide rows answer every pipeline of every repository in the team, like a GitHub organization secret with no repository list.",
   local:
-    "Stored in this machine's local sparkwing database. Runs started here read only team-wide rows; a pipeline row reaches only runs GitHub proved for its repository.",
+    "Stored in this machine's local sparkwing database. Runs started here read only team-wide rows; a pipeline row reaches only runs whose code Sparkwing fetched from its repository.",
 };
 
 // An unscoped row that is not shared answers no run; the CLI can still write

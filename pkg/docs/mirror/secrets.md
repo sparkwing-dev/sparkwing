@@ -12,43 +12,57 @@ that refuses a plan missing a secret are in [pipelines](pipelines.md).
 
 Pipeline secrets match GitHub repository secrets: one repository's pipeline
 reads them, and a pipeline of the same name in another repository of the team
-never does. They are released only to runs whose repository GitHub proved: a
-GitHub App push or pull request, a GitHub Actions job, or a schedule a team
-admin armed. A CLI, API, dashboard, member-token, local or `--runner here` run
-names its repository itself, so it reads only `--shared` secrets, like GitHub,
-where a local run never receives repository secrets. `--shared` secrets are team-wide, like a GitHub organization secret
-with no repository allow-list: every pipeline of every repository in the team
-reads them. Protect deploy secrets with a [reserved pool](scheduling.md#reserved-pools)
+never does. Runs whose code Sparkwing fetched from the repository get its
+pipeline secrets; uploaded and local runs get shared secrets only. Sparkwing
+fetches the code itself, through the team's GitHub App installation, for App
+pushes and pull requests, schedule fires and run-now, and dashboard or CLI runs
+of a connected repository at a branch or commit; a GitHub Actions job proves its
+repository with GitHub's token. A run whose code or repository the submitter
+supplies (an uploaded working tree or bundle, a local checkout, `--runner here`,
+or a controller without the GitHub App) reads only `--shared` secrets, like
+GitHub, where a local run never receives repository secrets.
+
+Fetching proves the repository for secrets only. A run-now or dashboard run
+keeps its manual trust class for reserved pools, OIDC claims and cache scopes.
+
+`--shared` secrets are team-wide, like a GitHub organization secret with no
+repository allow-list: every pipeline of every repository in the team reads
+them. Protect deploy secrets with a [reserved pool](scheduling.md#reserved-pools)
 or `--only-on`, which only verified runs receive.
 
 `--repo` takes a GitHub `owner/name` or a repository key such as `gh:12345`
 from `sparkwing secrets list -o json`. The controller resolves it to the
 repository's GitHub ID, so a repository keeps its secrets when it is renamed.
 
-A pipeline secret is released whatever branch or commit the run executes.
+A pipeline secret is released whatever branch or commit the run executes, so
+everyone who can push a branch or start a run of a connected repository can
+read its pipeline secrets.
 
 | Run | Pipeline secrets of |
 | --- | --- |
-| App delivery, GitHub Actions push, admin-armed schedule | The pipeline in the GitHub repository it proved |
-| CLI, API, dashboard, member-token, local or `here` run | None; it reads team-wide shared secrets only |
+| App push or pull request, GitHub Actions job | The pipeline in the GitHub repository it proved |
+| Schedule fire or run-now of an App-connected repository | The schedule's repository and pipeline |
+| Dashboard, API or CLI run whose code the controller fetches through the App | The pipeline in that repository |
+| Uploaded, working-tree, local or `--runner here` run | None; it reads team-wide shared secrets only |
 | Child run at its parent's exact revision | The parent's repository and pipeline |
 | Any other child run | None; it reads team-wide shared secrets only |
-| Schedule a non-admin armed, overrode or locked | None; it reads team-wide shared secrets only |
 | Retry | The same repository and pipeline as the run it retries |
 
 An asserted child reads no pipeline secret, like a GitHub reusable workflow
 called without `secrets: inherit`.
 
-## `source:` branch pins read only shared secrets
+## `source:` branch pins are demoted but keep pipeline secrets
 
 A `source:` pin that names a branch or tag runs code that whoever can push that
 ref chooses. Such a run is demoted to asserted: its OIDC token carries no
-`repository_id`, `ref` or `sha`, it receives no reserved pool, its cache records
-stay in its own scope, so it never writes cache entries that builds of `main`
-read, and it reads only `--shared` secrets.
+`repository_id`, `ref` or `sha`, it receives no reserved pool, and its cache
+records stay in its own scope, so it never writes cache entries that builds of
+`main` read. Sparkwing still fetches its code from the repository, so it reads
+the repository's pipeline secrets.
 
-Pin a full commit ID to keep the run's identity and its repository's pipeline
-secrets. See [OIDC](oidc.md#what-each-value-proves) and
+Protect every branch a `source:` pin names as strictly as the default branch, or
+pin a full commit ID, which keeps the run's identity. See
+[OIDC](oidc.md#what-each-value-proves) and
 [caching](caching.md#who-shares-a-cache).
 
 ## Values that can be secrets

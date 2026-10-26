@@ -31,7 +31,11 @@ type IntakeRequest struct {
 	CapabilityPrefix   string
 	LocalSecrets       map[string]string `json:"-"`
 	VerifiedDeliveryID string
-	RetryMode          string
+	// FetchedRepositoryID is the GitHub repository the controller fetches this
+	// run's code from through the team's App installation; only the controller
+	// sets it, never a request body.
+	FetchedRepositoryID int64 `json:"-"`
+	RetryMode           string
 	// OriginMachine is a short-lived proof of the submitting machine's runner credential; intake verifies it and seals
 	// only the machine's name.
 	OriginMachine string `json:"-"`

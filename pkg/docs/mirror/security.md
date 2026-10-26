@@ -164,8 +164,9 @@ and commit.
 
 A `source:` code pin that is a full commit ID keeps the run's class. A branch or
 tag pin that does not resolve to the execution commit demotes the run to
-`asserted`, because whoever can push that ref chooses the code. Like every asserted
-run, the demoted run reads only team-wide shared secrets; see [secrets](secrets.md).
+`asserted`, because whoever can push that ref chooses the code. The demoted run
+still reads its repository's pipeline secrets, because the controller fetches its
+code from the repository; see [secrets](secrets.md).
 Bare names must identify a branch or tag. If both exist at different commits,
 resolution fails. Use `refs/heads/main` or `refs/tags/main` to choose one.
 Commit pins require a full commit ID. Scheduled execution resolves the named
