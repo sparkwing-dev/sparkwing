@@ -31,7 +31,7 @@ import (
 
 type oidcFacts struct {
 	selectorTransactions
-	facts capability.OIDCFacts
+	facts  capability.OIDCFacts
 	actor  capability.Authorized
 	calls  int
 	minted int
