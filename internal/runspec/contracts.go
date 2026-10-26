@@ -344,7 +344,8 @@ type Concurrency struct {
 }
 
 // safety: Request is submitted to the one intake transaction on every placement.
-// App facts, allowed pools and authority references are derived by intake, not trusted from JSON.
+// App facts and authority references are derived by intake, not trusted from JSON; pool access is
+// decided at each use from current access rules, never sealed.
 // Raw requested argument values are restricted execution inputs, not a display document.
 // SecretArgs is unset before describe. Display must then redact every requested value.
 type Request struct {

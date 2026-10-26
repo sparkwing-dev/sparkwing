@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// Evaluate checks a runner profile against resolved requirements and
-// intake-authorized pools. Claim awards also enforce eligibility in the store.
+// Evaluate checks a runner profile against resolved requirements and the pools
+// access rules currently grant the work. Claim awards also enforce eligibility in the store.
 // Profile identity and reservations are granted facts; labels cannot
 // impersonate name, class or pool.
 // A reserved profile is eligible only when at least one granted pool is both
