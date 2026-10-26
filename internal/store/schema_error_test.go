@@ -24,9 +24,12 @@ func TestSchemaErrorDocumentation(t *testing.T) {
 	if start < 0 || finish < start {
 		t.Fatal("missing generated schema error markers")
 	}
-	want := fmt.Sprintf("%s\n```text\n%s\n\n%s\n```\n", begin,
-		schemaMismatchError(expectedSchemaVersion-1, "delete <path> (or drop the database)"),
-		schemaMismatchError(expectedSchemaVersion+1, "delete <path> (or drop the database)"))
+	want := fmt.Sprintf("%s\n```text\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n```\n", begin,
+		schemaMismatchError(expectedSchemaVersion-1, "<path>"),
+		schemaMismatchError(expectedSchemaVersion-1, ""),
+		schemaMismatchError(expectedSchemaVersion+1, "<path>"),
+		preRewriteStoreError(94, "~/.sparkwing/state.db"),
+		preRewriteStoreError(94, ""))
 	if *updateSchemaDocs {
 		if err := os.WriteFile(path, []byte(text[:start]+want+text[finish:]), 0o644); err != nil {
 			t.Fatal(err)

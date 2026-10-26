@@ -422,3 +422,73 @@ func TestOlderSchemaRequiresBackupBeforeDiscard(t *testing.T) {
 		}
 	}
 }
+
+// A store from before the v0.68 rewrite is refused with the move-aside remedy,
+// not the matching-binary advice, and is left exactly as it was.
+func TestOpenRefusesAPreRewriteStore(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "state.db")
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = db.Close() }()
+		seedPreRewriteStore(t, db)
+		_, err = teststore.OpenExisting(path)
+		assertPreRewriteRefusal(t, err, "mv "+path+" "+path+".v067")
+		assertPreRewriteStoreIntact(t, db, `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
+	})
+	t.Run("postgres", func(t *testing.T) {
+		dsn := storetest.NewPostgres(t).DSN()
+		db, err := sql.Open("pgx", dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = db.Close() }()
+		seedPreRewriteStore(t, db)
+		_, err = teststore.OpenPostgres(t.Context(), dsn)
+		assertPreRewriteRefusal(t, err, "point the server at an empty database")
+		assertPreRewriteStoreIntact(t, db, `SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() ORDER BY table_name`)
+	})
+}
+
+// seedPreRewriteStore writes the shape v0.67.0 leaves: its version table at
+// schema 94 beside sparkwing_meta, which the rewrite never creates.
+func seedPreRewriteStore(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`CREATE TABLE sparkwing_schema_version (version INTEGER NOT NULL, applied_at BIGINT NOT NULL, PRIMARY KEY (version))`,
+		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (94, 1)`,
+		`CREATE TABLE sparkwing_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at BIGINT NOT NULL)`,
+		`CREATE TABLE runs (id TEXT PRIMARY KEY)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+}
+
+func assertPreRewriteRefusal(t *testing.T, err error, remedy string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("Open accepted a v0.67 store")
+	}
+	for _, want := range []string{"Sparkwing v0.67 or earlier", "schema version 94", "cannot read or import it", remedy} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Open error %q does not say %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "newer than this binary") {
+		t.Errorf("Open error %q sends the operator to find a matching binary", err)
+	}
+}
+
+func assertPreRewriteStoreIntact(t *testing.T, db *sql.DB, tables string) {
+	t.Helper()
+	if got := column(t, db, tables); !slices.Equal(got, []string{"runs", "sparkwing_meta", "sparkwing_schema_version"}) {
+		t.Errorf("tables after the refused open = %v, want the old store's only", got)
+	}
+	if got := column(t, db, `SELECT CAST(version AS TEXT) FROM sparkwing_schema_version`); !slices.Equal(got, []string{"94"}) {
+		t.Errorf("recorded versions after the refused open = %v, want [94]", got)
+	}
+}
