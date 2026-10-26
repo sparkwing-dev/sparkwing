@@ -340,3 +340,29 @@ func TestALostDisputeOnARefusedPaymentSettles(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "credit_grants WHERE kind='reversal'", 0)
 }
+
+// Stripe can fail a refund after reporting it succeeded; the failure is accepted and listed for the operator.
+func TestARefundFailedAfterItSucceededIsListed(t *testing.T) {
+	s, tenant, now := queuedRefundFixture(t, false)
+	ctx := t.Context()
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment", "re_late"); err != nil {
+		t.Fatal(err)
+	}
+	refund := providerPaymentEvent(now, capability.PaymentRefund)
+	refund.PaymentID, refund.ObjectID, refund.Status, refund.AmountMinor = "payment", "re_late", cardRefundSucceeded, 1_000
+	if _, err := s.settlePaymentFacts(ctx, refund); err != nil {
+		t.Fatal(err)
+	}
+	refund.EventID, refund.Status = "refund-failed-late", "failed"
+	if _, err := s.settlePaymentFacts(ctx, refund); err != nil {
+		t.Fatalf("a refund failed after it succeeded = %v", err)
+	}
+	failed, err := tenant.FailedCardRefunds(ctx)
+	if err != nil || len(failed) != 1 || failed[0].RefundID != "re_late" || failed[0].Status != "failed" {
+		t.Fatalf("failed refunds = %+v, %v", failed, err)
+	}
+	refund.EventID, refund.Status = "refund-succeeded-again", cardRefundSucceeded
+	if _, err := s.settlePaymentFacts(ctx, refund); err == nil {
+		t.Fatal("a failed refund went back to succeeded")
+	}
+}
