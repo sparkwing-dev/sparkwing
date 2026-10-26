@@ -5847,6 +5847,8 @@ components:
               type: string
             ref:
               type: string
+            repository:
+              type: string
             repository_id:
               type: integer
             sha:

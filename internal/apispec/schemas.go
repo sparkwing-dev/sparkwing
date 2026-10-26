@@ -41,6 +41,7 @@ func (b *schemaBuilder) value(t reflect.Type) schema {
 		return schema{"type": "object", "additionalProperties": false, "required": []string{"trust"}, "properties": schema{
 			"trust":               schema{"type": "string", "enum": []string{string(runspec.TrustVerifiedDefault), string(runspec.TrustVerified), string(runspec.TrustActions), string(runspec.TrustSchedule), string(runspec.TrustAsserted)}},
 			"repository_id":       schema{"type": "integer"},
+			"repository":          text,
 			"ref":                 text,
 			"sha":                 text,
 			"event":               text,
