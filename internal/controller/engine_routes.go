@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -199,7 +200,8 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 			return err
 		}
 		request.Intent = &intent.Request
-		request.FetchedRepositoryID = s.fetchedGitHubRepository(body.Request)
+		access := &intakeRevisionAccess{server: s, team: store.Team(a.Target.Team)}
+		request.FetchedRepositoryID = s.fetchedGitHubRepository(ctx, body.Request, access.resolveGitHubAppRef(source.Spec{RepoKey: string(body.Request.Git.Repository.Key), RemoteURL: body.Request.Source.Location.RemoteURL}))
 		response, err := admitWithFlood(ctx, s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.admitRun(ctx, a.Target.Team, request)
 		})

@@ -381,3 +381,24 @@ func TestSecrets_AssertedRunReadsOnlySharedSecrets(t *testing.T) {
 		}
 	}
 }
+
+// `sparkwing secrets set --only-on` failed on every call: the API dropped the
+// pool, so the client's confirmation of it never matched.
+func TestSecrets_WriteKeepsOnlyOnPool(t *testing.T) {
+	f := newBrowserFixture(t, nil)
+	code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "DEPLOY", "value": "deploy-value", "repo": "gh:1", "pipeline": "ci", "only_on": "prod"})
+	var written controllerwire.SecretWritten
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &written) != nil || written.Secret.OnlyOn != "prod" {
+		t.Fatalf("write: HTTP %d %s", code, body)
+	}
+	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("DEPLOY", "gh:1", "ci")
+	if err != nil || row.OnlyOn != "prod" {
+		t.Fatalf("stored pool: %+v %v", row, err)
+	}
+	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets", "", nil); code != http.StatusOK || !strings.Contains(body, `"only_on":"prod"`) {
+		t.Fatalf("list lost the pool: HTTP %d %s", code, body)
+	}
+	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "DEPLOY", "value": "v", "only_on": "bad pool\n"}); code != http.StatusBadRequest {
+		t.Fatalf("invalid pool: HTTP %d %s", code, body)
+	}
+}

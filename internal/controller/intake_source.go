@@ -110,14 +110,25 @@ func (s *Server) keyedRepositoryDisplay(ctx context.Context, team string, reques
 }
 
 // fetchedGitHubRepository is the GitHub repository the controller itself fetches
-// a run's code from, through the team's App installation that resolved it, or
-// zero when the submitter supplies the code: an upload, a working tree, a local
-// checkout or a run on the submitter's own machine.
-func (s *Server) fetchedGitHubRepository(request runspec.Request) int64 {
+// a run's code from, through the team's App installation that resolved it, at
+// the head of one of its branches or tags. It is zero when the submitter
+// supplies the code (an upload, a working tree, a local checkout or a run on
+// the submitter's own machine) or names a commit the branch does not point at,
+// which GitHub may serve from a fork, or a pull request ref.
+func (s *Server) fetchedGitHubRepository(ctx context.Context, request runspec.Request, resolve func(context.Context, string) (string, error)) int64 {
 	source := request.Source
 	here := request.Options.Runner.Set && request.Options.Runner.Value.Kind == runspec.RunnerHere
 	if s.githubApp == nil || source.Location.RemoteURL == "" || source.BundleDigest.Set || source.WorkingTree || source.Location.LocalCheckout != "" || here {
 		return 0
+	}
+	ref := request.Git.Ref
+	if !strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/") || source.Ref != "" && !strings.EqualFold(source.Ref, request.Git.SHA) {
+		return 0
+	}
+	if request.Git.SHA != "" {
+		if head, err := resolve(ctx, ref); err != nil || !strings.EqualFold(head, request.Git.SHA) {
+			return 0
+		}
 	}
 	key, ok := strings.CutPrefix(string(request.Git.Repository.Key), "gh:")
 	if !ok {

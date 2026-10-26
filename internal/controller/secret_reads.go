@@ -78,7 +78,7 @@ func (s *Server) handleReadSecret(w http.ResponseWriter, r *http.Request, a capa
 	noteAuditTarget(r.Context(), "secret_name", row.Name)
 	writeJSON(w, http.StatusOK, controllerwire.SecretValue{
 		SecretMetadata: controllerwire.SecretMetadata{
-			Name: row.Name, Principal: row.Principal, Repo: row.RepoName, RepoKey: row.Repo, Pipeline: row.Pipeline,
+			Name: row.Name, Principal: row.Principal, Repo: row.RepoName, RepoKey: row.Repo, Pipeline: row.Pipeline, OnlyOn: row.OnlyOn,
 			Masked: row.Masked, Shared: row.Shared, Bound: secrets.IsBound(row.Value),
 			CreatedAt: row.CreatedAt.Unix(), UpdatedAt: row.UpdatedAt.Unix(),
 		},

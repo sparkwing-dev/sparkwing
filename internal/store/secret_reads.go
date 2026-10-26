@@ -147,7 +147,7 @@ type selectedSecretRow struct {
 }
 
 func selectedSecretsTx(ctx context.Context, tx *storeTx, team Team, name string, selection secretSelection) ([]selectedSecretRow, error) {
-	rows, err := tx.queryContext(ctx, `SELECT `+secretCols+`,only_on FROM secrets WHERE team=? AND (?='' OR name=?) AND ((?=1 AND pipeline<>'' AND repo=? AND pipeline=?) OR (?=1 AND pipeline='' AND (shared=1 OR ?=1))) ORDER BY name,CASE WHEN pipeline='' THEN 1 ELSE 0 END`+tx.forShare(), team, name, name, boolInt(selection.scope == secretPipelineScope), selection.repo, selection.pipeline, boolInt(selection.scope != secretNone), boolInt(selection.includeUnshared))
+	rows, err := tx.queryContext(ctx, `SELECT `+secretCols+` FROM secrets WHERE team=? AND (?='' OR name=?) AND ((?=1 AND pipeline<>'' AND repo=? AND pipeline=?) OR (?=1 AND pipeline='' AND (shared=1 OR ?=1))) ORDER BY name,CASE WHEN pipeline='' THEN 1 ELSE 0 END`+tx.forShare(), team, name, name, boolInt(selection.scope == secretPipelineScope), selection.repo, selection.pipeline, boolInt(selection.scope != secretNone), boolInt(selection.includeUnshared))
 	if err != nil {
 		return nil, err
 	}
@@ -155,9 +155,10 @@ func selectedSecretsTx(ctx context.Context, tx *storeTx, team Team, name string,
 	var out []selectedSecretRow
 	for rows.Next() {
 		var row selectedSecretRow
-		if err := scanSecret(rows, &row.secret, &row.pool); err != nil {
+		if err := scanSecret(rows, &row.secret); err != nil {
 			return nil, err
 		}
+		row.pool = row.secret.OnlyOn
 		if len(out) > 0 && out[len(out)-1].secret.Name == row.secret.Name {
 			continue
 		}

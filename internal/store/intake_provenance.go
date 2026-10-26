@@ -44,16 +44,19 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 }
 
 // fetchedRepositoryTx names the GitHub repository the controller itself fetches
-// this run's code from through the team's App installation: a signed delivery's
-// repository, an App-bound schedule's (its fires, overrides and run-now), or a
-// remote source the controller resolved through the installation. Zero when
-// the submitter supplies the code or the repository claim.
+// this run's code from through the team's App installation, at a commit a
+// signed delivery named or a branch head the App resolved: a delivery's
+// repository, an unlocked App-bound schedule's (fires, overrides and run-now),
+// or a remote branch run the controller checked. Zero when the submitter
+// supplies the code, the repository claim or an arbitrary commit.
 func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Request) int64 {
 	switch {
 	case input.Origin == runspec.OriginApp && request.VerifiedDeliveryID != "" && input.Git.App.Set:
 		return input.Git.App.Value.RepositoryID
 	case input.Origin == runspec.OriginSchedule && tx.scheduleAdmission != nil && tx.scheduleAdmission.authority() == request.Authority:
-		if s := tx.scheduleAdmission.schedule; s.GitHubInstallationID > 0 {
+		// safety: a schedule locked to a commit runs a SHA GitHub may serve from a
+		// fork, not a branch head the App resolved.
+		if s := tx.scheduleAdmission.schedule; s.GitHubInstallationID > 0 && s.LockedRef == "" {
 			return s.GitHubRepositoryID
 		}
 		return 0

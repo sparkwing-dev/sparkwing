@@ -22,7 +22,10 @@ supplies (an uploaded working tree or bundle, a local checkout, `--runner here`,
 or a controller without the GitHub App) reads only `--shared` secrets, like
 GitHub, where a local run never receives repository secrets.
 
-Fetching proves the repository for secrets only. A run-now or dashboard run
+Only a branch or tag head counts: a run that names a commit the branch does not
+point at (GitHub may serve it from a fork), a pull request ref, or a schedule
+locked to a commit reads only `--shared` secrets. Fetching proves the repository
+for secrets only. A run-now or dashboard run
 keeps its manual trust class for reserved pools, OIDC claims and cache scopes.
 
 `--shared` secrets are team-wide, like a GitHub organization secret with no

@@ -72,18 +72,7 @@ func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, reques
 		options.Base.Local, options.Base.Captured, options.GitAccess = true, os.Environ(), source.GitAccessOwner
 	}
 	if read != nil && s.githubApp != nil && strings.HasPrefix(spec.RepoKey, "gh:") {
-		options.ResolveRef = func(ctx context.Context, ref string) (string, error) {
-			installation, repository, err := access.githubAppRepository(ctx, spec)
-			if err != nil {
-				return "", err
-			}
-			repo, _ := store.ParseGitHubRepo(repository.FullName)
-			sha, err := s.githubApp.client.ResolveCommit(ctx, installation.InstallationID, repo.Owner, repo.Name, ref)
-			if errors.Is(err, githubapp.ErrRefNotFound) {
-				return "", nil
-			}
-			return sha, err
-		}
+		options.ResolveRef = access.resolveGitHubAppRef(spec)
 	}
 	git, code, _, err := source.Select(ctx, spec, request.Pipeline, request.Git, request.Source, "", options)
 	return git, code, err
@@ -92,6 +81,23 @@ func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, reques
 type intakeRevisionAccess struct {
 	server *Server
 	team   store.Team
+}
+
+// resolveGitHubAppRef resolves a ref of the repository to its commit through
+// the team's App installation, or "" when the repository has no such ref.
+func (a *intakeRevisionAccess) resolveGitHubAppRef(spec source.Spec) func(context.Context, string) (string, error) {
+	return func(ctx context.Context, ref string) (string, error) {
+		installation, repository, err := a.githubAppRepository(ctx, spec)
+		if err != nil {
+			return "", err
+		}
+		repo, _ := store.ParseGitHubRepo(repository.FullName)
+		sha, err := a.server.githubApp.client.ResolveCommit(ctx, installation.InstallationID, repo.Owner, repo.Name, ref)
+		if errors.Is(err, githubapp.ErrRefNotFound) {
+			return "", nil
+		}
+		return sha, err
+	}
 }
 
 func (a *intakeRevisionAccess) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error) {

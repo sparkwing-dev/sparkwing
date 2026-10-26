@@ -475,9 +475,11 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			want:  asserted("nightly", "run/{run}", "main", "nightly-token", "team-token"),
 		},
 		{
+			// A locked commit may be one GitHub serves from a fork, so it proves no
+			// repository for pipeline secrets.
 			name:  "a schedule locked to a commit is asserted",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "locked") },
-			want:  asserted("nightly", "run/{run}", "main", "nightly-token", "team-token"),
+			want:  asserted("nightly", "run/{run}", "main", "team-token"),
 		},
 		{
 			name:  "a schedule run-now is asserted by the member who pressed it",

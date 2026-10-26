@@ -26,6 +26,8 @@ type Secret struct {
 	Repo      string
 	RepoName  string
 	Pipeline  string
+	// OnlyOn is the reserved pool the secret is released on, or "".
+	OnlyOn    string
 	Masked    bool
 	Shared    bool
 	CreatedAt time.Time
@@ -56,7 +58,7 @@ func (s Secret) SealScope() string {
 	return s.Repo + "#" + s.Pipeline
 }
 
-const secretCols = "name,value,principal,repo,repo_name,pipeline,masked,shared,created_at,updated_at"
+const secretCols = "name,value,principal,repo,repo_name,pipeline,only_on,masked,shared,created_at,updated_at"
 
 func boolInt(b bool) int {
 	if b {
@@ -150,7 +152,7 @@ func scanSecretRows(rows rowCursor) ([]Secret, error) {
 func scanSecret(rows rowCursor, sec *Secret, extra ...any) error {
 	var masked, shared int
 	var created, updated int64
-	dest := []any{&sec.Name, &sec.Value, &sec.Principal, &sec.Repo, &sec.RepoName, &sec.Pipeline, &masked, &shared, &created, &updated}
+	dest := []any{&sec.Name, &sec.Value, &sec.Principal, &sec.Repo, &sec.RepoName, &sec.Pipeline, &sec.OnlyOn, &masked, &shared, &created, &updated}
 	if err := rows.Scan(append(dest, extra...)...); err != nil {
 		return err
 	}

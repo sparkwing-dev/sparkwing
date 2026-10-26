@@ -347,33 +347,52 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 }
 
 // Decision 68: only code the controller fetches through the team's GitHub App
-// proves the repository for its pipeline secrets; anything the submitter
-// supplies, or a controller without the App, proves nothing.
-func TestFetchedGitHubRepositoryNeedsControllerFetchedCode(t *testing.T) {
-	fetched := runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701"}}, Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app"}}}
+// at a branch or tag head proves the repository for its pipeline secrets;
+// anything the submitter supplies, a raw commit GitHub may serve from a fork,
+// a pull request ref, or a controller without the App proves nothing.
+func TestFetchedGitHubRepositoryNeedsControllerFetchedBranchHead(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	fork := strings.Repeat("f", 40)
+	resolve := func(_ context.Context, ref string) (string, error) {
+		if ref == "refs/heads/main" || ref == "refs/tags/v1" {
+			return head, nil
+		}
+		return "", nil
+	}
+	fetched := runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "refs/heads/main", SHA: head}, Source: runspec.Source{Ref: head, Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app"}}}
 	app := &Server{githubApp: &githubAppState{}}
-	if got := app.fetchedGitHubRepository(fetched); got != 701 {
-		t.Fatalf("remote fetch = %d", got)
+	for name, change := range map[string]func(*runspec.Request){
+		"branch head":            func(*runspec.Request) {},
+		"branch, commit unnamed": func(r *runspec.Request) { r.Git.SHA, r.Source.Ref = "", "" },
+		"tag head":               func(r *runspec.Request) { r.Git.Ref = "refs/tags/v1" },
+	} {
+		request := fetched
+		change(&request)
+		if got := app.fetchedGitHubRepository(t.Context(), request, resolve); got != 701 {
+			t.Errorf("%s = %d", name, got)
+		}
 	}
 	for name, change := range map[string]func(*runspec.Request){
-		"upload": func(r *runspec.Request) {
-			r.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:x"}
-		},
-		"working tree":   func(r *runspec.Request) { r.Source.WorkingTree = true },
-		"local checkout": func(r *runspec.Request) { r.Source.Location.LocalCheckout = "/src" },
-		"no remote":      func(r *runspec.Request) { r.Source.Location.RemoteURL = "" },
-		"other host":     func(r *runspec.Request) { r.Git.Repository.Key = "git:git.example.com/acme/app" },
+		"fork commit on a branch": func(r *runspec.Request) { r.Git.SHA, r.Source.Ref = fork, fork },
+		"code at another commit":  func(r *runspec.Request) { r.Source.Ref = fork },
+		"pull request ref":        func(r *runspec.Request) { r.Git.Ref = "refs/pull/7/head" },
+		"bare commit":             func(r *runspec.Request) { r.Git.Ref = "" },
+		"upload":                  func(r *runspec.Request) { r.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:x"} },
+		"working tree":            func(r *runspec.Request) { r.Source.WorkingTree = true },
+		"local checkout":          func(r *runspec.Request) { r.Source.Location.LocalCheckout = "/src" },
+		"no remote":               func(r *runspec.Request) { r.Source.Location.RemoteURL = "" },
+		"other host":              func(r *runspec.Request) { r.Git.Repository.Key = "git:git.example.com/acme/app" },
 		"here": func(r *runspec.Request) {
 			r.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 		},
 	} {
 		request := fetched
 		change(&request)
-		if got := app.fetchedGitHubRepository(request); got != 0 {
+		if got := app.fetchedGitHubRepository(t.Context(), request, resolve); got != 0 {
 			t.Errorf("%s proved repository %d", name, got)
 		}
 	}
-	if got := (&Server{}).fetchedGitHubRepository(fetched); got != 0 {
+	if got := (&Server{}).fetchedGitHubRepository(t.Context(), fetched, resolve); got != 0 {
 		t.Fatalf("controller without the App proved repository %d", got)
 	}
 }

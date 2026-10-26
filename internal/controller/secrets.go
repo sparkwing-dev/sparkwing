@@ -19,6 +19,8 @@ type secretSetReq struct {
 	Value    string `json:"value"`
 	Repo     string `json:"repo,omitempty"`
 	Pipeline string `json:"pipeline,omitempty"`
+	// OnlyOn is a reserved pool; plan acceptance and release enforce it.
+	OnlyOn string `json:"only_on,omitempty"`
 	// safety: nil defaults to masked; only an explicit false stores plain config.
 	Masked *bool `json:"masked,omitempty"`
 	// safety: an unscoped secret answers a run only when an admin marked it shared.
@@ -32,6 +34,7 @@ type secretJSON struct {
 	Repo      string `json:"repo,omitempty"`
 	RepoKey   string `json:"repo_key,omitempty"`
 	Pipeline  string `json:"pipeline,omitempty"`
+	OnlyOn    string `json:"only_on,omitempty"`
 	Masked    bool   `json:"masked"`
 	Shared    bool   `json:"shared,omitempty"`
 	Bound     bool   `json:"bound"`
@@ -75,6 +78,9 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 	if err := secrets.ValidateName(req.Name); err != nil {
 		return invalidEngineBody("invalid secret name")
 	}
+	if req.OnlyOn != "" && controllerwire.ValidateQueueGroupName(req.OnlyOn) != nil {
+		return invalidEngineBody("invalid only_on pool")
+	}
 	if req.Shared && req.Pipeline != "" {
 		return invalidEngineBody("a pipeline secret cannot also be shared team-wide")
 	}
@@ -99,7 +105,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 	}
 	stored, err := store.SealSecret(cipher, tn.Team(), store.Secret{
 		Name: req.Name, Value: req.Value, Principal: a.Principal.Capability.Subject.ID,
-		Repo: string(repo.Key), RepoName: repo.Display, Pipeline: req.Pipeline, Masked: masked, Shared: req.Shared,
+		Repo: string(repo.Key), RepoName: repo.Display, Pipeline: req.Pipeline, OnlyOn: req.OnlyOn, Masked: masked, Shared: req.Shared,
 	})
 	if err != nil {
 		return credentialWriteError(err)
@@ -112,7 +118,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 	noteAuditTarget(r.Context(), "secret_name", req.Name)
 	response := controllerwire.SecretWritten{Secret: controllerwire.SecretMetadata{
 		Name: committed.Name, Principal: committed.Principal,
-		Repo: committed.RepoName, RepoKey: committed.Repo, Pipeline: committed.Pipeline, Masked: committed.Masked, Shared: committed.Shared, Bound: true,
+		Repo: committed.RepoName, RepoKey: committed.Repo, Pipeline: committed.Pipeline, OnlyOn: committed.OnlyOn, Masked: committed.Masked, Shared: committed.Shared, Bound: true,
 		CreatedAt: committed.CreatedAt.Unix(), UpdatedAt: committed.UpdatedAt.Unix(),
 	}}
 	if masked && !secrets.Maskable(req.Value) {
@@ -150,6 +156,7 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request, a cap
 			Repo:      sec.RepoName,
 			RepoKey:   sec.Repo,
 			Pipeline:  sec.Pipeline,
+			OnlyOn:    sec.OnlyOn,
 			Masked:    sec.Masked,
 			Shared:    sec.Shared,
 			Bound:     secrets.IsBound(sec.Value),
