@@ -450,11 +450,10 @@ func awardCacheHostTx(ctx context.Context, tx *storeTx, team Team, facts claiman
 }
 
 func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Capability, host string) (*capability.DataScope, error) {
-	facts, err := provenanceRefFacts(sealed)
+	facts, err := runRefFacts(sealed, host)
 	if err != nil {
 		return nil, err
 	}
-	facts = hostRefFacts(facts, host)
 	scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: row.repo, WriteRef: facts.Scope.CapabilityScope(), ReadRefs: readScopes(facts), RunID: row.run, NodeID: row.node, Attempt: row.attempt, Generation: c.Binding.Generation}
 	if c.Unit == capability.UnitNode {
 		scope.Attempt = 0
