@@ -116,6 +116,7 @@ func TestMembershipDowngradeRechecksInviterAuthority(t *testing.T) {
 		invitations[string(role)] = invitation.ID
 		invitee := authorityMember(t, s, string(role), RoleReader)
 		rewriteSchemaExec(t, s.db, `UPDATE accounts SET email=?,email_verified=1 WHERE id=?`, string(role)+"@example.com", role)
+		rewriteSchemaExec(t, s.db, `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('google',?,?,?,1,1)`, role, role, string(role)+"@example.com")
 		rewriteSchemaExec(t, s.db, `UPDATE memberships SET team='b' WHERE account_id=?`, role)
 		rewriteSchemaExec(t, s.db, `UPDATE sessions SET team='b' WHERE hash=?`, invitee.Authority.ID)
 		rewriteSchemaExec(t, s.db, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES (?,'b',0)`, invitee.Authority.ID)
