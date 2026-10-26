@@ -358,12 +358,13 @@ func probeSecurity() *corev1.SecurityContext {
 	return &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}
 }
 
-// boundaryName keeps each probe role's name distinct before its last '-'.
-// The EKS VPC CNI network-policy agent shares one policy map among Pods in a
-// namespace whose names match up to the last '-', so canaries named only
-// sw-boundary-<random> made the peer inherit the control's allow-all ingress.
+// boundaryName makes every probe Pod's name unique before its last '-'. The
+// EKS VPC CNI network-policy agent shares one policy map among Pods in a
+// namespace whose names match up to the last '-', so two probes sharing that
+// prefix, whether two roles or one role in two reservations, would inherit
+// each other's policies.
 func boundaryName(role string) string {
-	return boundaryPrefix + role + "-" + strings.ToLower(rand.Text())
+	return boundaryPrefix + role + "-" + strings.ToLower(rand.Text()) + "-p"
 }
 
 func (p *productionBoundary) canary(ctx context.Context, r CloudNodeReservation, nonce string) *corev1.Pod {

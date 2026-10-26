@@ -415,3 +415,17 @@ func TestKubeletTargetsExceptOnlyTheOwnNodesAuthenticatedPort(t *testing.T) {
 		t.Errorf("own node with its kubelet on a nonstandard port = %v", got)
 	}
 }
+
+// Probe names differ before their final '-', across roles and across
+// reservations of one role, so the CNI never shares a policy map between them.
+func TestBoundaryNamesAreUniqueBeforeTheFinalSeparator(t *testing.T) {
+	seen := map[string]bool{}
+	for _, role := range []string{"control", "control", "peer", "peer", "witness", "measure"} {
+		name := boundaryName(role)
+		key := name[:strings.LastIndex(name, "-")]
+		if seen[key] || len(name) > 63 {
+			t.Fatalf("probe name %q shares its CNI key or exceeds 63 characters", name)
+		}
+		seen[key] = true
+	}
+}
