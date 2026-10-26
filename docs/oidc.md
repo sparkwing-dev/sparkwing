@@ -25,7 +25,7 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out oidc-signing.p
 | Setting | Meaning |
 |---|---|
 | `oidc-key` credential | RSA private key, PKCS #1 or PKCS #8 PEM, at least 2048 bits, that signs every token. Only its owner may read the file (mode 0400 or 0600); startup refuses one that group or other users can read. Without it the controller issues no tokens and the three routes answer 404. |
-| `oidc-key.published` credential | A second key, as a private or public key PEM, that the key set publishes and that never signs: the next key before a rotation, the previous key after one. |
+| `oidc-key.published` credential | A second key's public half, as a public key PEM (`openssl pkey -in key.pem -pubout`), that the key set publishes and that never signs: the next key before a rotation, the previous key after one. Startup refuses private key material in this file. |
 | `--oidc-token-ttl` | Token lifetime. Default `10m`, at most `1h`, at least `1m`. |
 
 The controller refuses to start when a key is set and `--external-url` is empty or is not an `https` origin. It never logs key material; the startup line names the key ids.
@@ -36,9 +36,9 @@ Each key's `kid` is its RFC 7638 JWK thumbprint, so the same key always publishe
 
 Relying parties cache the key set for up to an hour, so a new key is published before anything signs with it:
 
-1. **Publish the next key.** Keep the current key in `oidc-key` and put the new key in `oidc-key.published`. Tokens still carry the current `kid`.
+1. **Publish the next key.** Keep the current key in `oidc-key` and put the new key's public half in `oidc-key.published`. Tokens still carry the current `kid`.
 2. **Wait longer than the one-hour cache time**, so every relying party's cached key set holds the new key.
-3. **Switch signing.** Put the new key in `oidc-key` and the old key in `oidc-key.published`. New tokens carry the new `kid`, and tokens the old key signed keep verifying.
+3. **Switch signing.** Put the new key in `oidc-key` and the old key's public half in `oidc-key.published`. New tokens carry the new `kid`, and tokens the old key signed keep verifying.
 4. **Wait longer than one token lifetime**, so every old-key token has expired, then remove `oidc-key.published`.
 
 Switching signing before step 2 has passed makes a relying party that cached the old key set reject new tokens until its cache expires.

@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -163,8 +164,10 @@ func TestNewRefusesWeakOrForeignKeysAndLifetimes(t *testing.T) {
 	}
 }
 
-// The previous key is published from either half of its PEM and never
-// signs, and a previous key equal to the active one publishes once.
+// The previous key is published from its public PEM and never signs, a
+// previous key equal to the active one publishes once, and private key
+// material there is refused: the file need not be private, so it must not
+// hold a key that can sign.
 func TestPreviousKeyIsPublishedNotUsed(t *testing.T) {
 	active := rsaPEM(t, 2048, true)
 	prevKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -195,7 +198,21 @@ func TestPreviousKeyIsPublishedNotUsed(t *testing.T) {
 	if head.Kid != ids[0] {
 		t.Fatalf("token kid = %s, want the active key %s", head.Kid, ids[0])
 	}
-	same, err := New("https://api.sparkwing.dev", active, active, 0)
+	if _, err := New("https://api.sparkwing.dev", active, active, 0); err == nil {
+		t.Fatal("a private key was accepted as the published key")
+	}
+	if _, err := New("https://api.sparkwing.dev", active, append(slices.Clone(prevPub), active...), 0); err == nil {
+		t.Fatal("a private key after the published public key was accepted")
+	}
+	activeKey, err := parsePrivateKey(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeDER, err := x509.MarshalPKIXPublicKey(&activeKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := New("https://api.sparkwing.dev", active, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: activeDER}), 0)
 	if err != nil {
 		t.Fatal(err)
 	}

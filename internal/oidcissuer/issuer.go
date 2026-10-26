@@ -414,10 +414,15 @@ func parsePrivateKey(data []byte) (*rsa.PrivateKey, error) {
 	return rk, nil
 }
 
+// parsePublicKey reads the published key, which must be public: the file is
+// not held to the signing key's permissions, so it may not carry one.
 func parsePublicKey(data []byte) (*rsa.PublicKey, error) {
-	block, _ := pem.Decode(data)
+	block, rest := pem.Decode(data)
 	if block == nil {
 		return nil, errors.New("not a PEM block")
+	}
+	if extra, _ := pem.Decode(rest); extra != nil {
+		return nil, errors.New("holds more than one PEM block; publish only the public key")
 	}
 	switch block.Type {
 	case "PUBLIC KEY":
@@ -437,9 +442,5 @@ func parsePublicKey(data []byte) (*rsa.PublicKey, error) {
 		}
 		return rk, nil
 	}
-	priv, err := parsePrivateKey(data)
-	if err != nil {
-		return nil, err
-	}
-	return &priv.PublicKey, nil
+	return nil, errors.New("is not a public key PEM; publish only the public key (openssl pkey -pubout)")
 }
