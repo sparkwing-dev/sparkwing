@@ -140,19 +140,42 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).EgressUsageAcrossTeams": "reloads team egress totals into the controller alarm before serving",
 }
 
+// safety: operator-owned tables that carry a team column are judged like tenant tables; an entry
+// names one statement's function and table with the reason it reads across teams.
+var reviewedOperatorTableSQL = map[string]string{
+	"(*Store).settlePaymentFacts|payment_events": "a provider event replays by its own id before any team is known",
+	"checkPaymentObjectTx|payment_events":        "a provider object's earlier events are found by the provider's id, whichever team they named",
+	"paymentEventReplayTx|payment_events":        "a provider event replays by its own id before any team is known",
+}
+
+// safety: queue_team routes an App delivery after verification and is filtered by hand; the guard's
+// predicate reader knows only team, so this table is reviewed here rather than silently skipped.
+var reviewedTeamColumnTables = map[string]string{
+	"github_app_deliveries": "an operator inbox keyed by delivery; queue_team is set only after the delivery verifies",
+}
+
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read
 // or a write of that table.
-var tenantOwnedTableRe = regexp.MustCompile(`(?is)\b(?:FROM|JOIN|INTO|UPDATE)\s+([a-z_][a-z0-9_]*)`)
+var tenantOwnedTableRe = regexp.MustCompile(`(?is)\b(?:FROM|JOIN|INTO|UPDATE|USING)\s+([a-z_][a-z0-9_]*)`)
 
 // Unbound SQL belongs to a reviewed Operator operation. Scoped methods and
 // package functions cannot acquire an exemption by adding an allowlist entry.
 func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	seen := map[string]bool{}
 	for _, stmt := range tenantSQLStatements(t) {
+		for _, problem := range unjudgeableTableSyntax(stmt.text) {
+			t.Errorf("%s: statement in %s %s, which the scope guard cannot judge; write a plain table name and an explicit JOIN.\n\t%s", stmt.pos, stmt.key, problem, collapse(stmt.text))
+		}
 		tables := tenantTablesTouchedBy(stmt.text)
 		if len(tables) == 0 {
 			continue
+		}
+		if len(tables) == 1 && !slices.Contains(tenantTables, tables[0]) {
+			if _, ok := reviewedOperatorTableSQL[stmt.key+"|"+tables[0]]; ok {
+				seen[stmt.key+"|"+tables[0]] = true
+				continue
+			}
 		}
 		unscoped := unscopedSubqueries(stmt.text)
 		if outerCarriesTeam(stmt.text) && len(unscoped) == 0 {
@@ -187,6 +210,16 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	for key, why := range reviewedClaimSQLFragments {
 		if !strings.HasPrefix(key, "(*claimSQL).") || why == "" || !seen[key] {
 			t.Errorf("stale or unexplained claim SQL fragment %s", key)
+		}
+	}
+	for key, why := range reviewedOperatorTableSQL {
+		if strings.TrimSpace(why) == "" || !seen[key] {
+			t.Errorf("reviewedOperatorTableSQL entry %q is stale or has no reason; delete it", key)
+		}
+	}
+	for table, why := range reviewedTeamColumnTables {
+		if strings.TrimSpace(why) == "" || len(tablesWithColumn("queue_team")) == 0 || !slices.Contains(tablesWithColumn("queue_team"), table) {
+			t.Errorf("reviewedTeamColumnTables entry %q is stale or has no reason", table)
 		}
 	}
 	for key, why := range reviewedUnscopedSQL {
@@ -318,14 +351,61 @@ type sqlStatement struct {
 	holdsTeam bool
 }
 
-func tenantTablesTouchedBy(sql string) []string {
+// safety: the guard reads table names after FROM, JOIN, INTO, UPDATE and USING, so a comma join,
+// a quoted name or a schema-qualified name hides a table from it; such statements are refused outright.
+func unjudgeableTableSyntax(sql string) []string {
 	var out []string
-	for _, m := range tenantOwnedTableRe.FindAllStringSubmatch(sql, -1) {
-		name := strings.ToLower(m[1])
-		if (slices.Contains(tenantTables, name) || slices.Contains([]string{"audit_events", "capabilities", "sessions"}, name)) && !slices.Contains(out, name) {
-			out = append(out, name)
+	tokens := scopeTokens(sql)
+	if commaJoined(tokens) {
+		out = append(out, "joins tables with a comma")
+	}
+	for i := 0; i+1 < len(tokens); i++ {
+		switch tokens[i] {
+		case "from", "join", "into", "update", "using":
+		default:
+			continue
+		}
+		next := tokens[i+1]
+		quoted := strings.ContainsAny(next[:1], "\"`[")
+		qualified := i+3 < len(tokens) && tokens[i+2] == "." && next != "information_schema" && scopeIdentRe.MatchString(next) && scopeIdentRe.MatchString(tokens[i+3])
+		if quoted || qualified {
+			out = append(out, "names a table quoted or schema-qualified")
+			break
 		}
 	}
+	return out
+}
+
+var scopeIdentRe = regexp.MustCompile(`^[a-z_][a-z0-9_$]*$`)
+
+// safety: a comma at the FROM clause's own depth is a join, however the tables before it were joined.
+func commaJoined(tokens []string) bool {
+	inFrom := []bool{false}
+	for i, token := range tokens {
+		top := len(inFrom) - 1
+		switch token {
+		case "(":
+			inFrom = append(inFrom, false)
+		case ")":
+			if top > 0 {
+				inFrom = inFrom[:top]
+			}
+		case "from", "using":
+			distinct := token == "from" && i > 0 && tokens[i-1] == "distinct"
+			inFrom[top] = !distinct
+		case "where", "group", "order", "limit", "having", "union", "intersect", "except", "returning", "window", "select", "set", "do", "values", ";":
+			inFrom[top] = false
+		case ",":
+			if inFrom[top] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func tenantTablesTouchedBy(sql string) []string {
+	out := statementTables(sql, teamColumnTables())
 	slices.Sort(out)
 	return out
 }
@@ -484,7 +564,7 @@ func tenantSQLStatements(t *testing.T) []sqlStatement {
 
 	var out []sqlStatement
 	for name, f := range files {
-		names := sortedFileNames(f)
+		names := append(sortedFileNames(f), packageLevelSQL(f)...)
 		for _, fn := range names {
 			ast.Inspect(fn.node, func(n ast.Node) bool {
 				expr, ok := n.(ast.Expr)
@@ -522,6 +602,31 @@ func sortedFileNames(f *ast.File) []namedFunc {
 			continue
 		}
 		out = append(out, namedFunc{key: funcKey(fn), node: fn.Body, holdsTeam: funcHoldsTeam(fn)})
+	}
+	return out
+}
+
+// safety: a statement built inside a package-level function or composite literal runs like any other,
+// so it is judged; a bare string constant is a fragment, judged where a function concatenates it.
+func packageLevelSQL(f *ast.File) []namedFunc {
+	var out []namedFunc
+	for _, decl := range f.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, value := range vs.Values {
+				switch value.(type) {
+				case *ast.CallExpr, *ast.CompositeLit, *ast.FuncLit:
+					out = append(out, namedFunc{key: "var " + vs.Names[0].Name, node: value})
+				}
+			}
+		}
 	}
 	return out
 }
@@ -603,3 +708,41 @@ var sqlVerbRe = regexp.MustCompile(`(?is)\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s
 func looksLikeSQL(s string) bool { return sqlVerbRe.MatchString(s) }
 
 func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// The blind spots security pass 3 reproduced with this guard's own matcher.
+func TestTenantSQLScope_RefusesUnjudgeableSyntax(t *testing.T) {
+	for _, c := range []struct {
+		sql     string
+		refused bool
+	}{
+		{`SELECT r.id FROM runs r, nodes n WHERE r.team=?`, true},
+		{`SELECT 1 FROM sparkwing_meta m, runs r`, true},
+		{`SELECT 1 FROM runs r JOIN nodes n ON n.run_id=r.id, approvals a WHERE r.team=?`, true},
+		{`SELECT id FROM "runs" WHERE id=?`, true},
+		{`SELECT id FROM main.runs WHERE id=?`, true},
+		{"SELECT id FROM `runs` WHERE id=?", true},
+		{`SELECT a, b FROM runs WHERE team=? AND id IN (?, ?)`, false},
+		{`SELECT x IS DISTINCT FROM y, z FROM runs WHERE team=?`, false},
+		{`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema()`, false},
+		{`SELECT n.id FROM nodes n JOIN clock ON TRUE WHERE n.team=?`, false},
+	} {
+		if got := len(unjudgeableTableSyntax(c.sql)) > 0; got != c.refused {
+			t.Errorf("%q: refused=%v, want %v", c.sql, got, c.refused)
+		}
+	}
+	if got := tenantTablesTouchedBy(`DELETE FROM sparkwing_meta USING runs WHERE runs.id=?`); !slices.Contains(got, "runs") {
+		t.Errorf("DELETE ... USING hid runs from the guard: %v", got)
+	}
+	for _, table := range []string{"payment_events", "audit_events", "capabilities", "sessions"} {
+		if !slices.Contains(teamColumnTables(), table) {
+			t.Errorf("operator table %s carries a team column and must be judged", table)
+		}
+	}
+	found := false
+	for _, stmt := range tenantSQLStatements(t) {
+		found = found || stmt.key == "var computeLimitsSQL"
+	}
+	if !found {
+		t.Error("the guard no longer reads SQL built in package-level initializers")
+	}
+}
