@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"slices"
+	"strconv"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -19,19 +20,37 @@ const (
 
 type secretSelection struct {
 	scope           secretScope
+	repo            string
 	pipeline        string
 	includeUnshared bool
 }
 
+// runSecretSelection selects the pipeline secrets of the repository and
+// pipeline a run speaks for, and only shared team-wide secrets when
+// [secretRepository] names no repository.
 func runSecretSelection(r runspec.SealedRequest) (secretSelection, error) {
 	p := r.Provenance
 	if !p.Valid() {
 		return secretSelection{}, bindingRefusal()
 	}
-	if p.SharedSecretsOnly() {
+	repo := secretRepository(r)
+	if p.SharedSecretsOnly() || repo == "" {
 		return secretSelection{scope: secretSharedOnly}, nil
 	}
-	return secretSelection{scope: secretPipelineScope, pipeline: p.Pipeline()}, nil
+	return secretSelection{scope: secretPipelineScope, repo: repo, pipeline: p.Pipeline()}, nil
+}
+
+// secretRepository is the one repository identity pipeline secrets are
+// released to. A verified delivery, an Actions push or an admin-armed schedule
+// seals the GitHub repository it proved. An asserted run (manual, local, here,
+// API) carries no proven repository, and falls back to the repository intake
+// resolved from its request, which a child inherits only together with its
+// parent's provenance.
+func secretRepository(r runspec.SealedRequest) string {
+	if id := r.Provenance.RepositoryID(); id > 0 {
+		return "gh:" + strconv.FormatInt(id, 10)
+	}
+	return string(r.Request.Git.Repository.Key)
 }
 
 func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {

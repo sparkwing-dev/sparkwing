@@ -18,13 +18,14 @@ func (t *Tenant) mutateCredentials(ctx context.Context, a capability.Authorized,
 }
 
 // WriteSecret stores a secret under current tenant administration authority and returns its committed metadata.
+// A rewrite named by bare repository key keeps the row's repository name.
 func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, sealed SealedSecret) (Secret, error) {
 	if sealed.team != t.team || sealed.team == "" || !secrets.IsBound(sealed.row.Value) {
 		return Secret{}, ErrInvalidInput
 	}
 	row := sealed.row
 	var out Secret
-	err := t.mutateCredentials(ctx, a, "WriteSecret", row.Pipeline+"/"+row.Name, func(tx *storeTx, actor string) error {
+	err := t.mutateCredentials(ctx, a, "WriteSecret", row.SealScope()+"/"+row.Name, func(tx *storeTx, actor string) error {
 		if err := secretname.Validate(row.Name); err != nil {
 			return ErrInvalidInput
 		}
@@ -36,7 +37,7 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 				return ErrSecretLimit
 			}
 			var count, replacing int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN name=? AND pipeline=? THEN 1 ELSE 0 END),0) FROM secrets WHERE team=?`, row.Name, row.Pipeline, t.team).Scan(&count, &replacing); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN name=? AND repo=? AND pipeline=? THEN 1 ELSE 0 END),0) FROM secrets WHERE team=?`, row.Name, row.Repo, row.Pipeline, t.team).Scan(&count, &replacing); err != nil {
 				return err
 			}
 			if replacing == 0 && count >= maxSecretsPerTeam {
@@ -46,7 +47,7 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 		at := tx.now(ctx).UnixNano()
 		var masked, shared int
 		var created, updated int64
-		err := tx.QueryRowContext(ctx, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(team,name,pipeline) DO UPDATE SET value=excluded.value,principal=excluded.principal,masked=excluded.masked,shared=excluded.shared,updated_at=excluded.updated_at RETURNING name,principal,pipeline,masked,shared,created_at,updated_at`, t.team, row.Name, row.Value, actor, row.Pipeline, boolInt(row.Masked), boolInt(row.Shared), at, at).Scan(&out.Name, &out.Principal, &out.Pipeline, &masked, &shared, &created, &updated)
+		err := tx.QueryRowContext(ctx, `INSERT INTO secrets(team,name,value,principal,repo,repo_name,pipeline,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,name,repo,pipeline) DO UPDATE SET value=excluded.value,principal=excluded.principal,repo_name=CASE WHEN excluded.repo_name=excluded.repo THEN secrets.repo_name ELSE excluded.repo_name END,masked=excluded.masked,shared=excluded.shared,updated_at=excluded.updated_at RETURNING name,principal,repo,repo_name,pipeline,masked,shared,created_at,updated_at`, t.team, row.Name, row.Value, actor, row.Repo, row.RepoName, row.Pipeline, boolInt(row.Masked), boolInt(row.Shared), at, at).Scan(&out.Name, &out.Principal, &out.Repo, &out.RepoName, &out.Pipeline, &masked, &shared, &created, &updated)
 		out.Masked, out.Shared = masked != 0, shared != 0
 		out.CreatedAt, out.UpdatedAt = time.Unix(0, created).UTC(), time.Unix(0, updated).UTC()
 		return err
@@ -58,9 +59,10 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 }
 
 // RemoveSecret deletes an exact secret scope under current administration authority.
-func (t *Tenant) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error {
-	return t.mutateCredentials(ctx, a, "RemoveSecret", pipeline+"/"+name, func(tx *storeTx, _ string) error {
-		result, err := tx.execContext(ctx, `DELETE FROM secrets WHERE team=? AND name=? AND pipeline=?`, t.team, name, pipeline)
+func (t *Tenant) RemoveSecret(ctx context.Context, a capability.Authorized, name, repo, pipeline string) error {
+	scope := Secret{Repo: repo, Pipeline: pipeline}.SealScope()
+	return t.mutateCredentials(ctx, a, "RemoveSecret", scope+"/"+name, func(tx *storeTx, _ string) error {
+		result, err := tx.execContext(ctx, `DELETE FROM secrets WHERE team=? AND name=? AND repo=? AND pipeline=?`, t.team, name, repo, pipeline)
 		return credentialRowChanged(result, err)
 	})
 }

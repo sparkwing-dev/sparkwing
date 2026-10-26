@@ -1,29 +1,40 @@
 # Secrets and run identity
 
-A team secret is scoped to one pipeline with `sparkwing secrets set --secret
-NAME --file <path> --pipeline PIPELINE`, or shared team-wide with `--shared`. A
-run reads a secret only when its plan declares it and the secret's scope admits
-the run. The commands are in [cli-secrets](cli-secrets.md); declaration and the
-preflight that refuses a plan missing a secret are in
-[pipelines](pipelines.md).
+A pipeline secret belongs to one repository and one pipeline:
+`sparkwing secrets set --secret NAME --file <path> --repo OWNER/NAME --pipeline
+PIPELINE`. `--repo` and `--pipeline` always go together; `--pipeline` without
+`--repo` is refused. A team-wide secret is set with `--shared`. A run reads a
+secret only when its plan declares it and the secret's scope admits the run. The
+commands are in [cli-secrets](cli-secrets.md); declaration and the preflight
+that refuses a plan missing a secret are in [pipelines](pipelines.md).
 
-## Pipeline-scoped secrets follow the pipeline name
+## Which runs read which secrets
 
-A pipeline-scoped secret is released to every run of that pipeline name in the
-team, whatever branch or commit the run executes. This matches GitHub repository
-secrets, which every workflow run of the repository can read. Restrict a secret
-further with a reserved pool, which only verified runs receive; see
-[reserved pools](scheduling.md#reserved-pools).
+Pipeline secrets match GitHub repository secrets: one repository's pipeline
+reads them, and a pipeline of the same name in another repository of the team
+never does. `--shared` secrets are team-wide, like a GitHub organization secret
+with no repository allow-list: every pipeline of every repository in the team
+reads them. Protect deploy secrets with a [reserved pool](scheduling.md#reserved-pools)
+or `--only-on`, which only verified runs receive.
 
-| Run | Pipeline-scoped secrets of |
+`--repo` takes a GitHub `owner/name`, another host's remote URL or `host/path`,
+or a repository key such as `gh:12345` from `sparkwing secrets list -o json`.
+The controller resolves it to the repository's identity the way it resolves a
+run's, so a GitHub repository keeps its secrets when it is renamed. A checkout
+with no remote cannot hold pipeline secrets.
+
+A pipeline secret is released whatever branch or commit the run executes.
+
+| Run | Pipeline secrets of |
 | --- | --- |
-| Any run started directly: App delivery, schedule, CLI, API, dashboard | Its own pipeline |
-| Child run at its parent's exact revision | The parent's pipeline |
+| App delivery, GitHub Actions push, admin-armed schedule | The pipeline in the GitHub repository it proved |
+| CLI, API, dashboard or local run | The pipeline in the repository the run was resolved to |
+| Child run at its parent's exact revision | The parent's repository and pipeline |
 | Any other child run | None; it reads team-wide shared secrets only |
-| Retry | The same pipeline as the run it retries |
+| Retry | The same repository and pipeline as the run it retries |
 
-An asserted child reads no pipeline-scoped secret, like a GitHub reusable
-workflow called without `secrets: inherit`.
+An asserted child reads no pipeline secret, like a GitHub reusable workflow
+called without `secrets: inherit`.
 
 ## `source:` branch pins still receive the pipeline's secrets
 
@@ -31,8 +42,8 @@ A `source:` pin that names a branch or tag runs code that whoever can push that
 ref chooses. Such a run is demoted to asserted: its OIDC token carries no
 `repository_id`, `ref` or `sha`, it receives no reserved pool, and its cache
 records stay in its own scope, so it never writes cache entries that builds of
-`main` read. It still receives its pipeline's scoped secrets, because those
-follow the pipeline name.
+`main` read. It still receives its repository's pipeline secrets, which do not
+depend on the branch.
 
 Protect every branch a `source:` pin names as strictly as the default branch, or
 pin a full commit ID, which keeps the run's identity. See

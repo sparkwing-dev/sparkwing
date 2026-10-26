@@ -61,12 +61,20 @@ func referenceWorld(t *testing.T, s *Store, repo string) *Tenant {
 	s.testOnlyExec(t, `INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at) VALUES ('a','depcache','default','modules',?,?,'refs/heads/main','runner','cloud',?,'job','main-run',1,1,?,1)`, digest, repo, []byte(`{}`), []byte(`{}`))
 	s.testOnlyExec(t, `INSERT INTO pool_access_rules(team,id,pool,repo_key,branch,source,route,created_by,created_at) VALUES ('a','main-only.000000','deploy-pool',?,'main','','','owner',1)`, repo)
 	for _, row := range [][2]string{{"team-token", ""}, {"ci-token", "ci"}, {"deploy-token", "deploy"}} {
-		shared := 0
-		if row[1] == "" {
-			shared = 1
+		// A world built before its repository is known seeds gh:701, which the
+		// schedule fixtures then move to the key their schedule resolved.
+		shared, owner := 0, repo
+		if owner == "" {
+			owner = "gh:701"
 		}
-		s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES ('a',?,'value','owner',?,1,?,1,1)`, row[0], row[1], shared)
+		if row[1] == "" {
+			shared, owner = 1, ""
+		}
+		s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at) VALUES ('a',?,'value','owner',?,?,1,?,1,1)`, row[0], owner, row[1], shared)
 	}
+	// Decision 66: another repository of the team has a pipeline named ci too.
+	// No run of this world's repository, verified or asserted, reads its secret.
+	s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at) VALUES ('a','outsider-token','value','owner','gh:999999','ci',1,0,1,1)`)
 	return &Tenant{s: s, team: "a"}
 }
 
@@ -145,7 +153,7 @@ func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObser
 		if err != nil {
 			return err
 		}
-		for _, name := range []string{"ci-token", "deploy-token", "team-token"} {
+		for _, name := range []string{"ci-token", "deploy-token", "outsider-token", "team-token"} {
 			selection, err := runSecretSelection(row.Request)
 			if err != nil {
 				return err
@@ -228,6 +236,7 @@ func scheduleReference(t *testing.T, s *Store, mode string) (*Tenant, string) {
 		t.Fatal(err)
 	}
 	s.testOnlyExec(t, `UPDATE pool_access_rules SET repo_key=?`, sched.RepositoryKey)
+	s.testOnlyExec(t, `UPDATE secrets SET repo=? WHERE repo='gh:701'`, sched.RepositoryKey)
 	s.testOnlyExec(t, `UPDATE blob_records SET repo_key=?`, sched.RepositoryKey)
 	if mode == "locked" {
 		s.testOnlyExec(t, `UPDATE cron_schedules SET locked_ref=?`, referenceMain)

@@ -58,10 +58,10 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 		if masked {
 			name = "TOKEN"
 		}
-		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": name, "value": "supersecret", "pipeline": "ci", "masked": masked}); code != http.StatusOK {
+		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": name, "value": "supersecret", "repo": "gh:1", "pipeline": "ci", "masked": masked}); code != http.StatusOK {
 			t.Fatalf("write: HTTP %d %s", code, body)
 		}
-		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow(name, "ci")
+		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow(name, "gh:1", "ci")
 		if err != nil || !secrets.IsBound(row.Value) || strings.Contains(row.Value, "supersecret") {
 			t.Fatalf("unsealed or plaintext storage: %v", err)
 		}
@@ -77,7 +77,7 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 			t.Fatalf("claim roundtrip: HTTP %d %s", code, body)
 		}
 	}
-	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/TOKEN?pipeline=ci", "", nil); code != http.StatusForbidden || strings.Contains(body, "supersecret") {
+	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/TOKEN?repo=gh:1&pipeline=ci", "", nil); code != http.StatusForbidden || strings.Contains(body, "supersecret") {
 		t.Fatalf("masked member read: HTTP %d %s", code, body)
 	}
 }
@@ -85,7 +85,7 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 func TestSecrets_SaveWarningAndWriteOnlyAccess(t *testing.T) {
 	f := newBrowserFixture(t, nil)
 	for _, value := range []string{"", "abc", "ééé", "abcd", "éééé"} {
-		code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": value, "pipeline": "ci"})
+		code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": value, "repo": "gh:1", "pipeline": "ci"})
 		var response controllerwire.SecretWritten
 		wantWarning := ""
 		if !secrets.Maskable(value) {
@@ -94,19 +94,19 @@ func TestSecrets_SaveWarningAndWriteOnlyAccess(t *testing.T) {
 		if code != http.StatusOK || json.Unmarshal([]byte(body), &response) != nil || response.Warning != wantWarning || !response.Secret.Masked {
 			t.Fatalf("short secret: HTTP %d %s", code, body)
 		}
-		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", "ci")
+		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", "gh:1", "ci")
 		if err != nil || !row.Masked || !secrets.IsBound(row.Value) {
 			t.Fatalf("short secret lost protection: %+v %v", row, err)
 		}
 		want := controllerwire.SecretMetadata{
-			Name: row.Name, Principal: row.Principal, Pipeline: row.Pipeline,
+			Name: row.Name, Principal: row.Principal, Repo: row.RepoName, RepoKey: row.Repo, Pipeline: row.Pipeline,
 			Masked: row.Masked, Shared: row.Shared, Bound: true,
 			CreatedAt: row.CreatedAt.Unix(), UpdatedAt: row.UpdatedAt.Unix(),
 		}
 		if response.Secret != want {
 			t.Fatalf("save receipt: %+v, committed metadata: %+v", response.Secret, want)
 		}
-		if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/TOKEN?pipeline=ci", "", nil); code != http.StatusForbidden {
+		if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/TOKEN?repo=gh:1&pipeline=ci", "", nil); code != http.StatusForbidden {
 			t.Fatalf("member read: HTTP %d %s", code, body)
 		}
 		code, body, _ = secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "VARIABLE", "value": value, "masked": false})
@@ -125,10 +125,16 @@ func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 func checkSecretBindingMutation(t *testing.T, field, private string) {
 	t.Helper()
 	f := newBrowserFixture(t, nil)
-	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": private, "pipeline": "ci"}); code != http.StatusOK {
+	// A shared row has no repository or pipeline, so the shared flag is
+	// relocated on an unscoped row.
+	write, repo, scope := map[string]any{"name": "TOKEN", "value": private, "repo": "gh:1", "pipeline": "ci"}, "gh:1", "ci"
+	if field == "shared" {
+		write, repo, scope = map[string]any{"name": "TOKEN", "value": private}, "", ""
+	}
+	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", write); code != http.StatusOK {
 		t.Fatalf("write: HTTP %d %s", code, body)
 	}
-	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", "ci")
+	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", repo, scope)
 	if err != nil || !secrets.IsBound(row.Value) {
 		t.Fatalf("bound row: %v", err)
 	}
@@ -140,7 +146,7 @@ func checkSecretBindingMutation(t *testing.T, field, private string) {
 	case "pipeline":
 		edited.Pipeline, pipeline = "other", "other"
 	case "unscoped":
-		edited.Pipeline, edited.Shared, pipeline = "", true, "other"
+		edited.Repo, edited.Pipeline, edited.Shared, pipeline = "", "", true, "other"
 	case "shared":
 		edited.Shared = true
 	case "masked":
@@ -162,7 +168,7 @@ func checkSecretBindingMutation(t *testing.T, field, private string) {
 	if code != http.StatusInternalServerError || json.Unmarshal([]byte(body), &failure) != nil || failure.Error.Code != apierr.Internal || failure.Error.Message != "request failed" || strings.Contains(body, private) || strings.Contains(f.logs.String(), private) {
 		t.Fatalf("%s relocation: HTTP %d %s", field, code, body)
 	}
-	stored, err := teststore.ForTeam(t, f.st, team).GetSecretRow(edited.Name, edited.Pipeline)
+	stored, err := teststore.ForTeam(t, f.st, team).GetSecretRow(edited.Name, edited.Repo, edited.Pipeline)
 	if err != nil || stored.Value != row.Value || stored.Shared != edited.Shared || stored.Masked != edited.Masked {
 		t.Fatalf("refused read changed the row: %v", err)
 	}
@@ -199,7 +205,7 @@ func TestSecrets_ReadRefusesEnvelopesSealedBeforeTeamBinding(t *testing.T) {
 	if status != http.StatusInternalServerError || strings.Contains(body, "older secret") {
 		t.Fatalf("unbound read: HTTP %d %s", status, body)
 	}
-	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("LEGACY", "")
+	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("LEGACY", "", "")
 	if err != nil || row.Value != legacy {
 		t.Fatalf("refused read changed the stored envelope: %v", err)
 	}
@@ -215,7 +221,7 @@ func TestSecrets_PlaintextRowFailsClosedOnceEncrypted(t *testing.T) {
 	if status != http.StatusInternalServerError || json.Unmarshal([]byte(body), &failure) != nil || failure.Error.Code != apierr.Internal || failure.Error.Message != "request failed" || strings.Contains(body, "plain value") || strings.Contains(body, "not sealed") {
 		t.Fatalf("plaintext read: HTTP %d %s", status, body)
 	}
-	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("PREDATES", "")
+	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("PREDATES", "", "")
 	if err != nil || row.Value != "plain value" {
 		t.Fatalf("refused read changed the row: %v", err)
 	}
@@ -302,7 +308,7 @@ func TestSecretsMalformedEnvelopeReadsProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		status, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/MALFORMED", "", nil)
-		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("MALFORMED", "")
+		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("MALFORMED", "", "")
 		var failure apierr.Envelope
 		return err == nil && row.Value == stored && status == http.StatusInternalServerError && json.Unmarshal([]byte(body), &failure) == nil && failure.Error.Code == apierr.Internal && failure.Error.Message == "request failed" && !strings.Contains(body, private) && !strings.Contains(f.logs.String(), private)
 	}
@@ -316,5 +322,41 @@ func TestSecrets_MarkerContainingValuesAreAccepted(t *testing.T) {
 	code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "TOKEN", "value": "prefix***suffix"})
 	if code != http.StatusOK {
 		t.Fatalf("HTTP %d %s", code, body)
+	}
+}
+
+// Decision 66: a run of one repository's ci pipeline never receives another
+// repository's ci secret, while its own repository's and team-wide shared
+// secrets still arrive.
+func TestSecrets_PipelineSecretBelongsToOneRepository(t *testing.T) {
+	f := newBrowserFixture(t, nil)
+	for _, write := range []map[string]any{
+		{"name": "OUTSIDER", "value": "outsider-value", "repo": "https://git.example.com/acme/other", "pipeline": "ci"},
+		{"name": "OWN", "value": "own-value", "repo": "gh:1", "pipeline": "ci"},
+		{"name": "TEAM", "value": "team-value", "shared": true},
+	} {
+		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", write); code != http.StatusOK {
+			t.Fatalf("write %v: HTTP %d %s", write["name"], code, body)
+		}
+	}
+	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "ORPHAN", "value": "v", "pipeline": "ci"}); code != http.StatusBadRequest {
+		t.Fatalf("pipeline without repository: HTTP %d %s", code, body)
+	}
+	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("OUTSIDER", "git:git.example.com/acme/other", "ci")
+	if err != nil || row.RepoName != "git.example.com/acme/other" {
+		t.Fatalf("outsider row: %+v %v", row, err)
+	}
+	claim := secretClaim(t, f, store.DefaultTeam, "ci", "OUTSIDER", "OWN", "TEAM")
+	for name, want := range map[string]string{"OUTSIDER": "", "OWN": "own-value", "TEAM": "team-value"} {
+		code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/"+name, claim, nil)
+		if want == "" {
+			if code == http.StatusOK || strings.Contains(body, "outsider-value") {
+				t.Fatalf("another repository's pipeline secret released: HTTP %d %s", code, body)
+			}
+			continue
+		}
+		if code != http.StatusOK || !strings.Contains(body, want) {
+			t.Fatalf("%s: HTTP %d %s", name, code, body)
+		}
 	}
 }

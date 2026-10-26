@@ -6,6 +6,10 @@ export interface StoredSecret {
   name: string;
   value?: string;
   principal: string;
+  // A pipeline row belongs to one repository: repo is its name when the row
+  // was written and repo_key the identity a run's repository must match.
+  repo?: string;
+  repo_key?: string;
   pipeline?: string;
   masked: boolean;
   shared?: boolean;
@@ -21,6 +25,7 @@ export interface SecretDraft {
   value: string;
   masked: boolean;
   scope: ScopeKind;
+  repo: string;
   pipeline: string;
 }
 
@@ -28,6 +33,7 @@ export interface SecretWriteBody {
   name: string;
   value: string;
   masked: boolean;
+  repo?: string;
   pipeline?: string;
   shared?: boolean;
 }
@@ -36,24 +42,26 @@ export interface SecretWriteBody {
 export type SecretsAudience = "team" | "local";
 
 export const scopeHelp: Record<SecretsAudience, string> = {
-  team: "Scope a secret to a pipeline to limit which runs can read it. Team-wide rows answer every pipeline in the team. There is no per-repository scope because a run's repository name is supplied by whoever starts it.",
+  team: "A pipeline secret belongs to one repository and one pipeline, like a GitHub repository secret: only runs of that pipeline in that repository read it. Team-wide rows answer every pipeline of every repository in the team, like a GitHub organization secret with no repository list.",
   local:
-    "Stored in this machine's local sparkwing database. Scope a secret to a pipeline to limit which runs can read it; unscoped rows answer every pipeline run here.",
+    "Stored in this machine's local sparkwing database. A pipeline secret belongs to one repository and one pipeline; unscoped rows answer every pipeline run here.",
 };
 
 // An unscoped row that is not shared answers no run; the CLI can still write
 // one, so the page names it rather than calling it team-wide.
 export function scopeLabel(
-  row: Pick<StoredSecret, "pipeline" | "shared">,
+  row: Pick<StoredSecret, "repo" | "pipeline" | "shared">,
   audience: SecretsAudience = "team",
 ) {
-  if (row.pipeline) return `Pipeline: ${row.pipeline}`;
+  if (row.pipeline) return `Pipeline: ${row.pipeline} in ${row.repo ?? ""}`;
   if (!row.shared) return "No runs (operator reads only)";
   return audience === "local" ? "Every pipeline" : "Team";
 }
 
-export function rowKey(row: Pick<StoredSecret, "name" | "pipeline">): string {
-  return `${row.name}\u0000${row.pipeline ?? ""}`;
+export function rowKey(
+  row: Pick<StoredSecret, "name" | "repo_key" | "pipeline">,
+): string {
+  return `${row.name}\u0000${row.repo_key ?? ""}\u0000${row.pipeline ?? ""}`;
 }
 
 export function splitSecrets(rows: StoredSecret[]): {
@@ -63,6 +71,7 @@ export function splitSecrets(rows: StoredSecret[]): {
   const sorted = [...rows].sort(
     (a, b) =>
       a.name.localeCompare(b.name) ||
+      (a.repo ?? "").localeCompare(b.repo ?? "") ||
       (a.pipeline ?? "").localeCompare(b.pipeline ?? ""),
   );
   return {
@@ -91,6 +100,9 @@ export function secretNameProblem(name: string): string | null {
 export function draftProblem(draft: SecretDraft): string | null {
   const nameProblem = secretNameProblem(draft.name);
   if (nameProblem) return nameProblem;
+  if (draft.scope === "pipeline" && draft.repo.trim() === "") {
+    return "Enter the repository this pipeline belongs to, as owner/name.";
+  }
   if (draft.scope === "pipeline" && draft.pipeline.trim() === "") {
     return "Enter the pipeline this row is scoped to.";
   }
@@ -103,6 +115,7 @@ export function draftBody(draft: SecretDraft): SecretWriteBody {
       name: draft.name,
       value: draft.value,
       masked: draft.masked,
+      repo: draft.repo.trim(),
       pipeline: draft.pipeline.trim(),
     };
   }
@@ -118,7 +131,10 @@ export function draftBody(draft: SecretDraft): SecretWriteBody {
 // and kind and changes only the value.
 export function updateBody(row: StoredSecret, value: string): SecretWriteBody {
   const body: SecretWriteBody = { name: row.name, value, masked: row.masked };
-  if (row.pipeline) body.pipeline = row.pipeline;
+  if (row.pipeline) {
+    body.repo = row.repo_key;
+    body.pipeline = row.pipeline;
+  }
   if (row.shared) body.shared = true;
   return body;
 }
@@ -128,8 +144,15 @@ export function existingRow(
   draft: SecretDraft,
 ): StoredSecret | undefined {
   const pipeline = draft.scope === "pipeline" ? draft.pipeline.trim() : "";
+  const repo =
+    draft.scope === "pipeline" ? draft.repo.trim().toLowerCase() : "";
   return rows.find(
-    (r) => r.name === draft.name && (r.pipeline ?? "") === pipeline,
+    (r) =>
+      r.name === draft.name &&
+      (r.pipeline ?? "") === pipeline &&
+      (repo === "" ||
+        (r.repo ?? "").toLowerCase() === repo ||
+        r.repo_key === draft.repo.trim()),
   );
 }
 
@@ -146,10 +169,10 @@ export async function writeSecret(
 }
 
 export async function deleteSecret(
-  row: Pick<StoredSecret, "name" | "pipeline">,
+  row: Pick<StoredSecret, "name" | "repo_key" | "pipeline">,
 ): Promise<void> {
   const query = row.pipeline
-    ? `?pipeline=${encodeURIComponent(row.pipeline)}`
+    ? `?repo=${encodeURIComponent(row.repo_key ?? "")}&pipeline=${encodeURIComponent(row.pipeline)}`
     : "";
   await send(
     "DELETE",

@@ -3711,20 +3711,6 @@ components:
         - next_due_at
       type: object
       x-sparkwing-go-type: controllerwire.ScheduleView
-    internal.controllerwire.SecretDeletion:
-      additionalProperties: true
-      properties:
-        deleted:
-          type: boolean
-        name:
-          type: string
-        pipeline:
-          type: string
-      required:
-        - name
-        - deleted
-      type: object
-      x-sparkwing-go-type: controllerwire.SecretDeletion
     internal.controllerwire.SecretMetadata:
       additionalProperties: true
       properties:
@@ -3741,6 +3727,10 @@ components:
         pipeline:
           type: string
         principal:
+          type: string
+        repo:
+          type: string
+        repo_key:
           type: string
         shared:
           type: boolean
@@ -3787,6 +3777,8 @@ components:
           type: string
         pipeline:
           type: string
+        repo:
+          type: string
       required:
         - name
       type: object
@@ -3807,6 +3799,10 @@ components:
         pipeline:
           type: string
         principal:
+          type: string
+        repo:
+          type: string
+        repo_key:
           type: string
         shared:
           type: boolean
@@ -3835,6 +3831,8 @@ components:
         only_on:
           type: string
         pipeline:
+          type: string
+        repo:
           type: string
         shared:
           type: boolean
@@ -14524,16 +14522,16 @@ paths:
           schema:
             type: string
         - in: query
+          name: repo
+          schema:
+            type: string
+        - in: query
           name: pipeline
           schema:
             type: string
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.SecretDeletion'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:
@@ -14559,6 +14557,10 @@ paths:
         - in: path
           name: name
           required: true
+          schema:
+            type: string
+        - in: query
+          name: repo
           schema:
             type: string
         - in: query

@@ -183,6 +183,7 @@ type Target struct {
 	NodeID               string
 	BodyRunID            string
 	Pipeline             string
+	Repo                 string
 	ChildRunID           string
 	SlotKey              string
 	SlotRunID            string

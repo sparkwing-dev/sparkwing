@@ -49,11 +49,11 @@ func TestCredentialInventoryHTTPUsesAuthorizedTenant(t *testing.T) {
 			if masked {
 				name = "SECRET"
 			}
-			value, err := cipher.SealBound(secrets.PurposeSecret, string(team), name, "build", false, masked, string(team)+"-"+name)
+			value, err := cipher.SealBound(secrets.PurposeSecret, string(team), name, "gh:1#build", false, masked, string(team)+"-"+name)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: name, Value: value, Pipeline: "build", Masked: masked}, teststore.Now(s)); err != nil {
+			if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: name, Value: value, Repo: "gh:1", Pipeline: "build", Masked: masked}, teststore.Now(s)); err != nil {
 				t.Fatal(err)
 			}
 		}

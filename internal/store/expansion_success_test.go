@@ -143,7 +143,7 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=? WHERE id='run'`, raw)
-			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','token','ciphertext','account',1,1,1,'p',0,'prod'),('b','token','other-ciphertext','other',1,1,1,'p',0,'prod')`)
+			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,repo,pipeline,shared,only_on) VALUES ('a','token','ciphertext','account',1,1,1,'gh:1','p',0,'prod'),('b','token','other-ciphertext','other',1,1,1,'gh:1','p',0,'prod')`)
 			if mode != "no_opener" {
 				tenant.s.planSecretOpener = fakePlanSecretOpener(func(_ context.Context, team Team, secret Secret) (string, error) {
 					if team != "a" || secret.Value != "ciphertext" || secret.Pipeline != "p" {
@@ -189,7 +189,7 @@ func TestExpansionReplayRechecksLeaseAfterSecretDecryption(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=? WHERE id='run'`, raw)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','clock-secret','ciphertext','account',1,1,1,'p',0,'')`)
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,repo,pipeline,shared,only_on) VALUES ('a','clock-secret','ciphertext','account',1,1,1,'gh:1','p',0,'')`)
 	tenant.s.planSecretOpener = fakePlanSecretOpener(func(context.Context, Team, Secret) (string, error) {
 		expired := tenant.s.now().Add(time.Hour)
 		tenant.s.clock = func() time.Time { return expired }

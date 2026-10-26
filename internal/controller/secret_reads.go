@@ -25,7 +25,7 @@ func (s *Server) secretReader(ctx context.Context, team string) (SecretReader, e
 
 func secretReadTarget(r *http.Request) (capability.RequestEvidence, error) {
 	query, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil || len(query["run"]) > 1 || len(query["pipeline"]) > 1 {
+	if err != nil || len(query["run"]) > 1 || len(query["pipeline"]) > 1 || len(query["repo"]) > 1 {
 		return capability.RequestEvidence{}, invalidEngineBody("invalid secret selector")
 	}
 	name := r.PathValue("name")
@@ -33,7 +33,7 @@ func secretReadTarget(r *http.Request) (capability.RequestEvidence, error) {
 		return capability.RequestEvidence{}, invalidEngineBody("invalid secret name")
 	}
 	return capability.RequestEvidence{Target: capability.Target{
-		SecretName: name, RunID: query.Get("run"), Pipeline: query.Get("pipeline"),
+		SecretName: name, RunID: query.Get("run"), Repo: query.Get("repo"), Pipeline: query.Get("pipeline"),
 	}}, nil
 }
 
@@ -45,6 +45,15 @@ func (s *Server) handleReadSecret(w http.ResponseWriter, r *http.Request, a capa
 	cipher, ok := s.secretsCipher.(BoundCipher)
 	if !ok || cipher == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "secret decryption is unavailable"}
+	}
+	// A run-bound read selects the repository and pipeline the run speaks
+	// for; only a member's unbound read names them.
+	if a.Target.RunID == "" && a.Access.Binding != capability.BindDeclaredSecret && (a.Target.Repo != "" || a.Target.Pipeline != "") {
+		repo, err := s.secretRepository(r.Context(), a.Target.Team, a.Target.Repo, a.Target.Pipeline)
+		if err != nil {
+			return err
+		}
+		a.Target.Repo = string(repo.Key)
 	}
 	row, err := reader.ReadSecret(r.Context(), a)
 	if err != nil {
@@ -69,7 +78,7 @@ func (s *Server) handleReadSecret(w http.ResponseWriter, r *http.Request, a capa
 	noteAuditTarget(r.Context(), "secret_name", row.Name)
 	writeJSON(w, http.StatusOK, controllerwire.SecretValue{
 		SecretMetadata: controllerwire.SecretMetadata{
-			Name: row.Name, Principal: row.Principal, Pipeline: row.Pipeline,
+			Name: row.Name, Principal: row.Principal, Repo: row.RepoName, RepoKey: row.Repo, Pipeline: row.Pipeline,
 			Masked: row.Masked, Shared: row.Shared, Bound: secrets.IsBound(row.Value),
 			CreatedAt: row.CreatedAt.Unix(), UpdatedAt: row.UpdatedAt.Unix(),
 		},

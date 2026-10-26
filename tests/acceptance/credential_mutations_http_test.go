@@ -89,19 +89,19 @@ func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Aut
 	if err := teststore.SeedSecret(f.store, f.Team(), row, teststore.Now(f.store)); err != nil {
 		return store.Secret{}, err
 	}
-	stored, err := f.Tenant.GetSecretRow(row.Name, row.Pipeline)
+	stored, err := f.Tenant.GetSecretRow(row.Name, row.Repo, row.Pipeline)
 	if err != nil {
 		return store.Secret{}, err
 	}
 	return *stored, nil
 }
 
-func (f *credentialMutationFake) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error {
+func (f *credentialMutationFake) RemoveSecret(ctx context.Context, a capability.Authorized, name, repo, pipeline string) error {
 	if err := f.record(a); err != nil {
 		return err
 	}
 	a.Principal.Authority = f.authority
-	return f.Tenant.RemoveSecret(ctx, a, name, pipeline)
+	return f.Tenant.RemoveSecret(ctx, a, name, repo, pipeline)
 }
 
 func (f *credentialMutationFake) WriteGitCredential(ctx context.Context, a capability.Authorized, row store.SealedGitCredential) (store.GitCredential, error) {
@@ -151,9 +151,10 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 	s, cipher := credentialMutationStore(t)
 	b := authorityMember()
 	h := mutationServer(t, s, cipher, b)
-	property := func(value, selector string, masked, shared bool) bool {
+	property := func(value, selector string, masked bool) bool {
+		const repo = "git:git.example.com/acme/app"
 		pipeline := "pipeline-" + selector
-		query := url.Values{"team": {selector}, "pipeline": {pipeline}, "run": {selector}}
+		query := url.Values{"team": {selector}, "repo": {repo}, "pipeline": {pipeline}, "run": {selector}}
 		target, err := s.ForTeam(t.Context(), "team")
 		if err != nil {
 			t.Fatal(err)
@@ -162,15 +163,15 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := teststore.SeedSecret(s, foreign.Team(), store.Secret{Name: "KEY", Pipeline: pipeline, Value: "foreign-value"}, teststore.Now(s)); err != nil {
+		if err := teststore.SeedSecret(s, foreign.Team(), store.Secret{Name: "KEY", Repo: repo, Pipeline: pipeline, Value: "foreign-value"}, teststore.Now(s)); err != nil {
 			t.Fatal(err)
 		}
-		body, err := json.Marshal(map[string]any{"name": "KEY", "value": value, "pipeline": pipeline, "masked": masked, "shared": shared})
+		body, err := json.Marshal(map[string]any{"name": "KEY", "value": value, "repo": repo, "pipeline": pipeline, "masked": masked})
 		if err != nil {
 			t.Fatal(err)
 		}
 		w := authorityHTTP(h, b, "POST", "/api/v1/secrets?"+query.Encode(), string(body))
-		row, err := target.GetSecretRow("KEY", pipeline)
+		row, err := target.GetSecretRow("KEY", repo, pipeline)
 		var receipt controllerwire.SecretWritten
 		if json.Unmarshal(w.Body.Bytes(), &receipt) != nil {
 			return false
@@ -178,29 +179,29 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 		if (receipt.Warning != "") != (masked && !secrets.Maskable(value)) {
 			return false
 		}
-		if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" || err != nil || row.Principal != "account" || row.Masked != masked || row.Shared != shared {
+		if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" || err != nil || row.Principal != "account" || row.Masked != masked || row.Shared || row.Repo != repo {
 			return false
 		}
-		plain, err := cipher.OpenBound(secrets.PurposeSecret, "team", "KEY", pipeline, shared, masked, row.Value)
+		plain, err := cipher.OpenBound(secrets.PurposeSecret, "team", "KEY", row.SealScope(), false, masked, row.Value)
 		if err != nil || plain != value || row.Value == value {
 			return false
 		}
-		if _, err := cipher.OpenBound(secrets.PurposeSecret, "foreign", "KEY", pipeline, shared, masked, row.Value); err == nil {
+		if _, err := cipher.OpenBound(secrets.PurposeSecret, "foreign", "KEY", row.SealScope(), false, masked, row.Value); err == nil {
 			return false
 		}
 		w = authorityHTTP(h, b, "DELETE", "/api/v1/secrets/KEY?"+query.Encode(), "")
-		if _, err := target.GetSecretRow("KEY", pipeline); w.Code != 204 || !errors.Is(err, store.ErrNotFound) {
+		if _, err := target.GetSecretRow("KEY", repo, pipeline); w.Code != 204 || !errors.Is(err, store.ErrNotFound) {
 			return false
 		}
-		other, err := foreign.GetSecretRow("KEY", pipeline)
+		other, err := foreign.GetSecretRow("KEY", repo, pipeline)
 		if err != nil || other.Value != "foreign-value" {
 			return false
 		}
-		return foreign.RemoveSecret(t.Context(), credentialSeedAuthority(t, s, "foreign"), "KEY", pipeline) == nil
+		return foreign.RemoveSecret(t.Context(), credentialSeedAuthority(t, s, "foreign"), "KEY", repo, pipeline) == nil
 	}
 	for _, value := range []string{"", "abc", "ééé", "has***marker", "abcd", "éééé"} {
 		for _, masked := range []bool{false, true} {
-			if !property(value, "foreign-selector", masked, true) {
+			if !property(value, "foreign-selector", masked) {
 				t.Fatalf("value %q masked=%t violated tenant isolation", value, masked)
 			}
 		}
@@ -485,7 +486,7 @@ func TestCredentialMutationsHTTPMemberTransports(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		row, err := tenant.GetSecretRow("KEY", "")
+		row, err := tenant.GetSecretRow("KEY", "", "")
 		if err != nil || !row.Masked || row.Shared || row.Principal != p.Capability.Subject.ID {
 			t.Fatalf("class %s stored %+v %v", class, row, err)
 		}
@@ -532,7 +533,7 @@ func TestCredentialMutationsHTTPEncryptionFailuresStoreNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row, err := tenant.GetSecretRow("KEY", ""); !errors.Is(err, store.ErrNotFound) || row != nil {
+	if row, err := tenant.GetSecretRow("KEY", "", ""); !errors.Is(err, store.ErrNotFound) || row != nil {
 		t.Fatalf("stored failed secret: %+v %v", row, err)
 	}
 	if row, err := tenant.GitCredentialForRepository(t.Context(), "", "git.invalid"); !errors.Is(err, store.ErrNotFound) || row.ID != "" {

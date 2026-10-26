@@ -14,9 +14,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+// fixtureRepo is the repository key the store's asserted run fixtures carry.
+const fixtureRepo = "gh:1"
+
 func seedSecret(t *testing.T, tenant *Tenant, row Secret, at time.Time) error {
 	t.Helper()
-	_, err := tenant.s.db.ExecContext(t.Context(), `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`, tenant.team, row.Name, row.Value, row.Principal, row.Pipeline, boolInt(row.Masked), boolInt(row.Shared), at.UnixNano(), at.UnixNano())
+	_, err := tenant.s.db.ExecContext(t.Context(), `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, tenant.team, row.Name, row.Value, row.Principal, row.Repo, row.Pipeline, boolInt(row.Masked), boolInt(row.Shared), at.UnixNano(), at.UnixNano())
 	return err
 }
 
@@ -36,11 +39,14 @@ func TestCredentialRotationPreservesTenantAndRowMetadataProperty(t *testing.T) {
 	for _, team := range []Team{"a", "b"} {
 		tn := &Tenant{s: tenant.s, team: team}
 		for i := range 24 {
-			sec := Secret{Name: fmt.Sprintf("secret_%d", i), Pipeline: []string{"", "deploy"}[random.IntN(2)], Value: fmt.Sprintf("old/%x", random.Uint64()), Principal: "author", Masked: random.IntN(2) == 0, Shared: random.IntN(2) == 0}
+			sec := Secret{Name: fmt.Sprintf("secret_%d", i), Value: fmt.Sprintf("old/%x", random.Uint64()), Principal: "author", Masked: random.IntN(2) == 0, Shared: random.IntN(2) == 0}
+			if random.IntN(2) == 0 {
+				sec.Repo, sec.Pipeline, sec.Shared = fixtureRepo, "deploy", false
+			}
 			if err := seedSecret(t, tn, sec, now); err != nil {
 				t.Fatal(err)
 			}
-			row, err := tn.GetSecretRow(sec.Name, sec.Pipeline)
+			row, err := tn.GetSecretRow(sec.Name, sec.Repo, sec.Pipeline)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -66,7 +72,7 @@ func TestCredentialRotationPreservesTenantAndRowMetadataProperty(t *testing.T) {
 			if team == "a" {
 				want.Value = "new/" + want.Value
 			}
-			got, err := tn.GetSecretRow(want.Name, want.Pipeline)
+			got, err := tn.GetSecretRow(want.Name, want.Repo, want.Pipeline)
 			if err != nil || !reflect.DeepEqual(*got, want) {
 				t.Fatalf("secret row changed: got=%+v want=%+v, %v", got, want, err)
 			}
@@ -126,7 +132,7 @@ func TestCredentialRotationRollsBackBothTables(t *testing.T) {
 				t.Fatalf("failed rotation: %+v,%v", result, err)
 			}
 			for _, name := range []string{"first", "second"} {
-				got, err := tenant.GetSecretRow(name, "")
+				got, err := tenant.GetSecretRow(name, "", "")
 				if err != nil || got.Value != "old" {
 					t.Fatalf("secret partially rotated: %+v,%v", got, err)
 				}
@@ -250,7 +256,7 @@ func TestCredentialRotationCommittedAttemptMetadataProperty(t *testing.T) {
 			t.Fatalf("retries=%d attempts=%d: got=%+v want=%+v: %v", retries, attempts, result, want, err)
 		}
 		for _, name := range []string{"repaired", "unreadable"} {
-			row, err := tenant.GetSecretRow(name, "")
+			row, err := tenant.GetSecretRow(name, "", "")
 			want := "new"
 			if name == "unreadable" {
 				want = "old"

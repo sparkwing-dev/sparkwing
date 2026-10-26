@@ -668,30 +668,35 @@ func Registry() []Command {
 			{Name: "all-repos"},
 		}},
 		{Path: "sparkwing secrets", Flags: []Flag{}},
-		{Path: "sparkwing secrets delete", Rules: []string{"Delete the exact pipeline or unscoped row. JSON retains whether the row was deleted or already absent; plain emits the name."}, Flags: []Flag{
+		{Path: "sparkwing secrets delete", Rules: []string{"Delete the exact pipeline or unscoped row. A pipeline row is named by --repo and --pipeline together. JSON retains whether the row was deleted or already absent; plain emits the name."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
-			{Name: "pipeline", Argument: "NAME"},
+			{Name: "repo", Argument: "REPO", Requires: []string{"pipeline"}},
+			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets get", Rules: []string{"This explicit authorized read includes the value. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
+		{Path: "sparkwing secrets get", Rules: []string{"This explicit authorized read includes the value. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
-			{Name: "pipeline", Argument: "NAME"},
+			{Name: "repo", Argument: "REPO", Requires: []string{"pipeline"}},
+			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets list", Rules: []string{"List metadata without values, including pipeline visibility and pool restrictions. Search matches names case-insensitively. JSON emits metadata records; plain emits names."}, Flags: []Flag{
+		{Path: "sparkwing secrets list", Rules: []string{"List metadata without values, including each pipeline row's repository and pipeline, and pool restrictions. Search matches names case-insensitively; --repo matches a repository name case-insensitively or its key exactly, and --pipeline requires --repo. JSON emits metadata records; plain emits names."}, Flags: []Flag{
 			{Name: "search", Argument: "PATTERN"},
+			{Name: "repo", Argument: "REPO"},
+			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing secrets rotate", Rules: []string{"Retain rotated counts and skipped row names/pipelines. The previous key is still needed when any row was skipped. JSON includes the controller's replay marker."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets set", Rules: []string{"Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.", "If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.", "Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. Saving a short secret prints one warning line on stderr. Read `sparkwing docs read --topic secrets` for the masking length rule. JSON returns metadata and replay without the value; plain emits the name."}, Flags: []Flag{
+		{Path: "sparkwing secrets set", Rules: []string{"Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.", "If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.", "A pipeline secret belongs to one repository and one pipeline: --repo and --pipeline go together, and only runs of that repository's pipeline read it. --repo takes GitHub owner/name, another host's remote URL or host/path, or a repository key. --shared stores a team-wide secret every pipeline of every repository in the team reads.", "Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. Saving a short secret prints one warning line on stderr. Read `sparkwing docs read --topic secrets` for the masking length rule. JSON returns metadata and replay without the value; plain emits the name."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "value", Argument: "VALUE", Conflicts: []string{"file"}},
 			{Name: "file", Argument: "PATH", Conflicts: []string{"value"}},
 			{Name: "variable"},
-			{Name: "pipeline", Argument: "NAME", Conflicts: []string{"shared"}},
-			{Name: "shared", Conflicts: []string{"pipeline"}},
+			{Name: "repo", Argument: "REPO", Requires: []string{"pipeline"}, Conflicts: []string{"shared"}},
+			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}, Conflicts: []string{"shared"}},
+			{Name: "shared", Conflicts: []string{"pipeline", "repo"}},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "only-on", Argument: "POOL"},
 		}},

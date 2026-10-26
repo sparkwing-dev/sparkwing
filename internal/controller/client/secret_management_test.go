@@ -31,8 +31,12 @@ func TestSecretManagementMetadataDoesNotExposeValues(t *testing.T) {
 
 func TestSecretManagementReadsScopedAndEmptyValues(t *testing.T) {
 	for _, pipeline := range []string{"", "deploy & release"} {
+		repo := ""
+		if pipeline != "" {
+			repo = "acme/web"
+		}
 		c := testEngine(t, func(req *http.Request) (*http.Response, error) {
-			if req.URL.EscapedPath() != "/api/v1/secrets/deploy%2Fkey" || req.URL.Query().Get("pipeline") != pipeline {
+			if req.URL.EscapedPath() != "/api/v1/secrets/deploy%2Fkey" || req.URL.Query().Get("repo") != repo || req.URL.Query().Get("pipeline") != pipeline {
 				t.Fatalf("selector lost: %s", req.URL)
 			}
 			data, err := json.Marshal(controllerwire.SecretValue{SecretMetadata: controllerwire.SecretMetadata{Name: "deploy/key", Shared: true}, Value: ""})
@@ -41,7 +45,7 @@ func TestSecretManagementReadsScopedAndEmptyValues(t *testing.T) {
 			}
 			return engineResponse(200, string(data)), nil
 		})
-		result, err := c.ReadSecret(t.Context(), controllerwire.SecretSelector{Name: "deploy/key", Pipeline: pipeline})
+		result, err := c.ReadSecret(t.Context(), controllerwire.SecretSelector{Name: "deploy/key", Repo: repo, Pipeline: pipeline})
 		if err != nil || result.Value != "" || result.Name != "deploy/key" {
 			t.Fatalf("empty or shared fallback value: %+v %v", result, err)
 		}
@@ -125,19 +129,19 @@ func TestSecretManagementRejectsInvalidRotationAndDeletion(t *testing.T) {
 	c := testEngine(t, func(*http.Request) (*http.Response, error) {
 		return engineResponse(200, `{"name":"TOKEN","pipeline":"other","deleted":true}`), nil
 	})
-	if _, err := c.DeleteSecret(t.Context(), controllerwire.SecretSelector{Name: "TOKEN", Pipeline: "deploy"}); err == nil {
-		t.Fatal("conflicting deletion accepted")
+	if _, err := c.DeleteSecret(t.Context(), controllerwire.SecretSelector{Name: "TOKEN", Repo: "acme/web", Pipeline: "deploy"}); err == nil {
+		t.Fatal("deletion answered with a body accepted")
 	}
 }
 
 func TestSecretManagementValidatesBeforeTransport(t *testing.T) {
 	c := testEngine(t, func(*http.Request) (*http.Response, error) { t.Fatal("invalid input reached HTTP"); return nil, io.EOF })
-	for _, input := range []controllerwire.SecretWrite{{}, {Name: "TOKEN"}, {Name: "../TOKEN", IdempotencyKey: "key"}, {Name: "TOKEN", Pipeline: "deploy", Shared: true, IdempotencyKey: "key"}, {Name: "TOKEN", OnlyOn: "\r\n", IdempotencyKey: "key"}} {
+	for _, input := range []controllerwire.SecretWrite{{}, {Name: "TOKEN"}, {Name: "../TOKEN", IdempotencyKey: "key"}, {Name: "TOKEN", Repo: "acme/web", Pipeline: "deploy", Shared: true, IdempotencyKey: "key"}, {Name: "TOKEN", Pipeline: "deploy", IdempotencyKey: "key"}, {Name: "TOKEN", Repo: "acme/web", IdempotencyKey: "key"}, {Name: "TOKEN", OnlyOn: "\r\n", IdempotencyKey: "key"}} {
 		if _, err := c.WriteSecret(t.Context(), input); err == nil {
 			t.Fatalf("invalid write accepted: %+v", input)
 		}
 	}
-	for _, selector := range []controllerwire.SecretSelector{{}, {Name: "../TOKEN"}, {Name: "TOKEN", Pipeline: "\n"}} {
+	for _, selector := range []controllerwire.SecretSelector{{}, {Name: "../TOKEN"}, {Name: "TOKEN", Repo: "acme/web", Pipeline: "\n"}, {Name: "TOKEN", Pipeline: "deploy"}, {Name: "TOKEN", Repo: "acme/web"}} {
 		if _, err := c.ReadSecret(t.Context(), selector); err == nil {
 			t.Fatalf("invalid read accepted: %+v", selector)
 		}
@@ -159,5 +163,26 @@ func TestSecretManagementPreservesStructuredRefusal(t *testing.T) {
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || !reflect.DeepEqual(failure, want) {
 		t.Fatalf("refusal changed: %v", err)
+	}
+}
+
+// The controller answers a deletion with 204, or 404 when the row is absent;
+// the CLI reports both instead of failing on the empty body.
+func TestSecretManagementDeletionReadsTheControllerStatus(t *testing.T) {
+	for _, tc := range []struct {
+		status  int
+		body    string
+		deleted bool
+	}{{204, "", true}, {404, `{"error":{"code":"not_found","message":"secret not found"}}`, false}} {
+		c := testEngine(t, func(req *http.Request) (*http.Response, error) {
+			if req.Method != "DELETE" || req.URL.Query().Get("repo") != "gh:7" || req.URL.Query().Get("pipeline") != "deploy" {
+				t.Fatalf("selector lost: %s %s", req.Method, req.URL)
+			}
+			return engineResponse(tc.status, tc.body), nil
+		})
+		got, err := c.DeleteSecret(t.Context(), controllerwire.SecretSelector{Name: "TOKEN", Repo: "gh:7", Pipeline: "deploy"})
+		if err != nil || got != (controllerwire.SecretDeletion{Name: "TOKEN", Repo: "gh:7", Pipeline: "deploy", Deleted: tc.deleted}) {
+			t.Fatalf("status %d: %+v %v", tc.status, got, err)
+		}
 	}
 }

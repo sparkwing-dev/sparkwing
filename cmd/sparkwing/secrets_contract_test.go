@@ -76,10 +76,10 @@ func TestSecretManagementPreservesValueAndRestrictions(t *testing.T) {
 			got = input
 			return controllerwire.SecretWritten{Secret: controllerwire.SecretMetadata{Name: input.Name, Pipeline: input.Pipeline, Masked: input.Masked, OnlyOn: input.OnlyOn, Bound: true}}, nil
 		}}
-		args := append([]string{"set", "--secret", "DEPLOY_KEY", "--pipeline", "deploy", "--only-on", "prod", "-o", "json"}, tc.args...)
+		args := append([]string{"set", "--secret", "DEPLOY_KEY", "--repo", "acme/web", "--pipeline", "deploy", "--only-on", "prod", "-o", "json"}, tc.args...)
 		var out bytes.Buffer
 		err := manageSecrets(t.Context(), secretInvocation(t, args...), manager, strings.NewReader(tc.stdin), &out, io.Discard, false)
-		if err != nil || got.Value != tc.want || got.Name != "DEPLOY_KEY" || got.Pipeline != "deploy" || !got.Masked || got.Shared || got.OnlyOn != "prod" || got.IdempotencyKey == "" {
+		if err != nil || got.Value != tc.want || got.Name != "DEPLOY_KEY" || got.Repo != "acme/web" || got.Pipeline != "deploy" || !got.Masked || got.Shared || got.OnlyOn != "prod" || got.IdempotencyKey == "" {
 			t.Fatalf("write: %+v %v", got, err)
 		}
 		var result controllerwire.SecretWritten
@@ -90,7 +90,7 @@ func TestSecretManagementPreservesValueAndRestrictions(t *testing.T) {
 }
 
 func TestSecretManagementLocalDefaultsAndVariables(t *testing.T) {
-	for _, args := range [][]string{{}, {"--pipeline", "deploy"}, {"--shared"}} {
+	for _, args := range [][]string{{}, {"--repo", "acme/web", "--pipeline", "deploy"}, {"--shared"}} {
 		manager := secretManagerFake{write: func(input controllerwire.SecretWrite) (controllerwire.SecretWritten, error) {
 			if input.Masked || input.Shared != (input.Pipeline == "") {
 				t.Fatalf("local variable scope: %+v", input)
@@ -141,7 +141,7 @@ func TestSecretManagementListsOnlyMetadata(t *testing.T) {
 }
 
 func TestSecretManagementExplicitReadAndExactDeletion(t *testing.T) {
-	selector := controllerwire.SecretSelector{Name: "TOKEN", Pipeline: "deploy"}
+	selector := controllerwire.SecretSelector{Name: "TOKEN", Repo: "acme/web", Pipeline: "deploy"}
 	manager := secretManagerFake{
 		read: func(got controllerwire.SecretSelector) (controllerwire.SecretValue, error) {
 			if got != selector {
@@ -158,7 +158,7 @@ func TestSecretManagementExplicitReadAndExactDeletion(t *testing.T) {
 	}
 	for _, format := range []string{"pretty", "json", "plain"} {
 		var out bytes.Buffer
-		if err := manageSecrets(t.Context(), secretInvocation(t, "get", "--secret", "TOKEN", "--pipeline", "deploy", "-o", format), manager, nil, &out, io.Discard, false); err != nil {
+		if err := manageSecrets(t.Context(), secretInvocation(t, "get", "--secret", "TOKEN", "--repo", "acme/web", "--pipeline", "deploy", "-o", format), manager, nil, &out, io.Discard, false); err != nil {
 			t.Fatal(err)
 		}
 		if format == "json" {
@@ -170,7 +170,7 @@ func TestSecretManagementExplicitReadAndExactDeletion(t *testing.T) {
 			t.Fatalf("value changed: %q", &out)
 		}
 		out.Reset()
-		if err := manageSecrets(t.Context(), secretInvocation(t, "delete", "--secret", "TOKEN", "--pipeline", "deploy", "-o", format), manager, nil, &out, io.Discard, false); err != nil {
+		if err := manageSecrets(t.Context(), secretInvocation(t, "delete", "--secret", "TOKEN", "--repo", "acme/web", "--pipeline", "deploy", "-o", format), manager, nil, &out, io.Discard, false); err != nil {
 			t.Fatal(err)
 		}
 		if format == "json" && !strings.Contains(out.String(), `"deleted":false`) {
@@ -233,13 +233,56 @@ func TestSecretManagementRejectsInvalidInputBeforeConnection(t *testing.T) {
 	for _, args := range [][]string{
 		{"set", "--secret", "../TOKEN", "--value", "secret"},
 		{"set", "--secret", "TOKEN", "--value", "secret", "--file", "missing"},
-		{"set", "--secret", "TOKEN", "--pipeline", "deploy", "--shared"},
+		{"set", "--secret", "TOKEN", "--repo", "acme/web", "--pipeline", "deploy", "--shared"},
+		{"set", "--secret", "TOKEN", "--repo", "acme/web", "--shared"},
 		{"list", "-o", "table"},
 		{"get"},
 		{"delete", "TOKEN"},
 	} {
 		if err := runSecretArgs(args); err == nil {
 			t.Fatalf("accepted: %v", args)
+		}
+	}
+}
+
+// Decision 66: a pipeline secret belongs to one repository, so naming a
+// pipeline without its repository is refused before any connection.
+func TestSecretManagementRefusesPipelineWithoutRepository(t *testing.T) {
+	for _, args := range [][]string{
+		{"set", "--secret", "TOKEN", "--value", "secret", "--pipeline", "deploy"},
+		{"get", "--secret", "TOKEN", "--pipeline", "deploy"},
+		{"delete", "--secret", "TOKEN", "--pipeline", "deploy"},
+		{"list", "--pipeline", "deploy"},
+	} {
+		if _, err := clisurface.Parse("sparkwing", append([]string{"secrets"}, args...)); err == nil || !strings.Contains(err.Error(), "--pipeline requires --repo") {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"set", "--secret", "TOKEN", "--value", "secret", "--repo", "acme/web"},
+		{"delete", "--secret", "TOKEN", "--repo", "acme/web"},
+	} {
+		if _, err := clisurface.Parse("sparkwing", append([]string{"secrets"}, args...)); err == nil || !strings.Contains(err.Error(), "--repo requires --pipeline") {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+}
+
+func TestSecretManagementListFiltersByRepository(t *testing.T) {
+	manager := secretManagerFake{list: func() (controllerwire.Secrets, error) {
+		return controllerwire.Secrets{Secrets: []controllerwire.SecretMetadata{
+			{Name: "TOKEN", Repo: "acme/web", RepoKey: "gh:7", Pipeline: "ci"},
+			{Name: "TOKEN", Repo: "acme/api", RepoKey: "gh:8", Pipeline: "ci"},
+			{Name: "REGION", Shared: true},
+		}}, nil
+	}}
+	for _, args := range [][]string{{"--repo", "Acme/Web"}, {"--repo", "gh:7", "--pipeline", "ci"}} {
+		var out bytes.Buffer
+		if err := manageSecrets(t.Context(), secretInvocation(t, append([]string{"list", "-o", "pretty"}, args...)...), manager, nil, &out, io.Discard, false); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "acme/web") || strings.Contains(out.String(), "acme/api") || strings.Contains(out.String(), "REGION") || !strings.Contains(out.String(), "REPO") {
+			t.Fatalf("%v: %s", args, &out)
 		}
 	}
 }

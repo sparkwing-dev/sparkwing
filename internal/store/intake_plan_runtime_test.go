@@ -929,7 +929,7 @@ func testBodyPlan(plan nodeproto.PlanDoc) nodeproto.PlanDoc {
 
 func expirePlanSecret(t *testing.T, tenant *Tenant, request *PlanAcceptance, expire func()) {
 	t.Helper()
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','clock-secret','ciphertext','account',1,1,1,'p',0,'')`)
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,repo,pipeline,shared,only_on) VALUES ('a','clock-secret','ciphertext','account',1,1,1,'gh:1','p',0,'')`)
 	request.Seal.Resolved.SecretNames = []string{"clock-secret"}
 	tenant.s.planSecretOpener = fakePlanSecretOpener(func(context.Context, Team, Secret) (string, error) {
 		expire()

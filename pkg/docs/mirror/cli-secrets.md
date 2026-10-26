@@ -29,7 +29,7 @@ Manage secrets in this machine's local store or on a controller
 
 Remove a secret
 
-Delete the exact pipeline or unscoped row. JSON retains whether the row was deleted or already absent; plain emits the name.
+Delete the exact pipeline or unscoped row. A pipeline row is named by --repo and --pipeline together. JSON retains whether the row was deleted or already absent; plain emits the name.
 
 ### Flags
 
@@ -40,6 +40,7 @@ Delete the exact pipeline or unscoped row. JSON retains whether the row was dele
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--secret NAME` | Secret name. (required) |
+| `--repo REPO` | Repository identity, never a checkout path; typed identity grants no authority. |
 | `--pipeline NAME` | Pipeline name. |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 
@@ -47,7 +48,7 @@ Delete the exact pipeline or unscoped row. JSON retains whether the row was dele
 
 Read a secret's value
 
-This explicit authorized read includes the value. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline.
+This explicit authorized read includes the value. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline.
 
 ### Flags
 
@@ -58,6 +59,7 @@ This explicit authorized read includes the value. JSON retains metadata and valu
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--secret NAME` | Secret name. (required) |
+| `--repo REPO` | Repository identity, never a checkout path; typed identity grants no authority. |
 | `--pipeline NAME` | Pipeline name. |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 
@@ -65,7 +67,7 @@ This explicit authorized read includes the value. JSON retains metadata and valu
 
 List secret names + metadata
 
-List metadata without values, including pipeline visibility and pool restrictions. Search matches names case-insensitively. JSON emits metadata records; plain emits names.
+List metadata without values, including each pipeline row's repository and pipeline, and pool restrictions. Search matches names case-insensitively; --repo matches a repository name case-insensitively or its key exactly, and --pipeline requires --repo. JSON emits metadata records; plain emits names.
 
 ### Flags
 
@@ -76,6 +78,8 @@ List metadata without values, including pipeline visibility and pool restriction
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--search PATTERN` | Match records; never scan log text. |
+| `--repo REPO` | Repository identity, never a checkout path; typed identity grants no authority. |
+| `--pipeline NAME` | Pipeline name. |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 
 ## `sparkwing secrets rotate`
@@ -102,6 +106,8 @@ Restricted --only-on secrets require matching pool demands at seal and reserved 
 
 If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.
 
+A pipeline secret belongs to one repository and one pipeline: --repo and --pipeline go together, and only runs of that repository's pipeline read it. --repo takes GitHub owner/name, another host's remote URL or host/path, or a repository key. --shared stores a team-wide secret every pipeline of every repository in the team reads.
+
 Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. Saving a short secret prints one warning line on stderr. Read `sparkwing docs read --topic secrets` for the masking length rule. JSON returns metadata and replay without the value; plain emits the name.
 
 ### Flags
@@ -116,6 +122,7 @@ Local unscoped writes are shared with local pipelines. Controller writes preserv
 | `--value VALUE` | value |
 | `--file PATH` | file |
 | `--variable` | Store an unmasked variable instead of a secret. |
+| `--repo REPO` | Repository identity, never a checkout path; typed identity grants no authority. |
 | `--pipeline NAME` | Pipeline name. |
 | `--shared` | shared |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |

@@ -21,6 +21,7 @@ const eventKindSecretPreflightRefused = "secret_preflight_refused"
 type secretPreflightError struct {
 	RunID      string
 	Pipeline   string
+	Repo       string
 	problems   []secretProblem
 	sharedOnly bool
 }
@@ -30,8 +31,8 @@ type secretProblem struct {
 	// safety: a team-wide row that is not shared is told apart from no row,
 	// because its fix is sharing it, not creating it.
 	Unshared bool
-	// safety: named so an author whose copy sits under another pipeline sees
-	// where it went rather than being told it does not exist.
+	// safety: named so an author whose copy sits under another repository or
+	// pipeline sees where it went rather than being told it does not exist.
 	OtherPipelines []string
 }
 
@@ -56,18 +57,19 @@ func (e *secretPreflightError) detail() string {
 		e.Pipeline, len(e.problems), plural(len(e.problems), "secret", "secrets"))
 	for _, p := range e.problems {
 		set := fmt.Sprintf("sparkwing secrets set --secret %s --file <path> --profile <profile>", p.Name)
+		scoped := fmt.Sprintf("%s --repo %s --pipeline %s", set, e.Repo, e.Pipeline)
 		switch {
 		case e.sharedOnly:
 			fmt.Fprintf(&b, "\n- %s is unavailable: this run can read only shared team-wide secrets.\n  Fix: %s --shared", p.Name, set)
 		case p.Unshared:
 			fmt.Fprintf(&b, "\n- %s is set team-wide but not shared with runs, so only an admin can read it."+
-				"\n  Fix: %s --shared\n   or: %s --pipeline %s", p.Name, set, set, e.Pipeline)
+				"\n  Fix: %s --shared\n   or: %s", p.Name, set, scoped)
 		case len(p.OtherPipelines) > 0:
-			fmt.Fprintf(&b, "\n- %s is set only for pipeline %s; pipeline %q has no copy and the team has no shared one."+
-				"\n  Fix: %s --pipeline %s", p.Name, quoteList(p.OtherPipelines), e.Pipeline, set, e.Pipeline)
+			fmt.Fprintf(&b, "\n- %s is set only for %s; pipeline %q of %s has no copy and the team has no shared one."+
+				"\n  Fix: %s", p.Name, strings.Join(p.OtherPipelines, ", "), e.Pipeline, e.Repo, scoped)
 		default:
-			fmt.Fprintf(&b, "\n- %s is not set: pipeline %q has no copy and the team has no shared one."+
-				"\n  Fix: %s --pipeline %s", p.Name, e.Pipeline, set, e.Pipeline)
+			fmt.Fprintf(&b, "\n- %s is not set: pipeline %q of %s has no copy and the team has no shared one."+
+				"\n  Fix: %s", p.Name, e.Pipeline, e.Repo, scoped)
 		}
 	}
 	b.WriteString("\nIf the run can do without a secret, declare it optional: tag its field in Secrets() `sw:\"NAME,optional\"`.")
@@ -100,14 +102,6 @@ func (s *Store) recordSecretPreflight(ctx context.Context, team Team, request Pl
 	})
 }
 
-func quoteList(names []string) string {
-	quoted := make([]string, len(names))
-	for i, n := range names {
-		quoted[i] = fmt.Sprintf("%q", n)
-	}
-	return strings.Join(quoted, ", ")
-}
-
 // The release selector also owns preflight eligibility so an unchanged row
 // cannot pass planning and fail release.
 func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, selection secretSelection, required []string) (err error) {
@@ -136,9 +130,9 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	for _, name := range required {
 		args = append(args, name)
 	}
-	rows, err := tx.queryContext(ctx, `SELECT name, pipeline, shared FROM secrets
+	rows, err := tx.queryContext(ctx, `SELECT name, repo_name, pipeline, shared FROM secrets
  WHERE team = ? AND name IN (?`+strings.Repeat(", ?", len(required)-1)+`)
- ORDER BY name, pipeline`, args...)
+ ORDER BY name, repo_name, pipeline`, args...)
 	if err != nil {
 		return err
 	}
@@ -146,16 +140,16 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	unshared := map[string]bool{}
 	others := map[string][]string{}
 	for rows.Next() {
-		var name, owner string
+		var name, repo, owner string
 		var shared int
-		if err := rows.Scan(&name, &owner, &shared); err != nil {
+		if err := rows.Scan(&name, &repo, &owner, &shared); err != nil {
 			return err
 		}
 		switch {
 		case owner == "" && shared == 0:
 			unshared[name] = true
 		case owner != "":
-			others[name] = append(others[name], owner)
+			others[name] = append(others[name], fmt.Sprintf("pipeline %q of %s", owner, repo))
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -165,7 +159,11 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	if pipeline == "" {
 		pipeline = run.Request.Provenance.Pipeline()
 	}
-	refused := &secretPreflightError{RunID: runID, Pipeline: pipeline, sharedOnly: selection.scope == secretSharedOnly}
+	repo := run.Request.Request.Git.Repository.Display
+	if repo == "" {
+		repo = selection.repo
+	}
+	refused := &secretPreflightError{RunID: runID, Pipeline: pipeline, Repo: repo, sharedOnly: selection.scope == secretSharedOnly}
 	for _, name := range required {
 		if readable[name] {
 			continue

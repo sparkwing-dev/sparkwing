@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 
@@ -25,7 +26,7 @@ func (c *engineClient) ListSecrets(ctx context.Context) (controllerwire.Secrets,
 	}
 	seen := map[controllerwire.SecretSelector]bool{}
 	for _, secret := range result.Secrets {
-		key := controllerwire.SecretSelector{Name: secret.Name, Pipeline: secret.Pipeline}
+		key := controllerwire.SecretSelector{Name: secret.Name, Repo: secret.RepoKey, Pipeline: secret.Pipeline}
 		if !validSecretMetadata(secret) || seen[key] {
 			return result, secretProtocolError("controller returned invalid or repeated secret metadata")
 		}
@@ -48,7 +49,7 @@ func (c *engineClient) ReadSecret(ctx context.Context, selector controllerwire.S
 
 func (c *engineClient) WriteSecret(ctx context.Context, input controllerwire.SecretWrite) (controllerwire.SecretWritten, error) {
 	var result controllerwire.SecretWritten
-	if !validSecretSelector(controllerwire.SecretSelector{Name: input.Name, Pipeline: input.Pipeline}) || input.Pipeline != "" && input.Shared || input.OnlyOn != "" && !validSelector(input.OnlyOn) || !validSelector(input.IdempotencyKey) {
+	if !validSecretSelector(controllerwire.SecretSelector{Name: input.Name, Repo: input.Repo, Pipeline: input.Pipeline}) || input.Pipeline != "" && input.Shared || input.OnlyOn != "" && !validSelector(input.OnlyOn) || !validSelector(input.IdempotencyKey) {
 		return result, &apierr.Error{Code: apierr.BadRequest, Message: "secret write requires a valid name, scope, pool and idempotency key"}
 	}
 	err := c.request(ctx, "POST", "/api/v1/secrets", "/api/v1/secrets", input.IdempotencyKey, input, &result)
@@ -60,14 +61,16 @@ func (c *engineClient) WriteSecret(ctx context.Context, input controllerwire.Sec
 }
 
 func (c *engineClient) DeleteSecret(ctx context.Context, selector controllerwire.SecretSelector) (controllerwire.SecretDeletion, error) {
-	var result controllerwire.SecretDeletion
+	result := controllerwire.SecretDeletion{Name: selector.Name, Repo: selector.Repo, Pipeline: selector.Pipeline}
 	if !validSecretSelector(selector) {
 		return result, &apierr.Error{Code: apierr.BadRequest, Message: "invalid secret selector"}
 	}
-	err := c.request(ctx, "DELETE", "/api/v1/secrets/{name}", secretPath(selector), "", nil, &result)
-	if err == nil && (result.Name != selector.Name || result.Pipeline != selector.Pipeline) {
-		err = secretProtocolError("controller returned conflicting secret deletion")
+	err := c.request(ctx, "DELETE", "/api/v1/secrets/{name}", secretPath(selector), "", nil, nil)
+	var failure *apierr.Error
+	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
+		return result, nil
 	}
+	result.Deleted = err == nil
 	return result, err
 }
 
@@ -96,17 +99,19 @@ func (c *engineClient) RotateSecrets(ctx context.Context, input controllerwire.S
 func secretPath(selector controllerwire.SecretSelector) string {
 	path := "/api/v1/secrets/" + url.PathEscape(selector.Name)
 	if selector.Pipeline != "" {
-		path += "?" + url.Values{"pipeline": {selector.Pipeline}}.Encode()
+		path += "?" + url.Values{"repo": {selector.Repo}, "pipeline": {selector.Pipeline}}.Encode()
 	}
 	return path
 }
 
+// validSecretSelector holds a pipeline row's repository and pipeline together,
+// since a pipeline secret belongs to exactly one repository.
 func validSecretSelector(selector controllerwire.SecretSelector) bool {
-	return secretname.Validate(selector.Name) == nil && (selector.Pipeline == "" || validSelector(selector.Pipeline))
+	return secretname.Validate(selector.Name) == nil && (selector.Repo == "") == (selector.Pipeline == "") && (selector.Pipeline == "" || validSelector(selector.Pipeline) && validSelector(selector.Repo))
 }
 
 func validSecretMetadata(secret controllerwire.SecretMetadata) bool {
-	return validSecretSelector(controllerwire.SecretSelector{Name: secret.Name, Pipeline: secret.Pipeline}) && !(secret.Pipeline != "" && secret.Shared) && !strings.ContainsAny(secret.Principal, "\r\n\x00") && (secret.OnlyOn == "" || validSelector(secret.OnlyOn))
+	return validSecretSelector(controllerwire.SecretSelector{Name: secret.Name, Repo: secret.RepoKey, Pipeline: secret.Pipeline}) && !(secret.Pipeline != "" && secret.Shared) && !strings.ContainsAny(secret.Principal, "\r\n\x00") && (secret.OnlyOn == "" || validSelector(secret.OnlyOn))
 }
 
 func secretProtocolError(message string) error {

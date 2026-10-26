@@ -51,6 +51,36 @@ hourly limits (`max_runs_per_hour`) and prepaid credits still bound intake.
 `sparkwing operator limits set` refuses the old name; drop it from scripts and
 configuration. A value already stored is ignored.
 
+## Pipeline secrets belong to one repository
+
+A pipeline secret now belongs to one repository and one pipeline, like a GitHub
+repository secret. Before, a secret set with `--pipeline ci` reached every
+repository's pipeline named `ci`, so anyone who could push to one repository
+could read another repository's `ci` secrets.
+
+- `sparkwing secrets set`, `get` and `delete` take `--repo OWNER/NAME` together
+  with `--pipeline`; `--pipeline` alone is refused. `--repo` also takes another
+  host's remote URL or `host/path`, or a repository key from
+  `sparkwing secrets list -o json`.
+- `sparkwing secrets list` shows each pipeline row's repository and filters by
+  `--repo` and `--pipeline`.
+- `POST /api/v1/secrets` takes `repo` with `pipeline`, and
+  `GET`/`DELETE /api/v1/secrets/{name}` take `repo` with `pipeline` in the query.
+  Secret metadata carries `repo` (the repository's name when the row was
+  written) and `repo_key` (its identity).
+- A repository with no remote cannot hold pipeline secrets; use a `--shared`
+  secret or a [local secret](../machine-config.md#local-secrets) for such a
+  checkout.
+- `--shared` secrets are unchanged and stay team-wide. Protect deploy secrets
+  with reserved pools or `--only-on`.
+
+v0.68 starts a new store, so set each pipeline secret again with its
+repository:
+
+```sh
+sparkwing secrets set --secret DEPLOY_KEY --file key.pem --repo acme/web --pipeline deploy
+```
+
 ## Secret missing sentinel
 
 Replace `secretname.ErrMissing` with `sparkwing.ErrSecretMissing` when checking

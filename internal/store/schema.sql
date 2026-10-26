@@ -575,14 +575,18 @@ CREATE TABLE secrets (
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
     masked BIGINT NOT NULL DEFAULT 1,
+    repo TEXT NOT NULL DEFAULT '',
+    repo_name TEXT NOT NULL DEFAULT '',
     pipeline TEXT NOT NULL DEFAULT '',
     shared BIGINT NOT NULL DEFAULT 0,
     team TEXT NOT NULL REFERENCES teams(name),
     only_on TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (team, name, pipeline),
+    PRIMARY KEY (team, name, repo, pipeline),
     CHECK(masked IN (0,1)),
     CHECK(shared IN (0,1)),
-    CHECK(name <> '')
+    CHECK(name <> ''),
+    CHECK((repo = '') = (pipeline = '')),
+    CHECK(repo = '' OR shared = 0)
 );
 
 CREATE TABLE pipeline_profiles (
