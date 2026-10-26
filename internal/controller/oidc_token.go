@@ -45,6 +45,7 @@ func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server {
 type OIDCReader interface {
 	Team() store.Team
 	ReadOIDCFacts(context.Context, capability.Authorized) (capability.OIDCFacts, error)
+	RecordOIDCMint(context.Context, capability.Authorized, string) error
 }
 
 func (s *Server) oidcReader(ctx context.Context, team string) (OIDCReader, error) {
@@ -118,6 +119,9 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 	token, expires, err := s.oidc.issuer.Mint(claims, facts.Now, ceiling)
 	if err != nil {
 		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "OIDC issuance unavailable"}, err)
+	}
+	if err := reader.RecordOIDCMint(r.Context(), a, body.Audience); err != nil {
+		return engineLookupError(err)
 	}
 	writeJSON(w, http.StatusOK, OIDCTokenResponse{Token: token, ExpiresAt: expires.UTC()})
 	return nil

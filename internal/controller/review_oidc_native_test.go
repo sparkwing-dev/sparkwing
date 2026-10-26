@@ -90,6 +90,17 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
 		t.Fatal(err)
 	}
+	// Every minted token leaves one audit row naming the run, its job and the
+	// audience, and nothing that identifies a person.
+	minted, err := tenant.BusinessEvents(t.Context(), "oidc.minted", 1000, "")
+	if err != nil || len(minted) != 16 {
+		t.Fatalf("OIDC audit rows = %d, %v", len(minted), err)
+	}
+	for _, event := range minted {
+		if event.RunID != "run" || event.Account != "" || event.Attrs["audience"] != "vault" || event.Attrs["node_digest"] == nil || len(event.Attrs) != 2 {
+			t.Fatalf("OIDC audit row = %+v", event)
+		}
+	}
 
 	engineSQL(t, e.Store, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event) VALUES ('verified-delivery','verified-delivery',1,'push')`)
 	for _, tc := range []struct {

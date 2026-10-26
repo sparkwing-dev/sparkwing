@@ -217,6 +217,8 @@ Approval decisions, run and job cancellations, token minting and rotation,
 runner enrollment, and invitation acceptance commit their audit events in the
 same transaction. These events contain IDs and closed decision values, without
 approval comments, cancellation reasons, email addresses or other personal text.
+Each OIDC token a run mints is audited as `oidc.minted` before it is returned,
+naming the run, a digest of its job and the audience.
 Restricted claims and sealed execution inputs must never be rendered as details.
 Run creation and retry return display inputs, not the execution seal. Schedule
 declarations, overrides, effective arguments and fire history hide every argument

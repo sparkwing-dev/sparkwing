@@ -80,6 +80,14 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	return facts, nil
 }
 
+// RecordOIDCMint audits a token minted for the authorized run, after signing and
+// before the token is returned, so every token handed out has its row.
+func (t *Tenant) RecordOIDCMint(ctx context.Context, a capability.Authorized, audience string) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(a.Principal)}, auditOIDCMint{RunID: a.Target.RunID, Node: digestAudit(a.Principal.Capability.Binding.NodeID), Audience: audience})
+	})
+}
+
 // oidcIdentity is the part of an ID token that the run's sealed provenance alone decides.
 func oidcIdentity(team Team, run RunRow) (capability.OIDCFacts, error) {
 	provenance := run.Request.Provenance
