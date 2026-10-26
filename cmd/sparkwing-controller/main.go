@@ -391,7 +391,7 @@ func run(args []string) error {
 			*liveLogNodeKB, *liveLogTotalMB)
 	}
 
-	if err := checkMultiTeamObjectStore(cfg, *bucketStoreURL); err != nil {
+	if err := checkMultiTeamObjectStore(cfg, *bucketStoreURL, *cacheBlobStore); err != nil {
 		return err
 	}
 	if err := checkInsecureCookies(cfg, *insecureCookies); err != nil {
@@ -832,8 +832,14 @@ func checkRequireAuth(ctx context.Context, reader deploymentAdminReader, require
 }
 
 // safety: a free team is held to its allowance only by counters kept over the object
-// store; the disk-backed cache and log volume enforce no allowance at all.
-func checkMultiTeamObjectStore(cfg deployment.Config, bucketStoreURL string) error {
+// store; the disk-backed cache and log volume enforce no allowance at all. The hosted
+// controller's home is replaced with its pod while PostgreSQL keeps the records of
+// every blob, so its blobs must live in S3; --bucket-store only measures a bucket.
+func checkMultiTeamObjectStore(cfg deployment.Config, bucketStoreURL, cacheBlobStore string) error {
+	if cfg.Hosted() && !strings.HasPrefix(cacheBlobStore, "s3://") {
+		return errors.New("--deployment=cloud needs --cache-blob-store=s3://bucket/prefix: without it blobs, artifacts " +
+			"and logs land on the pod's filesystem and are lost when it is replaced, while PostgreSQL keeps their records")
+	}
 	if !cfg.MultiTeam() || strings.TrimSpace(bucketStoreURL) != "" {
 		return nil
 	}

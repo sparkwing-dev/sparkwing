@@ -48,6 +48,12 @@
 {{- if and (eq $c.store "postgres") (not $c.databaseSecret.name) (not (include "sparkwing-full.controller.credentialsBundle" .)) -}}
 {{- fail "sparkwing-full: controller.store=postgres needs a pg-url credential. Set controller.databaseSecret.name, or put pg-url in controller.credentialsSecret" -}}
 {{- end -}}
+{{- if and (eq $c.storage.type "emptyDir") (ne $c.store "postgres") -}}
+{{- fail "sparkwing-full: controller.storage.type=emptyDir loses /data with the pod, and a SQLite controller keeps its state.db there. Set controller.storage.type=pvc, or set controller.store=postgres with controller.dataStore.s3URL" -}}
+{{- end -}}
+{{- if and (eq $c.storage.type "emptyDir") (not $c.dataStore.s3URL) -}}
+{{- fail "sparkwing-full: controller.storage.type=emptyDir loses /data with the pod, and without controller.dataStore.s3URL the controller keeps every blob, artifact and log there while the database keeps their records. controller.bucketCeiling.store only measures a bucket and stores nothing. Set controller.dataStore.s3URL, or set controller.storage.type=pvc" -}}
+{{- end -}}
 {{- if and (eq $c.deployment "cloud") (ne $c.store "postgres") -}}
 {{- fail "sparkwing-full: controller.deployment=cloud needs controller.store=postgres" -}}
 {{- end -}}

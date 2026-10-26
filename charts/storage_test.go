@@ -44,7 +44,7 @@ func TestChartsUseControllerDataWithoutCacheService(t *testing.T) {
 func TestControllerEpochSurvivesPodAndDatabaseReplacement(t *testing.T) {
 	for _, storage := range []string{"pvc", "emptyDir"} {
 		t.Run(storage, func(t *testing.T) {
-			sets := []string{"controller.store=postgres", "controller.databaseSecret.name=database", "controller.storage.type=" + storage}
+			sets := []string{"controller.store=postgres", "controller.databaseSecret.name=database", "controller.dataStore.s3URL=s3://bucket/controller", "controller.storage.type=" + storage}
 			rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", "default", sets...)
 			pod := deploymentDocument(t, helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing", sets...)).Spec.Template.Spec
 			controller := pod.Containers[0]
@@ -102,4 +102,26 @@ func TestRunnerReadsItsTokenFromTheCredentialsDir(t *testing.T) {
 			t.Errorf("runner env %s carries a Secret; its token belongs in the credentials directory", env.Name)
 		}
 	}
+}
+
+// safety: an emptyDir /data goes with the pod, so the chart refuses it
+// whenever state.db or the blob store would live there. A bucket-ceiling
+// URL only measures a bucket and does not move blobs off /data.
+func TestEphemeralDataNeedsDurableStateAndBlobs(t *testing.T) {
+	postgres := []string{"controller.store=postgres", "controller.databaseSecret.name=database", "controller.storage.type=emptyDir"}
+	for name, tc := range map[string]struct {
+		sets []string
+		want string
+	}{
+		"sqlite":                  {[]string{"controller.storage.type=emptyDir"}, "state.db"},
+		"filesystem blobs":        {postgres, "controller.dataStore.s3URL"},
+		"bucket measurement only": {append(postgres, "controller.bucketCeiling.store=s3://bucket/controller"), "controller.dataStore.s3URL"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if out := helmRenderError(t, "./sparkwing-full", "sparkwing", tc.sets...); !strings.Contains(out, tc.want) {
+				t.Fatalf("render failure does not name %q:\n%s", tc.want, out)
+			}
+		})
+	}
+	helmRenderAll(t, "./sparkwing-full", "sparkwing", "default", append(postgres, "controller.dataStore.s3URL=s3://bucket/controller")...)
 }

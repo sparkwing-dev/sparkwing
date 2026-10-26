@@ -1005,7 +1005,7 @@ func TestNotesMatchHowTheControllerKeysItsSecrets(t *testing.T) {
 	if strings.Contains(notes, "plaintext") || strings.Contains(notes, "openssl rand") {
 		t.Errorf("SQLite notes still describe plaintext storage or a fresh key:\n%s", notes)
 	}
-	notes = renderNotes(t, "controller.store=postgres", "controller.databaseSecret.name=sparkwing-db", "controller.storage.type=emptyDir")
+	notes = renderNotes(t, "controller.store=postgres", "controller.databaseSecret.name=sparkwing-db", "controller.storage.type=emptyDir", "controller.dataStore.s3URL=s3://bucket/controller")
 	if !strings.Contains(notes, "refuses to store secrets until it has a key") || strings.Contains(notes, "/data/secrets.key") {
 		t.Errorf("PostgreSQL notes:\n%s", notes)
 	}

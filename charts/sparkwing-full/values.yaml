@@ -211,7 +211,8 @@ controller:
   # emptyDir. It uses pvc.storageClassName, or the cluster default when empty.
   storage:
     # "pvc" mounts a PersistentVolumeClaim at /data.
-    # "emptyDir" is ephemeral. Pair with PostgreSQL and S3 for durable state.
+    # "emptyDir" is ephemeral; the render fails unless store=postgres and
+    # dataStore.s3URL keep state and blobs off it (bucketCeiling.store does not).
     # Any other value fails the render.
     type: pvc
     pvc:

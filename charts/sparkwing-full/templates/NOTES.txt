@@ -85,11 +85,6 @@ controller refuses to start. Back it up, owner-only, once a secret exists:
 
   (umask 077 && kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "sparkwing-full.controller.fullname" . }} -- \
     cat /data/secrets.key > sparkwing-secrets.key)
-{{- if eq .Values.controller.storage.type "emptyDir" }}
-
-  controller.storage.type is emptyDir, so the key and the state DB both go
-  with the pod; supply a key before storing anything you need to keep.
-{{- end }}
 
 To manage the key as a Secret, create it from that same file, never from a
 new key:
