@@ -135,6 +135,9 @@ func overflowControlTx(ctx context.Context, tx *storeTx, team Team, account stri
 	return out, nil
 }
 
+// overflowAllowanceReached is why Cloud work stops when its requester's overflow allowance cannot extend its lease.
+const overflowAllowanceReached = "monthly overflow allowance reached"
+
 func checkOverflowTx(ctx context.Context, tx *storeTx, team Team, run string) error {
 	exhausted, err := overflowExhaustedTx(ctx, tx, team, run, SliceSeconds)
 	if err != nil || !exhausted {

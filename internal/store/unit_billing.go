@@ -185,7 +185,7 @@ func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 	if err != nil || a == nil {
 		return time.Time{}, err
 	}
-	if a.stop != "" {
+	if a.stop != "" && a.stop != overflowAllowanceReached {
 		beat.CancelRequested, beat.CancelReason = true, a.stop
 	}
 	if a.settled.Valid {
@@ -222,7 +222,7 @@ func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 	if err != nil || a == nil {
 		return time.Time{}, err
 	}
-	if a.stop != "" {
+	if a.stop != "" && a.stop != overflowAllowanceReached {
 		beat.CancelRequested, beat.CancelReason = true, a.stop
 	}
 	return fundedBoundTx(ctx, tx, team, unit, generation, now)

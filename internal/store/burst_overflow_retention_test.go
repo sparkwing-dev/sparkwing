@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestOverflowUsageLookupIndexesTeamAndRequester(t *testing.T) {
@@ -85,7 +86,8 @@ func overflowRetainedUsage(t *testing.T, name string, account bool) {
 }
 
 // A member's overflow budget is checked at every Cloud renewal against the reservation that renewal adds: a one-minute
-// allowance lets the job run the minute it prepaid at award, and no renewal extends its lease past that minute.
+// allowance lets the job run the minute it prepaid at award, no renewal extends its lease past that minute, and the
+// job then ends naming the allowance rather than as a generic lapse.
 func TestOverflowBudgetBoundsARunningJobAtRenewal(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, true)
 	owner := authorityMember(t, s, "owner", RoleOwner)
@@ -112,5 +114,23 @@ func TestOverflowBudgetBoundsARunningJobAtRenewal(t *testing.T) {
 	var reserved int64
 	if err := s.db.QueryRow(`SELECT COALESCE(SUM(seconds),0) FROM credit_charges WHERE kind IN ('reservation','slice')`).Scan(&reserved); err != nil || reserved != limit*60 {
 		t.Fatalf("reserved %d seconds under a %d-minute allowance: %v", reserved, limit, err)
+	}
+	var reason string
+	if err := s.db.QueryRow(`SELECT stop_reason FROM billing_awards WHERE team='a'`).Scan(&reason); err != nil || reason != overflowAllowanceReached {
+		t.Fatalf("declined renewal recorded %q, %v; want the overflow allowance", reason, err)
+	}
+	*now = start.Add(time.Minute + time.Second)
+	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "overflow", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || row.Outcome != runstate.NodeCancelled || row.CancelReason != overflowAllowanceReached {
+		t.Fatalf("job after its prepaid minute = outcome %q reason %q, %v; want stopped at the overflow allowance", row.Outcome, row.CancelReason, err)
 	}
 }

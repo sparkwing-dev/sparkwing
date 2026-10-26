@@ -290,10 +290,19 @@ func renewBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservatio
 	}
 	// safety: a member's overflow budget is the customer's own spending brake, so each renewal checks the reservation
 	// it is about to add, not a fresh slice on top of what the award already prepaid. Work the budget cannot extend
-	// keeps only the time it prepaid, and its lease ends there.
+	// keeps only the time it prepaid; the award records why, and its lease and drain end there.
 	if a.provenance.ExecutorClass == TierCloud {
 		exhausted, err := overflowExhaustedTx(ctx, tx, team, a.run, ahead)
-		if err != nil || exhausted {
+		if err != nil {
+			return err
+		}
+		if exhausted {
+			prepaidEnd, err := prepaidEndTx(ctx, tx, a, through, paidSeconds)
+			if err != nil {
+				return err
+			}
+			_, err = tx.execContext(ctx, `UPDATE billing_awards SET stop_reason=?,drain_deadline_at=? WHERE team=? AND reservation_id=? AND stop_reason=''`,
+				overflowAllowanceReached, prepaidEnd.UnixNano(), team, reservation)
 			return err
 		}
 	}
