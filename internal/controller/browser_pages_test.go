@@ -266,18 +266,28 @@ func TestRunEventStreamEndsWhenMembershipEnds(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream opened with %d", resp.StatusCode)
+	}
 	scanner := bufio.NewScanner(resp.Body)
 	removed := false
 	for scanner.Scan() {
 		if !removed && strings.HasPrefix(scanner.Text(), ": open") {
-			if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `DELETE FROM memberships WHERE account_id='alice'`); err != nil {
+			result, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `DELETE FROM memberships WHERE account_id='alice'`)
+			if err != nil {
 				t.Fatal(err)
+			}
+			if n, err := result.RowsAffected(); err != nil || n != 1 {
+				t.Fatalf("membership removal changed %d rows: %v", n, err)
 			}
 			if err := teststore.ForTeam(t, f.st, store.DefaultTeam).AppendEvent(t.Context(), "r1", "", "after_removal", []byte(`{}`)); err != nil {
 				t.Fatal(err)
 			}
 			removed = true
 		}
+	}
+	if !removed {
+		t.Fatal("the stream ended before it opened")
 	}
 	if err := scanner.Err(); err != nil || ctx.Err() != nil {
 		t.Fatalf("the stream outlived the membership: %v %v", err, ctx.Err())
