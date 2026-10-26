@@ -440,6 +440,8 @@ func (r *blobRecords) copyMemo(ctx context.Context, request blob.CopyMemoRequest
 		}
 		record := original
 		record.Key, record.Digest, record.CreatedAt = key, part.digest.Value, tx.now(ctx)
+		// safety: the copy's facts describe the scope it lands in, never the evidence of the memo it came from.
+		record.RefFacts = a.authority.Ref
 		record.ExpiresAt = runspec.Optional[time.Time]{}
 		record.ManifestDigest = runspec.Optional[blob.Digest]{}
 		record.Pinned = false
