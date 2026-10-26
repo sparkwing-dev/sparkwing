@@ -184,12 +184,12 @@ func TestPreviousKeyIsPublishedNotUsed(t *testing.T) {
 	if len(ids) != 2 || ids[1] != Thumbprint(&prevKey.PublicKey) {
 		t.Fatalf("key ids = %v, want the active key then the previous", ids)
 	}
-	tok, _, err := iss.Mint(runClaims(), time.Now(), time.Time{})
+	tok, err := iss.Mint(runClaims(), time.Now(), time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var head struct{ Kid string }
-	if err := jwks.DecodeSegment(strings.Split(tok, ".")[0], &head); err != nil {
+	if err := jwks.DecodeSegment(strings.Split(tok.Value, ".")[0], &head); err != nil {
 		t.Fatal(err)
 	}
 	if head.Kid != ids[0] {
@@ -210,18 +210,21 @@ func TestMintCapsExpiryAtNotAfter(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Unix(1_800_000_000, 0)
-	_, exp, err := iss.Mint(runClaims(), now, now.Add(3*time.Minute))
+	tok, err := iss.Mint(runClaims(), now, now.Add(3*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !exp.Equal(now.Add(3 * time.Minute)) {
-		t.Fatalf("exp = %s, want the credential's expiry %s", exp, now.Add(3*time.Minute))
+	if !tok.ExpiresAt.Equal(now.Add(3 * time.Minute)) {
+		t.Fatalf("exp = %s, want the credential's expiry %s", tok.ExpiresAt, now.Add(3*time.Minute))
 	}
-	_, exp, err = iss.Mint(runClaims(), now, time.Time{})
-	if err != nil || !exp.Equal(now.Add(10*time.Minute)) {
-		t.Fatalf("exp = %s, err = %v; want issue time plus the lifetime", exp, err)
+	tok, err = iss.Mint(runClaims(), now, time.Time{})
+	if err != nil || !tok.ExpiresAt.Equal(now.Add(10*time.Minute)) {
+		t.Fatalf("exp = %s, err = %v; want issue time plus the lifetime", tok.ExpiresAt, err)
 	}
-	if _, _, err := iss.Mint(runClaims(), now, now.Add(-time.Second)); err == nil {
+	if tok.ID == "" || tok.Subject == "" {
+		t.Fatalf("token identity missing: %+v", tok)
+	}
+	if _, err := iss.Mint(runClaims(), now, now.Add(-time.Second)); err == nil {
 		t.Fatal("a credential already expired got a token")
 	}
 }

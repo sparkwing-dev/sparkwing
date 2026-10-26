@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -24,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
@@ -58,6 +60,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT lease_expires_at FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&lease); err != nil {
 		t.Fatal(err)
 	}
+	issued := map[string]bool{}
 	property := func(forged [8]byte) bool {
 		response := engineClaimHTTP(t, handler, award.Claim.Capability, "POST", fmt.Sprintf("/api/v1/runs/run/oidc-token?team=%x&repository=%x&runner_kind=service", forged, forged), `{"audience":"vault"}`, http.StatusOK)
 		var token OIDCTokenResponse
@@ -85,6 +88,9 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		if json.Unmarshal(raw, &claims) != nil {
 			return false
 		}
+		if id, ok := claims["jti"].(string); ok {
+			issued[id] = true
+		}
 		return claims["team"] == "a" && claims["pipeline"] == "ci" && claims["trigger"] == "manual" && claims["runner_kind"] == "runner" && claims["repository"] == nil && claims["sha"] == nil && claims["ref"] == nil && claims["repository_id"] == nil && !token.ExpiresAt.After(time.Unix(0, lease))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
@@ -95,10 +101,19 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		t.Fatalf("OIDC audit rows = %d, %v", len(minted), err)
 	}
 	for _, event := range minted {
-		if event.RunID != "run" || event.Account != "" || event.Attrs["audience"] != "vault" || event.Attrs["node_digest"] == nil || len(event.Attrs) != 2 {
+		id, _ := event.Attrs["token_id"].(string)
+		subject, _ := event.Attrs["subject"].(string)
+		if event.RunID != "run" || event.Account != "" || event.Attrs["audience"] != "vault" || event.Attrs["node_digest"] == nil || !issued[id] || !strings.HasPrefix(subject, "team:a:") || event.Attrs["expires_at"] == nil || len(event.Attrs) != 5 {
 			t.Fatalf("OIDC audit row = %+v", event)
 		}
 	}
+	engineSQL(t, e.Store, `CREATE TRIGGER refuse_oidc_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	refused := engineClaimHTTP(t, handler, award.Claim.Capability, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`, http.StatusInternalServerError)
+	var leaked OIDCTokenResponse
+	if json.Unmarshal(refused.Body.Bytes(), &leaked) == nil && leaked.Token != "" {
+		t.Fatalf("a token left without its audit row: %s", refused.Body)
+	}
+	engineSQL(t, e.Store, `DROP TRIGGER refuse_oidc_audit`)
 
 	engineSQL(t, e.Store, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at,event) VALUES ('verified-delivery','verified-delivery',1,'push')`)
 	for _, tc := range []struct {
@@ -181,12 +196,12 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 	supplied := capability.Authorized{Principal: principal, Target: capability.Target{Team: "a", RunID: "run"}}
 	forged := supplied
 	forged.Target.Team = "foreign"
-	if _, err := tenant.ReadOIDCFacts(t.Context(), forged); err == nil {
+	if _, err := mintStubOIDC(t.Context(), tenant, forged); err == nil {
 		t.Fatal("cross-team persisted facts escaped")
 	}
 	engineSQL(t, e.Store, `UPDATE nodes SET cancel_requested_at=1 WHERE team='a' AND run_id='run' AND node_id='job'`)
 
-	if _, err := tenant.ReadOIDCFacts(t.Context(), supplied); err == nil {
+	if _, err := mintStubOIDC(t.Context(), tenant, supplied); err == nil {
 		t.Fatal("stale authorization minted after cancellation")
 	} else {
 		var failure *apierr.Error
@@ -195,4 +210,10 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		}
 	}
 	engineClaimHTTP(t, handler, award.Claim.Capability, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`, 401)
+}
+
+func mintStubOIDC(ctx context.Context, tenant *store.Tenant, a capability.Authorized) (store.OIDCMint, error) {
+	return tenant.MintOIDCToken(ctx, a, "sts.amazonaws.com", func(facts capability.OIDCFacts) (store.OIDCMint, error) {
+		return store.OIDCMint{Token: "token", ID: "id", Subject: "subject", ExpiresAt: facts.NotAfter}, nil
+	})
 }

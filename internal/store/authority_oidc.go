@@ -9,14 +9,42 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// ReadOIDCFacts revalidates claim authority and sealed identity in one store snapshot.
-func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authorized) (capability.OIDCFacts, error) {
-	tx, err := t.s.beginSnapshotReadTx(ctx)
-	if err != nil {
-		return capability.OIDCFacts{}, err
-	}
-	defer rollbackOrLog(tx)
-	chain, err := authorityChainTx(ctx, tx, supplied.Principal.Authority, false)
+// OIDCMint is the record of one signed ID token. Token is returned to the
+// caller and never stored; ID, Subject and ExpiresAt are audited.
+type OIDCMint struct {
+	Token     string
+	ID        string
+	Subject   string
+	ExpiresAt time.Time
+}
+
+// MintOIDCToken revalidates claim authority and sealed identity, has sign
+// produce the token from those facts, and audits it, all in one transaction:
+// a token exists only if its audit row commits alongside the authority check
+// that allowed it.
+func (t *Tenant) MintOIDCToken(ctx context.Context, supplied capability.Authorized, audience string, sign func(capability.OIDCFacts) (OIDCMint, error)) (OIDCMint, error) {
+	return inTxResult(ctx, t.s, func(tx *storeTx) (OIDCMint, error) {
+		facts, err := t.oidcFactsTx(ctx, tx, supplied)
+		if err != nil {
+			return OIDCMint{}, err
+		}
+		minted, err := sign(facts)
+		if err != nil {
+			return OIDCMint{}, err
+		}
+		if minted.Token == "" || minted.ID == "" || minted.Subject == "" || minted.ExpiresAt.IsZero() || minted.ExpiresAt.After(facts.NotAfter) {
+			return OIDCMint{}, authorityError(apierr.IntegrityFailure, "signed OIDC token does not match its issuance facts")
+		}
+		event := auditOIDCMint{RunID: supplied.Target.RunID, Node: digestAudit(supplied.Principal.Capability.Binding.NodeID), Audience: audience, TokenID: minted.ID, Subject: minted.Subject, ExpiresAt: minted.ExpiresAt.UTC().Unix()}
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(supplied.Principal)}, event); err != nil {
+			return OIDCMint{}, err
+		}
+		return minted, nil
+	})
+}
+
+func (t *Tenant) oidcFactsTx(ctx context.Context, tx *storeTx, supplied capability.Authorized) (capability.OIDCFacts, error) {
+	chain, err := authorityChainTx(ctx, tx, supplied.Principal.Authority, true)
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
@@ -73,18 +101,7 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	if !facts.NotAfter.After(facts.Now) {
 		return capability.OIDCFacts{}, authorityError(apierr.Unauthenticated, "claim issuance window has ended")
 	}
-	if err := tx.Commit(); err != nil {
-		return capability.OIDCFacts{}, err
-	}
 	return facts, nil
-}
-
-// RecordOIDCMint audits a token minted for the authorized run, after signing and
-// before the token is returned, so every token handed out has its row.
-func (t *Tenant) RecordOIDCMint(ctx context.Context, a capability.Authorized, audience string) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error {
-		return tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(a.Principal)}, auditOIDCMint{RunID: a.Target.RunID, Node: digestAudit(a.Principal.Capability.Binding.NodeID), Audience: audience})
-	})
 }
 
 // oidcIdentity is the part of an ID token that the run's sealed provenance alone decides.
