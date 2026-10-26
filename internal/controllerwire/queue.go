@@ -45,14 +45,13 @@ type QueueGroupWaiter struct {
 	Position       int       `json:"position"`
 }
 
-// QueuePriorityWrite chooses an exact priority, including zero, or a relative
-// rank resolved atomically by the controller against its current queue. RunID
-// accepts a stable ID or team number. HTTP mutations require an idempotency key.
+// QueuePriorityWrite chooses an exact local admission priority, including
+// zero, or a rank relative to the other queued runs. RunID accepts a stable ID
+// or team number.
 type QueuePriorityWrite struct {
-	RunID          string `json:"run_id"`
-	Priority       *int   `json:"priority,omitempty"`
-	Mode           string `json:"mode,omitempty"`
-	IdempotencyKey string `json:"-"`
+	RunID    string `json:"run_id"`
+	Priority *int   `json:"priority,omitempty"`
+	Mode     string `json:"mode,omitempty"`
 }
 
 // Validate rejects ambiguous rank changes before any mutation.
@@ -69,11 +68,10 @@ func (w QueuePriorityWrite) Validate() error {
 	return errors.New("priority requires either an integer or front/back")
 }
 
-// QueuePriorityResult carries the canonical run ID, committed rank and positions.
-// Group is absent for machine admission. An existing holder keeps its lease.
+// QueuePriorityResult carries the canonical run ID, committed rank and
+// positions. An existing holder keeps its lease.
 type QueuePriorityResult struct {
 	RunID string `json:"run_id"`
-	Group string `json:"group,omitempty"`
 	wingwire.SetPriorityAck
 	PreviousPosition int `json:"previous_position,omitempty"`
 }
