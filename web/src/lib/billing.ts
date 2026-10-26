@@ -48,7 +48,7 @@ export interface Billing {
   usage: UsageRow[];
   storage_charged_micro: number;
   grants: GrantRow[];
-  // Stripe holds the card; Sparkwing knows only that the team's customer has one.
+  // Stripe holds the card; Sparkwing knows only when one was last added.
   card?: { added_at: number };
   can_add_card: boolean;
   refill: Refill;
@@ -587,7 +587,7 @@ export function checkoutReturn(param: string | null): CheckoutReturn {
 export const checkoutRefreshDelays = [2_000, 5_000, 10_000, 15_000, 20_000];
 
 // openCardPage asks the controller for Stripe's card setup page, or for
-// Stripe's customer portal once the team has a card, and returns its link.
+// Stripe's customer portal once the team has added a card, and returns its link.
 export async function openCardPage(hasCard: boolean): Promise<string> {
   const res = await authFetch(
     hasCard ? "/api/v1/team/billing/portal" : "/api/v1/team/billing/card",

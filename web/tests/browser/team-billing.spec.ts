@@ -232,6 +232,7 @@ test("a held team sees the hold and no pay-now or budget controls", async ({
   await page.goto("/team/billing");
   await expect(page.getByRole("alert").filter({ hasText: "Cloud work is stopped while a payment dispute is open" })).toBeVisible();
   await expect(page.getByText(/balance is empty/)).toHaveCount(0);
+  await expect(page.getByText(/A card was added on/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Manage card" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Pay .* now/ })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Spend limits" })).toHaveCount(0);

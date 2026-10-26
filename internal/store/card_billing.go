@@ -25,11 +25,11 @@ const (
 // errStaleCardSetup refuses a card setup older than the card already on file.
 var errStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
 
-// Card records that a team's Stripe customer has a card for refills. Stripe holds the card itself, and refills
-// charge the customer's default payment method.
+// Card records that a card setup completed for the team's Stripe customer. Stripe holds the card and may since have
+// removed it; refills charge the customer's default payment method, and a refill without one stops as no_card.
 type Card struct {
 	Customer string
-	// AddedAt orders setups by completion time, or receipt time when absent; zero means no card.
+	// AddedAt orders setups by completion time, or receipt time when absent; zero means no card was ever added.
 	AddedAt time.Time
 }
 

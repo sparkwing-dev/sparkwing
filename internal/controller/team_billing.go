@@ -52,7 +52,7 @@ type teamBillingJSON struct {
 	Grants                    []teamBillingGrantJSON `json:"grants"`
 }
 
-// teamCardJSON says the team's Stripe customer has a card; Stripe's portal shows which.
+// teamCardJSON says when a card was last added; whether Stripe still holds it, and which, only Stripe's portal shows.
 type teamCardJSON struct {
 	AddedAt int64 `json:"added_at"`
 }

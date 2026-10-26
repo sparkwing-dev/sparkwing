@@ -463,8 +463,8 @@ function CardPanel({ billing }: { billing: Billing }) {
       <div className="p-4 space-y-2 text-sm">
         {billing.card ? (
           <p>
-            Your card is saved with Stripe. Stripe shows and changes it; Sparkwing
-            stores no card details.
+            A card was added on {fmtDateTime(unixSecondsISO(billing.card.added_at))}.
+            Stripe holds it; Manage card shows and changes it.
           </p>
         ) : (
           <p className="text-[var(--muted)]">

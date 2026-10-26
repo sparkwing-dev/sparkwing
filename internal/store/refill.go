@@ -195,7 +195,7 @@ func (s RefillSettings) validate() error {
 	return nil
 }
 
-// ErrNoCard refuses turning on refills for a team with no saved card.
+// ErrNoCard refuses turning on refills for a team that never added a card.
 var ErrNoCard = errors.New("card billing: save a card before turning on automatic refill")
 
 func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, actor auditActor) error {

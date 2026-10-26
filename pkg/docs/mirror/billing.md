@@ -109,7 +109,7 @@ Stripe holds every card detail. Sparkwing stores no card brand, last four digits
 fingerprint, payment method ID or payer email. Per team it keeps only the Stripe
 customer ID and when a card setup last completed, plus the checkout, payment and
 refund IDs, amounts, modes and statuses its credit ledger needs. Once a team has
-a card, the billing page's Manage card button (`POST /api/v1/team/billing/portal`)
+added a card, the billing page's Manage card button (`POST /api/v1/team/billing/portal`)
 opens Stripe's customer portal, where owners view, replace or remove it.
 Automatic refill charges the customer's default payment method in Stripe. When
 a card is set up, the controller passes the team owner's email to Stripe for its
