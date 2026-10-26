@@ -66,7 +66,6 @@ the scheme, host and path. Userinfo, query parameters and fragments are omitted.
 sparkwing queue list -o json
 sparkwing queue list --profile prod --group g:deploy -o pretty
 sparkwing queue priority --run RUN_ID --set front
-sparkwing queue priority --profile prod --group g:deploy --run 412 --set 0
 ```
 
 `queue list` reads one controller snapshot. A profile selects a remote
@@ -80,8 +79,9 @@ concurrency group, including its effective capacity, used cost, separate run
 and job IDs, holder leases, supersession and waiter positions. JSON returns one
 snapshot. Plain output uses tab-separated records.
 
-Priority accepts an integer, including zero, or `front`/`back`. The controller
-resolves relative values against the other runs in the queue. Transport retries
+`queue priority` changes local machine admission priority. It accepts an
+integer, including zero, or `front`/`back`, resolved against the other runs in
+the queue. Transport retries
 reuse the same mutation key. The result preserves prior and new
 priorities and positions. A holder keeps its existing lease. A missing run
 returns a receipt and exits 1.

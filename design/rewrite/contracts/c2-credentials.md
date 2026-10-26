@@ -210,12 +210,14 @@ cannot mint. Missing/dead authority answers unauthenticated. Live authority
 without the grant or run binding answers forbidden. Minting has no legacy
 scope or claimed-run lookup fallback. Both old handlers are deleted.
 
-The local C2 `controller.OIDCReader` interface is Team() store.Team and
-ReadOIDCFacts(ctx, Authorized) (capability.OIDCFacts, error).
+The local C2 `controller.OIDCMinter` interface is Team() store.Team and
+MintOIDCToken(ctx, Authorized, audience, sign) (store.OIDCMint, error), which
+rechecks authority, calls sign with the facts and audits the token's id,
+subject and expiry in one transaction.
 WithOIDCReader supplies its resolver. The default requires Tenant to implement
 it and refuses missing adapters with policy_missing. No C1 signature changes.
 
-ReadOIDCFacts must use one store-clock transaction to recheck the complete
+MintOIDCToken must use one store-clock transaction to recheck the complete
 live ancestry, awarded/delegated claim, oidc.mint grant, exact team/run binding,
 current holder/generation, cancellation and unit liveness. Derive the pipeline,
 ref, exact SHA, repository identity and original trigger from immutable intake
@@ -1176,7 +1178,7 @@ All capability names below are in `internal/capability`.
 | `controller.SizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
 | `controller.CredentialInventoryReader` | Supply the existing tenant secret/git inventory reads with an authenticated-team check. |
 | `controller.CredentialRotator` | Supply one tenant's authority-bearing atomic secret/git rotation. |
-| `capability.OIDCFacts`, `controller.OIDCReader` | Supply authority-rechecked sealed OIDC identity and its complete ancestry expiry ceiling. |
+| `capability.OIDCFacts`, `controller.OIDCMinter` | Supply authority-rechecked sealed OIDC identity and its complete ancestry expiry ceiling. |
 | `controller.SourceAuditReader` | Supply one tenant's final committed source-release audit projection. |
 | `controller.CredentialWriter` | Supply tenant credential mutations with committing authority rechecks and actor attribution. Missing adapters refuse writes. |
 | `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. The default uses Tenant.ReadRunView. No C1 signature changes. |
@@ -3182,7 +3184,7 @@ route policy. Console management carries `ConsoleProof` naming its direct
 session. Native transactions resolve it again and check the configured account
 and session lifetime. Inventory, rotation and revocation share `OwnsToken`.
 The store owns origin admission in the issuing transaction. CapabilityManager
-and OIDCReader are composed by the production store and controller constructors.
+and OIDCMinter are composed by the production store and controller constructors.
 
 `Repositories == nil` is unrestricted. A nonnil empty list authorizes nothing.
 RepositoryPattern and RepositoryIdentity distinguish path patterns from canonical
