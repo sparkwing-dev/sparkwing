@@ -138,8 +138,11 @@ replacing that member's destination file.
 Artifact records use `KindManifest` and the exact-attempt `ResultRecordKey`
 layout. A memo copy uses that same layout for its destination manifest.
 Attempt and generation also stay in `Record.Source`.
-`Manifest` and `DecodeManifest` define the shared bytes/member agreement for
-staging and memo reads. This includes each file's path, digest, size and mode.
+`Manifest` defines the manifest bytes, including each file's path, digest, size
+and mode. Memo reads check those bytes against the record's members with the
+package's private decoder. Staging (`nodehost.ArtifactRecords.Stage`) never
+decodes the manifest body: it takes members from the admitted record metadata,
+checks their paths and digests, and verifies the manifest bytes exist.
 
 Publication component checks exercise output and artifact writes through signed
 filesystem and S3 transfers with imported attempt identities. Forged uploader
@@ -368,8 +371,8 @@ transfers, memo verification and artifact staging against filesystem and S3
 objects. Each backend receives 128 generated payloads. Missing output records,
 missing or corrupt bytes and refused copy transactions produce memo misses.
 Required artifact reads fail before replacing the affected file. Record
-transactions and controller authorization are fakes. Separate generated capture
-and staging properties check symlink and path containment on Unix. Native
+transactions and controller authorization are fakes. Staging path and symlink
+containment is covered by `TestArtifactStaging` in `internal/nodehost`. Native
 Windows filesystem evidence remains required.
 
 The filesystem and S3 archive proofs drive the common host output and artifact

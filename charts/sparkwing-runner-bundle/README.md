@@ -34,8 +34,11 @@ it. Verified pools mount it only in the launcher.
 
 The runs this pool takes come from the trust class an admin set when registering
 its credential (`sparkwing runners add --trust`), never from the chart. Unset, a
-pool holding a secret reserved to it takes only verified pushes to the
-repository's default branch, and any other pool takes any run.
+pool holding a secret reserved to it takes only verified default-branch work:
+pushes to the repository's default branch and default-branch schedules a team
+admin armed. Any other pool takes every trust class, with one exception: a
+persistent Kubernetes runner never takes verified default-branch work, even with
+`--trust any`. That work runs on a launcher's fresh pod or in Sparkwing Cloud.
 `runner.submitEnvAllow` lists the
 submitted environment names this pool's jobs receive; empty accepts none. See
 [pool trust](../../docs/self-hosting.md#shared-runners-and-pool-trust).

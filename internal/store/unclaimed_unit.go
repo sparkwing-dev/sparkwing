@@ -68,6 +68,10 @@ func readUnclaimedUnitTx(ctx context.Context, tx *storeTx, team Team, run RunRow
 	}
 	if slices.ContainsFunc(standings, func(e eligibility) bool { return e.failed == stepFreshPod }) {
 		unit.NoEligible = freshPodReason
+		// A launcher never takes a pending host trigger, so only a new run with another runner selection can proceed.
+		if run.Request.Request.Dispatch == runspec.DispatchHost {
+			unit.NoEligible = freshPodHostRemedy
+		}
 		return &unit, nil
 	}
 	if runAnywhere(run.Request.Request) {

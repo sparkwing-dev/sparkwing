@@ -133,6 +133,8 @@ func localClaimant(c capability.Capability) bool {
 
 const freshPodReason = "verified default-branch work on Kubernetes runs only on fresh pods; add a launcher pool or use Sparkwing Cloud"
 
+const freshPodHostRemedy = "verified default-branch work on Kubernetes runs only on fresh pods; change the run's runner selection to a launcher pool or Sparkwing Cloud and start a new run"
+
 // safety: a claimant that runs one job after another shares host state between them,
 // so work from a run anyone can push must not reach a host that later holds a pool's
 // reserved secrets.
