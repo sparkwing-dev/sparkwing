@@ -245,6 +245,45 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 	t.Fatalf("stream ended before the late event: %v", scanner.Err())
 }
 
+// An open event stream ends once its caller's membership does, rather than
+// following the run for as long as it lasts.
+func TestRunEventStreamEndsWhenMembershipEnds(t *testing.T) {
+	f := newBrowserFixture(t, &controller.Dashboard{Paths: paths.PathsAt(t.TempDir())})
+	if err := teststore.SeedRun(f.st, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(f.h)
+	t.Cleanup(ts.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/v1/runs/r1/events/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	scanner := bufio.NewScanner(resp.Body)
+	removed := false
+	for scanner.Scan() {
+		if !removed && strings.HasPrefix(scanner.Text(), ": open") {
+			if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `DELETE FROM memberships WHERE account_id='alice'`); err != nil {
+				t.Fatal(err)
+			}
+			if err := teststore.ForTeam(t, f.st, store.DefaultTeam).AppendEvent(t.Context(), "r1", "", "after_removal", []byte(`{}`)); err != nil {
+				t.Fatal(err)
+			}
+			removed = true
+		}
+	}
+	if err := scanner.Err(); err != nil || ctx.Err() != nil {
+		t.Fatalf("the stream outlived the membership: %v %v", err, ctx.Err())
+	}
+}
+
 type browserRunDeleter struct {
 	*store.Tenant
 	seen capability.Authorized
