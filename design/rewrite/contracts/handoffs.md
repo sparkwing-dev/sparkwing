@@ -933,10 +933,11 @@ copy of the example in `testdata/refill_contract.json`.
   provider call.
 - The service creates the PaymentIntent with `confirm=true` and
   `off_session=true`, with the refill id as the idempotency key and as the
-  `refill_id` metadata. Every controller pass repeats the open refill's same
-  request until it settles or its 23-hour key life ends, so a crash or lost
-  answer never charges twice. A refill turned off between its check and a
-  retry is still charged and credited (an accepted seconds-wide window).
+  `refill_id` metadata. The service charges whatever it is asked, so every
+  controller pass rechecks eligibility, setting the open refill's own
+  reservation aside, immediately before repeating its same request. A crash or
+  lost answer never charges twice. A refill no longer eligible is withdrawn
+  without another call, and a payment an earlier call made still credits it.
 - The signed payment webhook finds the refill by the `refill_id` in its
   metadata and settles it exactly like Add funds; a refill funds at most one
   payment. A 409 closes the refill as `no_card`; a `failure` closes it with that

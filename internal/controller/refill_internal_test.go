@@ -167,42 +167,50 @@ func TestRefillPassChargesInOneCallAndOnlyTheWebhookGrants(t *testing.T) {
 	}
 }
 
-// A call whose answer is lost is sent again with the same body, so the refill id keeps Stripe to one charge; a team
-// that turned refills off in between still gets the credit for that charge.
+// A call whose answer is lost is sent again with the same body, so the refill id keeps Stripe to one charge, but only
+// while the team is still eligible; a refill withdrawn in between makes no call, and the payment the lost call made
+// is still credited.
 func TestALostRefillAnswerIsRetriedUnderTheSameKey(t *testing.T) {
-	e, tenant := refillFixture(t)
-	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
-	var bodies []string
-	worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		bodies = append(bodies, string(body))
-		if len(bodies) == 1 {
-			return nil, errors.New("connection reset after Stripe charged")
-		}
-		return refillReply(http.StatusOK, `{"payment_intent":"pi_retried","status":"succeeded"}`), nil
-	})
-	worker.refillPass(t.Context())
-	engineSQL(t, e.Store, `UPDATE teams SET refill_enabled=0 WHERE name='a'`)
-	worker.refillPass(t.Context())
-	if len(bodies) != 2 || bodies[0] != bodies[1] {
-		t.Fatalf("retried calls %q; want the same request twice", bodies)
-	}
-	var sent refillRequest
-	strictJSON(t, []byte(bodies[0]), &sent)
-	provider := paymenttest.Provider{}.SettledCheckout("pi_retried", false, "")
-	_, deliver := billingModelProviderDelivery(t, e, provider, func(s *Server) *Server { return s })
-	if w := deliver("evt_retried", "payment_intent.succeeded", refillIntent("pi_retried", sent.RefillID, "succeeded")); w.Code != http.StatusNoContent {
-		t.Fatalf("refill webhook = %d %s", w.Code, w.Body)
-	}
-	if micro, err := tenant.CreditBalanceMicro(t.Context()); err != nil || micro != 2000*store.MicroCreditsPerCent {
-		t.Fatalf("balance after the retried refill = %d, %v", micro, err)
-	}
-	worker.refillPass(t.Context())
-	if len(bodies) != 2 {
-		t.Fatalf("a refill turned off was opened again: %q", bodies)
+	for _, withdrawn := range []bool{false, true} {
+		t.Run(map[bool]string{false: "eligible", true: "turned off"}[withdrawn], func(t *testing.T) {
+			e, tenant := refillFixture(t)
+			worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
+			var bodies []string
+			worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				bodies = append(bodies, string(body))
+				if len(bodies) == 1 {
+					return nil, errors.New("connection reset after Stripe charged")
+				}
+				return refillReply(http.StatusOK, `{"payment_intent":"pi_retried","status":"succeeded"}`), nil
+			})
+			worker.refillPass(t.Context())
+			if withdrawn {
+				engineSQL(t, e.Store, `UPDATE teams SET refill_enabled=0 WHERE name='a'`)
+			}
+			worker.refillPass(t.Context())
+			if withdrawn && len(bodies) != 1 || !withdrawn && (len(bodies) != 2 || bodies[0] != bodies[1]) {
+				t.Fatalf("calls %q; want the same request again only while eligible", bodies)
+			}
+			var sent refillRequest
+			strictJSON(t, []byte(bodies[0]), &sent)
+			provider := paymenttest.Provider{}.SettledCheckout("pi_retried", false, "")
+			_, deliver := billingModelProviderDelivery(t, e, provider, func(s *Server) *Server { return s })
+			if w := deliver("evt_retried", "payment_intent.succeeded", refillIntent("pi_retried", sent.RefillID, "succeeded")); w.Code != http.StatusNoContent {
+				t.Fatalf("refill webhook = %d %s", w.Code, w.Body)
+			}
+			if micro, err := tenant.CreditBalanceMicro(t.Context()); err != nil || micro != 2000*store.MicroCreditsPerCent {
+				t.Fatalf("balance after the retried refill = %d, %v", micro, err)
+			}
+			calls := len(bodies)
+			worker.refillPass(t.Context())
+			if len(bodies) != calls {
+				t.Fatalf("a settled refill was charged again: %q", bodies)
+			}
+		})
 	}
 }
 

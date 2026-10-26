@@ -169,10 +169,12 @@ hold, the balance is below the threshold and the refill fits every limit. The
 refill fixes its amount and Stripe customer when it opens. The controller then
 makes one call that creates and confirms the off-session payment, with the
 refill's id as Stripe's idempotency key and in the payment's metadata. Until
-the payment settles, every pass repeats that same request under the same key,
-so a crash or a lost answer never charges twice. A refill that was turned off
-after it opened is still retried and credited, because its first call may
-already have charged. A refill that nothing settles within 23 hours is closed
+the payment settles, every pass rechecks the same eligibility, setting the
+refill's own reservation aside, and repeats that same request under the same
+key, so a crash or a lost answer never charges twice. A refill the team is no
+longer eligible for, for example because refills were turned off or the card
+changed, is withdrawn without another call; a payment an earlier call made is
+still credited. A refill that nothing settles within 23 hours is closed
 as expired and the next one starts fresh; a payment that settles later is still
 credited. Credits settle only from Stripe's signed webhook, which names the
 refill in its metadata, through the same path as Add funds: the same

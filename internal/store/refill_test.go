@@ -279,8 +279,7 @@ func TestRefillCapsFollowHistoryNotTheBalance(t *testing.T) {
 	}
 }
 
-// An open refill is retried with its own request, even after the team turns refills off or changes its amount or
-// card, because its first call may already have charged; it is credited when its payment settles.
+// An open refill is retried with its own request after the team changes its refill amount, until its key life.
 func TestAnOpenRefillIsRetriedAsOpenedUntilItsKeyLife(t *testing.T) {
 	s, tenant, now := refillFixture(t, true)
 	settings := RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000}
@@ -295,13 +294,6 @@ func TestAnOpenRefillIsRetriedAsOpenedUntilItsKeyLife(t *testing.T) {
 	if err := setRefill(t, s, "a", settings); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_2"}, "billing", now.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	settings.Enabled = false
-	if err := setRefill(t, s, "a", settings); err != nil {
-		t.Fatal(err)
-	}
 	now = now.Add(refillKeyLife - time.Minute)
 	s.clock = func() time.Time { return now }
 	again := dueRefillsFor(t, s, "a")
@@ -313,13 +305,61 @@ func TestAnOpenRefillIsRetriedAsOpenedUntilItsKeyLife(t *testing.T) {
 		t.Fatalf("open refill state = %+v, %v", st.Refill, err)
 	}
 	payRefill(t, s, again[0], now)
-	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 1_000*MicroCreditsPerCent {
-		t.Fatalf("balance after a refill paid after opt-out = %d, %v", balance, err)
-	}
-	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
-		t.Fatalf("refill after opt-out: %+v", due)
-	}
 	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE kind='refill'", 1)
+}
+
+// Every retry rechecks eligibility, setting the refill's own reservation aside; a refill the team may no longer be
+// charged for is withdrawn without another call, and a payment an earlier call made still credits it.
+func TestAnOpenRefillIsWithdrawnWhenNoLongerEligible(t *testing.T) {
+	for _, restriction := range []string{"none", "disabled", "hold", "changed customer", "weekly limit", "monthly limit"} {
+		t.Run(restriction, func(t *testing.T) {
+			s, tenant, now := refillFixture(t, true)
+			settings := RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, WeekLimitCents: 1_000}
+			if err := setRefill(t, s, "a", settings); err != nil {
+				t.Fatal(err)
+			}
+			first := dueRefillsFor(t, s, "a")
+			if len(first) != 1 {
+				t.Fatalf("refill = %+v", first)
+			}
+			switch restriction {
+			case "disabled":
+				settings.Enabled = false
+			case "hold":
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES ('operator:test','a','review','operator','owner',1)`)
+			case "changed customer":
+				if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_2"}, "billing", now.Add(time.Minute)); err != nil {
+					t.Fatal(err)
+				}
+			case "weekly limit":
+				settings.WeekLimitCents = 999
+			case "monthly limit":
+				settings.MonthLimitCents = 999
+			}
+			if err := setRefill(t, s, "a", settings); err != nil {
+				t.Fatal(err)
+			}
+			s.SetTestClock(t, func() time.Time { return now })
+			again := dueRefillsFor(t, s, "a")
+			if restriction == "none" {
+				if len(again) != 1 || again[0] != first[0] {
+					t.Fatalf("an eligible open refill was not retried: %+v", again)
+				}
+				return
+			}
+			if len(again) != 0 {
+				t.Fatalf("an ineligible open refill was retried: %+v", again)
+			}
+			rewriteSchemaCount(t, s.db, "credit_checkouts WHERE kind='refill' AND failure='withdrawn' AND payment_id=''", 1)
+			if restriction == "hold" {
+				return
+			}
+			payRefill(t, s, first[0], now)
+			if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 1_000*MicroCreditsPerCent {
+				t.Fatalf("a payment an earlier call made was not credited: %d, %v", balance, err)
+			}
+		})
+	}
 }
 
 func TestAFailedRefillWaitsForANewCardOrAddFunds(t *testing.T) {

@@ -532,8 +532,9 @@ Stripe when closing the card-refund queue.
 
 Refill reservations persist amount and Stripe customer, never a card or email.
 `DueRefills` checks eligibility and opens a reservation in one transaction; the
-worker then sends its fixed request under its id until a signed outcome or a
-refusal closes it, or until it expires after 23 hours. A card payment's signed
+worker then sends its fixed request under its id, rechecking eligibility before
+every retry, until a signed outcome or a refusal closes it, a recheck withdraws
+it, or it expires after 23 hours. A card payment's signed
 outcome finds its reservation by the refill id in the payment's metadata and
 records the payment id then; a reservation funds at most one payment. Open
 reservations and every refill payment count against refill limits, including

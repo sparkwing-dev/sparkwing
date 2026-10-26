@@ -41,9 +41,13 @@ const (
 // after that it is closed as expired and the next refill gets a new key. A late signed outcome still settles it.
 const refillKeyLife = 23 * time.Hour
 
-// refillExpired closes a refill no outcome settled within its key life; unless a payment later binds to it, it
-// neither counts against limits nor stops later refills.
-const refillExpired = "expired"
+// A refill closed without an outcome: expired after its key life, or withdrawn when a recheck before a retry found
+// the team no longer eligible. Unless a payment later binds to it, it neither counts against limits nor stops later
+// refills.
+const (
+	refillExpired   = "expired"
+	refillWithdrawn = "withdrawn"
+)
 
 const (
 	refillDay   = 24 * time.Hour
@@ -191,6 +195,21 @@ func (s RefillSettings) validate() error {
 // ErrNoCard refuses turning on refills for a team that never added a card.
 var ErrNoCard = errors.New("card billing: save a card before turning on automatic refill")
 
+// retryable reports whether the team may still be charged for its open refill r: refills on, no failed refill
+// blocking them, no hold, the same Stripe customer, and within every limit once r's own reservation is set aside.
+func (st SpendStanding) retryable(r Refill) bool {
+	refill := st.Refill
+	if !refill.Enabled || !refill.FailedAt.IsZero() || st.Billing.HoldCause != "" || r.Customer != st.Card.Customer {
+		return false
+	}
+	// An open refill is younger than its key life, so every window already counts it.
+	refill.AmountCents = r.AmountCents
+	refill.DayCount--
+	refill.WeekCents -= r.AmountCents
+	refill.MonthCents -= r.AmountCents
+	return refill.limit() == ""
+}
+
 func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, actor auditActor) error {
 	if err := s.validate(); err != nil {
 		return err
@@ -271,8 +290,9 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	if err != nil {
 		return nil, err
 	}
-	// safety: an open refill is retried as it was opened, even if the team turned refills off since, because its
-	// first call may already have charged; only its key life ends it.
+	// safety: the checkout service charges whatever it is asked, so an open refill is retried, with its own request
+	// under its own key, only while the team is still eligible. One that is not is withdrawn; if an earlier call did
+	// charge, its signed payment still credits the closed refill.
 	r := Refill{Team: team}
 	var opened int64
 	err = tx.QueryRowContext(ctx, `SELECT id, amount_minor, opened_at, customer_id
@@ -282,12 +302,20 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
 		return nil, err
-	case now.Sub(time.Unix(0, opened)) < refillKeyLife:
-		return &r, nil
 	default:
+		closed := refillExpired
+		if now.Sub(time.Unix(0, opened)) < refillKeyLife {
+			if st.retryable(r) {
+				return &r, nil
+			}
+			closed = refillWithdrawn
+		}
 		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ? WHERE team = ? AND id = ?`,
-			now.UnixNano(), refillExpired, string(team), r.ID); err != nil {
+			now.UnixNano(), closed, string(team), r.ID); err != nil {
 			return nil, err
+		}
+		if closed == refillWithdrawn {
+			return nil, nil
 		}
 		if st, err = spendStandingTx(ctx, tx, team, now); err != nil {
 			return nil, err
