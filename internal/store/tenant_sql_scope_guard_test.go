@@ -373,9 +373,9 @@ func unjudgeableTableSyntax(sql string) []string {
 	return out
 }
 
-// safety: discovery and refusal share this one reader of relation references, so a form either
-// names its table to every guard or is refused; ONLY is consumed, and a parenthesized, quoted or
-// schema-qualified relation is refused because no guard can see the table behind it.
+// safety: discovery and refusal share this fail-closed reader: after FROM, JOIN, INTO, UPDATE or USING
+// (and ONLY) it accepts a plain table, a subquery, an INTO column list, information_schema, or the clause
+// word, comma or parenthesis left where the flattener dropped a fragment; every other form is refused.
 func sqlRelations(tokens []string) (tables, problems []string) {
 	for i := 0; i+1 < len(tokens); i++ {
 		switch tokens[i] {
@@ -383,33 +383,36 @@ func sqlRelations(tokens []string) (tables, problems []string) {
 		default:
 			continue
 		}
-		if tokens[i] == "from" && i > 0 && tokens[i-1] == "distinct" {
+		if tokens[i] == "from" && i > 0 && tokens[i-1] == "distinct" || tokens[i] == "update" && i > 0 && slices.Contains([]string{"do", "before", "after"}, tokens[i-1]) {
 			continue
 		}
 		j := i + 1
 		if tokens[j] == "only" && j+1 < len(tokens) {
 			j++
 		}
-		next := tokens[j]
+		next, after := tokens[j], ""
+		if j+1 < len(tokens) {
+			after = tokens[j+1]
+		}
 		switch {
-		case next == "(":
-			// safety: an empty pair is a fragment the flattener could not resolve, judged where it is built,
-			// and INTO's parenthesis is a column list after an unresolved table name.
-			if tokens[i] != "into" && j+1 < len(tokens) && scopeIdentRe.MatchString(tokens[j+1]) && !slices.Contains([]string{"select", "with", "values"}, tokens[j+1]) {
-				problems = append(problems, "wraps a relation in parentheses")
-			}
-		case strings.ContainsAny(next[:1], "\"`["):
-			problems = append(problems, "names a table quoted")
-		case j+2 < len(tokens) && tokens[j+1] == "." && scopeIdentRe.MatchString(next) && scopeIdentRe.MatchString(tokens[j+2]):
-			if next != "information_schema" {
-				problems = append(problems, "names a table schema-qualified")
-			}
-		case scopeIdentRe.MatchString(next):
+		case next == "(" && (slices.Contains([]string{"select", "with", "values", ")"}, after) || tokens[i] == "into" && scopeIdentRe.MatchString(after) && j+2 < len(tokens) && (tokens[j+2] == "," || tokens[j+2] == ")")):
+		case slices.Contains(sqlClauseWords, next) || next == ")" || next == ",":
+		case next == "information_schema" && after == ".":
+		case scopeIdentRe.MatchString(next) && after != "." && !slices.Contains(sqlRelationModifiers, next):
 			tables = append(tables, next)
+		default:
+			problems = append(problems, "names a relation as "+strings.Join(tokens[i:min(j+3, len(tokens))], " "))
 		}
 	}
 	return tables, problems
 }
+
+// safety: the flattener leaves a clause word where it dropped an unresolved table fragment; that
+// fragment is judged where it is built, so the word is not a relation to refuse.
+// safety: these words modify a relation rather than name one; the reader does not interpret them.
+var sqlRelationModifiers = []string{"or", "lateral", "natural", "recursive"}
+
+var sqlClauseWords = []string{"where", "join", "left", "inner", "cross", "on", "as", "set", "order", "group", "limit", "union", "returning", "select", "values", "default"}
 
 var scopeIdentRe = regexp.MustCompile(`^[a-z_][a-z0-9_$]*$`)
 
@@ -766,9 +769,19 @@ func TestTenantSQLScope_RefusesUnjudgeableSyntax(t *testing.T) {
 		{`SELECT id FROM ONLY "runs" WHERE id=?`, true},
 		{`SELECT id FROM (runs) WHERE id=?`, true},
 		{`SELECT id FROM (SELECT id FROM runs WHERE team=?) r`, false},
+		{`SELECT id FROM ("runs") WHERE id=?`, true},
+		{`SELECT id FROM ((runs)) WHERE id=?`, true},
+		{`UPDATE OR IGNORE runs SET status=? WHERE id=?`, true},
+		{`INSERT OR REPLACE INTO runs(team,id) VALUES (?,?)`, false},
+		{`INSERT INTO runs(team,id) VALUES (?,?) ON CONFLICT(team,id) DO UPDATE SET id=excluded.id`, false},
 	} {
 		if got := len(unjudgeableTableSyntax(c.sql)) > 0; got != c.refused {
 			t.Errorf("%q: refused=%v, want %v", c.sql, got, c.refused)
+		}
+	}
+	for _, sql := range []string{`SELECT SUM(amount_micro) FROM ((credit_grants)) WHERE team=?`, `UPDATE OR IGNORE credit_grants SET created_by=? WHERE team=?`} {
+		if statementTables(sql, []string{"credit_grants"}) == nil && len(unjudgeableTableSyntax(sql)) == 0 {
+			t.Errorf("%q hid a money table from discovery without being refused", sql)
 		}
 	}
 	if got := tenantTablesTouchedBy(`UPDATE ONLY runs SET status=? WHERE id=?`); !slices.Contains(got, "runs") {
