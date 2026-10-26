@@ -18,7 +18,6 @@ func TestGitHubAppUnavailableKeepsControllerAvailable(t *testing.T) {
 		method, path, want string
 		status             int
 	}{
-		{"GET", "/api/v1/health", `"status":"degraded"`, http.StatusOK},
 		{"GET", "/api/v1/team/github-app", "GitHub App unavailable", http.StatusServiceUnavailable},
 		{"GET", "/api/v1/team/github-app/extra-repos", `"code":"unavailable"`, http.StatusServiceUnavailable},
 		{"GET", githubAppCallbackPath, `"code":"unavailable"`, http.StatusServiceUnavailable},
@@ -31,6 +30,9 @@ func TestGitHubAppUnavailableKeepsControllerAvailable(t *testing.T) {
 		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) || strings.Contains(w.Body.String(), "private key is malformed") {
 			t.Errorf("%s: HTTP %d %s", tc.path, w.Code, w.Body)
 		}
+	}
+	if health := OperatorHealth(t, s.Server); health.Status != "degraded" || !strings.Contains(strings.Join(health.Problems, ";"), "GitHub App unavailable") {
+		t.Errorf("operator health: %+v", health)
 	}
 	provider := s.sourceAdapter().GitHub
 	if provider == nil {

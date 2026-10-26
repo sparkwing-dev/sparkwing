@@ -95,7 +95,7 @@ func retryAfterSeconds(d time.Duration) int64 {
 	return 1
 }
 
-// safety: public health reports the alarm without exposing usage or budget totals.
+// safety: health reports the alarm; usage and budget totals stay on their own routes.
 func (s *Server) egressHealth() (map[string]any, []string) {
 	if s.egress == nil {
 		return map[string]any{"enabled": false}, nil

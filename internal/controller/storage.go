@@ -45,8 +45,8 @@ func (s *storageSample) read() (store.DatabaseSize, int64, bool, bool) {
 	return s.size, s.limit, s.alarm, s.sampled
 }
 
-// safety: the health route answers without a token, so it says only whether
-// the alarm stands; sizes and table names go to the admin storage route.
+// safety: health says only whether the alarm stands; sizes and table names go
+// to the admin storage route.
 func (s *Server) storageHealth() map[string]any {
 	_, _, alarm, sampled := s.storage.read()
 	return map[string]any{"sampled": sampled, "alarm": alarm}

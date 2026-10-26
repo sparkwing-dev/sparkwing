@@ -26,12 +26,12 @@ func TestController_Health(t *testing.T) {
 	f := newCronsFixture(t)
 	var body map[string]any
 	f.call(http.MethodGet, "/api/v1/health", "", nil, http.StatusOK, &body)
-	if body["status"] != "ok" {
-		t.Errorf("status=%q want ok", body["status"])
+	if !reflect.DeepEqual(body, map[string]any{"status": "ok", "auth": "enabled"}) {
+		t.Errorf("public health = %v, want liveness only", body)
 	}
-	objectStore, ok := body["object_store"].(map[string]any)
-	if !ok || objectStore["tripped"] != false {
-		t.Fatalf("fresh controller object_store=%v", body["object_store"])
+	health := controller.OperatorHealth(t, f.server)
+	if health.Status != "ok" || health.ObjectStore["tripped"] != false {
+		t.Fatalf("fresh controller operator health = %+v", health)
 	}
 }
 

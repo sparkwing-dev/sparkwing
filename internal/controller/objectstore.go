@@ -57,9 +57,9 @@ func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Re
 	return nil
 }
 
-// safety: the health route answers without a token, so the summary says which
-// classes refuse and never what their limits are, and a failed measurement is
-// named here while its error goes to the log and the admin breaker route.
+// safety: the health summary says which classes refuse and never what their
+// limits are, and a failed measurement is named here while its error goes to
+// the log and the admin breaker route.
 func objectStoreHealth(bucket bool) (map[string]any, []string) {
 	limiter := objectguard.Shared()
 	state := limiter.State()
@@ -82,7 +82,7 @@ func objectStoreHealth(bucket bool) (map[string]any, []string) {
 	ceiling := state.Ceiling
 	if ceiling.Enforced || bucket {
 		// safety: the totals and the ceilings stay on the admin-scoped breaker route,
-		// so an anonymous caller learns that writes are frozen and not how large the bucket is.
+		// so health says that writes are frozen and not how large the bucket is.
 		summary["ceiling"] = map[string]any{
 			"enforced":               ceiling.Enforced,
 			"frozen":                 ceiling.Frozen,

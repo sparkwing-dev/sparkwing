@@ -9,6 +9,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+// OperatorHealth is the deployment's full health, which only operators read:
+// readiness plus license, rotation, bucket, storage, egress and GitHub App state.
+type OperatorHealth struct {
+	Status      string         `json:"status"`
+	Problems    []string       `json:"problems,omitempty"`
+	ObjectStore map[string]any `json:"object_store"`
+	Database    map[string]any `json:"database"`
+	Egress      map[string]any `json:"egress"`
+}
+
 // OperatorLimits reports configured guards and observed request budgets.
 type OperatorLimits struct {
 	Limits  map[string]int64 `json:"limits"`

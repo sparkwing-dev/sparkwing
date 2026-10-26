@@ -2356,6 +2356,39 @@ components:
         - requests_per_minute_alarm
       type: object
       x-sparkwing-go-type: controllerwire.OperatorBudgets
+    internal.controllerwire.OperatorHealth:
+      additionalProperties: true
+      properties:
+        database:
+          anyOf:
+            - additionalProperties: {}
+              type: object
+            - type: "null"
+        egress:
+          anyOf:
+            - additionalProperties: {}
+              type: object
+            - type: "null"
+        object_store:
+          anyOf:
+            - additionalProperties: {}
+              type: object
+            - type: "null"
+        problems:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        status:
+          type: string
+      required:
+        - status
+        - object_store
+        - database
+        - egress
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorHealth
     internal.controllerwire.OperatorLimits:
       additionalProperties: true
       properties:
@@ -8524,6 +8557,40 @@ paths:
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
+  /api/v1/operator/health:
+    get:
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.OperatorHealth'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Read the deployment's full health
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/operator/health
+        audience: controller
+        owner: deployment
+        authentication: capability
+        access:
+          - credential: deployment_admin
+            grants:
+              - operator.limits
+            binding: none
+            liveness: credential
+          - credential: operator_console_session
+            grants:
+              - operator.console
+            binding: none
+            liveness: credential
+        retry: safe
   /api/v1/operator/limits:
     get:
       responses:

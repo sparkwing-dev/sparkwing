@@ -196,6 +196,7 @@ var routes = []RoutePolicy{
 	route("POST", "/api/v1/data/depcache/lookup", OwnerTeam, RetrySafe, claim(DataRead, BindData, LiveSensitive), claim(DataRead, BindData, LiveExpansion), repoReader()),
 	route("POST", "/api/v1/data/memo/copy", OwnerTeam, RetryExactBody, AccessRule{CredentialClaim, []Grant{DataRead, DataWrite}, BindData, LiveSensitive}),
 	route("GET", "/api/v1/data/capabilities", OwnerTeam, RetrySafe, authenticated()),
+	route("GET", "/api/v1/operator/health", OwnerDeployment, RetrySafe, deployment(OperatorLimits), console()),
 	route("GET", "/api/v1/operator/limits", OwnerDeployment, RetrySafe, deployment(OperatorLimits), console()),
 	route("PUT", "/api/v1/operator/limits", OwnerDeployment, RetrySafe, deployment(OperatorLimits), console()),
 	route("GET", "/api/v1/operator/signups", OwnerDeployment, RetrySafe, deployment(OperatorLimits), console()),

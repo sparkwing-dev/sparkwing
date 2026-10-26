@@ -64,7 +64,7 @@ Header: `{"alg": "RS256", "kid": "<thumbprint>", "typ": "JWT"}`.
 | `trigger` | `push`, `pull_request`, `release`, `create`, `delete`, `cron` or `manual`, described below. |
 | `runner_kind` | `runner`, `personal`, `github-actions`, `user` or `service`, described below. |
 | `ref` | The ref the controller established: the verified delivery's ref (`refs/pull/<number>/head` for a pull request, `refs/heads/<base>` for a merged pull request's `closed` event, `refs/tags/<tag>` for a tag push or release, otherwise `refs/heads/<branch>`), the default branch an admin-armed schedule follows, or the push a GitHub Actions credential is bound to. Absent for an asserted run. |
-| `sha` | The commit the controller established alongside `ref`; absent whenever `ref` is. |
+| `sha` | The commit the controller established alongside `ref`; absent whenever `ref` is. A branch `delete` event's run has `ref` naming the deleted branch, which has no commit, so `sha` is the head of the repository's default branch when the delivery arrived, and that is the code the run executes. |
 | `repository` | `<host>/<owner>/<name>`, for example `github.com/acme/api`, when `repository_id` is set; absent otherwise. |
 | `run_id` | The run id. |
 

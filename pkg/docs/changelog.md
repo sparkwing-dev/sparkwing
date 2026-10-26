@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **controller (Breaking):** `GET /api/v1/health` answers liveness and readiness only (`status` and `auth`, HTTP 503 when the database is unreachable). License expiry, webhook secret rotation, bucket, database size, egress and GitHub App state moved to the new `GET /api/v1/operator/health`, which requires `operator.limits` or an operator console session. The unauthenticated GitHub Actions credential exchange reads at most 16 KiB. OIDC docs state that a branch `delete` run's `sha` is the default branch's head.
 - **operator:** The first team-admin credential of an operator-created team expires after 30 days, like every other `team.admin` token, instead of never. Rotate it before then with the team token commands.
 - **pools (Breaking):** Reserved pool access is decided at each use, from the access rules as they stand and the run's sealed identity: placement, reserved secret release and OIDC tokens on a pool all check it. Removing a rule now cuts off admitted runs and retries of older runs. Runs no longer record `allowed_pools`, and branch rules accept only the `*` and `?` wildcards. See [migration](docs/migrations/_unreleased.md#sealed-run-provenance).
 - **billing:** A queued refund that Stripe reports failed or canceled is no longer retried on a backoff schedule. The operator console lists it on the team, and the operator returns the money in Stripe. A refund call that fails before Stripe answers repeats under the same key.

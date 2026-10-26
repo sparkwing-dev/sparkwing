@@ -29,6 +29,7 @@ const cronTestSHA = "cf857896cdbc5330e7600465c2a6dade81d8bcba"
 
 type cronsFixture struct {
 	t       *testing.T
+	server  *controller.Server
 	handler http.Handler
 	store   *store.Store
 	writer  string
@@ -68,7 +69,7 @@ func newCronsFixture(t *testing.T, opts ...store.Option) *cronsFixture {
 	if err != nil {
 		t.Fatalf("CreateToken stranger: %v", err)
 	}
-	return &cronsFixture{t: t, handler: s.Handler(), store: st, writer: writer, reader: reader, none: none}
+	return &cronsFixture{t: t, server: s, handler: s.Handler(), store: st, writer: writer, reader: reader, none: none}
 }
 
 // safety: the request and its body's close live in one function, so no caller
