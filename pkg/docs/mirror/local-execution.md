@@ -599,9 +599,9 @@ Use `-o json` for the saved `monthly_minutes`, `used_seconds` and UTC
 use the selected account credential. Team standing tiers and the prepaid
 balance still apply. Once the allowance is reached, new Cloud
 claims wait while local and registered-machine capacity remains eligible.
-Running Cloud work is checked at each 60-second lease renewal: once the next
-slice would pass the allowance, the job is cancelled with a reason naming the
-allowance and stops within one slice.
+Each lease renewal of running Cloud work reserves more time only while it fits
+the allowance, so a job keeps the time it already reserved and its lease ends
+there.
 Deleting run history keeps its usage in the monthly total.
 
 Local publication has a 45-second request deadline. During publication, a second

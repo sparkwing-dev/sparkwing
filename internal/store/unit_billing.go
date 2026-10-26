@@ -195,22 +195,6 @@ func renewUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 		return fundedBoundTx(ctx, tx, team, unit, generation, tx.now(ctx))
 	}
 	now := tx.now(ctx)
-	// safety: a member's overflow budget is the customer's own spending brake, so every renewal checks it, not only
-	// the award; work that reaches it reserves no further slice and drains within one slice, like a funding refusal.
-	if a.provenance.Metered && a.provenance.ExecutorClass == TierCloud && !a.drain.Valid {
-		exhausted, err := overflowExhaustedTx(ctx, tx, team, a.run)
-		if err != nil {
-			return time.Time{}, err
-		}
-		if exhausted {
-			if err := stopAwardTx(ctx, tx, team, *a, overflowBudgetReached, now.Add(SliceSeconds*time.Second)); err != nil {
-				return time.Time{}, err
-			}
-			if a, err = unitBillingAwardTx(ctx, tx, team, unit, generation); err != nil || a == nil {
-				return time.Time{}, err
-			}
-		}
-	}
 	err = renewBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, now, a.provenance.Metered && !a.drain.Valid)
 	if refused := (*InsufficientCreditsError)(nil); errors.As(err, &refused) {
 		drain := now.Add(SliceSeconds * time.Second)
