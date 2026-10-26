@@ -87,13 +87,14 @@ func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeReque
 		// default branch GitHub reported, whose commit the App resolved now, is verified.
 		defaultBranch := request.Request.Git.DefaultBranch
 		repository, err := strconv.ParseInt(strings.TrimPrefix(string(input.Git.Repository.Key), "gh:"), 10, 64)
-		// safety: fire-time resolution proved the repository id from this same slug, so the pair seals together.
-		name, nameErr := githubScheduleSlug(s.RepoPath)
-		app := err == nil && nameErr == nil && strings.HasPrefix(string(input.Git.Repository.Key), "gh:")
+		// safety: the same fire-time App lookup that proved the id reported the name, in GitHub's case.
+		name := request.Request.Git.RepositoryName
+		_, named := ParseGitHubRepo(name.Value)
+		app := err == nil && name.Set && named && strings.HasPrefix(string(input.Git.Repository.Key), "gh:")
 		if !app || !pinned || s.LockedRef != "" || s.Override != nil || !defaultBranch.Set || runspec.NormalizedBranch(s.GitBranch) != runspec.NormalizedBranch(defaultBranch.Value) {
 			return asserted(runspec.RunWriter(run))
 		}
-		return refused(runspec.ScheduleProvenance(s.ID, repository, name, defaultBranch.Value, input.Git.SHA, input.Pipeline))
+		return refused(runspec.ScheduleProvenance(s.ID, repository, name.Value, defaultBranch.Value, input.Git.SHA, input.Pipeline))
 	case p.Capability.Binding.Kind == capability.BindingPush && p.Capability.Binding.Push != nil:
 		push := p.Capability.Binding.Push
 		// safety: the ref and commit come from the push GitHub's token proved, while the

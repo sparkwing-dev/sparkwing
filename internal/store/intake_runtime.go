@@ -491,7 +491,7 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	input.Options = *policy.Options
 	input.Actor = runspec.Actor{Kind: string(p.Capability.Subject.Kind), ID: p.Capability.Subject.ID}
 	input.Git.App = runspec.Optional[runspec.AppFacts]{}
-	input.Git.DefaultBranch = runspec.Optional[string]{}
+	input.Git.DefaultBranch, input.Git.RepositoryName = runspec.Optional[string]{}, runspec.Optional[string]{}
 	if request.VerifiedDeliveryID != "" {
 		delivery := policy.Delivery
 		if delivery == nil || !delivery.Git.App.Set || delivery.Git.App.Value.DeliveryKey == "" || delivery.Git.App.Value.VerifiedAt.IsZero() {

@@ -5211,6 +5211,8 @@ components:
           type: string
         repository:
           $ref: '#/components/schemas/internal.runspec.Repository'
+        repository_name:
+          $ref: '#/components/schemas/internal.runspec.Optional.string.'
         sha:
           type: string
       required:
@@ -5218,6 +5220,7 @@ components:
         - ref
         - sha
         - default_branch
+        - repository_name
         - app
       type: object
       x-sparkwing-go-type: runspec.Git

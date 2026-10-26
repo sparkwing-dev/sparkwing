@@ -94,6 +94,7 @@ func (referenceIntakePolicy) ResolveScheduleSource(_ context.Context, row CronSc
 		input.Git.SHA, input.Source.Ref = row.LockedRef, row.LockedRef
 	} else {
 		input.Git.DefaultBranch = runspec.Optional[string]{Set: true, Value: "main"}
+		input.Git.RepositoryName = runspec.Optional[string]{Set: true, Value: "acme/app"}
 	}
 	return input, nil
 }
@@ -269,7 +270,7 @@ func memberScheduleReference(t *testing.T, s *Store, role Role) (*Tenant, string
 	tenant := referenceWorld(t, s, "gh:701")
 	armer := referenceMember(t, s, "armer", role)
 	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), teamAuthorization(t, s, armer, "a", "PUT", "/api/v1/schedules/repos"), ScheduleRepoRequest{
-		Mode: scheduleReplace, RepoURL: "https://github.com/acme/app.git", Branch: "main", Follow: true,
+		Mode: scheduleReplace, RepoURL: "https://github.com/ACME/App.git", Branch: "main", Follow: true,
 		Schedules: []runspec.ScheduleDeclaration{{Pipeline: "nightly", Cron: "* * * * *"}},
 	})
 	if err != nil {
@@ -375,9 +376,9 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 		write := "manual:" + writer + ":" + ref
 		return provenanceObservation{Subject: "team:a:repository_id::pipeline:" + pipeline + ":trigger:manual:runner:runner:ref:", Write: write, Reads: []string{write, "refs/heads/main"}, Pools: []string{}, Secrets: secrets}
 	}
-	verifiedSchedule := provenanceObservation{Repository: "acme/repo-9", Subject: "team:a:repository_id:701:pipeline:nightly:trigger:cron:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:schedule/schedule-9:refs/heads/main", Reads: []string{"manual:schedule/schedule-9:refs/heads/main", "refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"team-token"}}
+	verifiedSchedule := provenanceObservation{Repository: "acme/app", Subject: "team:a:repository_id:701:pipeline:nightly:trigger:cron:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:schedule/schedule-9:refs/heads/main", Reads: []string{"manual:schedule/schedule-9:refs/heads/main", "refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"team-token"}}
 	memberSchedule := verifiedSchedule
-	// safety: a manually registered schedule has no repository id on its row; fire-time resolution supplies the pair.
+	// safety: a manually registered schedule, stored as ACME/App, seals the name fire-time resolution reported.
 	memberSchedule.Repository = "acme/app"
 	memberSchedule.Write, memberSchedule.Reads = "manual:schedule/{schedule}:refs/heads/main", []string{"manual:schedule/{schedule}:refs/heads/main", "refs/heads/main"}
 	rows := []struct {

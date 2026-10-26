@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -63,41 +65,48 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 	}
 	request.Git, request.Source = git, code
 	if row.LockedRef == "" && row.Where != store.CronWhereLocal && s.githubApp != nil && strings.HasPrefix(string(request.Git.Repository.Key), "gh:") {
-		branch, err := s.githubDefaultBranch(ctx, row)
+		repo, err := s.githubScheduleRepository(ctx, row)
 		if err != nil {
 			return request, err
 		}
-		request.Git.DefaultBranch = runspec.Optional[string]{Set: true, Value: branch}
+		if string(request.Git.Repository.Key) != "gh:"+strconv.FormatInt(repo.ID, 10) {
+			return request, errors.New("GitHub resolved the schedule's repository to another id")
+		}
+		request.Git.DefaultBranch = runspec.Optional[string]{Set: true, Value: repo.DefaultBranch}
+		request.Git.RepositoryName = runspec.Optional[string]{Set: true, Value: repo.FullName}
 	}
 
 	return request, nil
 }
 
-// githubDefaultBranch asks GitHub, through the team's installation covering the
-// schedule's repository, which branch the repository serves as its head.
-func (s *Server) githubDefaultBranch(ctx context.Context, row store.CronSchedule) (string, error) {
+// safety: one App lookup reports id, GitHub-cased owner/name and head branch together, so a
+// schedule seals the repository name GitHub Actions would issue, not the stored URL's case.
+func (s *Server) githubScheduleRepository(ctx context.Context, row store.CronSchedule) (githubapp.Repository, error) {
 	tenant, err := s.tenantForTeam(ctx, row.Team)
 	if err != nil {
-		return "", err
+		return githubapp.Repository{}, err
 	}
 	display, err := sourceurl.Identity(row.RepoPath)
 	if err != nil {
-		return "", err
+		return githubapp.Repository{}, err
 	}
 	_, slug, _ := strings.Cut(display, "/")
 	installation, repository, err := s.resolveGitHubAppRepository(ctx, tenant, strings.TrimSuffix(slug, ".git"))
 	if err != nil {
-		return "", err
+		return githubapp.Repository{}, err
 	}
 	token, err := s.githubApp.client.InstallationTokenByIDs(ctx, installation.InstallationID, []int64{repository.ID}, map[string]string{"metadata": "read"})
 	if err != nil {
-		return "", err
+		return githubapp.Repository{}, err
 	}
 	repo, err := s.githubApp.client.RepositoryByID(ctx, token.Token, repository.ID)
-	if err == nil && repo.DefaultBranch == "" {
-		err = errors.New("GitHub reported no default branch")
+	if err != nil {
+		return githubapp.Repository{}, err
 	}
-	return repo.DefaultBranch, err
+	if _, valid := store.ParseGitHubRepo(repo.FullName); repo.ID != repository.ID || !valid || repo.DefaultBranch == "" {
+		return githubapp.Repository{}, errors.New("GitHub reported an incomplete repository identity or no default branch")
+	}
+	return repo, nil
 }
 
 func (s *Server) commitLocalSchedules(ctx context.Context, a capability.Authorized, root string, rows []store.CronSchedule, registration crons.LocalRegistration, replace bool) (crons.ArmReport, error) {
