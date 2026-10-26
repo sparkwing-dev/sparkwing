@@ -39,8 +39,8 @@ func tablesWithColumn(column string) []string {
 
 func statementTables(sql string, candidates []string) []string {
 	var out []string
-	for _, m := range tenantOwnedTableRe.FindAllStringSubmatch(sql, -1) {
-		name := strings.ToLower(m[1])
+	tables, _ := sqlRelations(scopeTokens(sql))
+	for _, name := range tables {
 		if slices.Contains(candidates, name) && !slices.Contains(out, name) {
 			out = append(out, name)
 		}
