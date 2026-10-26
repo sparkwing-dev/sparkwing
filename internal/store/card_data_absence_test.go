@@ -140,7 +140,9 @@ func assertNoCardDetails(t *testing.T, s *store.Store, owner string) {
 	if len(tables) < 50 {
 		t.Fatalf("found only %d tables", len(tables))
 	}
-	card := []string{paymenttest.CardFingerprint, paymenttest.CardBrand, paymenttest.CardLast4, paymenttest.CardMethod, paymenttest.PayerEmail}
+	// safety: four digits occur by chance inside hex digests, so the last four counts only as a
+	// whole column value or a whole JSON string; the long, distinctive values count anywhere.
+	card := []string{paymenttest.CardFingerprint, paymenttest.CardBrand, paymenttest.CardMethod, paymenttest.PayerEmail, `"` + paymenttest.CardLast4 + `"`}
 	for _, table := range tables {
 		rows, err := s.DB().QueryContext(ctx, `SELECT * FROM `+table)
 		if err != nil {
@@ -167,6 +169,9 @@ func assertNoCardDetails(t *testing.T, s *store.Store, owner string) {
 					if strings.Contains(raw, detail) {
 						t.Errorf("%s.%s stores card detail %q: %s", table, column, detail, raw)
 					}
+				}
+				if raw == paymenttest.CardLast4 {
+					t.Errorf("%s.%s stores the card's last four", table, column)
 				}
 				if strings.Contains(raw, owner) && table != "accounts" {
 					t.Errorf("%s.%s stores the owner's email: %s", table, column, raw)
