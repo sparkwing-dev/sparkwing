@@ -1,5 +1,35 @@
 # Migrating to the next release
 
+## Upgrading from v0.67: v0.68 starts a new store
+
+v0.68 replaces the store. It cannot read a store written by v0.67 or earlier,
+and there is no import tool. Nothing in the old store carries over: run
+history, logs, caches, secrets and tokens, and on a server also teams, members,
+invitations, credits and schedules.
+The new store's schema baseline moves to version 25.
+
+When v0.68 finds an old store it refuses to start, names the store, and leaves
+it unchanged. It never deletes or rewrites it.
+
+- **Local installs:** move the old store aside and run again. Sparkwing creates
+  a new store on the next start.
+
+  ```sh
+  mv ~/.sparkwing/state.db ~/.sparkwing/state.db.v067
+  ```
+
+  Move `state.db-wal` and `state.db-shm` with it if they exist. With
+  `SPARKWING_HOME` set, the store is `$SPARKWING_HOME/state.db`. Add secrets
+  again with `sparkwing secrets`.
+- **Servers:** back up the database, then point the controller at an empty
+  database (PostgreSQL) or an empty `state.db` path (SQLite). Re-create teams,
+  invite members, mint tokens, store secrets and register runners against the
+  new controller. Keep the backup if you need the old history, and read it with
+  a v0.67 binary.
+
+Releases after v0.68.0 ship schema changes as forward migrations. See
+[Schema compatibility](../backup-restore.md#schema-compatibility).
+
 ## An ephemeral controller home needs PostgreSQL and S3
 
 The `sparkwing-full` chart refuses `controller.storage.type=emptyDir` unless
@@ -38,13 +68,11 @@ that post signed deliveries must treat 202 as acceptance for later processing.
 Disconnecting an installation revokes work still preparing source for admission
 or schedule publication. Those refused effects leave no receipt to replay.
 
-The schema baseline moves to version 25 for the inbox, targeted effect results,
-team queue attribution, idle free-slot tracking, per-team descendant ceilings
-and indexed overflow policy. Claim polls seek each overflow account and test
+The store records the inbox, targeted effect results, team queue attribution,
+idle free-slot tracking, per-team descendant ceilings and indexed overflow
+policy. Claim polls seek each overflow account and test
 its budget ranges before selecting policy routes. Repeated capped policies add no per-policy, run or node scan, even when the
 jobs have different preferences.
-Recreate stores from an earlier baseline before starting this build.
-Existing stores are refused rather than opened under the new schema.
 
 ## Stripe holds card data
 
@@ -59,8 +87,7 @@ Each team keeps only its Stripe customer ID and the time its last card setup
 completed. The schema drops `teams.card_payment_method`, `card_fingerprint`,
 `card_brand` and `card_last4`, `credit_checkouts.payment_method`,
 `receipt_email` and `warning_id`, `payment_warnings.fingerprint`, the card
-columns of `payment_setups`, and the `payment_cards` table. Recreate stores
-built from an earlier development baseline. Verified payment events persisted
+columns of `payment_setups`, and the `payment_cards` table. Verified payment events persisted
 in `payment_events` and `payment_states` no longer carry a payment method or
 card details.
 
@@ -138,12 +165,10 @@ its runner. Cloud-only work still needs funds at intake. Private owner placement
 use the same eligibility and funding checks as awards. Reading a snapshot
 leaves readiness, reservations and fair-share accounting unchanged.
 Requirements are indexed when work is accepted, so unrelated label backlogs do
-not delay matching jobs. Existing stores must be recreated because the baseline
-adds normalized requirement sets and indexed references on queued work.
+not delay matching jobs.
 Metered claim leases account for billable time that begins during issuance.
 
-The store baseline is 24. Earlier stores are refused and must be recreated under
-the pre-launch baseline policy. Delivery receipts now include each targeted
+Delivery receipts now include each targeted
 admission, publication, withdrawal and lifecycle result. Reprocessing preserves
 committed effects. Installation withdrawals keep their original repository targets
 and result, so processing an old delivery cannot withdraw later schedules or consent.
@@ -176,10 +201,9 @@ opt in to automatic refill. See [Cloud billing](../billing.md).
 
 No data migration is needed: the staging and production stores had no open
 card charges, no negative balances and no saved cards at the cut. The store
-schema baseline moves to version 21, which drops `card_charges`,
-`card_attempts` and `team_spend_days` and adds the refill settings to `teams` and the immutable
-`credit_checkouts.liability_shift` payment snapshot;
-recreate stores at an earlier version. Saved cards, card pins, fraud warnings
+has no `card_charges`, `card_attempts` or `team_spend_days`, and keeps the
+refill settings on `teams` and the immutable
+`credit_checkouts.liability_shift` payment snapshot. Saved cards, card pins, fraud warnings
 and refunds carry over in schema terms. Automatic refill starts off for every
 team. An early fraud warning holds the team and blocks its card. Only payments
 whose verified 3-D Secure result was `authenticated` keep their remaining credit
@@ -326,8 +350,7 @@ App automation and subscriptions take `runner: anywhere | cloud | github-actions
 `github-actions` on repositories whose App runs a GitHub Actions workflow should
 own. `PUT /api/v1/team/settings` takes optional `members_can_add_machines` and
 `claim_ranking` fields, and the plain output of `sparkwing team settings show`
-adds the ranking. The schema baseline moves to version 12, so recreate the
-database. Unclaimed runs carry an `unclaimed_work` notice, Cloud work held by
+adds the ranking. Unclaimed runs carry an `unclaimed_work` notice, Cloud work held by
 the team's credits carries a `credit_hold` notice instead, work no eligible
 runner can take carries a `no_eligible_runner` notice naming the cause, and
 `sparkwing_claim_empty_total` counts claim polls that matched nothing.
@@ -747,7 +770,7 @@ administration authority and use the store clock.
 
 `Store.ResealSecrets` and `SecretResealCounts` are removed with the startup
 plaintext scan. The pre-launch store has no automatic historical-secret
-conversion. Recreate disposable state with the final schema. Missing-key
+conversion. Missing-key
 checks still inspect sealed samples, and keyless secret access remains refused.
 
 ## Source credentials use capability transactions
@@ -1705,8 +1728,7 @@ by object age. Keep source bytes through blob records. Run
 `Operator.MaintainRetention` under the maintenance lease to expire records and
 release upload-ticket quota holds. Use `Operator.MarkBlobTombstones` and
 `Operator.CollectBlobTombstones` with the verified object backend for physical
-collection after the 24-hour grace. Rebuild pre-launch stores from the final
-schema. There is no old-row migration or compatibility adapter.
+collection after the 24-hour grace.
 
 ## Node logs reach the controller as segments
 
@@ -1878,8 +1900,8 @@ that keep the logs service running.
   `admin`, such as the bootstrap admin token, pasted into the `/login` form.
   The routes, the form, the CLI commands and the client's `CreateUser`,
   `ListUsers` and `DeleteUser` are gone; each route answers `404`, or `401` to
-  a request with no credential. Schema v96 drops the users table and ends
-  every password session, so each person signs in again. A token session
+  a request with no credential. The new store has no users table or
+  password sessions, so each person signs in again. A token session
   follows its token: revoking or expiring the token ends it.
 
 Before upgrading:
@@ -1907,8 +1929,8 @@ Before upgrading:
   for the CLI.
 - An open controller (empty tokens table) serves the dashboard without
   sign-in, as before, and its `/login` redirects to the page asked for.
-- Rollback: an older controller or CLI refuses the new store. Roll back by
-  restoring a backup taken before the upgrade.
+- Rollback: an older controller or CLI cannot read the new store. Roll back by
+  starting the older binary against the old store you set aside.
 
 ## Team CLI and runner tokens become team tokens
 
@@ -1932,8 +1954,8 @@ Tokens already minted keep working.
   that mixes families, names an unknown scope or sends none answers `400`.
   `GET /api/v1/team/tokens`, `DELETE /api/v1/team/tokens/{prefix}` and
   `PUT /api/v1/team/tokens/{prefix}/git-credentials` replace the list, revoke
-  and git-credential routes for both kinds. Schema v97 makes an agent name
-  unique across live runner and machine tokens; it needs no operator action.
+  and git-credential routes for both kinds. An agent name is unique across live
+  runner and machine tokens.
 
 To upgrade:
 
@@ -2046,8 +2068,8 @@ node's claim token instead.
   spawned-child lookup. A trigger's claim token reads the run's declared
   secrets. A Job's `SPARKWING_AGENT_TOKEN` holds its node's claim token, and
   every trigger child reaches the controller through a loopback broker that
-  admits only its run's routes. Schema v99 adds the `trigger_claim_tokens`
-  table; it needs no operator action.
+  admits only its run's routes. The store keeps them in the
+  `trigger_claim_tokens` table.
 
 To upgrade:
 
@@ -2367,7 +2389,7 @@ its retained event bytes without a repair call.
 
 `Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
 `Store.ReconcileFreeEventBytes` are removed. The pre-launch schema also removes
-the duplicate `free_slots.event_bytes` column. Rebuild the disposable store.
+the duplicate `free_slots.event_bytes` column.
 
 `Store.ReleaseExpiredStorage` is removed. Final upload reservations expire
 through quota admission and leased blob maintenance. An expired upload ticket
@@ -2552,8 +2574,7 @@ dispatched-node refusal are removed.
 Plan and job concurrency groups now have separate namespaces. A group named
 `deploys` on the plan and on a job names two independent budgets. Definitions
 need to agree only within their level. Persisted group keys now include `plan:`
-or `job:`. The store baseline is version 20; recreate stores at an
-earlier baseline before starting this build.
+or `job:`.
 
 Box scope is available only on job groups. Pipeline acceptance refuses a
 box-scoped plan group with an error naming the group and pointing at job-level
@@ -3009,8 +3030,7 @@ operator and team billing responses. Team billing also removes
 `purchased_30d_cents`. Its limits remove `ceiling_cents`, `daily_cap_cents` and
 `credit_limit_cents`. The dashboard consumes standing.
 
-The final rewrite schema removes dollar-cap columns and shared-card spend buckets. Recreate development
-stores made before this final schema. Released older stores remain unsupported. Existing
+The final rewrite schema removes dollar-cap columns and shared-card spend buckets. Existing
 awards retain immutable pricing and their captured deadline. New Cloud awards
 serialize capacity admission with reservation and issuance. The signup gate serializes launch
 admission and leaves operator approval available beyond the launch cap.
@@ -3056,7 +3076,7 @@ The intake wire adds `request.burst`, `request.local_secret_names` and a private
 `local_secrets` map outside the seal. Here claims add observed OS, architecture,
 capacity and availability. Renewal may refresh here availability. Personal
 runner enrollment adds `personal:true`. `GET` and `PUT /api/v1/overflow` manage
-the authenticated account's monthly allowance. The store baseline gains account
+the authenticated account's monthly allowance. The store gains account
 subject-kind provenance and account overflow controls.
 
 Personal enrollment uses `sparkwing runners add --runner NAME --personal
@@ -3284,9 +3304,8 @@ retain audit facts. Every deletion and its authorization retain separate facts
 even when a later run reuses the deleted run's ID. SQLite audit tables exclude
 the implicit rowid so replacement cannot bypass their guarded primary key.
 
-The store baseline uses SQLite STRICT tables and stronger relational and row
-constraints on both dialects. Recreate stores from another baseline before
-starting this build. There is no in-place migration.
+The store uses SQLite STRICT tables and stronger relational and row
+constraints on both dialects.
 
 Audit entries retain account IDs and invitation IDs rather than personal details.
 Each audit kind accepts a closed payload of identifiers, enums, digests and
@@ -3323,14 +3342,12 @@ cancellation was requested.
 
 The internal node API replaces `NodeTransition` with named commands. Store
 mutation methods no longer accept caller wall-clock arguments. The store captures
-database time for transaction decisions. Schema baseline 21 includes stored,
-generated cancellation deadlines. Older schema baselines require the declared
-restore workflow.
+database time for transaction decisions. The store keeps stored,
+generated cancellation deadlines.
 
 ## Durable start admission
 
-Schema baseline 20 includes durable admission records. Recreate stores at an older
-baseline. Owners propose releases. Hosts use the private `may-start` operation
+The store keeps durable admission records. Owners propose releases. Hosts use the private `may-start` operation
 under the actual job award, including jobs without concurrency groups. The private
 `capacity/acquire` operation is removed. A wait grants no partial group set.
 Released jobs continue when the plan waits to reacquire capacity. Burst returns
@@ -3357,9 +3374,8 @@ effective values and every normalized list item. Planning and generator output
 stays buffered until declarations are known. Failed discovery withholds it.
 The describe cache is rebuilt with the safe presentation format.
 
-Schema baseline 20 stores the private registration projection with each accepted
-expansion and binds it to the expansion digest. Older baselines require the
-declared restore workflow. Successful expansion submissions must explicitly
+The store keeps the private registration projection with each accepted
+expansion and binds it to the expansion digest. Successful expansion submissions must explicitly
 supply version 1 registration, even when empty. An accepted expansion without
 its registration is refused rather than resumed with incomplete masking. Runs sealed without version 1
 host masking registrations cannot resume. Start a new run. This is a pre-launch
