@@ -60,6 +60,7 @@ const team = {
   frozen: true,
   holds: ["dp_1", "operator-x"],
   hold_causes: ["dispute", "operator"],
+  failed_refunds: [],
   events: [],
 };
 

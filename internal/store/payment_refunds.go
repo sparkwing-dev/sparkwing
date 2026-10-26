@@ -179,7 +179,7 @@ func (op *Operator) reconcilePaymentStateTx(ctx context.Context, tx *storeTx, mo
 			}
 		case "refund":
 			if item.status == cardRefundSucceeded || item.status == "failed" || item.status == "canceled" {
-				if _, err := applyCardRefundTx(ctx, tx, team, payment, item.id, item.status, `refund_id = ? AND status = 'pending'`, []any{item.id}, tx.now(ctx)); err != nil {
+				if err := applyCardRefundTx(ctx, tx, team, payment, item.id, item.status); err != nil {
 					return err
 				}
 			}

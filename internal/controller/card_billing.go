@@ -212,9 +212,9 @@ func (s *Server) recordRefillFailure(ctx context.Context, r store.Refill, code s
 	s.reportPaymentSettlement(ctx, settled)
 }
 
-// safety: a refused payment is refunded under a key naming its retry, so a
-// repeated pass repeats the same refund and a retry after a failed one makes a
-// new one; the refund's success reverses any grant.
+// safety: a refused payment is refunded under its payment as the key, so a pass
+// after a lost answer repeats the same refund; a refund Stripe fails is listed
+// for the operator, not retried, and the refund's success reverses any grant.
 func (s *Server) refundQueuedPayments(ctx context.Context) {
 	operator := s.operator
 	due, err := operator.DueCardRefunds(ctx)
@@ -223,13 +223,13 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 		return
 	}
 	for _, d := range due {
-		refund, status, err := s.checkout.refund(ctx, d.PaymentIntent, d.Key, d.Reason)
+		refund, status, err := s.checkout.refund(ctx, d.PaymentIntent, d.Reason)
 		if err != nil {
 			s.logger.Error("refunding a queued card payment failed; it is retried", "team", string(d.Team),
 				"payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
-		if err := operator.MarkCardRefundMade(ctx, d.Team, d.Key, refund); err != nil {
+		if err := operator.MarkCardRefundMade(ctx, d.Team, d.PaymentIntent, refund); err != nil {
 			s.logger.Error("recording a card refund failed", "payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}

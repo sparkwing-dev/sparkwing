@@ -328,9 +328,12 @@ already being paid. A replay of a signed event is recognized by what Stripe
 signed, not by the 3-D Secure result read from Stripe afterwards.
 All events and refund responses for one payment serialize before reading its
 payer or outcomes. A refund response binds only the provider's refund ID to the
-queued attempt. Verified callbacks supply its amount and outcome, including
+queued refund. Verified callbacks supply its amount and outcome, including
 when an earlier partial refund leaves less than the original payment to return.
-A failed or canceled refund becomes retryable under a new attempt key. A
+The worker refunds under the payment as its idempotency key, so a call that
+fails before Stripe answers repeats the same refund. A refund Stripe reports
+failed or canceled is not retried: the operator console lists it on the team
+under Refunds Stripe did not make, and the operator returns the money in Stripe. A
 terminal refund outcome survives a later pending delivery, and a conflicting
 terminal outcome is refused.
 

@@ -68,7 +68,7 @@ func TestPurgeSettlesStartedAwardsBeforeLateWarning(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "card_refunds WHERE payment_intent='payment'", 1)
 }
 
-func TestRefundWorkerBindsAndRetriesAfterPurge(t *testing.T) {
+func TestRefundWorkerBindsAndSettlesAfterPurge(t *testing.T) {
 	s, _, now := providerPaymentFixture(t)
 	providerCheckoutPaid(t, s)
 	warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
@@ -77,20 +77,17 @@ func TestRefundWorkerBindsAndRetriesAfterPurge(t *testing.T) {
 		t.Fatal(err)
 	}
 	purgePaymentTeam(t, s, "a")
-	for attempt, status := range []string{"failed", "succeeded"} {
-		due, err := s.AsOperator().DueCardRefunds(t.Context())
-		if err != nil || len(due) != 1 {
-			t.Fatalf("due attempt %d=%+v: %v", attempt, due, err)
-		}
-		refund := providerPaymentEvent(now, capability.PaymentRefund)
-		refund.ObjectID, refund.EventID, refund.Status = "refund-"+status, "event-"+status, status
-		if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", due[0].Key, refund.ObjectID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := s.settlePaymentFacts(t.Context(), refund); err != nil {
-			t.Fatal(err)
-		}
-		s.SetTestClock(t, func() time.Time { return now.Add(2 * time.Hour) })
+	due, err := s.AsOperator().DueCardRefunds(t.Context())
+	if err != nil || len(due) != 1 {
+		t.Fatalf("due=%+v: %v", due, err)
 	}
-	rewriteSchemaCount(t, s.db, "card_refunds WHERE status='succeeded' AND attempts=1", 1)
+	refund := providerPaymentEvent(now, capability.PaymentRefund)
+	refund.ObjectID, refund.EventID, refund.Status = "refund-succeeded", "event-succeeded", "succeeded"
+	if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", due[0].PaymentIntent, refund.ObjectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.settlePaymentFacts(t.Context(), refund); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaCount(t, s.db, "card_refunds WHERE status='succeeded'", 1)
 }

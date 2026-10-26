@@ -1080,7 +1080,8 @@ Card setup ordering uses the supplied completion timestamp at nanosecond
 precision, or receipt time when completion time is absent. Older timestamps
 cannot replace the recorded card setup. The subsecond migration marker is removed.
 Collection amounts must fit the credit ledger's integer representation.
-Refund retry state is read and updated under one transaction and ledger lock.
+Refund queue state is read and updated under one transaction and ledger lock. A
+refund Stripe fails or cancels is terminal and listed for the operator, never retried.
 Payment settlement, refund reconciliation and purge first lock team rows FOR UPDATE.
 Deletion never waits for financial finality. Purge removes operational data,
 refill settings and the team's Stripe customer ID, keeping the team row as a

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -202,37 +201,19 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, setup strin
 	return nil
 }
 
-func applyCardRefundTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, refundID, status, when string, whenArgs []any, now time.Time) (bool, error) {
+// applyCardRefundTx records the outcome of the payment's pending refund. Failed and canceled are terminal: Stripe
+// declined to return the money, so the operator settles it by hand rather than the worker retrying.
+func applyCardRefundTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, refundID, status string) error {
 	mode, err := paymentModeTx(ctx, tx)
 	if err != nil {
-		return false, err
+		return err
 	}
-	var attempts int64
-	args := append([]any{mode, team, paymentIntent}, whenArgs...)
-	err = tx.QueryRowContext(ctx, `SELECT attempts FROM card_refunds WHERE payment_mode=? AND team = ? AND payment_intent = ? AND `+when+tx.forUpdate(), args...).Scan(&attempts)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if attempts < 0 {
-		return false, fmt.Errorf("%w: refund attempts must be nonnegative", ErrInvalidInput)
-	}
-	set, args := `refund_id = ?, status = ?`, []any{refundID, cardRefundPending}
 	switch status {
-	case cardRefundSucceeded:
-		args[1] = cardRefundSucceeded
-	case "failed", "canceled":
-		set = `refund_id = ?, status = ?, attempts = attempts + 1, next_attempt_at = ?`
-		delay := cardRefundRetryAfter[min(attempts, int64(len(cardRefundRetryAfter)-1))]
-		args = []any{refundID, cardRefundDue, now.Add(delay).UnixNano()}
+	case cardRefundSucceeded, "failed", "canceled":
+	default:
+		status = cardRefundPending
 	}
-	args = append(append(args, mode, string(team), paymentIntent), whenArgs...)
-	res, err := tx.execContext(ctx, `UPDATE card_refunds SET `+set+` WHERE payment_mode=? AND team = ? AND payment_intent = ? AND `+when, args...)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	return n > 0, err
+	_, err = tx.execContext(ctx, `UPDATE card_refunds SET status = ? WHERE payment_mode=? AND team = ? AND payment_intent = ?
+	    AND refund_id = ? AND status = 'pending'`, status, mode, string(team), paymentIntent, refundID)
+	return err
 }

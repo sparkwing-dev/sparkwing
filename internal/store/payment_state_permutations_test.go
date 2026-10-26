@@ -49,7 +49,7 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 					}
 					if outcome != cardRefundSucceeded {
 						for range 2 {
-							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment-0", pending.ObjectID); err != nil {
+							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment", pending.ObjectID); err != nil {
 								t.Fatal(err)
 							}
 						}
@@ -77,7 +77,7 @@ func TestPaymentStateEveryRefundResponseDeliveryPermutation(t *testing.T) {
 				for _, name := range order {
 					for range 2 {
 						if name == "response" {
-							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment-0", "refund"); err != nil {
+							if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment", "refund"); err != nil {
 								t.Fatal(err)
 							}
 						} else {
@@ -211,7 +211,7 @@ func TestPaymentStateEveryRefillAssociationPermutation(t *testing.T) {
 	}
 }
 
-func assertPaymentStateFinancialResult(t *testing.T, s *Store, tenant *Tenant, now time.Time, refundDue bool) {
+func assertPaymentStateFinancialResult(t *testing.T, s *Store, tenant *Tenant, now time.Time, refundFailed bool) {
 	t.Helper()
 	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 0 {
 		t.Fatalf("balance=%d, want zero after warning/refund: %v", balance, err)
@@ -220,15 +220,14 @@ func assertPaymentStateFinancialResult(t *testing.T, s *Store, tenant *Tenant, n
 		t.Fatalf("warning hold=%+v: %v", freeze, err)
 	}
 	s.SetTestClock(t, func() time.Time { return now.Add(24 * time.Hour) })
-	due, err := s.AsOperator().DueCardRefunds(t.Context())
+	if due, err := s.AsOperator().DueCardRefunds(t.Context()); err != nil || len(due) != 0 {
+		t.Fatalf("refunds=%+v, want none queued again: %v", due, err)
+	}
 	want := 0
-	if refundDue {
+	if refundFailed {
 		want = 1
 	}
-	if err != nil || len(due) != want {
-		t.Fatalf("refunds=%+v, want %d: %v", due, want, err)
-	}
-	if refundDue && due[0].Key != "payment-1" {
-		t.Fatalf("refund terminal applied more or less than once: %+v", due[0])
+	if failed, err := tenant.FailedCardRefunds(t.Context()); err != nil || len(failed) != want {
+		t.Fatalf("failed refunds=%+v, want %d listed: %v", failed, want, err)
 	}
 }

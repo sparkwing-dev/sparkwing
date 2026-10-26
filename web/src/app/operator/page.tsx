@@ -450,6 +450,23 @@ function TeamView({ slug }: { slug: string }) {
           </Fact>
         </dl>
       </Panel>
+      {team.failed_refunds.length > 0 ? (
+        <Panel title="Refunds Stripe did not make" hint="These are not retried. Return the money in Stripe.">
+          <ul className="text-sm">
+            {team.failed_refunds.map((f) => (
+              <li
+                key={f.payment_intent}
+                className="px-4 py-2 border-b border-[var(--border)] last:border-0"
+              >
+                <span className="font-mono">{f.payment_intent}</span>{" "}
+                {fmtCents(balanceCents(f.amount_micro))} {f.status}
+                {f.refund_id ? ` (refund ${f.refund_id})` : ""}, queued{" "}
+                {fmtDateTime(unixSecondsISO(f.created_at))} for {f.reason}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
       <ActionForm team={team} onDone={load} />
       <Panel title="Recent business events">
         {team.events.length === 0 ? (

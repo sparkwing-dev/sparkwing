@@ -35,6 +35,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 				if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), paymentWarning{WarningID: "queued", PaymentIntent: event.PaymentID, Actionable: true}, now); err != nil {
 					t.Fatal(err)
 				}
+				rewriteSchemaExec(t, s.db, `UPDATE card_refunds SET refund_id='provider-refund', status='pending'`)
 			}
 			mutate := func(tx *storeTx) error {
 				ctx := t.Context()
@@ -54,11 +55,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 					_, err := tx.operator.applyPaymentStateTx(ctx, tx, capability.PaymentEvent{Kind: capability.PaymentWarningEvent, Mode: event.Mode, ObjectID: "warning", PaymentID: event.PaymentID, Actionable: true}, auditActor{system: auditPaymentProvider})
 					return err
 				case "queued_refund":
-					changed, err := applyCardRefundTx(ctx, tx, tenant.team, event.PaymentID, "provider-refund", "failed", `attempts = ? AND status = 'due'`, []any{0}, now)
-					if err == nil && !changed {
-						return errors.New("refund queue did not change")
-					}
-					return err
+					return applyCardRefundTx(ctx, tx, tenant.team, event.PaymentID, "provider-refund", "failed")
 				}
 				return errors.New("unknown payment mutation")
 			}

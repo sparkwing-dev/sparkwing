@@ -1124,9 +1124,8 @@ CREATE TABLE card_refunds (
     reason TEXT NOT NULL,
     amount_micro BIGINT NOT NULL DEFAULT 0 CHECK(amount_micro >= 0),
     refund_id TEXT NOT NULL DEFAULT '',
+    -- safety: a refund Stripe reports failed or canceled is terminal and listed for the operator, never retried.
     status TEXT NOT NULL DEFAULT 'due' CHECK(status IN ('due','pending','succeeded','failed','canceled')),
-    attempts BIGINT NOT NULL DEFAULT 0,
-    next_attempt_at BIGINT NOT NULL DEFAULT 0,
     created_at BIGINT NOT NULL,
     PRIMARY KEY (payment_mode, team, payment_intent)
 );

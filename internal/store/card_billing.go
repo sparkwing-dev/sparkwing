@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -155,26 +154,52 @@ const (
 	cardRefundSucceeded = "succeeded"
 )
 
-// safety: a failed refund is retried on a widening schedule, and never
-// dropped, because until it succeeds the payer holds neither the money nor
-// credits for it.
-var cardRefundRetryAfter = []time.Duration{time.Hour, 6 * time.Hour, 24 * time.Hour}
-
-// CardRefundWork is a payment the worker must refund in full.
+// CardRefundWork is a payment the worker must refund in full. The payment is the refund's idempotency key, so a
+// retry after a lost answer repeats the same refund.
 type CardRefundWork struct {
 	Team          Team
 	PaymentIntent string
 	Reason        string
-	Key           string
 }
 
-func parseRefundKey(key string) (string, int64, bool) {
-	i := strings.LastIndexByte(key, '-')
-	if i <= 0 {
-		return "", 0, false
+// FailedCardRefund is a queued refund Stripe reported failed or canceled; the operator settles it by hand.
+type FailedCardRefund struct {
+	PaymentIntent string
+	RefundID      string
+	Status        string
+	Reason        string
+	AmountMicro   int64
+	CreatedAt     time.Time
+}
+
+// FailedCardRefunds lists t's refunds that Stripe failed or canceled, newest first.
+func (t *Tenant) FailedCardRefunds(ctx context.Context) (_ []FailedCardRefund, err error) {
+	tx, err := t.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return nil, err
 	}
-	attempt, err := strconv.ParseInt(key[i+1:], 10, 64)
-	return key[:i], attempt, err == nil && attempt >= 0
+	defer rollbackOrLog(tx)
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.queryContext(ctx, `SELECT payment_intent,refund_id,status,reason,amount_micro,created_at FROM card_refunds
+	    WHERE team=? AND payment_mode=? AND status IN ('failed','canceled') ORDER BY created_at DESC`, string(t.team), mode)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []FailedCardRefund
+	for rows.Next() {
+		var f FailedCardRefund
+		var created int64
+		if err := rows.Scan(&f.PaymentIntent, &f.RefundID, &f.Status, &f.Reason, &f.AmountMicro, &created); err != nil {
+			return nil, err
+		}
+		f.CreatedAt = time.Unix(0, created)
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 // TeamOwnerEmails returns the verified email addresses of t's owners.

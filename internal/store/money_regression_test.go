@@ -16,7 +16,7 @@ func TestDeletionRetainsFailedRefundAfterCheckoutExpiry(t *testing.T) {
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment-0", "refund"); err != nil {
+	if err := s.AsOperator().MarkCardRefundMade(t.Context(), "a", "payment", "refund"); err != nil {
 		t.Fatal(err)
 	}
 	refund := providerPaymentEvent(now, capability.PaymentRefund)
@@ -26,12 +26,7 @@ func TestDeletionRetainsFailedRefundAfterCheckoutExpiry(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE credit_checkouts SET expires_at=1`)
 	purgePaymentTeam(t, s, "a")
-	rewriteSchemaCount(t, s.db, "card_refunds", 1)
-	s.SetTestClock(t, func() time.Time { return now.Add(2 * time.Hour) })
-	due, err := s.AsOperator().DueCardRefunds(t.Context())
-	if err != nil || len(due) != 1 || due[0].Team != "a" || due[0].PaymentIntent != "payment" {
-		t.Fatalf("refund retry after purge=%+v: %v", due, err)
-	}
+	rewriteSchemaCount(t, s.db, "card_refunds WHERE team='a' AND payment_intent='payment' AND status='failed'", 1)
 }
 
 func TestRevokedStandingReportsCreditFreeze(t *testing.T) {
