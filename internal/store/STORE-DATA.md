@@ -209,7 +209,7 @@ removed too. Each caller must select a Tenant for its grants, charge history
 and idempotent events.
 The separate `SetCreditRateTable` wrapper is removed.
 `recordBillingAwardTx` stores immutable provenance and a reservation charge. The
-charge snapshots the CPU class, rate and card fingerprint. Its caller must pass
+charge snapshots the CPU class and rate. Its caller must pass
 server-derived authority, pricing and reservation size after taking claim locks.
 A capability prefix belongs to one reservation. Identical award replay writes
 nothing, and conflicting provenance or pricing fails.
@@ -530,10 +530,10 @@ protection snapshot. Replays share the same reversal reference and all reversals
 are capped by the paid grant. Only refund-kind rows count as money returned by
 Stripe when closing the card-refund queue.
 
-Refill reservations persist amount, customer, payment method and receipt email.
+Refill reservations persist amount and Stripe customer, never a card or email.
 Unbound reservations may expire or be explicitly replaced. A bound payment
 keeps the team's single refill slot until its payment outcome is known.
-`CanConfirmRefill` rechecks current card eligibility, refill authorization,
+`CanConfirmRefill` rechecks the team's Stripe customer, refill authorization,
 holds and limits before the worker confirms an unconfirmed intent. The worker
 reconciles processing and succeeded intents without confirming again. An
 ineligible unconfirmed intent is canceled at Stripe; `RecordRefillCanceled`
@@ -695,7 +695,7 @@ migration destinations are discovered without locks, locked complete in this
 order, then reread and validated.
 
 `lock_order.go` owns financial team and ledger acquisition. Every affected team
-is locked before any ledger. Warnings include teams whose saved card is cleared.
+is locked before any ledger. A warning locks only the team its payment funded.
 A shared team lock cannot be upgraded, and a new team cannot be added after a
 ledger lock. Payment callbacks revalidate their discovered teams after taking
 the payment identity lock. A changed binding restarts the transaction.

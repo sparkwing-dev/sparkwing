@@ -21,8 +21,8 @@ at controller startup, after draining test work. The first live start persists t
 restarting live preserves it. Switching from live to test is refused, including
 after team deletion. Live balances, standing, limits, refills and payment decisions
 use only live records. Test rows remain in the store for history; they never fund
-live work. The switch clears saved test cards and card pins and disables automatic
-refills; save a live card and opt in again to use live refills.
+live work. The switch forgets each team's test Stripe customer and disables
+automatic refills; add a live card and opt in again to use live refills.
 
 ## Test-to-live cutover runbook
 
@@ -105,6 +105,14 @@ Checkout page, and the credits land when the controller receives Stripe's
 signed webhook for the paid checkout. The billing page also saves a card through
 a Stripe setup page; a saved card is what automatic refill charges.
 
+Stripe holds every card detail. Sparkwing stores no card brand, last four digits,
+fingerprint, payment method ID or payer email. Per team it keeps only the Stripe
+customer ID and when a card setup last completed, plus the checkout, payment and
+refund IDs, amounts, modes and statuses its credit ledger needs. Once a team has
+a card, the billing page's Manage card button (`POST /api/v1/team/billing/portal`)
+opens Stripe's customer portal, where owners view, replace or remove it.
+Automatic refill charges the customer's default payment method in Stripe.
+
 Each Add funds payment and automatic refill is at most $1,000, at every standing
 tier including High. Larger amounts are refused before a payment starts. Use
 the billing page contact request, or `sparkwing billing request-tier --profile cloud --tier high --message <text>`, to ask about larger payments. The request reaches the
@@ -153,20 +161,20 @@ High still has the $1,000 maximum per payment and uses the team's own weekly
 and monthly limits.
 
 The controller checks for due refills every 30 seconds and keeps at most one
-refill in flight per team. A refill fixes its amount, card, customer and receipt
-address when it opens, and every retry sends that same request under the
+refill in flight per team. A refill fixes its amount and Stripe customer when it
+opens, and every retry sends that same request under the
 refill's own id, so a retried or interrupted refill never charges twice. The
 payment is created before it is confirmed. A refill whose payment was never
-created is closed after 23 hours, or when the team saves a different card first,
-and the next one starts fresh. Once its payment exists, the refill keeps the
+created is closed after 23 hours, or when the team's Stripe customer changes
+first, and the next one starts fresh. Once its payment exists, the refill keeps the
 team's one refill slot until its payment outcome is known. Before confirming
 an unconfirmed payment, the controller rechecks that refills remain enabled,
-the team has no hold, the saved card is still eligible, and the payment fits
+the team has no hold, its Stripe customer is unchanged, and the payment fits
 the current limits. Otherwise it cancels the unconfirmed payment at Stripe and
 retains its reservation record. Processing and succeeded payments are
 reconciled without another confirmation. Credits settle only from Stripe's
-signed webhook, through the same path as Add funds: the same card pinning,
-refund ordering and standing update apply.
+signed webhook, through the same path as Add funds: the same fraud-warning
+handling, refund ordering and standing update apply.
 
 Every unresolved reservation and confirmed refill counts against the limits,
 whether granted, declined, refused or refunded. A payment Stripe confirms was
@@ -179,10 +187,11 @@ A refill that returns `requires_action` closes as failed with `authentication_re
 whether the status arrives from reconciliation, confirmation or a signed webhook.
 A refill the card declines, or that asks for authentication, is recorded with
 its decline code, and the team's owners receive an email asking them to update
-the card. A refill paid with a card pinned to another team is refused, refunded
-in full, and the card is taken off the team, which turns refills off. Either
-way no further refill starts until an owner changes the saved card or an Add funds payment
-succeeds; changing the refill settings does not restart them. The balance runs
+the card with Manage card. A refill that an early fraud warning named before it
+settled is refused, refunded in full and holds the team. Either way no further
+refill starts until an Add funds payment succeeds or a new card setup completes;
+changing the card in Stripe's portal or changing the refill settings does not
+restart them. The balance runs
 down as usual. A delayed failure from a refill opened before a successful Add
 funds payment does not block refills again. A failure from a newer refill does.
 
@@ -285,15 +294,12 @@ the page's team. If setup completion arrives first, the controller keeps its
 verified facts and saves the card when the page binds that intent. A refill's payment intent carries `purpose=card_refill` and
 settles on its own events. Unsigned and badly signed requests are refused.
 
-The controller is the only consumer of Stripe events, so it also answers stolen
-cards. A card is pinned, by its Stripe fingerprint, to the team whose payment it
-first funds. A payment by that card for another team, through Add funds or a
-refill, grants nothing and is queued for a full refund, and the card cannot be
-saved on another team.
+Stripe Radar handles card fraud. Sparkwing does not recognize a card across
+teams, so abuse of one card across many teams is stopped by a Radar rule or by
+the operator by hand.
 
-An actionable early fraud warning on a payment this controller settled always
-holds the team and blocks the card: it is removed wherever it is saved and
-cannot be saved again. Sparkwing treats a settled 3-D Secure result of
+An actionable early fraud warning on a payment this controller settled holds the
+team whose payment it names, and no other. Sparkwing treats a settled 3-D Secure result of
 `authenticated` as protected. The warning leaves that payment's credits frozen
 under its hold and queues no refund. `attempt_acknowledged`, missing results and
 all other results are unprotected. For those payments, the warning takes back
@@ -303,8 +309,9 @@ result in `three_d_secure` and its protection decision separately in
 `liability_shift` when the payment settles. This decision follows Sparkwing's
 warning policy. Stripe's authentication result does not prove liability
 protection in every case. Neither stored value changes on replay or gets read
-from Stripe again when a warning arrives. A later payment by a blocked card
-holds its team and is refunded. A refused payment raises the
+from Stripe again when a warning arrives. A warning that arrives before its
+payment settles refuses an unprotected payment, which grants nothing and is
+refunded. A refused payment raises the
 `card_payment_refused` alert, and each submitted refund raises `card_refund`.
 
 Refunds, lost disputes and fraud warnings are kept against their payment
@@ -314,7 +321,7 @@ the credit, using the stored protection decision for warnings. A refused
 payment has no granted credit to reverse. All reversals together take back at
 most the original grant. Only actual refunds count toward a queued refund
 already being paid. A replay of a signed event is recognized by what Stripe
-signed, not by the card details read from Stripe afterwards.
+signed, not by the 3-D Secure result read from Stripe afterwards.
 All events and refund responses for one payment serialize before reading its
 payer or outcomes. A refund response binds only the provider's refund ID to the
 queued attempt. Verified callbacks supply its amount and outcome, including
@@ -324,7 +331,8 @@ terminal refund outcome survives a later pending delivery, and a conflicting
 terminal outcome is refused.
 
 Team deletion never waits for money to finish moving. Purge removes operational
-data and saved card settings, retaining the team id as a tombstone. Checkouts,
+data, refill settings and the team's Stripe customer ID, retaining the team id
+as a tombstone. Sparkwing holds no card details to scrub. Checkouts,
 payments, refunds, grants, charges, holds and their payer association survive.
 Late settlements, refund callbacks and fraud warnings continue to reconcile after
 purge under the same exclusive team lock used by other financial mutations.

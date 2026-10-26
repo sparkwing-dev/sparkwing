@@ -611,8 +611,8 @@ The controller verifies Stripe signatures at `POST /webhooks/stripe`. Checkout
 payments, failures and expiry carry the committed provider session identity.
 Card setup and card payment outcomes, individual refund updates, early fraud
 warnings and opened or closed disputes carry their provider identities and
-verified status. The verifier reads card details from Stripe when needed and
-checks their identity, customer and test/live mode. Metadata grants no team,
+verified status. The verifier reads a paid charge's 3-D Secure result from Stripe
+and checks its identity, payment and test/live mode. It keeps no card details. Metadata grants no team,
 credit, attempt or billing authority.
 
 Settlement derives the team and ledger effect from committed billing records

@@ -1064,16 +1064,29 @@ Operator entry points call those owners in a store transaction. Payment receipt
 settlement can use the same owners without nesting transactions or committing
 financial state before its receipt. No new unverified payment entry point exists.
 
+Stripe holds all card data (decision 65). No table column or persisted event
+JSON stores a card brand, last four digits, fingerprint, payment method ID or
+payer email. Per team the store keeps only `card_customer` and `card_added_at`;
+the ledger keeps checkout, payment and refund IDs, amounts, modes and statuses.
+Refills charge the Stripe customer's default payment method off-session, and the
+billing page shows and changes the card through Stripe's customer portal. Stripe
+Radar handles card fraud. The store never links one card across teams, so abuse
+of one card across many teams is a Radar rule or a manual matter. An actionable
+early fraud warning holds only the team its payment funded.
+`TestNoCardDetailsAreStoredFromSetupThroughPurge` scans every column of every
+table after a card setup, payment, refill, warning, refund and purge.
+
 Card setup ordering uses the supplied completion timestamp at nanosecond
 precision, or receipt time when completion time is absent. Older timestamps
-cannot replace the saved card. The subsecond migration marker is removed.
+cannot replace the recorded card setup. The subsecond migration marker is removed.
 Collection amounts must fit the credit ledger's integer representation.
 Refund retry state is read and updated under one transaction and ledger lock.
 Payment settlement, refund reconciliation and purge first lock team rows FOR UPDATE.
-Deletion never waits for financial finality. Purge removes operational data and
-saved card settings, keeping the team row as a tombstone. Checkouts, receipts,
-refunds, grants, charges, holds and payer associations survive both purge passes,
-so late settlement, refund callbacks and collateral fraud warnings still reconcile.
+Deletion never waits for financial finality. Purge removes operational data,
+refill settings and the team's Stripe customer ID, keeping the team row as a
+tombstone. Checkouts, receipts, refunds, grants, charges, holds and payer
+associations survive both purge passes, so late settlement, refund callbacks and
+fraud warnings still reconcile. No card details exist to scrub.
 Purge final-settles every award from its retained intervals before deleting work.
 Warnings and dispute holds write financial facts and a drain deadline only. Work
 renewal applies that deadline. Financial writers acquire no owner or work locks
@@ -1115,9 +1128,9 @@ correlations and hosted-page delivery details are removed.
   The JSON stores the verified facts and `PaymentSettlement`, respectively.
   Checkout writes retain their existing shape. Index `(payment_mode,object_id)`.
   Several event IDs can refer to one provider object. They cannot change its
-  payer association or a settled object's payment, amount, currency, method and
-  card. A payment-intent failure is an observation before settlement. Its amount,
-  method and latest charge can change before success while the persisted payer
+  payer association or a settled object's payment, amount, currency and charge.
+  A payment-intent failure is an observation before settlement. Its amount and
+  latest charge can change before success while the persisted payer
   and attempt remain fixed. Closing a dispute preserves its
   terminal outcome and prevents a late open from restoring its hold.
 - Add `payment_correlations` with `payment_mode`, `provider_id`, `kind`, `team`,
@@ -1157,7 +1170,7 @@ before touching legacy financial rows. Unknown warnings may persist before a
 payment is associated, so later settlement can refuse the warned payment.
 Warnings escalate monotonically. Returning to non-actionable never removes
 recorded protection. Warnings select the configured mode. The test-to-live
-startup switch clears test-provider card pins while retaining payment history.
+startup switch forgets test-provider customers while retaining payment history.
 
 ## Persisted log readers
 
@@ -2497,10 +2510,10 @@ persisted payer attribution, replay rules and refund queue. This handle cut
 adds no provider verification contract. C2 still owns verified event delivery.
 
 Warning persistence and its payer hold share one transaction-local mutation owner.
-A warning ID retains its first payment and card fingerprint. A conflicting
-replay fails before applying a hold. Payer lookup compares every matching paid
-grant and card attempt. Conflicting tenant evidence rolls back the warning and
-hold. Shared-card warnings still hold each team when its own payment settles.
+A warning ID retains its first payment. A conflicting replay fails before
+applying a hold. Payer lookup compares every matching paid grant and card
+attempt. Conflicting tenant evidence rolls back the warning and hold. A warning
+holds only the team its payment funded.
 Holds use the tenant-scoped warning identity. The legacy provider-only hold
 identity is removed. Replaying an exact warning after release cannot restore
 its hold. A failed audit rolls back both warning persistence and the hold.
@@ -2531,7 +2544,7 @@ Balances, standing history, holds, refill windows and payment decisions select
 the configured mode. Startup refuses the switch while any test award or reservation
 is unsettled or a test refill is open. All test work settles before live accounting
 starts, so later charges need no reservation-mode carry-over. The switch restarts
-storage watermarks at the cutover instant and clears test-provider card pins.
+storage watermarks at the cutover instant and forgets test-provider customers.
 Test financial rows remain for history, excluded from live reports and decisions.
 
 `Operator.CreditLedgerTotals` owns deployment-wide ledger reports. Its raw Store
@@ -3637,7 +3650,7 @@ in the startup transaction, before requests and workers start. Controller startu
 uses the same `--payment-mode` for the store and verifier. An unconfigured ledger
 uses test mode. The first live start refuses unsettled test awards and reservations
 or open test refills. It atomically records the switch, restarts storage watermarks
-at the cutover instant, and clears saved test cards, card pins and refill opt-ins.
+at the cutover instant, and forgets test Stripe customers and refill opt-ins.
 Publication failure rolls back the whole transaction. Subsequent live starts
 preserve live cards, refills and accounting watermarks. Payment mode stays fixed
 for that startup, so financial readers need no payment-mode row lock. Purging teams never clears
