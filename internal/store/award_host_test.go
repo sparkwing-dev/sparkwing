@@ -35,7 +35,7 @@ func TestAwardBoxIdentityForActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := runspec.ActionsProvenance(42, spec.Binding.Push.Ref, spec.Binding.Push.SHA, "ci")
+	p, err := runspec.ActionsProvenance(42, "acme/repo", spec.Binding.Push.Ref, spec.Binding.Push.SHA, "ci")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -75,7 +75,7 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 
 func writePushRun(t *testing.T, s *Store, git runspec.Git) {
 	t.Helper()
-	provenance, err := runspec.ActionsProvenance(1, git.Ref, git.SHA, "ci")
+	provenance, err := runspec.ActionsProvenance(1, "acme/repo", git.Ref, git.SHA, "ci")
 	if err != nil {
 		t.Fatal(err)
 	}

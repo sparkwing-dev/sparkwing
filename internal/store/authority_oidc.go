@@ -95,9 +95,7 @@ func oidcIdentity(team Team, run RunRow) (capability.OIDCFacts, error) {
 	}
 	facts := capability.OIDCFacts{Team: string(team), RunID: run.ID, Pipeline: provenance.Pipeline()}
 	facts.Trigger, facts.RepositoryID, facts.Ref, facts.SHA = provenance.OIDC()
-	if facts.RepositoryID > 0 {
-		facts.Repository = run.Request.Request.Git.Repository.Display
-	}
+	facts.Repository = provenance.Repository()
 	return facts, nil
 }
 

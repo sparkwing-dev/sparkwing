@@ -60,11 +60,11 @@ func TestDefaultBranchWorkSQLAgreesWithGo(t *testing.T) {
 		}
 		return p
 	}
-	schedule, err := runspec.ScheduleProvenance("nightly", 7, "main", sha, "ci")
+	schedule, err := runspec.ScheduleProvenance("nightly", 7, "acme/repo", "main", sha, "ci")
 	if err != nil {
 		t.Fatal(err)
 	}
-	actions, err := runspec.ActionsProvenance(7, "refs/heads/main", sha, "ci")
+	actions, err := runspec.ActionsProvenance(7, "acme/repo", "refs/heads/main", sha, "ci")
 	if err != nil {
 		t.Fatal(err)
 	}

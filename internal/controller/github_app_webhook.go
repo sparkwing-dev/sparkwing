@@ -1000,7 +1000,7 @@ func (s *Server) startGitHubAppRun(
 		Git: runspec.Git{
 			Repository: runspec.Repository{Key: key, Display: repo.Slug()}, Ref: ref, SHA: in.sha,
 			DefaultBranch: runspec.Optional[string]{Set: defaultBranch != "", Value: defaultBranch},
-			App:           runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: in.env["GITHUB_EVENT_NAME"], Action: in.env["GITHUB_ACTION"], DeliveryKey: githubAppDeliveryDigest(body), InstallationID: installation.InstallationID, RepositoryID: repo.ID, Ref: ref, SHA: in.sha, DefaultBranch: defaultBranch, DefaultBranchPush: in.env["GITHUB_EVENT_NAME"] == "push" && ref == "refs/heads/"+defaultBranch, VerifiedAt: now}},
+			App:           runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: in.env["GITHUB_EVENT_NAME"], Action: in.env["GITHUB_ACTION"], DeliveryKey: githubAppDeliveryDigest(body), InstallationID: installation.InstallationID, RepositoryID: repo.ID, Repository: repo.Slug(), Ref: ref, SHA: in.sha, DefaultBranch: defaultBranch, DefaultBranchPush: in.env["GITHUB_EVENT_NAME"] == "push" && ref == "refs/heads/"+defaultBranch, VerifiedAt: now}},
 		},
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/" + repo.Slug() + ".git", PipelineDir: ".sparkwing"}},
 	}

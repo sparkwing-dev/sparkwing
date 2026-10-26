@@ -106,7 +106,7 @@ func (f *RankingFixture) Request(t *testing.T, mutate func(*runspec.Request)) {
 	case runspec.OriginApp:
 		provenance, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: f.now, Ref: request.Git.Ref, SHA: request.Git.SHA}, runspec.Optional[runspec.PullRequest]{}, request.Pipeline)
 	case runspec.OriginSchedule:
-		provenance, err = runspec.ScheduleProvenance("schedule", 1, "main", request.Git.SHA, request.Pipeline)
+		provenance, err = runspec.ScheduleProvenance("schedule", 1, "acme/repo", "main", request.Git.SHA, request.Pipeline)
 	}
 	if err != nil {
 		t.Fatal(err)

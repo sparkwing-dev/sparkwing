@@ -65,7 +65,7 @@ type Provenance struct {
 // AppProvenance seals the identity of a signed, replay-checked GitHub App delivery.
 // A pull request delivery also seals the base branch its runs may read caches from.
 func AppProvenance(app AppFacts, pr Optional[PullRequest], pipeline string) (Provenance, error) {
-	p := Provenance{identity: provenanceJSON{Trust: TrustVerified, RepositoryID: app.RepositoryID, Ref: app.Ref, SHA: strings.ToLower(app.SHA), Event: app.Event, Pipeline: pipeline, DefaultBranch: app.DefaultBranch, Delivery: app.DeliveryKey}}
+	p := Provenance{identity: provenanceJSON{Trust: TrustVerified, RepositoryID: app.RepositoryID, Repository: app.Repository, Ref: app.Ref, SHA: strings.ToLower(app.SHA), Event: app.Event, Pipeline: pipeline, DefaultBranch: app.DefaultBranch, Delivery: app.DeliveryKey}}
 	if app.VerifiedAt.IsZero() {
 		return Provenance{}, errors.New("provenance requires a verified App delivery")
 	}
@@ -82,9 +82,9 @@ func AppProvenance(app AppFacts, pr Optional[PullRequest], pipeline string) (Pro
 // the repository's default branch. The commit is that branch's head, which GitHub
 // resolved at fire time, so the run is as trusted as a push to the default branch
 // for pools and cache reads, while it still writes only its own scope.
-func ScheduleProvenance(schedule string, repositoryID int64, defaultBranch, sha, pipeline string) (Provenance, error) {
+func ScheduleProvenance(schedule string, repositoryID int64, repository, defaultBranch, sha, pipeline string) (Provenance, error) {
 	branch := NormalizedBranch(defaultBranch)
-	p := Provenance{identity: provenanceJSON{Trust: TrustSchedule, RepositoryID: repositoryID, Ref: "refs/heads/" + branch, SHA: strings.ToLower(sha), Pipeline: pipeline, DefaultBranch: branch, Writer: "schedule/" + escapeWriter(schedule)}}
+	p := Provenance{identity: provenanceJSON{Trust: TrustSchedule, RepositoryID: repositoryID, Repository: repository, Ref: "refs/heads/" + branch, SHA: strings.ToLower(sha), Pipeline: pipeline, DefaultBranch: branch, Writer: "schedule/" + escapeWriter(schedule)}}
 	if schedule == "" || NormalizedBranch(branch) == "" {
 		return Provenance{}, errors.New("schedule provenance requires the schedule and the branch it follows")
 	}
@@ -93,8 +93,8 @@ func ScheduleProvenance(schedule string, repositoryID int64, defaultBranch, sha,
 
 // ActionsProvenance seals a run whose credential is bound to one GitHub Actions push
 // of one repository.
-func ActionsProvenance(repositoryID int64, ref, sha, pipeline string) (Provenance, error) {
-	p := Provenance{identity: provenanceJSON{Trust: TrustActions, RepositoryID: repositoryID, Ref: ref, SHA: strings.ToLower(sha), Pipeline: pipeline, Writer: "actions"}}
+func ActionsProvenance(repositoryID int64, repository, ref, sha, pipeline string) (Provenance, error) {
+	p := Provenance{identity: provenanceJSON{Trust: TrustActions, RepositoryID: repositoryID, Repository: repository, Ref: ref, SHA: strings.ToLower(sha), Pipeline: pipeline, Writer: "actions"}}
 	return p, p.validate()
 }
 
@@ -158,6 +158,9 @@ func (p Provenance) validate() error {
 	if p.identity.SHA != "" && !IsCommitID(p.identity.SHA) {
 		return errors.New("provenance commit must be a full commit ID")
 	}
+	if p.identity.Repository != "" && p.identity.RepositoryID <= 0 {
+		return errors.New("only a run bound to a GitHub repository names its repository")
+	}
 	switch p.identity.Trust {
 	case TrustVerified, TrustVerifiedDefault:
 		if p.identity.RepositoryID <= 0 || p.identity.Delivery == "" || p.identity.Ref == "" || p.identity.SHA == "" || p.identity.Writer != "" || !slices.Contains(appEvents, p.identity.Event) {
@@ -209,6 +212,10 @@ func (p Provenance) DefaultBranchWork() bool {
 	return DefaultBranchWorkTrust.Has(p.identity.Trust) && p.identity.DefaultBranch != "" && p.identity.Ref == "refs/heads/"+p.identity.DefaultBranch
 }
 
+// Repository is the owner/name GitHub reported for RepositoryID when intake sealed
+// the run, and empty for a run a principal chose.
+func (p Provenance) Repository() string { return p.identity.Repository }
+
 // RepositoryID is the GitHub repository a signed delivery, an Actions push binding
 // or App automation consent established, and zero for a run a principal chose.
 func (p Provenance) RepositoryID() int64 { return p.identity.RepositoryID }
@@ -254,6 +261,7 @@ func (p Provenance) OIDC() (trigger string, repositoryID int64, ref, sha string)
 type provenanceJSON struct {
 	Trust         TrustClass `json:"trust"`
 	RepositoryID  int64      `json:"repository_id,omitempty"`
+	Repository    string     `json:"repository,omitempty"`
 	Ref           string     `json:"ref,omitempty"`
 	SHA           string     `json:"sha,omitempty"`
 	Event         string     `json:"event,omitempty"`

@@ -42,11 +42,11 @@ func poolBranchRulesMatchLikePathGlobs(t *testing.T, open func(*testing.T) *Stor
 		}
 		return p
 	}
-	schedule, err := runspec.ScheduleProvenance("nightly", 1, "main", referenceMain, "ci")
+	schedule, err := runspec.ScheduleProvenance("nightly", 1, "acme/repo", "main", referenceMain, "ci")
 	if err != nil {
 		t.Fatal(err)
 	}
-	actions, err := runspec.ActionsProvenance(1, "refs/heads/main", referenceMain, "ci")
+	actions, err := runspec.ActionsProvenance(1, "acme/repo", "refs/heads/main", referenceMain, "ci")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,11 +177,11 @@ func pushClaimProvenanceParity(t *testing.T, open func(*testing.T) *Store) {
 			var err error
 			switch tc.trust {
 			case runspec.TrustActions:
-				p, err = runspec.ActionsProvenance(tc.repo, "refs/heads/main", referenceMain, "ci")
+				p, err = runspec.ActionsProvenance(tc.repo, "acme/repo", "refs/heads/main", referenceMain, "ci")
 			case runspec.TrustVerified, runspec.TrustVerifiedDefault:
 				p, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: tc.repo, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/main", SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: tc.trust == runspec.TrustVerifiedDefault}, runspec.Optional[runspec.PullRequest]{}, "ci")
 			case runspec.TrustSchedule:
-				p, err = runspec.ScheduleProvenance("schedule", tc.repo, "main", referenceMain, "ci")
+				p, err = runspec.ScheduleProvenance("schedule", tc.repo, "acme/repo", "main", referenceMain, "ci")
 			case runspec.TrustAsserted:
 				p = assertedProvenance(t, "ci", "refs/heads/main", referenceMain)
 			}
@@ -222,7 +222,7 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					seal.Provenance = assertedProvenance(t, "ci", "refs/heads/main", referenceMain)
 					if source == "schedule" || source == "inherited-schedule" {
 						var err error
-						seal.Provenance, err = runspec.ScheduleProvenance("nightly", 1, "main", referenceMain, "ci")
+						seal.Provenance, err = runspec.ScheduleProvenance("nightly", 1, "acme/repo", "main", referenceMain, "ci")
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -276,8 +276,7 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					// Advertisements cannot turn a persistent enrollment into a fresh pod.
 					demand.Labels = append(demand.Labels, "single-use", "launcher", "class=cloud")
 					indexFixtureUnit(t, s, "a", ref)
-					// A signed delivery on main that intake did not seal as a default-branch
-					// push is ordinary verified work, the same rule pools and caches read.
+					// safety: a signed main delivery not sealed as a default-branch push is ordinary verified work everywhere.
 					want := runner != "persistent" || source == "asserted-main" || source == "verified-feature" || source == "verified-main"
 					if runner == "launcher" && source == "asserted-main" {
 						want = false

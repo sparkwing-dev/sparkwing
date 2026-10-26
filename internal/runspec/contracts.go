@@ -119,6 +119,7 @@ type AppFacts struct {
 	DeliveryKey       string    `json:"delivery_key"`
 	InstallationID    int64     `json:"installation_id"`
 	RepositoryID      int64     `json:"repository_id"`
+	Repository        string    `json:"repository,omitempty"`
 	Ref               string    `json:"ref"`
 	SHA               string    `json:"sha"`
 	DefaultBranch     string    `json:"default_branch"`

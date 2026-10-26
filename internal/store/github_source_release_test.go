@@ -191,7 +191,7 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 			run.Request.Request.Pipeline = run.Pipeline
 			run.Request.Request.Origin = runspec.OriginSchedule
 			run.Request.Request.Git.App = runspec.Optional[runspec.AppFacts]{}
-			run.Request.Provenance, err = runspec.ScheduleProvenance(sched.ID, 1, "main", fixtureFeatureSHA, run.Pipeline)
+			run.Request.Provenance, err = runspec.ScheduleProvenance(sched.ID, 1, "acme/repo", "main", fixtureFeatureSHA, run.Pipeline)
 			if err != nil {
 				t.Fatal(err)
 			}

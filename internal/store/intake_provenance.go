@@ -91,7 +91,13 @@ func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeReque
 		if !app || !pinned || s.LockedRef != "" || s.Override != nil || !defaultBranch.Set || runspec.NormalizedBranch(s.GitBranch) != runspec.NormalizedBranch(defaultBranch.Value) {
 			return asserted(runspec.RunWriter(run))
 		}
-		return refused(runspec.ScheduleProvenance(s.ID, repository, defaultBranch.Value, input.Git.SHA, input.Pipeline))
+		name := ""
+		if s.GitHubRepositoryID == repository {
+			if name, err = scheduleDisplay(s); err != nil {
+				return runspec.Provenance{}, err
+			}
+		}
+		return refused(runspec.ScheduleProvenance(s.ID, repository, name, defaultBranch.Value, input.Git.SHA, input.Pipeline))
 	case p.Capability.Binding.Kind == capability.BindingPush && p.Capability.Binding.Push != nil:
 		push := p.Capability.Binding.Push
 		// safety: the ref and commit come from the push GitHub's token proved, while the
@@ -103,7 +109,7 @@ func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeReque
 		if err != nil || !strings.HasPrefix(push.RepositoryKey, "gh:") {
 			return runspec.Provenance{}, authorityError(apierr.Forbidden, "an Actions push binding names no GitHub repository")
 		}
-		return refused(runspec.ActionsProvenance(id, push.Ref, push.SHA, input.Pipeline))
+		return refused(runspec.ActionsProvenance(id, push.Repository, push.Ref, push.SHA, input.Pipeline))
 	}
 	subject := p.Capability.Subject
 	return asserted(runspec.PrincipalWriter(string(subject.Kind), subject.ID))
@@ -120,7 +126,7 @@ func scheduleArmedByAdminTx(ctx context.Context, tx *storeTx, in *scheduleAdmiss
 	if err := json.Unmarshal([]byte(in.consent), &saved); err != nil {
 		return false, err
 	}
-	armer, err := tx.ResolveAuthority(ctx, saved.Authority)
+	armer, err := resolveTeamAuthorityTx(ctx, tx, in.schedule.Team, saved.Authority, sameTeam)
 	if err != nil {
 		return false, err
 	}
