@@ -179,12 +179,6 @@ func (p Provenance) Verified() bool {
 	return p.identity.Trust == TrustVerified || p.identity.Trust == TrustVerifiedDefault
 }
 
-// TrustedDefault reports the default-branch pushes and admin-armed schedule fires
-// that may use a verified-default-only pool.
-func (p Provenance) TrustedDefault() bool {
-	return p.identity.Trust == TrustVerifiedDefault || p.identity.Trust == TrustSchedule
-}
-
 // RepositoryID is the GitHub repository a signed delivery, an Actions push binding
 // or App automation consent established, and zero for a run a principal chose.
 func (p Provenance) RepositoryID() int64 { return p.identity.RepositoryID }
