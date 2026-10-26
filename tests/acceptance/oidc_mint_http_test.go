@@ -39,15 +39,17 @@ type oidcFacts struct {
 }
 
 func (*oidcFacts) Team() store.Team { return "team" }
-func (f *oidcFacts) ReadOIDCFacts(_ context.Context, a capability.Authorized) (capability.OIDCFacts, error) {
+func (f *oidcFacts) MintOIDCToken(_ context.Context, a capability.Authorized, _ string, sign func(capability.OIDCFacts) (store.OIDCMint, error)) (store.OIDCMint, error) {
 	f.calls++
 	f.actor = a
-	return f.facts, f.err
-}
-
-func (f *oidcFacts) RecordOIDCMint(context.Context, capability.Authorized, string) error {
-	f.minted++
-	return nil
+	if f.err != nil {
+		return store.OIDCMint{}, f.err
+	}
+	minted, err := sign(f.facts)
+	if err == nil {
+		f.minted++
+	}
+	return minted, err
 }
 
 func oidcBoundary() (*credentialBoundary, *oidcFacts) {
@@ -83,7 +85,7 @@ func oidcServer(t *testing.T, b *credentialBoundary, f *oidcFacts, private, publ
 		s.WithOIDCIssuer(issuer)
 	}
 	if f != nil {
-		bindTenantPort[controller.OIDCReader](s, func(context.Context, store.Team) (controller.OIDCReader, error) { return f, nil })
+		bindTenantPort[controller.OIDCMinter](s, func(context.Context, store.Team) (controller.OIDCMinter, error) { return f, nil })
 	}
 	return s
 }
