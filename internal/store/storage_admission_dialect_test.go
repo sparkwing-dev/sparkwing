@@ -199,3 +199,55 @@ func TestCloudBillingChargesThePublishedRatePastTheFreeAllowance(t *testing.T) {
 		}
 	})
 }
+
+// A log upload URL is signed only after its bytes pass the storage rule: a team past its free allowance gets no slot
+// and no hold, and a funded team's hold settles once at commit, so the segment is counted a single time.
+func TestLogSlotPassesTheStorageRuleBeforeItIsSigned(t *testing.T) {
+	bothDialects(t, func(t *testing.T, target *storetest.Target) {
+		f := newGrowthFixture(t, target)
+		subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: f.attempt.Team, RunID: f.attempt.RunID, Attempt: &f.attempt}
+		holds := func() (held, committed int) {
+			t.Helper()
+			for state, out := range map[string]*int{"held": &held, "committed": &committed} {
+				if err := f.s.DB().QueryRowContext(t.Context(), storetest.Rebind(f.s, "SELECT COUNT(*) FROM quota_reservations WHERE team=? AND quota='storage' AND state=?"), f.tenant.Team(), state).Scan(out); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return held, committed
+		}
+		f.storeBytes(t, "a", 1<<30, f.now)
+		if _, _, err := f.tenant.ReserveLogUpload(t.Context(), subject, f.holder, 1, 3); !errors.Is(err, store.ErrInsufficientCredits) {
+			t.Fatalf("unfunded log slot past the free allowance = %v; want a refusal before signing", err)
+		}
+		if held, committed := holds(); held+committed != 0 {
+			t.Fatalf("refused log slot left holds: held=%d committed=%d", held, committed)
+		}
+		fundTeam(t, f.tenant, "pay-logs")
+		for range 2 {
+			if _, expires, err := f.tenant.ReserveLogUpload(t.Context(), subject, f.holder, 1, 3); err != nil || !expires.After(f.now) {
+				t.Fatalf("funded log slot: expires=%v, %v", expires, err)
+			}
+		}
+		if held, _ := holds(); held != 1 {
+			t.Fatalf("signing one slot twice holds %d reservations, want 1", held)
+		}
+		usage := func() int64 {
+			t.Helper()
+			var bytes int64
+			if err := f.s.DB().QueryRowContext(t.Context(), storetest.Rebind(f.s, "SELECT COALESCE(SUM(bytes),0) FROM storage_month_usage WHERE team=?"), f.tenant.Team()).Scan(&bytes); err != nil {
+				t.Fatal(err)
+			}
+			return bytes
+		}
+		before := usage()
+		if err := f.recordSegment(t); err != nil {
+			t.Fatal(err)
+		}
+		if held, committed := holds(); held != 0 || committed != 1 {
+			t.Fatalf("after commit held=%d committed=%d; want the slot's hold settled", held, committed)
+		}
+		if grew := usage() - before; grew != 3 {
+			t.Fatalf("the commit recorded %d bytes of log usage; want the 3 committed bytes once", grew)
+		}
+	})
+}

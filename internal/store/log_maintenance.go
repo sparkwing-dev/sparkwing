@@ -32,9 +32,9 @@ type abandonedLogStream struct {
 	run, id string
 }
 
-// SealAbandonedLogStreams closes ended execution logs as incomplete under the
-// maintenance fence. Completed attempts and owner units retain final-tail grace. Publication
-// streams require their publisher's final commit because they have no lease.
+// SealAbandonedLogStreams closes ended execution logs as incomplete. Completed
+// attempts and owner units retain final-tail grace. Publication streams require
+// their publisher's final commit because they have no claim lease to lapse.
 func (o *Operator) SealAbandonedLogStreams(ctx context.Context, limit int) (int64, error) {
 	if limit <= 0 {
 		return 0, ErrInvalidInput

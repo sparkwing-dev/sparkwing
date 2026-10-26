@@ -6,7 +6,8 @@ import (
 	"time"
 )
 
-// FailedRefundNotice is a queued refund Stripe failed or canceled whose team owners have not been told.
+// FailedRefundNotice is a queued refund Stripe failed or canceled whose team owners have not been told. AmountMicro
+// is what the failed refund itself asked Stripe for, which a partial refund made earlier leaves below the payment.
 type FailedRefundNotice struct {
 	Team        Team
 	AmountMicro int64
@@ -22,7 +23,8 @@ func (o *Operator) ClaimFailedRefundNotices(ctx context.Context) ([]FailedRefund
 			return nil, err
 		}
 		rows, err := tx.queryContext(ctx, `SELECT r.team,r.payment_intent,
-	    CASE WHEN r.amount_micro>0 THEN r.amount_micro ELSE COALESCE(c.amount_micro,0) END,
+	    COALESCE((SELECT p.amount_micro FROM payment_refunds p WHERE p.payment_mode=r.payment_mode AND p.kind='refund' AND p.refund_id=r.refund_id AND r.refund_id<>''),
+	      CASE WHEN r.amount_micro>0 THEN r.amount_micro ELSE COALESCE(c.amount_micro,0) END),
 	    COALESCE(c.paid_at,c.closed_at,r.created_at)
 	    FROM card_refunds r LEFT JOIN credit_checkouts c ON c.payment_mode=r.payment_mode AND c.payment_id=r.payment_intent AND c.team=r.team
 	    WHERE r.payment_mode=? AND r.status IN ('failed','canceled') AND r.owners_notified_at IS NULL

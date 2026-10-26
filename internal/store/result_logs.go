@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 	"unicode/utf8"
@@ -141,6 +142,18 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	var seal any
 	finalDigest = ""
 	if commit.Final {
+		// safety: the final manifest's slot was signed for its exact size, so its hold settles in full.
+		manifest := logReservationID(identity.id, 0)
+		var size int64
+		err := tx.QueryRowContext(ctx, `SELECT amount FROM quota_reservations WHERE team=? AND id=? AND quota='storage'`, t.team, manifest).Scan(&size)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil {
+			if _, err := settleLogSlotTx(ctx, tx, t.team, commit.Subject.RunID, manifest, size); err != nil {
+				return err
+			}
+		}
 		seal = tx.now(ctx).UnixNano()
 		completeness = "complete"
 		finalDigest = digest
@@ -153,6 +166,25 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 		return err
 	}
 	return tx.Commit()
+}
+
+func logReservationID(stream string, index int64) string {
+	return fmt.Sprintf("log:%s:%d", stream, index)
+}
+
+// settleLogSlotTx commits a signed slot's live hold at the bytes actually stored, and reports false when the slot
+// holds nothing to settle.
+func settleLogSlotTx(ctx context.Context, tx *storeTx, team Team, run, id string, used int64) (bool, error) {
+	var held bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM quota_reservations WHERE team=? AND id=? AND state='held' AND expires_at>?)`, team, id, tx.now(ctx).UnixNano()).Scan(&held); err != nil || !held {
+		return false, err
+	}
+	accounting := blobAccounting{ReservationID: id}
+	quotas, err := lockBlobQuotaTx(ctx, tx, team, run, accounting)
+	if err != nil {
+		return false, err
+	}
+	return true, settleBlobQuotaTx(ctx, tx, team, run, accounting, quotas, used, 0)
 }
 
 func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segments []runstate.Segment) error {
@@ -192,8 +224,15 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 		next++
 		offset += segment.Size
 		stored += segment.StoredBytes
-		added += segment.StoredBytes
+		settled, err := settleLogSlotTx(ctx, tx, team, run, logReservationID(identity.id, segment.Index), segment.StoredBytes)
+		if err != nil {
+			return err
+		}
+		if !settled {
+			added += segment.StoredBytes
+		}
 	}
+	// safety: a segment whose signed slot expired before its commit is admitted now.
 	if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: run, bytes: added}); err != nil {
 		return err
 	}

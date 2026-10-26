@@ -9,7 +9,7 @@ import (
 )
 
 // ChargeRetainedStorage bills unique committed blobs and persisted log bytes.
-// The maintenance fence and each team's watermarks commit with its ledger debit.
+// Each team's watermarks commit with its ledger debit.
 // The initial sample starts billing without charging for earlier storage.
 func (o *Operator) ChargeRetainedStorage(ctx context.Context) (StorageChargeSweep, error) {
 	var out StorageChargeSweep
@@ -121,7 +121,9 @@ func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team, rate, fre
 		bytes = min(bytes, allowance)
 	}
 	bytes = max(bytes-free, 0)
-	// safety: after an idle gap, fresh bytes cannot be billed before they existed.
+	// safety: an idle gap bills no longer than the team's oldest stored byte has existed. Mixed-age inventory is
+	// billed for the whole interval at its current size, so bytes added just before a pass are charged for time
+	// before they existed; normal passes are minutes apart, and an exceptional gap is reconciled by hand.
 	seconds := min(gap, max((now.UnixNano()-inventory.oldest)/int64(time.Second), 0))
 	amount, err := storageChargeMicro(bytes, rate, seconds)
 	if err != nil {

@@ -18,9 +18,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-// safety: shorter than a minute, so a wake the store's lease turns away is
-// followed by another inside the same minute. The store's cron tick window
-// spaces the ticks that actually run.
+// safety: shorter than a minute, so a wake the store's tick window turns away is
+// followed by another inside the same minute. That window spaces the ticks
+// that actually run.
 const cronTickOffer = 20 * time.Second
 
 // safety: long enough that a tick which dies mid-flight does not hand the next
@@ -131,9 +131,9 @@ func defaultCronHolder() string {
 
 // safety: a store has one active controller, which holds a PostgreSQL session
 // advisory lock for its whole life (SQLite is single-process). Ticks run
-// synchronously in this loop; the store lease fences any concurrent caller,
-// and its stored timestamp keeps a window from being ticked twice. A tick that
-// fails is logged so the next interval still runs.
+// synchronously in this loop, and the store's stamp of the last successful
+// tick keeps a window from being ticked twice. A tick that fails is logged so
+// the next interval still runs.
 func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

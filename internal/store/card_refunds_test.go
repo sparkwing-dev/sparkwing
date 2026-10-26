@@ -143,6 +143,10 @@ func TestPartialRefundThenWarningRefundFailureIsListed(t *testing.T) {
 	if err != nil || len(failedRefunds) != 1 || failedRefunds[0].RefundID != "remaining-refund" {
 		t.Fatalf("failed remainder refund = %+v, %v; want it listed", failedRefunds, err)
 	}
+	// The owners hear about the $6 refund that failed, not the $10 payment.
+	if notices, err := s.AsOperator().ClaimFailedRefundNotices(ctx); err != nil || len(notices) != 1 || notices[0].AmountMicro != 600*MicroCreditsPerCent {
+		t.Fatalf("failed refund notices = %+v, %v; want one for $6", notices, err)
+	}
 	var refunded int64
 	if err := s.inTx(ctx, func(tx *storeTx) error {
 		var err error

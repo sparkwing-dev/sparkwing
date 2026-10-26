@@ -921,7 +921,6 @@ func configureMailer(ctx context.Context, srv *controller.Server, sender, config
 	return nil
 }
 
-// safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.
 // validateSupportContact accepts what the dashboard can link: an email address or an http(s) URL.
 func validateSupportContact(contact string) error {
 	if contact == "" {
@@ -936,6 +935,7 @@ func validateSupportContact(contact string) error {
 	return fmt.Errorf("--support-contact %q is neither an email address nor an http(s) URL", contact)
 }
 
+// safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.
 func validateBucketCeiling(cfg objectguard.CeilingConfig) error {
 	for name, n := range map[string]int64{
 		"--max-bucket-bytes":    cfg.Limit.MaxBytes,

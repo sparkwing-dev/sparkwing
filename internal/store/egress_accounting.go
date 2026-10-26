@@ -75,7 +75,7 @@ func (o *Operator) EgressUsageAcrossTeams(ctx context.Context, period string) (_
 // egressUsageRetentionMonths preserves thirteen months of egress reports.
 const egressUsageRetentionMonths = 13
 
-// PruneEgressUsage expires old reports under the maintenance fence and store clock.
+// PruneEgressUsage expires old reports under the store clock.
 func (o *Operator) PruneEgressUsage(ctx context.Context) (int64, error) {
 	var removed int64
 	err := o.s.inTx(ctx, func(tx *storeTx) error {

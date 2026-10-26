@@ -29,8 +29,8 @@ continue scheduling without treating that rollback as a database failure.
 
 ## Collection and required blob reads
 
-Integration amendment under the store review ruling: collection rechecks the
-maintenance lease after digest-lock waits and verifies the same collecting
+Integration amendment under the store review ruling: collection waits for the
+digest lock and verifies the same collecting
 tombstone immediately before physical deletion. Finalization also requires
 that tombstone. S3 deletes use the observed ETag as `If-Match`. Missing ETags,
 failed conditions and backend errors retain the tombstone for another pass.
@@ -2379,7 +2379,7 @@ unsealed execution streams with `writer_lost`. Job attempts wait until strictly
 after their persisted finish plus `limits.LogSealGrace`. Trigger and plan streams
 need no matching live unit generation. Eval checks its own generation and its
 immutable source generation separately. The operation locks each run, rechecks
-eligibility and the maintenance fence, and commits a bounded batch atomically.
+eligibility, and commits a bounded batch atomically.
 It preserves segments, stored-byte accounting, final seals and execution results.
 Publish-mode streams retain their publisher's final-commit contract because
 publication has no executable lease. The controller invokes this operation from
@@ -2423,7 +2423,7 @@ local publication transport and physical bytes remain integration obligations.
 | `logseg.UploadVerifier` | Derive one authorized object's key and check its stored size and digest after successful close. |
 | `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads, verify uncertain writes and proxy authenticated reads through the controller. |
 | `SegmentCommit`, `runstate.LogSegments`, `Tenant.ReadLogSegments` | Commit and read persisted segments under the same subject fence. |
-| `Operator.SealAbandonedLogStreams` | Seal abandoned execution streams under the maintenance lease without changing execution results. |
+| `Operator.SealAbandonedLogStreams` | Seal abandoned execution streams without changing execution results. |
 
 ## Capability persistence, authority and payment settlement
 
@@ -2639,8 +2639,7 @@ egress without consuming download quota. Accounting errors are logged. A process
 termination before request completion can lose that request's egress sample.
 `Tenant.EgressUsage` sums replicas for a UTC day or month.
 `Operator.EgressUsageAcrossTeams` supplies team totals for startup alarm reload.
-`Operator.PruneEgressUsage` retains thirteen months under the maintenance lease
-and store clock. `Store.RecordEgressUsage`, `Store.ListEgressUsage` and the raw
+`Operator.PruneEgressUsage` retains thirteen months under the store clock. `Store.RecordEgressUsage`, `Store.ListEgressUsage` and the raw
 `Store.PruneEgressUsage` are removed with the controller's principal flush timer.
 Account deletion leaves the tenant counters unchanged because they have no user
 identity. No schema or policy limit changes.
@@ -2669,8 +2668,7 @@ Expiry releases their holds before another charge can use that capacity.
 Already delivered bytes remain countable after the cap, and the download that
 crosses the cap finishes. Zero-byte checks add no usage row. Midnight resets
 admission while preserving earlier report rows. Overflow or a failed counter
-write rolls back both sides. Controller adapters reuse their existing lease
-holder identity as the replica ID. Logs retain their download-cap exemption.
+write rolls back both sides. Logs retain their download-cap exemption.
 
 `Operator.ChargeRetainedStorage(ctx, maintenanceLease)` bills unique `blobs`
 and committed `log_streams.stored_bytes`. Historical replica usage and reference
@@ -2678,8 +2676,7 @@ counts cannot multiply the charge. The team's cache and log rows share their
 existing `storage_charged_through` watermark because the free allowance applies
 once to the combined bytes. The tenant's retained allowance caps that total
 before the free allowance comes off. An absent quota row adds no ceiling.
-Each watermark and ledger debit commit under the current maintenance fence and
-credit lock. Initial samples establish billing time. Idle gaps are clamped to
+Each watermark and ledger debit commit under the credit lock. Initial samples establish billing time. Idle gaps are clamped to
 the stored bytes' creation time. A zero price resets existing watermarks so
 resuming billing starts a new interval. Storage charges remain runless.
 
@@ -2771,8 +2768,7 @@ and reports. Run and metric windows use `operator.run_retention_days` and
 existing names in the final settings table. Policy writes commit as one batch.
 Malformed, sealed, negative and overflowing values fail loudly.
 
-The controller's storage maintenance calls leased retention and billing with the same
-maintenance fence. The independent bucket-listing reconciliation pass and its
+The controller's storage maintenance calls retention and billing in one pass. The independent bucket-listing reconciliation pass and its
 StorageMarks, ReconcileStorage, TeamsOverFreeLogShare and
 PrunableNodeLogs APIs are removed. Retained-byte reports and billing read unique
 blobs and committed tagged log streams. Bucket listings cannot replace replica
@@ -2889,13 +2885,8 @@ fields cannot widen the persisted capability. Final upload and record writes
 still repeat their locking checks before persisting a receipt or reference.
 
 The `storage-reachability-and-retention-tails/store-data-sqlite` proof exercises
-leased record expiry, newest-success output pins, receipt roots, transitive
-members, persisted tombstones, grace and failed physical deletion. Collection
-requires the persisted maintenance fence even when no tombstones are ready.
-The proof refuses forged fences before and after reopening, then refuses an
-expired or superseded generation on an empty inventory. A same-holder takeover
-must acquire a new generation before collection resumes. Collection
-rechecks references added after marking, then removes tails after their last
+record expiry, newest-success output pins, receipt roots, transitive members,
+persisted tombstones, grace and failed physical deletion. Collection rechecks references added after marking, then removes tails after their last
 root disappears. An old source bundle survives its originating run and becomes
 collectible only after its record expires and the tombstone grace passes.
 Graphs and the deletion backend are contract fixtures. Native
@@ -3777,7 +3768,7 @@ Retries copy that retained source edge while preserving original provenance.
 A source digest in caller JSON without this proof is forbidden.
 
 Unbound committed uploads retain the existing 24-hour source window, measured
-from commit. `Operator.ExpireSourceUploads` holds the maintenance lease, deletes
+from commit. `Operator.ExpireSourceUploads` deletes
 staging bytes before releasing pending quota and removing expired unbound
 tickets. Failed deletion retains the ticket for retry. Bound source records
 follow run retention after their temporary upload tickets expire.

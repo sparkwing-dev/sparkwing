@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"reflect"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -102,15 +104,16 @@ func (s *Server) handleLogSigning(w http.ResponseWriter, r *http.Request, a capa
 	if err != nil {
 		return engineLookupError(err)
 	}
-	class, err := tenant.PrepareLogWrite(r.Context(), subject, logActor(a, subject))
+	// safety: the slot's bytes pass the storage rule before any URL exists, so a team at its limit gets none.
+	class, expires, err := tenant.ReserveLogUpload(r.Context(), subject, logActor(a, subject), body.Index, body.Size)
 	if err != nil {
-		return engineLookupError(err)
+		return storageGrowthRefusal(err)
 	}
 	objects, err := s.submissionObjects()
 	if err != nil {
 		return err
 	}
-	slot, err := (logseg.Signer{Objects: objects, ClassReady: objects.LogClassReady}).Sign(r.Context(), body, class)
+	slot, err := (logseg.Signer{Objects: objects, ClassReady: objects.LogClassReady, Now: func() time.Time { return expires.Add(-limits.LogUploadURLTTL) }}).Sign(r.Context(), body, class)
 	if err != nil {
 		return err
 	}
@@ -217,3 +220,19 @@ var (
 	_ logSubmissionObjects = (*blob.Filesystem)(nil)
 	_ logSubmissionObjects = (*blob.S3)(nil)
 )
+
+// storageGrowthRefusal answers a write the storage rule refused with its limit or funding reason, which the
+// writer shows the user instead of retrying.
+func storageGrowthRefusal(err error) error {
+	var held *store.InsufficientCreditsError
+	switch {
+	case errors.As(err, &held):
+		return creditsRefusal(held)
+	case errors.Is(err, store.ErrStorageQuota):
+		return &apierr.Error{Code: apierr.QuotaExceeded, Message: err.Error()}
+	case errors.Is(err, store.ErrInsufficientCredits):
+		return &apierr.Error{Code: apierr.InsufficientCredit, Message: err.Error(), Details: map[string]any{"reason": creditsRefusedCode}}
+	default:
+		return engineLookupError(err)
+	}
+}
