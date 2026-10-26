@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-
 )
 
 func TestQueueManagerUsesFinalRoutes(t *testing.T) {

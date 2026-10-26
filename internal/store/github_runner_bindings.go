@@ -25,8 +25,8 @@ type GitHubRunnerBinding struct {
 	// repository at enrollment; the binding ends with it. Zero on a
 	// controller without the App.
 	InstallationID int64
-	CreatedBy  string
-	CreatedAt  time.Time
+	CreatedBy      string
+	CreatedAt      time.Time
 }
 
 // GitHubRunnerBindings lists t's bindings, oldest first.
