@@ -381,6 +381,10 @@ podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65534
   fsGroup: 65534
+  # safety: without it the kubelet re-applies group write to every file on each
+  # mount, and the controller refuses its 0600 credential-epoch file after the
+  # first restart. The init container's chown still sets the root's ownership.
+  fsGroupChangePolicy: OnRootMismatch
   # Required by the Pod Security "restricted" profile. Drop this only
   # for a workload that needs syscalls the runtime's default profile
   # blocks; the pods this chart runs do not.

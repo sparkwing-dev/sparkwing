@@ -196,7 +196,11 @@ directory. Use the same flag for startup and every restore command. The
 controller restricts that directory to its owner and applies the credential
 file checks above to the epoch. The Helm chart always mounts a dedicated,
 retained PVC at `/var/lib/sparkwing/credential-epoch` and selects it with this
-flag, including when `/data` uses `emptyDir`. Preserve the latest epoch when
+flag, including when `/data` uses `emptyDir`. The chart sets the pod's
+`fsGroupChangePolicy` to `OnRootMismatch`. Without it the kubelet adds group
+write to the 0600 epoch file on every mount, and the controller refuses to
+start after its first restart. A pod spec of your own needs the same setting.
+Preserve the latest epoch when
 restoring a database. Retain its volume independently of database backups.
 Declared restore preparation holds schedules until operator acknowledgment and
 cancels restored unfinished scheduled runs. A normal restore keeps sessions,
@@ -539,7 +543,10 @@ relation sizes, including indexes.
 
 Quotas belong to registered teams. Token principal labels do not select a
 quota. `default_tier` supplies limits only when a team has no explicit row.
-An empty default leaves those teams unlimited. A zero write limit is unbounded.
+An empty default leaves those teams unlimited on a self-hosted deployment.
+Sparkwing Cloud instead gives them the free tier, or the paid tier once the team
+has bought credits ([limits](limits.md#uploads-and-storage-accounting)). An
+allowance alone does not set write limits. A zero write limit is unbounded.
 
 Source uploads reserve monthly capacity before a run exists. Intake applies
 the committed unique-byte charge to the run and its per-run limits.

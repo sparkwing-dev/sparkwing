@@ -2177,3 +2177,15 @@ func TestCloudLauncherPermissionsStayScoped(t *testing.T) {
 		})
 	}
 }
+
+// A kubelet that re-applies fsGroup on every mount adds group write to the 0600 credential-epoch file, and the
+// controller then refuses to start after its first restart.
+func TestControllerPodLeavesVolumeOwnershipAloneOnRemount(t *testing.T) {
+	out := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing")
+	if !strings.Contains(out, "fsGroupChangePolicy: OnRootMismatch") {
+		t.Fatalf("controller pod security context lacks fsGroupChangePolicy: OnRootMismatch:\n%s", out)
+	}
+	if !strings.Contains(out, "/bin/chown") {
+		t.Fatal("controller pod lost the init chown that sets the volume root's ownership")
+	}
+}
