@@ -4320,7 +4320,7 @@ committed refund receipt in the same ledger transaction. The receipt is selected
 by configured provider mode, refund object, tenant and payment identity through
 the existing payment_events object index. A successful receipt completes the
 queue and wins over a stale failed worker response; failed or canceled receipts
-schedule one retry. Repeated binds cannot
+are final and listed for the operator, never retried. Repeated binds cannot
 repeat that transition. The verified callback owns the financial reversal.
 No second callback authority or refund ledger is introduced.
 

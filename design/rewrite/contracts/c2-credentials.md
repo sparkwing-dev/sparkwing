@@ -87,19 +87,19 @@ inventory is:
 
 The existing four checkout policies and their projection remain unchanged.
 PaymentEvent stays comparable. ObjectID carries the setup, intent, refund,
-warning or dispute ID. PaymentID is the payment intent. CustomerID and MethodID
-identify the card setup. ChargeID selects the verified charge. Status, Reason,
-DeclineCode, Fingerprint, Brand, Last4, Created (provider event Unix seconds)
-and Actionable retain only provider facts. No team, credit value, local charge
+warning or dispute ID. PaymentID is the payment intent. CustomerID identifies
+the card setup's customer. ChargeID selects the verified charge. Status, Reason,
+DeclineCode, ThreeDS, LiabilityShift, Created (provider event Unix seconds) and
+Actionable retain only provider facts; the table above is the complete
+inventory, and no card detail is among them. No team, credit value, local charge
 ID, attempt ID, or metadata field is accepted as authority.
 
 Signature, timestamp and configured event mode precede object decoding and
 provider access. Every non-checkout object must match the configured mode and
 carry a positive event creation time. Required references accept provider IDs
-or expanded objects. Card setup reads the payment method using the configured
-private API key and checks the exact method, customer, mode and card shape.
-Paid-card and warning events read the charge and check its exact payment-intent
-relation and mode before taking a fingerprint. Reads use fixed HTTPS Stripe
+or expanded objects. Card setup and warning events make no provider read. A paid
+card event reads its charge with the configured private API key and checks the
+exact payment-intent relation and mode before taking the 3-D Secure result. Reads use fixed HTTPS Stripe
 collections, path-safe IDs, no redirects and the existing one-MiB JSON budget.
 Provider failure returns a safe unavailable error. No proof reaches settlement
 after a failed read. The provider has no SQL, ledger write or retry policy.

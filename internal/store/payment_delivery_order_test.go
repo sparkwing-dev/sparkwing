@@ -91,8 +91,7 @@ func TestPaymentConsequencesSurviveEveryDeliveryOrder(t *testing.T) {
 	}
 }
 
-// A replay of the identical signed warning after its refund completed, and after a provider read now reports
-// other card facts, is the same event.
+// A replay of the identical signed warning after its refund completed is the same event.
 func TestAWarningReplaysAfterItsRefundCompleted(t *testing.T) {
 	s, pay := paymentFixture(t, capability.PaymentTest)
 	now := s.now()

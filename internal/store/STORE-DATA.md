@@ -228,7 +228,7 @@ settlement return zero cost without invoking a calculator or writing a charge.
 Final settlement still closes the immutable award, and exact replay returns
 that zero result after claimant pruning. Settlement reads the award and ledger,
 so deleting a run or revoking its claimant cannot change its payer or rate.
-Refunds retain the reservation's card and spend day. Callers keep renewal,
+Refunds retain the reservation's spend day. Callers keep renewal,
 transition and accounting in one transaction. They apply the existing spend
 policy to the resulting balance. A pause cannot precede the interval's last
 charged checkpoint.
@@ -237,7 +237,7 @@ The unused expired-claim settlement adapter is removed. Reapers must use the
 immutable award and interval helpers in their state transaction. Generated
 SQLite tests settle through an earlier persisted lapse after database reopening,
 race two settlement connections, and replay the committed result. The original
-rate, CPU class, card and refund day survive claimant pruning and pricing/card
+rate, CPU class and refund day survive claimant pruning and pricing
 changes. C2 calculation is a contract fake in these tests. Claim/start/reaper
 wiring and native execution remain integration obligations.
 
@@ -552,8 +552,8 @@ first verified paid outcome, including a refused payment. The separate
 is protected. Missing, unknown and `attempt_acknowledged` results are
 unprotected. Later deliveries cannot change either value. A fraud
 warning keeps protected credit under a payment-specific team hold. Without
-protection, it reverses the credit and queues a refund. Both paths block the
-card deployment-wide. Held credit cannot fund storage growth or retention.
+protection, it reverses the credit and queues a refund. Both paths hold only the
+team the payment funded. Held credit cannot fund storage growth or retention.
 
 The unused `ErrMeteredInProcessNodes`, `LiveLogOffsetHeader`,
 `LiveLogAttemptHeader` and `LogWatchHeader` exports are removed. Tagged log

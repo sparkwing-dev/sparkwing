@@ -929,7 +929,7 @@ customer's default payment method, or its newest card when it has no default.
   has no card; the controller closes that refill as `no_card`, blocks refills
   like a declined payment and notifies the owners. It never confirms a payment.
 - `POST /internal/refill/reconcile` retrieves the bound intent, validates its
-  refill identity, deployment, amount and customer, and returns its raw
+  refill ID and customer, and returns its raw
   Stripe status. It never confirms or cancels a payment.
 - `POST /internal/refill/confirm` validates those same facts and confirms only a
   `requires_confirmation` intent, under the refill's existing confirmation

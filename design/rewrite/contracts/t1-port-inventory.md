@@ -2929,7 +2929,8 @@ The uncharged-event cap test prepares a real internal state event. The retiremen
 reflection test also refuses Tenant.AppendEventOnce and Operator.DropCardAttempt.
 No acceptance cell is newly enabled by this cut.
 
-The queued-refund tests retain failed/canceled retry backoff, exact provider
+The queued-refund tests check that failed and canceled refunds are final and
+listed for operators, and cover exact provider
 object binding, duplicate and stale callbacks, early outcomes, operator partial
 refunds and conservation. Caller-supplied attempt keys no longer authorize
 callbacks. The generated association property covers foreign tenant, provider
