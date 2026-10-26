@@ -20,7 +20,8 @@ type UnitRef struct {
 }
 
 // UnitDemand carries observed platform and labels. Identity, reservations and team
-// come from C2's capability; requirements and allowed pools come from persisted seals.
+// come from C2's capability; requirements come from persisted seals, and pool access is
+// decided at each use from the current pool rules.
 type UnitDemand struct {
 	// FreeSlots is remaining poll capacity; nil offers one slot. Awards consume it.
 	FreeSlots          *int

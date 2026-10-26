@@ -95,7 +95,8 @@ type AcceptedExpansion struct {
 }
 
 // AdmitRun is the only intake for local, remote, retry, child and published runs.
-// It derives authority and allowed pools in the transaction; published runs receive no executable owner unit.
+// It derives authority in the transaction; pool access is decided at each use, not here.
+// Published runs receive no executable owner unit.
 // A nonempty idempotency key is scoped by server-derived team, principal and pipeline.
 // The canonical input digest (including retry lineage) and key commit on runs for
 // executable and published intake alike. Same key/body returns the original result;
@@ -103,7 +104,8 @@ type AcceptedExpansion struct {
 // Verified App redeliveries return the original run for that delivery and pipeline,
 // including when the caller supplies no idempotency key.
 // Retry intake loads Lineage.RetryOf from this Tenant, preserves code and inputs,
-// and reseals asserted writes for the retrier. The new execution ID stays outside the source envelope.
+// and keeps the source's sealed writer; the retrier is recorded only in lineage.
+// The new execution ID stays outside the source envelope.
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error) {
 	var result AdmissionResult
 	var installed *localRunSecrets

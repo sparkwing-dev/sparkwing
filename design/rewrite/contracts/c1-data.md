@@ -840,7 +840,7 @@ runner selection keeps its label-term alternatives.
 `claim_contexts` assigns immutable policy contexts to source rows at intake,
 plan acceptance and expansion insertion. A context hash includes the request,
 provenance, resolved options and guards, job execution settings, repository
-scope, allowed pools and creator. Seal identities, source revisions, timestamps and unrelated job declarations
+scope and creator (pool access is read at each use, not hashed). Seal identities, source revisions, timestamps and unrelated job declarations
 do not split otherwise equal contexts. The context row stores its identity,
 requirement set and unit kind, and copies the overflow account and minute limit
 for indexed budget checks. Finished sources clear their context reference in the
