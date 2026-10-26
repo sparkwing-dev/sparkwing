@@ -80,3 +80,13 @@ func TestOnlyAFailedRefillCanBlockRefills(t *testing.T) {
 		}
 	}
 }
+
+func TestAStripeCustomerBelongsToOneTeam(t *testing.T) {
+	s, _, _ := refillFixture(t, true)
+	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('other',1,1),('third',1,1)`)
+	if _, err := s.db.ExecContext(t.Context(), `UPDATE teams SET card_customer='cus_1',card_added_at=1 WHERE name='other'`); err == nil {
+		t.Fatal("a second team took the first team's Stripe customer")
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='cus_other',card_added_at=1 WHERE name='other'`)
+	rewriteSchemaCount(t, s.db, "teams WHERE card_customer=''", 2)
+}

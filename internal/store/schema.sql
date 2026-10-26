@@ -29,6 +29,9 @@ CREATE TABLE teams (
     CHECK(refill_enabled = 0 OR (refill_amount_cents >= 1000 AND card_added_at <> 0))
 );
 
+-- safety: one Stripe customer pays for one team, so no team's portal or refill reaches another team's card.
+CREATE UNIQUE INDEX idx_teams_card_customer ON teams(card_customer) WHERE card_customer <> '';
+
 CREATE TABLE claim_awards (
     singleton BIGINT PRIMARY KEY CHECK(singleton=1),
     ordinal BIGINT NOT NULL DEFAULT 0 CHECK(ordinal >= 0)
