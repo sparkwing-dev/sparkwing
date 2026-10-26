@@ -587,10 +587,11 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 }
 
 func installationActionsRootsTx(ctx context.Context, tx *storeTx, team Team, installation int64) ([]string, error) {
+	now := tx.now(ctx).UnixNano()
 	rows, err := tx.queryContext(ctx, `SELECT c.prefix FROM capabilities c
 		JOIN github_runner_bindings b ON b.team = c.team AND b.repo_key = c.repo_key
-		WHERE b.team = ? AND b.installation_id = ? AND c.bind_kind = 'push' AND c.parent_id IS NULL AND c.revoked_at IS NULL
-		ORDER BY c.prefix`, string(team), installation)
+		WHERE b.team = ? AND b.installation_id = ? AND c.bind_kind = 'push' AND c.parent_id IS NULL AND `+liveCredentialSQL("c.")+`
+		ORDER BY c.prefix`, string(team), installation, now, now)
 	if err != nil {
 		return nil, err
 	}
