@@ -494,7 +494,8 @@ type RetryInput struct {
 	SourceRunID string
 }
 
-// safety: RetrySnapshot preserves source trust and keys asserted writes to the retrier.
+// safety: RetrySnapshot keeps the source's sealed identity whole, including the writer whose cache scope
+// the retry reads and writes; the retrier is recorded only in Lineage.
 type RetrySnapshot struct {
 	Request SealedRequest
 	Spec    Optional[Spec]

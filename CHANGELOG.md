@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **schedules:** Run now records the member who pressed it as the run's actor and creator, not the schedule's armer. Its asserted identity is unchanged.
+- **provenance:** A GitHub Actions push run keeps the push's verified ref and commit only when it executes that same commit; code at any other commit it names runs asserted. A child in its parent's repository must use the parent's source location, checked once at intake, and a push-bound credential can be delegated only from a push-bound credential.
 - **runners (Breaking):** A runner in a Kubernetes pod reports it on every claim, and the controller refuses the claims of a self-hosted credential not enrolled with `--platform kubernetes`, so the runner stops at its first poll with an error naming the fix instead of serving as a plain machine that takes verified default-branch work.
 - **oidc:** Every minted run token writes an `oidc.minted` audit event naming the run, a digest of its job and the audience, before the token is returned.
 - **controller (Breaking):** `GET /api/v1/health` answers liveness and readiness only (`status` and `auth`, HTTP 503 when the database is unreachable). License expiry, webhook secret rotation, bucket, database size, egress and GitHub App state moved to the new `GET /api/v1/operator/health`, which requires `operator.limits` or an operator console session. The unauthenticated GitHub Actions credential exchange reads at most 16 KiB. OIDC docs state that a branch `delete` run's `sha` is the default branch's head.

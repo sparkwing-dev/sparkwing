@@ -200,6 +200,16 @@ refuses with `409` and conflict detail `limit` set to `max_child_depth` or
 budgets of whoever created its root, not the runner holding the parent's
 claim. See [limits](limits.md#execution-and-records).
 
+### Approvals
+
+An approval pauses a run until a team member with `approvals.write` (an editor,
+admin or owner, including the member who started the run) approves or denies
+it. It is a workflow step, not a security control. It does not enforce a
+separate reviewer, and it does not narrow what the run's code, secrets or OIDC
+tokens can reach. Protect a deployment target with that target's own controls,
+such as a protected branch, a reserved pool or the relying party's OIDC claim
+checks. Each decision is audited as `approval.decided`.
+
 ### Request audit log
 
 Audit records identify the route, operation, team, subject and public credential

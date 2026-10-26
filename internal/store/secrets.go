@@ -12,9 +12,10 @@ import (
 // "" for an unscoped secret. Shared marks an unscoped secret a run may
 // resolve; an unscoped row that is not shared answers admin only.
 //
-// The scope is the pipeline and not the repository, because a run's
-// repository is a string its submitter typed and nothing proves the
-// submitter owns it.
+// A run reads the secrets of the pipeline its sealed provenance speaks for:
+// its own, or its parent's when it is a child at the parent's exact revision.
+// A child that left that revision reads only shared secrets. Secrets are
+// scoped by pipeline, not by repository.
 type Secret struct {
 	Ephemeral bool `json:"-"`
 	Name      string

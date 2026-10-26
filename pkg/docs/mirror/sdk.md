@@ -282,6 +282,13 @@ deadline. Approvals support `Needs`, `NeedsIfPresent`, `NeedsGenerated`, `SkipIf
 `Optional`, `ContinueOnError` and `OnFailure`. The recovery job is executable.
 The gate itself only declares a decision.
 
+Any team member whose credential holds `approvals.write` can approve or deny:
+editors, admins and owners, including the member who started the run. Readers
+cannot. An approval is a workflow step that pauses a run for a person's
+decision. It is not a security control: it does not stop a run's author from
+approving their own run, and it does not limit what the run's code or secrets
+can do. See [security](security.md#approvals).
+
 ## Memo, caches and artifacts
 
 `Memo` reuses a successful job result. Its callback returns `sw.MemoValue` and an
