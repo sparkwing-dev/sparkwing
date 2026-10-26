@@ -190,6 +190,16 @@ claims. Plain-machine runners (VMs and bare metal) keep serving verified work
 under the same OS user, so job code can read runner credentials and leave host
 state for later jobs.
 
+A long-lived runner (a plain machine or a persistent Kubernetes runner) runs
+every job with the runner's own credential within reach. When it serves several
+repositories, a job from one repository can act as the runner and claim another
+repository's jobs in the same team, and with them that repository's pipeline
+secrets, source token and OIDC identity. The isolation unit is the runner, not
+the repository: enroll a runner with `--repos` limited to one repository, or to
+repositories that trust each other, and use launcher pools or Sparkwing Cloud,
+which give each claim a fresh pod, where repositories must stay apart. Pools
+that hold reserved secrets already require a launcher.
+
 A verified run on a host that outlives its jobs (plain-machine runners and
 persistent Kubernetes runners) writes memo, depcache and output records only to
 that host's own cache scope. Fresh pods, Sparkwing Cloud and remote cache
