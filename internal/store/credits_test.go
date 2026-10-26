@@ -14,9 +14,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-// safety: a node whose plan pins no cpu resolves to one core, which the
-// smallest class of the default rate table covers, so that is the price these
-// fixtures are billed at.
+// safety: runner sizes are labels priced by class, and these fixtures' nodes
+// bill at the default rate table's smallest class, two cores.
 var unpinnedNodeRateMicro = int64(9_000)
 
 func seedClaimedNode(t *testing.T, s *store.Store, runID, nodeID string) {

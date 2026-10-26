@@ -97,7 +97,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).applyCheckoutPaymentTx":    "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 
 	"(*Operator).DueCardRefunds":            "the payment worker lists every team's queued refunds in one pass",
-	"(*Operator).globalRunsPerHourRefusal":  "the committed-admission ceiling counts runs across every team in the deployment",
 	"(*Operator).runOwnerTx":                "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Operator).SampleSealedSecrets":       "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Operator).unlinkAccountIdentityTx":   "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",

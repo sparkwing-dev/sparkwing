@@ -39,9 +39,6 @@ const (
 	// computeLimitGlobalNodesPerRun caps the nodes any run may carry,
 	// whichever principal created it.
 	computeLimitGlobalNodesPerRun = "max_global_nodes_per_run"
-	// ComputeLimitGlobalRunsPerHour caps the runs the whole controller
-	// creates in an hour, whichever principal created them.
-	ComputeLimitGlobalRunsPerHour = "max_global_runs_per_hour"
 	// ComputeLimitCronSeconds is the shortest interval a cloud schedule may
 	// declare, in seconds.
 	ComputeLimitCronSeconds = "min_cron_interval_seconds"
@@ -95,7 +92,6 @@ type ComputeLimits struct {
 	NodesPerRun       int64
 	RunsPerHour       int64
 	GlobalNodesPerRun int64
-	GlobalRunsPerHour int64
 	CronSeconds       int64
 }
 
@@ -115,7 +111,6 @@ var computeLimitFields = map[string]func(*ComputeLimits) *int64{
 	ComputeLimitNodesPerRun:       func(l *ComputeLimits) *int64 { return &l.NodesPerRun },
 	ComputeLimitRunsPerHour:       func(l *ComputeLimits) *int64 { return &l.RunsPerHour },
 	computeLimitGlobalNodesPerRun: func(l *ComputeLimits) *int64 { return &l.GlobalNodesPerRun },
-	ComputeLimitGlobalRunsPerHour: func(l *ComputeLimits) *int64 { return &l.GlobalRunsPerHour },
 	ComputeLimitCronSeconds:       func(l *ComputeLimits) *int64 { return &l.CronSeconds },
 }
 
@@ -147,8 +142,8 @@ func (l ComputeLimits) Value(name string) (int64, bool) {
 
 func computeLimitKey(name string) string { return "compute_limit_" + name }
 
-// safety: one row per guard read one at a time is nine point-reads on the
-// claim path, so every guard is read in this one statement instead.
+// safety: the claim path reads every guard, so they are read in one statement
+// rather than one point-read per guard.
 var computeLimitsSQL, computeLimitKeyArgs = func() (string, []any) {
 	names := ComputeLimitNames()
 	args := make([]any, 0, len(names))
@@ -318,7 +313,7 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, team Team, runID str
 	if err != nil {
 		return err
 	}
-	if limits.RunsPerHour <= 0 && limits.GlobalRunsPerHour <= 0 {
+	if limits.RunsPerHour <= 0 {
 		return nil
 	}
 	if err := lockComputeGuardsTx(ctx, tx); err != nil {
@@ -333,45 +328,30 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, team Team, runID str
 			return fmt.Errorf("%w: run %s", errIDOwnedByAnotherTeam, runID)
 		}
 		createdBy, err := runPrincipalTx(ctx, tx, team, runID)
-		if err != nil || createdBy != "" || principal.ID == "" {
+		if err != nil || createdBy != "" {
 			return err
 		}
-		return runsPerHourRefusal(ctx, tx, team, ComputeLimits{RunsPerHour: limits.RunsPerHour}, principal, now)
 	}
-	return runsPerHourRefusal(ctx, tx, team, limits, principal, now)
+	if principal.ID == "" {
+		return nil
+	}
+	return runsPerHourRefusal(ctx, tx, team, limits.RunsPerHour, principal, now)
 }
 
 func runsPerHourRefusal(
-	ctx context.Context, q *storeTx, team Team, limits ComputeLimits, principal capability.Subject, now time.Time,
+	ctx context.Context, q *storeTx, team Team, limit int64, principal capability.Subject, now time.Time,
 ) error {
 	since := now.Add(-time.Hour).UnixNano()
-	if limits.RunsPerHour > 0 && principal.ID != "" {
-		kind, id := `json_extract(lineage_json, '$.admission_subject.kind')`, `json_extract(lineage_json, '$.admission_subject.id')`
-		if q.dialect == DialectPostgres {
-			kind, id = `convert_from(lineage_json,'UTF8')::jsonb->'admission_subject'->>'kind'`, `convert_from(lineage_json,'UTF8')::jsonb->'admission_subject'->>'id'`
-		}
-		var runs int64
-		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=? AND created_at>=? AND `+kind+`=? AND `+id+`=?`, team, since, principal.Kind, principal.ID).Scan(&runs); err != nil {
-			return err
-		}
-		if runs >= limits.RunsPerHour {
-			return &ComputeLimitError{Limit: ComputeLimitRunsPerHour, Cap: limits.RunsPerHour, Observed: runs, Scope: "principal " + principal.ID, Principal: principal.ID}
-		}
+	kind, id := `json_extract(lineage_json, '$.admission_subject.kind')`, `json_extract(lineage_json, '$.admission_subject.id')`
+	if q.dialect == DialectPostgres {
+		kind, id = `convert_from(lineage_json,'UTF8')::jsonb->'admission_subject'->>'kind'`, `convert_from(lineage_json,'UTF8')::jsonb->'admission_subject'->>'id'`
 	}
-
-	if limits.GlobalRunsPerHour > 0 {
-		return q.operator.globalRunsPerHourRefusal(ctx, q, limits.GlobalRunsPerHour, since)
-	}
-	return nil
-}
-
-func (o *Operator) globalRunsPerHourRefusal(ctx context.Context, q *storeTx, limit, since int64) error {
 	var runs int64
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE created_at>=?`, since).Scan(&runs); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=? AND created_at>=? AND `+kind+`=? AND `+id+`=?`, team, since, principal.Kind, principal.ID).Scan(&runs); err != nil {
 		return err
 	}
 	if runs >= limit {
-		return &ComputeLimitError{Limit: ComputeLimitGlobalRunsPerHour, Cap: limit, Observed: runs, Scope: "controller"}
+		return &ComputeLimitError{Limit: ComputeLimitRunsPerHour, Cap: limit, Observed: runs, Scope: "principal " + principal.ID, Principal: principal.ID}
 	}
 	return nil
 }

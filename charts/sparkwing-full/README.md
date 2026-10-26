@@ -164,7 +164,11 @@ same bucket and prefix for multi-team storage accounting. The example uses
 `s3://sparkwing-cloud-data/controller`. Every blob, artifact, source bundle,
 upload and log key stays under `controller/`; record metadata lives in RDS.
 The example uses `controller.storage.type=emptyDir` for the process home at
-`/data`, because RDS and S3 hold database and object state. The credential epoch
+`/data`, because RDS and S3 hold database and object state. The render fails on
+`emptyDir` without `controller.store=postgres` and `controller.dataStore.s3URL`,
+and a `deployment: cloud` controller refuses to start without
+`--cache-blob-store`; `controller.bucketCeiling.store` measures a bucket and
+moves nothing off `/data`. The credential epoch
 still uses its dedicated retained PVC.
 `controller.storage.type=pvc` remains available for filesystem/SQLite installs.
 The example declares `deployment: cloud` and `store: postgres`.

@@ -145,7 +145,7 @@ func TestArgsMergeAndScheduledOverrides(t *testing.T) {
 }
 
 func TestOperatorSettingSourcePairs(t *testing.T) {
-	fields := []string{"RunRetentionDays", "MetricRetentionDays", "OwnerExecution", "MaxCores", "MaxMemoryBytes", "MaxPriority", "AllowedAdmissionClasses", "AllowedSources", "MaxClaimWait", "MaxConcurrentRunners", "MaxGlobalRunners", "RunnerAlarm", "MaxJobsPerRun", "MaxGlobalJobsPerRun", "MaxRunsPerPrincipalHour", "MaxGlobalRunsPerHour", "MinScheduleInterval", "ClaimsPerRunnerMinute", "HeartbeatsPerRunnerMinute", "RequestsPerTokenMinute", "RequestsPerMinuteAlarm", "MaxLogStreamsPerPrincipal", "MaxDownloadsPerPrincipal", "ShedQueueDepth", "EgressDailyAlarmBytes", "EnforceIdleClaimPoll"}
+	fields := []string{"RunRetentionDays", "MetricRetentionDays", "OwnerExecution", "MaxCores", "MaxMemoryBytes", "MaxPriority", "AllowedAdmissionClasses", "AllowedSources", "MaxClaimWait", "MaxConcurrentRunners", "MaxGlobalRunners", "RunnerAlarm", "MaxJobsPerRun", "MaxGlobalJobsPerRun", "MaxRunsPerPrincipalHour", "MinScheduleInterval", "ClaimsPerRunnerMinute", "HeartbeatsPerRunnerMinute", "RequestsPerTokenMinute", "RequestsPerMinuteAlarm", "MaxLogStreamsPerPrincipal", "MaxDownloadsPerPrincipal", "ShedQueueDepth", "EgressDailyAlarmBytes", "EnforceIdleClaimPoll"}
 	for _, field := range fields {
 		t.Run(field, func(t *testing.T) {
 			for near := 0; near < 4; near++ {

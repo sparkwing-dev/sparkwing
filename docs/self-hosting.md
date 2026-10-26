@@ -310,7 +310,9 @@ helm upgrade --install sparkwing ./charts/sparkwing-full -f my-values.yaml \
 ```
 
 The chart passes `--store=postgres`, and the controller reads the Secret as its
-`pg-url` credential. Keep the DSN out of Helm
+`pg-url` credential. With `controller.storage.type=emptyDir`, `my-values.yaml`
+must also set `controller.dataStore.s3URL`; the chart refuses an ephemeral
+`/data` that would hold blobs whose records outlive it. Keep the DSN out of Helm
 values and command arguments. Initialize and verify the PostgreSQL data before
 starting the controller against it.
 

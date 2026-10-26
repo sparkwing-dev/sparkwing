@@ -1,5 +1,26 @@
 # Migrating to the next release
 
+## An ephemeral controller home needs PostgreSQL and S3
+
+The `sparkwing-full` chart refuses `controller.storage.type=emptyDir` unless
+`controller.store=postgres` and `controller.dataStore.s3URL` are both set,
+because an emptyDir `/data` goes with the pod. Without them SQLite's
+`state.db`, or every blob, artifact and log whose record PostgreSQL keeps,
+would be lost on pod replacement. `controller.bucketCeiling.store` does not
+satisfy the check: it measures a bucket and stores nothing. A
+`--deployment=cloud` controller likewise refuses to start without an `s3://`
+`--cache-blob-store`. Set `controller.dataStore.s3URL`. A self-hosted install
+may instead switch to `controller.storage.type=pvc`; Cloud still requires S3.
+
+## Fleet-wide hourly run cap removed
+
+The optional `max_global_runs_per_hour` compute guard, and the
+`operator.max_global_runs_per_hour` setting that fed it, are removed. It was
+off by default and counted every team's runs against one budget. Per-principal
+hourly limits (`max_runs_per_hour`) and prepaid credits still bound intake.
+`sparkwing operator limits set` refuses the old name; drop it from scripts and
+configuration. A value already stored is ignored.
+
 ## Secret missing sentinel
 
 Replace `secretname.ErrMissing` with `sparkwing.ErrSecretMissing` when checking

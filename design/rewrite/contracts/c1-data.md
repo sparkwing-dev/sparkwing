@@ -3510,13 +3510,14 @@ unknown argument classification masks every requested value. The existing
 PlanSecretOpener supplies decryption. A decryption or final authority failure
 rolls back the receipt and all state. This adds no runtime-mask propagation.
 
-AdmitRun applies the configured hourly guards after idempotent and App replay
+AdmitRun applies the configured hourly guard after idempotent and App replay
 selection, before inserting either the run or its owner. The single per-principal
 guard uses the authenticated subject kind and ID within its tenant, including
 unmetered members. Retry admissions use the committed retrier lineage for the
 subject kind because the source request retains its original actor. An account
-and machine sharing an ID have separate budgets. The global guard covers every team and uses only the configured cap. Pending
-execution backlog never derives a per-team hourly share. Both read committed run admissions
+and machine sharing an ID have separate budgets. There is no fleet-wide hourly
+guard; it was removed with `max_global_runs_per_hour`. Pending
+execution backlog never derives a per-team hourly share. The guard reads committed run admissions
 under the shared store serialization, never summed usage counters. Refusals preserve ErrComputeLimit and expose canonical rate_limited with the
 existing five-second retry delay. Replay spends no second slot. Raw pending-run attribution and token metering are not intake
 inputs. The unused OldestWaitingReadyNodeForPrincipal diagnostic is removed.

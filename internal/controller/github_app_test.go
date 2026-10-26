@@ -20,8 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -736,20 +734,21 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
 		t.Fatalf("subscribe = %d", code)
 	}
-	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "existing", Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
+	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitRunsPerHour: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalRunsPerHour: 1}); err != nil {
-		t.Fatal(err)
+	if code, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("first push = %d %v, want dispatched", code, out)
 	}
 	payload := pushPayload(7, 701, "acme/widgets", headSHA)
+	payload["before"] = strings.Repeat("1", 40)
 	if code, out := f.deliver("push", payload, ""); code != http.StatusTooManyRequests || computeLimitReason(out) != "compute_limit" {
 		t.Fatalf("limited app webhook = %d %v, want compute-limit 429", code, out)
 	}
-	if got := f.triggers(olga.team); len(got) != 0 {
-		t.Fatalf("limited app webhook left triggers: %+v", got)
+	if got := f.triggers(olga.team); len(got) != 1 {
+		t.Fatalf("triggers = %+v, want only the first push's", got)
 	}
-	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalRunsPerHour: 0}); err != nil {
+	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitRunsPerHour: 0}); err != nil {
 		t.Fatal(err)
 	}
 	f.processAgain(olga, payload)
