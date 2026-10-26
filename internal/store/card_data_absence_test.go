@@ -87,10 +87,7 @@ func TestNoCardDetailsAreStoredFromSetupThroughPurge(t *testing.T) {
 	if err != nil || len(due) != 1 || due[0].Customer != "cus_cards" {
 		t.Fatalf("due refills = %+v, %v", due, err)
 	}
-	if err := s.AsOperator().RecordRefillIntent(ctx, "a", due[0].ID, "pi_refill"); err != nil {
-		t.Fatal(err)
-	}
-	deliver("evt_refill", "payment_intent.succeeded", `{"id":"pi_refill","object":"payment_intent","status":"succeeded","livemode":false,"amount":1500,"amount_received":1500,"currency":"usd","customer":"cus_cards","latest_charge":"ch_refill",`+card+`,`+stamp+`,"purpose":"card_refill"}}`)
+	deliver("evt_refill", "payment_intent.succeeded", `{"id":"pi_refill","object":"payment_intent","status":"succeeded","livemode":false,"amount":1500,"amount_received":1500,"currency":"usd","customer":"cus_cards","latest_charge":"ch_refill",`+card+`,`+stamp+`,"purpose":"card_refill","refill_id":"`+due[0].ID+`"}}`)
 	deliver("evt_warning", "radar.early_fraud_warning.created", `{"id":"issfr_refill","object":"radar.early_fraud_warning","livemode":false,"actionable":true,"charge":"ch_refill","payment_intent":"pi_refill",`+card+`}`)
 	if standing, err := tenant.BillingStanding(ctx); err != nil || standing.Tier != "Held" {
 		t.Fatalf("standing after warning = %+v, %v; want the warned payment's team held", standing, err)

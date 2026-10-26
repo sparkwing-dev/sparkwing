@@ -22,8 +22,6 @@ const (
 	noCardCode = "no_card"
 )
 
-const refillCreated = "created"
-
 type hostedPageJSON struct {
 	URL string `json:"url"`
 }
@@ -129,16 +127,14 @@ func (s *Server) runBilling(ctx context.Context, every time.Duration) {
 	}
 }
 
-// safety: a refill's request is fixed when it opens, so every retry sends Stripe the same one under its key. Its
-// payment id is recorded before the confirm call charges the card, and only the signed webhook grants credit; a
-// crash before the id is recorded leaves a refill the next pass retries. A recorded payment is reconciled first;
-// charging still requires current permission, and cancellation retains the reservation record.
+// safety: DueRefills rechecks eligibility and opens each refill in its own transaction before any provider call, and
+// every pass sends an open refill's same request under its id as the idempotency key, so a crash or lost answer is
+// retried without a second charge. Only the signed webhook grants credit; a refusal the service reports stops refills.
 func (s *Server) refillPass(ctx context.Context) {
 	if !s.deployment.Metering() {
 		return
 	}
-	operator := s.operator
-	due, err := operator.DueRefills(ctx)
+	due, err := s.operator.DueRefills(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.logger.Error("refill pass", "err", err)
@@ -146,57 +142,14 @@ func (s *Server) refillPass(ctx context.Context) {
 		return
 	}
 	for _, r := range due {
-		if r.PaymentIntent == "" {
-			res, err := s.checkout.refill(ctx, s.paymentDeployment, r, "")
-			if errors.Is(err, errRefillNoCard) {
-				s.recordRefillFailure(ctx, r, store.RefillNoCard)
-				continue
-			}
-			if err != nil || res.Status != refillCreated {
-				s.logger.Error("creating a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "status", res.Status, "err", err)
-				continue
-			}
-			if err := operator.RecordRefillIntent(ctx, r.Team, r.ID, res.PaymentIntent); err != nil {
-				s.logger.Error("recording a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
-				continue
-			}
-			r.PaymentIntent = res.PaymentIntent
-		}
-		res, err := s.checkout.refill(ctx, s.paymentDeployment, r, "reconcile")
-		if err != nil {
-			s.logger.Error("reconciling a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
-			continue
-		}
-		switch res.Status {
-		case "requires_confirmation", "requires_payment_method", "requires_action", "canceled":
-		default:
-			continue
-		}
-		if res.Status != "canceled" && res.Status != "requires_action" {
-			allowed, err := operator.CanConfirmRefill(ctx, r)
-			if err != nil {
-				s.logger.Error("checking refill confirmation failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
-				continue
-			}
-			action := "cancel"
-			if allowed && res.Status == "requires_confirmation" {
-				action = "confirm"
-			} else if allowed {
-				continue
-			}
-			res, err = s.checkout.refill(ctx, s.paymentDeployment, r, action)
-			if err != nil {
-				s.logger.Error("updating a refill payment failed; it is retried", "team", string(r.Team), "refill", r.ID, "action", action, "err", err)
-				continue
-			}
-		}
-		if res.Status == "requires_action" {
-			s.recordRefillFailure(ctx, r, store.RefillAuthenticationRequired)
-		}
-		if res.Status == "canceled" {
-			if err := operator.RecordRefillCanceled(ctx, r); err != nil {
-				s.logger.Error("recording a canceled refill failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
-			}
+		res, err := s.checkout.refill(ctx, s.paymentDeployment, r)
+		switch {
+		case errors.Is(err, errRefillNoCard):
+			s.recordRefillFailure(ctx, r, store.RefillNoCard)
+		case err != nil:
+			s.logger.Error("charging a refill failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
+		case res.Failure != "":
+			s.recordRefillFailure(ctx, r, res.Failure)
 		}
 	}
 }

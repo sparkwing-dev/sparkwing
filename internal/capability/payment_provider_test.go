@@ -45,8 +45,8 @@ func financialObjects(mode PaymentMode) map[string]string {
 	live := fmt.Sprintf(`,"livemode":%t}`, mode == PaymentLive)
 	return map[string]string{
 		"setup_intent.succeeded":            `{"id":"seti_setup","object":"setup_intent","status":"succeeded","customer":"cus_owner","payment_method":"pm_card","metadata":{"purpose":"card_setup","sparkwing_deployment":"staging.sparkwing.dev"}` + live,
-		"payment_intent.succeeded":          `{"id":"pi_paid","object":"payment_intent","status":"succeeded","amount":1200,"amount_received":1200,"currency":"usd","latest_charge":"ch_paid","metadata":{"purpose":"card_refill","sparkwing_deployment":"staging.sparkwing.dev"}` + live,
-		"payment_intent.payment_failed":     `{"id":"pi_failed","object":"payment_intent","status":"requires_payment_method","amount":1200,"currency":"usd","last_payment_error":{"decline_code":"insufficient_funds"},"metadata":{"purpose":"card_refill"}` + live,
+		"payment_intent.succeeded":          `{"id":"pi_paid","object":"payment_intent","status":"succeeded","amount":1200,"amount_received":1200,"currency":"usd","latest_charge":"ch_paid","metadata":{"purpose":"card_refill","refill_id":"refill_paid","sparkwing_deployment":"staging.sparkwing.dev"}` + live,
+		"payment_intent.payment_failed":     `{"id":"pi_failed","object":"payment_intent","status":"requires_payment_method","amount":1200,"currency":"usd","last_payment_error":{"decline_code":"insufficient_funds"},"metadata":{"purpose":"card_refill","refill_id":"refill_failed"}` + live,
 		"refund.created":                    `{"id":"re_refund","object":"refund","payment_intent":"pi_paid","charge":"ch_paid","status":"pending","amount":600,"currency":"usd"` + live,
 		"refund.updated":                    `{"id":"re_refund","object":"refund","payment_intent":{"id":"pi_paid"},"charge":{"id":"ch_paid"},"status":"succeeded","amount":600,"currency":"usd"` + live,
 		"refund.failed":                     `{"id":"re_refund","object":"refund","payment_intent":"pi_paid","charge":"ch_paid","status":"failed","amount":600,"currency":"usd"` + live,
@@ -103,8 +103,8 @@ func TestPaymentProviderProofProperty(t *testing.T) {
 				if json.Unmarshal([]byte(object), &raw) != nil {
 					return false
 				}
-				purpose, _ := raw["metadata"].(map[string]any)
-				raw["metadata"] = map[string]any{"team": metadata, "credits": metadata, "charge": metadata, "attempt": metadata, "purpose": purpose["purpose"]}
+				routing, _ := raw["metadata"].(map[string]any)
+				raw["metadata"] = map[string]any{"team": metadata, "credits": metadata, "charge": metadata, "attempt": metadata, "purpose": routing["purpose"], "refill_id": routing["refill_id"]}
 				encoded, _ := json.Marshal(raw)
 				body := verifiedProviderBody(PaymentTest, kind, string(encoded))
 				proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
@@ -236,7 +236,7 @@ func TestPaymentProviderAcknowledgesIntentsSettledElsewhere(t *testing.T) {
 	objects := financialObjects(PaymentTest)
 	for kind, replace := range map[string][2]string{
 		"payment_intent.succeeded":      {`"purpose":"card_refill"`, `"team":"acme"`},
-		"payment_intent.payment_failed": {`"metadata":{"purpose":"card_refill"},`, ``},
+		"payment_intent.payment_failed": {`"metadata":{"purpose":"card_refill","refill_id":"refill_failed"}`, `"metadata":{}`},
 		"setup_intent.succeeded":        {`"purpose":"card_setup"`, `"purpose":"other"`},
 	} {
 		v, calls := providerVerifier(t, PaymentTest)
@@ -244,6 +244,28 @@ func TestPaymentProviderAcknowledgesIntentsSettledElsewhere(t *testing.T) {
 		proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
 		if err != nil || proof != nil || *calls != 0 {
 			t.Fatalf("%s without its purpose: proof=%v err=%v calls=%d", kind, proof, err, *calls)
+		}
+	}
+}
+
+// A card payment settles against the refill its metadata names, so one without a refill id is refused.
+func TestCardPaymentsCarryTheirRefillID(t *testing.T) {
+	object := financialObjects(PaymentTest)["payment_intent.succeeded"]
+	for _, tc := range []struct{ object, want string }{
+		{object, "refill_paid"},
+		{strings.Replace(object, `"refill_id":"refill_paid",`, ``, 1), ""},
+	} {
+		v, _ := providerVerifier(t, PaymentTest)
+		body := verifiedProviderBody(PaymentTest, "payment_intent.succeeded", tc.object)
+		proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
+		if tc.want == "" {
+			if err == nil || proof != nil {
+				t.Fatalf("payment without a refill id: proof=%v err=%v", proof, err)
+			}
+			continue
+		}
+		if err != nil || proof == nil || proof.Event().RefillID != tc.want {
+			t.Fatalf("refill payment proof=%v err=%v", proof, err)
 		}
 	}
 }

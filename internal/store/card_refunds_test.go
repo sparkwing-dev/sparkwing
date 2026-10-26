@@ -25,7 +25,7 @@ func cardFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 	return s, tenant, now
 }
 
-func openRefill(t *testing.T, s *Store, team Team, cents int64, payment string) Refill {
+func openRefill(t *testing.T, s *Store, team Team, cents int64) Refill {
 	t.Helper()
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		return setRefillTx(t.Context(), tx, team, RefillSettings{Enabled: true, ThresholdCents: 10_000_000, AmountCents: cents}, auditAccountActor("owner"))
@@ -38,10 +38,6 @@ func openRefill(t *testing.T, s *Store, team Team, cents int64, payment string) 
 	}
 	for _, r := range due {
 		if r.Team == team {
-			if err := s.AsOperator().RecordRefillIntent(t.Context(), team, r.ID, payment); err != nil {
-				t.Fatal(err)
-			}
-			r.PaymentIntent = payment
 			return r
 		}
 	}
@@ -49,9 +45,10 @@ func openRefill(t *testing.T, s *Store, team Team, cents int64, payment string) 
 	return Refill{}
 }
 
-func refillPaid(now time.Time, payment string, cents int64) capability.PaymentEvent {
+// refillPaid is the signed success of payment, whose metadata names refill r.
+func refillPaid(now time.Time, r Refill, payment string) capability.PaymentEvent {
 	e := providerPaymentEvent(now, capability.PaymentCardPaid)
-	e.EventID, e.PaymentID, e.ObjectID, e.AmountMinor = "paid-"+payment, payment, payment, cents
+	e.EventID, e.PaymentID, e.ObjectID, e.AmountMinor, e.RefillID = "paid-"+payment, payment, payment, r.AmountCents, r.ID
 	e.CustomerID, e.Status = "cus_1", "succeeded"
 	return e
 }
@@ -59,10 +56,10 @@ func refillPaid(now time.Time, payment string, cents int64) capability.PaymentEv
 func queuedRefundFixture(t *testing.T, paidFirst bool) (*Store, *Tenant, time.Time) {
 	t.Helper()
 	s, tenant, now := cardFixture(t)
-	openRefill(t, s, "a", 1_000, "payment")
+	r := openRefill(t, s, "a", 1_000)
 	warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
 	warning.AmountMinor, warning.Currency, warning.Actionable = 0, "", true
-	events := []capability.PaymentEvent{warning, refillPaid(now, "payment", 1_000)}
+	events := []capability.PaymentEvent{warning, refillPaid(now, r, "payment")}
 	if paidFirst {
 		events[0], events[1] = events[1], events[0]
 	}
@@ -112,8 +109,8 @@ func TestAFailedQueuedRefundIsListedNotRetried(t *testing.T) {
 func TestPartialRefundThenWarningRefundFailureIsListed(t *testing.T) {
 	s, tenant, now := cardFixture(t)
 	ctx := t.Context()
-	openRefill(t, s, "a", 1_000, "payment")
-	if _, err := s.settlePaymentFacts(ctx, refillPaid(now, "payment", 1_000)); err != nil {
+	r := openRefill(t, s, "a", 1_000)
+	if _, err := s.settlePaymentFacts(ctx, refillPaid(now, r, "payment")); err != nil {
 		t.Fatal(err)
 	}
 	partial := providerPaymentEvent(now, capability.PaymentRefund)
@@ -316,14 +313,14 @@ func TestRecordedRefundBindingRollsBackWithItsOutcome(t *testing.T) {
 
 func TestAWarningBeforeItsRefillIsPaidQueuesNoEmptyRefund(t *testing.T) {
 	s, _, now := cardFixture(t)
-	openRefill(t, s, "a", 1_000, "payment")
+	r := openRefill(t, s, "a", 1_000)
 	warning := providerPaymentEvent(now, capability.PaymentWarningEvent)
 	warning.AmountMinor, warning.Currency, warning.Actionable = 0, "", true
 	if _, err := s.settlePaymentFacts(t.Context(), warning); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "card_refunds", 0)
-	if _, err := s.settlePaymentFacts(t.Context(), refillPaid(now, "payment", 1_000)); err != nil {
+	if _, err := s.settlePaymentFacts(t.Context(), refillPaid(now, r, "payment")); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "card_refunds WHERE payment_intent='payment' AND amount_micro=1000000000", 1)
@@ -331,9 +328,9 @@ func TestAWarningBeforeItsRefillIsPaidQueuesNoEmptyRefund(t *testing.T) {
 
 func TestALostDisputeOnARefusedPaymentSettles(t *testing.T) {
 	s, _, now := cardFixture(t)
-	openRefill(t, s, "a", 1_000, "payment")
+	r := openRefill(t, s, "a", 1_000)
 	rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings(payment_mode,warning_id,payment_intent,actionable,created_at) VALUES ('test','issfr_refused','payment',1,1)`)
-	if got, err := s.settlePaymentFacts(t.Context(), refillPaid(now, "payment", 1_000)); err != nil || got.Refused == "" {
+	if got, err := s.settlePaymentFacts(t.Context(), refillPaid(now, r, "payment")); err != nil || got.Refused == "" {
 		t.Fatalf("refill named by an earlier warning = %+v, %v", got, err)
 	}
 	lost := providerPaymentEvent(now, capability.PaymentDisputeClosed)

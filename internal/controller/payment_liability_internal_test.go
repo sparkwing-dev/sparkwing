@@ -18,7 +18,7 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/%s/warning_first=%t", kind, result, warningFirst), func(t *testing.T) {
 					e, tenant := refillFixture(t)
 					s := e.Store
-					payment, paidKind, paidObject := "pi_refill", "payment_intent.succeeded", refillIntent("pi_refill", "succeeded")
+					payment, paidKind, paidObject := "pi_refill", "payment_intent.succeeded", ""
 					if kind == "checkout" {
 						billingModelCheckout(t, s, tenant, "cs_refill", 2000)
 						paidKind, paidObject = "checkout.session.completed", stolenCardSession("cs_refill", payment)
@@ -27,9 +27,7 @@ func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
 						if err != nil || len(due) != 1 {
 							t.Fatalf("reserve refill = %+v, %v", due, err)
 						}
-						if err := s.AsOperator().RecordRefillIntent(t.Context(), "a", due[0].ID, payment); err != nil {
-							t.Fatal(err)
-						}
+						paidObject = refillIntent(payment, due[0].ID, "succeeded")
 					}
 					engineSQL(t, s, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at) VALUES ('b',1,1,'cus_b',1)`)
 					deployment, err := s.AsOperator().ConfigureDeployment(t.Context(), "", store.DefaultFreeTeamSlots, func() error { return nil })

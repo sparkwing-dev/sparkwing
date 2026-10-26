@@ -1139,14 +1139,6 @@ CREATE TABLE payment_warnings (
     PRIMARY KEY(payment_mode,warning_id)
 );
 
-CREATE TABLE payment_states (
-    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
-    payment_id TEXT NOT NULL CHECK(payment_id <> ''),
-    status TEXT NOT NULL CHECK(status IN ('failed','succeeded')),
-    outcome_json TEXT NOT NULL,
-    PRIMARY KEY(payment_mode,payment_id)
-);
-
 CREATE TABLE payment_setups (
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     intent_id TEXT NOT NULL CHECK(intent_id <> ''),

@@ -100,6 +100,8 @@ type PaymentEvent struct {
 	IntentID       string
 	Created        int64
 	Actionable     bool
+	// RefillID is the refill a card payment's metadata names; settlement finds the refill by it.
+	RefillID string
 }
 
 // Identity is the event as Stripe signed it. Settlement snapshots protection policy after

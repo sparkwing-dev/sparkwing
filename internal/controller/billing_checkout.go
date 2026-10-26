@@ -46,7 +46,7 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 
 var errCheckoutRefused = errors.New("the checkout service refused the session")
 
-// errRefillNoCard is the checkout service's refusal to create a refill for a customer with no card in Stripe.
+// errRefillNoCard is the checkout service's refusal to charge a refill for a customer with no card in Stripe.
 var errRefillNoCard = errors.New("the customer has no card")
 
 // openReservedPage opens the provider page for a reservation; email, the team owner's address for Stripe's receipts,
@@ -130,23 +130,33 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 	return nil
 }
 
-type refillResult struct {
-	PaymentIntent string `json:"payment_intent"`
-	Status        string `json:"status"`
+// refillRequest and refillResponse are the checkout service's POST /internal/refill contract, which creates and
+// confirms one off-session payment under the refill id. testdata/refill_contract.json holds the example the checkout
+// service tests against too, byte for byte, so a drift in either repository fails a test.
+type refillRequest struct {
+	Team        string `json:"team"`
+	Deployment  string `json:"deployment"`
+	RefillID    string `json:"refill_id"`
+	AmountCents int64  `json:"amount_cents"`
+	Customer    string `json:"customer"`
 }
 
-func (c *billingCheckout) refill(ctx context.Context, deployment string, r store.Refill, action string) (refillResult, error) {
-	var out refillResult
-	path := "/internal/refill"
-	if action != "" {
-		path += "/" + action
-	}
-	err := c.post(ctx, path, map[string]any{
-		"team": string(r.Team), "deployment": deployment, "refill_id": r.ID, "amount_cents": r.AmountCents,
-		"customer": r.Customer, "payment_intent": r.PaymentIntent,
+// refillResponse names the payment and its Stripe status. Failure is set when Stripe refused the charge:
+// authentication_required, or the decline code.
+type refillResponse struct {
+	PaymentIntent string `json:"payment_intent"`
+	Status        string `json:"status"`
+	Failure       string `json:"failure,omitempty"`
+}
+
+func (c *billingCheckout) refill(ctx context.Context, deployment string, r store.Refill) (refillResponse, error) {
+	var out refillResponse
+	err := c.post(ctx, "/internal/refill", refillRequest{
+		Team: string(r.Team), Deployment: deployment, RefillID: r.ID, AmountCents: r.AmountCents, Customer: r.Customer,
 	}, &out)
-	if err == nil && (out.PaymentIntent == "" || out.Status == "" || r.PaymentIntent != "" && out.PaymentIntent != r.PaymentIntent) {
-		err = fmt.Errorf("%w: missing or mismatched payment or status", errCheckoutRefused)
+	// A payment Stripe accepted is succeeded or processing, and its signed webhook settles it.
+	if err == nil && (out.PaymentIntent == "" || out.Failure == "" && out.Status != "succeeded" && out.Status != "processing") {
+		err = fmt.Errorf("%w: refill answered no payment, status %q", errCheckoutRefused, out.Status)
 	}
 	return out, err
 }

@@ -108,6 +108,9 @@ func (a *paymentAuthenticator) cardPayment(ctx context.Context, object paymentOb
 		return invalidPaymentEvent()
 	}
 	event.PaymentID, event.AmountMinor, event.Currency = object.ID, *object.Amount, object.Currency
+	if event.RefillID = object.Metadata.get(paymentRefillMetadata); event.RefillID == "" {
+		return invalidPaymentEvent()
+	}
 	event.ChargeID, event.DeclineCode = string(object.LatestCharge), object.LastPaymentError.DeclineCode
 	if event.Kind == PaymentCardFailed {
 		if object.Status == "requires_action" {
