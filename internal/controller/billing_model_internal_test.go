@@ -292,7 +292,7 @@ func TestRefillPassCreatesRecordsThenConfirmsAndOnlyTheWebhookGrants(t *testing.
 	}
 }
 
-// A signed failure closes the refill, stops refills until Add funds succeeds or a new card setup completes, and alerts and mails
+// A signed failure closes the refill, stops refills until Add funds succeeds, and alerts and mails
 // the owners.
 func TestARefusedRefillStopsRefillsAndAlerts(t *testing.T) {
 	e, tenant := refillFixture(t)
