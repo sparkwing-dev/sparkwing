@@ -59,7 +59,8 @@ The default is true. Personal enrollment requires an independent account session
 and members may use it while this setting permits it. Shared runner enrollment,
 token rotation and revocation always require administration. The console exposes
 the setting and personal/shared enrollment through the same routes. Disabling
-enrollment preserves existing machine authority and owner-only claim scope.
+enrollment ends the personal machines that members without administration
+enrolled, and re-enabling it does not revive them (decision 67).
 
 ## Amendment 1: environment, presence and managed units
 

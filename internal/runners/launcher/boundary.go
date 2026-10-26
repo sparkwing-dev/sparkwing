@@ -31,7 +31,8 @@ const (
 )
 
 // KubernetesBoundary persists exclusivity on the node under Kubernetes resource-version fencing.
-// Probe proves network enforcement and Clear removes prior Job state before the node can be reused.
+// Probe proves network enforcement and Clear removes this reservation's probe Pods; a node is
+// reused only within the run that first used it, so no Job state is cleared between runs.
 // Both callbacks are required deployment integrations, with no manifest-only or no-op fallback.
 // Clear must be idempotent and confined to this reservation's state, including concurrent calls.
 type KubernetesBoundary struct {

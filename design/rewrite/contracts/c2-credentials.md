@@ -543,7 +543,9 @@ Personal enrollment requires current `runs.write`. Shared enrollment always requ
 `team.admin`, as do shared-runner token rotation and revocation. The store
 rechecks the setting with current membership inside root issuance, under the
 same team lock as setting changes. Personal ownership and claim matching keep
-their existing persisted origin relation. Disabling enrollment revokes nothing.
+their existing persisted origin relation. Disabling enrollment bumps the team's
+member machine epoch, ending personal machines that members without
+administration enrolled; re-enabling it does not revive them (decision 67).
 
 GET `/api/v1/team/settings` requires `runs.read`. PUT requires `team.admin`
 and one explicit boolean `members_can_add_machines`; missing, null or unknown

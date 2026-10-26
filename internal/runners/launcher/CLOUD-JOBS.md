@@ -506,7 +506,10 @@ capability dropped. It must reach the controller, and must be refused by the
 control listener, the in-cluster API address, every address in the
 `default/kubernetes` EndpointSlices, the instance metadata service
 (169.254.169.254 and fd00:ec2::254), the Pod Identity agent (169.254.170.23),
-DaemonSet TCP ports and kubelet endpoints. That proves Job egress denial,
+DaemonSet TCP ports and every node address's kubelet ports (10250, 10255 and
+the advertised port), except the job's own node's internal address on 10250,
+which the VPC CNI cannot block and whose kubelet refuses anonymous requests.
+That proves Job egress denial,
 including against an operator egress rule that drops the metadata exception.
 
 All of it runs in the Pod network namespace. Job Pods hold no node root, so
@@ -617,8 +620,9 @@ the award's team value. Two more protected labels,
 `node-restriction.kubernetes.io/sparkwing-used-team` and
 `node-restriction.kubernetes.io/sparkwing-used-run`, record first use and are
 never cleared. A warm node is reused only by later jobs of the same run; a child
-run is another run and gets its own node. A used node missing either label is
-refused. Neither reservation cleanup nor a NodePool template change can move a
+run is another run and gets its own node. A node is reused only when its
+used-run label names the run, so a node with a used-team label and no used-run
+label is refused. Neither reservation cleanup nor a NodePool template change can move a
 used node to another team or run; Karpenter consolidation removes nodes a
 finished run leaves empty. No LimitRange read permission is needed.
 
