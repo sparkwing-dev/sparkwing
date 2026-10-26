@@ -131,11 +131,8 @@ const (
 	ReasonCredentialUnconfirmed  Reason = "credential_unconfirmed"
 	ReasonReauthRequired         Reason = "reauth_required"
 	ReasonSecretsKeyRequired     Reason = "secrets_key_required"
-	ReasonNotDependency          Reason = "not_dependency"
-	ReasonReferenceUndeclared    Reason = "reference_undeclared"
 	ReasonNotReady               Reason = "not_ready"
 	ReasonNoOutput               Reason = "no_output"
-	ReasonChildCycle             Reason = "child_cycle"
 )
 
 // Error contains only safe, masked text. Details must never include registered secret values.

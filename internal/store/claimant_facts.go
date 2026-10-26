@@ -9,8 +9,8 @@ import (
 )
 
 type claimantFacts struct {
-	Launcher, Personal, Shared, Cloud, Observable bool
-	OwnerAccount, Tier, OIDCKind, ExecutorClass   string
+	Launcher, Personal, Shared, Cloud, Observable, PersistentKubernetes bool
+	OwnerAccount, Tier, OIDCKind, ExecutorClass                         string
 }
 
 func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, request runspec.Request) (claimantFacts, error) {
@@ -36,6 +36,7 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 		if err != nil {
 			return facts, err
 		}
+		facts.PersistentKubernetes = record.Origin != nil && record.Origin.Platform == "kubernetes" && !capability.Launcher(root)
 		facts.Personal = record.Origin != nil && record.Origin.Personal
 		facts.Shared = record.Origin != nil && record.Origin.Kind == capability.ProvisionMachine && !facts.Personal
 		if err := tx.QueryRowContext(ctx, `SELECT created_by FROM capabilities WHERE team=? AND prefix=?`, root.Team, root.Prefix).Scan(&facts.OwnerAccount); err != nil {
@@ -53,6 +54,7 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 		c := ancestor.principal.Capability
 		facts.Cloud = facts.Cloud || capability.CloudLauncher(c)
 		if c.Binding.Kind == capability.BindingPush {
+			facts.PersistentKubernetes = false
 			facts.Tier, facts.OIDCKind = tierActions, tierActions
 		}
 	}

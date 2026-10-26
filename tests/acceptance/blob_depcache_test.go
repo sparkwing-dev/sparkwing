@@ -165,7 +165,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err := os.Mkdir(filepath.Join(root, "staged"), 0o700); err != nil {
 		return err
 	}
-	if _, err := artifacts.Stage(ctx, artifactData, filepath.Join(root, "staged"), []artifacts.Edge{{Record: manifest.Key}}); err != nil {
+	if _, err := (nodehost.ArtifactRecords{Blobs: artifactData.Bytes, Records: artifactData.Records}).Stage(ctx, blob.RecordLookup{Authority: artifactData.Authority, Key: manifest.Key, Budget: artifactData.Budget}, filepath.Join(root, "staged"), ""); err != nil {
 		return fmt.Errorf("stage physical artifacts: %w", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(root, "staged", "module")); err != nil || !bytes.Equal(got, payload) {

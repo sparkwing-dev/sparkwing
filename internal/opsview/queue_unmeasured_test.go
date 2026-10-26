@@ -29,10 +29,10 @@ func TestRenderQueuePretty_UnmeasuredExternalPrintsTheWordNotAFigure(t *testing.
 	measured, unmeasured := memoryRows()
 
 	var mb, ub bytes.Buffer
-	if err := RenderQueuePretty(&mb, measured); err != nil {
+	if err := RenderQueue(&mb, measured, "pretty"); err != nil {
 		t.Fatalf("render measured: %v", err)
 	}
-	if err := RenderQueuePretty(&ub, unmeasured); err != nil {
+	if err := RenderQueue(&ub, unmeasured, "pretty"); err != nil {
 		t.Fatalf("render unmeasured: %v", err)
 	}
 	measuredOut, unmeasuredOut := mb.String(), ub.String()

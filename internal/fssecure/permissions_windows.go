@@ -10,8 +10,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const auditSupported = false
-
 func tighten(string, fs.FileMode) error { return nil }
 
 func tightenOpen(file *os.File, _ fs.FileMode) error {
@@ -190,5 +188,3 @@ func rejectReparsePoint(handle windows.Handle, path string) error {
 	}
 	return nil
 }
-
-func repairTree(string, os.FileInfo, bool) ([]change, error) { return nil, nil }

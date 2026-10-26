@@ -254,10 +254,10 @@ func (s *Server) handler() http.Handler {
 
 func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux) http.Handler {
 	labels = append([]*http.ServeMux{router}, labels...)
-	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
+	h := otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(labels...), func(r *http.Request) string {
 			return ratelimit.ClientIP(r)
-		})))
+		}))
 	return h
 }
 

@@ -227,35 +227,6 @@ func CredentialName(name string) bool {
 	return credentialShaped(trimmed)
 }
 
-// credentialValue reports whether a value carries a credential that
-// cannot be rewritten in place: a bearer header, a PEM block, a JSON
-// document or array with a credential-shaped field, a KEY=VALUE
-// assignment named like one, or a URL whose query or path names one.
-// Every line of a multi-line value is examined. Such values must be
-// dropped.
-func credentialValue(value string) bool {
-	v := strings.TrimSpace(value)
-	if v == "" {
-		return false
-	}
-	if strings.Contains(v, "-----BEGIN ") {
-		return true
-	}
-	if credentialJSON(v) {
-		return true
-	}
-	for _, line := range strings.Split(v, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if bearerIn(line) || credentialJSON(line) || credentialURL(line) || credentialAssignmentIn(line) {
-			return true
-		}
-	}
-	return false
-}
-
 // RedactValue replaces the userinfo of a URL or DSN value with
 // "redacted", and replaces any query parameter value or path segment the
 // URL names like a credential. Values that are not URL-shaped come back
@@ -379,53 +350,8 @@ func appendCaseSegments(dst []string, run string) []string {
 	return append(dst, strings.ToUpper(string(r[start:])))
 }
 
-func bearerIn(line string) bool {
-	upper := strings.ToUpper(line)
-	for i := 0; i+len(bearerScheme) <= len(upper); i++ {
-		if upper[i:i+len(bearerScheme)] != bearerScheme {
-			continue
-		}
-		if i > 0 && isNameByte(upper[i-1]) {
-			continue
-		}
-		if strings.TrimSpace(line[i+len(bearerScheme):]) != "" {
-			return true
-		}
-	}
-	return false
-}
-
 func isNameByte(b byte) bool {
 	return b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
-}
-
-func credentialJSON(value string) bool {
-	if !strings.HasPrefix(value, "{") && !strings.HasPrefix(value, "[") {
-		return false
-	}
-	var doc any
-	if json.Unmarshal([]byte(value), &doc) != nil {
-		return false
-	}
-	return credentialFieldIn(doc, jsonScanDepth)
-}
-
-func credentialURL(value string) bool {
-	u := parseCredentialURL(value)
-	if u == nil {
-		return false
-	}
-	for _, seg := range strings.Split(u.Path, "/") {
-		if seg != "" && credentialShaped(seg) {
-			return true
-		}
-	}
-	for _, pair := range strings.Split(u.RawQuery, "&") {
-		if name, _, ok := strings.Cut(pair, "="); ok && credentialShaped(name) {
-			return true
-		}
-	}
-	return false
 }
 
 func redactURLCredentials(value string) string {
@@ -474,60 +400,6 @@ func parseCredentialURL(value string) *url.URL {
 		return nil
 	}
 	return u
-}
-
-func credentialFieldIn(doc any, depth int) bool {
-	if depth <= 0 {
-		return false
-	}
-	switch node := doc.(type) {
-	case map[string]any:
-		for k, v := range node {
-			if credentialShaped(k) || credentialFieldIn(v, depth-1) {
-				return true
-			}
-		}
-	case []any:
-		for _, v := range node {
-			if credentialFieldIn(v, depth-1) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func credentialAssignmentIn(line string) bool {
-	if name, value, ok := assignmentParts(line); ok && value != "" && CredentialName(name) {
-		return true
-	}
-	for _, field := range strings.Fields(line) {
-		name, value, ok := strings.Cut(field, "=")
-		if !ok || value == "" || !envNameShaped(name) {
-			continue
-		}
-		if CredentialName(name) {
-			return true
-		}
-	}
-	return false
-}
-
-func envNameShaped(name string) bool {
-	if len(name) < 2 {
-		return false
-	}
-	for i := 0; i < len(name); i++ {
-		b := name[i]
-		switch {
-		case b == '_':
-		case b >= 'A' && b <= 'Z':
-		case b >= '0' && b <= '9' && i > 0:
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 // CredentialFileName reports whether a file name is secret-shaped: a

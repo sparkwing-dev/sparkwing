@@ -22,8 +22,10 @@ type claimContextPlacement struct {
 // A context shares only immutable policy inputs; readiness and authority stay in the claim predicate.
 func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID string, kind capability.UnitKind, requirements string, execution []byte) (string, error) {
 	var request, spec, pools []byte
+	var verifiedDefault bool
+	q := claimSQL{dialect: tx.dialect}
 	var repoKey, repoDisplay, repository, dispatch, subject, principal string
-	if err := tx.QueryRowContext(ctx, `SELECT request_json,spec_json,allowed_pools,repo_key,repo_display,repo_identity,dispatch,created_subject_kind,created_principal FROM runs WHERE team=? AND id=?`, team, runID).Scan(&request, &spec, &pools, &repoKey, &repoDisplay, &repository, &dispatch, &subject, &principal); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT request_json,spec_json,allowed_pools,repo_key,repo_display,repo_identity,dispatch,created_subject_kind,created_principal,`+q.verifiedDefaultWork(q.at(q.blob("request_json"), "provenance"))+` FROM runs WHERE team=? AND id=?`, team, runID).Scan(&request, &spec, &pools, &repoKey, &repoDisplay, &repository, &dispatch, &subject, &principal, &verifiedDefault); err != nil {
 		return "", err
 	}
 	var sealed struct {
@@ -45,12 +47,14 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 			LocalForeground bool   `json:"local_foreground"`
 		} `json:"request"`
 		Provenance struct {
-			Trust runspec.TrustClass `json:"trust"`
+			Trust           runspec.TrustClass `json:"trust"`
+			VerifiedDefault bool
 		} `json:"provenance"`
 	}
 	if err := json.Unmarshal(request, &sealed); err != nil {
 		return "", err
 	}
+	sealed.Provenance.VerifiedDefault = verifiedDefault
 	var accepted struct {
 		Resolved struct {
 			Settings struct {

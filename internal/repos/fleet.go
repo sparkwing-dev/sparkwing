@@ -106,40 +106,6 @@ func SDKPin(sparkwingDir string) (pin, replace string) {
 	return pin, replace
 }
 
-func sdkWorkspaceOverride(sparkwingDir string) string {
-	body, err := os.ReadFile(filepath.Join(sparkwingDir, "go.work"))
-	if err != nil {
-		return ""
-	}
-	wf, err := modfile.ParseWork("go.work", body, nil)
-	if err != nil {
-		return ""
-	}
-	for _, use := range wf.Use {
-		dir := use.Path
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(sparkwingDir, dir)
-		}
-		if modulePathOf(dir) == sdkModulePath {
-			return filepath.Clean(dir)
-		}
-	}
-	return ""
-}
-
-func modulePathOf(dir string) string {
-	// #nosec G703 -- the go.mod of a checkout this user's fleet configuration names
-	body, err := os.ReadFile(filepath.Join(dir, "go.mod"))
-	if err != nil {
-		return ""
-	}
-	mf, err := modfile.Parse("go.mod", body, nil)
-	if err != nil || mf.Module == nil {
-		return ""
-	}
-	return mf.Module.Mod.Path
-}
-
 func DeriveFleet(cands []Candidate, runs []RunObservation, git Git, latest string, guidesBehind func(pin, latest string) int) []Repo {
 	byPrimary := map[string]*Repo{}
 	order := []string{}

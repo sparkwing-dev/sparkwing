@@ -100,6 +100,9 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	if spec.Authority != nil && !deployment && c.Team != spec.Team {
 		return bindingRefusal()
 	}
+	if spec.Platform != "" && (spec.Platform != "kubernetes" || spec.Kind != capability.ProvisionMachine || spec.Personal || !deployment && !slices.Contains(c.Grants, capability.TeamAdmin)) {
+		return authorityError(apierr.Forbidden, "runner platform requires team administration of a shared Kubernetes runner")
+	}
 	bootstrap := spec.Kind == capability.ProvisionBootstrap
 	for _, grant := range spec.Grants {
 		if grant == capability.OperatorConsole || (!bootstrap && !deployment && ((grant == capability.ClaimsLaunch && spec.Kind != capability.ProvisionMachine) || strings.HasPrefix(string(grant), "operator."))) {

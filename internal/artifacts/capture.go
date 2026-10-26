@@ -1,3 +1,4 @@
+// Package artifacts publishes declared outputs as committed records.
 package artifacts
 
 import (

@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 )
 
 type routeParent struct {
@@ -83,9 +82,6 @@ func (s *server) Admit(node routeNode) (string, func(), error) {
 		if node.Resolver != nil {
 			service.Secret = func(ctx context.Context, _ capability.Authorized, name string) (string, bool, error) {
 				value, masked, err := node.Resolver.Resolve(ctx, name)
-				if err == secretsource.ErrMissing {
-					err = &apierr.Error{Code: apierr.NotFound, Message: "secret missing"}
-				}
 				return value, masked, err
 			}
 		}

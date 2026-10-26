@@ -20,7 +20,7 @@ func TestRenderQueuePretty_ResourceRowReconciles(t *testing.T) {
 		Waiters: []wingwire.Waiter{{RunID: "run-b", Position: 1, Resources: wingwire.HostResources{Cores: 5}}},
 	}
 	var buf bytes.Buffer
-	if err := RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueue(&buf, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -82,7 +82,7 @@ func TestRenderQueuePretty_UsesDisplayRunID(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueue(&buf, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -128,7 +128,7 @@ func TestRenderQueuePretty_ShowsAdmissionWaitingRunOnce(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueue(&buf, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -168,7 +168,7 @@ func TestRenderQueuePretty_ShowsConnectedRunWhileItsNodeWaits(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueue(&buf, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -280,7 +280,7 @@ func TestRenderQueue_SeparatesConnectionsFromResourceHolders(t *testing.T) {
 	}}
 
 	var pretty bytes.Buffer
-	if err := RenderQueuePretty(&pretty, qs); err != nil {
+	if err := RenderQueue(&pretty, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := pretty.String()
@@ -312,7 +312,7 @@ func TestRenderQueuePretty_CountsARunningPipelineOnce(t *testing.T) {
 	}}
 
 	var buf bytes.Buffer
-	if err := RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueue(&buf, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -330,7 +330,7 @@ func TestRenderQueuePretty_ShowsCapacityChangeAndRunners(t *testing.T) {
 		Runners:        []wingwire.RunnerHeadroom{{Name: "host-7", Cores: 3.5, QueueDepth: 2}},
 	}
 	var buf bytes.Buffer
-	if err := RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueue(&buf, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -353,7 +353,7 @@ func TestRenderQueuePretty_ExplainsSoftCoreAllowance(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueue(&buf, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
@@ -386,7 +386,7 @@ func TestRenderQueuePretty_NoSoftCoreNoteWithinCapacity(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueue(&buf, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	if strings.Contains(buf.String(), "soft-core") {
@@ -404,7 +404,7 @@ func TestRenderQueuePretty_NoSoftCoreNoteForPinnedOvercommit(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := RenderQueuePretty(&buf, qs); err != nil {
+	if err := RenderQueue(&buf, qs, "pretty"); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
 	if strings.Contains(buf.String(), "soft-core") {
@@ -422,7 +422,7 @@ func TestRenderQueuePlain_OmitsSoftCoreNote(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := renderLocalQueue(&buf, qs, serving(), "plain"); err != nil {
+	if err := RenderQueue(&buf, qs, "plain"); err != nil {
 		t.Fatalf("render plain: %v", err)
 	}
 	if strings.Contains(buf.String(), "soft-core") {

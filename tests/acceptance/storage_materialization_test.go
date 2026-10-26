@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 )
 
 type storageMaterializationSigner struct {
@@ -115,7 +116,7 @@ func checkStorageMaterialization(t *testing.T, objects blob.ObjectBackend, trans
 		}
 		members := records.results[manifest.Key].Members
 		consumer := t.TempDir()
-		if n, err := artifacts.Stage(t.Context(), data, consumer, []artifacts.Edge{{Record: manifest.Key}}); n != 1 || err != nil {
+		if n, err := (nodehost.ArtifactRecords{Blobs: data.Bytes, Records: data.Records}).Stage(t.Context(), blob.RecordLookup{Authority: data.Authority, Key: manifest.Key, Budget: data.Budget}, consumer, ""); n != 1 || err != nil {
 			t.Fatalf("stage: %d, %v", n, err)
 		}
 		if body, err := os.ReadFile(filepath.Join(consumer, file)); err != nil || !bytes.Equal(body, payload) {
@@ -142,7 +143,7 @@ func checkStorageMaterialization(t *testing.T, objects blob.ObjectBackend, trans
 			if err := os.WriteFile(filepath.Join(consumer, file), []byte("preserved"), 0o640); err != nil {
 				t.Fatal(err)
 			}
-			if n, err := artifacts.Stage(t.Context(), data, consumer, []artifacts.Edge{{Record: manifest.Key}}); n != 0 || err == nil {
+			if n, err := (nodehost.ArtifactRecords{Blobs: data.Bytes, Records: data.Records}).Stage(t.Context(), blob.RecordLookup{Authority: data.Authority, Key: manifest.Key, Budget: data.Budget}, consumer, ""); n != 0 || err == nil {
 				t.Fatalf("%s staged: %d, %v", fault, n, err)
 			}
 			if body, err := os.ReadFile(filepath.Join(consumer, file)); err != nil || string(body) != "preserved" {

@@ -1548,6 +1548,8 @@ components:
           type: string
         personal:
           type: boolean
+        platform:
+          type: string
         repos:
           anyOf:
             - items:

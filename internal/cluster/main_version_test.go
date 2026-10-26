@@ -32,16 +32,8 @@ func TestRunnerVersionReportsStampedOfflineIdentity(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &identity); err != nil {
 		t.Fatalf("decode identity: %v (%q)", err, output.String())
 	}
-	expected := buildinfo.Expectation{
-		Binary: "sparkwing-runner", Version: "v9.9.9",
-		GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
-	}
-	if err := buildinfo.Verify(identity, expected); err != nil {
-		t.Fatal(err)
-	}
-	expected.Version = "v9.9.8"
-	if err := buildinfo.Verify(identity, expected); err == nil {
-		t.Fatal("stamped runner matched a different required release")
+	if identity.Binary != "sparkwing-runner" || identity.Version != "v9.9.9" || identity.GOOS != runtime.GOOS || identity.GOARCH != runtime.GOARCH {
+		t.Fatalf("stamped runner identity: %+v", identity)
 	}
 }
 

@@ -386,37 +386,6 @@ func printOneVerdict(v repos.Verdict) {
 	}
 }
 
-// compactReason picks the line of a captured plan failure that names the
-// cause; the subprocess wraps it in workspace warnings and a generic
-// trailer.
-func compactReason(reason string) string {
-	first := ""
-	for _, line := range strings.Split(reason, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "exit status ") {
-			if i := strings.Index(line, ": "); i > 0 {
-				line = line[i+2:]
-			}
-		}
-		if line == "" {
-			continue
-		}
-		if first == "" {
-			first = line
-		}
-		switch {
-		case strings.HasPrefix(line, "warning:"),
-			strings.HasPrefix(line, "sparks:"),
-			strings.HasPrefix(line, "==>"),
-			strings.HasPrefix(line, "sparkwing error:"),
-			strings.HasPrefix(line, "exit status"):
-			continue
-		}
-		return line
-	}
-	return first
-}
-
 type execOps struct {
 	ctx context.Context
 }

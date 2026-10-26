@@ -993,14 +993,6 @@ func reapStaleConcurrencyWaitersTx(ctx context.Context, tx *storeTx, team Team, 
 	return stale, nil
 }
 
-func prefixColumns(cols, alias string) string {
-	parts := strings.Split(cols, ",")
-	for i, p := range parts {
-		parts[i] = alias + strings.TrimSpace(p)
-	}
-	return strings.Join(parts, ", ")
-}
-
 const holderColumns = `key, holder_id, run_id, node_id, claimed_at, queue_arrived_at, lease_expires_at, superseded, cost, declared_capacity, team`
 
 func scanHolder(rs rowScanner) (ConcurrencyHolder, error) {

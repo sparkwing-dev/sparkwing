@@ -927,3 +927,19 @@ func TestRunnersEnrollmentRefusesIssuanceWithoutWritingConfig(t *testing.T) {
 		t.Fatalf("config after refused mint: %v", err)
 	}
 }
+
+func TestRunnersEnrollmentRecordsKubernetesPlatform(t *testing.T) {
+	f := newRunnersFixture(t)
+	enrollment, _, err := prepareRunnerEnrollmentArgs([]string{"--profile", "prod", "--runner", "pool", "--repos", "github.com/acme/*", "--platform", "kubernetes", "--no-service", "--config", f.config, "--output", "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureStdout(t, func() {
+		if err := enrollRunner(t.Context(), f, enrollment); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if len(f.enrolled) != 1 || f.enrolled[0].Platform != "kubernetes" {
+		t.Fatalf("enrolled platform: %+v", f.enrolled)
+	}
+}

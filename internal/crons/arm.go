@@ -437,32 +437,6 @@ func (s *Service) Disarm(ctx context.Context, id string) error {
 	return s.removePin(id)
 }
 
-// disarmRepo deletes every schedule of one repository checkout, their
-// histories and their pinned binaries, returning how many rows went.
-func (s *Service) disarmRepo(ctx context.Context, repoRoot string) (int, error) {
-	root, err := filepath.Abs(repoRoot)
-	if err != nil {
-		return 0, fmt.Errorf("resolve %s: %w", repoRoot, err)
-	}
-	rows, err := s.Schedules.ListCronSchedules(ctx)
-	if err != nil {
-		return 0, err
-	}
-	removed, err := s.Schedules.DeleteCronSchedulesForRepo(ctx, root)
-	if err != nil {
-		return 0, err
-	}
-	for _, sched := range rows {
-		if sched.RepoPath != root {
-			continue
-		}
-		if perr := s.removePin(sched.ID); perr != nil {
-			return removed, perr
-		}
-	}
-	return removed, nil
-}
-
 // Lock pins a schedule to the checkout as it stands: it compiles the pipeline
 // through prove, copies that binary under [Service.PinRoot], and records the
 // checkout's HEAD. The schedule then runs that binary until it is re-pinned or

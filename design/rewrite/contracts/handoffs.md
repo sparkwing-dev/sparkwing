@@ -1098,3 +1098,10 @@ separate operations; no database transaction stays open across a provider call.
 
 - One deletion-only lane runs now: dead code, compatibility paths with no remaining caller, duplicated helpers and unused exports, with no behavior change.
 - Then S9 is amended: instead of a net line target, every area that grew names its reason (the bug class it removes), and no new internal package exceeds 500 lines without a named deletion that pays for it (decision 35).
+
+## 2026-10-25 Korey decision 65: Stripe holds all card data
+
+- Sparkwing stores no card details: no brand, last four, fingerprint, payment-method id or checkout email. Per team it keeps only the Stripe customer id, plus checkout, payment and refund ids, amounts, modes and status for the credit ledger.
+- Card management and display go through Stripe (hosted customer portal, or a live read at page load that is never persisted). Auto-refill charges the Stripe customer's default payment method off-session.
+- Cross-team card pinning and fingerprint-spread fraud warnings are removed. Stripe Radar handles card fraud; an early fraud warning holds the team whose payment it names. Abuse with one card across many teams is handled by a Radar rule or by hand (runbook).
+- Amends decision 62: purge has no card data to scrub.

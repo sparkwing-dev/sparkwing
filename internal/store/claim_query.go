@@ -42,6 +42,7 @@ type claimFacts struct {
 	Named          int                        `json:"named,omitempty"`
 	Cloud          int                        `json:"cloud,omitempty"`
 	Launcher       int                        `json:"launcher,omitempty"`
+	PersistentPod  int                        `json:"persistent_kubernetes,omitempty"`
 	Metered        int                        `json:"metered,omitempty"`
 	Personal       int                        `json:"personal,omitempty"`
 	Account        string                     `json:"account,omitempty"`
@@ -110,6 +111,7 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	}
 	f.Prefix, f.Team, f.Name = leaf.Prefix, leaf.Team, leaf.Subject.ID
 	f.Cloud, f.Launcher, f.Metered = boolInt(capability.CloudLauncher(leaf)), boolInt(launcherClaimant(leaf)), boolInt(meteredPlacement(leaf, root))
+	f.PersistentPod = boolInt(observed.PersistentKubernetes)
 	f.Personal, f.Account, f.Tier, f.Trust = boolInt(observed.Personal), observed.OwnerAccount, observed.Tier, string(root.Trust)
 	f.BindRun, f.BindKind, f.BindHolder, f.BindGeneration = leaf.Binding.RunID, string(leaf.Binding.Kind), leaf.Binding.Holder, leaf.Binding.Generation
 	if leaf.Binding.ClaimBy != nil {
@@ -340,6 +342,16 @@ func (q *claimSQL) poolTrust(team, pools, trust, launcher, provenance string) st
 	return `((NOT (` + reserved + ` OR (` + trust + `='verified-default' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='any' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.at(provenance, "trust") + ` IN ('verified-default','schedule')))`
 }
 
+// Context sharing and placement must agree, including seals inherited from schedules.
+func (q *claimSQL) verifiedDefaultWork(provenance string) string {
+	p := func(name string) string { return q.at(provenance, name) }
+	return `COALESCE((` + p("trust") + ` IN ('verified','verified-default','schedule') AND ` + p("default_branch") + `<>'' AND ` + p("ref") + `='refs/heads/'||` + p("default_branch") + `),FALSE)`
+}
+
+func (q *claimSQL) freshPod(persistentKubernetes, provenance string) string {
+	return `(` + persistentKubernetes + `=0 OR NOT ` + q.verifiedDefaultWork(provenance) + `)`
+}
+
 func (q *claimSQL) predicate() string {
 	f := q.fact
 	n := q.flag
@@ -397,7 +409,7 @@ func (q *claimSQL) predicate() string {
 		excluded = "1=1"
 	}
 	return strings.Join([]string{
-		labels, live, q.contains(f("kinds"), "w.kind"), excluded, bind, pushes, scopes, accepted, trust, personal, runner, burst, guards, reservation, `(` + foreground + `)`,
+		labels, live, q.freshPod(n("persistent_kubernetes"), q.at("w.request", "provenance")), q.contains(f("kinds"), "w.kind"), excluded, bind, pushes, scopes, accepted, trust, personal, runner, burst, guards, reservation, `(` + foreground + `)`,
 	}, " AND ")
 }
 

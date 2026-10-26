@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func TestPruneDropsOnlyStaleCheckouts(t *testing.T) {
@@ -19,8 +21,8 @@ func TestPruneDropsOnlyStaleCheckouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", registry)
-	want := &config{
-		Repos:         []*entry{{Path: live}, {Path: stale}},
+	want := &userconfig.ReposConfig{
+		Repos:         []userconfig.RepoPath{{Path: live}, {Path: stale}},
 		FallbackPaths: []string{"~/code"},
 	}
 	if err := Save(registry, want); err != nil {
@@ -38,7 +40,7 @@ func TestPruneDropsOnlyStaleCheckouts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Repos, []*entry{{Path: live}}) {
+	if !reflect.DeepEqual(got.Repos, []userconfig.RepoPath{{Path: live}}) {
 		t.Fatalf("repos = %#v, want only %s", got.Repos, live)
 	}
 	if !reflect.DeepEqual(got.FallbackPaths, want.FallbackPaths) {
@@ -46,14 +48,41 @@ func TestPruneDropsOnlyStaleCheckouts(t *testing.T) {
 	}
 }
 
-func TestUnderTempDir_CoversSharedTmpAsWellAsTMPDIR(t *testing.T) {
-	for _, p := range []string{filepath.Join(os.TempDir(), "scratch"), "/tmp/scratch", "/private/tmp/scratch"} {
-		if !underTempDir(p) {
-			t.Errorf("underTempDir(%q) = false, want true", p)
-		}
+func TestRegistryMutationsPreserveSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv(userconfig.PathEnv, path)
+	enabled, disabled := true, false
+	want := userconfig.ReposConfig{AutoRegister: &disabled, IncludeWorktrees: &enabled, FallbackPaths: []string{"~/code"}}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	permanent := filepath.Join(string(filepath.Separator), "sparkwing-permanent-checkout", "code", "app")
-	if underTempDir(permanent) {
-		t.Errorf("underTempDir(%q) = true, want false", permanent)
+	for _, operation := range []string{"add", "remove", "prune"} {
+		t.Run(operation, func(t *testing.T) {
+			if err := userconfig.Write(path, userconfig.Repos, "test registry", &want); err != nil {
+				t.Fatal(err)
+			}
+			if err := Add(root); err != nil {
+				t.Fatal(err)
+			}
+			switch operation {
+			case "remove":
+				if _, err := Remove(root); err != nil {
+					t.Fatal(err)
+				}
+			case "prune":
+				if _, err := Prune(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var got userconfig.ReposConfig
+			if _, err := userconfig.Read(path, userconfig.Repos, &got); err != nil {
+				t.Fatal(err)
+			}
+			got.Repos = nil
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("settings after %s = %+v, want %+v", operation, got, want)
+			}
+		})
 	}
 }
