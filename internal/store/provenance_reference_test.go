@@ -20,3 +20,7 @@ func TestProvenanceUnverifiedWritersShareNoScope(t *testing.T) {
 func TestChildPipelinesMustBeDeclared(t *testing.T) {
 	store.ChildPipelinesMustBeDeclared(t, func(t *testing.T) *store.Store { return storetest.Open(t) })
 }
+
+func TestChildrenOfTheirParentsRepositoryUseItsSourceLocation(t *testing.T) {
+	store.ChildrenOfTheirParentsRepositoryUseItsSourceLocation(t, func(t *testing.T) *store.Store { return storetest.Open(t) })
+}

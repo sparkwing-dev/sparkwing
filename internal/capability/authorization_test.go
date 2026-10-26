@@ -3,6 +3,7 @@ package capability
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,6 +122,24 @@ func TestDelegateCannotWiden(t *testing.T) {
 	}
 	p.Capability.RevokedAt = &now
 	requireCode(t, ValidateDelegation(p, child, now), apierr.Unauthenticated)
+}
+
+// A push binding is the identity GitHub's token proved for one Actions push, so
+// only a credential minted from that proof may pass it on; an unbound credential
+// cannot invent one.
+func TestOnlyAPushBoundCredentialDelegatesAPush(t *testing.T) {
+	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	push := Binding{Kind: BindingPush, Push: &PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "1", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/ci.yaml@refs/heads/main"}}
+	parent := Principal{Class: CredentialBearer, Authority: AuthorityRef{Kind: AuthorityCapability, ID: "root"}, Capability: Capability{
+		Prefix: "root", Team: "team", Subject: Subject{Kind: SubjectMachine, ID: "machine"}, Audience: Controller, Issuance: Delegate,
+		Grants: []Grant{RunsWrite}, Binding: Binding{Kind: BindingNone},
+	}}
+	child := DelegateSpec{Parent: parent.Authority, Audience: Controller, Grants: []Grant{RunsWrite}, Binding: push}
+	requireCode(t, ValidateDelegation(parent, child, now), apierr.Forbidden)
+	parent.Capability.Binding = push
+	if err := ValidateDelegation(parent, child, now); err != nil {
+		t.Fatalf("a push-bound credential could not pass on its own push: %v", err)
+	}
 }
 
 func TestOwnJobInputHasNoAdminBypass(t *testing.T) {

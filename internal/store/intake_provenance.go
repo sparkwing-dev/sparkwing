@@ -49,7 +49,11 @@ func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeReque
 			return runspec.Provenance{}, authorityError(apierr.IntegrityFailure, "parent run has no sealed provenance")
 		}
 		from := parent.Request.Request
-		if input.Git.Repository.Key == from.Git.Repository.Key && input.Git.Ref == from.Git.Ref && input.Git.SHA == from.Git.SHA && input.Source.Ref == from.Source.Ref {
+		sameRepository := input.Git.Repository.Key == from.Git.Repository.Key
+		if sameRepository && input.Source.Location != from.Source.Location {
+			return runspec.Provenance{}, authorityError(apierr.Forbidden, "a child in its parent's repository uses its parent's source location")
+		}
+		if sameRepository && input.Git.Ref == from.Git.Ref && input.Git.SHA == from.Git.SHA && input.Source.Ref == from.Source.Ref {
 			return inherited, nil
 		}
 		writer := runspec.RunWriter(parent.ID)

@@ -276,7 +276,7 @@ func boundedExpiry(child, parent *time.Time, now time.Time) bool {
 }
 
 func narrowBinding(parent, child Binding) bool {
-	if !slices.Contains([]BindingKind{BindingNone, BindingRun, BindingNode, BindingTrigger, BindingPush}, child.Kind) {
+	if !slices.Contains([]BindingKind{BindingNone, BindingRun, BindingNode, BindingTrigger, BindingPush}, child.Kind) || child.Kind == BindingPush && parent.Kind != BindingPush {
 		return false
 	}
 	if parent.Kind != BindingNone && child.Kind != parent.Kind {

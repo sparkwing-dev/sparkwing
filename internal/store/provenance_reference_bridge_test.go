@@ -600,3 +600,17 @@ func ChildPipelinesMustBeDeclared(t *testing.T, open func(*testing.T) *Store) {
 		t.Fatalf("undeclared child pipeline admitted: %v", err)
 	}
 }
+
+// ChildrenOfTheirParentsRepositoryUseItsSourceLocation is the one source-location
+// rule for children: a child in its parent's repository fetches from where the
+// parent did, so it cannot name another remote for the same repository identity.
+func ChildrenOfTheirParentsRepositoryUseItsSourceLocation(t *testing.T, open func(*testing.T) *Store) {
+	parent, git := referenceAppProvenance(t, "refs/heads/main", referenceMain)
+	child := childRequest("deploy", "refs/heads/main", referenceMain)
+	child.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/attacker/repo.git"}
+	_, _, err := admitReferenceChild(t, open(t), parent, git, child)
+	var refused *apierr.Error
+	if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+		t.Fatalf("child in its parent's repository used another source location: %v", err)
+	}
+}
