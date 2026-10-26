@@ -24,7 +24,7 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out oidc-signing.p
 
 | Setting | Meaning |
 |---|---|
-| `oidc-key` credential | RSA private key, PKCS #1 or PKCS #8 PEM, at least 2048 bits, that signs every token. Without it the controller issues no tokens and the three routes answer 404. |
+| `oidc-key` credential | RSA private key, PKCS #1 or PKCS #8 PEM, at least 2048 bits, that signs every token. Only its owner may read the file (mode 0400 or 0600); startup refuses one that group or other users can read. Without it the controller issues no tokens and the three routes answer 404. |
 | `oidc-key.published` credential | A second key, as a private or public key PEM, that the key set publishes and that never signs: the next key before a rotation, the previous key after one. |
 | `--oidc-token-ttl` | Token lifetime. Default `10m`, at most `1h`, at least `1m`. |
 

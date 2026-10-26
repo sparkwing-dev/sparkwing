@@ -13,6 +13,9 @@ import (
 
 func openCredentialFile(root *os.Root, name string) (*os.File, error) { return root.Open(name) }
 
+// safety: the DACL check in verifyCredentialFile is what Windows offers; mode bits mean nothing there.
+func verifyOwnerOnly(os.FileInfo) error { return nil }
+
 func verifyCredentialFile(file *os.File, _ os.FileInfo) error {
 	sd, err := windows.GetSecurityInfo(windows.Handle(file.Fd()), windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {

@@ -120,17 +120,15 @@ func readCredentials(path string) (controllerCredentials, error) {
 		*dst, err = readCredential(dir, name)
 		c.GitHubError = errors.Join(c.GitHubError, err)
 	}
-	for name, dst := range map[string]*[]byte{
-		credOIDCKey:          &c.OIDCKey,
-		credOIDCPublishedKey: &c.OIDCPublishedKey,
-	} {
-		raw, err := readCredential(dir, name)
-		if err != nil {
-			return c, err
-		}
-		if raw != "" {
-			*dst = []byte(raw)
-		}
+	if c.OIDCKey, err = readOIDCKey(dir); err != nil {
+		return c, err
+	}
+	published, err := readCredential(dir, credOIDCPublishedKey)
+	if err != nil {
+		return c, err
+	}
+	if published != "" {
+		c.OIDCPublishedKey = []byte(published)
 	}
 	if c.SecretsKey, err = readSecretsKey(dir, credSecretsKey); err != nil {
 		return c, err
@@ -157,6 +155,18 @@ func readCredential(dir credentials.Dir, name string) (string, error) {
 
 func emptyCredentialError(dir credentials.Dir, name string) error {
 	return fmt.Errorf("credential %s in %s is empty; write its value or remove the file to leave it unset", name, dir.Path())
+}
+
+func readOIDCKey(dir credentials.Dir) ([]byte, error) {
+	raw, err := dir.ReadPrivateBytes(credOIDCKey)
+	if err != nil || raw == nil {
+		return nil, err
+	}
+	key := strings.TrimSpace(string(raw))
+	if key == "" {
+		return nil, emptyCredentialError(dir, credOIDCKey)
+	}
+	return []byte(key), nil
 }
 
 // safety: the key file holds either the 32 raw bytes or their base64, and
