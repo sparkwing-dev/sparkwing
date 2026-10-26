@@ -531,15 +531,13 @@ are capped by the paid grant. Only refund-kind rows count as money returned by
 Stripe when closing the card-refund queue.
 
 Refill reservations persist amount and Stripe customer, never a card or email.
-Unbound reservations may expire or be explicitly replaced. A bound payment
-keeps the team's single refill slot until its payment outcome is known.
-`CanConfirmRefill` rechecks the team's Stripe customer, refill authorization,
-holds and limits before the worker confirms an unconfirmed intent. The worker
-reconciles processing and succeeded intents without confirming again. An
-ineligible unconfirmed intent is canceled at Stripe; `RecordRefillCanceled`
-retains its binding and closes the reservation only after Stripe reports
-cancellation. Unresolved reservations and every confirmed payment count against
-refill limits, including refusals and refunds; canceled payments do not.
+`DueRefills` checks eligibility and opens a reservation in one transaction; the
+worker then sends its fixed request under its id until a signed outcome or a
+refusal closes it, or until it expires after 23 hours. A card payment's signed
+outcome finds its reservation by the refill id in the payment's metadata and
+records the payment id then; a reservation funds at most one payment. Open
+reservations and every refill payment count against refill limits, including
+refusals and refunds; reservations closed without a payment do not.
 Resolved outcomes enter their spending windows when recorded, so delayed
 settlement cannot age a new charge out of its limits.
 `credit_checkouts.refill_blocked` records an active failure independently of
