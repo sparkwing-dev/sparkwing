@@ -13,8 +13,8 @@ func TestRewriteSchemaCapabilitiesPreserveAuthority(t *testing.T) {
 	db := rewriteSchemaDB(t)
 	rewriteSchemaExec(t, db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)")
 	rewriteSchemaExec(t, db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,
-repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
-VALUES ('a','r',1,'p','pending',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{"version":1}`), []byte(`[]`))
+repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days)
+VALUES ('a','r',1,'p','pending',?,'request',1,'gh:1','host','execute','account',1,'r30',30)`, []byte(`{"version":1}`))
 	rewriteSchemaExec(t, db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','account@example.com',1,1)`)
 	rewriteSchemaExec(t, db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('session','account','runs.write',1,100,'a','account')`)
 	deadline := time.Unix(100, 7).UTC()
@@ -133,11 +133,11 @@ func TestRewriteSchemaIntakeKeysIncludePublishedRuns(t *testing.T) {
 	db := rewriteSchemaDB(t)
 	rewriteSchemaExec(t, db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1)")
 	const insert = `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,
-repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,
+repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,
 idempotency_scope,idempotency_key,idempotency_digest)
-VALUES (?,?,?,'p','pending',?,'request',1,'gh:1','host',?,?,'account',1,'r30',30,?,?,?)`
+VALUES (?,?,?,'p','pending',?,'request',1,'gh:1','host',?,'account',1,'r30',30,?,?,?)`
 	args := func(team, id string, number int, mode, scope, key, digest string) []any {
-		return []any{team, id, number, []byte(`{"version":1}`), mode, []byte(`[]`), scope, key, digest}
+		return []any{team, id, number, []byte(`{"version":1}`), mode, scope, key, digest}
 	}
 	rewriteSchemaExec(t, db, insert, args("a", "published", 1, "publish", "account/p", "key", "digest")...)
 	rewriteSchemaRefuses(t, db, insert, args("a", "same-key", 2, "publish", "account/p", "key", "digest")...)

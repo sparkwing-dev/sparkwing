@@ -40,8 +40,8 @@ func seedStoreLogBoundary(ctx context.Context, db *sql.DB, now time.Time) (store
 		query string
 		args  []any
 	}{
-		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
-VALUES (?,'logs',1,'fixture','running',?,'fixture',?,'gh:1','host','execute',?,'logger',?,'r30',30)`, []any{store.DefaultTeam, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"fixture","writer":"account/fixture"}}`), now.UnixNano(), []byte(`[]`), now.UnixNano()}},
+		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days)
+VALUES (?,'logs',1,'fixture','running',?,'fixture',?,'gh:1','host','execute','logger',?,'r30',30)`, []any{store.DefaultTeam, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"fixture","writer":"account/fixture"}}`), now.UnixNano(), now.UnixNano()}},
 		{`INSERT INTO nodes(team,run_id,node_id,status,claimed_by,capability_prefix,generation,attempt,lease_expires_at,started_at,spec_json,execution_json)
 VALUES (?,'logs','job','running','logger',?,7,1,?,?,?,?)`, []any{store.DefaultTeam, c.Prefix, now.Add(time.Hour).UnixNano(), now.UnixNano(), []byte(`{}`), []byte(`{}`)}},
 		{`INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at)

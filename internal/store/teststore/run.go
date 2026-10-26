@@ -65,14 +65,14 @@ func SeedRun(s *store.Store, ctx context.Context, team store.Team, r store.Run) 
 	if err != nil {
 		return err
 	}
-	query := `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,repo_identity,dispatch,intake_mode,allowed_pools,created_at,started_at,finished_at,parent_run_id,retry_of,replay_of_run_id,replay_of_node_id,trigger_source,git_branch,git_sha,error,created_principal,log_retention_class,log_retention_days)
-SELECT ?,?,COALESCE(MAX(number),0)+1,?,?,?,?,?,'gh:1',?,?,'host','execute',?,?,?,?,?,?,?,?,?,?,?,?,'fixture','r30',30 FROM runs WHERE team=?`
+	query := `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,repo_identity,dispatch,intake_mode,created_at,started_at,finished_at,parent_run_id,retry_of,replay_of_run_id,replay_of_node_id,trigger_source,git_branch,git_sha,error,created_principal,log_retention_class,log_retention_days)
+SELECT ?,?,COALESCE(MAX(number),0)+1,?,?,?,?,?,'gh:1',?,?,'host','execute',?,?,?,?,?,?,?,?,?,?,?,'fixture','r30',30 FROM runs WHERE team=?`
 	if s.Dialect() == store.DialectPostgres {
 		for i := 1; strings.Contains(query, "?"); i++ {
 			query = strings.Replace(query, "?", fmt.Sprintf("$%d", i), 1)
 		}
 	}
-	_, err = Exec(ctx, s, query, team, r.ID, r.Pipeline, r.Status, body, "fixture", created.UnixNano(), repository, identity, []byte(`[]`), created.UnixNano(), started, finished, parent, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, r.TriggerSource, r.GitBranch, r.GitSHA, r.Error, team)
+	_, err = Exec(ctx, s, query, team, r.ID, r.Pipeline, r.Status, body, "fixture", created.UnixNano(), repository, identity, created.UnixNano(), started, finished, parent, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, r.TriggerSource, r.GitBranch, r.GitSHA, r.Error, team)
 	return err
 }
 

@@ -3159,7 +3159,9 @@ upgrading:
   source `github` requires a run a signed App delivery started, and a
   `--branch` rule, normalized and matched as a glob, matches only a verified
   App run on that branch or an admin-armed schedule fire when it names the
-  default branch.
+  default branch. Branch rules accept only the `*` and `?` wildcards. Rules are
+  read at each use, so removing one stops placement, reserved secrets and OIDC
+  for runs already admitted, retries included.
 - **Extra repositories.** Owner-approved extra repositories join the source
   token only for a verified push to the default branch. Other runs fetch only
   their own repository.

@@ -109,7 +109,7 @@ func TestEngineClaimHTTPTriggerQueueKeepsOrder(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	engineSQL(t, e.Store, `UPDATE runs SET created_at=1 WHERE id='run'`)
 	for i, id := range []string{"second", "third"} {
-		engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,?,number+?,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,?,log_retention_class,log_retention_days FROM runs WHERE id='run'`, id, i+1, i+2)
+		engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,?,number+?,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,?,log_retention_class,log_retention_days FROM runs WHERE id='run'`, id, i+1, i+2)
 		engineSQL(t, e.Store, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,?,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`, id)
 	}
 	e.claimProfiles = engineProfileFake{}

@@ -31,7 +31,7 @@ func launcherFairnessFixture(t *testing.T) (*Store, UnitDemand) {
 	authorityPersist(t, s, launcher)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller' WHERE team='a'`)
 	request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Team: "b", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Dispatch: runspec.DispatchController}}, assertedProvenance(t, "ci", "", ""))
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('b','run-b',1,'ci','running',?,'request',1,'gh:1','https://github.com/acme/repo','controller','execute',?,'account',2,'r30',30)`, request, []byte(`[]`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('b','run-b',1,'ci','running',?,'request',1,'gh:1','https://github.com/acme/repo','controller','execute','account',2,'r30',30)`, request)
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'b','run-b','job','pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='job'`)
 	indexFixtureUnit(t, s, "b", UnitRef{Kind: capability.UnitNode, RunID: "run-b", NodeID: "job"})
 	demand := UnitDemand{CapabilityPrefix: launcher.Prefix, Kinds: []capability.UnitKind{capability.UnitNode}}

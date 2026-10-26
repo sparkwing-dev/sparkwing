@@ -11,7 +11,7 @@ import (
 
 func TestWaitingNodesReadSealedDemandAndPageReadyWork(t *testing.T) {
 	s, _ := unitClaimFixture(t)
-	rewriteSchemaExec(t, s.db, `UPDATE runs SET allowed_pools=?`, []byte(`["prod"]`))
+	grantFixturePool(t, s, "run", "prod", "feature")
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["gpu","pool=prod"]}}`))
 	for _, id := range []string{"next", "last"} {
 		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,'pending',ready_at,spec_json,execution_json FROM nodes WHERE node_id='job'`, id)

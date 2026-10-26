@@ -54,7 +54,7 @@ func checkStoreEnrolledClaims(t *testing.T) (err error) {
 	if _, err := s.DB().ExecContext(ctx, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["pool=private","name=enrolled"]}}`)); err != nil {
 		return err
 	}
-	if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET allowed_pools=?`, []byte(`["private"]`)); err != nil {
+	if err := grantPool(ctx, s, team, plan.RunID, "private", "feature"); err != nil {
 		return err
 	}
 	if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET expires_at=?`, time.Now().Add(time.Hour).UnixNano()); err != nil {

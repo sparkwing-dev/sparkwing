@@ -41,23 +41,26 @@ its funding as Cloud-only placement. A comma alternative such as
 
 A team administrator reserves a runner for a pool and allows repositories into
 that pool. A reserved runner accepts work only when the resolved demand both
-explicitly requires one of its granted pools and includes it in intake's allowed
-pools. Satisfying a different alternative in a selector does not replace that
+explicitly requires one of its granted pools and an access rule allows the run
+into it. Satisfying a different alternative in a selector does not replace that
 pool requirement. An unreserved runner cannot claim work requiring a pool.
 
 ```go
 sw.Job(plan, "deploy", &Deploy{}).Requires("pool=production")
 ```
 
-A pipeline's `requires` is inherited by its jobs. Allowed pools are sealed
-server facts. Neither a pipeline declaration nor a caller's label grants them.
+A pipeline's `requires` is inherited by its jobs. Allowed pools come only from
+access rules, read against the run's sealed identity each time the run is
+placed, releases a reserved secret or mints an OIDC token, so removing a rule
+cuts off runs already admitted, retries included. Neither a pipeline declaration
+nor a caller's label grants them.
 Pool-restricted secrets check the reservation at acceptance and release. Here
 execution cannot use those secrets. See [authentication](auth.md).
 
 An access rule may name a branch with `sparkwing pools allow --branch`. The
 branch is stored without `refs/heads/`, so `main` and `refs/heads/main` are the
-same rule, and it matches as a Go `path.Match` glob, the matcher App
-subscriptions use. A run a signed GitHub App delivery started on that branch,
+same rule, and it matches as a Go `path.Match` glob limited to the `*` and `?`
+wildcards; `[` classes and `\` escapes are refused. A run a signed GitHub App delivery started on that branch,
 a child or retry that inherits that run's identity, and a fire of an
 admin-armed default-branch schedule (see [schedules](schedules.md#pause-edit-and-run))
 when the rule names the default branch match a branch rule. Pools are granted at

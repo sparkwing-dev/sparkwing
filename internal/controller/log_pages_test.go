@@ -39,7 +39,7 @@ func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) {
 		}
 		engineSQL(t, st, `UPDATE runs SET parent_run_id=? WHERE team='a' AND id='run'`, fmt.Sprintf("child-%03d", count))
 		engineSQL(t, st, `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`)
-		engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,parent_run_id,log_retention_class,log_retention_days) SELECT 'foreign','foreign-child',1,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,'run',log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
+		engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,parent_run_id,log_retention_class,log_retention_days) SELECT 'foreign','foreign-child',1,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,'run',log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
 		engineSQL(t, st, `INSERT INTO events(team,run_id,seq,kind,ts,payload) VALUES ('foreign','foreign-child',1,'run_started',1,?)`, []byte(`{"private":"foreign"}`))
 		options, _, _ := memberObservationOptions(t, st, nil)
 		reader, err := client.NewLogReader(options)

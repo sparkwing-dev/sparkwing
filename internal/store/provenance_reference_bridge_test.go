@@ -134,9 +134,12 @@ func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObser
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := provenanceObservation{Subject: subject, SHA: facts.SHA, Write: scope.WriteRef, Reads: scope.ReadRefs, Pools: slices.Clone(row.Request.AllowedPools), Secrets: []string{}}
+	out := provenanceObservation{Subject: subject, SHA: facts.SHA, Write: scope.WriteRef, Reads: scope.ReadRefs, Secrets: []string{}}
 	err = tenant.s.inTx(t.Context(), func(tx *storeTx) error {
 		var err error
+		if out.Pools, _, err = runPoolsTx(t.Context(), tx, tenant.team, row.Request.Provenance); err != nil {
+			return err
+		}
 		reason, err := claimantTrustRefusalTx(t.Context(), tx, tenant.team, run, capability.Capability{Trust: capability.TrustVerifiedDefault, ReservedPools: []string{"deploy-pool"}}, true, false)
 		out.DefaultClaimant = reason == ""
 		if err != nil {
@@ -323,7 +326,7 @@ func admitReferenceChild(t *testing.T, s *Store, parent runspec.Provenance, pare
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.testOnlyExec(t, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_subject_kind,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','host','execute',?,'account','owner',1,'r30',30)`, body, []byte(`[]`))
+	s.testOnlyExec(t, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_subject_kind,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','host','execute','account','owner',1,'r30',30)`, body)
 	s.testOnlyExec(t, `UPDATE runs SET lineage_json=? WHERE team='a' AND id='run'`, []byte(`{"admission_key":"capability:owner","admission_subject":{"kind":"account","id":"owner"}}`))
 	s.testOnlyExec(t, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	s.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,capability_prefix,generation,attempt,started_at,lease_expires_at) VALUES ('a','run','job','running',?,?,'runner','child-parent',2,3,?,?)`, []byte(`{"id":"job","children":[{"pipeline":"deploy"}]}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(time.Hour).UnixNano())

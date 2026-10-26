@@ -128,7 +128,7 @@ func TestMeteredUnitConcurrentClaimsCannotSpendTheSameCredit(t *testing.T) {
 
 func TestMeteredUnitQueuePassesOverUnaffordableWork(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, true)
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b','older',number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,0,log_retention_class,log_retention_days FROM runs WHERE id='run'`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b','older',number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,created_principal,0,log_retention_class,log_retention_days FROM runs WHERE id='run'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('b','older','trigger',1,1,?,?,?)`, now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'b','older',node_id,status,ready_at,spec_json,execution_json FROM nodes WHERE run_id='run'`)
 	demand.Target, demand.Kinds = nil, []capability.UnitKind{capability.UnitNode}

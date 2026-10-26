@@ -174,8 +174,11 @@ branch in `refs/heads/`, so a tag with the same name cannot select its code.
 Reserved pools are granted only to verified App runs, the children and retries
 that inherit them, and admin-armed default-branch schedule fires, which receive
 only pools whose rules allow the default branch. A typed repository grants no
-pool. Owner-approved extra repositories join the source token only for a
-verified push to the default branch.
+pool. Access is checked against the rules as they stand at each use: placement,
+reserved secret release and OIDC tokens. Removing a rule cuts off every run of
+that repository at its next use, including retries of older runs.
+Owner-approved extra repositories join the source token only for a verified
+push to the default branch.
 
 On Kubernetes, verified default-branch work runs only on fresh, single-use pods.
 This includes admin-armed default-branch schedules, plus children and retries

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -175,14 +174,13 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err != nil {
 			return AdmissionResult{}, err
 		}
-		pools, err := intakePoolsTx(ctx, tx, team, &input, provenance)
-		if err != nil {
+		if err := routeIntakeTx(ctx, tx, team, &input, provenance); err != nil {
 			return AdmissionResult{}, err
 		}
 		if request.Request.Dispatch == "" {
 			input.Dispatch = SelectDispatch(input)
 		}
-		snapshot.request, err = runspec.SealRequest(input, runspec.IntakeFacts{RunID: id, AdmittedAt: now, AllowedPools: pools, AuthorityRef: request.Authority, Ceilings: policy.Ceilings, Provenance: provenance})
+		snapshot.request, err = runspec.SealRequest(input, runspec.IntakeFacts{RunID: id, AdmittedAt: now, AuthorityRef: request.Authority, Ceilings: policy.Ceilings, Provenance: provenance})
 		if err != nil {
 			return AdmissionResult{}, err
 		}
@@ -524,44 +522,24 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	return input, nil
 }
 
-// intakePoolsTx grants reserved pools from sealed provenance alone: only a run whose
-// identity a signed App delivery or an App-armed schedule established qualifies.
-func intakePoolsTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, provenance runspec.Provenance) ([]string, error) {
-	pools := []string{}
-	if !provenance.Verified() && !provenance.TrustedDefault() {
-		return pools, nil
-	}
-	rows, err := tx.queryContext(ctx, `SELECT pool,branch,source,route FROM pool_access_rules WHERE team=? AND repo_key=? ORDER BY pool,id`+tx.forShare(), team, fmt.Sprintf("gh:%d", provenance.RepositoryID()))
+// routeIntakeTx adds the pool requirement of every access rule that routes this
+// run onto its pool. Access itself is decided at each use, never sealed.
+func routeIntakeTx(ctx context.Context, tx *storeTx, team Team, input *runspec.Request, provenance runspec.Provenance) error {
+	_, routed, err := runPoolsTx(ctx, tx, team, provenance)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var pool, branch, source, route string
-		if err = rows.Scan(&pool, &branch, &source, &route); err != nil {
-			return nil, err
+	for _, pool := range routed {
+		requirement := "pool=" + pool
+		if !slices.Contains(input.Options.Requires.Value, requirement) {
+			input.Options.Requires.Value = append(slices.Clone(input.Options.Requires.Value), requirement)
 		}
-		if source != "" && (source != string(runspec.OriginApp) || !provenance.Verified()) {
-			continue
-		}
-		if branch != "" && (!strings.HasPrefix(provenance.Ref(), "refs/heads/") || !(runspec.BranchSelector{branch}).Matches(provenance.Ref())) {
-			continue
-		}
-		if route != "" {
-			requirement := "pool=" + pool
-			if !slices.Contains(input.Options.Requires.Value, requirement) {
-				input.Options.Requires.Value = append(slices.Clone(input.Options.Requires.Value), requirement)
-			}
-			if !input.Options.Requires.Set {
-				input.Options.Requires.Set = true
-				input.Options.Requires.Origin = runspec.SettingOrigin{Layer: runspec.LayerOperatorTeam, Key: "pool_access_rules"}
-			}
-		}
-		if !slices.Contains(pools, pool) {
-			pools = append(pools, pool)
+		if !input.Options.Requires.Set {
+			input.Options.Requires.Set = true
+			input.Options.Requires.Origin = runspec.SettingOrigin{Layer: runspec.LayerOperatorTeam, Key: "pool_access_rules"}
 		}
 	}
-	return pools, rows.Err()
+	return nil
 }
 
 func replayAdmissionTx(ctx context.Context, tx *storeTx, team Team, scope, key, digest string) (AdmissionResult, bool, error) {

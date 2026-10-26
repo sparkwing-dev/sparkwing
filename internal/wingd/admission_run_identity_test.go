@@ -23,8 +23,8 @@ func TestNodeHostAdmissionReadsItsRealRun(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	_, err = teststore.SQL(t, db).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
-VALUES ('default','real-run',1,'example','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{}`), []byte(`[]`))
+	_, err = teststore.SQL(t, db).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days)
+VALUES ('default','real-run',1,'example','running',?,'request',1,'gh:1','host','execute','account',1,'r30',30)`, []byte(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

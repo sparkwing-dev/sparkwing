@@ -125,11 +125,15 @@ func TestExpansionChecksStoredSecretValuesAndPools(t *testing.T) {
 			spec.Declarations.Version = 1
 			spec.Request.RunID = string(request.Source.RunID)
 			spec.Request.Request.Pipeline = "p"
-			spec.Request.Provenance = assertedProvenance(t, "p", "", "")
-			spec.Request.AllowedPools = []string{"prod"}
+			app := runspec.AppFacts{Event: "push", DeliveryKey: "delivery", RepositoryID: 1, Ref: "refs/heads/feature", SHA: fixtureOtherSHA, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0).UTC()}
+			provenance, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "p")
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec.Request.Provenance = provenance
 			spec.Resolved.SecretNames = []string{"token"}
-			if mode == "ungranted_pool" {
-				spec.Request.AllowedPools = nil
+			if mode != "ungranted_pool" {
+				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES ('a','prod','prod','gh:1','owner',1)`)
 			}
 			if mode == "here" {
 				spec.Request.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}

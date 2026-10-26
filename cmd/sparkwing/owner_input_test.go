@@ -99,7 +99,7 @@ func TestOwnerInputMatchesPersistedTriggerFence(t *testing.T) {
 		args  []any
 	}{
 		{`INSERT INTO teams(name,created_at,updated_at) VALUES ('team',1,1)`, nil},
-		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('team',?,1,'ci','running',?,?,1,?,'host','execute',?,'account',1,'r30',30)`, []any{award.RunID, request, string(award.Request.Hash), string(award.Request.Request.Git.Repository.Key), []byte(`[]`)}},
+		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('team',?,1,'ci','running',?,?,1,?,'host','execute','account',1,'r30',30)`, []any{award.RunID, request, string(award.Request.Hash), string(award.Request.Request.Git.Repository.Key)}},
 		{`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,needs_labels,prefers_labels) VALUES ('team',?,'trigger',1,1,?,?)`, []any{award.RunID, []byte(`[]`), []byte(`[]`)}},
 	} {
 		if _, err := teststore.SQL(t, state).ExecContext(t.Context(), statement.query, statement.args...); err != nil {

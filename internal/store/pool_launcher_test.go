@@ -39,7 +39,8 @@ func poolLauncherFixture(t *testing.T) (*Store, UnitDemand) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,allowed_pools=? WHERE id='run'`, body, []byte(`["deploy"]`))
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE id='run'`, body)
+	rewriteSchemaExec(t, s.db, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES ('a','deploy','deploy','gh:1','owner',1)`)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=CAST(json_set(execution_json, '$.requires', json(?)) AS BLOB) WHERE run_id='run'`, `{"set":true,"value":["pool=deploy","team-4cpu"]}`)
 	return s, demand
 }
@@ -114,7 +115,42 @@ func TestVerifiedPoolRefusesPersistentRunnerCredentials(t *testing.T) {
 	}
 }
 
-func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
+type poolPin struct {
+	tenant   *Tenant
+	input    IntakeRequest
+	admitted AdmissionResult
+	root     capability.Capability
+	lease    SingletonLease
+}
+
+// claim awards one unit to the deploy launcher and exchanges its bootstrap.
+func (f poolPin) claim(t *testing.T, kind capability.UnitKind, run string) (capability.Capability, error) {
+	t.Helper()
+	demand := UnitDemand{CapabilityPrefix: f.root.Prefix, Kinds: []capability.UnitKind{kind}}
+	if run != "" {
+		demand.Target = &UnitRef{Kind: kind, RunID: runspec.RunID(run)}
+		if kind == capability.UnitNode {
+			demand.Target.NodeID = "job"
+		}
+	}
+	award, err := f.tenant.s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil {
+		return capability.Capability{}, err
+	}
+	if run != "" && string(award.RunID) != run || award.Kind != kind {
+		t.Fatalf("pool award: %+v", award)
+	}
+	issued, err := f.tenant.s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: award.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return issued.Capability, nil
+}
+
+// poolPinFixture admits a verified main push pinned to the deploy pool that one
+// access rule opens, and accepts its plan, which declares secrets.
+func poolPinFixture(t *testing.T, secrets ...string) poolPin {
+	t.Helper()
 	ctx := t.Context()
 	tenant, input, now := intakeFixture(t)
 	s := tenant.s
@@ -144,23 +180,11 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim := func(kind capability.UnitKind) capability.Capability {
-		t.Helper()
-		demand := UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{kind}}
-		award, err := s.AsOperator().ClaimUnit(ctx, demand)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if award.RunID != admitted.RunID || award.Kind != kind {
-			t.Fatalf("pool award: %+v", award)
-		}
-		issued, err := s.AsOperator().ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: award.Award.CapabilityPrefix})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return issued.Capability
+	f := poolPin{tenant: tenant, input: input, admitted: admitted, root: root, lease: lease}
+	planner, err := f.claim(t, capability.UnitPlan, "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	planner := claim(capability.UnitPlan)
 	_, actor, err := renewalActor(planner)
 	if err != nil {
 		t.Fatal(err)
@@ -170,16 +194,29 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range secrets {
+		rewriteSchemaExec(t, s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a',?,'ciphertext','account',1,1,0,'p',0,'deploy')`, name)
+	}
 	declarations := runspec.CheckoutDeclarations{Version: 1}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: seal, Plan: plan, Declarations: declarations})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.AcceptPlan(ctx, PlanAcceptance{RunID: admitted.RunID, Actor: actor, Seal: runspec.SealInput{Request: seal, Plan: raw, Declarations: declarations, Resolved: runspec.Resolved{Args: seal.Request.RequestedArgs, SecretArgs: []string{}, DefaultBranch: runspec.Optional[string]{Set: true, Value: "main"}, DefaultBranchSource: runspec.DefaultBranchApp, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}); err != nil {
+	if _, err := tenant.AcceptPlan(ctx, PlanAcceptance{RunID: admitted.RunID, Actor: actor, Seal: runspec.SealInput{Request: seal, Plan: raw, Declarations: declarations, Resolved: runspec.Resolved{Args: seal.Request.RequestedArgs, SecretArgs: []string{}, SecretNames: secrets, DefaultBranch: runspec.Optional[string]{Set: true, Value: "main"}, DefaultBranchSource: runspec.DefaultBranchApp, Settings: resolved, Guards: runspec.Guards{Passed: true}}}}); err != nil {
 		t.Fatal(err)
 	}
-	worker := claim(capability.UnitNode)
-	_, actor, err = renewalActor(worker)
+	return f
+}
+
+func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
+	ctx := t.Context()
+	f := poolPinFixture(t)
+	tenant, admitted, s := f.tenant, f.admitted, f.tenant.s
+	worker, err := f.claim(t, capability.UnitNode, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, actor, err := renewalActor(worker)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +230,7 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.AsOperator().ReconcileControllerRuns(ctx, lease, "", 10); err != nil {
+	if _, err := s.AsOperator().ReconcileControllerRuns(ctx, f.lease, "", 10); err != nil {
 		t.Fatal(err)
 	}
 	run, err := tenant.ReadRun(ctx, admitted.RunID)
@@ -201,6 +238,51 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 		t.Fatalf("pool-pinned run: %+v %v", run, err)
 	}
 	rewriteSchemaCount(t, s.db, "billable_intervals", 0)
+}
+
+// An access rule an admin removes stops every later use of the pool: secret
+// release and OIDC for work already on it, and placement, including of retries
+// that copy an older run's sealed identity.
+func TestRemovedPoolRuleCutsOffRetriesOfVerifiedRuns(t *testing.T) {
+	ctx := t.Context()
+	f := poolPinFixture(t, "DEPLOY")
+	s := f.tenant.s
+	retry := func(key string) string {
+		t.Helper()
+		result, err := f.tenant.AdmitRun(ctx, IntakeRequest{Authority: f.input.Authority, IdempotencyKey: key, Request: runspec.Request{Pipeline: "p", Lineage: runspec.Lineage{RetryOf: f.admitted.RunID}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.RunID
+	}
+	running := f.admitted.RunID
+	worker, err := f.claim(t, capability.UnitNode, running)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := s.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: worker.Prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := capability.Target{Team: "a", SecretName: "DEPLOY"}
+	if err := s.AsOperator().CheckBinding(ctx, principal, capability.BindDeclaredSecret, secret); err != nil {
+		t.Fatalf("allowed pool withheld its secret: %v", err)
+	}
+	oidc := capability.Authorized{Principal: principal, Target: capability.Target{Team: "a", RunID: running}}
+	if _, err := f.tenant.ReadOIDCFacts(ctx, oidc); err != nil {
+		t.Fatalf("allowed pool withheld OIDC: %v", err)
+	}
+	rewriteSchemaExec(t, s.db, `DELETE FROM pool_access_rules WHERE team='a' AND id='deploy'`)
+	if err := s.AsOperator().CheckBinding(ctx, principal, capability.BindDeclaredSecret, secret); err == nil {
+		t.Fatal("a removed pool rule still released the reserved secret")
+	}
+	if _, err := f.tenant.ReadOIDCFacts(ctx, oidc); err == nil {
+		t.Fatal("a removed pool rule still minted OIDC on the pool")
+	}
+	late := retry("after-removal")
+	if _, err := f.claim(t, capability.UnitPlan, late); err == nil {
+		t.Fatal("a retry placed on a pool whose rule was removed")
+	}
 }
 
 func TestPoolLauncherCannotCrossItsScope(t *testing.T) {
@@ -223,7 +305,7 @@ func TestPoolLauncherCannotCrossItsScope(t *testing.T) {
 				authorityPersist(t, s, root)
 				demand.CapabilityPrefix = root.Prefix
 			} else {
-				rewriteSchemaExec(t, s.db, `UPDATE runs SET allowed_pools=? WHERE id='run'`, []byte(`["other"]`))
+				rewriteSchemaExec(t, s.db, `UPDATE pool_access_rules SET pool='other'`)
 			}
 			if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {
 				t.Fatalf("pool launcher escaped its %s", other)

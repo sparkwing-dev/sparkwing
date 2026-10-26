@@ -41,7 +41,7 @@ func seedRetryHistory(t *testing.T, s *serverFixture, secret string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,retry_of,lineage_json) SELECT team,?,?,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,?,log_retention_class,log_retention_days,?,? FROM runs WHERE id='run'`, retry.id, i+2, i+2, retry.parent, lineage)
+		engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,retry_of,lineage_json) SELECT team,?,?,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,?,log_retention_class,log_retention_days,?,? FROM runs WHERE id='run'`, retry.id, i+2, i+2, retry.parent, lineage)
 	}
 }
 
@@ -111,7 +111,7 @@ func TestRetryHistoryTraversesLongChainsAndCycles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,retry_of,lineage_json) SELECT team,?,?,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,?,log_retention_class,log_retention_days,?,? FROM runs WHERE id='run'`, id, i+5, i+5, parent, lineage)
+		engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,retry_of,lineage_json) SELECT team,?,?,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,?,log_retention_class,log_retention_days,?,? FROM runs WHERE id='run'`, id, i+5, i+5, parent, lineage)
 		ids = append(ids, id)
 		parent = id
 	}
@@ -158,7 +158,7 @@ func FuzzRetryHistoryKeepsPrivateInputsAndTeams(f *testing.F) {
 		s, session := pauseHTTPFixture(t)
 		seedRetryHistory(t, s, secret)
 		engineSQL(t, s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
-		engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,retry_of) SELECT 'b','foreign',5,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,'run' FROM runs WHERE id='run'`)
+		engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,retry_of) SELECT 'b','foreign',5,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,'run' FROM runs WHERE id='run'`)
 		engineSQL(t, s.store, `UPDATE runs SET retry_of='foreign' WHERE id='run'`)
 		options, prefix := selectorClientOptions(t, s, session, `{"grants":["runs.read"]}`)
 		raw, err := options.Bearer(t.Context())

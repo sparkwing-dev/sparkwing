@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -118,6 +119,9 @@ func (t *Tenant) WritePoolAccess(ctx context.Context, actor runstate.Actor, id s
 					return false, authorityError(apierr.BadRequest, err.Error())
 				}
 				rule.Branch = selector[0]
+				if strings.ContainsAny(rule.Branch, `[\`) {
+					return false, authorityError(apierr.BadRequest, "pool rule branch patterns support only the * and ? wildcards")
+				}
 			}
 			rule.ID = fmt.Sprintf("%s.%06d", id, i)
 			rule.InstallationID = 0
@@ -161,4 +165,61 @@ func (t *Tenant) DeletePoolAccess(ctx context.Context, actor runstate.Actor, poo
 		}
 		return n > 0, nil
 	})
+}
+
+// poolGrant is the one rule deciding whether access rule `rule` opens its pool to
+// a run: the rule as it stands now, judged against the run's sealed provenance.
+// Placement, secret release and OIDC all evaluate it at use, so removing a rule
+// stops every run on its next use, retries of older runs included. Only signed
+// App deliveries and admin-armed default-branch schedules qualify. A branch
+// pattern is a path.Match glob limited to * and ?, which WritePoolAccess enforces;
+// an equal slash count keeps both wildcards inside one path segment.
+func (q *claimSQL) poolGrant(rule, provenance string) string {
+	trust, ref := q.at(provenance, "trust"), `COALESCE(`+q.at(provenance, "ref")+`,'')`
+	branch := `substr(` + ref + `,12)`
+	glob := branch + ` GLOB ` + rule + `.branch`
+	if q.dialect == DialectPostgres {
+		glob = branch + ` LIKE replace(replace(replace(replace(replace(` + rule + `.branch,'\','\\'),'%','\%'),'_','\_'),'*','%'),'?','_') ESCAPE '\'`
+	}
+	slashes := func(v string) string { return `(length(` + v + `)-length(replace(` + v + `,'/','')))` }
+	return `(` + trust + ` IN ('verified','verified-default','schedule') AND ` + rule + `.repo_key='gh:'||CAST(` + q.at(provenance, "repository_id") + ` AS TEXT)` +
+		` AND (` + rule + `.source='' OR (` + rule + `.source='github_app' AND ` + trust + ` IN ('verified','verified-default')))` +
+		` AND (` + rule + `.branch='' OR (substr(` + ref + `,1,11)='refs/heads/' AND ` + slashes(rule+".branch") + `=` + slashes(branch) + ` AND ` + glob + `)))`
+}
+
+// allowedPools is the JSON array of pools poolGrant opens to a run, for row reads.
+func (q *claimSQL) allowedPools(team, provenance string) string {
+	from := ` FROM pool_access_rules pr WHERE pr.team=` + team + ` AND ` + q.poolGrant("pr", provenance)
+	if q.dialect == DialectPostgres {
+		return `(SELECT COALESCE(json_agg(DISTINCT pr.pool),'[]'::json)::text` + from + `)`
+	}
+	return `(SELECT json_group_array(pool) FROM (SELECT DISTINCT pr.pool` + from + `))`
+}
+
+// runPoolsTx lists the pools the team's current access rules open to a sealed
+// provenance, and those of them whose rules also route the run onto the pool.
+func runPoolsTx(ctx context.Context, tx *storeTx, team Team, provenance runspec.Provenance) (pools, routed []string, err error) {
+	body, err := json.Marshal(provenance)
+	if err != nil {
+		return nil, nil, err
+	}
+	q := claimSQL{dialect: tx.dialect}
+	rows, err := tx.queryContext(ctx, `SELECT pr.pool,MAX(pr.route) FROM pool_access_rules pr CROSS JOIN (SELECT CAST(? AS TEXT) AS provenance) v WHERE pr.team=? AND `+q.poolGrant("pr", "v.provenance")+` GROUP BY pr.pool`, string(body), team)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	pools = []string{}
+	for rows.Next() {
+		var pool, route string
+		if err := rows.Scan(&pool, &route); err != nil {
+			return nil, nil, err
+		}
+		pools = append(pools, pool)
+		if route != "" {
+			routed = append(routed, pool)
+		}
+	}
+	slices.Sort(pools)
+	return pools, routed, rows.Err()
 }

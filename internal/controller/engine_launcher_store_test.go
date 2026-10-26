@@ -159,7 +159,7 @@ func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *tes
 				t.Fatal(err)
 			}
 			engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-			engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,lineage_json,log_retention_class,log_retention_days) SELECT team,'sibling',2,pipeline,status,CAST(REPLACE(CAST(request_json AS TEXT),'"run"','"sibling"') AS BLOB),request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,lineage_json,log_retention_class,log_retention_days FROM runs WHERE id='run'`)
+			engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,lineage_json,log_retention_class,log_retention_days) SELECT team,'sibling',2,pipeline,status,CAST(REPLACE(CAST(request_json AS TEXT),'"run"','"sibling"') AS BLOB),request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,lineage_json,log_retention_class,log_retention_days FROM runs WHERE id='run'`)
 			engineSQL(t, e.Store, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,'sibling',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
 			var observed []capability.LauncherObservation
 			var preparing []capability.LeaseRef

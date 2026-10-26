@@ -378,7 +378,6 @@ type Request struct {
 type IntakeFacts struct {
 	RunID        string
 	AdmittedAt   time.Time
-	AllowedPools []string
 	AuthorityRef capability.AuthorityRef
 	Ceilings     Ceilings
 	Provenance   Provenance
@@ -390,7 +389,6 @@ type SealedRequest struct {
 	Request      Request                 `json:"request"`
 	RunID        string                  `json:"run_id"`
 	AdmittedAt   time.Time               `json:"admitted_at"`
-	AllowedPools []string                `json:"allowed_pools"`
 	AuthorityRef capability.AuthorityRef `json:"authority_ref"`
 	Ceilings     Ceilings                `json:"ceilings"`
 	Provenance   Provenance              `json:"provenance"`
@@ -482,7 +480,6 @@ type projections struct {
 	Ref           string
 	DefaultBranch string
 	Dispatch      Dispatch
-	AllowedPools  []string
 	RequestHash   Hash
 	SpecHash      Hash
 	PlanHash      Hash

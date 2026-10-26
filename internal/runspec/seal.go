@@ -56,7 +56,7 @@ func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 	if err := ValidateRepoUse(request.Git.Repository.Key, RepoMachineStore); err != nil {
 		return SealedRequest{}, err
 	}
-	sealed, err := clone(SealedRequest{Version: 1, Request: request, RunID: facts.RunID, AdmittedAt: facts.AdmittedAt.UTC(), AllowedPools: facts.AllowedPools, AuthorityRef: facts.AuthorityRef, Ceilings: facts.Ceilings, Provenance: facts.Provenance})
+	sealed, err := clone(SealedRequest{Version: 1, Request: request, RunID: facts.RunID, AdmittedAt: facts.AdmittedAt.UTC(), AuthorityRef: facts.AuthorityRef, Ceilings: facts.Ceilings, Provenance: facts.Provenance})
 	if err != nil {
 		return SealedRequest{}, err
 	}
@@ -189,7 +189,7 @@ func project(s Spec) projections {
 	} else if r.Git.DefaultBranch.Set {
 		branch = r.Git.DefaultBranch.Value
 	}
-	return projections{RepoKey: r.Git.Repository.Key, RepoDisplay: r.Git.Repository.Display, Pipeline: r.Pipeline, SHA: r.Git.SHA, Ref: r.Git.Ref, DefaultBranch: branch, Dispatch: r.Dispatch, AllowedPools: append([]string(nil), s.Request.AllowedPools...), RequestHash: s.Request.Hash, SpecHash: s.Hash, PlanHash: s.PlanHash}
+	return projections{RepoKey: r.Git.Repository.Key, RepoDisplay: r.Git.Repository.Display, Pipeline: r.Pipeline, SHA: r.Git.SHA, Ref: r.Git.Ref, DefaultBranch: branch, Dispatch: r.Dispatch, RequestHash: s.Request.Hash, SpecHash: s.Hash, PlanHash: s.PlanHash}
 }
 
 // CarryRetry preserves the sealed code, writer and inputs, recording the retrier separately.

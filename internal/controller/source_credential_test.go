@@ -103,7 +103,7 @@ func (f *appFixture) claimRunNodeOn(owner signedIn, runID, repoURL string, repoI
 	if repoID > 0 && !personal {
 		pools = []string{"source"}
 		path = "/api/v1/launcher/claim"
-		if _, err := teststore.Exec(ctx, f.store, `UPDATE runs SET allowed_pools=? WHERE team=? AND id=?`, []byte(`["source"]`), owner.team, runID); err != nil {
+		if _, err := teststore.Exec(ctx, f.store, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES (?,?,'source',?,'owner',1)`, owner.team, runID, fmt.Sprintf("gh:%d", repoID)); err != nil {
 			f.t.Fatal(err)
 		}
 		if _, err := teststore.Exec(ctx, f.store, `UPDATE nodes SET execution_json=? WHERE team=? AND run_id=? AND node_id='compile'`, []byte(`{"requires":{"value":["pool=source"]}}`), owner.team, runID); err != nil {

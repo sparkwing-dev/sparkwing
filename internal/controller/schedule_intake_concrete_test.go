@@ -50,7 +50,7 @@ func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := run.Request.Request
-	if run.Request.Hash == "" || request.Origin != runspec.OriginSchedule || request.Dispatch != runspec.DispatchController || request.Actor.ID != "alice" || request.RequestedArgs["channel"] != "nightly" || request.Git.SHA != sha || request.Source.Location.RemoteURL != "https://gitlab.com/acme/ci.git" || len(run.Request.AllowedPools) != 0 || request.Git.App.Set {
+	if run.Request.Hash == "" || request.Origin != runspec.OriginSchedule || request.Dispatch != runspec.DispatchController || request.Actor.ID != "alice" || request.RequestedArgs["channel"] != "nightly" || request.Git.SHA != sha || request.Source.Location.RemoteURL != "https://gitlab.com/acme/ci.git" || request.Git.App.Set {
 		t.Fatalf("scheduled Cloud intake lost source or consent: %+v", run.Request)
 	}
 	acquired, err := source.ForRequest(run.Request)

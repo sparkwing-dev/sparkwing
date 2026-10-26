@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -21,11 +22,11 @@ type claimContextPlacement struct {
 
 // A context shares only immutable policy inputs; readiness and authority stay in the claim predicate.
 func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID string, kind capability.UnitKind, requirements string, execution []byte) (string, error) {
-	var request, spec, pools []byte
+	var request, spec []byte
 	var verifiedDefault bool
 	q := claimSQL{dialect: tx.dialect}
 	var repoKey, repoDisplay, repository, dispatch, subject, principal string
-	if err := tx.QueryRowContext(ctx, `SELECT request_json,spec_json,allowed_pools,repo_key,repo_display,repo_identity,dispatch,created_subject_kind,created_principal,`+q.verifiedDefaultWork(q.at(q.blob("request_json"), "provenance"))+` FROM runs WHERE team=? AND id=?`, team, runID).Scan(&request, &spec, &pools, &repoKey, &repoDisplay, &repository, &dispatch, &subject, &principal, &verifiedDefault); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT request_json,spec_json,repo_key,repo_display,repo_identity,dispatch,created_subject_kind,created_principal,`+q.verifiedDefaultWork(q.at(q.blob("request_json"), "provenance"))+` FROM runs WHERE team=? AND id=?`, team, runID).Scan(&request, &spec, &repoKey, &repoDisplay, &repository, &dispatch, &subject, &principal, &verifiedDefault); err != nil {
 		return "", err
 	}
 	var sealed struct {
@@ -46,8 +47,11 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 			OriginMachine   string `json:"origin_machine"`
 			LocalForeground bool   `json:"local_foreground"`
 		} `json:"request"`
+		// Pool access rules read the repository and ref of runs that may hold a pool.
 		Provenance struct {
 			Trust           runspec.TrustClass `json:"trust"`
+			RepositoryID    int64              `json:"repository_id"`
+			Ref             string             `json:"ref"`
 			VerifiedDefault bool
 		} `json:"provenance"`
 	}
@@ -55,6 +59,9 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 		return "", err
 	}
 	sealed.Provenance.VerifiedDefault = verifiedDefault
+	if !slices.Contains([]runspec.TrustClass{runspec.TrustVerified, runspec.TrustVerifiedDefault, runspec.TrustSchedule}, sealed.Provenance.Trust) {
+		sealed.Provenance.RepositoryID, sealed.Provenance.Ref = 0, ""
+	}
 	var accepted struct {
 		Resolved struct {
 			Settings struct {
@@ -83,10 +90,9 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 		Options                                                        *claimContextPlacement
 		Guards                                                         runspec.Guards
 		Execution                                                      claimContextPlacement
-		Pools                                                          json.RawMessage
 		RepoKey, RepoDisplay, Repository, Dispatch, Subject, Principal string
 		Foreground                                                     bool
-	}{kind, requirements, sealed.Request, sealed.Provenance, accepted.Resolved.Settings.Options, accepted.Resolved.Guards, placement, pools, repoKey, repoDisplay, repository, dispatch, subject, principal, sealed.RunID == runID})
+	}{kind, requirements, sealed.Request, sealed.Provenance, accepted.Resolved.Settings.Options, accepted.Resolved.Guards, placement, repoKey, repoDisplay, repository, dispatch, subject, principal, sealed.RunID == runID})
 	if err != nil {
 		return "", err
 	}

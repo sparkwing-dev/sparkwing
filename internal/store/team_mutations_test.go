@@ -230,7 +230,7 @@ func TestRunDeletionUsesCredentialGrantsForOtherMembersRuns(t *testing.T) {
 	}
 	token := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}}
 	for i, creator := range []string{"other", "owner"} {
-		rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_subject_kind,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a',?,?,'p','success',?,'request',1,'gh:1','host','execute',?,?, 'account',1,2,'r30',30)`, creator, i+1, []byte(`{"version":1}`), []byte(`[]`), creator)
+		rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_subject_kind,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a',?,?,'p','success',?,'request',1,'gh:1','host','execute',?, 'account',1,2,'r30',30)`, creator, i+1, []byte(`{"version":1}`), creator)
 	}
 	a := teamAuthorization(t, s, token, "a", "DELETE", "/api/v1/runs/{run}")
 	a.Target.RunID = "other"

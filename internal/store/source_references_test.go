@@ -19,7 +19,7 @@ func FuzzDeclaredPipelineReferenceDoesNotEscapeItsJob(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','producer-run',2,'producer','success',?,'producer',1,'gh:1','host','execute',?,'account',1,2,'r30',30)`, sealed, []byte(`[]`))
+		rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','producer-run',2,'producer','success',?,'producer',1,'gh:1','host','execute','account',1,2,'r30',30)`, sealed)
 		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json) VALUES ('a','producer-run','output','done','success',2,?,?)`, []byte(`{"id":"output"}`), []byte(`{}`))
 		p, err := s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 		if err != nil {

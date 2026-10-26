@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -25,6 +26,54 @@ func ClaimSecurityRegressions(t *testing.T, open func(*testing.T) *Store) {
 	t.Run("fresh default branch", func(t *testing.T) { verifiedDefaultRequiresFreshPod(t, fixture) })
 	t.Run("fresh pod explanation", func(t *testing.T) { freshPodWaitingExplanation(t, fixture) })
 	t.Run("push provenance parity", func(t *testing.T) { pushClaimProvenanceParity(t, fixture) })
+	t.Run("pool branch rules", func(t *testing.T) { poolBranchRulesMatchLikePathGlobs(t, fixture) })
+}
+
+// The pool rule runs in SQL in both dialects; it must agree with path.Match for
+// the * and ? wildcards it accepts, never crossing a slash or treating % and _
+// as wildcards.
+func poolBranchRulesMatchLikePathGlobs(t *testing.T, open func(*testing.T) *Store) {
+	s := open(t)
+	for i, branch := range []string{"main", "release/*", "v?", "a_b", "x%y", "*"} {
+		s.testOnlyExec(t, `INSERT INTO pool_access_rules(team,id,pool,repo_key,branch,created_by,created_at) VALUES ('a',?,?,'gh:1',?,'owner',1)`, fmt.Sprint(i), branch, branch)
+	}
+	s.testOnlyExec(t, `INSERT INTO pool_access_rules(team,id,pool,repo_key,source,created_by,created_at) VALUES ('a','app','app-only','gh:1','github_app','owner',1),('a','other','other-repo','gh:2','','owner',1),('b','foreign','foreign','gh:1','','owner',1)`)
+	app := func(ref string) runspec.Provenance {
+		p, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: time.Unix(1, 0), Ref: ref, SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main"}, runspec.Optional[runspec.PullRequest]{}, "ci")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	schedule, err := runspec.ScheduleProvenance("nightly", 1, "main", referenceMain, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, err := runspec.ActionsProvenance(1, "refs/heads/main", referenceMain, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		provenance runspec.Provenance
+		want       []string
+	}{
+		{"default branch", app("refs/heads/main"), []string{"*", "app-only", "main"}},
+		{"one segment under release", app("refs/heads/release/1"), []string{"app-only", "release/*"}},
+		{"two segments under release", app("refs/heads/release/1/2"), []string{"app-only"}},
+		{"question mark is one character", app("refs/heads/v1"), []string{"*", "app-only", "v?"}},
+		{"underscore is literal", app("refs/heads/aXb"), []string{"*", "app-only"}},
+		{"percent is literal", app("refs/heads/xZZy"), []string{"*", "app-only"}},
+		{"literal underscore", app("refs/heads/a_b"), []string{"*", "a_b", "app-only"}},
+		{"a tag matches no branch rule", app("refs/tags/main"), []string{"app-only"}},
+		{"admin-armed schedule is not an App delivery", schedule, []string{"*", "main"}},
+		{"actions push gets no pool", actions, []string{}},
+		{"asserted run gets no pool", assertedProvenance(t, "ci", "refs/heads/main", referenceMain), []string{}},
+	} {
+		if got := testAllowedPools(t, s, "a", tc.provenance); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: pools=%v want %v", tc.name, got, tc.want)
+		}
+	}
 }
 
 func actionsClaimRefusesEditorAssertedMain(t *testing.T, open func(*testing.T) *Store) {
@@ -73,19 +122,16 @@ func reservedPoolTrustClaimAndExplanationParity(t *testing.T, open func(*testing
 						}
 						authorityPersist(t, s, root)
 						demand.CapabilityPrefix = root.Prefix
-						s.testOnlyExec(t, `UPDATE runs SET allowed_pools=?`, []byte(`["prod"]`))
 						s.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["pool=prod"]}}`))
 						if secret {
 							s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'',0,'prod')`)
 						}
+						// Only verified pushes reach a pool; a feature branch is not default-branch work.
+						branch := "feature"
 						if verified {
-							p, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "verified", VerifiedAt: s.now(), Ref: "refs/heads/main", SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: true}, runspec.Optional[runspec.PullRequest]{}, "ci")
-							if err != nil {
-								t.Fatal(err)
-							}
-							body := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}}, p)
-							s.testOnlyExec(t, `UPDATE runs SET request_json=?`, body)
+							branch = "main"
 						}
+						grantFixturePool(t, s, "run", "prod", branch)
 						indexFixtureUnit(t, s, "a", *demand.Target)
 						want := (!secret || launcher) && (trust == capability.TrustAny || trust == "" && !secret || verified && launcher)
 						err := s.inTx(t.Context(), func(tx *storeTx) error {
@@ -205,7 +251,7 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					root.Trust = capability.TrustAny
 					if runner == "launcher" {
 						root.Grants, root.ReservedPools = []capability.Grant{capability.ClaimsLaunch}, []string{"prod"}
-						s.testOnlyExec(t, `UPDATE runs SET allowed_pools=? WHERE id='run'`, []byte(`["prod"]`))
+						s.testOnlyExec(t, `INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES ('a','prod','prod','gh:1','owner',1)`)
 						s.testOnlyExec(t, `UPDATE nodes SET execution_json=? WHERE run_id='run'`, []byte(`{"requires":{"value":["pool=prod","team-4cpu"]}}`))
 					}
 					if runner == "cloud" {
@@ -235,6 +281,9 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					demand.Labels = append(demand.Labels, "single-use", "launcher", "class=cloud")
 					indexFixtureUnit(t, s, "a", ref)
 					want := runner != "persistent" || source == "asserted-main" || source == "verified-feature"
+					if runner == "launcher" && source == "asserted-main" {
+						want = false // no access rule opens a pool to an asserted run
+					}
 					if runner == "actions" && (source == "asserted-main" || source == "schedule" || source == "inherited-schedule") {
 						want = false
 					}

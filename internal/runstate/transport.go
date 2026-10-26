@@ -27,7 +27,6 @@ type Execution struct {
 	Plan              json.RawMessage
 	PlanHash          string
 	Dispatch          string
-	AllowedPools      []string
 	Owner             *OwnerLeaseRef
 	CreatedAt         time.Time
 	CancelRequestedAt *time.Time

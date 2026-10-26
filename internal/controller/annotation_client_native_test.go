@@ -67,7 +67,7 @@ func FuzzMetadataNumericSelectorsRetainJobAuthority(f *testing.F) {
 		engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
 		engineClaimHTTP(t, server.Handler(), raw, "POST", "/api/v1/runs/run/jobs/job/steps/start", `{"step_id":"compile","state":"running","source_attempt":1}`, 200)
 		engineSQL(t, engine.Store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
-		engineSQL(t, engine.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b','foreign',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
+		engineSQL(t, engine.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b','foreign',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
 		switch state % 3 {
 		case 1:
 			engineSQL(t, engine.Store, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, authorized.Principal.Capability.Prefix)

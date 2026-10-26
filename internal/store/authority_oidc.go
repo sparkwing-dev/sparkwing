@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -43,6 +44,15 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	run, err := readRunTx(ctx, tx, t.team, authorized.Target.RunID)
 	if err != nil {
 		return capability.OIDCFacts{}, err
+	}
+	if reserved := auth.Principal.Capability.ReservedPools; len(reserved) > 0 {
+		allowed, _, err := runPoolsTx(ctx, tx, t.team, run.Request.Provenance)
+		if err != nil {
+			return capability.OIDCFacts{}, err
+		}
+		if !slices.ContainsFunc(reserved, func(pool string) bool { return slices.Contains(allowed, pool) }) {
+			return capability.OIDCFacts{}, bindingRefusal()
+		}
 	}
 	factsClass, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
 	if err != nil {

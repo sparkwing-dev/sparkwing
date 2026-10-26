@@ -107,8 +107,8 @@ func TestRewriteSchemaRetentionPreservesFinancialRecordsAndNewestSuccess(t *test
 	rewriteSchemaExec(t, db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1)")
 	for i, id := range []string{"old", "new"} {
 		rewriteSchemaExec(t, db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,
-repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days)
-VALUES ('a',?,?,'p','success',?,'request',1,'gh:1','host','execute',?,'account',1,2,'r30',30)`, id, i+1, []byte(`{"version":1}`), []byte(`[]`))
+repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days)
+VALUES ('a',?,?,'p','success',?,'request',1,'gh:1','host','execute','account',1,2,'r30',30)`, id, i+1, []byte(`{"version":1}`))
 	}
 	rewriteSchemaExec(t, db, "INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','old','n','pending',?,?)", []byte(`{"version":1}`), []byte(`{}`))
 	rewriteSchemaRefuses(t, db, "INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('b','old','n','pending',?,?)", []byte(`{"version":1}`), []byte(`{}`))
@@ -176,8 +176,8 @@ func TestRewriteSchemaReceiptsSeparateJobAndNonJobUploaders(t *testing.T) {
 	db := rewriteSchemaDB(t)
 	rewriteSchemaExec(t, db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)")
 	rewriteSchemaExec(t, db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,
-repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
-VALUES ('a','r',1,'p','pending',?,'request',1,'gh:1','host','publish',?,'account',1,'r30',30)`, []byte(`{"version":1}`), []byte(`[]`))
+repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days)
+VALUES ('a','r',1,'p','pending',?,'request',1,'gh:1','host','publish','account',1,'r30',30)`, []byte(`{"version":1}`))
 	rewriteSchemaExec(t, db, "INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','r','n','pending',?,?)", []byte(`{"version":1}`), []byte(`{}`))
 	rewriteSchemaExec(t, db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES ('a','r','n',1,1,'holder','cap','runner','runner','remote',1)`)
 	rewriteSchemaExec(t, db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a','digest',1,1)")

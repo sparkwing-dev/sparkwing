@@ -278,7 +278,7 @@ func TestBoundDelegateRevocationRequiresTheAccountOwner(t *testing.T) {
 	s := authorityStore(t)
 	owner := authorityMember(t, s, "owner", RoleEditor)
 	other := authorityMember(t, s, "other", RoleEditor)
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','published-run',1,'ci','running',?,'sealed',1,'gh:1','host','publish',?,'account',1,'r30',30)`, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"ci","writer":"account/fixture"}}`), []byte(`[]`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','published-run',1,'ci','running',?,'sealed',1,'gh:1','host','publish','account',1,'r30',30)`, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"ci","writer":"account/fixture"}}`))
 	child := authorityRoot("publication", "a")
 	child.Parent = &owner.Authority
 	child.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "owner"}

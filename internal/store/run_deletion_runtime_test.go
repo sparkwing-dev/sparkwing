@@ -152,7 +152,7 @@ func assertReusedRunIDRetainsEveryDeletionAudit(t *testing.T, s *store.Store) {
 	}
 	route, _ := capability.LookupRoute("DELETE", "/api/v1/runs/{run}")
 	for range 2 {
-		_, err := s.DB().Exec(storetest.Rebind(s, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'reused',1,'p','success',?,'request',1,'gh:1','host','execute',?,'owner',1,2,'r30',30)`), tn.Team(), []byte(`{"version":1}`), []byte(`[]`))
+		_, err := s.DB().Exec(storetest.Rebind(s, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'reused',1,'p','success',?,'request',1,'gh:1','host','execute','owner',1,2,'r30',30)`), tn.Team(), []byte(`{"version":1}`))
 		if err != nil {
 			t.Fatal(err)
 		}

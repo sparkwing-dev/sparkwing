@@ -13,7 +13,7 @@ func TestRunPrunerAcknowledgesCommittedDeletion(t *testing.T) {
 			server, session := pauseHTTPFixture(t)
 			options, _ := selectorClientOptions(t, server, session, `{"grants":["runs.read","runs.control"]}`)
 			engineSQL(t, server.store, `UPDATE runs SET status='success',finished_at=1,created_subject_kind='account',created_principal='member' WHERE team='a' AND id='run'`)
-			engineSQL(t, server.store, `INSERT INTO runs(team,id,number,pipeline,status,finished_at,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,'run-1',2,pipeline,status,finished_at,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
+			engineSQL(t, server.store, `INSERT INTO runs(team,id,number,pipeline,status,finished_at,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,'run-1',2,pipeline,status,finished_at,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
 			pruner, err := client.NewRunPruner(options)
 			if err != nil {
 				t.Fatal(err)

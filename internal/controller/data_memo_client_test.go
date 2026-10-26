@@ -60,7 +60,7 @@ func TestDataMemoClientUsesRealRecordsAndCopy(t *testing.T) {
 	if _, err := records.LookupMemo(t.Context(), lookup); err == nil {
 		t.Fatal("completed producer retained live memo authority")
 	}
-	engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,lineage_json,log_retention_class,log_retention_days) SELECT team,'memo-reader',2,pipeline,'running',request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,lineage_json,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
+	engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,lineage_json,log_retention_class,log_retention_days) SELECT team,'memo-reader',2,pipeline,'running',request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,lineage_json,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','memo-reader','job','pending',1,?,?)`, []byte(`{"id":"job","memo":{}}`), []byte(`{}`))
 	engineSQL(t, e.Store, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT team,'memo-reader',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE team='a' AND id='run'`)
 	engineAcceptedFixturePlan(t, e, "a", "memo-reader")

@@ -131,7 +131,7 @@ func poolControllerStore(t *testing.T) (*store.Store, string) {
 	}
 	request.Git.Ref = app.Ref
 	request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: app}
-	sealed, err := runspec.SealRequest(request, runspec.IntakeFacts{RunID: "run", AdmittedAt: time.Unix(1, 0), AllowedPools: []string{"deploy"}, Provenance: provenance})
+	sealed, err := runspec.SealRequest(request, runspec.IntakeFacts{RunID: "run", AdmittedAt: time.Unix(1, 0), Provenance: provenance})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,8 +140,9 @@ func poolControllerStore(t *testing.T) (*store.Store, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,spec_json,spec_hash,sealed_at,plan_json,plan_hash,log_retention_class,log_retention_days) VALUES ('team','run',1,'ci','running',?,?,1,?,'host','execute',?,'account',1,?,?,1,?,?,'r30',30)`, encode(sealed), sealed.Hash, request.Git.Repository.Key, encode(sealed.AllowedPools), encode(spec), spec.Hash, plan, spec.PlanHash)
+	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,spec_json,spec_hash,sealed_at,plan_json,plan_hash,log_retention_class,log_retention_days) VALUES ('team','run',1,'ci','running',?,?,1,?,'host','execute','account',1,?,?,1,?,?,'r30',30)`, encode(sealed), sealed.Hash, request.Git.Repository.Key, encode(spec), spec.Hash, plan, spec.PlanHash)
 	exec(`UPDATE runs SET repo_display=?,repo_identity='github.com/team/repo' WHERE team='team' AND id='run'`, request.Git.Repository.Display)
+	exec(`INSERT INTO pool_access_rules(team,id,pool,repo_key,created_by,created_at) VALUES ('team','deploy','deploy','gh:1','fixture',1)`)
 	exec(`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('team','run','trigger',1,1,?,?,?)`, time.Now().Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
 	for _, id := range []string{"job-a", "job-b"} {
 		exec(`INSERT INTO nodes(team,run_id,node_id,status,ready_at,queue_started_at,spec_json,execution_json) VALUES ('team','run',?,'pending',1,1,?,?)`, id, encode(nodeproto.JobSpec{ID: id}), []byte(`{"requires":{"set":true,"value":["pool=deploy"]}}`))

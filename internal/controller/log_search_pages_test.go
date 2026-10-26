@@ -54,7 +54,7 @@ func memberObservationOptions(t *testing.T, st *store.Store, objects blob.Object
 
 func TestPersistedLogSearchPagesAdvanceThroughCandidateRuns(t *testing.T) {
 	logs, subject, st := committedDashboardLogs(t, []byte("fatal first\nordinary\nfatal second\n"))
-	engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,'newer',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
+	engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT team,'newer',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
 	engineSQL(t, st, `UPDATE runs SET request_json=CAST(replace(CAST(request_json AS TEXT),'"run"','"newer"') AS BLOB) WHERE team='a' AND id='newer'`)
 	reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
 	query := controllerwire.LogSearchQuery{Runs: controllerwire.RunQuery{Limit: 1}, Pattern: "fatal", MaxMatches: 1}
@@ -136,7 +136,7 @@ func logSearchCandidate(t *testing.T, st *store.Store, id string, number int, pi
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) SELECT team,?,?,?,'success',?,request_hash,request_sealed_at,'gh:2',dispatch,intake_mode,allowed_pools,created_principal,created_at,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, id, number, pipeline, body)
+	engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) SELECT team,?,?,?,'success',?,request_hash,request_sealed_at,'gh:2',dispatch,intake_mode,created_principal,created_at,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, id, number, pipeline, body)
 }
 
 func TestPersistedLogSearchAppliesRunFiltersBeforeLimit(t *testing.T) {
@@ -207,7 +207,7 @@ func FuzzLogSearchCursorNeverGrantsAuthority(f *testing.F) {
 		logs, _, st := committedDashboardLogs(t, []byte(strings.Repeat("private\n", logPageRecords+1)))
 		reader, prefix := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
 		engineSQL(t, st, `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`)
-		if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'foreign','foreign-run',3,pipeline,status,?,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, []byte(`{invalid private data`)); err != nil {
+		if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'foreign','foreign-run',3,pipeline,status,?,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, []byte(`{invalid private data`)); err != nil {
 			t.Fatal(err)
 		}
 		query := controllerwire.LogSearchQuery{Runs: controllerwire.RunQuery{Limit: 1}, Pattern: "private"}

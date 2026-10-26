@@ -47,9 +47,9 @@ func (t *Tenant) TestOnlySeedRun(ctx context.Context, r Run) error {
 		finish = now.UnixNano()
 	}
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := tx.execContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,started_at,finished_at,trigger_source,git_branch,git_sha,parent_run_id,retry_of,replay_of_run_id,replay_of_node_id,log_retention_class,log_retention_days)
-SELECT ?,?,COALESCE(MAX(number),0)+1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'r30',30 FROM runs WHERE team=?
-ON CONFLICT(id) DO NOTHING`, t.team, r.ID, r.Pipeline, r.Status, body, "fixture", now.UnixNano(), request.Request.Git.Repository.Key, r.DeclaredRepo, "host", "execute", []byte(`[]`), creatingPrincipal(ctx), now.UnixNano(), start, finish, r.TriggerSource, r.GitBranch, r.GitSHA, sql.NullString{String: r.ParentRunID, Valid: r.ParentRunID != ""}, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, t.team)
+		_, err := tx.execContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,created_principal,created_at,started_at,finished_at,trigger_source,git_branch,git_sha,parent_run_id,retry_of,replay_of_run_id,replay_of_node_id,log_retention_class,log_retention_days)
+SELECT ?,?,COALESCE(MAX(number),0)+1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'r30',30 FROM runs WHERE team=?
+ON CONFLICT(id) DO NOTHING`, t.team, r.ID, r.Pipeline, r.Status, body, "fixture", now.UnixNano(), request.Request.Git.Repository.Key, r.DeclaredRepo, "host", "execute", creatingPrincipal(ctx), now.UnixNano(), start, finish, r.TriggerSource, r.GitBranch, r.GitSHA, sql.NullString{String: r.ParentRunID, Valid: r.ParentRunID != ""}, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, t.team)
 		return err
 	})
 }

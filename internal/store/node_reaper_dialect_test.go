@@ -43,8 +43,8 @@ func seedExpiredUnitNode(t *testing.T, st *store.Store, team store.Team, runID s
 		}
 	}
 	now := time.Now()
-	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
-VALUES (?,?,?,'ci','running',?,'request',1,'gh:1','host','execute',?,'account',?,'r30',30)`, team, runID, number, []byte(`{}`), []byte(`[]`), now.Add(-time.Hour).UnixNano())
+	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days)
+VALUES (?,?,?,'ci','running',?,'request',1,'gh:1','host','execute','account',?,'r30',30)`, team, runID, number, []byte(`{}`), now.Add(-time.Hour).UnixNano())
 	exec(`INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,claimed_by,capability_prefix,generation,attempt,disruptions,lease_expires_at,started_at)
 VALUES (?,?,'job','running',?,?,'runner','claim',4,1,?,?,?)`, team, runID, []byte(`{"id":"job"}`), []byte(`{}`), disruptions, now.Add(-time.Minute).UnixNano(), now.Add(-time.Hour).UnixNano())
 	exec(`INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at)

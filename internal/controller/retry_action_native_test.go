@@ -210,7 +210,7 @@ func FuzzRetryActionCannotCrossAuthorityOrChangeSource(f *testing.F) {
 		secret := "private-value-" + hex.EncodeToString(value)
 		s, options, prefix, original := retryActionFixture(t, secret, false)
 		engineSQL(t, s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
-		engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,finished_at) SELECT 'b','foreign',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,finished_at FROM runs WHERE team='a' AND id='run'`)
+		engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,finished_at) SELECT 'b','foreign',2,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,finished_at FROM runs WHERE team='a' AND id='run'`)
 		switch state % 3 {
 		case 1:
 			engineSQL(t, s.store, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, prefix)

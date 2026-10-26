@@ -199,8 +199,9 @@ func (o *Operator) ListWaitingNodes(ctx context.Context, readyBefore time.Time, 
 	if limit <= 0 {
 		return nil, errors.New("waiting node limit must be positive")
 	}
+	q := claimSQL{dialect: o.s.dialect}
 	rows, err := o.s.query(ctx, `SELECT n.run_id,n.node_id,n.team,n.execution_json,n.attention_reason,
-       r.repo_display,r.request_json,r.allowed_pools
+       r.repo_display,r.request_json,`+q.allowedPools("r.team", q.at(q.blob("r.request_json"), "provenance"))+`
   FROM nodes n JOIN runs r ON r.id=n.run_id AND r.team=n.team
  WHERE n.ready_at IS NOT NULL AND n.ready_at < ?
    AND n.claimed_by IS NULL AND n.status='pending' AND n.cancel_requested_at IS NULL

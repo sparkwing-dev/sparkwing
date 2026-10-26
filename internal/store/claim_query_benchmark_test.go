@@ -125,7 +125,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 	for i := range teams {
 		team := fmt.Sprintf("team-%03d", i)
 		exec(`INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)`, team)
-		exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,repo_identity,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,?,1,'bench','running',?,'request',1,'gh:1','https://github.com/acme/repo','github.com/acme/repo','host','execute',?,'',1,'r30',30)`, team, "run-"+team, request, []byte(`[]`))
+		exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,repo_identity,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,?,1,'bench','running',?,'request',1,'gh:1','https://github.com/acme/repo','github.com/acme/repo','host','execute','',1,'r30',30)`, team, "run-"+team, request)
 		teams[i] = claimTeamFacts{Team: team, Available: 128, Balance: 1e12}
 	}
 	tx, err := db.BeginTx(ctx, nil)

@@ -93,8 +93,8 @@ func seedOwner(t *testing.T, binding Binding, id string, started bool) {
 		at := time.Unix(0, 1)
 		start = &at
 	}
-	_, err := stateSQL(t, binding).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
-VALUES (?,?,(SELECT COALESCE(MAX(number),0)+1 FROM runs),'pipeline','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, binding.Tenant.Team(), id, []byte(`{"version":1,"request":{"origin":"local"},"provenance":{"trust":"asserted","pipeline":"pipeline","writer":"account/fixture"}}`), []byte(`[]`))
+	_, err := stateSQL(t, binding).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days)
+VALUES (?,?,(SELECT COALESCE(MAX(number),0)+1 FROM runs),'pipeline','running',?,'request',1,'gh:1','host','execute','account',1,'r30',30)`, binding.Tenant.Team(), id, []byte(`{"version":1,"request":{"origin":"local"},"provenance":{"trust":"asserted","pipeline":"pipeline","writer":"account/fixture"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5790,12 +5790,6 @@ components:
         admitted_at:
           format: date-time
           type: string
-        allowed_pools:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
         authority_ref:
           $ref: '#/components/schemas/internal.capability.AuthorityRef'
         ceilings:
@@ -5847,7 +5841,6 @@ components:
         - request
         - run_id
         - admitted_at
-        - allowed_pools
         - authority_ref
         - ceilings
         - provenance
@@ -6618,12 +6611,6 @@ components:
     internal.runstate.RunRow:
       additionalProperties: true
       properties:
-        AllowedPools:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
         CancelReason:
           type: string
         CancelRequestedAt:
@@ -6694,7 +6681,6 @@ components:
         - Plan
         - PlanHash
         - Dispatch
-        - AllowedPools
         - Owner
         - CreatedAt
         - CancelRequestedAt

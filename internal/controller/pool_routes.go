@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"path"
 	"slices"
 	"sort"
 	"strconv"
@@ -89,9 +88,6 @@ func (s *Server) handlePoolRule(w http.ResponseWriter, r *http.Request, a capabi
 	for _, branch := range body.Branches {
 		if branch == "" {
 			return invalidEngineBody("empty branch selector")
-		}
-		if _, err := path.Match(branch, ""); err != nil {
-			return invalidEngineBody("invalid branch selector")
 		}
 	}
 	tenant, err := s.reportingTenant(r, a)

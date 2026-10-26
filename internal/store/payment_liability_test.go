@@ -35,7 +35,7 @@ func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run-a',1,'p','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{"version":1}`), []byte(`[]`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run-a',1,'p','running',?,'request',1,'gh:1','host','execute','account',1,'r30',30)`, []byte(`{"version":1}`))
 	if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run-a", "node", "log", []byte("frozen")); !errors.Is(err, ErrInsufficientCredits) {
 		t.Fatalf("storage growth = %v; want held credit refused", err)
 	}

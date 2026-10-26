@@ -76,7 +76,6 @@ CREATE TABLE runs (
     dispatch TEXT NOT NULL CHECK(dispatch IN ('host','controller')),
     intake_mode TEXT NOT NULL CHECK(intake_mode IN ('execute','publish')),
     admission TEXT NOT NULL DEFAULT '',
-    allowed_pools BLOB NOT NULL,
     created_subject_kind TEXT NOT NULL DEFAULT '',
     created_principal TEXT NOT NULL,
     created_at BIGINT NOT NULL,

@@ -164,7 +164,7 @@ func cloudResourceStore(t *testing.T) (*cloudResourceFixture, *store.Tenant) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cloudResourceSQL(t, s, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','controller','execute',?,'account',?,'r30',30)`, request, []byte(`[]`), time.Now().UnixNano())
+	cloudResourceSQL(t, s, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','controller','execute','account',?,'r30',30)`, request, time.Now().UnixNano())
 	cloudResourceSQL(t, s, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a','run','plan',1,1,?,?,?)`, time.Now().Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
 	tenant, err := s.ForTeam(t.Context(), "a")
 	if err != nil {

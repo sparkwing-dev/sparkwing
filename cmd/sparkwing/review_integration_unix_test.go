@@ -83,8 +83,8 @@ func TestReviewPublicDoctorSweepsAndWarnsForPrunedRun(t *testing.T) {
 		}
 	})
 	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO runs
-		(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days)
-		VALUES ('default','pruned',1,'build','pending','{}','request',1,'github.com/acme/repo','host','execute','[]','member',1,'default',1)`); err != nil {
+		(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days)
+		VALUES ('default','pruned',1,'build','pending','{}','request',1,'github.com/acme/repo','host','execute','member',1,'default',1)`); err != nil {
 		t.Fatal(err)
 	}
 	owner := exec.Command("true")

@@ -154,7 +154,7 @@ func TestStoreBackendTenantReadsProperty(t *testing.T) {
 
 func seedBackendRun(t *testing.T, st *store.Store, team store.Team, id, pipeline string, at time.Time) {
 	t.Helper()
-	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,started_at,log_retention_class,log_retention_days) VALUES (?,?,1,?,'running',?,'fixture',?,'gh:1','host','execute',?,'fixture',?,?,'r30',30)`, team, id, pipeline, []byte(`{"version":1}`), at.UnixNano(), []byte(`[]`), at.UnixNano(), at.UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,started_at,log_retention_class,log_retention_days) VALUES (?,?,1,?,'running',?,'fixture',?,'gh:1','host','execute','fixture',?,?,'r30',30)`, team, id, pipeline, []byte(`{"version":1}`), at.UnixNano(), at.UnixNano(), at.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 }

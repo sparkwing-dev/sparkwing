@@ -81,7 +81,7 @@ func lifecycleSchemaFixture(t *testing.T, running bool) *store.Store {
 		}
 	}
 	exec(`INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
-	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'p','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, []byte(`{}`), []byte(`[]`))
+	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'p','running',?,'request',1,'gh:1','host','execute','account',1,'r30',30)`, []byte(`{}`))
 	exec(`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,needs_labels,prefers_labels) VALUES ('a','run','trigger',1,1,?,?)`, []byte(`[]`), []byte(`[]`))
 	exec(`INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','job','pending',?,?)`, []byte(`{}`), []byte(`{}`))
 	if running {

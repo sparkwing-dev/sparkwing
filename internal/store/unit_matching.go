@@ -28,7 +28,7 @@ type matchingRun struct {
 	display string
 	request runspec.SealedRequest
 	spec    *runspec.Spec
-	pools   []byte
+	pools   []string
 	err     error
 }
 
@@ -76,7 +76,7 @@ func (op *Operator) loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, 
 	run.profile = authenticatedClaimProfile(p.Capability, run.profile, run.here)
 	var repo, display string
 	var requestBody, specBody []byte
-	err = tx.QueryRowContext(ctx, `SELECT team,repo_key,repo_display,request_json,spec_json,allowed_pools FROM runs WHERE id=?`, runID).Scan(&run.team, &repo, &display, &requestBody, &specBody, &run.pools)
+	err = tx.QueryRowContext(ctx, `SELECT team,repo_key,repo_display,request_json,spec_json FROM runs WHERE id=?`, runID).Scan(&run.team, &repo, &display, &requestBody, &specBody)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !capability.CloudLauncher(p.Capability) && p.Capability.Team != run.team {
 		run.err = bindingRefusal()
 		return run
@@ -87,6 +87,11 @@ func (op *Operator) loadMatchingRunTx(ctx context.Context, tx *storeTx, prefix, 
 	}
 	if run.err = json.Unmarshal(requestBody, &run.request); run.err != nil {
 		return run
+	}
+	if len(run.profile.ReservedPools) > 0 {
+		if run.pools, _, run.err = runPoolsTx(ctx, tx, Team(run.team), run.request.Provenance); run.err != nil {
+			return run
+		}
 	}
 	if display == "" {
 		display = run.request.Request.Git.Repository.Display
@@ -138,12 +143,9 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 		}
 		options = sealed.Resolved.Settings.Options
 	}
-	demand := match.Demand{Selector: slices.Clone(options.Requires.Value), Trigger: unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan, Repo: &match.Repository{URL: display}}
+	demand := match.Demand{Selector: slices.Clone(options.Requires.Value), Trigger: unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan, Repo: &match.Repository{URL: display}, AllowedPools: pools}
 	if demand.Repo.URL == "" {
 		demand.Repo.URL = requestSeal.Request.Git.Repository.Display
-	}
-	if err = json.Unmarshal(pools, &demand.AllowedPools); err != nil {
-		return profile, demand, err
 	}
 	if unit.Kind == capability.UnitNode {
 		var body []byte
