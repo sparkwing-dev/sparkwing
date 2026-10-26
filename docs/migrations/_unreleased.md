@@ -12,6 +12,15 @@ satisfy the check: it measures a bucket and stores nothing. A
 `--cache-blob-store`. Set `controller.dataStore.s3URL`, or switch to
 `controller.storage.type=pvc`.
 
+## Fleet-wide hourly run cap removed
+
+The optional `max_global_runs_per_hour` compute guard, and the
+`operator.max_global_runs_per_hour` setting that fed it, are removed. It was
+off by default and counted every team's runs against one budget. Per-principal
+hourly limits (`max_runs_per_hour`) and prepaid credits still bound intake.
+`sparkwing operator limits set` refuses the old name; drop it from scripts and
+configuration. A value already stored is ignored.
+
 ## Secret missing sentinel
 
 Replace `secretname.ErrMissing` with `sparkwing.ErrSecretMissing` when checking

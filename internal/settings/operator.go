@@ -117,11 +117,6 @@ func ControllerCeilings(in OperatorInputs) (OperatorValues, error) {
 	if out.MaxRunsPerPrincipalHour != nil && (*out.MaxRunsPerPrincipalHour < 0) {
 		return OperatorValues{}, invalid("operator.max_runs_per_principal_hour", origin, "invalid operator bound")
 	}
-	out.MaxGlobalRunsPerHour, origin = operatorPick(in, "operator.max_global_runs_per_hour", func(v OperatorValues) *int { return v.MaxGlobalRunsPerHour }, pointer(0))
-	out.Origins["operator.max_global_runs_per_hour"] = origin
-	if out.MaxGlobalRunsPerHour != nil && (*out.MaxGlobalRunsPerHour < 0) {
-		return OperatorValues{}, invalid("operator.max_global_runs_per_hour", origin, "invalid operator bound")
-	}
 	out.MinScheduleInterval, origin = operatorPick(in, "operator.min_schedule_interval", func(v OperatorValues) *time.Duration { return v.MinScheduleInterval }, pointer(time.Duration(0)))
 	out.Origins["operator.min_schedule_interval"] = origin
 	if out.MinScheduleInterval != nil && (*out.MinScheduleInterval < 0) {

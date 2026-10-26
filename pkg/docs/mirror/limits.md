@@ -55,7 +55,6 @@ These grants do not confer operator-console powers.
 | Child-run depth | At most ten levels, counting the root run. A deeper child is refused with `409`, conflict detail `limit: max_child_depth`. GitHub reusable workflows also nest ten levels. |
 | Children per root | The team setting `max_children_per_root` defaults to 50 descendants across every depth; retries do not count. Team admins set a ceiling from 1 to 1,000 in Team settings or with `sparkwing team settings set --profile work --max-children-per-root 200`; changes are audited. Each child is checked when created. When the root has reached its allowance, creation returns `409`, `limit: max_children_per_root`, with the team's setting, the 1,000 maximum, and instructions to raise the setting or split the work into separate runs. GitHub limits 50 unique reusable workflow definitions per run, rather than invocations. |
 | Child run budget | A child spends the hourly run (`max_runs_per_hour`), flood and queue-depth budgets of whoever created its root, not the runner holding the parent's claim. |
-| Global hourly runs | When `max_global_runs_per_hour` is set, admission counts every run the controller committed during the past hour. New runs are refused when that count reaches the configured cap. |
 | Cloud scratch | Fixed aggregate 20 GiB, including Docker-in-Docker. |
 | Cloud Docker | `docker build`, `docker run`, Compose and `--memory` work; privileged and host-level features do not. |
 

@@ -127,9 +127,9 @@ func TestSealedIntakeRateCountsOnlyTheAuthenticatedTeam(t *testing.T) {
 	}
 }
 
-func TestConcurrentSealedIntakeNeverPassesTheHourlyGuard(t *testing.T) {
+func TestConcurrentSealedIntakeNeverPassesThePrincipalHourlyGuard(t *testing.T) {
 	tenant, request, _ := intakeFixture(t)
-	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalRunsPerHour: 3}); err != nil {
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitRunsPerHour: 3}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -187,5 +187,14 @@ func TestSealedIntakeRateKeepsPrincipalKindsSeparateProperty(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 20}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The fleet-wide hourly run cap is removed; per-principal limits and prepaid
+// credits bound intake, so an operator naming the old guard is refused.
+func TestTheFleetWideHourlyRunCapIsGone(t *testing.T) {
+	tenant, _, _ := intakeFixture(t)
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{"max_global_runs_per_hour": 3}); !errors.Is(err, ErrInvalidComputeLimitSetting) {
+		t.Fatalf("setting the removed guard = %v, want %v", err, ErrInvalidComputeLimitSetting)
 	}
 }

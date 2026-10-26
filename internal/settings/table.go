@@ -52,7 +52,6 @@ func table() []rule {
 		{Key: "operator.max_jobs_per_run", Sources: operatorPrecedence(), Phase: startup},
 		{Key: "operator.max_global_jobs_per_run", Sources: operatorPrecedence(), Phase: startup},
 		{Key: "operator.max_runs_per_principal_hour", Sources: operatorPrecedence(), Phase: startup},
-		{Key: "operator.max_global_runs_per_hour", Sources: operatorPrecedence(), Phase: startup},
 		{Key: "operator.min_schedule_interval", Sources: operatorPrecedence(), Phase: startup},
 		{Key: "operator.claims_per_runner_minute", Sources: operatorPrecedence(), Phase: startup},
 		{Key: "operator.heartbeats_per_runner_minute", Sources: operatorPrecedence(), Phase: startup},

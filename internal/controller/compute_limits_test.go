@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -165,17 +163,6 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 	}
 }
 
-func TestComputeLimits_RunCreationRefusedPastTheHourlyCap(t *testing.T) {
-	f := newCreditsFixture(t, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
-	setComputeLimit(t, f, store.ComputeLimitGlobalRunsPerHour, 1)
-	seedRunNode(t, f.store, "run-first", "build")
-
-	status, body := f.request(t, http.MethodPost, "/api/v1/runs", f.writer, computeIntake("demo"))
-	if status != http.StatusTooManyRequests {
-		t.Fatalf("the run past the cap = %d, want 429: %s", status, body)
-	}
-}
-
 func TestComputeLimits_CronBelowTheMinimumIntervalIsRefused(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
@@ -280,19 +267,18 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 		"sha":      cronTestSHA,
 		"schedules": []map[string]any{
 			{"pipeline": "nightly", "cron": "0 3 * * *"},
+			{"pipeline": "weekly", "cron": "0 3 * * 0"},
 		},
 	}
 	f.call(http.MethodPut, "/api/v1/schedules/repos", f.writer, body, http.StatusOK, nil)
 	rows, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListCronSchedules(ctx)
-	if err != nil || len(rows) != 1 {
+	if err != nil || len(rows) != 2 {
 		t.Fatalf("list schedules = %d rows, %v", len(rows), err)
 	}
-	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run-already", Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
-		t.Fatalf("seed a run: %v", err)
-	}
-	if _, err := f.store.AsOperator().SetComputeLimits(ctx, map[string]int64{store.ComputeLimitGlobalRunsPerHour: 1}); err != nil {
+	if _, err := f.store.AsOperator().SetComputeLimits(ctx, map[string]int64{store.ComputeLimitRunsPerHour: 1}); err != nil {
 		t.Fatalf("set the guard: %v", err)
 	}
+	f.call(http.MethodPost, "/api/v1/schedules/"+rows[1].ID+"/run", f.writer, nil, http.StatusOK, nil)
 
 	var refusal struct {
 		Error struct {
@@ -305,14 +291,14 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 	f.call(http.MethodPost, "/api/v1/schedules/"+rows[0].ID+"/run", f.writer, nil,
 		http.StatusTooManyRequests, &refusal)
 	if refusal.Error.Code != apierr.RateLimited ||
-		refusal.Error.Details.Limit != store.ComputeLimitGlobalRunsPerHour {
+		refusal.Error.Details.Limit != store.ComputeLimitRunsPerHour {
 		t.Fatalf("refusal = %+v, want the hourly guard named", refusal)
 	}
 	triggers, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("list triggers: %v", err)
 	}
-	if len(triggers) != 0 {
-		t.Fatalf("the refused run-now left %d triggers behind", len(triggers))
+	if len(triggers) != 1 {
+		t.Fatalf("triggers = %d, want only the admitted run-now's; the refused one left one behind", len(triggers))
 	}
 }

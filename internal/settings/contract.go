@@ -92,7 +92,6 @@ type OperatorValues struct {
 	MaxJobsPerRun             *int
 	MaxGlobalJobsPerRun       *int
 	MaxRunsPerPrincipalHour   *int
-	MaxGlobalRunsPerHour      *int
 	MinScheduleInterval       *time.Duration
 	ClaimsPerRunnerMinute     *int
 	HeartbeatsPerRunnerMinute *int
