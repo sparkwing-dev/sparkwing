@@ -290,6 +290,13 @@ func memberScheduleReference(t *testing.T, s *Store, role Role) (*Tenant, string
 
 func actionsReference(t *testing.T, s *Store) (*Tenant, string) {
 	t.Helper()
+	return actionsReferenceRunning(t, s, runspec.Source{Ref: referenceMain})
+}
+
+// actionsReferenceRunning submits the Actions push of main with the given code
+// source, as the runner in the workflow job reports it.
+func actionsReferenceRunning(t *testing.T, s *Store, source runspec.Source) (*Tenant, string) {
+	t.Helper()
 	tenant := referenceWorld(t, s, "gh:701")
 	push := authorityRoot("actions-push", "a")
 	push.Grants = []capability.Grant{capability.RunsWrite}
@@ -298,7 +305,7 @@ func actionsReference(t *testing.T, s *Store) (*Tenant, string) {
 	result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: push.Prefix}, IdempotencyKey: "actions", Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
 		Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "refs/heads/main", SHA: referenceMain},
-		Source: runspec.Source{Ref: referenceMain},
+		Source: source,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -451,6 +458,15 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			name:  "a GitHub Actions push keeps its proven ref under its own scope",
 			admit: actionsReference,
 			want:  provenanceObservation{Subject: "team:a:repository_id:701:pipeline:ci:trigger:manual:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:actions:refs/heads/main", Reads: []string{"manual:actions:refs/heads/main", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
+		},
+		{
+			// The submitter names the code commit; only the push GitHub proved may
+			// speak for main, so code from any other commit is asserted.
+			name: "attack: an Actions push running a commit it names itself is asserted",
+			admit: func(t *testing.T, s *Store) (*Tenant, string) {
+				return actionsReferenceRunning(t, s, runspec.Source{Ref: referenceFeature, RequestedRef: referenceFeature})
+			},
+			want: asserted("ci", "run/{run}", "refs/heads/main", "ci-token", "team-token"),
 		},
 		{
 			name: "a retry by another member copies the App provenance whole",
