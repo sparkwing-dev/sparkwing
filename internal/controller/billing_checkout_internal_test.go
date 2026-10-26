@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -39,5 +40,22 @@ func TestHostedPagesOnlyLeaveForStripe(t *testing.T) {
 		if _, err := serve(`{"url":"`+url+`"}`).portal(t.Context(), "dep", "a", "cus_1"); (err == nil) != ok {
 			t.Fatalf("portal page %s: %v", url, err)
 		}
+	}
+}
+
+// A queued refund names the controller's deployment, which the checkout service checks against the payment's stamp.
+func TestAQueuedRefundNamesItsDeployment(t *testing.T) {
+	var sent map[string]string
+	checkout := &billingCheckout{url: "https://checkout.test", token: "credential", http: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Fatal(err)
+		}
+		return refillReply(http.StatusOK, `{"refund":"re_1","status":"pending"}`), nil
+	})}}
+	if _, _, err := checkout.refund(t.Context(), "dep", "pi_1", "duplicate"); err != nil {
+		t.Fatal(err)
+	}
+	if sent["deployment"] != "dep" || sent["payment_intent"] != "pi_1" || sent["key"] != "pi_1" || sent["reason"] != "duplicate" {
+		t.Fatalf("refund request %v", sent)
 	}
 }

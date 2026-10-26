@@ -946,7 +946,12 @@ copy of the example in `testdata/refill_contract.json`.
 - `POST /internal/portal` takes `team`, `deployment` and `customer` and returns the
   `url` of a Stripe customer portal session, where owners view, replace or remove
   the card. `POST /internal/card-setup` also receives the team owner's `email`,
-  which only Stripe keeps, for receipts.
+  which only Stripe keeps, for receipts. `POST /internal/refund` takes
+  `deployment`, `payment_intent`, `key` and `reason`.
+- The service answers 403 to portal, refill, card setup with an existing
+  customer and refund when the Stripe customer or payment intent is stamped
+  for another deployment. The controller follows payment and setup pages only
+  on `checkout.stripe.com` and the portal only on `billing.stripe.com`.
 
 ## 2026-10-20 Korey decision 35: wave 2 proceeds; growth is fine when it is healthy
 

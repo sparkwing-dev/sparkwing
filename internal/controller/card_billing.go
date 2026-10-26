@@ -176,7 +176,7 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 		return
 	}
 	for _, d := range due {
-		refund, status, err := s.checkout.refund(ctx, d.PaymentIntent, d.Reason)
+		refund, status, err := s.checkout.refund(ctx, s.paymentDeployment, d.PaymentIntent, d.Reason)
 		if err != nil {
 			s.logger.Error("refunding a queued card payment failed; it is retried", "team", string(d.Team),
 				"payment_intent", d.PaymentIntent, "err", err)

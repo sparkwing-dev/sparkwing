@@ -175,7 +175,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			t.Fatal(err)
 		}
-		if in["team"] != "a" || r.URL.Path != "/internal/refund" && in["deployment"] != "staging.sparkwing.dev" {
+		if in["team"] != "a" || in["deployment"] != "staging.sparkwing.dev" {
 			t.Fatalf("provider team=%v", in)
 		}
 		body := ""

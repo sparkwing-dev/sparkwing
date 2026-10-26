@@ -173,13 +173,13 @@ func (c *billingCheckout) portal(ctx context.Context, deployment, team, customer
 	return out.URL, nil
 }
 
-func (c *billingCheckout) refund(ctx context.Context, paymentIntent, reason string) (string, string, error) {
+func (c *billingCheckout) refund(ctx context.Context, deployment, paymentIntent, reason string) (string, string, error) {
 	var out struct {
 		Refund string `json:"refund"`
 		Status string `json:"status"`
 	}
 	err := c.post(ctx, "/internal/refund", map[string]any{
-		"payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
+		"deployment": deployment, "payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
 	}, &out)
 	if err == nil && (out.Refund == "" || out.Status == "") {
 		err = fmt.Errorf("%w: it named no refund and status", errCheckoutRefused)
