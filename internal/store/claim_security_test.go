@@ -276,7 +276,9 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					// Advertisements cannot turn a persistent enrollment into a fresh pod.
 					demand.Labels = append(demand.Labels, "single-use", "launcher", "class=cloud")
 					indexFixtureUnit(t, s, "a", ref)
-					want := runner != "persistent" || source == "asserted-main" || source == "verified-feature"
+					// A signed delivery on main that intake did not seal as a default-branch
+					// push is ordinary verified work, the same rule pools and caches read.
+					want := runner != "persistent" || source == "asserted-main" || source == "verified-feature" || source == "verified-main"
 					if runner == "launcher" && source == "asserted-main" {
 						want = false
 					}

@@ -48,7 +48,9 @@ func TestStoreSQLTrustLiterals(t *testing.T) {
 
 // TestDefaultBranchWorkSQLAgreesWithGo evaluates the SQL rule against every trust
 // class, including a verified delivery on the default branch that is not a push,
-// which an earlier SQL copy counted and the Go predicate did not.
+// which the fresh-pod SQL counted while the pool SQL and the Go cache rule did not.
+// Intake seals every signed default-branch push as verified-default, so the
+// non-push case is ordinary verified work everywhere.
 func TestDefaultBranchWorkSQLAgreesWithGo(t *testing.T) {
 	sha := strings.Repeat("a", 40)
 	app := func(event string, push bool) runspec.Provenance {
@@ -71,6 +73,9 @@ func TestDefaultBranchWorkSQLAgreesWithGo(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]runspec.Provenance{"default push": app("push", true), "default create": app("create", false), "schedule": schedule, "actions": actions, "asserted": asserted}
+	if cases["default create"].DefaultBranchWork() || !cases["default push"].DefaultBranchWork() || !cases["schedule"].DefaultBranchWork() || cases["actions"].DefaultBranchWork() {
+		t.Fatal("verified default-branch work is a signed default-branch push or an admin-armed schedule")
+	}
 	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
 		t.Run(dialect.String(), func(t *testing.T) {
 			driver, dsn := "sqlite", ":memory:"

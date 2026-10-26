@@ -36,8 +36,7 @@ func (s TrustSet) Has(c TrustClass) bool { return slices.Contains(s, c) }
 var (
 	// DefaultBranchWorkTrust is verified default-branch work: a signed push to the
 	// default branch, or an unmodified fire of an admin-armed default-branch schedule
-	// (decisions 31, 34, 60). Reserved pools, fresh-pod placement and extra source
-	// repositories all read this one rule.
+	// (decisions 31, 34, 60). Any other class on the default branch is ordinary work.
 	DefaultBranchWorkTrust = TrustSet{TrustVerifiedDefault, TrustSchedule}
 	// AppRepositoryTrust proved its repository through the GitHub App: a signed
 	// delivery or a schedule whose commit the App resolved. Pool access rules grant it.
@@ -202,9 +201,13 @@ func (p Provenance) Trust() TrustClass { return p.identity.Trust }
 // Verified reports a signed GitHub App delivery, on any branch.
 func (p Provenance) Verified() bool { return AppDeliveryTrust.Has(p.identity.Trust) }
 
-// DefaultBranchWork reports verified default-branch work; the store's SQL renders
-// the same DefaultBranchWorkTrust set.
-func (p Provenance) DefaultBranchWork() bool { return DefaultBranchWorkTrust.Has(p.identity.Trust) }
+// DefaultBranchWork reports verified default-branch work. Reserved pools, fresh-pod
+// placement, context sharing and the default-branch cache all read this one rule,
+// and the store's SQL renders the same test. Seal validation already pins both
+// classes to the default branch; the ref check keeps a stored seal honest.
+func (p Provenance) DefaultBranchWork() bool {
+	return DefaultBranchWorkTrust.Has(p.identity.Trust) && p.identity.DefaultBranch != "" && p.identity.Ref == "refs/heads/"+p.identity.DefaultBranch
+}
 
 // RepositoryID is the GitHub repository a signed delivery, an Actions push binding
 // or App automation consent established, and zero for a run a principal chose.

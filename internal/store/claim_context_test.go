@@ -178,7 +178,7 @@ func TestClaimContextsIgnoreRunSpecificExecutionInputs(t *testing.T) {
 	if got := persist(nextRequest, nextSpec, nextExecution); got != baseline {
 		t.Fatalf("run-specific inputs split identical claim policy: %s != %s", got, baseline)
 	}
-	for _, trust := range []string{"verified", "schedule"} {
+	for _, trust := range []string{"verified-default", "schedule"} {
 		verified := strings.Replace(nextRequest, `"trust":"asserted"`, `"trust":"`+trust+`","default_branch":"main"`, 1)
 		main := strings.Replace(verified, `"ref":"feature"`, `"ref":"refs/heads/main"`, 1)
 		if persist(verified, nextSpec, nextExecution) == persist(main, nextSpec, nextExecution) {

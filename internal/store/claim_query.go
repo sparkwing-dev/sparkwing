@@ -351,10 +351,10 @@ func (q *claimSQL) poolTrust(team, pools, trust, launcher, provenance string) st
 	return `((NOT (` + reserved + ` OR (` + trust + `='` + string(capability.TrustVerifiedDefault) + `' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='` + string(capability.TrustAny) + `' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.defaultBranchWork(provenance) + `))`
 }
 
-// defaultBranchWork is Provenance.DefaultBranchWork in SQL. Seal validation pins
-// both classes to the default branch, so the class alone decides.
+// defaultBranchWork is Provenance.DefaultBranchWork in SQL.
 func (q *claimSQL) defaultBranchWork(provenance string) string {
-	return `COALESCE(` + trustIn(q.at(provenance, "trust"), runspec.DefaultBranchWorkTrust) + `,FALSE)`
+	p := func(name string) string { return q.at(provenance, name) }
+	return `COALESCE((` + trustIn(p("trust"), runspec.DefaultBranchWorkTrust) + ` AND ` + p("default_branch") + `<>'' AND ` + p("ref") + `='refs/heads/'||` + p("default_branch") + `),FALSE)`
 }
 
 // trustIn renders membership in one runspec trust set. TestStoreSQLTrustLiterals
