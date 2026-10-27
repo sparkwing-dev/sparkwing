@@ -136,7 +136,6 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"POST", "/api/v1/schedules/{schedule}/pause", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
 		{"POST", "/api/v1/schedules/{schedule}/resume", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
 		{"POST", "/api/v1/schedules/{schedule}/run", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
-		{"PUT", "/api/v1/queue/groups/{group}/priority", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
 		{"GET", "/api/v1/tokens", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"POST", "/api/v1/tokens", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"GET", "/api/v1/tokens/{token}", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|ownToken|credential"}},

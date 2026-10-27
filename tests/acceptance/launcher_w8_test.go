@@ -21,19 +21,18 @@ import (
 )
 
 type cloudBoundaryFake struct {
-	missingNetwork bool
-	wrongTeam      bool
-	reserved       int
-	released       int
+	wrongTeam bool
+	reserved  int
+	released  int
 }
 
-func (b *cloudBoundaryFake) Reserve(_ context.Context, binding launcher.CloudJobBinding, name string) (launcher.CloudNodeReservation, launcher.CloudNetworkEvidence, error) {
+func (b *cloudBoundaryFake) Reserve(_ context.Context, binding launcher.CloudJobBinding, name string) (launcher.CloudNodeReservation, error) {
 	b.reserved++
 	team := binding.Team
 	if b.wrongTeam {
 		team = "other-team"
 	}
-	return launcher.CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: team, JobName: name, ReservationID: "reservation", Award: binding.LeaseRef()}, launcher.CloudNetworkEvidence{Namespace: "cloud", NodeUID: "uid", PolicyRevision: "revision", DefaultDenyEgressEnforced: !b.missingNetwork, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
+	return launcher.CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: team, JobName: name, ReservationID: "reservation", Award: binding.LeaseRef()}, nil
 }
 
 func (b *cloudBoundaryFake) Release(context.Context, launcher.CloudNodeReservation) error {
@@ -183,13 +182,11 @@ func TestLauncherCloudPodContract(t *testing.T) {
 }
 
 func TestLauncherCloudBoundaryRefusal(t *testing.T) {
-	for _, name := range []string{"network", "team", "expired", "engine", "cpu", "memory", "cpu_precision"} {
+	for _, name := range []string{"team", "expired", "engine", "cpu", "memory", "cpu_precision"} {
 		t.Run(name, func(t *testing.T) {
 			now, cfg, award := cloudFixture(launcher.CloudWork)
 			boundary := &cloudBoundaryFake{}
 			switch name {
-			case "network":
-				boundary.missingNetwork = true
 			case "team":
 				boundary.wrongTeam = true
 			case "expired":
@@ -207,7 +204,7 @@ func TestLauncherCloudBoundaryRefusal(t *testing.T) {
 			if err == nil || resources.Job != nil || resources.BootstrapSecret != nil {
 				t.Fatal("refused launch produced runnable objects")
 			}
-			if (name == "network" || name == "team") && boundary.released != 1 {
+			if name == "team" && boundary.released != 1 {
 				t.Fatal("rejected reservation leaked")
 			}
 			if name == "expired" && !errors.Is(err, limits.ErrNoTime) {

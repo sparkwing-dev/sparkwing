@@ -86,10 +86,20 @@ func (d Dir) Read(name string) (string, error) {
 // holds it, for a binary key whose edges may be whitespace bytes. An absent
 // file reads as nil.
 func (d Dir) ReadBytes(name string) ([]byte, error) {
+	return d.read(name, fssecure.OpenCredential)
+}
+
+// ReadPrivateBytes is ReadBytes for a private key: a file that group or other
+// users can read is refused.
+func (d Dir) ReadPrivateBytes(name string) ([]byte, error) {
+	return d.read(name, fssecure.OpenPrivateCredential)
+}
+
+func (d Dir) read(name string, open func(string, string) (*os.File, error)) ([]byte, error) {
 	if d.path == "" {
 		return nil, nil
 	}
-	file, err := fssecure.OpenCredential(d.path, name)
+	file, err := open(d.path, name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}

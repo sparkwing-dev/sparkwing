@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -27,11 +26,9 @@ func admissionPolicyName(kind, namespace string) string {
 
 const (
 	podShape = `size(variables.owners) == 1 && variables.owners[0].apiVersion == 'batch/v1' && variables.owners[0].kind == 'Job' && variables.owners[0].?controller.orValue(false) && variables.owners[0].name == variables.labels[?'sparkwing.dev/job'].orValue('') ? 'job' : ` +
-		`size(variables.owners) == 0 && object.metadata.name.startsWith('` + capacityPrefix + `') ? 'capacity' : ` +
-		`size(variables.owners) == 0 && object.metadata.name.startsWith('` + boundaryPrefix + `') ? 'probe' : 'other'`
-	boundaryPrefix = "sw-boundary-"
-	jobController  = `'system:serviceaccount:kube-system:job-controller'`
-	podOwners      = `['system:serviceaccount:kube-system:job-controller', 'system:serviceaccount:kube-system:generic-garbage-collector']`
+		`size(variables.owners) == 0 && object.metadata.name.startsWith('` + capacityPrefix + `') ? 'capacity' : 'other'`
+	jobController = `'system:serviceaccount:kube-system:job-controller'`
+	podOwners     = `['system:serviceaccount:kube-system:job-controller', 'system:serviceaccount:kube-system:generic-garbage-collector']`
 )
 
 // safety: the API server's PodTopologyLabels admission copies these from the Node
@@ -45,7 +42,7 @@ var (
 
 func podValidations(pod bool) []admissionv1.Validation {
 	return []admissionv1.Validation{
-		{Expression: `!variables.create || variables.shape != 'other'`, Message: "only Cloud Job, capacity and boundary probe Pods run in the Sparkwing job namespace"},
+		{Expression: `!variables.create || variables.shape != 'other'`, Message: "only Cloud Job and capacity Pods run in the Sparkwing job namespace"},
 		{Expression: `!variables.create || variables.spec.?serviceAccountName.orValue('') == '` + ServiceAccount + `' && !variables.spec.?automountServiceAccountToken.orValue(true)`, Message: "Pods use the customer job service account without an API token"},
 		{Expression: `!variables.create || !variables.spec.?hostNetwork.orValue(false) && !variables.spec.?hostIPC.orValue(false) && !variables.spec.?hostPID.orValue(false) && variables.containers.all(c, c.?ports.orValue([]).all(p, p.?hostPort.orValue(0) == 0))`, Message: "Pods cannot share host namespaces or ports"},
 		{Expression: `!variables.create || variables.spec.?volumes.orValue([]).all(v, variables.shape == 'job' && (v.name == 'scratch' && has(v.emptyDir) || v.name == 'bootstrap' && has(v.secret) && v.secret.?secretName.orValue('') == variables.labels[?'sparkwing.dev/job'].orValue('')))`, Message: "Pods mount only their scratch emptyDir, own bootstrap Secret"},
@@ -56,12 +53,12 @@ func podValidations(pod bool) []admissionv1.Validation {
 		{Expression: `!variables.create || !has(variables.spec.dnsConfig) && !has(variables.spec.hostAliases) && variables.spec.?schedulerName.orValue('default-scheduler') == 'default-scheduler' && !variables.spec.?enableServiceLinks.orValue(true) && !variables.spec.?priorityClassName.orValue('').startsWith('system-')`, Message: "Pods keep cluster DNS, the default scheduler, no service links and no system priority class"},
 		{Expression: `!variables.create || variables.shape != 'job' || size(variables.inits) != 2 || ` + hostCommand("variables.inits[1]", "fetch-source") + ` && ` + hostCommand("variables.spec.containers[0]", "run-node"), Message: "the workload containers run only the launcher's sparkwing-runner commands"},
 		{Expression: `!variables.create || ` + securityShapes(), Message: "each container runs exactly its shape's security context, with no SELinux, Windows or other override"},
-		{Expression: `!variables.create || variables.containers.all(c, !has(c.lifecycle) && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || !has(p.value().exec) || variables.shape == 'probe' && c.name == 'peer' && p == c.?readinessProbe && p.value().exec.?command.orValue([]) == ` + celList(peerReadiness) + `))`, Message: "containers run no lifecycle hooks or exec probes beyond the peer listener's loopback readiness check"},
+		{Expression: `!variables.create || variables.containers.all(c, !has(c.lifecycle) && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || !has(p.value().exec)))`, Message: "containers run no lifecycle hooks or exec probes"},
 		{Expression: `!variables.create || variables.shape != 'job' || size(variables.inits) == 0 || variables.inits[0].?command.orValue([]) == ` + celList(dockerCommand) + ` && variables.inits[0].?args.orValue([]) == ` + celList(dockerArgs), Message: "the Docker sidecar runs only the launcher's dockerd command"},
 		{Expression: `!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([])) == 0 && c.?env.orValue([]).all(e, variables.shape == 'job' && (e.name in ` + celList(workloadEnv) + ` && !has(e.valueFrom))))`, Message: "containers carry only the launcher's environment and EKS region values, never AWS credentials"},
 		{Expression: `!variables.create || variables.team != '' && variables.spec.?nodeSelector.orValue({})[?'` + TeamNodeLabel + `'].orValue('') == variables.team && ` + exactTolerations(pod), Message: "Pods select and tolerate only their own team's nodes"},
-		{Expression: `!variables.create || (variables.shape == 'capacity' ? variables.spec.?nodeName.orValue('') == '' : variables.spec.?nodeName.orValue('') != '')`, Message: "Job and probe Pods are bound to their reserved node; capacity requests are not"},
-		{Expression: `!variables.create || (variables.shape == 'job' ? variables.labels.all(k, k in ` + celList(jobLabelKeys) + ` || k in variables.nodeTopology) && variables.labels[?'app'].orValue('') == 'sparkwing-job' && variables.labels[?'app.kubernetes.io/managed-by'].orValue('') == '` + managedByLauncher + `' && variables.labels[?'sparkwing.dev/job'].orValue('') != '' : variables.shape == 'capacity' ? variables.labels.all(k, k in ['app', 'app.kubernetes.io/managed-by', '` + capacityLabel + `', 'sparkwing.dev/team']) && variables.labels[?'app'].orValue('') == 'sparkwing-job' && variables.labels[?'app.kubernetes.io/managed-by'].orValue('') == '` + managedByLauncher + `' && variables.labels[?'` + capacityLabel + `'].orValue('') == 'true' : variables.labels.all(k, k in ['` + boundaryControlLabel + `', 'app', 'app.kubernetes.io/managed-by', 'sparkwing.dev/job', 'sparkwing.dev/team'] || k in variables.nodeTopology))`, Message: "Pods carry exactly the launcher's labels"},
+		{Expression: `!variables.create || (variables.shape == 'capacity' ? variables.spec.?nodeName.orValue('') == '' : variables.spec.?nodeName.orValue('') != '')`, Message: "Job Pods are bound to their reserved node; capacity requests are not"},
+		{Expression: `!variables.create || (variables.shape == 'job' ? variables.labels.all(k, k in ` + celList(jobLabelKeys) + ` || k in variables.nodeTopology) && variables.labels[?'app'].orValue('') == 'sparkwing-job' && variables.labels[?'app.kubernetes.io/managed-by'].orValue('') == '` + managedByLauncher + `' && variables.labels[?'sparkwing.dev/job'].orValue('') != '' : variables.labels.all(k, k in ['app', 'app.kubernetes.io/managed-by', '` + capacityLabel + `', 'sparkwing.dev/team']) && variables.labels[?'app'].orValue('') == 'sparkwing-job' && variables.labels[?'app.kubernetes.io/managed-by'].orValue('') == '` + managedByLauncher + `' && variables.labels[?'` + capacityLabel + `'].orValue('') == 'true')`, Message: "Pods carry exactly the launcher's labels"},
 		{Expression: `!variables.create || variables.spec.?readinessGates.orValue([]).all(g, g.conditionType.startsWith('target-health.elbv2.k8s.aws/'))`, Message: "only AWS load balancer readiness gates are allowed"},
 	}
 }
@@ -128,15 +125,6 @@ func celList(values []string) string {
 	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
-func probeCommands() string {
-	var shapes []string
-	for name, command := range map[string][]string{"control": listenerCommand, "peer": listenerCommand, "witness": witnessCommand, "measure": measureCommand} {
-		shapes = append(shapes, fmt.Sprintf("variables.spec.containers[0].name == '%s' && variables.spec.containers[0].?command.orValue([]) == %s", name, celList(command)))
-	}
-	slices.Sort(shapes)
-	return "(" + strings.Join(shapes, " || ") + ")"
-}
-
 // AdmissionPolicies returns the Pod and Job policies, with their Deny bindings, scoped to the job namespace.
 func AdmissionPolicies(c AdmissionConfig) ([]*admissionv1.ValidatingAdmissionPolicy, []*admissionv1.ValidatingAdmissionPolicyBinding) {
 	pods := policyVariables(c, "object")
@@ -147,7 +135,6 @@ func AdmissionPolicies(c AdmissionConfig) ([]*admissionv1.ValidatingAdmissionPol
 		{Expression: `request.operation != 'UPDATE' || size(variables.spec.?ephemeralContainers.orValue([])) == 0`, Message: "ephemeral containers are not allowed"},
 		{Expression: `request.operation != 'UPDATE' || object.spec == oldObject.spec && variables.labels == oldObject.metadata.?labels.orValue({})`, Message: "Pod specs and labels are immutable here"},
 		{Expression: `request.operation != 'UPDATE' || variables.owners == oldObject.metadata.?ownerReferences.orValue([]) || request.userInfo.username in ` + podOwners, Message: "only the Job controller and garbage collector change Pod ownership"},
-		{Expression: `!variables.create || variables.shape != 'probe' || ` + probeCommands(), Message: "boundary probes run only the launcher's measurement commands"},
 	}, podValidations(true)...)
 	jobs := append(policyVariables(c, "object.spec.template"), admissionv1.Variable{Name: "shape", Expression: `'job'`}, admissionv1.Variable{Name: "nodeTopology", Expression: `[]`})
 	jobRules := append([]admissionv1.Validation{

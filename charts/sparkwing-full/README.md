@@ -203,8 +203,7 @@ code runs as UID 1000 in a user-namespaced Pod whose DinD sidecar is root only
 inside that namespace, under `sparkwing-customer-job`,
 which has no API token or cloud annotations. Do not attach an IRSA role or create
 a Pod Identity association for this account. Customer Pods with AWS credential
-injections are rejected. Each Job and its boundary probes
-carry `karpenter.sh/do-not-disrupt: "true"`. Jobs tolerate
+injections are rejected. Each Job carries `karpenter.sh/do-not-disrupt: "true"`. Jobs tolerate
 `sparkwing.dev/cpu-band:NoSchedule`, including the existing `small` band, and keep
 the fixed aggregate 20 GiB scratch budget including DinD.
 
@@ -269,21 +268,20 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   (`launcher.createNamespace`). Keep other NetworkPolicies and Pod Security
   labels out of it. Before moving Jobs from an older namespace, drain its Jobs
   and node reservations as the runner-bundle README describes. Its admission policies admit only
-  launcher-created Jobs, capacity requests and probes and Job-controller Pods of
+  launcher-created Jobs, capacity requests and Job-controller Pods of
   the launcher's exact shape, after every mutating webhook. VPC resource
   controller ENI edits and load-balancer readiness gates pass; AWS credential
   injection does not. Grant no other identity Pod or Job rights there. See
   [runner-bundle](../sparkwing-runner-bundle/README.md).
-- Enforce default-deny egress from Job Pods. Allow DNS,
-  the API origin, S3/CloudFront, GitHub source/releases and required dependency
-  registries. Block metadata, internal networks and DaemonSet ports, and the
-  Kubernetes API from Pods. The kubelet needs the API from the node, so node
-  credentials and authorization guard it there. The example allows public HTTPS
-  and cluster DNS at the Pod layer. Adapt destinations for your network.
+- Job Pods get a default-deny policy plus `launcher.networkPolicy.egress`. The
+  example allows cluster DNS and the internet on every port, and blocks private
+  (10/8, 172.16/12, 192.168/16), carrier-grade NAT (100.64/10), link-local
+  (169.254/16, covering instance metadata and the Pod Identity agent) and the
+  IPv6 equivalents (fc00::/7, fe80::/10). Adapt it for your network.
 - The CNI must enforce NetworkPolicy ingress as well as egress. On EKS, enable
   VPC CNI network policy (`enableNetworkPolicy: "true"` in the `vpc-cni` add-on
-  configuration). Job ingress denial is defense in depth: Job code holds no
-  node root, and the boundary probe measures egress from the Pod only.
+  configuration). Sparkwing does not test enforcement at runtime; verifying it
+  is the operator's periodic check.
 
 The Cloud example enables `volumePermissions` so the controller owns `/data`
 and its epoch volume and can set their private mode to `0700`. `fsGroup: 65534` grants group access but
@@ -297,11 +295,10 @@ customer Pods and the fenced infrastructure components. Keep baseline allow-all
 policies out of the job namespace. Chart RBAC
 cannot remove privileges granted by other bindings.
 
-The chart's policies select customer Jobs and enforcement probes. The controller
-and launcher keep their infrastructure networking. Job code cannot reach the node network
-namespace, so Pod NetworkPolicy bounds its traffic. The launcher runs actual
-probes before publishing each Job and refuses incomplete evidence.
-Rendering this chart proves neither EKS feature availability nor network isolation.
+The chart's policies select customer Jobs. The controller and launcher keep
+their infrastructure networking. Job code cannot reach the node network
+namespace, so Pod NetworkPolicy bounds its traffic. Rendering this chart proves
+neither EKS feature availability nor network isolation.
 
 ## Self-hosted runner pools
 

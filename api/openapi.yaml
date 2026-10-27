@@ -526,6 +526,8 @@ components:
           type: string
         repository:
           type: string
+        runner_environment:
+          type: string
         sha:
           type: string
         workflow_ref:
@@ -2827,52 +2829,6 @@ components:
         - position
       type: object
       x-sparkwing-go-type: controllerwire.QueueGroupWaiter
-    internal.controllerwire.QueuePriorityResult:
-      additionalProperties: true
-      properties:
-        found:
-          type: boolean
-        group:
-          type: string
-        holding:
-          type: boolean
-        participants:
-          type: integer
-        position:
-          type: integer
-        previous:
-          type: integer
-        previous_position:
-          type: integer
-        priority:
-          type: integer
-        reason:
-          type: string
-        run_id:
-          type: string
-      required:
-        - run_id
-        - found
-        - previous
-        - priority
-        - position
-      type: object
-      x-sparkwing-go-type: controllerwire.QueuePriorityResult
-    internal.controllerwire.QueuePriorityWrite:
-      additionalProperties: true
-      properties:
-        mode:
-          type: string
-        priority:
-          anyOf:
-            - type: integer
-            - type: "null"
-        run_id:
-          type: string
-      required:
-        - run_id
-      type: object
-      x-sparkwing-go-type: controllerwire.QueuePriorityWrite
     internal.controllerwire.Receipt:
       additionalProperties: true
       properties:
@@ -4119,6 +4075,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        high_trust:
+          type: boolean
         max_children_per_root:
           maximum: 1000
           minimum: 1
@@ -4129,6 +4087,7 @@ components:
         - members_can_add_machines
         - claim_ranking
         - max_children_per_root
+        - high_trust
       type: object
       x-sparkwing-go-type: controllerwire.TeamSettings
     internal.controllerwire.TeamSettingsUpdate:
@@ -4141,6 +4100,10 @@ components:
                     type: string
                   type: array
                 - type: "null"
+            - type: "null"
+        high_trust:
+          anyOf:
+            - type: boolean
             - type: "null"
         max_children_per_root:
           anyOf:
@@ -10060,52 +10023,6 @@ paths:
               - runs.state
             binding: slotOfBoundNode
             liveness: reporting
-        retry: safe
-  /api/v1/queue/groups/{group}/priority:
-    put:
-      parameters:
-        - in: path
-          name: group
-          required: true
-          schema:
-            type: string
-        - in: header
-          name: Idempotency-Key
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/internal.controllerwire.QueuePriorityWrite'
-        required: true
-      responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.QueuePriorityResult'
-          description: Successful response.
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: Change queued priority
-      x-sparkwing-policy:
-        method: PUT
-        path: /api/v1/queue/groups/{group}/priority
-        audience: controller
-        owner: team
-        authentication: capability
-        access:
-          - credential: unbound_member_or_local
-            grants:
-              - runs.control
-            binding: none
-            liveness: credential
         retry: safe
   /api/v1/runners:
     get:

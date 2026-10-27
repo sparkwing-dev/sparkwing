@@ -84,7 +84,9 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	if !found || (record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.now(ctx))) {
 		return result, nil
 	}
-	if request.VerifiedDefaultOnly {
+	// safety: a verified default-branch reader shares its ref with merged pull requests and with pushes made
+	// before a rename, so it takes cache records only when they carry the same default-branch evidence.
+	if request.VerifiedDefaultOnly || a.authority.Ref.DefaultBranchVerified && (key.Kind == blob.KindMemo || key.Kind == blob.KindDepcache) {
 		facts := record.RefFacts
 		if !record.VerifiedDefault() || (a.authority.Ref.DefaultBranch != "" && facts.Scope.Ref != a.authority.Ref.DefaultBranch) {
 			return result, nil
@@ -438,6 +440,8 @@ func (r *blobRecords) copyMemo(ctx context.Context, request blob.CopyMemoRequest
 		}
 		record := original
 		record.Key, record.Digest, record.CreatedAt = key, part.digest.Value, tx.now(ctx)
+		// safety: the copy's facts describe the scope it lands in, never the evidence of the memo it came from.
+		record.RefFacts = a.authority.Ref
 		record.ExpiresAt = runspec.Optional[time.Time]{}
 		record.ManifestDigest = runspec.Optional[blob.Digest]{}
 		record.Pinned = false

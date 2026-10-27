@@ -73,7 +73,7 @@ An unpinned resource dimension uses the operator's ceiling. Pool claims are
 unmetered and use the self-hosted ranking tier. Each claim gets a fresh pod with
 only scratch and its one-time bootstrap mounted. The pool credential stays in
 the launcher, and no local cache survives a claim. The Cloud node, admission,
-quarantine and boundary-probe prerequisites below apply equally to pool Jobs.
+quarantine and network prerequisites below apply equally to pool Jobs.
 
 Set `runner.repos` to the repository patterns this machine may fetch, such as
 `github.com/your-org/*`. The runner checks this list before hosting each award.
@@ -117,7 +117,7 @@ namespace and creates it with privileged Pod Security unless
 Security label out of it: an additive policy there widens Job egress or ingress.
 The chart adds the customer ServiceAccount, launcher Role and egress policies, plus two
 ValidatingAdmissionPolicies with Deny bindings selecting only that namespace.
-They admit launcher-created Jobs, capacity requests and boundary probes and
+They admit launcher-created Jobs and capacity requests and
 Job-controller Pods of the launcher's exact container set, pinned images,
 volumes, environment, team placement and labels, judged after every mutating
 webhook. EKS region values, VPC resource controller ENI data and load-balancer
@@ -129,8 +129,9 @@ template is generated from `launcher.AdmissionPolicies`; regenerate it with
 `GOWORK=off go test ./charts -run TestLauncherAdmissionTemplateIsGenerated -update`.
 
 The launcher refuses to start unless those policies and bindings match its
-identity, namespace and images, and stops claiming work while they do not. It then checks each Job's award fields (team
-placement, node, images and resources) at activation and on every sync. A
+identity, namespace and images. It checks each Job's award fields (team
+placement, node, images and resources) at activation, and each of the Job's
+Pods once, on the first pass that sees it. A
 mismatch deletes the Job, fails its exact award, cordons the node and deletes
 its Karpenter NodeClaim. Nodes keep their first team assignment through
 reservation cleanup. Do not annotate the customer ServiceAccount with an IRSA
@@ -163,7 +164,8 @@ made by another RoleBinding, so audit existing namespace and cluster bindings.
 The chart labels infrastructure Pods `app: sparkwing-controller`,
 `app: sparkwing-launcher` and `app: sparkwing-runner`. Customer Pods use
 `app: sparkwing-job`. Exclude these values from any baseline allow-all policies
-that would union away the corresponding chart fences. Boundary probes must
-pass before a Job is published.
+that would union away the corresponding chart fences. The cluster must enforce
+NetworkPolicy; Sparkwing does not test enforcement at runtime, so verifying it
+is the operator's periodic check.
 
 `values.yaml` lists the supported chart values.

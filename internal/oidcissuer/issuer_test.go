@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -163,8 +164,10 @@ func TestNewRefusesWeakOrForeignKeysAndLifetimes(t *testing.T) {
 	}
 }
 
-// The previous key is published from either half of its PEM and never
-// signs, and a previous key equal to the active one publishes once.
+// The previous key is published from its public PEM and never signs, a
+// previous key equal to the active one publishes once, and private key
+// material there is refused: the file need not be private, so it must not
+// hold a key that can sign.
 func TestPreviousKeyIsPublishedNotUsed(t *testing.T) {
 	active := rsaPEM(t, 2048, true)
 	prevKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -184,18 +187,32 @@ func TestPreviousKeyIsPublishedNotUsed(t *testing.T) {
 	if len(ids) != 2 || ids[1] != Thumbprint(&prevKey.PublicKey) {
 		t.Fatalf("key ids = %v, want the active key then the previous", ids)
 	}
-	tok, _, err := iss.Mint(runClaims(), time.Now(), time.Time{})
+	tok, err := iss.Mint(runClaims(), time.Now(), time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var head struct{ Kid string }
-	if err := jwks.DecodeSegment(strings.Split(tok, ".")[0], &head); err != nil {
+	if err := jwks.DecodeSegment(strings.Split(tok.Value, ".")[0], &head); err != nil {
 		t.Fatal(err)
 	}
 	if head.Kid != ids[0] {
 		t.Fatalf("token kid = %s, want the active key %s", head.Kid, ids[0])
 	}
-	same, err := New("https://api.sparkwing.dev", active, active, 0)
+	if _, err := New("https://api.sparkwing.dev", active, active, 0); err == nil {
+		t.Fatal("a private key was accepted as the published key")
+	}
+	if _, err := New("https://api.sparkwing.dev", active, append(slices.Clone(prevPub), active...), 0); err == nil {
+		t.Fatal("a private key after the published public key was accepted")
+	}
+	activeKey, err := parsePrivateKey(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeDER, err := x509.MarshalPKIXPublicKey(&activeKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := New("https://api.sparkwing.dev", active, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: activeDER}), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,18 +227,21 @@ func TestMintCapsExpiryAtNotAfter(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Unix(1_800_000_000, 0)
-	_, exp, err := iss.Mint(runClaims(), now, now.Add(3*time.Minute))
+	tok, err := iss.Mint(runClaims(), now, now.Add(3*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !exp.Equal(now.Add(3 * time.Minute)) {
-		t.Fatalf("exp = %s, want the credential's expiry %s", exp, now.Add(3*time.Minute))
+	if !tok.ExpiresAt.Equal(now.Add(3 * time.Minute)) {
+		t.Fatalf("exp = %s, want the credential's expiry %s", tok.ExpiresAt, now.Add(3*time.Minute))
 	}
-	_, exp, err = iss.Mint(runClaims(), now, time.Time{})
-	if err != nil || !exp.Equal(now.Add(10*time.Minute)) {
-		t.Fatalf("exp = %s, err = %v; want issue time plus the lifetime", exp, err)
+	tok, err = iss.Mint(runClaims(), now, time.Time{})
+	if err != nil || !tok.ExpiresAt.Equal(now.Add(10*time.Minute)) {
+		t.Fatalf("exp = %s, err = %v; want issue time plus the lifetime", tok.ExpiresAt, err)
 	}
-	if _, _, err := iss.Mint(runClaims(), now, now.Add(-time.Second)); err == nil {
+	if tok.ID == "" || tok.Subject == "" {
+		t.Fatalf("token identity missing: %+v", tok)
+	}
+	if _, err := iss.Mint(runClaims(), now, now.Add(-time.Second)); err == nil {
 		t.Fatal("a credential already expired got a token")
 	}
 }

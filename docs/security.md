@@ -189,8 +189,44 @@ add a launcher pool or use Sparkwing Cloud. The
 controller reads the platform from the admin-issued enrollment, never from job
 claims. Plain-machine runners (VMs and bare metal) keep serving verified work
 under the same OS user, so job code can read runner credentials and leave host
-state for later jobs. Launcher pods, Cloud pods and Actions job runners are
-unaffected.
+state for later jobs.
+
+A long-lived runner (a plain machine or a persistent Kubernetes runner) runs
+every job with the runner's own credential within reach. When it serves several
+repositories, a job from one repository can act as the runner and claim another
+repository's jobs in the same team, and with them that repository's pipeline
+secrets, source token and OIDC identity. The isolation unit is the runner, not
+the repository: enroll a runner with `--repos` limited to one repository, or to
+repositories that trust each other, and use launcher pools or Sparkwing Cloud,
+which give each claim a fresh pod, where repositories must stay apart. Pools
+that hold reserved secrets already require a launcher.
+
+A verified run on a host that outlives its jobs (plain-machine runners,
+persistent Kubernetes runners and self-hosted GitHub Actions runners) writes
+memo, depcache and output records only to that host's own cache scope. Fresh
+pods, Sparkwing Cloud and remote cache readers restore only the shared verified
+scope, which launcher pods, Cloud pods and GitHub-hosted Actions runners write,
+as GitHub's signed `runner_environment` claim reports, so state an earlier job left on a long-lived host never
+reaches them through the cache. Runs on that host still read the verified
+default branch. A team administrator can turn on the `high_trust` team setting
+(console team settings, or `sparkwing team settings set --high-trust true`; off
+by default and audited), meant for teams whose every job on those runners is
+trusted, to let them write the shared verified scope. A verified default-branch
+run reads only cache records that carry default-branch evidence, including in
+its own ref scope.
+
+Each Sparkwing Cloud node serves one team and one run. Later jobs of the same
+run may reuse a warm node; every other run, a child run included, gets a node no
+other run has used, so nothing one run's job leaves on a node reaches another
+run. A node's team and run are recorded in labels the node itself cannot
+change; a node whose run label does not name the run is never reused. Cloud nodes may
+pull only Sparkwing's own images.
+
+Cloud jobs get the chart's NetworkPolicy: outbound internet on any port, as on
+other CI providers, and nothing in private, carrier-grade NAT or link-local
+ranges, which covers instance metadata and the Pod Identity agent. The cluster
+must enforce NetworkPolicy; Sparkwing does not probe enforcement at runtime.
+Verifying it is the operator's periodic check.
 
 Child runs nest at most 10 levels deep counting the root, and one root run
 uses the team-set descendant ceiling, from 1 to 1000, default 50 at every depth, retries excluded.
@@ -228,8 +264,10 @@ Approval decisions, run and job cancellations, token minting and rotation,
 runner enrollment, and invitation acceptance commit their audit events in the
 same transaction. These events contain IDs and closed decision values, without
 approval comments, cancellation reasons, email addresses or other personal text.
-Each OIDC token a run mints is audited as `oidc.minted` before it is returned,
-naming the run, a digest of its job and the audience.
+Each OIDC token a run mints is audited as `oidc.minted` in the transaction that
+rechecks the run's authority, naming the run, a digest of its job, the
+audience, and the token's `jti`, subject and expiry, so a leaked token traces to
+its mint. A token whose audit row does not commit is never returned.
 Restricted claims and sealed execution inputs must never be rendered as details.
 Run creation and retry return display inputs, not the execution seal. Schedule
 declarations, overrides, effective arguments and fire history hide every argument

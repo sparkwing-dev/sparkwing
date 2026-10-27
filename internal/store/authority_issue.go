@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -406,7 +407,11 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if c.Children, err = awardChildrenTx(ctx, tx, row, spec.Unit); err != nil {
 		return capability.Capability{}, err
 	}
-	if c.Data, err = awardDataScope(row, sealed, c); err != nil {
+	host, err := awardCacheHostTx(ctx, tx, Team(row.team), facts)
+	if err != nil {
+		return capability.Capability{}, err
+	}
+	if c.Data, err = awardDataScope(row, sealed, c, host); err != nil {
 		return capability.Capability{}, err
 	}
 	if spec.Delivery == capability.DeliveryBootstrap {
@@ -429,8 +434,23 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	return c, nil
 }
 
-func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Capability) (*capability.DataScope, error) {
-	facts, err := provenanceRefFacts(sealed)
+// awardCacheHostTx names the cache scope of a claimant whose host serves many
+// jobs (plain-machine, persistent and self-hosted Actions runners), or "" for a
+// fresh pod, Cloud, a GitHub-hosted Actions runner or a high-trust team.
+func awardCacheHostTx(ctx context.Context, tx *storeTx, team Team, facts claimantFacts) (string, error) {
+	if facts.FreshHost {
+		return "", nil
+	}
+	var highTrust bool
+	if err := tx.QueryRowContext(ctx, `SELECT high_trust FROM teams WHERE name=?`, team).Scan(&highTrust); err != nil || highTrust {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(facts.Host))
+	return hostWriterPrefix + hex.EncodeToString(sum[:8]), nil
+}
+
+func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Capability, host string) (*capability.DataScope, error) {
+	facts, err := runRefFacts(sealed, host)
 	if err != nil {
 		return nil, err
 	}

@@ -10,7 +10,6 @@ import (
 	"testing/synctest"
 
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -20,64 +19,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
-
-func FuzzProductionBoundaryRejectsMetadataInjection(f *testing.F) {
-	f.Add("probe-isolated", "", false)
-	f.Add("annotation", "", true)
-	f.Fuzz(func(t *testing.T, suffix, value string, annotation bool) {
-		if len(suffix) > 20 || len(value) > 63 {
-			t.Skip()
-		}
-		key := "probe-x" + hex.EncodeToString([]byte(suffix))
-		_, kube := boundaryFixture()
-		policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "deny", Namespace: "cloud", UID: "policy"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}}}
-		if _, err := kube.NetworkingV1().NetworkPolicies("cloud").Create(t.Context(), policy, metav1.CreateOptions{}); err != nil {
-			t.Fatal(err)
-		}
-		if !annotation {
-			allow := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "additive-egress", Namespace: "cloud", UID: "allow"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: key, Operator: metav1.LabelSelectorOpDoesNotExist}}}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, Egress: []networkingv1.NetworkPolicyEgressRule{{}}}}
-			if _, err := kube.NetworkingV1().NetworkPolicies("cloud").Create(t.Context(), allow, metav1.CreateOptions{}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		kube.PrependReactor("create", "networkpolicies", func(action ktesting.Action) (bool, runtime.Object, error) {
-			policy := action.(ktesting.CreateAction).GetObject().(*networkingv1.NetworkPolicy)
-			policy.UID = types.UID(policy.Name)
-			return false, nil, nil
-		})
-		created := 0
-		kube.PrependReactor("create", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
-			pod := action.(ktesting.CreateAction).GetObject().(*corev1.Pod).DeepCopy()
-			created++
-			pod.UID = types.UID(pod.Name)
-			pod.Status = corev1.PodStatus{PodIP: "10.1.2.3", HostIP: "10.0.0.1", Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
-			if name := pod.Spec.Containers[0].Name; name != "control" && name != "peer" {
-				pod.Status.Phase = corev1.PodSucceeded
-			}
-			if annotation {
-				pod.Annotations[key] = value
-			} else {
-				pod.Labels[key] = value
-			}
-			if err := kube.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), pod, pod.Namespace); err != nil {
-				return true, nil, err
-			}
-			return true, pod, nil
-		})
-		boundary, err := NewProductionBoundary(kube, karpenterFixture(), productionBoundaryConfig(), "https://kubernetes.default:443")
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _, err = boundary.Reserve(t.Context(), boundaryBinding("team"), "job")
-		if created == 0 || err == nil {
-			t.Fatalf("admission changed probe policy selection: created=%d error=%v", created, err)
-		}
-		pods, err := kube.CoreV1().Pods("cloud").List(t.Context(), metav1.ListOptions{})
-		if err != nil || len(pods.Items) != 0 {
-			t.Fatalf("rejected probe survived: %v, %d pods", err, len(pods.Items))
-		}
-	})
-}
 
 func FuzzCapacityIdentityRefusalIsLocal(f *testing.F) {
 	for kind := uint8(0); kind < 8; kind++ {

@@ -95,7 +95,7 @@ func TestImagesRequireRepositoryAndTagTogether(t *testing.T) {
 func checkCloudBindings(t *testing.T, manifest []byte) {
 	t.Helper()
 	decoder := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(string(manifest)), 4096)
-	ingressFound, controllerFound, launcherFound, denyFound := false, false, false, false
+	ingressFound, controllerFound, launcherFound, denyFound, allowFound := false, false, false, false, false
 	for {
 		var raw runtime.RawExtension
 		err := decoder.Decode(&raw)
@@ -198,6 +198,28 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 			if err := json.Unmarshal(raw.Raw, &policy); err != nil {
 				t.Fatal(err)
 			}
+			if strings.HasSuffix(policy.Name, "-cloud-allow") {
+				allowFound = true
+				internet := false
+				for _, rule := range policy.Spec.Egress {
+					for _, peer := range rule.To {
+						if peer.IPBlock == nil {
+							continue
+						}
+						if len(rule.Ports) != 0 {
+							t.Errorf("Cloud internet egress is limited to ports %+v", rule.Ports)
+						}
+						want := map[string][]string{"0.0.0.0/0": {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10"}, "::/0": {"fc00::/7", "fe80::/10"}}[peer.IPBlock.CIDR]
+						if want == nil || !slices.Equal(peer.IPBlock.Except, want) {
+							t.Errorf("Cloud egress block %s excepts %v, want %v", peer.IPBlock.CIDR, peer.IPBlock.Except, want)
+						}
+						internet = true
+					}
+				}
+				if !internet {
+					t.Error("Cloud Job policy allows no internet egress")
+				}
+			}
 			if strings.HasSuffix(policy.Name, "-cloud-deny") {
 				denyFound = true
 				if !slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeIngress) || !slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeEgress) || len(policy.Spec.Ingress)+len(policy.Spec.Egress) != 0 {
@@ -229,6 +251,9 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 				t.Errorf("Cloud ingress hosts/TLS = %+v", ingress.Spec)
 			}
 		}
+	}
+	if !allowFound {
+		t.Error("Cloud Job egress allow policy missing")
 	}
 	if !denyFound {
 		t.Error("Cloud Job deny policy not rendered")

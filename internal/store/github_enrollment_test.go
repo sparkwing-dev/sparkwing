@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func actionsEnrollment(t *testing.T) (*Tenant, capability.Authorized, GitHubRunnerBinding) {
@@ -387,4 +388,73 @@ func TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit(t *testing.T) {
 		t.Fatalf("quota after expiry: %+v, %v", issued.Capability, err)
 	}
 	rewriteSchemaCount(t, s.db, "capabilities", maxGitHubRunnerCredentials+1)
+}
+
+// Losing an installation ends everything the team held through it, and
+// connecting it again restores none of it.
+func TestInstallationUnbindEndsActionsConsentAndAutomation(t *testing.T) {
+	tenant, a := credentialMaintenanceFixture(t)
+	s := tenant.s
+	now, err := s.databaseNow(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation := GitHubAppInstallation{InstallationID: 9, AccountID: 7, AccountLogin: "Acme", AccountType: "Organization"}
+	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), installation, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.RegisterGitHubRunner(t.Context(), a, GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "Acme/Widgets", InstallationID: 9}); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_automation(team,repository_id,repository,installation_id,enabled_by,enabled_at,repo_key) VALUES ('a',42,'Acme/Widgets',9,'owner',1,'gh:42')`)
+	issued, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, "a", "1000"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AsOperator().UnbindGitHubAppInstallation(t.Context(), 9); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}); err == nil {
+		t.Fatal("an Actions credential outlived the installation")
+	}
+	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), installation, now); err != nil {
+		t.Fatal(err)
+	}
+	var automation, bindings int
+	if err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM github_app_automation WHERE team='a'),(SELECT COUNT(*) FROM github_runner_bindings WHERE team='a')`).Scan(&automation, &bindings); err != nil || automation != 0 || bindings != 0 {
+		t.Fatalf("consent after reconnecting: automation=%d bindings=%d %v", automation, bindings, err)
+	}
+}
+
+// Only a GitHub-hosted Actions runner is a fresh host. A self-hosted runner,
+// or a token without the claim, is a long-lived host whose verified work
+// writes only its host's cache scope.
+func TestActionsRunnerEnvironmentDecidesFreshness(t *testing.T) {
+	tenant, _, _ := actionsEnrollment(t)
+	s := tenant.s
+	for i, tc := range []struct {
+		environment string
+		fresh       bool
+	}{{"github-hosted", true}, {"self-hosted", false}, {"", false}} {
+		spec := actionsSpec(t, s, tenant.team, fmt.Sprint(2000+i))
+		spec.Binding.Push.RunnerEnvironment = tc.environment
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var facts claimantFacts
+		if err := s.inTx(t.Context(), func(tx *storeTx) error {
+			chain, err := authorityChainTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, false)
+			if err != nil {
+				return err
+			}
+			facts, err = claimantFactsTx(t.Context(), tx, chain, runspec.Request{})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if facts.FreshHost != tc.fresh || facts.Tier != tierActions {
+			t.Fatalf("runner_environment %q: fresh=%v tier=%s, want fresh=%v", tc.environment, facts.FreshHost, facts.Tier, tc.fresh)
+		}
+	}
 }

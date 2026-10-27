@@ -127,7 +127,7 @@ func FuzzBoundaryReleaseRequiresOwnAward(f *testing.F) {
 		mode %= 7
 		boundary, kube := boundaryFixture()
 		binding := boundaryBinding("team")
-		original, _, err := boundary.Reserve(t.Context(), binding, jobName(binding))
+		original, err := boundary.Reserve(t.Context(), binding, jobName(binding))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -148,24 +148,22 @@ func FuzzBoundaryReleaseRequiresOwnAward(f *testing.F) {
 		case 6:
 			candidate.ReservationID = foreign
 		}
-		clears := 0
-		boundary.Clear = func(context.Context, CloudNodeReservation) error { clears++; return nil }
 		err = boundary.Release(t.Context(), candidate)
 		if mode == 0 {
-			if err != nil || clears != 1 {
-				t.Fatalf("own release: clears=%d: %v", clears, err)
+			if err != nil {
+				t.Fatalf("own release: %v", err)
 			}
 			return
 		}
-		if err == nil || clears != 0 {
-			t.Fatalf("foreign release: mode=%d clears=%d: %v", mode, clears, err)
+		if err == nil {
+			t.Fatalf("foreign release: mode=%d was accepted", mode)
 		}
 		node, err := kube.CoreV1().Nodes().Get(t.Context(), original.NodeName, metav1.GetOptions{})
 		if err != nil || node.Annotations[reservationAnnotation] == "" {
 			t.Fatalf("foreign release lost original reservation: %v", err)
 		}
-		if err := boundary.Release(t.Context(), original); err != nil || clears != 1 {
-			t.Fatalf("original release: clears=%d: %v", clears, err)
+		if err := boundary.Release(t.Context(), original); err != nil {
+			t.Fatalf("original release: %v", err)
 		}
 	})
 }

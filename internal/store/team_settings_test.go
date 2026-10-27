@@ -200,3 +200,58 @@ func TestTeamSettingRechecksAuthorityProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Turning members_can_add_machines off ends members' personal machines for
+// good: turning it back on admits new enrollments but never the old ones.
+// Administrators' machines never depended on the setting.
+func TestReenablingMemberMachinesDoesNotReviveOldOnes(t *testing.T) {
+	s := authorityStore(t)
+	owner := authorityMember(t, s, "owner", RoleOwner)
+	member := authorityMember(t, s, "member", RoleEditor)
+	enroll := func(actor runstate.Actor, name string) capability.AuthorityRef {
+		t.Helper()
+		issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &actor.Authority, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+		if err != nil {
+			t.Fatalf("enroll %s: %v", name, err)
+		}
+		return capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}
+	}
+	old, admins := enroll(member, "old"), enroll(owner, "admins")
+	a := teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings")
+	tenant := &Tenant{s: s, team: "a"}
+	for _, enabled := range []bool{false, true} {
+		if err := tenant.SetAuthorizedTeamSettings(t.Context(), a, TeamSettingsUpdate{MembersCanAddMachines: &enabled}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), old); err == nil {
+		t.Fatal("re-enabling members_can_add_machines revived a member's earlier machine")
+	}
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), admins); err != nil {
+		t.Fatalf("an administrator's machine after the toggle: %v", err)
+	}
+	if _, err := s.AsOperator().ResolveAuthority(t.Context(), enroll(member, "new")); err != nil {
+		t.Fatalf("a member's machine enrolled after re-enabling: %v", err)
+	}
+}
+
+// high_trust is off by default, changed only by an administrator, and audited.
+func TestHighTrustSettingIsAuditedAdministration(t *testing.T) {
+	s := authorityStore(t)
+	owner := authorityMember(t, s, "owner", RoleOwner)
+	tenant := &Tenant{s: s, team: "a"}
+	if settings, err := tenant.TeamSettings(t.Context()); err != nil || settings.HighTrust {
+		t.Fatalf("default high_trust: %+v %v", settings, err)
+	}
+	on := true
+	if err := tenant.SetAuthorizedTeamSettings(t.Context(), teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings"), TeamSettingsUpdate{HighTrust: &on}); err != nil {
+		t.Fatal(err)
+	}
+	if settings, err := tenant.TeamSettings(t.Context()); err != nil || !settings.HighTrust {
+		t.Fatalf("high_trust after enabling: %+v %v", settings, err)
+	}
+	events, err := tenant.BusinessEvents(t.Context(), "team.settings_changed", 10, "")
+	if err != nil || len(events) != 1 || events[0].Attrs["high_trust"] != true || events[0].Attrs["previous_high_trust"] != false {
+		t.Fatalf("high_trust audit: %+v %v", events, err)
+	}
+}

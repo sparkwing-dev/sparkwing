@@ -43,9 +43,11 @@ Manage team settings
 
 Change the team's enrollment, claim ranking and child-run settings
 
-Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking or --max-children-per-root, separately or together. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration.
+Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking, --max-children-per-root or --high-trust, separately or together. False requires administration for personal enrollment and ends personal machines that members without administration enrolled; setting it back to true does not revive them. Shared runner registration, token minting and revocation always require administration.
 
 --max-children-per-root takes an integer from 1 to 1000 (default 50) and limits descendants across every depth, excluding retries. --claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it.
+
+--high-trust true lets verified runs on plain-machine, persistent and self-hosted Actions runners write the verified cache that fresh pods, Sparkwing Cloud and remote readers restore. Off (the default), those runs write only their own host's cache, because an earlier job on the same host could have tampered with what they archive. Turn it on only when every job those runners take is trusted.
 
 ### Flags
 
@@ -57,6 +59,7 @@ Only team administrators change team settings. Changes are audited. Pass --membe
 | `--help-all` | Include uncommon flags in command help. |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
 | `--members-can-add-machines BOOL` | members can add machines Values: true, false. |
+| `--high-trust BOOL` | high trust Values: true, false. |
 | `--claim-ranking TIERS` | claim ranking |
 | `--max-children-per-root COUNT` | Maximum descendants per root run (1 to 1000, default 50; retries excluded) |
 
@@ -64,7 +67,7 @@ Only team administrators change team settings. Changes are audited. Pass --membe
 
 Show the team's enrollment, claim ranking and child-run settings
 
-Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. The child-run ceiling defaults to 50 descendants per root, excluding retries. Plain prints the boolean, comma-separated ranking and child-run ceiling.
+Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. The child-run ceiling defaults to 50 descendants per root, excluding retries. high_trust defaults to false; see team settings set. Plain prints the boolean, comma-separated ranking, child-run ceiling and high_trust.
 
 ### Flags
 

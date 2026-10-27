@@ -10,6 +10,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // GitHubAppInstallation binds one installation of the deployment's GitHub
@@ -187,7 +189,9 @@ func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation i
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error) {
 	return inTxResult(ctx, o.s, func(tx *storeTx) (Team, error) {
 		return githubDeliveryResultTx(ctx, tx, fmt.Sprintf("lifecycle:unbind:%d", installation), func() (Team, error) {
-			if err := acquireLockSet(ctx, tx, func() lockSet { return tx.operator.discoverInstallationLocks(ctx, tx, lockSet{}, installation) }); err != nil {
+			if err := acquireLockSet(ctx, tx, func() lockSet {
+				return tx.operator.discoverInstallationTeardownLocks(ctx, tx, lockSet{}, installation)
+			}); err != nil {
 				return "", err
 			}
 			team, _, err := tx.operator.githubInstallationConnectionTx(ctx, tx, installation)
@@ -549,9 +553,22 @@ func (t *Tenant) GitHubCommitRuns(ctx context.Context, repo GitHubRepo, sha stri
 	return out, rows.Err()
 }
 
+// unbindGitHubAppInstallationTx ends everything t holds through installation,
+// for an uninstall, a disconnect and a move to another team alike. Triggers,
+// automation consent and Actions runner bindings cascade from the
+// installation row; the caller holds [discoverInstallationTeardownLocks].
 func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx, installation int64) error {
 	if err := invalidateGitHubInstallationPublicationsTx(ctx, tx, t.team, installation); err != nil {
 		return err
+	}
+	prefixes, err := installationActionsRootsTx(ctx, tx, t.team, installation)
+	if err != nil {
+		return err
+	}
+	for _, prefix := range prefixes {
+		if err := tx.operator.revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+			return err
+		}
 	}
 	res, err := tx.execContext(ctx, `DELETE FROM github_app_installations WHERE team = ? AND installation_id = ?`,
 		string(t.team), installation)
@@ -561,16 +578,24 @@ func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx,
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return ErrNotFound
 	}
-	if _, err := tx.execContext(ctx, `DELETE FROM github_app_triggers WHERE team = ? AND installation_id = ?`,
-		string(t.team), installation); err != nil {
-		return err
-	}
 	if _, err := tx.execContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
 		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
 		tx.now(ctx).UnixNano(), string(t.team), installation); err != nil {
 		return err
 	}
 	return nil
+}
+
+func installationActionsRootsTx(ctx context.Context, tx *storeTx, team Team, installation int64) ([]string, error) {
+	now := tx.now(ctx).UnixNano()
+	rows, err := tx.queryContext(ctx, `SELECT c.prefix FROM capabilities c
+		JOIN github_runner_bindings b ON b.team = c.team AND b.repo_key = c.repo_key
+		WHERE b.team = ? AND b.installation_id = ? AND c.bind_kind = 'push' AND c.parent_id IS NULL AND `+liveCredentialSQL("c.")+`
+		ORDER BY c.prefix`, string(team), installation, now, now)
+	if err != nil {
+		return nil, err
+	}
+	return scanPrefixes(rows)
 }
 
 func (o *Operator) githubInstallationConnectionTx(ctx context.Context, tx *storeTx, installation int64) (Team, string, error) {

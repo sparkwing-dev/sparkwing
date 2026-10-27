@@ -239,7 +239,7 @@ func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capabil
 		t := &Tenant{s: c.s, team: team}
 		return team, t.unbindGitHubAppInstallationTx(ctx, tx, installation)
 	}, func(tx *storeTx, set lockSet) lockSet {
-		return tx.operator.discoverInstallationLocks(ctx, tx, set, installation)
+		return tx.operator.discoverInstallationTeardownLocks(ctx, tx, set, installation)
 	})
 }
 

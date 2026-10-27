@@ -30,10 +30,10 @@ func productionLauncher(version string) LauncherFactory {
 		if err != nil {
 			return nil, err
 		}
-		boundary, err := launcher.NewProductionBoundary(kube, karpenter, jobs, config.Host)
-		if err != nil {
+		if err := jobs.Validate(); err != nil {
 			return nil, err
 		}
+		boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: karpenter, Namespace: jobs.Namespace}
 		return launcher.NewLauncher(ctx, launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: jobs, Bearer: bearer, Demand: controllerwire.ClaimRequest{Labels: jobs.Labels, RunnerVersion: version, Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}}})
 	}
 }

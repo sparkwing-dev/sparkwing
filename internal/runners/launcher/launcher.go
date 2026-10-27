@@ -69,6 +69,8 @@ type Launcher struct {
 	mu       sync.Mutex
 	waiting  map[string]*CloudJobAward
 	identity string
+	// checked holds, per Job, the Pods already compared with their award; a Pod is checked once.
+	checked map[types.UID]map[types.UID]bool
 }
 
 func (l *Launcher) logger() *slog.Logger {
@@ -88,7 +90,9 @@ func (l *Launcher) validate() error {
 	return nil
 }
 
-// Run verifies the job namespace admission policies, then reconciles existing Jobs before claiming further work until ctx is cancelled.
+// Run verifies the job namespace admission policies once, catching a chart and
+// launcher mismatch after an upgrade, then reconciles existing Jobs before
+// claiming further work until ctx is cancelled.
 func (l *Launcher) Run(ctx context.Context) error {
 	if err := l.validate(); err != nil {
 		return err
@@ -104,10 +108,6 @@ func (l *Launcher) Run(ctx context.Context) error {
 	var cooldown time.Time
 	for ctx.Err() == nil {
 		if !time.Now().Before(cooldown) {
-			admitted := l.verifyAdmission(ctx)
-			if admitted != nil {
-				logger.Error("Cloud admission policies do not match this launcher; reconciling without claiming work", failureAttrs(admitted)...)
-			}
 			// safety: a faulty node is excluded from placement, so only
 			// cluster-wide faults stop claims for every team.
 			synced := l.sync(ctx)
@@ -117,7 +117,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 			} else if synced != nil {
 				logger.Error("Cloud node faults require operator inspection; suspect nodes are excluded from placement and quarantines use "+quarantineAnnotation+"; claiming continues", "error", synced)
 			}
-			if blocking(synced) == nil && admitted == nil {
+			if blocking(synced) == nil {
 				if _, err := l.LaunchOne(ctx); err != nil {
 					logger.Warn("launcher claim failed", failureAttrs(err)...)
 					cooldown = time.Now().Add(retryWait(err, 0))
@@ -160,9 +160,6 @@ func failureAttrs(err error) []any {
 // LaunchOne persists a suspended Job, creates its bootstrap Secret, then permits execution.
 func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := l.validate(); err != nil {
-		return false, err
-	}
-	if err := l.verifyAdmission(ctx); err != nil {
 		return false, err
 	}
 	if err := l.placeWaiting(ctx); err != nil {

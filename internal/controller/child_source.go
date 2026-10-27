@@ -18,8 +18,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// resolveChildRevisions preserves an authorized explicit source, or pins an
-// inherited source to the parent's revision or a branch the controller resolves.
+// resolveChildRevisions keeps a same-repository child at its parent's revision,
+// or pins the child to a branch the controller resolves.
 func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineController, a capability.Authorized, request *runspec.Request) error {
 	if request.Lineage.ParentRunID == "" {
 		return nil
@@ -41,7 +41,8 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 	}
 	sameRepository := request.Git.Repository.Key == from.Git.Repository.Key
 	if request.Git.SHA != "" {
-		if sameRepository && (request.Git.SHA != from.Git.SHA || request.Git.Ref != from.Git.Ref || request.Source.Ref != from.Source.Ref) {
+		// safety: in another repository a caller-chosen commit could be any fetchable head, fork pulls included.
+		if !sameRepository || request.Git.SHA != from.Git.SHA || request.Git.Ref != from.Git.Ref || request.Source.Ref != from.Source.Ref {
 			return apierr.Authorization(apierr.ReasonBinding, "a child runs its parent's revision or a branch the controller resolves")
 		}
 		return nil

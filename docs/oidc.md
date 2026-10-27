@@ -24,8 +24,8 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out oidc-signing.p
 
 | Setting | Meaning |
 |---|---|
-| `oidc-key` credential | RSA private key, PKCS #1 or PKCS #8 PEM, at least 2048 bits, that signs every token. Without it the controller issues no tokens and the three routes answer 404. |
-| `oidc-key.published` credential | A second key, as a private or public key PEM, that the key set publishes and that never signs: the next key before a rotation, the previous key after one. |
+| `oidc-key` credential | RSA private key, PKCS #1 or PKCS #8 PEM, at least 2048 bits, that signs every token. Only its owner may read the file (mode 0400 or 0600); startup refuses one that group or other users can read. Without it the controller issues no tokens and the three routes answer 404. |
+| `oidc-key.published` credential | A second key's public half, as a public key PEM (`openssl pkey -in key.pem -pubout`), that the key set publishes and that never signs: the next key before a rotation, the previous key after one. Startup refuses private key material in this file. |
 | `--oidc-token-ttl` | Token lifetime. Default `10m`, at most `1h`, at least `1m`. |
 
 The controller refuses to start when a key is set and `--external-url` is empty or is not an `https` origin. It never logs key material; the startup line names the key ids.
@@ -36,9 +36,9 @@ Each key's `kid` is its RFC 7638 JWK thumbprint, so the same key always publishe
 
 Relying parties cache the key set for up to an hour, so a new key is published before anything signs with it:
 
-1. **Publish the next key.** Keep the current key in `oidc-key` and put the new key in `oidc-key.published`. Tokens still carry the current `kid`.
+1. **Publish the next key.** Keep the current key in `oidc-key` and put the new key's public half in `oidc-key.published`. Tokens still carry the current `kid`.
 2. **Wait longer than the one-hour cache time**, so every relying party's cached key set holds the new key.
-3. **Switch signing.** Put the new key in `oidc-key` and the old key in `oidc-key.published`. New tokens carry the new `kid`, and tokens the old key signed keep verifying.
+3. **Switch signing.** Put the new key in `oidc-key` and the old key's public half in `oidc-key.published`. New tokens carry the new `kid`, and tokens the old key signed keep verifying.
 4. **Wait longer than one token lifetime**, so every old-key token has expired, then remove `oidc-key.published`.
 
 Switching signing before step 2 has passed makes a relying party that cached the old key set reject new tokens until its cache expires.
@@ -102,7 +102,7 @@ Intake seals every run with the identity it speaks for: a trust class, and the r
   - `manual` with `repository_id`, `ref` and `sha`: a run bound to a GitHub Actions push. The values are the push's, which GitHub's own ID token proved.
   - `manual` with no `repository_id`, `ref` or `sha`: every asserted run, including the CLI, the dashboard, the API, a schedule a non-admin armed, a locked, overridden or non-default-branch schedule, a schedule's "run now", a child run that does not run its parent's exact revision, and a run whose `source:` pin is a branch or tag. The controller proves none of its repository, ref or commit, so the token claims none of them.
 - `repository` is emitted only alongside `repository_id`, so an asserted run's token has neither.
-- A child run either runs its parent's exact revision (same repository, ref, commit and code commit) and inherits the parent's identity whole, including its `pipeline`, or is asserted under its own pipeline name and mints `manual` with no `repository_id`, `ref` or `sha`. The accepted plan declares each child pipeline and repository. Award issuance seals the authorized pairs in a separate child-start capability, using the team's registered repositories or live App installation coverage. The claim's source and data scope remain on the parent repository. A child in another repository is asserted even when the ref and commit text match. A job may start only the child pipelines its plan declares with `StartsChildren` for its own repository or `StartsChildrenIn("gh:123", "deploy")` for an explicit repository. A retry keeps its source run's OIDC identity, so a retried push stays `push` and a retried schedule fire stays `cron`.
+- A child run either runs its parent's exact revision (same repository, ref, commit and code commit) and inherits the parent's identity whole, including its `pipeline`, or is asserted under its own pipeline name and mints `manual` with no `repository_id`, `ref` or `sha`. The accepted plan declares each child pipeline and repository. Award issuance seals the authorized pairs in a separate child-start capability, using the team's registered repositories or live App installation coverage. The claim's source and data scope remain on the parent repository. A child in another repository names a branch the controller resolves there, never a commit, and is asserted. A job may start only the child pipelines its plan declares with `StartsChildren` for its own repository or `StartsChildrenIn("gh:123", "deploy")` for an explicit repository. A retry keeps its source run's OIDC identity, so a retried push stays `push` and a retried schedule fire stays `cron`.
 - A `source:` code pin that is a full commit ID keeps the run's identity. A branch or tag pin, unless it resolves to the execution commit itself, runs code whoever can push that ref chooses, so the run mints `manual` with no `ref` or `sha`.
 - `runner_kind` names the credential that holds the claim: `runner` for a shared runner token, `personal` for a member's personal machine, `github-actions` for the credential a GitHub Actions job received through the [runner exchange](github-actions-runners.md), `user` for a person's token or session, which is how a laptop run reaches the controller, and `service` for a service token.
 

@@ -3,7 +3,7 @@
 // cloud provider reads to verify them.
 //
 //	iss, err := oidcissuer.New("https://api.sparkwing.dev", activePEM, publishedPEM, 10*time.Minute)
-//	token, exp, err := iss.Mint(claims, time.Now(), time.Time{})
+//	token, err := iss.Mint(claims, time.Now(), time.Time{})
 package oidcissuer
 
 import (
@@ -218,15 +218,23 @@ func ValidateAudience(aud string) error {
 	return nil
 }
 
+// Token is one signed ID token with the claims that identify it.
+type Token struct {
+	Value     string
+	ID        string
+	Subject   string
+	ExpiresAt time.Time
+}
+
 // Mint signs c as a token issued at now. The token expires after the
 // issuer's lifetime, or at notAfter when that is earlier and non-zero.
-func (i *Issuer) Mint(c Claims, now, notAfter time.Time) (string, time.Time, error) {
+func (i *Issuer) Mint(c Claims, now, notAfter time.Time) (Token, error) {
 	if err := ValidateAudience(c.Audience); err != nil {
-		return "", time.Time{}, err
+		return Token{}, err
 	}
 	sub, err := c.Subject()
 	if err != nil {
-		return "", time.Time{}, err
+		return Token{}, err
 	}
 	now = now.Truncate(time.Second)
 	exp := now.Add(i.ttl)
@@ -234,12 +242,13 @@ func (i *Issuer) Mint(c Claims, now, notAfter time.Time) (string, time.Time, err
 		exp = notAfter.Truncate(time.Second)
 	}
 	if !exp.After(now) {
-		return "", time.Time{}, errors.New("oidcissuer: the token would expire before it is issued")
+		return Token{}, errors.New("oidcissuer: the token would expire before it is issued")
 	}
-	jti := make([]byte, 16)
-	if _, err := rand.Read(jti); err != nil {
-		return "", time.Time{}, err
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return Token{}, err
 	}
+	jti := hex.EncodeToString(raw)
 	payload := map[string]any{
 		"iss":         i.issuer,
 		"aud":         c.Audience,
@@ -247,7 +256,7 @@ func (i *Issuer) Mint(c Claims, now, notAfter time.Time) (string, time.Time, err
 		"iat":         now.Unix(),
 		"nbf":         now.Unix(),
 		"exp":         exp.Unix(),
-		"jti":         hex.EncodeToString(jti),
+		"jti":         jti,
 		"team":        c.Team,
 		"pipeline":    c.Pipeline,
 		"trigger":     c.Trigger,
@@ -261,9 +270,9 @@ func (i *Issuer) Mint(c Claims, now, notAfter time.Time) (string, time.Time, err
 	}
 	token, err := i.sign(payload)
 	if err != nil {
-		return "", time.Time{}, err
+		return Token{}, err
 	}
-	return token, exp, nil
+	return Token{Value: token, ID: jti, Subject: sub, ExpiresAt: exp}, nil
 }
 
 func (i *Issuer) sign(payload map[string]any) (string, error) {
@@ -405,10 +414,15 @@ func parsePrivateKey(data []byte) (*rsa.PrivateKey, error) {
 	return rk, nil
 }
 
+// parsePublicKey reads the published key, which must be public: the file is
+// not held to the signing key's permissions, so it may not carry one.
 func parsePublicKey(data []byte) (*rsa.PublicKey, error) {
-	block, _ := pem.Decode(data)
+	block, rest := pem.Decode(data)
 	if block == nil {
 		return nil, errors.New("not a PEM block")
+	}
+	if extra, _ := pem.Decode(rest); extra != nil {
+		return nil, errors.New("holds more than one PEM block; publish only the public key")
 	}
 	switch block.Type {
 	case "PUBLIC KEY":
@@ -428,9 +442,5 @@ func parsePublicKey(data []byte) (*rsa.PublicKey, error) {
 		}
 		return rk, nil
 	}
-	priv, err := parsePrivateKey(data)
-	if err != nil {
-		return nil, err
-	}
-	return &priv.PublicKey, nil
+	return nil, errors.New("is not a public key PEM; publish only the public key (openssl pkey -pubout)")
 }

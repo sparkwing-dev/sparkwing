@@ -31,7 +31,7 @@ const (
 func (r Role) Valid() bool { return r.rank() > 0 }
 
 // safety: the most recent provider assertion owns an address, so another account's verified claim on
-// it is withdrawn before this one takes it.
+// it, primary or through a linked sign-in, is withdrawn before this one takes it.
 func claimEmailTx(ctx context.Context, tx *storeTx, accountID, email string, at int64) error {
 	if err := releaseEmailTx(ctx, tx, email, accountID, at); err != nil {
 		return err
@@ -41,10 +41,39 @@ func claimEmailTx(ctx context.Context, tx *storeTx, accountID, email string, at 
 	return err
 }
 
+// releaseEmailTx makes keepID the owner of email and withdraws every other
+// account's cached claim on it. Sign-up, sign-in through any identity and
+// linking all call it when a provider newly asserts the address; accounts are
+// never merged. The email_owners upsert is the serialization point: concurrent
+// assertions queue on its row, so exactly one account ends as owner.
 func releaseEmailTx(ctx context.Context, tx *storeTx, email, keepID string, at int64) error {
-	_, err := tx.execContext(ctx, `
+	owner := `DELETE FROM email_owners WHERE email=?`
+	args := []any{email}
+	if keepID != "" {
+		owner = `INSERT INTO email_owners(email,account_id,updated_at) VALUES (?,?,?)
+		ON CONFLICT(email) DO UPDATE SET account_id=excluded.account_id, updated_at=excluded.updated_at`
+		args = []any{email, keepID, at}
+	}
+	if _, err := tx.execContext(ctx, owner, args...); err != nil {
+		return err
+	}
+	if _, err := tx.execContext(ctx, `
 		UPDATE accounts SET email_verified = 0, updated_at = ?
-		WHERE email = ? AND email_verified = 1 AND id <> ?`, at, email, keepID)
+		WHERE email = ? AND email_verified = 1 AND id <> ?`, at, email, keepID); err != nil {
+		return err
+	}
+	_, err := tx.execContext(ctx, `
+		UPDATE identities SET email_verified = 0
+		WHERE email = ? AND email_verified = 1 AND account_id <> ?`, email, keepID)
+	return err
+}
+
+// dropUnprovenEmailOwnershipTx ends the account's ownership of every address
+// none of its current sign-ins verifies, after an identity changes address or
+// is unlinked.
+func dropUnprovenEmailOwnershipTx(ctx context.Context, tx *storeTx, accountID string) error {
+	_, err := tx.execContext(ctx, `DELETE FROM email_owners WHERE account_id = ? AND NOT EXISTS (SELECT 1
+		FROM identities i WHERE i.account_id = email_owners.account_id AND i.email = email_owners.email AND i.email_verified = 1)`, accountID)
 	return err
 }
 
@@ -424,13 +453,20 @@ func (op *Operator) resolveSignInTx(ctx context.Context, tx *storeTx, p SignInPr
 			p.Email, boolInt(p.EmailVerified), p.Provider, p.Subject); err != nil {
 			return SignInResult{}, fmt.Errorf("identity: refresh: %w", err)
 		}
+		if err := dropUnprovenEmailOwnershipTx(ctx, tx, accountID); err != nil {
+			return SignInResult{}, err
+		}
 		// safety: the account's address is its linking and invitation key, so it follows what the
 		// provider asserts now; an address left behind would let whoever holds it next walk in. A
-		// linked identity was attached whatever its address, so its address is not the account's.
+		// linked identity was attached whatever its address, so its address is not the account's, but
+		// its newer assertion still withdraws every other account's claim.
 		if linked == 0 {
-			if err := claimEmailTx(ctx, tx, accountID, p.Email, at); err != nil {
-				return SignInResult{}, err
-			}
+			err = claimEmailTx(ctx, tx, accountID, p.Email, at)
+		} else {
+			err = releaseEmailTx(ctx, tx, p.Email, accountID, at)
+		}
+		if err != nil {
+			return SignInResult{}, err
 		}
 	case errors.Is(err, sql.ErrNoRows):
 		// safety: rule 2, the account side must hold this address verified too.
@@ -477,6 +513,9 @@ func (op *Operator) resolveSignInTx(ctx context.Context, tx *storeTx, p SignInPr
 				accountID, p.Email, boolInt(p.EmailVerified), strings.TrimSpace(p.Name), at, at,
 				waitlistedAt, decision.reason); err != nil {
 				return SignInResult{}, fmt.Errorf("identity: create account: %w", err)
+			}
+			if err := releaseEmailTx(ctx, tx, p.Email, accountID, at); err != nil {
+				return SignInResult{}, err
 			}
 			if decision.reason == "" {
 				if err := recordAdmissionTx(ctx, tx, accountID, admissionSignUp, now); err != nil {
@@ -681,9 +720,9 @@ func (o *Operator) AccountMemberships(ctx context.Context, accountID string) (_ 
 	return out, rows.Err()
 }
 
-// OpenInvitationsForEmail lists the unaccepted, unexpired invitations to an
-// address, from every team.
-func (o *Operator) OpenInvitationsForEmail(ctx context.Context, email string) (out []Invitation, err error) {
+// OpenInvitationsForAccount lists the unaccepted, unexpired invitations, from
+// every team, to the addresses the account currently owns.
+func (o *Operator) OpenInvitationsForAccount(ctx context.Context, accountID string) (out []Invitation, err error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return out, err
@@ -691,8 +730,9 @@ func (o *Operator) OpenInvitationsForEmail(ctx context.Context, email string) (o
 	defer rollbackOrLog(tx)
 
 	rows, err := tx.queryContext(ctx, invitationSelect+`
-		WHERE i.email = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, normalizeEmail(email), tx.now(ctx).UTC().UnixNano())
+		WHERE i.email IN (SELECT email FROM email_owners WHERE account_id = ?)
+		  AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
+		ORDER BY i.created_at`, accountID, tx.now(ctx).UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -751,8 +791,15 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 		return none, err
 	}
 	// safety: the address check runs before the expiry and use checks, so a
-	// holder of someone else's invitation learns nothing about its state.
-	if !acct.EmailVerified || acct.Email != email {
+	// holder of someone else's invitation learns nothing about its state. Only the
+	// address's one current owner may accept; the account row's copy outlives the
+	// identity that verified it.
+	var proves bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM email_owners
+		WHERE account_id = ? AND email = ?)`, accountID, email).Scan(&proves); err != nil {
+		return none, err
+	}
+	if !proves {
 		return none, ErrEmailMismatch
 	}
 	// safety: the gate row is locked before the member count and the admission

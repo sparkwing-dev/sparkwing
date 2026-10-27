@@ -7,6 +7,24 @@ import (
 	"path/filepath"
 )
 
+// OpenPrivateCredential is OpenCredential for a private key, which only its
+// owner may read.
+func OpenPrivateCredential(directory, name string) (*os.File, error) {
+	file, err := OpenCredential(directory, name)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err == nil {
+		err = verifyOwnerOnly(file, info)
+	}
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("credential %s: %w", name, err)
+	}
+	return file, nil
+}
+
 // OpenCredential opens a regular, trusted-owner file confined to directory after resolving links.
 func OpenCredential(directory, name string) (*os.File, error) {
 	if !filepath.IsLocal(name) {

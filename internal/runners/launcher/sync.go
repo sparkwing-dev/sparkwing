@@ -293,6 +293,7 @@ func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error
 }
 
 func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation CloudNodeReservation) error {
+	l.forgetJobChecks(job.UID)
 	namespace := l.Config.Namespace
 	bootstrap := bootstrapReference{}
 	if reference := job.Annotations[bootstrapAnnotation]; reference != "" {

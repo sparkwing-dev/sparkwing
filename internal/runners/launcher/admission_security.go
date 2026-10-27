@@ -57,9 +57,8 @@ func valueRule(path string, v reflect.Value) string {
 // securityShapes pins the Pod and container security contexts of each shape.
 func securityShapes() string {
 	job := exactly("variables.spec.securityContext", jobPodSecurity()) + " && variables.containers.all(c, c.name == 'docker' ? " + exactly("c.securityContext", dockerSecurity()) + " : " + exactly("c.securityContext", workloadSecurity()) + ")"
-	capacity := exactly("variables.spec.securityContext", probePodSecurity()) + " && variables.containers.all(c, " + exactly("c.securityContext", capacitySecurity()) + ")"
-	probe := exactly("variables.spec.securityContext", probePodSecurity()) + " && variables.containers.all(c, " + exactly("c.securityContext", probeSecurity()) + ")"
-	return "variables.shape == 'job' ? " + job + " : variables.shape == 'capacity' ? " + capacity + " : " + probe
+	capacity := exactly("variables.spec.securityContext", capacityPodSecurity()) + " && variables.containers.all(c, " + exactly("c.securityContext", capacitySecurity()) + ")"
+	return "variables.shape == 'job' ? " + job + " : " + capacity
 }
 
 // hostCommand pins a workload container's command and argument grammar. The

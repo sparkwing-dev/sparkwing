@@ -67,6 +67,9 @@ type PushScope struct {
 	WorkflowRunID      string `json:"workflow_run_id"`
 	WorkflowRunAttempt string `json:"workflow_run_attempt"`
 	WorkflowRef        string `json:"workflow_ref"`
+	// RunnerEnvironment is GitHub's signed runner_environment claim; only
+	// github-hosted marks a runner no earlier job touched.
+	RunnerEnvironment string `json:"runner_environment,omitempty"`
 }
 
 // Binding is server-derived; incoming fence headers cannot replace any field.

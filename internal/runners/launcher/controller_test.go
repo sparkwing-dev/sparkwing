@@ -161,7 +161,7 @@ func TestMemoizedSourceGenerationZeroReachesCloudJob(t *testing.T) {
 	if award.Binding.Generation != 3 || award.Binding.SourceGeneration != 0 {
 		t.Fatalf("lease replaced memoized source: %+v", award.Binding)
 	}
-	cfg := productionBoundaryConfig()
+	cfg := CloudJobConfig{Namespace: "cloud", RunnerImage: "runner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", DockerImage: "docker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ControllerURL: "https://controller.example", CPUCeiling: 1, MemoryCeiling: 1 << 30}
 	cfg.CPUCeiling, cfg.MemoryCeiling = 2, 2<<30
 	if _, err := BuildJob(t.Context(), time.Now(), cfg, *award, &boundaryFake{}); err != nil {
 		t.Fatal(err)

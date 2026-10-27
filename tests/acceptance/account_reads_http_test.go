@@ -22,9 +22,8 @@ import (
 var accountReadPaths = []string{"/api/v1/me", "/api/v1/me/identities", "/api/v1/me/team-deletions"}
 
 type accountReads struct {
-	ids   []string
-	email string
-	err   error
+	ids []string
+	err error
 }
 
 func (f *accountReads) Account(_ context.Context, id string) (store.Account, error) {
@@ -37,8 +36,8 @@ func (f *accountReads) AccountMemberships(_ context.Context, id string) ([]store
 	return []store.Membership{{AccountID: id, Team: "team", Role: store.RoleEditor}}, f.err
 }
 
-func (f *accountReads) OpenInvitationsForEmail(_ context.Context, email string) ([]store.Invitation, error) {
-	f.email = email
+func (f *accountReads) OpenInvitationsForAccount(_ context.Context, id string) ([]store.Invitation, error) {
+	f.ids = append(f.ids, id)
 	return []store.Invitation{{ID: "invite", Team: "inviting", Role: store.RoleReader}}, f.err
 }
 
@@ -90,7 +89,7 @@ func TestAccountReadHTTPIdentityProperty(t *testing.T) {
 				return false
 			}
 		}
-		return len(f.ids) == 4 && f.email == "member@example.test"
+		return len(f.ids) == 5
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)

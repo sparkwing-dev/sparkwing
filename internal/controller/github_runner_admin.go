@@ -82,7 +82,8 @@ func (s *Server) handleAddGitHubRunnerBinding(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return err
 	}
-	if err := s.resolveGitHubRunnerIdentity(r.Context(), a.Target.Team, &request); err != nil {
+	installation, err := s.resolveGitHubRunnerIdentity(r.Context(), a.Target.Team, &request)
+	if err != nil {
 		return err
 	}
 	if request.RepositoryID <= 0 || request.RepositoryOwnerID <= 0 {
@@ -90,7 +91,7 @@ func (s *Server) handleAddGitHubRunnerBinding(w http.ResponseWriter, r *http.Req
 	}
 	binding, err := registry.RegisterGitHubRunner(r.Context(), a, store.GitHubRunnerBinding{
 		Team: store.Team(a.Target.Team), Repository: request.Repository, RepositoryID: request.RepositoryID,
-		RepositoryOwnerID: request.RepositoryOwnerID, CreatedBy: a.Principal.Capability.Subject.ID,
+		RepositoryOwnerID: request.RepositoryOwnerID, InstallationID: installation, CreatedBy: a.Principal.Capability.Subject.ID,
 	})
 	if errors.Is(err, store.ErrAlreadyBound) {
 		return &apierr.Error{Code: apierr.Conflict, Message: "repository is already enrolled"}
@@ -105,31 +106,33 @@ func (s *Server) handleAddGitHubRunnerBinding(w http.ResponseWriter, r *http.Req
 	return nil
 }
 
-func (s *Server) resolveGitHubRunnerIdentity(ctx context.Context, team string, request *githubBindingReq) error {
+// resolveGitHubRunnerIdentity fills request from GitHub and reports the team's
+// installation that covers the repository, or zero without the App.
+func (s *Server) resolveGitHubRunnerIdentity(ctx context.Context, team string, request *githubBindingReq) (int64, error) {
 	if s.githubApp == nil {
-		return nil
+		return 0, nil
 	}
 	if s.operator == nil {
-		return routepolicy.MissingEndpointPolicy()
+		return 0, routepolicy.MissingEndpointPolicy()
 	}
 	tenant, err := s.tenantForTeam(ctx, store.Team(team))
 	if err != nil {
-		return engineLookupError(err)
+		return 0, engineLookupError(err)
 	}
-	_, repo, err := s.resolveGitHubAppRepository(ctx, tenant, request.Repository)
+	installation, repo, err := s.resolveGitHubAppRepository(ctx, tenant, request.Repository)
 	switch {
 	case errors.Is(err, store.ErrInvalidInput):
-		return invalidEngineBody("repository identity is invalid")
+		return 0, invalidEngineBody("repository identity is invalid")
 	case errors.Is(err, store.ErrNotFound):
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "the team's GitHub App installation does not cover this repository")
+		return 0, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "the team's GitHub App installation does not cover this repository")
 	case err != nil:
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository coverage could not be verified"}, err)
+		return 0, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository coverage could not be verified"}, err)
 	}
 	if request.RepositoryID != 0 && request.RepositoryID != repo.ID || request.RepositoryOwnerID != 0 && request.RepositoryOwnerID != repo.Owner.ID {
-		return invalidEngineBody("repository identity differs from GitHub")
+		return 0, invalidEngineBody("repository identity differs from GitHub")
 	}
 	request.Repository, request.RepositoryID, request.RepositoryOwnerID = repo.FullName, repo.ID, repo.Owner.ID
-	return nil
+	return installation.InstallationID, nil
 }
 
 func (s *Server) handleRemoveGitHubRunnerBinding(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

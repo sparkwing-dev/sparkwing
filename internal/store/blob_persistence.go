@@ -112,7 +112,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 	if err := json.Unmarshal(request, &sealed); err != nil {
 		return a, err
 	}
-	facts, err := provenanceRefFacts(sealed)
+	facts, err := runRefFacts(sealed, grantHost(c.Data.WriteRef))
 	if err != nil {
 		return a, err
 	}
@@ -314,9 +314,30 @@ func blobCacheRepositoryAllowed(a blobActor, kind blob.Kind) bool {
 	return !blobLocalRepo(a.authority.Repo) || kind == blob.KindDepcache && a.capability.Subject.Kind == capability.SubjectLocal && a.capability.Data.Use == capability.DataClaim
 }
 
-// provenanceRefFacts is the one owner of a run's data scope: the scope it writes,
-// from its trust class, and the verified fallbacks it reads, from the default
-// branch and pull request base its provenance sealed.
+// runRefFacts is the one owner of a run's data scope on one host: the scope it
+// writes, from its trust class and, for a verified run on a long-lived host,
+// that host; and the verified fallbacks it reads, from the default branch and
+// pull request base its provenance sealed. host is "" on a fresh host.
+func runRefFacts(sealed runspec.SealedRequest, host string) (blob.RefFacts, error) {
+	facts, err := provenanceRefFacts(sealed)
+	return hostRefFacts(facts, host), err
+}
+
+// grantHost recovers the host a sealed data grant confines writes to.
+func grantHost(writeRef string) string {
+	if scope := blob.ParseCapabilityScope(writeRef); !scope.Verified && strings.HasPrefix(scope.Writer, hostWriterPrefix) {
+		return scope.Writer
+	}
+	return ""
+}
+
+// scopeAcceptsCopy reports whether a record written under source may be
+// republished under dest: the same scope, or a verified record copied down
+// into a host scope of the same ref. A record never moves to a more trusted scope.
+func scopeAcceptsCopy(dest, source blob.RefScope) bool {
+	return source == dest || source.Verified && !dest.Verified && strings.HasPrefix(dest.Writer, hostWriterPrefix) && source.Ref == dest.Ref
+}
+
 func provenanceRefFacts(sealed runspec.SealedRequest) (blob.RefFacts, error) {
 	p := sealed.Provenance
 	if !p.Valid() {
@@ -335,6 +356,23 @@ func provenanceRefFacts(sealed runspec.SealedRequest) (blob.RefFacts, error) {
 		facts.PullRequestBase = runspec.Optional[string]{Set: true, Value: "refs/heads/" + base}
 	}
 	return facts, nil
+}
+
+// hostRefFacts confines a verified run on a host that outlives its jobs to that
+// host's own scope. Earlier jobs on the host may have tampered with what the
+// run archives, so its records never carry verified or default-branch evidence
+// that fresh pods, Cloud and remote readers trust; it still reads the verified
+// default branch. host is empty on a fresh host or for a high-trust team.
+const hostWriterPrefix = "host-"
+
+func hostRefFacts(facts blob.RefFacts, host string) blob.RefFacts {
+	if host == "" || !facts.Scope.Verified {
+		return facts
+	}
+	facts.Scope = blob.RefScope{Ref: facts.Scope.Ref, Writer: host}
+	facts.DefaultBranchVerified = false
+	facts.AppDeliveryKey = ""
+	return facts
 }
 
 // readScopes lists what a run may read: its own scope, then the verified default

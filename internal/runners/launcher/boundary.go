@@ -31,32 +31,28 @@ const (
 )
 
 // KubernetesBoundary persists exclusivity on the node under Kubernetes resource-version fencing.
-// Probe proves network enforcement and Clear removes prior Job state before the node can be reused.
-// Both callbacks are required deployment integrations, with no manifest-only or no-op fallback.
-// Clear must be idempotent and confined to this reservation's state, including concurrent calls.
+// A node is reused only within the run that first used it, so no Job state is cleared between
+// runs. Network isolation is the cluster's NetworkPolicy enforcement, which the operator verifies.
 type KubernetesBoundary struct {
-	Kube       kubernetes.Interface
-	Karpenter  dynamic.Interface
-	Namespace  string
-	Probe      func(context.Context, CloudNodeReservation) (CloudNetworkEvidence, error)
-	Clear      func(context.Context, CloudNodeReservation) error
-	StopProbes func(context.Context, CloudNodeReservation) error
+	Kube      kubernetes.Interface
+	Karpenter dynamic.Interface
+	Namespace string
 }
 
-func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBinding, job string) (CloudNodeReservation, CloudNetworkEvidence, error) {
-	if b.Kube == nil || b.Namespace == "" || b.Probe == nil || b.Clear == nil || binding.Team == "" || job == "" {
-		return CloudNodeReservation{}, CloudNetworkEvidence{}, errors.New("Cloud boundary requires Kubernetes, namespace, network probe, node cleanup, team and Job")
+func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBinding, job string) (CloudNodeReservation, error) {
+	if b.Kube == nil || b.Namespace == "" || binding.Team == "" || binding.RunID == "" || job == "" {
+		return CloudNodeReservation{}, errors.New("Cloud boundary requires Kubernetes, namespace, team, run and Job")
 	}
 	if _, err := cloudDeadline(time.Now(), binding); err != nil {
-		return CloudNodeReservation{}, CloudNetworkEvidence{}, err
+		return CloudNodeReservation{}, err
 	}
 	lease := binding.LeaseRef()
 	if lease.Kind == "" || lease.ID == "" || lease.Holder == "" || lease.Generation <= 0 {
-		return CloudNodeReservation{}, CloudNetworkEvidence{}, errors.New("Cloud reservation requires a complete award fence")
+		return CloudNodeReservation{}, errors.New("Cloud reservation requires a complete award fence")
 	}
 	nodes, err := b.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: TeamNodeLabel + "=" + TeamNodeValue(b.Namespace, binding.Team)})
 	if err != nil {
-		return CloudNodeReservation{}, CloudNetworkEvidence{}, err
+		return CloudNodeReservation{}, err
 	}
 	for _, node := range nodes.Items {
 		if !nodeReady(node) || quarantined(node) {
@@ -67,28 +63,24 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 			continue
 		}
 		if err != nil {
-			return CloudNodeReservation{}, CloudNetworkEvidence{}, err
+			return CloudNodeReservation{}, err
 		}
-		err = b.consumeCapacity(ctx, node.Name, binding.Team)
-		var evidence CloudNetworkEvidence
-		if err == nil {
-			evidence, err = b.Probe(ctx, reservation)
+		if err = b.consumeCapacity(ctx, node.Name, binding.Team); err != nil {
+			return CloudNodeReservation{}, errors.Join(err, b.Release(ctx, reservation))
 		}
-		if err == nil {
-			err = validateBoundary(b.Namespace, binding, job, reservation, evidence)
-		}
-		if err != nil {
-			return CloudNodeReservation{}, CloudNetworkEvidence{}, errors.Join(err, b.Release(ctx, reservation))
-		}
-		return reservation, evidence, nil
+		return reservation, nil
 	}
-	return CloudNodeReservation{}, CloudNetworkEvidence{}, ErrNoDedicatedNode
+	return CloudNodeReservation{}, ErrNoDedicatedNode
 }
 
 func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, binding CloudJobBinding, job string) (CloudNodeReservation, error) {
 	team := binding.Team
 	if err := b.verifyNodeTeam(ctx, &node, team); err != nil {
 		return CloudNodeReservation{}, err
+	}
+	run := runNodeValue(b.Namespace, binding.RunID)
+	if (node.Labels[usedTeamLabel] != "" || node.Labels[usedRunLabel] != "") && node.Labels[usedRunLabel] != run {
+		return CloudNodeReservation{}, ErrNoDedicatedNode
 	}
 	// safety: replay must validate the binding too, even when quarantine could not persist.
 	if reservationEvidence(&node) {
@@ -117,6 +109,7 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 		node.Annotations = map[string]string{}
 	}
 	node.Labels[usedTeamLabel] = TeamNodeValue(b.Namespace, team)
+	node.Labels[usedRunLabel] = run
 	node.Annotations[reservationAnnotation] = string(raw)
 	node.Annotations[reservationNamespaceAnnotation] = b.Namespace
 	node.Annotations[bindingAnnotation] = string(bindingJSON)
@@ -131,8 +124,8 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 // every update conflict; that is charged to the node, which stays reserved and
 // therefore out of placement, and sync retries it.
 func (b *KubernetesBoundary) Release(ctx context.Context, reservation CloudNodeReservation) error {
-	if b.Kube == nil || b.Clear == nil {
-		return errors.New("Cloud boundary requires Kubernetes and node cleanup")
+	if b.Kube == nil {
+		return errors.New("Cloud boundary requires Kubernetes")
 	}
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error { return b.release(ctx, reservation) })
 	if apierrors.IsConflict(err) {
@@ -161,19 +154,11 @@ func (b *KubernetesBoundary) release(ctx context.Context, reservation CloudNodeR
 	if json.Unmarshal([]byte(raw), &held) != nil || held != reservation || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
 		return &nodeFault{node: reservation.NodeName, cause: "reservation changed before teardown"}
 	}
-	if b.StopProbes != nil {
-		if err = b.StopProbes(ctx, reservation); err != nil {
-			return err
-		}
-	}
 	if err = b.vacant(ctx, node.Name); err != nil {
 		if errors.Is(err, ErrNoDedicatedNode) {
 			return errContainersRunning
 		}
 		return err
-	}
-	if err = b.Clear(ctx, reservation); err != nil {
-		return fmt.Errorf("clear Cloud node state: %w", err)
 	}
 	delete(node.Annotations, reservationAnnotation)
 	delete(node.Annotations, reservationNamespaceAnnotation)
@@ -215,9 +200,9 @@ func (b *KubernetesBoundary) occupants(ctx context.Context, node, team string) (
 }
 
 // safety: requests leave only after the reservation and its taint are persisted,
-// so no other award can take the node. consolidateAfter must outlast empty gaps
-// before and after boundary probes. Waiting for removal frees the requests'
-// resources before probing and Job placement.
+// so no other award can take the node. consolidateAfter must outlast the empty
+// gap before the Job lands. Waiting for removal frees the requests' resources
+// before Job placement.
 func (b *KubernetesBoundary) consumeCapacity(ctx context.Context, node, team string) error {
 	requests, err := b.occupants(ctx, node, team)
 	if err != nil {

@@ -55,8 +55,8 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 		if record.Key.Scope.Repo != a.authority.Repo || record.Key.Scope.Pipeline != a.pipeline || runspec.NodeID(record.Key.Scope.Job) != ref.NodeID {
 			return result, blob.ErrDigestNotReadable
 		}
-		if record.Key.Scope.Ref != a.authority.Ref.Scope {
-			return result, blob.ErrDigestNotReadable
+		if !scopeAcceptsCopy(a.authority.Ref.Scope, record.Key.Scope.Ref) {
+			return result, blob.ErrNotFound
 		}
 		members, err := records.readMembers(ctx, tx, record)
 		if err != nil {
@@ -86,7 +86,7 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 				}
 			}
 			copy := record
-			copy.Key = materializedKey(team, a, target, part.kind)
+			copy.Key, copy.RefFacts = materializedKey(team, a, target, part.kind), a.authority.Ref
 			copy.Digest, copy.ManifestDigest = part.digest, runspec.Optional[blob.Digest]{}
 			copy.ExpiresAt, copy.Pinned = runspec.Optional[time.Time]{}, false
 			namespace, err := blob.RecordNamespace(copy.Key)
@@ -177,7 +177,7 @@ func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobAc
 	if err := json.Unmarshal(request, &sealed); err != nil {
 		return nil, err
 	}
-	if repo != string(a.authority.Repo) || pipeline != a.pipeline || ref.NodeID != target.Ref.NodeID || blob.ScopeFor(sealed.Provenance) != a.authority.Ref.Scope {
+	if repo != string(a.authority.Repo) || pipeline != a.pipeline || ref.NodeID != target.Ref.NodeID || !scopeAcceptsCopy(a.authority.Ref.Scope, blob.ScopeFor(sealed.Provenance)) {
 		return nil, blob.ErrDigestNotReadable
 	}
 	row, err := readNodeTx(ctx, tx, team, ref)
@@ -187,8 +187,12 @@ func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobAc
 	var keys []blob.RecordKey
 	for _, key := range []*blob.RecordKey{row.OutputRecord, row.ManifestRecord} {
 		if key != nil {
-			if key.Team != string(team) || key.Scope.Ref != a.authority.Ref.Scope {
+			if key.Team != string(team) {
 				return nil, blob.ErrDigestNotReadable
+			}
+			// safety: a result another host wrote is a miss here, so the job runs again.
+			if !scopeAcceptsCopy(a.authority.Ref.Scope, key.Scope.Ref) {
+				return nil, blob.ErrNotFound
 			}
 			keys = append(keys, *key)
 		}

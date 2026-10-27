@@ -19,7 +19,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -152,7 +151,7 @@ func setChildAncestor(t *testing.T, e *engineFixture, id, parent string) {
 
 // The same pipeline name in another authorized repository is not a cycle and
 // cannot inherit the first repository's identity, even at the same ref and SHA.
-func TestAuthorizedCrossRepositoryChildIsAsserted(t *testing.T) {
+func TestAuthorizedCrossRepositoryChildNamesABranch(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -187,17 +186,15 @@ func TestAuthorizedCrossRepositoryChildIsAsserted(t *testing.T) {
 			if !slices.Equal(issued.Capability.Repositories, []string{"gh:1"}) || issued.Capability.Data.RepositoryKey != "gh:1" || !issued.Capability.AllowsChild("ci", "gh:2") || issued.Capability.AllowsChild("ci", "gh:3") {
 				t.Fatalf("child authority widened source/data scope or ignored team consent: %+v", issued.Capability)
 			}
-			engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:3"}}), 403)
-			engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 403)
-			w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 201)
-			var result controllerwire.CreateRunResponse
-			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
-				t.Fatal(err)
+			unconsented := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:3"}}), 403)
+			if !strings.Contains(unconsented.Body.String(), `"reason":"repository_unauthorized"`) {
+				t.Fatalf("unconsented repository refusal: %s", unconsented.Body)
 			}
-			p := storedIntake(t, e.Store, result.RunID).Provenance
-			trigger, repo, ref, sha := p.OIDC()
-			if p.Trust() != runspec.TrustAsserted || !p.SharedSecretsOnly() || trigger != "manual" || repo != 0 || ref != "" || sha != "" {
-				t.Fatalf("explicit child inherited identity: %+v", p)
+			engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 403)
+			// The consented repository passes authorization and is then refused only for naming a commit.
+			pinned := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 403)
+			if !strings.Contains(pinned.Body.String(), `"reason":"binding"`) {
+				t.Fatalf("cross-repository commit refusal: %s", pinned.Body)
 			}
 		})
 	}

@@ -18,6 +18,7 @@ type authorityRequirement struct {
 	Epoch                 int64            `json:"epoch"`
 	Grant                 capability.Grant `json:"grant,omitempty"`
 	MembersCanAddMachines bool             `json:"members_can_add_machines,omitempty"`
+	MemberMachinesEpoch   int64            `json:"member_machines_epoch,omitempty"`
 }
 
 func membershipEpochTx(ctx context.Context, tx *storeTx, team, account string) (int64, error) {
@@ -54,6 +55,9 @@ func provisionRequirementTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	if spec.Personal {
 		requirement.Grant = capability.RunsWrite
 		requirement.MembersCanAddMachines = true
+		if err := tx.QueryRowContext(ctx, `SELECT member_machines_epoch FROM teams WHERE name=?`, spec.Team).Scan(&requirement.MemberMachinesEpoch); err != nil {
+			return nil, err
+		}
 		if len(spec.ReservedPools) != 0 {
 			requirement.Grant = capability.TeamAdmin
 		}
@@ -73,10 +77,11 @@ func checkAuthorityRequirementTx(ctx context.Context, tx *storeTx, team string, 
 	}
 	if requirement.MembersCanAddMachines {
 		var allowed bool
-		if err := tx.QueryRowContext(ctx, `SELECT members_can_add_machines FROM teams WHERE name=?`, team).Scan(&allowed); err != nil {
+		var machineEpoch int64
+		if err := tx.QueryRowContext(ctx, `SELECT members_can_add_machines,member_machines_epoch FROM teams WHERE name=?`, team).Scan(&allowed, &machineEpoch); err != nil {
 			return err
 		}
-		if !allowed && !slices.Contains(ScopesForRole(role), scopeTeamAdmin) {
+		if (!allowed || machineEpoch != requirement.MemberMachinesEpoch) && !slices.Contains(ScopesForRole(role), scopeTeamAdmin) {
 			return authorityError(apierr.Unauthenticated, "credential enrollment setting has ended")
 		}
 	}

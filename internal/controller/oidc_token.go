@@ -41,15 +41,14 @@ func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server {
 	return s
 }
 
-// OIDCReader rechecks claim authority and reads sealed identity under one store clock.
-type OIDCReader interface {
+// OIDCMinter rechecks claim authority, signs and audits one token in a single store transaction.
+type OIDCMinter interface {
 	Team() store.Team
-	ReadOIDCFacts(context.Context, capability.Authorized) (capability.OIDCFacts, error)
-	RecordOIDCMint(context.Context, capability.Authorized, string) error
+	MintOIDCToken(context.Context, capability.Authorized, string, func(capability.OIDCFacts) (store.OIDCMint, error)) (store.OIDCMint, error)
 }
 
-func (s *Server) oidcReader(ctx context.Context, team string) (OIDCReader, error) {
-	return tenantPort[OIDCReader](ctx, s, store.Team(team))
+func (s *Server) oidcMinter(ctx context.Context, team string) (OIDCMinter, error) {
+	return tenantPort[OIDCMinter](ctx, s, store.Team(team))
 }
 
 func (s *Server) handleOIDCDiscovery(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
@@ -81,50 +80,53 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 	if oidcissuer.ValidateAudience(body.Audience) != nil {
 		return invalidEngineBody("invalid OIDC audience")
 	}
-	reader, err := s.oidcReader(r.Context(), a.Target.Team)
+	minter, err := s.oidcMinter(r.Context(), a.Target.Team)
 	if err != nil {
 		return err
 	}
-	facts, err := reader.ReadOIDCFacts(r.Context(), a)
-	if err != nil {
-		return engineLookupError(err)
-	}
-	if facts.Team != a.Target.Team || facts.RunID != a.Target.RunID || facts.Now.IsZero() || !facts.NotAfter.After(facts.Now) {
-		return errors.New("invalid persisted OIDC identity")
-	}
-	ceiling := facts.NotAfter
-	for _, end := range []*time.Time{a.Principal.Capability.ExpiresAt, a.Principal.Capability.RevokedAt} {
-		if end != nil && end.Before(ceiling) {
+	var limited time.Duration
+	minted, err := minter.MintOIDCToken(r.Context(), a, body.Audience, func(facts capability.OIDCFacts) (store.OIDCMint, error) {
+		if facts.Team != a.Target.Team || facts.RunID != a.Target.RunID || facts.Now.IsZero() || !facts.NotAfter.After(facts.Now) {
+			return store.OIDCMint{}, errors.New("invalid persisted OIDC identity")
+		}
+		ceiling := facts.NotAfter
+		for _, end := range []*time.Time{a.Principal.Capability.ExpiresAt, a.Principal.Capability.RevokedAt} {
+			if end != nil && end.Before(ceiling) {
+				ceiling = *end
+			}
+		}
+		if end := a.Binding.Deadline; end != nil && end.Before(ceiling) {
 			ceiling = *end
 		}
+		claims := oidcissuer.Claims{
+			Audience: body.Audience, Team: facts.Team, RunID: facts.RunID, Pipeline: facts.Pipeline,
+			Trigger: facts.Trigger, RunnerKind: facts.RunnerKind, Ref: facts.Ref, SHA: facts.SHA, Repository: facts.Repository, RepositoryID: facts.RepositoryID,
+		}
+		if _, err := claims.Subject(); err != nil {
+			return store.OIDCMint{}, &apierr.Error{Code: apierr.BadRequest, Message: "run identity cannot form an OIDC subject"}
+		}
+		key := a.Principal.Authority.ID + "\x00" + a.Target.RunID
+		if ok, wait := s.oidc.limit.AllowWithRetry(key, facts.Now); !ok {
+			limited = wait
+			return store.OIDCMint{}, &apierr.Error{Code: apierr.RateLimited, Message: "OIDC issuance budget exhausted"}
+		}
+		if err := r.Context().Err(); err != nil {
+			return store.OIDCMint{}, err
+		}
+		token, err := s.oidc.issuer.Mint(claims, facts.Now, ceiling)
+		if err != nil {
+			return store.OIDCMint{}, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "OIDC issuance unavailable"}, err)
+		}
+		return store.OIDCMint{Token: token.Value, ID: token.ID, Subject: token.Subject, ExpiresAt: token.ExpiresAt}, nil
+	})
+	if limited > 0 {
+		setRetryAfter(w, limited)
 	}
-	if end := a.Binding.Deadline; end != nil && end.Before(ceiling) {
-		ceiling = *end
-	}
-	claims := oidcissuer.Claims{
-		Audience: body.Audience, Team: facts.Team, RunID: facts.RunID, Pipeline: facts.Pipeline,
-		Trigger: facts.Trigger, RunnerKind: facts.RunnerKind, Ref: facts.Ref, SHA: facts.SHA, Repository: facts.Repository, RepositoryID: facts.RepositoryID,
-	}
-	if _, err := claims.Subject(); err != nil {
-		return &apierr.Error{Code: apierr.BadRequest, Message: "run identity cannot form an OIDC subject"}
-	}
-	key := a.Principal.Authority.ID + "\x00" + a.Target.RunID
-	if ok, wait := s.oidc.limit.AllowWithRetry(key, facts.Now); !ok {
-		setRetryAfter(w, wait)
-		return &apierr.Error{Code: apierr.RateLimited, Message: "OIDC issuance budget exhausted"}
-	}
-	if err := r.Context().Err(); err != nil {
-		return err
-	}
-	token, expires, err := s.oidc.issuer.Mint(claims, facts.Now, ceiling)
 	if err != nil {
-		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "OIDC issuance unavailable"}, err)
-	}
-	if err := reader.RecordOIDCMint(r.Context(), a, body.Audience); err != nil {
 		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusOK, OIDCTokenResponse{Token: token, ExpiresAt: expires.UTC()})
+	writeJSON(w, http.StatusOK, OIDCTokenResponse{Token: minted.Token, ExpiresAt: minted.ExpiresAt.UTC()})
 	return nil
 }
 
-var _ OIDCReader = (*store.Tenant)(nil)
+var _ OIDCMinter = (*store.Tenant)(nil)

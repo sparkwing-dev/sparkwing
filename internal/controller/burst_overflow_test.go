@@ -204,7 +204,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("personal enrollment: %v", err)
 	}
-	engineSQL(t, e.Store, `UPDATE teams SET members_can_add_machines=0 WHERE name='a'`)
+	engineSQL(t, e.Store, `UPDATE teams SET members_can_add_machines=0,member_machines_epoch=member_machines_epoch+1 WHERE name='a'`)
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil {
 		t.Fatal(err)
@@ -226,6 +226,11 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	body := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"job"}`
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusUnauthorized)
 	engineSQL(t, e.Store, `UPDATE teams SET members_can_add_machines=1 WHERE name='a'`)
+	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusUnauthorized)
+	enrolled, err = manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "desktop-again", Repos: []string{"github.com/acme/*"}, Personal: true})
+	if err != nil {
+		t.Fatalf("personal enrollment after re-enabling: %v", err)
+	}
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusForbidden)
 	engineSQL(t, e.Store, `UPDATE runs SET request_json=?`, sealWith(t, run.Request, provenance))
 	engineAcceptedFixturePlan(t, e, "a", "run")

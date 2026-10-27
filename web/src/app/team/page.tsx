@@ -106,7 +106,7 @@ function Members({ me }: { me: Me }) {
 
   return (
     <>
-      <Panel title="Team settings" hint="Shared runners always require team administration. Turning off personal enrollment keeps existing machines registered until an administrator revokes them.">
+      <Panel title="Team settings" hint="Shared runners always require team administration. Turning off personal enrollment ends the personal machines members enrolled; turning it back on does not revive them.">
         <label className="flex items-center gap-3 p-4 text-sm">
           <input
             type="checkbox"
@@ -117,6 +117,17 @@ function Members({ me }: { me: Me }) {
             }, "Team settings saved")}
           />
           Members can add personal machines (members_can_add_machines)
+        </label>
+        <label className="flex items-center gap-3 p-4 text-sm" title="Off by default. On, verified runs on plain-machine, persistent and self-hosted Actions runners write the verified cache that fresh pods, Sparkwing Cloud and remote readers restore. Off, they write only their own host's cache, because an earlier job on that host could have tampered with it. Changes are audited.">
+          <input
+            type="checkbox"
+            checked={settings?.high_trust ?? false}
+            disabled={!owner || settings === null || busy !== null}
+            onChange={(e) => run("settings", async () => {
+              setSettings(await setTeamSettings({ high_trust: e.target.checked }));
+            }, "Team settings saved")}
+          />
+          High trust: persistent runners write the shared verified cache (high_trust)
         </label>
         {settings && (
           <form className="flex flex-wrap items-center gap-3 p-4 text-sm" onSubmit={(e) => {

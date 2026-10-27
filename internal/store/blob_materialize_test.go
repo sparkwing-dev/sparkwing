@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -263,5 +264,58 @@ func TestBlobMaterializationReadSelectorsCannotBeAliasedProperty(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(719))}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A failed-only retry of a verified run whose job runs on a long-lived host
+// writes that host's scope; a source result it cannot republish there is a
+// miss that runs the job again, never a hard failure.
+func TestHostScopedRetryTreatsAnUncopyableSourceAsAMiss(t *testing.T) {
+	s, tenant, request := blobMaterializationFixture(t)
+	request.MaterializeOnly = true
+	app := runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: fixtureFeatureSHA, DeliveryKey: "main-delivery", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: time.Unix(1, 0).UTC()}
+	verified, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := sealWith(t, runspec.SealedRequest{Version: 1, Request: runspec.Request{Git: runspec.Git{Ref: app.Ref, SHA: app.SHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: app}}}}, verified)
+	rewriteSchemaExec(t, s.db, "UPDATE runs SET request_json=? WHERE id IN ('run','target')", body)
+	host := blob.RefScope{Ref: "refs/heads/main", Writer: hostWriterPrefix + "0123456789abcdef"}
+	var raw []byte
+	if err := s.db.QueryRow("SELECT authority_json FROM capabilities WHERE prefix='target-owner'").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var record CapabilityRecord
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	record.Value.Data.WriteRef, record.Value.Data.ReadRefs = host.CapabilityScope(), []string{host.CapabilityScope(), "refs/heads/main"}
+	if raw, err = json.Marshal(record); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=?,ref_scope=? WHERE prefix='target-owner'", raw, host.CapabilityScope())
+	got, err := tenant.ReconcileNode(t.Context(), request)
+	if err != nil || got.Kind != runstate.Dispatch || got.Node.OutputRecord != nil {
+		t.Fatalf("host-scoped retry of an uncopyable result = %+v, %v; want the job to run", got, err)
+	}
+}
+
+func TestScopeAcceptsCopyOnlyDownward(t *testing.T) {
+	verified := blob.RefScope{Ref: "refs/heads/main", Verified: true}
+	host := blob.RefScope{Ref: "refs/heads/main", Writer: hostWriterPrefix + "aa"}
+	for _, tc := range []struct {
+		dest, source blob.RefScope
+		want         bool
+	}{
+		{host, host, true},
+		{host, verified, true},
+		{verified, host, false},
+		{host, blob.RefScope{Ref: "refs/heads/main", Writer: hostWriterPrefix + "bb"}, false},
+		{host, blob.RefScope{Ref: "refs/heads/other", Verified: true}, false},
+		{blob.RefScope{Ref: "refs/heads/main", Writer: "account/x"}, verified, false},
+	} {
+		if got := scopeAcceptsCopy(tc.dest, tc.source); got != tc.want {
+			t.Errorf("scopeAcceptsCopy(%+v, %+v) = %v, want %v", tc.dest, tc.source, got, tc.want)
+		}
 	}
 }

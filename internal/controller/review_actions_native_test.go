@@ -41,7 +41,7 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 		"iat": now.Unix(), "nbf": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(),
 		"repository": "acme/repo", "repository_id": "42", "repository_owner_id": "7",
 		"ref": "refs/heads/main", "sha": strings.Repeat("a", 40), "event_name": "push",
-		"workflow_ref": "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main", "run_id": "1000", "run_attempt": "1",
+		"workflow_ref": "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main", "run_id": "1000", "run_attempt": "1", "runner_environment": "self-hosted",
 	}
 	sign := func() string {
 		token, err := signer.Sign(claims)
@@ -68,7 +68,7 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := principal.Capability
-	if c.Parent != nil || c.Team != "a" || c.Subject.Kind != capability.SubjectMachine || c.Binding.Kind != capability.BindingPush || c.Binding.Push == nil || c.Binding.Push.RepositoryKey != "gh:42" || c.Binding.Push.Ref != "refs/heads/main" || c.Binding.Push.SHA != strings.Repeat("a", 40) || c.Binding.Push.WorkflowRunID != "1000" || c.RootMetered || c.ExpiresAt == nil {
+	if c.Parent != nil || c.Team != "a" || c.Subject.Kind != capability.SubjectMachine || c.Binding.Kind != capability.BindingPush || c.Binding.Push == nil || c.Binding.Push.RepositoryKey != "gh:42" || c.Binding.Push.Ref != "refs/heads/main" || c.Binding.Push.SHA != strings.Repeat("a", 40) || c.Binding.Push.WorkflowRunID != "1000" || c.Binding.Push.RunnerEnvironment != "self-hosted" || c.RootMetered || c.ExpiresAt == nil {
 		t.Fatalf("Actions root lost verified scope: %+v", c)
 	}
 	exchange(token, 403)
