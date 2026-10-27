@@ -11,7 +11,8 @@
 #                              and bindingSecretTx refuses them to --runner here)
 # oidc_*                       oidcIdentity, which reads Provenance.OIDC(); the subject's runner segment is the
 #                              claimant's kind (runner, actions, personal, user, service) and is not shown
-# oidc_runner_environment      no such claim exists in this code
+# oidc_runner_environment_<host>  the runner_environment claim, from the claimant's FreshHost as authority_oidc
+#                              reads it: fresh only on a fresh host, whatever the team's high_trust
 # cache_reads                  awardDataScope for a job claim (ReadRefs)
 # default_branch_work_go       Provenance.DefaultBranchWork()
 # actions_runner_fresh_host    claimantFactsTx FreshHost for the Actions binding's signed runner_environment
@@ -40,15 +41,17 @@ oidc_trigger                                       push
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
-oidc_runner_environment                            (no such claim)
 cache_reads                                        refs/heads/main
 default_branch_work_go                             yes
 cache_write_fresh_host                             refs/heads/main
 cache_write_default_branch_fresh_host              yes
+oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  refs/heads/main
 cache_write_default_branch_long_lived_high_trust   yes
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          no
@@ -67,15 +70,17 @@ oidc_trigger                                       push
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/heads/feature
 oidc_sha                                           main-head
-oidc_runner_environment                            (no such claim)
 cache_reads                                        refs/heads/feature refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             refs/heads/feature
 cache_write_default_branch_fresh_host              no
+oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>:refs/heads/feature
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  refs/heads/feature
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -94,15 +99,17 @@ oidc_trigger                                       pull_request
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/pull/1/head
 oidc_sha                                           main-head
-oidc_runner_environment                            (no such claim)
 cache_reads                                        refs/pull/1/head refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             refs/pull/1/head
 cache_write_default_branch_fresh_host              no
+oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>:refs/pull/1/head
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  refs/pull/1/head
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -118,18 +125,20 @@ trust                                              asserted
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
-oidc_repository                                    -
+oidc_repository                                    7 acme/repo
 oidc_ref                                           -
 oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
 cache_reads                                        manual:run/run-app-push-branch-source-pin:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:run/run-app-push-branch-source-pin:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -148,15 +157,17 @@ oidc_trigger                                       cron
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
-oidc_runner_environment                            (no such claim)
 cache_reads                                        manual:schedule/nightly:refs/heads/main refs/heads/main
 default_branch_work_go                             yes
 cache_write_fresh_host                             manual:schedule/nightly:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:schedule/nightly:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/schedule/nightly:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:schedule/nightly:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          no
@@ -172,18 +183,20 @@ trust                                              asserted
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
-oidc_repository                                    -
-oidc_ref                                           -
-oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
+oidc_repository                                    7 acme/repo
+oidc_ref                                           refs/heads/main
+oidc_sha                                           main-head
 cache_reads                                        manual:account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:account/alice:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -199,18 +212,20 @@ trust                                              asserted
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
-oidc_repository                                    -
-oidc_ref                                           -
-oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
+oidc_repository                                    7 acme/repo
+oidc_ref                                           refs/heads/main
+oidc_sha                                           main-head
 cache_reads                                        manual:run/run-schedule-overridden:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:run/run-schedule-overridden:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -229,15 +244,17 @@ oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
 cache_reads                                        manual:run/run-schedule-locked:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:run/run-schedule-locked:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:run/run-schedule-locked:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/run/run-schedule-locked:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:run/run-schedule-locked:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -256,15 +273,17 @@ oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
 cache_reads                                        manual:armer/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:armer/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:armer/alice:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/armer/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:armer/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -280,18 +299,20 @@ trust                                              asserted
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
-oidc_repository                                    -
-oidc_ref                                           -
-oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
+oidc_repository                                    7 acme/repo
+oidc_ref                                           refs/heads/main
+oidc_sha                                           main-head
 cache_reads                                        manual:account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:account/alice:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -310,15 +331,17 @@ oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
 cache_reads                                        manual:account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:account/alice:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -337,15 +360,17 @@ oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
 cache_reads                                        manual:local/laptop:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:local/laptop:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:local/laptop:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/local/laptop:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:local/laptop:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -360,20 +385,22 @@ fresh_host_required          no
 trust                                              actions
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
-oidc_trigger                                       manual
+oidc_trigger                                       actions
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
-oidc_runner_environment                            (no such claim)
 cache_reads                                        manual:actions:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 actions_runner_fresh_host                          yes
 cache_write_fresh_host                             manual:actions:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:actions:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/actions:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:actions:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -388,20 +415,22 @@ fresh_host_required          no
 trust                                              actions
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
-oidc_trigger                                       manual
+oidc_trigger                                       actions
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
-oidc_runner_environment                            (no such claim)
 cache_reads                                        manual:actions:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 actions_runner_fresh_host                          no
 cache_write_fresh_host                             manual:actions:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:actions:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/actions:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:actions:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -420,15 +449,17 @@ oidc_trigger                                       push
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
-oidc_runner_environment                            (no such claim)
 cache_reads                                        refs/heads/main
 default_branch_work_go                             yes
 cache_write_fresh_host                             refs/heads/main
 cache_write_default_branch_fresh_host              yes
+oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  refs/heads/main
 cache_write_default_branch_long_lived_high_trust   yes
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          no
@@ -447,15 +478,17 @@ oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
 cache_reads                                        manual:run/run-app-push-default:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:run/run-app-push-default:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:run/run-app-push-default:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -474,15 +507,17 @@ oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
 cache_reads                                        manual:run/run-app-push-default:refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:run/run-app-push-default:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:run/run-app-push-default:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
@@ -498,18 +533,20 @@ trust                                              asserted
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
-oidc_repository                                    -
-oidc_ref                                           -
-oidc_sha                                           -
-oidc_runner_environment                            (no such claim)
+oidc_repository                                    7 acme/repo
+oidc_ref                                           refs/heads/main
+oidc_sha                                           main-head
 cache_reads                                        manual:account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 cache_write_fresh_host                             manual:account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
-cache_write_long_lived                             manual:account/alice:refs/heads/main
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
