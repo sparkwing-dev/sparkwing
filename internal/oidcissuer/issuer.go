@@ -176,7 +176,8 @@ type Claims struct {
 // The repository sits between team and pipeline because a team holds
 // repositories and a repository declares pipelines, so a trust condition
 // ending in "*" narrows from coarse to fine, and a pipeline name shared by
-// two repositories never yields one subject. It fails with errInvalidClaim when a value holds a separator, a wildcard
+// two proven repositories never yields one subject; asserted runs carry no
+// repository_id and can share one. It fails with errInvalidClaim when a value holds a separator, a wildcard
 // a trust policy would match on, or whitespace, because such a value could
 // forge a later segment.
 func (c Claims) Subject() (string, error) {
