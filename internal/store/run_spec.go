@@ -31,7 +31,11 @@ type IntakeRequest struct {
 	CapabilityPrefix   string
 	LocalSecrets       map[string]string `json:"-"`
 	VerifiedDeliveryID string
-	RetryMode          string
+	// FetchedRepositoryID is the GitHub repository the controller fetches this
+	// run's code from through the team's App installation; only the controller
+	// sets it, never a request body.
+	FetchedRepositoryID int64 `json:"-"`
+	RetryMode           string
 	// OriginMachine is a short-lived proof of the submitting machine's runner credential; intake verifies it and seals
 	// only the machine's name.
 	OriginMachine string `json:"-"`
@@ -244,7 +248,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 }
 
 func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission) error {
-	preliminary, err := authorityChainTx(ctx, tx, request.Actor.Authority, false)
+	preliminary, err := teamAuthorityChainTx(ctx, tx, team, request.Actor.Authority, false, sameTeam)
 	if err != nil {
 		return err
 	}
@@ -252,12 +256,12 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 	if lease == nil {
 		return holderRefusal()
 	}
-	chain, err := authorityChainTx(ctx, tx, request.Actor.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, team, request.Actor.Authority, true, sameTeam)
 	if err != nil {
 		return err
 	}
 	c := chain[0].principal.Capability
-	if c.Team != string(team) || c.Prefix != request.Actor.CapabilityPrefix || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.ExpansionSubmit) || c.Binding.Kind != capability.BindingNode || runspec.RunID(c.Binding.RunID) != request.Source.RunID || runspec.NodeID(c.Binding.NodeID) != request.Source.NodeID || runspec.ClaimGeneration(c.Binding.Generation) != request.SourceGeneration {
+	if c.Prefix != request.Actor.CapabilityPrefix || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.ExpansionSubmit) || c.Binding.Kind != capability.BindingNode || runspec.RunID(c.Binding.RunID) != request.Source.RunID || runspec.NodeID(c.Binding.NodeID) != request.Source.NodeID || runspec.ClaimGeneration(c.Binding.Generation) != request.SourceGeneration {
 		return holderRefusal()
 	}
 	lease = c.Binding.Expansion

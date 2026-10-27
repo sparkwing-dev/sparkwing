@@ -7,7 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func TestLateBoundRefillOutcomesKeepTheirSpendingWindows(t *testing.T) {
+func TestLateRefillOutcomesKeepTheirSpendingWindows(t *testing.T) {
 	for _, window := range []struct {
 		name    string
 		delay   time.Duration
@@ -34,16 +34,9 @@ func TestLateBoundRefillOutcomesKeepTheirSpendingWindows(t *testing.T) {
 				if len(first) != 1 {
 					t.Fatalf("initial refill = %+v", first)
 				}
-				if err := s.AsOperator().RecordRefillIntent(t.Context(), "a", first[0].ID, "pi_late"); err != nil {
-					t.Fatal(err)
-				}
 				now = now.Add(window.delay)
 				s.clock = func() time.Time { return now }
-				pending := dueRefillsFor(t, s, "a")
-				if len(pending) != 1 || pending[0].ID != first[0].ID {
-					t.Fatalf("bound refill lost its slot = %+v", pending)
-				}
-				paid := refillPaid(now, "pi_late", 1_000)
+				paid := refillPaid(now, first[0], "pi_late")
 				switch outcome {
 				case "refused":
 					rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings(payment_mode,warning_id,payment_intent,actionable,created_at) VALUES ('test','issfr_late',?,1,1)`, paid.PaymentID)
@@ -95,11 +88,11 @@ func TestLatePaidRefillReplacesItsEarlierFailureWindow(t *testing.T) {
 	for _, refused := range []bool{false, true} {
 		t.Run(map[bool]string{false: "granted", true: "refused"}[refused], func(t *testing.T) {
 			s, tenant, now := refillFixture(t, true)
-			openRefill(t, s, "a", 1_000, "pi_recovered")
+			r := openRefill(t, s, "a", 1_000)
 			if err := setRefill(t, s, "a", RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, MonthLimitCents: 1_000}); err != nil {
 				t.Fatal(err)
 			}
-			failed := refillPaid(now, "pi_recovered", 1_000)
+			failed := refillPaid(now, r, "pi_recovered")
 			failed.EventID, failed.Kind = "failed-first", capability.PaymentCardFailed
 			failed.Status, failed.DeclineCode = "requires_payment_method", "insufficient_funds"
 			if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
@@ -110,7 +103,7 @@ func TestLatePaidRefillReplacesItsEarlierFailureWindow(t *testing.T) {
 			if refused {
 				rewriteSchemaExec(t, s.db, `INSERT INTO payment_warnings(payment_mode,warning_id,payment_intent,actionable,created_at) VALUES ('test','issfr_recovered','pi_recovered',1,1)`)
 			}
-			settled, err := s.settlePaymentFacts(t.Context(), refillPaid(now, "pi_recovered", 1_000))
+			settled, err := s.settlePaymentFacts(t.Context(), refillPaid(now, r, "pi_recovered"))
 			if err != nil || refused && settled.Refused != CardRefusedWarning || !refused && !settled.Granted {
 				t.Fatalf("late paid outcome = %+v: %v", settled, err)
 			}
@@ -127,7 +120,7 @@ func TestLatePaidRefillReplacesItsEarlierFailureWindow(t *testing.T) {
 			}
 			closedAt := now.UnixNano()
 			now = now.Add(time.Hour)
-			replayed := refillPaid(now, "pi_recovered", 1_000)
+			replayed := refillPaid(now, r, "pi_recovered")
 			replayed.EventID = "paid-again"
 			if _, err := s.settlePaymentFacts(t.Context(), replayed); err != nil {
 				t.Fatal(err)

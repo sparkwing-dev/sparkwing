@@ -69,14 +69,14 @@ func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager contr
 		return err
 	}
 	format := inv.Output(color.IsInteractiveStdout())
-	selector := controllerwire.SecretSelector{Name: inv.Value("secret"), Pipeline: inv.Value("pipeline")}
+	selector := controllerwire.SecretSelector{Name: inv.Value("secret"), Repo: inv.Value("repo"), Pipeline: inv.Value("pipeline")}
 	var input controllerwire.SecretWrite
 	if inv.Command.Path == "sparkwing secrets set" {
 		value, err := readSecretValue(inv, in)
 		if err != nil {
 			return err
 		}
-		input = controllerwire.SecretWrite{Name: selector.Name, Pipeline: selector.Pipeline, Value: value, Masked: !inv.Bool("variable"), Shared: inv.Bool("shared") || local && selector.Pipeline == "", OnlyOn: inv.Value("only-on"), IdempotencyKey: rand.Text()}
+		input = controllerwire.SecretWrite{Name: selector.Name, Repo: selector.Repo, Pipeline: selector.Pipeline, Value: value, Masked: !inv.Bool("variable"), Shared: inv.Bool("shared") || local && selector.Pipeline == "", OnlyOn: inv.Value("only-on"), IdempotencyKey: rand.Text()}
 	}
 	ctx, cancel := context.WithTimeout(ctx, secretOperationTimeout(inv))
 	defer cancel()
@@ -102,7 +102,7 @@ func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager contr
 			_, err = fmt.Fprintln(out, result.Secret.Name)
 			return err
 		}
-		_, err = fmt.Fprintf(out, "secret %q set (pipeline: %s, masked=%t, only-on: %s)\n", result.Secret.Name, secretScope(result.Secret), result.Secret.Masked, dashIfEmpty(result.Secret.OnlyOn))
+		_, err = fmt.Fprintf(out, "secret %q set (repo: %s, pipeline: %s, masked=%t, only-on: %s)\n", result.Secret.Name, dashIfEmpty(result.Secret.Repo), secretScope(result.Secret), result.Secret.Masked, dashIfEmpty(result.Secret.OnlyOn))
 		return err
 	case "sparkwing secrets get":
 		result, err := manager.ReadSecret(ctx, selector)
@@ -119,7 +119,7 @@ func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager contr
 		if err != nil {
 			return err
 		}
-		return renderSecrets(out, result.Secrets, inv.Value("search"), format)
+		return renderSecrets(out, result.Secrets, secretFilter{search: inv.Value("search"), repo: inv.Value("repo"), pipeline: inv.Value("pipeline")}, format)
 	case "sparkwing secrets delete":
 		result, err := manager.DeleteSecret(ctx, selector)
 		if err != nil {
@@ -179,18 +179,30 @@ func readSecretValue(inv clisurface.Invocation, in io.Reader) (string, error) {
 	return string(data), nil
 }
 
-func renderSecrets(out io.Writer, rows []controllerwire.SecretMetadata, search, format string) error {
+type secretFilter struct{ search, repo, pipeline string }
+
+func (f secretFilter) match(row controllerwire.SecretMetadata) bool {
+	return strings.Contains(strings.ToLower(row.Name), strings.ToLower(f.search)) &&
+		(f.repo == "" || strings.EqualFold(row.Repo, f.repo) || row.RepoKey == f.repo) &&
+		(f.pipeline == "" || row.Pipeline == f.pipeline)
+}
+
+func renderSecrets(out io.Writer, rows []controllerwire.SecretMetadata, filter secretFilter, format string) error {
 	selected := make([]controllerwire.SecretMetadata, 0, len(rows))
 	for _, row := range rows {
-		if strings.Contains(strings.ToLower(row.Name), strings.ToLower(search)) {
+		if filter.match(row) {
 			selected = append(selected, row)
 		}
 	}
 	sort.Slice(selected, func(i, j int) bool {
-		if selected[i].Name == selected[j].Name {
-			return selected[i].Pipeline < selected[j].Pipeline
+		a, b := selected[i], selected[j]
+		if a.Name != b.Name {
+			return a.Name < b.Name
 		}
-		return selected[i].Name < selected[j].Name
+		if a.Repo != b.Repo {
+			return a.Repo < b.Repo
+		}
+		return a.Pipeline < b.Pipeline
 	})
 	if format == "json" || format == "plain" {
 		for _, row := range selected {
@@ -209,9 +221,9 @@ func renderSecrets(out io.Writer, rows []controllerwire.SecretMetadata, search, 
 		return err
 	}
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tPIPELINE\tMASKED\tBOUND\tONLY_ON\tPRINCIPAL\tCREATED\tUPDATED")
+	fmt.Fprintln(tw, "NAME\tREPO\tPIPELINE\tMASKED\tBOUND\tONLY_ON\tPRINCIPAL\tCREATED\tUPDATED")
 	for _, row := range selected {
-		fmt.Fprintf(tw, "%s\t%s\t%t\t%t\t%s\t%s\t%s\t%s\n", row.Name, secretScope(row), row.Masked, row.Bound, dashIfEmpty(row.OnlyOn), row.Principal, secretTimestamp(row.CreatedAt), secretTimestamp(row.UpdatedAt))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%t\t%t\t%s\t%s\t%s\t%s\n", row.Name, dashIfEmpty(row.Repo), secretScope(row), row.Masked, row.Bound, dashIfEmpty(row.OnlyOn), row.Principal, secretTimestamp(row.CreatedAt), secretTimestamp(row.UpdatedAt))
 	}
 	return tw.Flush()
 }
@@ -242,7 +254,7 @@ func renderSecretRotation(out io.Writer, result controllerwire.SecretRotation, f
 			return err
 		}
 		for _, row := range result.Skipped {
-			if _, err := fmt.Fprintf(out, "skipped\t%s\t%s\n", row.Name, row.Pipeline); err != nil {
+			if _, err := fmt.Fprintf(out, "skipped\t%s\t%s\t%s\n", row.Name, row.Repo, row.Pipeline); err != nil {
 				return err
 			}
 		}
@@ -255,7 +267,7 @@ func renderSecretRotation(out io.Writer, result controllerwire.SecretRotation, f
 	} else {
 		fmt.Fprintln(tw, "The previous key is still needed for skipped rows:")
 		for _, row := range result.Skipped {
-			fmt.Fprintf(tw, "%s\t%s\n", row.Name, dashIfEmpty(row.Pipeline))
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", row.Name, dashIfEmpty(row.Repo), dashIfEmpty(row.Pipeline))
 		}
 	}
 	return tw.Flush()

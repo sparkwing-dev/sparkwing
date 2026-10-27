@@ -23,7 +23,7 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 						root := authorityRoot("actions", "a")
 						root.Grants = []capability.Grant{capability.TriggersClaim, capability.NodesClaim}
 						root.Repositories = []string{"gh:1"}
-						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 						authorityPersist(t, s, root)
 						demand.CapabilityPrefix = root.Prefix
 						if descendant {
@@ -75,7 +75,7 @@ func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
 
 func writePushRun(t *testing.T, s *Store, git runspec.Git) {
 	t.Helper()
-	provenance, err := runspec.ActionsProvenance(1, git.Ref, git.SHA, "ci")
+	provenance, err := runspec.ActionsProvenance(1, "acme/repo", git.Ref, git.SHA, "ci")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestPushAwardRefusesScopeEscape(t *testing.T) {
 	root := authorityRoot("actions", "a")
 	root.Grants = []capability.Grant{capability.TriggersClaim}
 	root.Repositories = []string{"gh:1"}
-	root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+	root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 	authorityPersist(t, s, root)
 	writePushRun(t, s, runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureOtherSHA})
 	seedTriggerClaim(t, s, "run", "actions", "actions", 1, s.now().Add(time.Hour))
@@ -109,7 +109,7 @@ func TestPushAwardedHostRetainsAncestorScopeProperty(t *testing.T) {
 		root := authorityRoot("actions", "a")
 		root.Grants = []capability.Grant{capability.TriggersClaim, capability.NodesClaim}
 		root.Repositories = []string{"gh:1"}
-		root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+		root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 		authorityPersist(t, s, root)
 		git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA}
 		writePushRun(t, s, git)

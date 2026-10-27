@@ -524,6 +524,8 @@ components:
           type: string
         repo_key:
           type: string
+        repository:
+          type: string
         sha:
           type: string
         workflow_ref:
@@ -3670,20 +3672,6 @@ components:
         - next_due_at
       type: object
       x-sparkwing-go-type: controllerwire.ScheduleView
-    internal.controllerwire.SecretDeletion:
-      additionalProperties: true
-      properties:
-        deleted:
-          type: boolean
-        name:
-          type: string
-        pipeline:
-          type: string
-      required:
-        - name
-        - deleted
-      type: object
-      x-sparkwing-go-type: controllerwire.SecretDeletion
     internal.controllerwire.SecretMetadata:
       additionalProperties: true
       properties:
@@ -3700,6 +3688,10 @@ components:
         pipeline:
           type: string
         principal:
+          type: string
+        repo:
+          type: string
+        repo_key:
           type: string
         shared:
           type: boolean
@@ -3746,6 +3738,8 @@ components:
           type: string
         pipeline:
           type: string
+        repo:
+          type: string
       required:
         - name
       type: object
@@ -3766,6 +3760,10 @@ components:
         pipeline:
           type: string
         principal:
+          type: string
+        repo:
+          type: string
+        repo_key:
           type: string
         shared:
           type: boolean
@@ -3794,6 +3792,8 @@ components:
         only_on:
           type: string
         pipeline:
+          type: string
+        repo:
           type: string
         shared:
           type: boolean
@@ -4895,6 +4895,8 @@ components:
           type: integer
         ref:
           type: string
+        repository:
+          type: string
         repository_id:
           type: integer
         sha:
@@ -5166,6 +5168,8 @@ components:
           type: string
         repository:
           $ref: '#/components/schemas/internal.runspec.Repository'
+        repository_name:
+          $ref: '#/components/schemas/internal.runspec.Optional.string.'
         sha:
           type: string
       required:
@@ -5173,6 +5177,7 @@ components:
         - ref
         - sha
         - default_branch
+        - repository_name
         - app
       type: object
       x-sparkwing-go-type: runspec.Git
@@ -5796,11 +5801,15 @@ components:
               type: string
             event:
               type: string
+            fetched_repository_id:
+              type: integer
             pipeline:
               type: string
             pull_request_base:
               type: string
             ref:
+              type: string
+            repository:
               type: string
             repository_id:
               type: integer
@@ -14434,16 +14443,16 @@ paths:
           schema:
             type: string
         - in: query
+          name: repo
+          schema:
+            type: string
+        - in: query
           name: pipeline
           schema:
             type: string
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.SecretDeletion'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:
@@ -14469,6 +14478,10 @@ paths:
         - in: path
           name: name
           required: true
+          schema:
+            type: string
+        - in: query
+          name: repo
           schema:
             type: string
         - in: query

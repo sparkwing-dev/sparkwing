@@ -2,21 +2,54 @@ package store
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+// fixtureRepo is the repository [proveFixtureRun] seals.
+const fixtureRepo = "gh:1"
+
+// proveFixtureRun reseals a fixture run as an App push to [fixtureRepo], the
+// proven repository identity pipeline secrets are released to (decision 68).
+func proveFixtureRun(t *testing.T, tenant *Tenant, run string) runspec.SealedRequest {
+	t.Helper()
+	var raw []byte
+	if err := tenant.s.db.QueryRowContext(t.Context(), `SELECT request_json FROM runs WHERE team=? AND id=?`, tenant.team, run).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var request runspec.SealedRequest
+	if err := json.Unmarshal(raw, &request); err != nil {
+		t.Fatal(err)
+	}
+	provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, Repository: "acme/repo", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), DeliveryKey: "delivery-" + run, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, request.Provenance.Pipeline())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Provenance, request.Hash = provenance, ""
+	if request.Hash, err = runspec.CanonicalHash(request); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err = json.Marshal(request); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=?,request_hash=? WHERE team=? AND id=?`, raw, string(request.Hash), tenant.team, run)
+	return request
+}
 
 func seedSecret(t *testing.T, tenant *Tenant, row Secret, at time.Time) error {
 	t.Helper()
-	_, err := tenant.s.db.ExecContext(t.Context(), `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`, tenant.team, row.Name, row.Value, row.Principal, row.Pipeline, boolInt(row.Masked), boolInt(row.Shared), at.UnixNano(), at.UnixNano())
+	_, err := tenant.s.db.ExecContext(t.Context(), `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, tenant.team, row.Name, row.Value, row.Principal, row.Repo, row.Pipeline, boolInt(row.Masked), boolInt(row.Shared), at.UnixNano(), at.UnixNano())
 	return err
 }
 
@@ -36,11 +69,14 @@ func TestCredentialRotationPreservesTenantAndRowMetadataProperty(t *testing.T) {
 	for _, team := range []Team{"a", "b"} {
 		tn := &Tenant{s: tenant.s, team: team}
 		for i := range 24 {
-			sec := Secret{Name: fmt.Sprintf("secret_%d", i), Pipeline: []string{"", "deploy"}[random.IntN(2)], Value: fmt.Sprintf("old/%x", random.Uint64()), Principal: "author", Masked: random.IntN(2) == 0, Shared: random.IntN(2) == 0}
+			sec := Secret{Name: fmt.Sprintf("secret_%d", i), Value: fmt.Sprintf("old/%x", random.Uint64()), Principal: "author", Masked: random.IntN(2) == 0, Shared: random.IntN(2) == 0}
+			if random.IntN(2) == 0 {
+				sec.Repo, sec.Pipeline, sec.Shared = fixtureRepo, "deploy", false
+			}
 			if err := seedSecret(t, tn, sec, now); err != nil {
 				t.Fatal(err)
 			}
-			row, err := tn.GetSecretRow(sec.Name, sec.Pipeline)
+			row, err := tn.GetSecretRow(sec.Name, sec.Repo, sec.Pipeline)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -66,7 +102,7 @@ func TestCredentialRotationPreservesTenantAndRowMetadataProperty(t *testing.T) {
 			if team == "a" {
 				want.Value = "new/" + want.Value
 			}
-			got, err := tn.GetSecretRow(want.Name, want.Pipeline)
+			got, err := tn.GetSecretRow(want.Name, want.Repo, want.Pipeline)
 			if err != nil || !reflect.DeepEqual(*got, want) {
 				t.Fatalf("secret row changed: got=%+v want=%+v, %v", got, want, err)
 			}
@@ -126,7 +162,7 @@ func TestCredentialRotationRollsBackBothTables(t *testing.T) {
 				t.Fatalf("failed rotation: %+v,%v", result, err)
 			}
 			for _, name := range []string{"first", "second"} {
-				got, err := tenant.GetSecretRow(name, "")
+				got, err := tenant.GetSecretRow(name, "", "")
 				if err != nil || got.Value != "old" {
 					t.Fatalf("secret partially rotated: %+v,%v", got, err)
 				}
@@ -250,7 +286,7 @@ func TestCredentialRotationCommittedAttemptMetadataProperty(t *testing.T) {
 			t.Fatalf("retries=%d attempts=%d: got=%+v want=%+v: %v", retries, attempts, result, want, err)
 		}
 		for _, name := range []string{"repaired", "unreadable"} {
-			row, err := tenant.GetSecretRow(name, "")
+			row, err := tenant.GetSecretRow(name, "", "")
 			want := "new"
 			if name == "unreadable" {
 				want = "old"

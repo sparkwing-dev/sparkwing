@@ -17,7 +17,7 @@ import (
 type CredentialWriter interface {
 	Team() store.Team
 	WriteSecret(context.Context, capability.Authorized, store.SealedSecret) (store.Secret, error)
-	RemoveSecret(context.Context, capability.Authorized, string, string) error
+	RemoveSecret(ctx context.Context, a capability.Authorized, name, repo, pipeline string) error
 	WriteGitCredential(context.Context, capability.Authorized, store.SealedGitCredential) (store.GitCredential, error)
 	ConfirmGitCredentialFor(context.Context, capability.Authorized, string, string, string) (store.GitCredential, error)
 	RemoveGitCredential(context.Context, capability.Authorized, string, string) error

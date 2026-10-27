@@ -20,12 +20,12 @@ func checkStoreCredentialMutations(ctx context.Context, s *store.Store, team sto
 	if err != nil {
 		return err
 	}
-	a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(team), SecretName: "CONFIG", Pipeline: "build"}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
+	a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(team), SecretName: "CONFIG", Repo: "gh:1", Pipeline: "build"}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		return err
 	}
-	sealed, err := store.SealSecret(cipher, team, store.Secret{Name: "CONFIG", Value: "stored-envelope", Pipeline: "build"})
+	sealed, err := store.SealSecret(cipher, team, store.Secret{Name: "CONFIG", Value: "stored-envelope", Repo: "gh:1", Pipeline: "build"})
 	if err != nil {
 		return err
 	}
@@ -44,13 +44,13 @@ func checkStoreCredentialMutations(ctx context.Context, s *store.Store, team sto
 	if err != nil || git.Team != team || git.CreatedBy != p.Capability.Subject.ID || git.ConfirmedAt == nil {
 		return fmt.Errorf("current session git transaction: %+v, %v", git, err)
 	}
-	if err := tenant.RemoveSecret(ctx, a, "CONFIG", "build"); err != nil {
+	if err := tenant.RemoveSecret(ctx, a, "CONFIG", "gh:1", "build"); err != nil {
 		return err
 	}
 	if err := tenant.RemoveGitCredential(ctx, a, git.Host, ""); err != nil {
 		return err
 	}
-	if err := tenant.RemoveSecret(ctx, a, "CONFIG", "build"); !errors.Is(err, store.ErrNotFound) {
+	if err := tenant.RemoveSecret(ctx, a, "CONFIG", "gh:1", "build"); !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("missing secret deletion: %v", err)
 	}
 	if err := tenant.RemoveGitCredential(ctx, a, git.Host, ""); !errors.Is(err, store.ErrNotFound) {

@@ -46,7 +46,7 @@ func TestEnrollmentPlatformControlsVerifiedMainClaims(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &issued); err != nil {
 				t.Fatal(err)
 			}
-			provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: time.Now(), Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), DefaultBranch: "main", DefaultBranchPush: true}, runspec.Optional[runspec.PullRequest]{}, "ci")
+			provenance, err := runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: time.Now(), Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), DefaultBranch: "main", DefaultBranchPush: true}, runspec.Optional[runspec.PullRequest]{}, "ci")
 			if err != nil {
 				t.Fatal(err)
 			}

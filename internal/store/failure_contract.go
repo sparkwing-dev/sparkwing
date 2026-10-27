@@ -21,12 +21,12 @@ func (t *Tenant) ReadFailure(ctx context.Context, source runspec.NodeRef, genera
 	}
 	var failure *nodeproto.JobFailure
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		principal, err := resolveActorTx(ctx, tx, actor)
+		principal, err := resolveTeamActorTx(ctx, tx, t.team, actor, sameTeam)
 		if err != nil {
 			return err
 		}
 		c := principal.Capability
-		if c.Team != string(t.team) || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.DataRead) {
+		if c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.DataRead) {
 			return holderRefusal()
 		}
 

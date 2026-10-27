@@ -113,7 +113,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	input.Team, input.Pipeline, input.Origin = string(t.team), schedule.Pipeline, runspec.OriginSchedule
 	input.RequestedArgs = schedule.Effective().Args
 	// safety: only fire-time lookup may name the default branch; an armed request cannot carry one in.
-	input.Git.DefaultBranch = runspec.Optional[string]{}
+	input.Git.DefaultBranch, input.Git.RepositoryName = runspec.Optional[string]{}, runspec.Optional[string]{}
 	// Replays identify persisted intent because source facts can change after admission.
 	intent := input
 	var replay AdmissionResult

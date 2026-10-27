@@ -11,12 +11,12 @@ import (
 )
 
 func (t *Tenant) credentialAdminTx(ctx context.Context, tx *storeTx, a capability.Authorized) error {
-	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 	if err != nil {
 		return err
 	}
 	c := p.Capability
-	if a.Target.Team != string(t.team) || c.Team != string(t.team) || c.Audience != capability.Controller || c.Subject.Kind != capability.SubjectAccount || c.Binding.Kind != capability.BindingNone || c.Unit != "" || c.Purpose != "" ||
+	if a.Target.Team != string(t.team) || c.Audience != capability.Controller || c.Subject.Kind != capability.SubjectAccount || c.Binding.Kind != capability.BindingNone || c.Unit != "" || c.Purpose != "" ||
 		a.Access.Credential != capability.CredentialMember || a.Access.Binding != capability.BindNone || a.Access.Liveness != capability.LiveCredential || !slices.Equal(a.Access.Grants, []capability.Grant{capability.TeamAdmin}) || !slices.Contains(c.Grants, capability.TeamAdmin) {
 		return bindingRefusal()
 	}
@@ -33,6 +33,7 @@ type CredentialRotation struct {
 // SecretRotationSkip identifies an unreadable secret retained during rotation.
 type SecretRotationSkip struct {
 	Name     string `json:"name"`
+	Repo     string `json:"repo,omitempty"`
 	Pipeline string `json:"pipeline,omitempty"`
 }
 
@@ -58,10 +59,10 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 				return err
 			}
 			if skip {
-				result.Skipped = append(result.Skipped, SecretRotationSkip{Name: row.Name, Pipeline: row.Pipeline})
+				result.Skipped = append(result.Skipped, SecretRotationSkip{Name: row.Name, Repo: row.Repo, Pipeline: row.Pipeline})
 				continue
 			}
-			if _, err := tx.execContext(ctx, `UPDATE secrets SET value=? WHERE team=? AND name=? AND pipeline=?`, value, t.team, row.Name, row.Pipeline); err != nil {
+			if _, err := tx.execContext(ctx, `UPDATE secrets SET value=? WHERE team=? AND name=? AND repo=? AND pipeline=?`, value, t.team, row.Name, row.Repo, row.Pipeline); err != nil {
 				return err
 			}
 			result.Rotated++
@@ -85,7 +86,7 @@ func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized,
 }
 
 func (t *Tenant) credentialSecretsTx(ctx context.Context, tx *storeTx) (_ []Secret, err error) {
-	rows, err := tx.queryContext(ctx, `SELECT name,value,principal,pipeline,masked,shared,created_at,updated_at FROM secrets WHERE team=? ORDER BY name,pipeline`+tx.forUpdate(), t.team)
+	rows, err := tx.queryContext(ctx, `SELECT `+secretCols+` FROM secrets WHERE team=? ORDER BY name,repo,pipeline`+tx.forUpdate(), t.team)
 	if err != nil {
 		return nil, err
 	}

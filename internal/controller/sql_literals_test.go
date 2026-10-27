@@ -100,7 +100,7 @@ func TestSecretMutationsTreatSQLMetacharactersAsLiteral(t *testing.T) {
 			want[tn.Team()] = make(map[[2]string]string)
 			for i, key := range keys {
 				value := fmt.Sprintf("%s-value-%d", tn.Team(), i)
-				if err := teststore.SeedSecret(f.store, tn.Team(), store.Secret{Name: key[0], Pipeline: key[1], Value: value}, time.Now()); err != nil {
+				if err := teststore.SeedSecret(f.store, tn.Team(), store.Secret{Name: key[0], Repo: "gh:1", Pipeline: key[1], Value: value}, time.Now()); err != nil {
 					t.Fatal(err)
 				}
 				want[tn.Team()][key] = value
@@ -117,7 +117,7 @@ func TestSecretMutationsTreatSQLMetacharactersAsLiteral(t *testing.T) {
 				for _, row := range rows {
 					value := row.Value
 					if secrets.IsEncrypted(value) {
-						opened, err := testCipher(t).OpenBound(secrets.PurposeSecret, string(tn.Team()), row.Name, row.Pipeline, row.Shared, row.Masked, value)
+						opened, err := testCipher(t).OpenBound(secrets.PurposeSecret, string(tn.Team()), row.Name, row.SealScope(), row.Shared, row.Masked, value)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -137,21 +137,21 @@ func TestSecretMutationsTreatSQLMetacharactersAsLiteral(t *testing.T) {
 				wantStatus = http.StatusBadRequest
 			}
 			f.call(http.MethodPost, "/api/v1/secrets", f.writer,
-				map[string]string{"name": key[0], "pipeline": key[1], "value": "replacement"}, wantStatus, nil)
+				map[string]string{"name": key[0], "repo": "gh:1", "pipeline": key[1], "value": "replacement"}, wantStatus, nil)
 			if wantStatus == http.StatusOK {
 				want[teamA.Team()][key] = "replacement"
 			}
 			assertRows(t)
 		}
 		for _, key := range [][2]string{{"MISSING' OR 1=1 --", pipeline}, {name, "missing' OR 1=1 --"}} {
-			path := "/api/v1/secrets/" + url.PathEscape(key[0]) + "?" + url.Values{"pipeline": {key[1]}}.Encode()
+			path := "/api/v1/secrets/" + url.PathEscape(key[0]) + "?" + url.Values{"repo": {"gh:1"}, "pipeline": {key[1]}}.Encode()
 			if code := f.call(http.MethodDelete, path, f.writer, nil, http.StatusNotFound, nil); code != http.StatusNotFound {
 				t.Fatalf("delete missing %q on %q: status %d", key[0], key[1], code)
 			}
 			assertRows(t)
 		}
 		for _, key := range keys {
-			path := "/api/v1/secrets/" + url.PathEscape(key[0]) + "?" + url.Values{"pipeline": {key[1]}}.Encode()
+			path := "/api/v1/secrets/" + url.PathEscape(key[0]) + "?" + url.Values{"repo": {"gh:1"}, "pipeline": {key[1]}}.Encode()
 			if code := f.call(http.MethodDelete, path, f.writer, nil, http.StatusNoContent, nil); code != http.StatusNoContent {
 				t.Fatalf("delete %q on %q: status %d", key[0], key[1], code)
 			}

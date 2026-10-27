@@ -72,7 +72,7 @@ func newKeyRotationFixture(t *testing.T, open func(*testing.T, ...store.Option) 
 	f.owner = session(t, st, alice, teamA)
 	now := time.Now()
 	for i, team := range f.teams {
-		if err := teststore.SeedSecret(st, team, store.Secret{Name: "TOKEN", Pipeline: "build", Masked: true, Principal: "seed", Value: seal(t, f.old, secrets.PurposeSecret, team, "TOKEN", "build", "secret-"+string(team))}, now); err != nil {
+		if err := teststore.SeedSecret(st, team, store.Secret{Name: "TOKEN", Repo: "gh:1", Pipeline: "build", Masked: true, Principal: "seed", Value: seal(t, f.old, secrets.PurposeSecret, team, "TOKEN", "gh:1#build", "secret-"+string(team))}, now); err != nil {
 			t.Fatal(err)
 		}
 		repository, scope, hostWide := "", "git-credential:host:git.example", 1
@@ -128,7 +128,7 @@ func (f *keyRotationFixture) opensUnder(t *testing.T, c *secrets.Cipher) (secret
 		if err := teststore.SQL(t, f.st).QueryRowContext(ctx, `SELECT submitted_env FROM runs WHERE team=$1 AND id=$2`, team, "run-"+string(team)).Scan(&run); err != nil {
 			t.Fatal(err)
 		}
-		if v, err := c.OpenBound(secrets.PurposeSecret, string(team), "TOKEN", "build", false, true, secret); err == nil && v == "secret-"+string(team) {
+		if v, err := c.OpenBound(secrets.PurposeSecret, string(team), "TOKEN", "gh:1#build", false, true, secret); err == nil && v == "secret-"+string(team) {
 			secretsOpen++
 		}
 		scope := "git-credential:host:git.example"

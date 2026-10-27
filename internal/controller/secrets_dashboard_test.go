@@ -69,7 +69,7 @@ func TestSecrets_DashboardSessionsWriteSecretsAndReadVariables(t *testing.T) {
 	for _, row := range []map[string]any{
 		{"name": "DEPLOY_KEY", "value": "hunter2", "shared": true, "masked": true},
 		{"name": "REGION", "value": "us-west-2", "shared": true, "masked": false},
-		{"name": "WEB_TOKEN", "value": "line one\nline two", "pipeline": "deploy-web"},
+		{"name": "WEB_TOKEN", "value": "line one\nline two", "repo": "gh:1", "pipeline": "deploy-web"},
 	} {
 		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", row); code != http.StatusOK {
 			t.Fatalf("write %v: HTTP %d %s", row["name"], code, body)
@@ -83,7 +83,7 @@ func TestSecrets_DashboardSessionsWriteSecretsAndReadVariables(t *testing.T) {
 	}
 	for _, tc := range []struct{ path, private string }{
 		{"/api/v1/secrets/DEPLOY_KEY", "hunter2"},
-		{"/api/v1/secrets/WEB_TOKEN?pipeline=deploy-web", "line one"},
+		{"/api/v1/secrets/WEB_TOKEN?repo=gh:1&pipeline=deploy-web", "line one"},
 	} {
 		code, body, _ := secretsRequest(t, f, "GET", tc.path, "", nil)
 		if code != http.StatusForbidden || strings.Contains(body, tc.private) || !strings.Contains(body, `"code":"forbidden"`) {
@@ -105,7 +105,7 @@ func TestSecrets_DashboardSessionsWriteSecretsAndReadVariables(t *testing.T) {
 	if listed["REGION"].Value != "us-west-2" || listed["DEPLOY_KEY"].Name != "DEPLOY_KEY" {
 		t.Fatalf("refused writes changed rows: %+v", listed)
 	}
-	if code, body, _ := secretsRequest(t, f, "DELETE", "/api/v1/secrets/WEB_TOKEN?pipeline=deploy-web", "", nil); code != http.StatusNoContent {
+	if code, body, _ := secretsRequest(t, f, "DELETE", "/api/v1/secrets/WEB_TOKEN?repo=gh:1&pipeline=deploy-web", "", nil); code != http.StatusNoContent {
 		t.Fatalf("owner delete: HTTP %d %s", code, body)
 	}
 	if _, exists := listSecretsAs(t, f)["WEB_TOKEN"]; exists {
@@ -125,7 +125,7 @@ func TestSecrets_ListOpensAVariablesEnvelope(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"REGION", "TOKEN"} {
-		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow(name, "")
+		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow(name, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -255,11 +255,11 @@ func TestSecretsDashboardMaskedValuesProperty(t *testing.T) {
 			viewer = secretMember(t, owner, "viewer", store.RoleReader)
 		}
 		private := "private-secret-" + hex.EncodeToString(value)
-		pipeline, path := "", "/api/v1/secrets/PROP_TOKEN"
+		repo, pipeline, path := "", "", "/api/v1/secrets/PROP_TOKEN"
 		if !shared {
-			pipeline, path = "deploy", path+"?pipeline=deploy"
+			repo, pipeline, path = "gh:1", "deploy", path+"?repo=gh:1&pipeline=deploy"
 		}
-		code, body, _ := secretsRequest(t, owner, "POST", "/api/v1/secrets", "", map[string]any{"name": "PROP_TOKEN", "value": private, "shared": shared, "pipeline": pipeline})
+		code, body, _ := secretsRequest(t, owner, "POST", "/api/v1/secrets", "", map[string]any{"name": "PROP_TOKEN", "value": private, "shared": shared, "repo": repo, "pipeline": pipeline})
 		if code != http.StatusOK {
 			t.Fatalf("write: HTTP %d %s", code, body)
 		}

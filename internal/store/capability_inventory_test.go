@@ -93,7 +93,7 @@ func TestCapabilityInventoryOwnershipProperty(t *testing.T) {
 		c.Subject.ID = []string{"member", "other"}[rng.IntN(2)]
 		c.Audience = []capability.Audience{capability.Controller, capability.NodeHost}[rng.IntN(2)]
 		if rng.IntN(3) == 0 {
-			c.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "repo", Ref: "main", SHA: "sha", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+			c.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "repo", Repository: "acme/repo", Ref: "main", SHA: "sha", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 		}
 		if rng.IntN(4) == 0 {
 			c.RevokedAt = new(s.now().Add(-time.Minute))

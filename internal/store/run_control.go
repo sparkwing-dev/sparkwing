@@ -150,7 +150,7 @@ func (t *Tenant) runControlAuthorityTx(ctx context.Context, tx *storeTx, a capab
 	if a.Target.Team != string(t.team) || a.Target.RunID == "" {
 		return capability.Principal{}, bindingRefusal()
 	}
-	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 	if err != nil {
 		return p, err
 	}

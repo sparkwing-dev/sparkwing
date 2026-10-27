@@ -18,7 +18,7 @@ func blobRestoreFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) 
 	t.Helper()
 	s, records, intent := blobRecordFixture(t)
 	intent.Authority.Ref = blob.RefFacts{}
-	app := runspec.AppFacts{Event: "pull_request", RepositoryID: 1, Ref: "refs/heads/feature", SHA: fixtureFeatureSHA, DeliveryKey: "feature-delivery", DefaultBranch: "main", VerifiedAt: time.Unix(1, 0).UTC()}
+	app := runspec.AppFacts{Repository: "acme/repo", Event: "pull_request", RepositoryID: 1, Ref: "refs/heads/feature", SHA: fixtureFeatureSHA, DeliveryKey: "feature-delivery", DefaultBranch: "main", VerifiedAt: time.Unix(1, 0).UTC()}
 	pr := runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{BaseRepo: "gh:1", BaseRef: "release"}}
 	verified, err := runspec.AppProvenance(app, pr, "ci")
 	if err != nil {

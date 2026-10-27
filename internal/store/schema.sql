@@ -29,6 +29,9 @@ CREATE TABLE teams (
     CHECK(refill_enabled = 0 OR (refill_amount_cents >= 1000 AND card_added_at <> 0))
 );
 
+-- safety: one Stripe customer pays for one team, so no team's portal or refill reaches another team's card.
+CREATE UNIQUE INDEX idx_teams_card_customer ON teams(card_customer) WHERE card_customer <> '';
+
 CREATE TABLE claim_awards (
     singleton BIGINT PRIMARY KEY CHECK(singleton=1),
     ordinal BIGINT NOT NULL DEFAULT 0 CHECK(ordinal >= 0)
@@ -574,14 +577,18 @@ CREATE TABLE secrets (
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
     masked BIGINT NOT NULL DEFAULT 1,
+    repo TEXT NOT NULL DEFAULT '',
+    repo_name TEXT NOT NULL DEFAULT '',
     pipeline TEXT NOT NULL DEFAULT '',
     shared BIGINT NOT NULL DEFAULT 0,
     team TEXT NOT NULL REFERENCES teams(name),
     only_on TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (team, name, pipeline),
+    PRIMARY KEY (team, name, repo, pipeline),
     CHECK(masked IN (0,1)),
     CHECK(shared IN (0,1)),
-    CHECK(name <> '')
+    CHECK(name <> ''),
+    CHECK((repo = '') = (pipeline = '')),
+    CHECK(repo = '' OR shared = 0)
 );
 
 CREATE TABLE pipeline_profiles (
@@ -1129,14 +1136,6 @@ CREATE TABLE payment_warnings (
     actionable BIGINT NOT NULL DEFAULT 1,
     created_at BIGINT NOT NULL,
     PRIMARY KEY(payment_mode,warning_id)
-);
-
-CREATE TABLE payment_states (
-    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
-    payment_id TEXT NOT NULL CHECK(payment_id <> ''),
-    status TEXT NOT NULL CHECK(status IN ('failed','succeeded')),
-    outcome_json TEXT NOT NULL,
-    PRIMARY KEY(payment_mode,payment_id)
 );
 
 CREATE TABLE payment_setups (

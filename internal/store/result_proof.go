@@ -32,7 +32,7 @@ func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor ru
 	if proof.Pattern != expected && proof.Pattern != privatePattern && !(ref.NodeID == "" && (proof.Pattern == "/api/v1/runs/{run}/plan" || proof.Pattern == "/api/v1/runs/{run}/local-host/transition")) {
 		return holderRefusal()
 	}
-	p, err := tx.ResolveAuthority(ctx, actor.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, team, actor.Authority, sameTeam)
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor ru
 	if c.Unit != capability.UnitNode {
 		attempt = c.Binding.Attempt
 	}
-	if c.Team != string(team) || runspec.RunID(c.Binding.RunID) != ref.RunID || c.Binding.Generation != proof.Generation || c.Binding.Holder != actor.Holder || actor.CapabilityPrefix != c.Prefix || proof.Attempt != attempt {
+	if runspec.RunID(c.Binding.RunID) != ref.RunID || c.Binding.Generation != proof.Generation || c.Binding.Holder != actor.Holder || actor.CapabilityPrefix != c.Prefix || proof.Attempt != attempt {
 		return holderRefusal()
 	}
 	return nil

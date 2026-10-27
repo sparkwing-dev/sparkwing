@@ -78,7 +78,7 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 }
 
 func checkLauncherActorTx(ctx context.Context, tx *storeTx, team Team, runID string, actor runstate.Actor) (LauncherAward, error) {
-	chain, err := authorityChainTx(ctx, tx, actor.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, team, actor.Authority, true, sameTeamOrCloudLauncher)
 	if err != nil {
 		return LauncherAward{}, err
 	}

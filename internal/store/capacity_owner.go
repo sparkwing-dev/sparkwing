@@ -239,7 +239,7 @@ func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, k
 		}
 	}
 	if fence.actor.Authority.Kind != "" {
-		if _, err := authorityChainTx(ctx, tx, fence.actor.Authority, true); err != nil {
+		if _, err := teamAuthorityChainTx(ctx, tx, team, fence.actor.Authority, true, claimantAccepts(fence.actor)); err != nil {
 			return err
 		}
 	}

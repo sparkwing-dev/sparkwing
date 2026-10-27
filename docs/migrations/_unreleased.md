@@ -68,6 +68,39 @@ hourly limits (`max_runs_per_hour`) and prepaid credits still bound intake.
 `sparkwing operator limits set` refuses the old name; drop it from scripts and
 configuration. A value already stored is ignored.
 
+## Pipeline secrets belong to one repository
+
+A pipeline secret now belongs to one GitHub repository and one pipeline, like a
+GitHub repository secret. Before, a secret set with `--pipeline ci` reached every
+repository's pipeline named `ci`, so anyone who could push to one repository
+could read another repository's `ci` secrets. Pipeline secrets now reach only
+runs whose code Sparkwing fetched from the repository through the team's GitHub
+App (pushes, pull requests, schedule fires, run-now and dashboard or CLI runs of
+a connected repository) or whose repository a GitHub Actions job proved.
+Uploaded, working-tree, local and `--runner here` runs read only `--shared`
+secrets.
+
+- `sparkwing secrets set`, `get` and `delete` take `--repo OWNER/NAME` together
+  with `--pipeline`; `--pipeline` alone is refused. `--repo` also takes a
+  `gh:<id>` key from `sparkwing secrets list -o json`.
+- `sparkwing secrets list` shows each pipeline row's repository and filters by
+  `--repo` and `--pipeline`.
+- `POST /api/v1/secrets` takes `repo` with `pipeline`, and
+  `GET`/`DELETE /api/v1/secrets/{name}` take `repo` with `pipeline` in the query.
+  Secret metadata carries `repo` (the repository's name when the row was
+  written) and `repo_key` (its identity).
+- A local or manual run that needs a secret reads a `--shared` secret or a
+  [local secret](../machine-config.md#local-secrets).
+- `--shared` secrets are unchanged and stay team-wide. Protect deploy secrets
+  with reserved pools or `--only-on`.
+
+v0.68 starts a new store, so set each pipeline secret again with its
+repository:
+
+```sh
+sparkwing secrets set --secret DEPLOY_KEY --file key.pem --repo acme/web --pipeline deploy
+```
+
 ## Secret missing sentinel
 
 Replace `secretname.ErrMissing` with `sparkwing.ErrSecretMissing` when checking
@@ -105,8 +138,7 @@ completed. The schema drops `teams.card_payment_method`, `card_fingerprint`,
 `card_brand` and `card_last4`, `credit_checkouts.payment_method`,
 `receipt_email` and `warning_id`, `payment_warnings.fingerprint`, the card
 columns of `payment_setups`, and the `payment_cards` table. Verified payment events persisted
-in `payment_events` and `payment_states` no longer carry a payment method or
-card details.
+in `payment_events` no longer carry a payment method or card details.
 
 The checkout service contract changes with this controller. `POST
 /internal/card-setup` receives the team owner's account `email`, which only Stripe
@@ -230,8 +262,9 @@ stores the authentication result and its protection decision at settlement.
 `payment_refunds.kind` distinguishes refunds, lost disputes and warning
 obligations in the same durable settlement path. Pending obligations are
 consumed atomically when their delayed payment grants credit.
-`payment_states` and `payment_setups` retain verified outcomes that arrive
-before their payment or setup association. All events for one payment use
+`payment_setups` retains verified setup outcomes that arrive before their
+setup association; a refill payment names its refill in its metadata, so its
+outcome settles on arrival. All events for one payment use
 the same provider-mode and payment lock, and terminal refund outcomes never
 regress to pending. Warning identities and refund queues also record provider
 mode.
@@ -264,12 +297,11 @@ running Cloud work stops the same way, with the hold named. Retained storage no
 longer takes the balance below zero. Kubernetes is the backstop during a launcher
 outage: a pod can run up to one extra slice plus its start delay beyond its
 funded deadline. This overage is never charged.
-The checkout service drops its pay-now page and charge route. The
-`POST /internal/refill` operation creates an unconfirmed intent using the amount,
-card and receipt address the controller fixed when the refill opened. Separate
-`/internal/refill/reconcile`, `/internal/refill/confirm` and
-`/internal/refill/cancel` operations resolve it after checking eligibility; deploy
-the matching sparkwing-platform release with this controller.
+The checkout service drops its pay-now page and charge route. One
+`POST /internal/refill` call creates and confirms the refill's off-session
+payment, using the amount and Stripe customer the controller fixed when the
+refill opened, with the refill id as idempotency key and payment metadata;
+deploy the matching sparkwing-platform release with this controller.
 
 Go callers of `internal/store` lose `NoCreditsHold`, `EventKindCreditsExhausted`,
 `PoolHeartbeatInterval` and `DispatchedHeartbeatInterval`. A waiting unit's

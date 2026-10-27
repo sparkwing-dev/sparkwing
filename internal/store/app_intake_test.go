@@ -25,7 +25,7 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 	}
 	in := GitHubAppAdmission{Installation: installation, Event: "push", Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost,
-		Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:701", Display: "acme/app"}, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}},
+		Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:701", Display: "acme/app"}, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}},
 		Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
 	}}
 	if automatic {
@@ -182,7 +182,7 @@ func TestAppFullRefRetainsExactDefaultBranchDataTrustProperty(t *testing.T) {
 		if verifiedAt.IsZero() {
 			verifiedAt = time.Unix(1, 0).UTC()
 		}
-		git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "signed", Ref: ref, SHA: git.SHA, DefaultBranch: branch, DefaultBranchPush: true, VerifiedAt: verifiedAt}}
+		git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "signed", Ref: ref, SHA: git.SHA, DefaultBranch: branch, DefaultBranchPush: true, VerifiedAt: verifiedAt}}
 		switch mode % 5 {
 		case 1:
 			git.Ref = "refs/tags/" + branch

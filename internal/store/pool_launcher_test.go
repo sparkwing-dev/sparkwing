@@ -100,7 +100,7 @@ func TestVerifiedPoolRefusesPersistentRunnerCredentials(t *testing.T) {
 			root.Trust = capability.TrustVerifiedDefault
 			if inherited {
 				root.Trust = ""
-				rewriteSchemaExec(t, s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'',0,'deploy')`)
+				rewriteSchemaExec(t, s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,repo,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'','',0,'deploy')`)
 			}
 			authorityPersist(t, s, root)
 			demand.CapabilityPrefix = root.Prefix
@@ -161,7 +161,7 @@ func poolPinFixtureOn(t *testing.T, reserved []string, secrets ...string) poolPi
 	input.VerifiedDeliveryID = "delivery"
 	git := input.Request.Git
 	git.Ref = "refs/heads/main"
-	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}
+	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "delivery", Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}
 	s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return IntakePolicyFacts{SourceLocation: &input.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "actor"}}}, nil
 	})
@@ -194,7 +194,7 @@ func poolPinFixtureOn(t *testing.T, reserved []string, secrets ...string) poolPi
 		t.Fatal(err)
 	}
 	for _, name := range secrets {
-		rewriteSchemaExec(t, s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a',?,'ciphertext','account',1,1,0,'p',0,'deploy')`, name)
+		rewriteSchemaExec(t, s.db, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,repo,pipeline,shared,only_on) VALUES ('a',?,'ciphertext','account',1,1,0,'gh:1','p',0,'deploy')`, name)
 	}
 	declarations := runspec.CheckoutDeclarations{Version: 1}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: seal, Plan: plan, Declarations: declarations})

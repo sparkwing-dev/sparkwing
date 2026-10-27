@@ -197,8 +197,8 @@ Declare every pipeline a job may start with
 `sw.Job(plan, "release", &Release{}).StartsChildren("deploy-us", "deploy-eu")`
 (TypeScript `job.startsChildren("deploy-us", "deploy-eu")`); the controller
 refuses an undeclared child with `403`. A child at its parent's exact revision
-inherits the parent's identity, including its pipeline for OIDC claims and
-pipeline-scoped secrets. A child that names a branch the controller resolves
+inherits the parent's identity, including its repository and pipeline for OIDC
+claims and pipeline secrets. A child that names a branch the controller resolves
 runs as an asserted manual run under its own pipeline name and reads only
 team-wide shared secrets. Use `WithFreshRepo("owner/repo")` (TypeScript
 `runAndAwait` option `repo`) for an explicit repository and `WithFreshBranch`

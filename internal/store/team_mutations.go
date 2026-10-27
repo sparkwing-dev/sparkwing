@@ -38,7 +38,7 @@ func (t *Tenant) teamMutationInTx(ctx context.Context, tx *storeTx, a capability
 	if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 		return err
 	}
-	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 			return err
 		}
-		p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+		p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 		if err != nil {
 			return err
 		}
@@ -191,7 +191,7 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		if a.Target.Team != string(t.team) || a.Target.RunID == "" || a.Target.NodeID != "" || a.ResultReplay || a.LogTailAttempt != 0 {
 			return bindingRefusal()
 		}
-		p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+		p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 		if err != nil {
 			return err
 		}
@@ -244,7 +244,7 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		if deadline := time.Unix(0, signed.Int64).Add(limits.LogUploadURLTTL); signed.Valid && tx.now(ctx).Before(deadline) {
 			return authorityError(apierr.Conflict, "this run's logs are still uploading; try again after "+deadline.UTC().Format(time.RFC3339))
 		}
-		if _, err := tx.ResolveAuthority(ctx, a.Principal.Authority); err != nil {
+		if _, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam); err != nil {
 			return err
 		}
 		if deleteLogs != nil {

@@ -72,7 +72,7 @@ func lockClaimQueueTx(ctx context.Context, tx *storeTx) error {
 // Renewal holds authority while it waits for the run, so taking the run first
 // deadlocks against it (B15).
 func lockAuthorityThenRunTx(ctx context.Context, tx *storeTx, team Team, runID string, actor runstate.Actor) error {
-	if _, err := resolveActorTx(ctx, tx, actor); err != nil {
+	if _, err := resolveTeamActorTx(ctx, tx, team, actor, claimantAccepts(actor)); err != nil {
 		return err
 	}
 	return lockStateRunTx(ctx, tx, team, runID)

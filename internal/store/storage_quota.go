@@ -74,8 +74,12 @@ func storageQuotaForTeamTx(ctx context.Context, tx *storeTx, team Team) (Storage
 	}
 	if tier == "" && tx.store.cloudStorage.Load() && holdsFreeAllowance(team) {
 		// safety: a team keeps the paid tier once it has paid, even after a refund or while its balance is empty.
+		mode, err := creditPaymentMode(ctx, tx)
+		if err != nil {
+			return StorageQuota{}, err
+		}
 		var paid bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM credit_grants WHERE team=? AND kind=?)", team, CreditGrantPaid).Scan(&paid); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM credit_grants WHERE team=? AND payment_mode=? AND kind=?)", team, mode, CreditGrantPaid).Scan(&paid); err != nil {
 			return StorageQuota{}, err
 		}
 		tier = storageTierFree

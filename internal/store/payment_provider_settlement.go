@@ -129,7 +129,8 @@ func validateProviderPayment(e capability.PaymentEvent) error {
 			return nil
 		}
 	case capability.PaymentCardPaid, capability.PaymentCardFailed, capability.PaymentRefund, capability.PaymentDisputeOpened, capability.PaymentDisputeClosed:
-		if e.PaymentID != "" && e.AmountMinor > 0 && e.Currency == "usd" {
+		cardPayment := e.Kind == capability.PaymentCardPaid || e.Kind == capability.PaymentCardFailed
+		if e.PaymentID != "" && e.AmountMinor > 0 && e.Currency == "usd" && (e.RefillID != "") == cardPayment {
 			_, err := billingProduct(e.AmountMinor, MicroCreditsPerCent)
 			return err
 		}
@@ -169,7 +170,7 @@ func samePaymentObject(a, b capability.PaymentEvent) bool {
 			return kind
 		}
 	}
-	if family(a.Kind) != family(b.Kind) || a.PaymentID != b.PaymentID || a.IntentID != b.IntentID || a.CustomerID != "" && b.CustomerID != "" && a.CustomerID != b.CustomerID {
+	if family(a.Kind) != family(b.Kind) || a.PaymentID != b.PaymentID || a.IntentID != b.IntentID || a.RefillID != b.RefillID || a.CustomerID != "" && b.CustomerID != "" && a.CustomerID != b.CustomerID {
 		return false
 	}
 	if family(a.Kind) == capability.PaymentCardPaid && (a.Kind == capability.PaymentCardFailed || b.Kind == capability.PaymentCardFailed) {
@@ -188,25 +189,6 @@ func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capa
 	}
 	for _, row := range set.rows {
 		if _, err := lockLedgerTx(ctx, tx, Team(row.key.keys[0])); err != nil {
-			return PaymentSettlement{}, err
-		}
-	}
-	if e.Kind == capability.PaymentCardPaid || e.Kind == capability.PaymentCardFailed {
-		encoded, err := json.Marshal(e)
-		if err != nil {
-			return PaymentSettlement{}, err
-		}
-		status := "failed"
-		if e.Kind == capability.PaymentCardPaid {
-			status = "succeeded"
-		}
-		if _, err := tx.execContext(ctx, `INSERT INTO payment_states(payment_mode,payment_id,status,outcome_json) VALUES (?,?,?,?) ON CONFLICT(payment_mode,payment_id) DO UPDATE SET status=excluded.status,outcome_json=excluded.outcome_json WHERE payment_states.status<>'succeeded'`, e.Mode, e.PaymentID, status, string(encoded)); err != nil {
-			return PaymentSettlement{}, err
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT outcome_json FROM payment_states WHERE payment_mode=? AND payment_id=?`, e.Mode, e.PaymentID).Scan(&encoded); err != nil {
-			return PaymentSettlement{}, err
-		}
-		if err := json.Unmarshal(encoded, &e); err != nil {
 			return PaymentSettlement{}, err
 		}
 	}
@@ -258,8 +240,8 @@ func (op *Operator) applyPaymentStateTx(ctx context.Context, tx *storeTx, e capa
 
 func (op *Operator) discoverPaymentTeamsTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) lockSet {
 	var set lockSet
-	rows, err := tx.queryContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND ((payment_id<>'' AND payment_id=?) OR (session_id<>id AND session_id=?))
- UNION SELECT team FROM payment_correlations WHERE payment_mode=? AND provider_id IN (?,?,?)`, e.Mode, e.PaymentID, e.CheckoutID, e.Mode, e.ObjectID, e.IntentID, e.CheckoutID)
+	rows, err := tx.queryContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND ((payment_id<>'' AND payment_id=?) OR (session_id<>id AND session_id=?) OR (kind='refill' AND id=?))
+ UNION SELECT team FROM payment_correlations WHERE payment_mode=? AND provider_id IN (?,?,?)`, e.Mode, e.PaymentID, e.CheckoutID, e.RefillID, e.Mode, e.ObjectID, e.IntentID, e.CheckoutID)
 	if err != nil {
 		set.err = err
 		return set
@@ -312,15 +294,17 @@ func (op *Operator) reducePaymentStateTx(ctx context.Context, tx *storeTx, e cap
 	case capability.PaymentCardPaid, capability.PaymentCardFailed:
 		var checkout paymentCheckout
 		var customer string
-		err := tx.QueryRowContext(ctx, `SELECT id,team,kind,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id,customer_id FROM credit_checkouts WHERE payment_mode=? AND payment_id=? AND kind=?`+tx.forUpdate(), e.Mode, e.PaymentID, checkoutKindRefill).Scan(append(checkout.scan(), &customer)...)
+		// safety: the refill id in the payment's metadata finds the refill, and the committed row, not the metadata,
+		// decides the team, amount and payer; a refill funds at most one payment.
+		err := tx.QueryRowContext(ctx, `SELECT id,team,kind,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id,customer_id FROM credit_checkouts WHERE payment_mode=? AND id=? AND kind=?`+tx.forUpdate(), e.Mode, e.RefillID, checkoutKindRefill).Scan(append(checkout.scan(), &customer)...)
 		if errors.Is(err, sql.ErrNoRows) {
-			result.Payment = e.PaymentID
-			return result, nil
+			return result, authorityError(apierr.NotFound, "committed refill is unavailable")
 		}
 		if err != nil {
 			return result, err
 		}
-		if checkout.currency != e.Currency || e.CustomerID != customer || e.Kind == capability.PaymentCardPaid && checkout.amount != e.AmountMinor {
+		if checkout.currency != e.Currency || e.CustomerID != customer || e.Kind == capability.PaymentCardPaid && checkout.amount != e.AmountMinor ||
+			checkout.payment != "" && checkout.payment != e.PaymentID {
 			return result, authorityError(apierr.Conflict, "payment facts conflict with committed refill")
 		}
 		checkout.result.Payment, checkout.result.GrantID = e.PaymentID, checkout.grant.String
@@ -404,9 +388,9 @@ func (op *Operator) bindCompletedPageTx(ctx context.Context, tx *storeTx, e capa
 func (o *Operator) RecordsPaymentParent(ctx context.Context, r capability.PaymentRoute) (bool, error) {
 	var found int
 	err := o.s.queryRow(ctx, `SELECT CASE WHEN
- EXISTS(SELECT 1 FROM credit_checkouts WHERE payment_mode=? AND (session_id=? OR payment_id<>'' AND payment_id=?))
+ EXISTS(SELECT 1 FROM credit_checkouts WHERE payment_mode=? AND (session_id=? OR payment_id<>'' AND payment_id=? OR kind='refill' AND id=?))
  OR EXISTS(SELECT 1 FROM payment_correlations WHERE payment_mode=? AND provider_id IN (?,?,?))
- THEN 1 ELSE 0 END`, r.Mode, r.CheckoutID, r.PaymentID, r.Mode, r.CheckoutID, r.PaymentID, r.ObjectID).Scan(&found)
+ THEN 1 ELSE 0 END`, r.Mode, r.CheckoutID, r.PaymentID, r.RefillID, r.Mode, r.CheckoutID, r.PaymentID, r.ObjectID).Scan(&found)
 	return found == 1, err
 }
 

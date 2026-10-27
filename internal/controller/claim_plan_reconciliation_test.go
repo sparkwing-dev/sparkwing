@@ -27,8 +27,8 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 	}
 	fixture := &serverFixture{}
 	e, tenant, h, raw, body := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "work"}}}}}, fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) }))
-	for _, secret := range []store.Secret{{Name: "TEAM_ONLY", Value: "private-team", Masked: true}, {Name: "ELSEWHERE", Value: "private-elsewhere", Pipeline: "release", Masked: true}} {
-		sealed, err := cipher.SealBound(secrets.PurposeSecret, string(tenant.Team()), secret.Name, secret.Pipeline, secret.Shared, secret.Masked, secret.Value)
+	for _, secret := range []store.Secret{{Name: "TEAM_ONLY", Value: "private-team", Masked: true}, {Name: "ELSEWHERE", Value: "private-elsewhere", Repo: "gh:1", RepoName: "acme/repo", Pipeline: "release", Masked: true}, {Name: "DEPLOY_TOKEN", Value: "private-outsider", Repo: "gh:2", RepoName: "acme/other", Pipeline: "ci", Masked: true}} {
+		sealed, err := cipher.SealBound(secrets.PurposeSecret, string(tenant.Team()), secret.Name, secret.SealScope(), secret.Shared, secret.Masked, secret.Value)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -55,7 +55,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 	if failure.Error.Message != want {
 		t.Fatalf("planner refusal = %s, want %s", failure.Error.Message, want)
 	}
-	for _, leak := range []string{"team-wide", "shared", "release", "only for", "not set", "admin", "private-team", "private-elsewhere", "SLACK_HOOK"} {
+	for _, leak := range []string{"team-wide", "shared", "release", "only for", "not set", "admin", "private-team", "private-elsewhere", "private-outsider", "SLACK_HOOK"} {
 		if strings.Contains(w.Body.String(), leak) {
 			t.Fatalf("planner refusal discloses %q: %s", leak, w.Body)
 		}
@@ -100,7 +100,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 	}
 	w = reviewSessionRequest(t, server, session, csrf, "GET", "/api/v1/runs/run/events", "", http.StatusOK)
 
-	for _, line := range []string{"TEAM_ONLY is set team-wide but not shared with runs", `ELSEWHERE is set only for pipeline \"release\"`, "sparkwing secrets set --secret DEPLOY_TOKEN", "--pipeline ci"} {
+	for _, line := range []string{"DEPLOY_TOKEN is unavailable: this run's code did not come from a repository Sparkwing fetched", "ELSEWHERE is unavailable", "sparkwing secrets set --secret DEPLOY_TOKEN", "--shared"} {
 		if !strings.Contains(w.Body.String(), line) {
 			t.Fatalf("team diagnostic lacks %q: %s", line, w.Body)
 		}

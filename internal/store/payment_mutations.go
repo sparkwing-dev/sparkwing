@@ -191,8 +191,12 @@ func saveCardTx(ctx context.Context, tx *storeTx, team Team, c Card, setup strin
 	if saved == 0 {
 		return errStaleCardSetup
 	}
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET refill_blocked = 0
-	    WHERE team = ? AND refill_blocked = 1 AND opened_at < ?`, string(team), addedAt); err != nil {
+	    WHERE team = ? AND payment_mode = ? AND refill_blocked = 1 AND opened_at < ?`, string(team), mode, addedAt); err != nil {
 		return err
 	}
 	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: now}, auditCard{Reference: digestAudit(setup), Operation: businessEventCardAdded}); err != nil {
@@ -214,6 +218,6 @@ func applyCardRefundTx(ctx context.Context, tx *storeTx, team Team, paymentInten
 		status = cardRefundPending
 	}
 	_, err = tx.execContext(ctx, `UPDATE card_refunds SET status = ? WHERE payment_mode=? AND team = ? AND payment_intent = ?
-	    AND refund_id = ? AND status = 'pending'`, status, mode, string(team), paymentIntent, refundID)
+	    AND refund_id = ? AND (status = 'pending' OR status = ? AND ? = 'failed')`, status, mode, string(team), paymentIntent, refundID, cardRefundSucceeded, status)
 	return err
 }

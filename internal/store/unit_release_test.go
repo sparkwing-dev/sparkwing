@@ -187,6 +187,11 @@ func TestReleaseUnitRefusesForgedStartedAndCancelledClaims(t *testing.T) {
 				if !errors.As(err, &refused) || refused.Code != apierr.LockHeld {
 					t.Fatalf("cancellation refusal = %v", err)
 				}
+			} else if problem == "team" {
+				var refused *apierr.Error
+				if !errors.As(err, &refused) || refused.Details["reason"] != apierr.ReasonBinding {
+					t.Fatalf("foreign-team release refusal = %v", err)
+				}
 			} else if problem == "revoked_parent" {
 				var refused *apierr.Error
 				if !errors.As(err, &refused) || refused.Code != apierr.Unauthenticated {

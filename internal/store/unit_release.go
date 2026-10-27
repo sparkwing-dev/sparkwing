@@ -12,12 +12,12 @@ import (
 func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string) error {
 	return s.inTx(ctx, func(tx *storeTx) error {
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
-		principal, err := tx.ResolveAuthority(ctx, ref)
+		principal, err := resolveTeamAuthorityTx(ctx, tx, claim.Team, ref, sameTeam)
 		if err != nil {
 			return err
 		}
 		c := principal.Capability
-		if c.Audience != capability.Controller || c.Team != string(claim.Team) || c.Unit != claim.Kind || c.Prefix != claim.Award.CapabilityPrefix || c.Binding.Holder != claim.Award.Holder {
+		if c.Audience != capability.Controller || c.Unit != claim.Kind || c.Prefix != claim.Award.CapabilityPrefix || c.Binding.Holder != claim.Award.Holder {
 			return holderRefusal()
 		}
 		unit, err := decodeAwardUnit(c.Unit, c.UnitID)

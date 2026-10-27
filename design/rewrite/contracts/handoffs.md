@@ -915,44 +915,43 @@ Assigned to an Opus implementer (env 1087).
 - Protected secrets (released only to verified default-branch runs, including decision 31 schedules) are a post-launch feature.
 
 
-## WS4 integration: explicit refill payment operations
+## WS4 integration: one refill payment call
 
-The controller requires these authenticated checkout-service operations before
-refills can resume. Each uses the refill request fields `team`, `deployment`,
-`refill_id`, `amount_cents`, `customer` and `payment_intent`, and responds with
-`payment_intent` and `status`. A bound response must name the requested payment.
-Under decision 65 the controller sends no card or email: the service charges the
-customer's default payment method, or its newest card when it has no default.
+Under decision 67 a refill takes one authenticated checkout-service call,
+`POST /internal/refill`, with the request fields `team`, `deployment`,
+`refill_id`, `amount_cents` and `customer`. It responds with `payment_intent`,
+the Stripe `status` and, when Stripe refused the charge, `failure`
+(`authentication_required` or the decline code). Under decision 65 the
+controller sends no card or email: the service charges the customer's default
+payment method, or its newest card when it has no default, and answers 409
+when the customer has no card. Both repositories test against a byte-for-byte
+copy of the example in `testdata/refill_contract.json`.
 
-- `POST /internal/refill` creates an unconfirmed intent only, requires an empty
-  `payment_intent`, and returns `status=created`. It answers 409 when the customer
-  has no card; the controller closes that refill as `no_card`, blocks refills
-  like a declined payment and notifies the owners. It never confirms a payment.
-- `POST /internal/refill/reconcile` retrieves the bound intent, validates its
-  refill ID and customer, and returns its raw
-  Stripe status. It never confirms or cancels a payment.
-- `POST /internal/refill/confirm` validates those same facts and confirms only a
-  `requires_confirmation` intent, under the refill's existing confirmation
-  idempotency key. Any processing or succeeded intent is returned unchanged.
-- `POST /internal/refill/cancel` validates those same facts, cancels an
-  unconfirmed intent at Stripe, and reports the resulting Stripe status. It
-  returns processing or succeeded payments unchanged; it never confirms them.
-  Cancellation is replayable after a lost response. Reconciliation and
-  cancellation accept legacy oversized reservations so they can be resolved;
-  creation and confirmation enforce the $1,000 maximum.
+- The controller checks eligibility and opens the refill in one transaction:
+  refills on, no failed refill blocking them, no hold, balance below the
+  threshold and every limit respected. No transaction stays open across the
+  provider call.
+- The service creates the PaymentIntent with `confirm=true` and
+  `off_session=true`, with the refill id as the idempotency key and as the
+  `refill_id` metadata. The service charges whatever it is asked, so every
+  controller pass rechecks eligibility, setting the open refill's own
+  reservation aside, immediately before repeating its same request. A crash or
+  lost answer never charges twice. A refill no longer eligible is withdrawn
+  without another call, and a payment an earlier call made still credits it.
+- The signed payment webhook finds the refill by the `refill_id` in its
+  metadata and settles it exactly like Add funds; a refill funds at most one
+  payment. A 409 closes the refill as `no_card`; a `failure` closes it with that
+  code. Both block refills like a declined payment and notify the owners, and
+  only a successful Add funds or a new card setup clears the block.
 - `POST /internal/portal` takes `team`, `deployment` and `customer` and returns the
   `url` of a Stripe customer portal session, where owners view, replace or remove
   the card. `POST /internal/card-setup` also receives the team owner's `email`,
-  which only Stripe keeps, for receipts.
-
-The controller rechecks the team's Stripe customer, refill opt-in, holds and
-limits immediately before asking for confirmation. An ineligible unconfirmed
-intent is canceled. A `canceled` response closes the reservation while retaining
-its payment binding; no credit moves. Processing and succeeded payments keep
-their slot for signed webhook settlement. Separate operation paths make an
-older checkout service fail closed instead of treating reconciliation as
-implicit authorization to charge. Eligibility commits and Stripe calls are
-separate operations; no database transaction stays open across a provider call.
+  which only Stripe keeps, for receipts. `POST /internal/refund` takes
+  `deployment`, `payment_intent`, `key` and `reason`.
+- The service answers 403 to portal, refill, card setup with an existing
+  customer and refund when the Stripe customer or payment intent is stamped
+  for another deployment. The controller follows payment and setup pages only
+  on `checkout.stripe.com` and the portal only on `billing.stripe.com`.
 
 ## 2026-10-20 Korey decision 35: wave 2 proceeds; growth is fine when it is healthy
 
@@ -1127,3 +1126,22 @@ separate operations; no database transaction stays open across a provider call.
 - Pools holding reserved secrets require a launcher credential for --trust=any (fresh pods), kept as a deliberate restriction.
 - Team admins may pause and resume schedules declared through the GitHub App, but not edit or delete them.
 - Ratified lead calls: writer-only retry of here/local runs; claim search outside the arbitration lock with a locked re-check; Kubernetes-enrolled runners required inside pods; pool branch patterns accept only * and ?; operator-created admin tokens last 30 days; run-now is attributed and charged to the presser; public health shows status only; Cloud requires S3 blobs and SQLite on emptyDir is refused; the fleet-wide hourly cap is removed; a refill with no card closes and notifies; v0.67 stores are refused with move-aside instructions; 3-D Secure attempt_acknowledged counts as paid; no cross-repository child opt-in; Actions credentials keep GitHub's lifetime; the previous webhook secret is warned about, not expired; re-enabling members_can_add_machines does not revive old machines; every OIDC mint is audited.
+
+## 2026-10-26 Korey decision 68: within-team trust after security pass 3
+
+- Amends decision 66: pipeline secrets are released only to runs whose repository identity is proven (GitHub App push and pull request, GitHub Actions, admin-armed schedules). Runs whose repository is asserted (CLI, API, member tokens, local, here) receive only team-wide --shared secrets, matching GitHub, where local runs never receive repository secrets.
+- Verified runs on non-fresh hosts (plain-machine and persistent runners) write only to that host's own branch cache scope, never the shared default-branch cache that fresh pods, Cloud and remote readers restore. A team admin may turn on a "high trust" team setting, meant for unregulated teams, that lifts this and lets those hosts write the default-branch cache.
+- Long-lived runners shared across repositories let one repository's jobs act as the runner and claim another repository's jobs in the same team; this is documented plainly with the decision 30 residual, and --repos scoping is the documented way to isolate repositories.
+- Cloud node reuse: a warm Cloud node is reused only by jobs of the same run (keyed by run id; a child run is a different run). Every new run starts on a node no other run has used, so nothing one run leaves behind reaches another. The Cloud node IAM role may read only Sparkwing's own images, not every repository in the account.
+- Free-tier storage slots (the 200-slot pool, its 30-day release and waitlist) are deleted; the automatic free storage tier plus retention replaces them (Korey, Q16). Storage tiers apply automatically on Cloud: free tier for teams without paid credits, paid tier (1 GiB per run, 100 GiB per month, 100,000 objects per run) once a team has paid credits; operator overrides win; one storage-admission rule covers events, blobs and logs, and Cloud charges the published storage rate by default.
+
+## 2026-10-26 Korey decision 69: a Cloud pod may reach its own node's kubelet
+
+- The AWS VPC CNI network policy cannot block a pod from reaching its own node. The launcher's pre-job egress check treats exactly the job's own node IP on port 10250 as an expected exception; any other node, any other port (including the read-only 10255) still fails closed. Basis, verified on staging EKS nodes 2026-10-26: kubelet anonymous authentication is disabled, webhook authentication and authorization are on, Cloud pods mount no service-account token, and a Cloud node serves only one run (decision 68). A node-level firewall rule may be added after launch for defence in depth.
+
+## 2026-10-26 Korey decision 70: OIDC claims for host kind, fetched repositories and Actions
+
+- OIDC tokens carry a runner environment claim saying whether the job ran on a fresh host (launcher pod, Cloud pod, GitHub Actions job) or a persistent one (plain machine, persistent runner, personal machine, here), like GitHub's runner_environment, so deploy roles can require fresh hosts.
+- Runs whose repository is proven because Sparkwing fetched the code from it (decision 68 run-now refinement) carry the repository claim; ref and sha claims stay off for them because their trust class is manual.
+- Runs from GitHub Actions bindings say trigger:actions in their subject, not trigger:manual.
+- Decision 68's secrets rule reads: pipeline secrets go to runs whose repository is proven, either verified (App delivery, Actions, admin-armed schedule) or fetched by Sparkwing from the repository at a branch or tag head (run-now, console runs, unlocked schedules); uploads, local, here, raw commits and pull request refs get shared secrets only.

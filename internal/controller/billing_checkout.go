@@ -46,7 +46,7 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 
 var errCheckoutRefused = errors.New("the checkout service refused the session")
 
-// errRefillNoCard is the checkout service's refusal to create a refill for a customer with no card in Stripe.
+// errRefillNoCard is the checkout service's refusal to charge a refill for a customer with no card in Stripe.
 var errRefillNoCard = errors.New("the customer has no card")
 
 // openReservedPage opens the provider page for a reservation; email, the team owner's address for Stripe's receipts,
@@ -72,8 +72,8 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, deployment strin
 	if err := c.post(ctx, path, body, &out); err != nil {
 		return err
 	}
-	if !validBillingPageURL(out.URL) {
-		return fmt.Errorf("%w: non-https payment page", errCheckoutRefused)
+	if !validBillingPageURL(out.URL, stripeCheckoutHost) {
+		return fmt.Errorf("%w: payment page not on %s", errCheckoutRefused, stripeCheckoutHost)
 	}
 	if out.ID == "" {
 		return fmt.Errorf("%w: missing session id", errCheckoutRefused)
@@ -130,23 +130,34 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 	return nil
 }
 
-type refillResult struct {
-	PaymentIntent string `json:"payment_intent"`
-	Status        string `json:"status"`
+// refillRequest and refillResponse are the checkout service's POST /internal/refill contract, which creates and
+// confirms one off-session payment under the refill id. testdata/refill_contract.json holds the example these types
+// are tested against; the checkout service keeps a byte-identical copy and tests its own side against that, so the
+// copies must be changed together, since neither suite reads the other's.
+type refillRequest struct {
+	Team        string `json:"team"`
+	Deployment  string `json:"deployment"`
+	RefillID    string `json:"refill_id"`
+	AmountCents int64  `json:"amount_cents"`
+	Customer    string `json:"customer"`
 }
 
-func (c *billingCheckout) refill(ctx context.Context, deployment string, r store.Refill, action string) (refillResult, error) {
-	var out refillResult
-	path := "/internal/refill"
-	if action != "" {
-		path += "/" + action
-	}
-	err := c.post(ctx, path, map[string]any{
-		"team": string(r.Team), "deployment": deployment, "refill_id": r.ID, "amount_cents": r.AmountCents,
-		"customer": r.Customer, "payment_intent": r.PaymentIntent,
+// refillResponse names the payment and its Stripe status. Failure is set when Stripe refused the charge:
+// authentication_required, or the decline code.
+type refillResponse struct {
+	PaymentIntent string `json:"payment_intent"`
+	Status        string `json:"status"`
+	Failure       string `json:"failure,omitempty"`
+}
+
+func (c *billingCheckout) refill(ctx context.Context, deployment string, r store.Refill) (refillResponse, error) {
+	var out refillResponse
+	err := c.post(ctx, "/internal/refill", refillRequest{
+		Team: string(r.Team), Deployment: deployment, RefillID: r.ID, AmountCents: r.AmountCents, Customer: r.Customer,
 	}, &out)
-	if err == nil && (out.PaymentIntent == "" || out.Status == "" || r.PaymentIntent != "" && out.PaymentIntent != r.PaymentIntent) {
-		err = fmt.Errorf("%w: missing or mismatched payment or status", errCheckoutRefused)
+	// A payment Stripe accepted is succeeded or processing, and its signed webhook settles it.
+	if err == nil && (out.PaymentIntent == "" || out.Failure == "" && out.Status != "succeeded" && out.Status != "processing") {
+		err = fmt.Errorf("%w: refill answered no payment, status %q", errCheckoutRefused, out.Status)
 	}
 	return out, err
 }
@@ -157,19 +168,19 @@ func (c *billingCheckout) portal(ctx context.Context, deployment, team, customer
 	if err := c.post(ctx, "/internal/portal", map[string]any{"team": team, "deployment": deployment, "customer": customer}, &out); err != nil {
 		return "", err
 	}
-	if !validBillingPageURL(out.URL) {
-		return "", fmt.Errorf("%w: non-https portal page", errCheckoutRefused)
+	if !validBillingPageURL(out.URL, stripePortalHost) {
+		return "", fmt.Errorf("%w: portal page not on %s", errCheckoutRefused, stripePortalHost)
 	}
 	return out.URL, nil
 }
 
-func (c *billingCheckout) refund(ctx context.Context, paymentIntent, reason string) (string, string, error) {
+func (c *billingCheckout) refund(ctx context.Context, deployment, paymentIntent, reason string) (string, string, error) {
 	var out struct {
 		Refund string `json:"refund"`
 		Status string `json:"status"`
 	}
 	err := c.post(ctx, "/internal/refund", map[string]any{
-		"payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
+		"deployment": deployment, "payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
 	}, &out)
 	if err == nil && (out.Refund == "" || out.Status == "") {
 		err = fmt.Errorf("%w: it named no refund and status", errCheckoutRefused)
@@ -177,7 +188,15 @@ func (c *billingCheckout) refund(ctx context.Context, paymentIntent, reason stri
 	return out.Refund, out.Status, err
 }
 
-func validBillingPageURL(raw string) bool {
+// Stripe hosts its payment pages on checkout.stripe.com and its customer portal on billing.stripe.com.
+const (
+	stripeCheckoutHost = "checkout.stripe.com"
+	stripePortalHost   = "billing.stripe.com"
+)
+
+// safety: a hosted page leaves only for Stripe's own host, so a compromised checkout service cannot send an owner to
+// a look-alike payment page.
+func validBillingPageURL(raw, host string) bool {
 	u, err := url.Parse(raw)
-	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil
+	return err == nil && u.Scheme == "https" && u.Host == host && u.User == nil
 }

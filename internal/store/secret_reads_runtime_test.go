@@ -25,9 +25,10 @@ import (
 func secretReadStoreFixture(t *testing.T) (*Tenant, capability.Authorized) {
 	t.Helper()
 	tenant, req, now := planFixture(t, runspec.DispatchHost)
-	if err := seedSecret(t, tenant, Secret{Name: "KEY", Value: "sealed", Pipeline: "p", Masked: true}, *now); err != nil {
+	if err := seedSecret(t, tenant, Secret{Name: "KEY", Value: "sealed", Repo: fixtureRepo, Pipeline: "p", Masked: true}, *now); err != nil {
 		t.Fatal(err)
 	}
+	req.Seal.Request = proveFixtureRun(t, tenant, req.RunID)
 	req.Seal.Resolved.SecretNames = []string{"KEY"}
 	tenant.s.planSecretOpener = fakePlanSecretOpener(func(_ context.Context, _ Team, row Secret) (string, error) { return row.Value, nil })
 	if _, err := tenant.AcceptPlan(t.Context(), req); err != nil {
@@ -56,13 +57,13 @@ func TestSecretReadClaimScopePrecedenceProperty(t *testing.T) {
 		shared, scoped := random.IntN(2) == 0, random.IntN(2) == 0
 		value := fmt.Sprintf("value/%x", random.Uint64())
 		rewriteSchemaExec(t, tenant.s.db, `DELETE FROM secrets`)
-		for _, row := range []Secret{{Name: "KEY", Value: "team/" + value, Shared: shared, Masked: true}, {Name: "KEY", Pipeline: "other", Value: "foreign-pipeline", Masked: true}} {
+		for _, row := range []Secret{{Name: "KEY", Value: "team/" + value, Shared: shared, Masked: true}, {Name: "KEY", Repo: fixtureRepo, Pipeline: "other", Value: "foreign-pipeline", Masked: true}, {Name: "KEY", Repo: "gh:2", Pipeline: "p", Value: "foreign-repository", Masked: true}} {
 			if err := seedSecret(t, tenant, row, tenant.s.now()); err != nil {
 				t.Fatal(err)
 			}
 		}
 		if scoped {
-			if err := seedSecret(t, tenant, Secret{Name: "KEY", Pipeline: "p", Value: "pipeline/" + value, Masked: true}, tenant.s.now()); err != nil {
+			if err := seedSecret(t, tenant, Secret{Name: "KEY", Repo: fixtureRepo, Pipeline: "p", Value: "pipeline/" + value, Masked: true}, tenant.s.now()); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -128,7 +129,7 @@ func TestSecretReadAuthorityAndSelectionProperty(t *testing.T) {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			tenant, a := secretReadStoreFixture(t)
 			s := tenant.s
-			switch random.IntN(12) {
+			switch random.IntN(13) {
 			case 0:
 				a.Target.Team = "b"
 			case 1:
@@ -155,9 +156,12 @@ func TestSecretReadAuthorityAndSelectionProperty(t *testing.T) {
 			case 9:
 				rewriteSchemaExec(t, s.db, `UPDATE secrets SET only_on='prod'`)
 			case 10:
-				rewriteSchemaExec(t, s.db, `UPDATE secrets SET pipeline='',shared=0`)
+				rewriteSchemaExec(t, s.db, `UPDATE secrets SET repo='',pipeline='',shared=0`)
 			case 11:
 				a.Target.SecretName = "UNDECLARED"
+			case 12:
+				// Another repository's pipeline of the same name owns the only row.
+				rewriteSchemaExec(t, s.db, `UPDATE secrets SET repo='gh:2'`)
 			}
 			if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
 				t.Fatalf("invalid read %d: %+v %v", i, row, err)
@@ -173,23 +177,23 @@ func TestSecretReadAuthorityAndSelectionProperty(t *testing.T) {
 func TestSecretReadMemberScopesAndMaskedRefusal(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
 	a.Target.SecretName = "KEY"
-	for _, row := range []Secret{{Name: "KEY", Value: "team"}, {Name: "KEY", Pipeline: "build", Value: "pipeline"}, {Name: "MASKED", Value: "hidden", Masked: true}} {
+	for _, row := range []Secret{{Name: "KEY", Value: "team"}, {Name: "KEY", Repo: fixtureRepo, Pipeline: "build", Value: "pipeline"}, {Name: "MASKED", Value: "hidden", Masked: true}} {
 		if _, err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, row)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, pipeline := range []string{"", "build", "other"} {
-		a.Target.Pipeline = pipeline
+	for _, scope := range [][2]string{{"", ""}, {fixtureRepo, "build"}, {fixtureRepo, "other"}, {"gh:2", "build"}} {
+		a.Target.Repo, a.Target.Pipeline = scope[0], scope[1]
 		row, err := tenant.ReadSecret(t.Context(), a)
 		want := "team"
-		if pipeline == "build" {
+		if scope == [2]string{fixtureRepo, "build"} {
 			want = "pipeline"
 		}
 		if err != nil || row == nil || openSecretFixture(t, tenant, row) != want {
-			t.Fatalf("member scope %q: %+v %v", pipeline, row, err)
+			t.Fatalf("member scope %q: %+v %v", scope, row, err)
 		}
 	}
-	a.Target.Pipeline, a.Target.SecretName = "", "MASKED"
+	a.Target.Repo, a.Target.Pipeline, a.Target.SecretName = "", "", "MASKED"
 	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
 		t.Fatalf("masked member read: %+v %v", row, err)
 	}
@@ -358,7 +362,7 @@ func TestSecretReadClockFailureCommitsNothing(t *testing.T) {
 func TestShortStoredSecretReleasedOnlyToAuthorizedClaim(t *testing.T) {
 	tenant, a := secretReadStoreFixture(t)
 	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM secrets WHERE team=? AND name='KEY'`, tenant.team)
-	sealed := sealedSecretFixture(t, tenant, Secret{Name: "KEY", Value: "abc", Pipeline: "p", Masked: true})
+	sealed := sealedSecretFixture(t, tenant, Secret{Name: "KEY", Value: "abc", Repo: fixtureRepo, Pipeline: "p", Masked: true})
 	if err := seedSecret(t, tenant, sealed.Row(), tenant.s.now()); err != nil {
 		t.Fatal(err)
 	}

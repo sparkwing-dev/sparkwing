@@ -146,7 +146,7 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 				return ErrInvalidInput
 			}
 			var result sql.Result
-			result, err = tx.execContext(ctx, `UPDATE credit_checkouts SET session_id=?,expires_at=? WHERE team=? AND id=? AND session_id=id AND paid_at IS NULL AND closed_at IS NULL`, page.ProviderID, page.ExpiresAt.UnixNano(), t.team, page.ReservationID)
+			result, err = tx.execContext(ctx, `UPDATE credit_checkouts SET session_id=?,expires_at=? WHERE team=? AND payment_mode=? AND id=? AND session_id=id AND paid_at IS NULL AND closed_at IS NULL`, page.ProviderID, page.ExpiresAt.UnixNano(), t.team, mode, page.ReservationID)
 			if err == nil {
 				err = requireOneRow(result, "checkout page binding")
 			}
@@ -165,7 +165,7 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 		if err != nil {
 			return err
 		}
-		_, err = tx.execContext(ctx, `UPDATE billing_pages SET page_json=?,failed_at=NULL WHERE team=? AND id=?`, data, t.team, page.ReservationID)
+		_, err = tx.execContext(ctx, `UPDATE billing_pages SET page_json=?,failed_at=NULL WHERE team=? AND payment_mode=? AND id=?`, data, t.team, mode, page.ReservationID)
 		return err
 	})
 }
@@ -173,14 +173,14 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 // RecordAuthorizedBillingPageFailure records ambiguous delivery without releasing its reservation.
 func (t *Tenant) RecordAuthorizedBillingPageFailure(ctx context.Context, a capability.Authorized, page capability.BillingPage) error {
 	return t.billingMutationTx(ctx, a, func(tx *storeTx, p capability.Principal) error {
-		prior, _, err := t.billingPageTx(ctx, tx, p, page.ReservationID)
+		prior, mode, err := t.billingPageTx(ctx, tx, p, page.ReservationID)
 		if err != nil {
 			return err
 		}
 		if prior.Kind != page.Kind || prior.Team != page.Team || prior.AmountCents != page.AmountCents {
 			return ErrInvalidInput
 		}
-		_, err = tx.execContext(ctx, `UPDATE billing_pages SET failed_at=? WHERE team=? AND id=?`, tx.now(ctx).UnixNano(), t.team, page.ReservationID)
+		_, err = tx.execContext(ctx, `UPDATE billing_pages SET failed_at=? WHERE team=? AND payment_mode=? AND id=?`, tx.now(ctx).UnixNano(), t.team, mode, page.ReservationID)
 		return err
 	})
 }

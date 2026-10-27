@@ -74,7 +74,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		entry.DefaultBranch = ""
 	}
 	if mode == "app_default" {
-		request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DefaultBranch: "trunk"}}
+		request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", DefaultBranch: "trunk"}}
 		request.Git.DefaultBranch = runspec.Optional[string]{Set: true, Value: "trunk"}
 		entry.DefaultBranch = "changed-origin-head"
 	}

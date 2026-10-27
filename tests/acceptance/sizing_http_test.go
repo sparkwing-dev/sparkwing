@@ -211,7 +211,7 @@ func TestSizingHTTPRefusals(t *testing.T) {
 				b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.NodesClaim, capability.SourceRead}
 				if state == "actions root" {
 					p := &b.snapshot.Authorities[0].Principal.Capability
-					p.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "123", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+					p.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Repository: "acme/repo", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "123", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 				}
 				status, code = 403, apierr.Forbidden
 			case "bootstrap":

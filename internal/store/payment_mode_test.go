@@ -50,7 +50,7 @@ func TestPaymentModeTestActivityCanSwitchToLive(t *testing.T) {
 			case "refill":
 				rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='customer',card_added_at=1,refill_enabled=1,refill_threshold_cents=1000,refill_amount_cents=1000 WHERE name='a'`)
 				if err := s.inTx(t.Context(), func(tx *storeTx) error {
-					refill, err := dueRefillTx(t.Context(), tx, "a")
+					refill, err := authorizeRefillTx(t.Context(), tx, "a")
 					if err == nil && refill == nil {
 						t.Fatal("no refill reserved")
 					}
@@ -274,7 +274,7 @@ func TestLiveCutoverExcludesTestStandingHoldsRefillsAndCards(t *testing.T) {
 		if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
 			t.Fatal(err)
 		}
-		refills, err := s.AsOperator().DueRefills(t.Context())
+		refills, err := collectDueRefills(t.Context(), s.AsOperator())
 		if err != nil || len(refills) != 1 || refills[0].Customer != "live-customer" || refills[0].ID == "test-open" {
 			t.Fatalf("live refill=%+v: %v", refills, err)
 		}
@@ -329,7 +329,7 @@ func TestLiveCutoverRequiresDrainedTestWork(t *testing.T) {
 			}
 			if activity == "refill" {
 				rewriteSchemaExec(t, s.db, `UPDATE teams SET refill_enabled=1,refill_threshold_cents=1000,refill_amount_cents=1000 WHERE name='a'`)
-				refills, err := s.AsOperator().DueRefills(t.Context())
+				refills, err := collectDueRefills(t.Context(), s.AsOperator())
 				if err != nil || len(refills) != 1 {
 					t.Fatalf("refills=%+v: %v", refills, err)
 				}

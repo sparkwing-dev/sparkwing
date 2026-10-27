@@ -10,12 +10,12 @@ import (
 )
 
 func checkTeamAdministrationTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor) (capability.Principal, error) {
-	p, err := resolveActorTx(ctx, tx, actor)
+	p, err := resolveTeamActorTx(ctx, tx, team, actor, sameTeam)
 	if err != nil {
 		return p, err
 	}
 	c := p.Capability
-	if c.Team != string(team) || c.Binding.Kind != capability.BindingNone || c.Audience != capability.Controller || (c.Subject.Kind != capability.SubjectAccount && c.Subject.Kind != capability.SubjectLocal) || !slices.Contains(c.Grants, capability.TeamAdmin) {
+	if c.Binding.Kind != capability.BindingNone || c.Audience != capability.Controller || (c.Subject.Kind != capability.SubjectAccount && c.Subject.Kind != capability.SubjectLocal) || !slices.Contains(c.Grants, capability.TeamAdmin) {
 		return p, authorityError(apierr.Forbidden, "current team administration is required")
 	}
 	return p, nil
