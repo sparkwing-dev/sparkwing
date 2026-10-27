@@ -116,43 +116,44 @@ func (s *Server) keyedRepositoryDisplay(ctx context.Context, team string, reques
 // (unqualified or qualified) to its head, reads that commit's configuration
 // and resolves any configured source pin. A request that names no commit, as
 // the console's does, adopts that selection, so admission and proof describe
-// the same source; one that names commits must match it exactly. It is zero
-// when the submitter supplies the code (an upload, a working tree, a local
-// checkout or a run on the submitter's own machine), names a commit no branch
+// the same source; one that names commits must match it exactly. Its name is
+// the owner/name the selector's App lookup reported. It is zero when the
+// submitter supplies the code (an upload, a working tree, a local checkout or
+// a run on the submitter's own machine), names a commit no branch
 // head selects (GitHub may serve it from a fork) or a pull request ref, or
 // when selection disagrees with the request.
-func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Request, selectSource func(context.Context, runspec.Request) (runspec.Git, runspec.Source, error)) (int64, error) {
+func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Request, selectSource func(context.Context, runspec.Request) (runspec.Git, runspec.Source, error)) (store.FetchedRepository, error) {
 	code := request.Source
 	here := request.Options.Runner.Set && request.Options.Runner.Value.Kind == runspec.RunnerHere
 	if s.githubApp == nil || request.Lineage.ParentRunID != "" || code.Location.RemoteURL == "" || code.BundleDigest.Set || code.WorkingTree || code.Location.LocalCheckout != "" || here {
-		return 0, nil
+		return store.FetchedRepository{}, nil
 	}
 	key, ok := strings.CutPrefix(string(request.Git.Repository.Key), "gh:")
 	if !ok {
-		return 0, nil
+		return store.FetchedRepository{}, nil
 	}
 	id, err := strconv.ParseInt(key, 10, 64)
 	if err != nil {
-		return 0, nil
+		return store.FetchedRepository{}, nil
 	}
 	ref := request.Git.Ref
 	if ref == "" || runspec.IsCommitID(ref) || strings.HasPrefix(ref, "refs/") && !strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/") {
-		return 0, nil
+		return store.FetchedRepository{}, nil
 	}
 	probe := *request
 	probe.Git.SHA, probe.Source.Ref, probe.Source.RequestedRef = "", "", ""
 	git, selected, err := selectSource(ctx, probe)
 	if request.Git.SHA == "" {
 		if err != nil {
-			return 0, err
+			return store.FetchedRepository{}, err
 		}
 		request.Git, request.Source = git, selected
-		return id, nil
+		return store.FetchedRepository{ID: id, Name: git.RepositoryName.Value}, nil
 	}
 	if err != nil || !strings.EqualFold(git.SHA, request.Git.SHA) || code.Ref != "" && !strings.EqualFold(selected.Ref, code.Ref) {
-		return 0, nil
+		return store.FetchedRepository{}, nil
 	}
-	return id, nil
+	return store.FetchedRepository{ID: id, Name: git.RepositoryName.Value}, nil
 }
 
 // appSourceSelector selects a remote run's source the way a schedule fire
@@ -169,7 +170,9 @@ func (s *Server) appSourceSelector(team store.Team) func(context.Context, runspe
 		read := func(ctx context.Context, sha, name string) ([]byte, bool, error) {
 			return s.githubApp.client.FileAtCommit(ctx, installation.InstallationID, repository.ID, repo.Owner, repo.Name, sha, name)
 		}
-		return s.selectIntakeSource(ctx, team, request, read)
+		git, selected, err := s.selectIntakeSource(ctx, team, request, read)
+		git.RepositoryName = runspec.Optional[string]{Set: true, Value: repository.FullName}
+		return git, selected, err
 	}
 }
 

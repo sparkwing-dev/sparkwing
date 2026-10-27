@@ -138,6 +138,14 @@ func (i *Issuer) KeyIDs() []string {
 // TTL is the lifetime of a token minted without a shorter cap.
 func (i *Issuer) TTL() time.Duration { return i.ttl }
 
+// Fresh names a host no earlier job touched: a launcher pod, a Cloud pod or a
+// GitHub-hosted Actions runner. Persistent names any other host, where an
+// earlier job may have left something behind.
+const (
+	Fresh      = "fresh"
+	Persistent = "persistent"
+)
+
 // Claims are the run facts a token carries. Empty optional fields are
 // left out of the token.
 type Claims struct {
@@ -146,19 +154,21 @@ type Claims struct {
 	Pipeline   string
 	Trigger    string
 	RunnerKind string
-	Ref        string
-	SHA        string
-	Repository string
-	// RepositoryID is GitHub's numeric repository id, zero when the run was
-	// not started by a GitHub App delivery. It survives renames and
-	// transfers, which the repository name does not.
+	// RunnerEnvironment is Fresh or Persistent, like GitHub's runner_environment.
+	RunnerEnvironment string
+	Ref               string
+	SHA               string
+	Repository        string
+	// RepositoryID is GitHub's numeric repository id, zero when the run
+	// proved no repository. It survives renames and transfers, which the
+	// repository name does not.
 	RepositoryID int64
 	RunID        string
 }
 
 // Subject renders the stable sub claim:
 //
-//	team:<team>:repository_id:<id>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>
+//	team:<team>:repository_id:<id>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:runner_environment:<runner_environment>:ref:<ref>
 //
 // The repository sits between team and pipeline because a team holds
 // repositories and a repository declares pipelines, so a trust condition
@@ -177,6 +187,7 @@ func (c Claims) Subject() (string, error) {
 		{"pipeline", c.Pipeline},
 		{"trigger", c.Trigger},
 		{"runner", c.RunnerKind},
+		{"runner_environment", c.RunnerEnvironment},
 		{"ref", c.Ref},
 	}
 	var b strings.Builder
@@ -250,18 +261,22 @@ func (i *Issuer) Mint(c Claims, now, notAfter time.Time) (Token, error) {
 	}
 	jti := hex.EncodeToString(raw)
 	payload := map[string]any{
-		"iss":         i.issuer,
-		"aud":         c.Audience,
-		"sub":         sub,
-		"iat":         now.Unix(),
-		"nbf":         now.Unix(),
-		"exp":         exp.Unix(),
-		"jti":         jti,
-		"team":        c.Team,
-		"pipeline":    c.Pipeline,
-		"trigger":     c.Trigger,
-		"runner_kind": c.RunnerKind,
-		"run_id":      c.RunID,
+		"iss":                i.issuer,
+		"aud":                c.Audience,
+		"sub":                sub,
+		"iat":                now.Unix(),
+		"nbf":                now.Unix(),
+		"exp":                exp.Unix(),
+		"jti":                jti,
+		"team":               c.Team,
+		"pipeline":           c.Pipeline,
+		"trigger":            c.Trigger,
+		"runner_kind":        c.RunnerKind,
+		"run_id":             c.RunID,
+		"runner_environment": c.RunnerEnvironment,
+	}
+	if c.RepositoryID > 0 {
+		payload["repository_id"] = strconv.FormatInt(c.RepositoryID, 10)
 	}
 	for name, v := range map[string]string{"ref": c.Ref, "sha": c.SHA, "repository": c.Repository} {
 		if v != "" {
@@ -297,7 +312,7 @@ func (i *Issuer) sign(payload map[string]any) (string, error) {
 // document.
 var claimsSupported = []string{
 	"iss", "aud", "sub", "iat", "nbf", "exp", "jti",
-	"team", "pipeline", "trigger", "runner_kind", "ref", "sha", "repository", "run_id",
+	"team", "pipeline", "trigger", "runner_kind", "runner_environment", "ref", "sha", "repository", "repository_id", "run_id",
 }
 
 // discovery is the OpenID provider metadata document.

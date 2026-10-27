@@ -24,8 +24,8 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 	if err != nil {
 		return sealed, err
 	}
-	if id := fetchedRepositoryTx(tx, request, input); id > 0 && sealed.Trust() == runspec.TrustAsserted && !sealed.SharedSecretsOnly() && input.Lineage.ParentRunID == "" && input.Git.Repository.Key == runspec.RepoKey("gh:"+strconv.FormatInt(id, 10)) {
-		if sealed, err = refused(sealed.FetchedFrom(id)); err != nil {
+	if fetched := fetchedRepositoryTx(tx, request, input); fetched.ID > 0 && sealed.Trust() == runspec.TrustAsserted && !sealed.SharedSecretsOnly() && input.Lineage.ParentRunID == "" && input.Git.Repository.Key == runspec.RepoKey("gh:"+strconv.FormatInt(fetched.ID, 10)) {
+		if sealed, err = refused(sealed.FetchedFrom(fetched.ID, fetched.Name)); err != nil {
 			return sealed, err
 		}
 	}
@@ -49,19 +49,20 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 // repository, an unlocked App-bound schedule's (fires, overrides and run-now),
 // or a remote branch run the controller checked. Zero when the submitter
 // supplies the code, the repository claim or an arbitrary commit.
-func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Request) int64 {
+func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Request) FetchedRepository {
 	switch {
 	case input.Origin == runspec.OriginApp && request.VerifiedDeliveryID != "" && input.Git.App.Set:
-		return input.Git.App.Value.RepositoryID
+		return FetchedRepository{ID: input.Git.App.Value.RepositoryID, Name: input.Git.App.Value.Repository}
 	case input.Origin == runspec.OriginSchedule && tx.scheduleAdmission != nil && tx.scheduleAdmission.authority() == request.Authority:
 		// safety: a schedule locked to a commit runs a SHA GitHub may serve from a
 		// fork, not a branch head the App resolved.
 		if s := tx.scheduleAdmission.schedule; s.GitHubInstallationID > 0 && s.LockedRef == "" {
-			return s.GitHubRepositoryID
+			// safety: the fire-time App lookup that proved the id reported the name, as for a verified fire.
+			return FetchedRepository{ID: s.GitHubRepositoryID, Name: request.Request.Git.RepositoryName.Value}
 		}
-		return 0
+		return FetchedRepository{}
 	}
-	return request.FetchedRepositoryID
+	return request.FetchedRepository
 }
 
 func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal, input runspec.Request, run string) (runspec.Provenance, error) {

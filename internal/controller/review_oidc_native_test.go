@@ -91,7 +91,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		if id, ok := claims["jti"].(string); ok {
 			issued[id] = true
 		}
-		return claims["team"] == "a" && claims["pipeline"] == "ci" && claims["trigger"] == "manual" && claims["runner_kind"] == "runner" && claims["repository"] == nil && claims["sha"] == nil && claims["ref"] == nil && claims["repository_id"] == nil && !token.ExpiresAt.After(time.Unix(0, lease))
+		return claims["team"] == "a" && claims["pipeline"] == "ci" && claims["trigger"] == "manual" && claims["runner_kind"] == "runner" && claims["runner_environment"] == "persistent" && strings.Contains(claims["sub"].(string), ":runner:runner:runner_environment:persistent:ref:") && claims["repository"] == nil && claims["sha"] == nil && claims["ref"] == nil && claims["repository_id"] == nil && !token.ExpiresAt.After(time.Unix(0, lease))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
 		t.Fatal(err)
@@ -121,17 +121,21 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		verified                             bool
 		origin                               runspec.Origin
 		wantID                               int64
-		// sealsApp is whether intake sealed this run's provenance from its App delivery.
-		sealsApp bool
+		// seal is how intake sealed this run's provenance: "app" from its App
+		// delivery, "fetched" as asserted code the controller fetched from the
+		// repository, "actions" from an Actions push binding, otherwise asserted.
+		seal string
 	}{
-		{"manual_cannot_claim_app", "push", "refs/heads/main", "manual", "", true, runspec.OriginLocal, 0, false},
-		{"unverified_app", "push", "refs/heads/main", "manual", "", false, runspec.OriginApp, 0, false},
-		{"push", "push", "refs/heads/main", "push", "refs/heads/main", true, runspec.OriginApp, 42, true},
-		{"tag", "push", "refs/tags/v1", "push", "refs/tags/v1", true, runspec.OriginApp, 42, true},
-		{"pull_request", "pull_request", "refs/pull/7/head", "pull_request", "refs/pull/7/head", true, runspec.OriginApp, 42, true},
-		{"release", "release", "refs/tags/v1", "release", "refs/tags/v1", true, runspec.OriginApp, 42, true},
-		{"create", "create", "refs/heads/topic", "create", "refs/heads/topic", true, runspec.OriginApp, 42, true},
-		{"delete", "delete", "refs/heads/topic", "delete", "refs/heads/topic", true, runspec.OriginApp, 42, true},
+		{"manual_cannot_claim_app", "push", "refs/heads/main", "manual", "", true, runspec.OriginLocal, 0, ""},
+		{"unverified_app", "push", "refs/heads/main", "manual", "", false, runspec.OriginApp, 0, ""},
+		{"fetched", "push", "refs/heads/main", "manual", "", false, runspec.OriginLocal, 42, "fetched"},
+		{"actions", "push", "refs/heads/main", "actions", "refs/heads/main", false, runspec.OriginLocal, 42, "actions"},
+		{"push", "push", "refs/heads/main", "push", "refs/heads/main", true, runspec.OriginApp, 42, "app"},
+		{"tag", "push", "refs/tags/v1", "push", "refs/tags/v1", true, runspec.OriginApp, 42, "app"},
+		{"pull_request", "pull_request", "refs/pull/7/head", "pull_request", "refs/pull/7/head", true, runspec.OriginApp, 42, "app"},
+		{"release", "release", "refs/tags/v1", "release", "refs/tags/v1", true, runspec.OriginApp, 42, "app"},
+		{"create", "create", "refs/heads/topic", "create", "refs/heads/topic", true, runspec.OriginApp, 42, "app"},
+		{"delete", "delete", "refs/heads/topic", "delete", "refs/heads/topic", true, runspec.OriginApp, 42, "app"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request := run.Request
@@ -143,8 +147,17 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 			}
 			request.Request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 7}}
 			p := assertedProvenance(t, "ci", tc.ref, strings.Repeat("a", 40))
-			if tc.sealsApp {
+			var err error
+			switch tc.seal {
+			case "app":
 				p = appProvenance(t, request.Request.Git.App.Value, request.Request.PullRequest, "ci")
+			case "fetched":
+				p, err = p.FetchedFrom(42, "acme/repo")
+			case "actions":
+				p, err = runspec.ActionsProvenance(42, "acme/repo", tc.ref, strings.Repeat("a", 40), "ci")
+			}
+			if err != nil {
+				t.Fatal(err)
 			}
 			encoded := sealWith(t, request, p)
 			engineSQL(t, e.Store, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, encoded)
@@ -163,11 +176,13 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 			if err := json.Unmarshal(payload, &claims); err != nil {
 				t.Fatal(err)
 			}
-			repositoryID := ""
+			repositoryID, repository := "", ""
 			if tc.wantID > 0 {
-				repositoryID = fmt.Sprint(tc.wantID)
+				repositoryID, repository = fmt.Sprint(tc.wantID), "acme/repo"
 			}
-			if ref, _ := claims["ref"].(string); claims["trigger"] != tc.wantEvent || ref != tc.wantRef || !strings.Contains(claims["sub"].(string), "repository_id:"+repositoryID+":pipeline:") {
+			gotID, _ := claims["repository_id"].(string)
+			gotRepository, _ := claims["repository"].(string)
+			if ref, _ := claims["ref"].(string); claims["trigger"] != tc.wantEvent || ref != tc.wantRef || (claims["sha"] != nil) != (tc.wantRef != "") || gotID != repositoryID || gotRepository != repository || !strings.Contains(claims["sub"].(string), "repository_id:"+repositoryID+":pipeline:ci:trigger:"+tc.wantEvent+":") {
 				t.Fatalf("identity: %s", payload)
 			}
 		})

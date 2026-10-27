@@ -203,7 +203,7 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 			return err
 		}
 		request.Intent = &intent.Request
-		request.FetchedRepositoryID = fetched
+		request.FetchedRepository = fetched
 		response, err := admitWithFlood(ctx, s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.admitRun(ctx, a.Target.Team, request)
 		})

@@ -57,8 +57,8 @@ func oidcBoundary() (*credentialBoundary, *oidcFacts) {
 	b.snapshot.Authorities[0].Principal.Capability.Grants = append(b.snapshot.Authorities[0].Principal.Capability.Grants, capability.OIDCMint)
 	f := &oidcFacts{selectorTransactions: selectorTransactions{team: "team"}, facts: capability.OIDCFacts{
 		Now: b.snapshot.Now, NotAfter: b.snapshot.Now.Add(5 * time.Minute),
-		Team: "team", RunID: "run", Pipeline: "deploy", Trigger: "push", RunnerKind: "runner", Ref: "refs/heads/main",
-		SHA: strings.Repeat("a", 40), Repository: "github.com/acme/api", RepositoryID: 42,
+		Team: "team", RunID: "run", Pipeline: "deploy", Trigger: "push", RunnerKind: "runner", RunnerEnvironment: "persistent", Ref: "refs/heads/main",
+		SHA: strings.Repeat("a", 40), Repository: "acme/api", RepositoryID: 42,
 	}}
 	return b, f
 }
@@ -138,7 +138,8 @@ func TestOIDCMintHTTPIdentityAndExpiryProperty(t *testing.T) {
 		ceiling := min(f.facts.NotAfter.Unix(), expiry.Unix(), deadline.Unix(), revocation.Unix())
 		return f.calls == 1 && f.minted == 1 && f.actor.Target.Team == "team" && f.actor.Target.RunID == "run" && f.actor.Access.Binding == capability.BindRun &&
 			f.actor.Principal.Authority == b.snapshot.Authorities[0].Principal.Authority && f.actor.Binding.Generation == 4 &&
-			c["iss"] == "https://issuer.example" && c["aud"] == "vault" && c["sub"] == "team:team:repository_id:42:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main" &&
+			c["iss"] == "https://issuer.example" && c["aud"] == "vault" && c["sub"] == "team:team:repository_id:42:pipeline:deploy:trigger:push:runner:runner:runner_environment:persistent:ref:refs/heads/main" &&
+			c["runner_environment"] == "persistent" && c["repository_id"] == "42" &&
 			c["team"] == "team" && c["run_id"] == "run" && c["repository"] == f.facts.Repository && c["sha"] == f.facts.SHA &&
 			c["iat"] == float64(f.facts.Now.Unix()) && c["nbf"] == c["iat"] && c["exp"] == float64(ceiling) && result.ExpiresAt.Unix() == ceiling &&
 			w.Header().Get("Cache-Control") == "no-store" && !strings.Contains(w.Body.String(), b.raw)
@@ -334,28 +335,30 @@ func TestOIDCMintHTTPKeyRotation(t *testing.T) {
 func TestOIDCMintHTTPCommittedSubjects(t *testing.T) {
 	key, private := oidcPrivate(t)
 	for _, tc := range []struct {
-		event, ref, kind string
-		repositoryID     int64
+		event, ref, kind, environment string
+		repositoryID                  int64
 	}{
-		{"push", "refs/heads/main", "runner", 42},
-		{"pull_request", "refs/pull/7/head", "runner", 42},
-		{"push", "refs/tags/v1.2.3", "runner", 42},
-		{"release", "refs/tags/v1", "runner", 42},
-		{"create", "refs/heads/topic", "runner", 42},
-		{"delete", "refs/heads/topic", "runner", 42},
-		{"cron", "refs/heads/main", "service", 0},
-		{"manual", "", "user", 0},
-		{"push", "refs/heads/main", "github-actions", 42},
-		{"push", "refs/heads/main", "runner", 9001},
+		{"push", "refs/heads/main", "runner", "persistent", 42},
+		{"pull_request", "refs/pull/7/head", "runner", "fresh", 42},
+		{"push", "refs/tags/v1.2.3", "runner", "persistent", 42},
+		{"release", "refs/tags/v1", "runner", "persistent", 42},
+		{"create", "refs/heads/topic", "runner", "persistent", 42},
+		{"delete", "refs/heads/topic", "runner", "persistent", 42},
+		{"cron", "refs/heads/main", "service", "fresh", 0},
+		{"manual", "", "user", "persistent", 0},
+		{"manual", "", "personal", "persistent", 42},
+		{"actions", "refs/heads/main", "github-actions", "fresh", 42},
+		{"actions", "refs/heads/main", "github-actions", "persistent", 42},
+		{"push", "refs/heads/main", "runner", "persistent", 9001},
 	} {
 		b, f := oidcBoundary()
-		f.facts.Trigger, f.facts.Ref, f.facts.RunnerKind, f.facts.RepositoryID = tc.event, tc.ref, tc.kind, tc.repositoryID
+		f.facts.Trigger, f.facts.Ref, f.facts.RunnerKind, f.facts.RunnerEnvironment, f.facts.RepositoryID = tc.event, tc.ref, tc.kind, tc.environment, tc.repositoryID
 		h := oidcServer(t, b, f, private, nil).Handler()
 		w := authorityHTTP(h, b, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`)
 		_, claims := oidcResponse(t, w, &key.PublicKey)
-		expected := oidcissuer.Claims{Team: "team", Pipeline: "deploy", Trigger: tc.event, RunnerKind: tc.kind, Ref: tc.ref, RepositoryID: tc.repositoryID}
+		expected := oidcissuer.Claims{Team: "team", Pipeline: "deploy", Trigger: tc.event, RunnerKind: tc.kind, RunnerEnvironment: tc.environment, Ref: tc.ref, RepositoryID: tc.repositoryID}
 		subject, err := expected.Subject()
-		if err != nil || claims["sub"] != subject || claims["trigger"] != tc.event || claims["runner_kind"] != tc.kind || (tc.ref != "" && claims["ref"] != tc.ref) {
+		if err != nil || claims["sub"] != subject || claims["trigger"] != tc.event || claims["runner_kind"] != tc.kind || claims["runner_environment"] != tc.environment || (tc.ref != "" && claims["ref"] != tc.ref) {
 			t.Fatalf("%+v: %v", tc, claims)
 		}
 	}
@@ -366,7 +369,7 @@ func TestOIDCMintHTTPSubjectInjectionProperty(t *testing.T) {
 	property := func(input []byte, field, invalid uint8) bool {
 		b, f := oidcBoundary()
 		value := "private-subject-" + hex.EncodeToString(input) + []string{":trigger:push", "*", "?", " ", "\x00", "é"}[invalid%6]
-		fields := []*string{&f.facts.Pipeline, &f.facts.Trigger, &f.facts.RunnerKind, &f.facts.Ref}
+		fields := []*string{&f.facts.Pipeline, &f.facts.Trigger, &f.facts.RunnerKind, &f.facts.RunnerEnvironment, &f.facts.Ref}
 		*fields[field%uint8(len(fields))] = value
 		w := authorityHTTP(oidcServer(t, b, f, private, nil).Handler(), b, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`)
 		var result apierr.Envelope

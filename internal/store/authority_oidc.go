@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -89,7 +90,20 @@ func (t *Tenant) oidcFactsTx(ctx context.Context, tx *storeTx, supplied capabili
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
-	facts.Now, facts.RunnerKind = snapshot.Now, factsClass.OIDCKind
+	// The host is the one award issuance classified: the claimant that received
+	// the run-bound unit capability, not the unit capability itself.
+	claimant := chain
+	for len(claimant) > 1 && claimant[0].principal.Capability.Unit != "" {
+		claimant = claimant[1:]
+	}
+	host, err := claimantFactsTx(ctx, tx, claimant, runspec.Request{})
+	if err != nil {
+		return capability.OIDCFacts{}, err
+	}
+	facts.Now, facts.RunnerKind, facts.RunnerEnvironment = snapshot.Now, factsClass.OIDCKind, oidcissuer.Persistent
+	if host.FreshHost {
+		facts.RunnerEnvironment = oidcissuer.Fresh
+	}
 	facts.NotAfter = state.LeaseExpiresAt
 	if state.Expansion != nil {
 		facts.NotAfter = state.Expansion.ExpiresAt
