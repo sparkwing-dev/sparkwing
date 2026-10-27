@@ -88,9 +88,10 @@ sparkwing team settings set --profile work --claim-ranking cloud,self-hosted
 App runs and App-armed schedules take their owner from the repository's App
 configuration (`runner: anywhere | cloud | github-actions | pool=<name>`,
 default `anywhere`). `--runner cloud` keeps a triggered run on Cloud, like the
-App's `cloud` owner. `--runner NAME` or `--runner label=LABEL` keeps the run on
-matching self-hosted runners, as does a pool route rule, and `--runner here`
-hosts it in the submitting CLI. Intake seals the choice in the run's request,
+App's `cloud` owner. `--runner NAME` keeps the whole run on that self-hosted
+runner, `--runner label=LABEL` places its plan and every job on runners with
+that label, as does a pool route rule, and `--runner here` hosts it in the
+submitting CLI. Intake seals the choice in the run's request,
 so retries keep it. A run whose work nobody has claimed after 30 seconds shows
 a notice in `sparkwing runs status`. When only metered Cloud placement could
 take that work and the team has no credits or payment method left, the notice

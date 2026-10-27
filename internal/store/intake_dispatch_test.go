@@ -25,7 +25,7 @@ func TestSelectDispatchRunsUnselectedWorkAnywhereOnEveryController(t *testing.T)
 		"non-pool requirement":     {mode: runspec.IntakeExecute, options: requires("linux"), want: runspec.DispatchController},
 		"local run keeps its host": {mode: runspec.IntakeExecute, origin: runspec.OriginLocal, want: runspec.DispatchHost},
 		"machine name":             {mode: runspec.IntakeExecute, options: runner(runspec.RunnerName, "builder"), want: runspec.DispatchHost},
-		"label":                    {mode: runspec.IntakeExecute, options: runner(runspec.RunnerLabel, "gpu"), want: runspec.DispatchHost},
+		"label":                    {mode: runspec.IntakeExecute, options: runner(runspec.RunnerLabel, "gpu"), want: runspec.DispatchController},
 		"here":                     {mode: runspec.IntakeExecute, options: runner(runspec.RunnerHere, ""), want: runspec.DispatchHost},
 		"pool requirement":         {mode: runspec.IntakeExecute, options: requires("linux", "pool=prod"), want: runspec.DispatchController},
 		"pool alternative":         {mode: runspec.IntakeExecute, options: requires("arm64, pool=prod"), want: runspec.DispatchController},
