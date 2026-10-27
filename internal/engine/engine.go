@@ -100,6 +100,8 @@ type VerifiedIndex struct {
 	verifiedAt  time.Time
 	development bool
 	offline     bool
+	// localCache marks a cached policy that local-only execution never refreshes.
+	localCache bool
 }
 
 // IndexResult reports fallback explicitly so output and the dashboard can show the same notice.

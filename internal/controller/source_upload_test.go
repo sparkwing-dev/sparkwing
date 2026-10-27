@@ -29,10 +29,6 @@ import (
 
 func sourceUploadFixture(t *testing.T, opts ...store.Option) (*serverFixture, client.EngineOptions, runspec.Request, string) {
 	t.Helper()
-	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
-	if err != nil {
-		t.Fatal(err)
-	}
 	// Signed-transfer issuance uses wall time, so verification must use it too.
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://controller", SigningKey: []byte(strings.Repeat("k", 32))})
 	if err != nil {
@@ -43,6 +39,16 @@ func sourceUploadFixture(t *testing.T, opts ...store.Option) (*serverFixture, cl
 			t.Error(err)
 		}
 	})
+	return sourceUploadFixtureWith(t, objects, nil, opts...)
+}
+
+// sourceUploadFixtureWith sends object-store hosts to objectStore and the rest to the controller.
+func sourceUploadFixtureWith(t *testing.T, objects blob.ObjectBackend, objectStore http.RoundTripper, opts ...store.Option) (*serverFixture, client.EngineOptions, runspec.Request, string) {
+	t.Helper()
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
 	s, session := credentialSessionServerWith(t, func(s *Server) { s.WithSecretsCipher(cipher).WithDataObjects(objects) }, opts...)
 	h := s.Handler()
 	w := credentialRequestHTTP(t, h, session, `{"grants":["runs.write","runs.read","runs.control"]}`, false)
@@ -50,7 +56,11 @@ func sourceUploadFixture(t *testing.T, opts ...store.Option) (*serverFixture, cl
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &credential) != nil {
 		t.Fatalf("credential: %d %s", w.Code, w.Body)
 	}
-	options := client.EngineOptions{URL: "http://controller", HTTP: &http.Client{Transport: inventoryRoundTrip{h}}, Bearer: func(context.Context) (string, error) { return credential.Capability, nil }}
+	var transport http.RoundTripper = inventoryRoundTrip{h}
+	if objectStore != nil {
+		transport = objectHostRoute{objects: objectStore, controller: transport}
+	}
+	options := client.EngineOptions{URL: "http://controller", HTTP: &http.Client{Transport: transport}, Bearer: func(context.Context) (string, error) { return credential.Capability, nil }}
 	input := runspec.Request{Version: 1, Pipeline: "ci", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/acme/repo"}, SHA: strings.Repeat("a", 40), Ref: "main"}, Source: runspec.Source{Ref: strings.Repeat("a", 40), Entrypoint: "CI", Location: runspec.SourceLocation{RemoteURL: "https://example.test/acme/repo.git", PipelineDir: ".sparkwing"}}}
 	return s, options, input, credential.Capability
 }

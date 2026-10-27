@@ -73,7 +73,12 @@ func (s *S3) Sign(ctx context.Context, object capability.ObjectToSign) (capabili
 			ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(raw)),
 		}, options)
 	} else {
-		signed, err = s.presign.PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(object.Key))}, options)
+		// safety: the default response-checksum mode signs an x-amz-checksum-mode
+		// header, which a bare URL fetch cannot send; readers verify the digest.
+		hostOnly := func(o *s3.PresignOptions) {
+			o.ClientOptions = append(o.ClientOptions, func(o *s3.Options) { o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired })
+		}
+		signed, err = s.presign.PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(object.Key))}, options, hostOnly)
 	}
 	if err != nil {
 		return capability.SignedObject{}, err
