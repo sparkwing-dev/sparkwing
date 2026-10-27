@@ -239,8 +239,8 @@ type ScheduleStore interface {
 // Set LockPath before [Service.Tick] on a host whose timer calls it: the tick
 // takes an exclusive lock on that file so two timers, or a timer and a hand-run
 // tick, cannot resolve the same due instant twice. Leave it empty in a caller
-// that already holds exclusion of its own, such as a controller ticking under
-// [store.Operator.RunCronTickLeased].
+// that already holds exclusion of its own, such as the store's one active
+// controller ticking through [store.Operator.RunCronTick].
 type Service struct {
 	Operator *store.Operator
 	Launcher Launcher

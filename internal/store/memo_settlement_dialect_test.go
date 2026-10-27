@@ -36,7 +36,7 @@ func TestMemoPublicationCommitsWithProducerOutcome(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					receipt, err := f.tenant.CommitBlobUpload(t.Context(), store.VerifiedUploadCommit{Authority: authority, TicketID: ticket.ID, Verified: ticket.Blob, ReplicaID: "memo"})
+					receipt, err := f.tenant.CommitBlobUpload(t.Context(), store.VerifiedUploadCommit{Authority: authority, TicketID: ticket.ID, Verified: ticket.Blob})
 					if err != nil {
 						t.Fatal(err)
 					}

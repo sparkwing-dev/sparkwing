@@ -45,6 +45,7 @@ import {
 } from "@/lib/billing";
 import { billingEnabled, unixSecondsISO } from "@/lib/teams";
 import { fmtDateTime } from "@/lib/timeFormat";
+import { LimitHelp } from "@/components/HelpMenu";
 
 export default function BillingPage() {
   return (
@@ -724,7 +725,7 @@ function StandingPanel({
     >
       <div className="p-4 space-y-2 text-sm">
         <p>
-          {s.tier} standing. {note}
+          {s.tier} standing. {note} <LimitHelp />
         </p>
         <p>
           {billing.limits.cloud_vcpu} concurrent Cloud vCPU and{" "}

@@ -61,7 +61,7 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 		t.Fatal(err)
 	}
 	if secret {
-		if _, err := s.DB().ExecContext(ctx, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES (?,'DEPLOY','ciphertext','account',1,1,1,'',0,'prod')`, tenant.Team()); err != nil {
+		if _, err := s.DB().ExecContext(ctx, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,repo,pipeline,shared,only_on) VALUES (?,'DEPLOY','ciphertext','account',1,1,1,'','',0,'prod')`, tenant.Team()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -129,7 +129,7 @@ func grantPool(ctx context.Context, s *store.Store, team store.Team, run, pool, 
 		return err
 	}
 	var err error
-	seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "pool-delivery", VerifiedAt: time.Now(), Ref: "refs/heads/" + branch, SHA: seal.Request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: branch == "main"}, runspec.Optional[runspec.PullRequest]{}, seal.Request.Pipeline)
+	seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "pool-delivery", VerifiedAt: time.Now(), Ref: "refs/heads/" + branch, SHA: seal.Request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: branch == "main"}, runspec.Optional[runspec.PullRequest]{}, seal.Request.Pipeline)
 	if err != nil {
 		return err
 	}

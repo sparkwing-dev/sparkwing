@@ -24,16 +24,12 @@ func TestStoreBillingRetention(t *testing.T) {
 	if _, err := op.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "billing-boundary", 200*24*time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES (?,'storage-fund','paid',?,1)`, tenant.Team(), 100*rate)
-	if initial, err := op.ChargeRetainedStorage(t.Context(), lease); err != nil || len(initial.Charges) != 0 {
+	if initial, err := op.ChargeRetainedStorage(t.Context()); err != nil || len(initial.Charges) != 0 {
 		t.Fatalf("initial sample: %+v: %v", initial, err)
 	}
 	*now = now.Add(24 * time.Hour)
-	billed, err := op.ChargeRetainedStorage(t.Context(), lease)
+	billed, err := op.ChargeRetainedStorage(t.Context())
 	if err != nil || len(billed.Charges) != 1 {
 		t.Fatalf("storage charge: %+v: %v", billed, err)
 	}
@@ -67,7 +63,15 @@ func TestStoreBillingRetention(t *testing.T) {
 	}
 	*now = now.Add(120 * 24 * time.Hour)
 	rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)", []byte(`90`))
-	result, err := op.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 100})
+	// Retention keeps a run until Sparkwing has deleted its counted log objects.
+	if result, err := op.MaintainRetention(t.Context(), RetentionRequest{Limit: 100}); err != nil || result.Runs != 0 {
+		t.Fatalf("retention before log expiry: %+v: %v", result, err)
+	}
+	deleted := &recordingLogDeleter{}
+	if n, err := op.DeleteExpiredLogObjects(t.Context(), 100, deleted); err != nil || n == 0 || n != len(deleted.keys) {
+		t.Fatalf("log expiry deleted %d objects (%v): %v", n, deleted.keys, err)
+	}
+	result, err := op.MaintainRetention(t.Context(), RetentionRequest{Limit: 100})
 	if err != nil || result.Runs != 1 {
 		t.Fatalf("retention: %+v: %v", result, err)
 	}
@@ -141,7 +145,6 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	}
 	for _, event := range []capability.PaymentEvent{
 		{Mode: capability.PaymentTest, EventID: "pending-setup", Kind: capability.PaymentCardSetup, ObjectID: "setup", CustomerID: "customer", Created: now.Unix()},
-		{Mode: capability.PaymentTest, EventID: "pending-payment", Kind: capability.PaymentCardFailed, ObjectID: "pending-payment", PaymentID: "pending-payment", CustomerID: "customer", Currency: "usd", AmountMinor: 1000, Status: "requires_payment_method", Created: now.Unix()},
 	} {
 		if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 			t.Fatal(err)
@@ -204,16 +207,12 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 	if _, err := tenant.ReleaseCreditFreezes(t.Context(), hold, "console", "resolved"); err != nil {
 		t.Fatal(err)
 	}
-	completion, err := op.AcquireSingletonLease(t.Context(), "completion", "billing-boundary", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	effects, err := op.DueRunEffects(t.Context(), completion, 100)
+	effects, err := op.DueRunEffects(t.Context(), 100)
 	if err != nil || len(effects) != 4 {
 		t.Fatalf("completion work: %+v: %v", effects, err)
 	}
 	for _, effect := range effects {
-		if err := tenant.AcknowledgeRunEffect(t.Context(), EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev, Lease: completion}); err != nil {
+		if err := tenant.AcknowledgeRunEffect(t.Context(), EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -256,4 +255,11 @@ func billingFinancialSnapshot(ctx context.Context, db *sql.DB) (map[string][]str
 		slices.Sort(snapshot[table])
 	}
 	return snapshot, nil
+}
+
+type recordingLogDeleter struct{ keys []string }
+
+func (d *recordingLogDeleter) DeleteLogObject(_ context.Context, _, _, key string) error {
+	d.keys = append(d.keys, key)
+	return nil
 }

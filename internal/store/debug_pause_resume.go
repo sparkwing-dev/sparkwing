@@ -37,7 +37,7 @@ func (t *Tenant) ResumeAuthorizedDebugPause(ctx context.Context, authorized capa
 				return err
 			}
 		}
-		_, err = appendEventTx(ctx, tx, t.team, target.RunID, target.NodeID, "debug.resumed", map[string]string{"released_by": current.Capability.Subject.ID}, tx.now(ctx))
+		_, err = appendEventTx(ctx, tx, t.team, target.RunID, target.NodeID, "debug.resumed", map[string]string{"released_by": current.Capability.Subject.ID}, tx.now(ctx), true)
 		return err
 	})
 }

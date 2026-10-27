@@ -104,7 +104,7 @@ func TestIdentityHTTPRejectsBootstrapAndEval(t *testing.T) {
 			p.Capability.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: "unit", Holder: "eval-host", Generation: 1}
 			expires := b.snapshot.Now.Add(time.Minute)
 			b.snapshot.Binding.FinishedAt = &b.snapshot.Now
-			b.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *p.Capability.Binding.Expansion, ExpiresAt: expires, ControllerLeaseExpiresAt: &expires}
+			b.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *p.Capability.Binding.Expansion, ExpiresAt: expires}
 		}
 		w := discoveryRequest(identityServer(b), b, "GET", "/api/v1/auth/whoami")
 		assertEngineError(t, w, 403, apierr.Forbidden)

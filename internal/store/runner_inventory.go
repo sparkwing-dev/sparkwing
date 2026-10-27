@@ -66,12 +66,12 @@ func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]strin
  AND n.capability_prefix=c.prefix AND n.generation=c.bind_generation AND n.claimed_by=c.bind_holder AND n.status<>'done' AND n.lease_expires_at>?)
  OR EXISTS (SELECT 1 FROM triggers t WHERE c.unit_kind=t.unit_kind AND t.team=c.team AND t.id=c.bind_run
  AND t.capability_prefix=c.prefix AND t.generation=c.bind_generation AND t.claimed_by=c.bind_holder AND t.status='claimed' AND t.finished_at IS NULL AND t.lease_expires_at>?)
-	OR EXISTS (SELECT 1 FROM eval_units e JOIN leases l ON l.name=e.owner_lease_name
+	OR EXISTS (SELECT 1 FROM eval_units e
 	JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id AND n.generation=e.source_generation
 	WHERE c.unit_kind='eval' AND e.team=c.team AND e.run_id=c.bind_run AND `+evaluationSourceSQL(&claimSQL{dialect: tx.dialect}, "n")+`
  AND e.source_node_id=c.bind_node AND e.source_generation=c.bind_generation AND e.capability_prefix=c.prefix AND e.generation=c.eval_unit_generation
- AND e.claimed_by=c.bind_holder AND e.status IN ('claimed','running') AND e.lease_expires_at>? AND e.owner_lease_name='controller.owner' AND e.owner_generation=l.generation AND l.until>?))
- ORDER BY c.prefix`, team, now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano())
+ AND e.claimed_by=c.bind_holder AND e.status IN ('claimed','running') AND e.lease_expires_at>?))
+ ORDER BY c.prefix`, team, now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano(), now.UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func currentRunnerAwardsTx(ctx context.Context, tx *storeTx, team Team) ([]strin
 }
 
 func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix string, indices map[string]int, out *capability.RunnerSnapshot) error {
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, false)
+	chain, err := teamAuthorityChainTx(ctx, tx, team, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, false, sameTeam)
 	if unavailableRunner(err) {
 		return nil
 	}
@@ -87,7 +87,7 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 		return err
 	}
 	c := chain[0].principal.Capability
-	if c.Team != string(team) || c.Billing == nil {
+	if c.Billing == nil {
 		return authorityError(apierr.IntegrityFailure, "invalid runner award")
 	}
 	key := c.Billing.ReservationID

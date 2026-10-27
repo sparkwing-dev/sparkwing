@@ -38,7 +38,6 @@ func (s *Server) configureDataStore(d *DataController) {
 	if d.authority == nil {
 		return
 	}
-	d.replicaID = s.leaseHolder
 	if d.ReadBlob == nil {
 		d.ReadBlob = func(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error) {
 			tenant, err := d.authorityTenant(ctx, authority)
@@ -54,7 +53,7 @@ func (s *Server) configureDataStore(d *DataController) {
 			if err != nil {
 				return err
 			}
-			_, err = tenant.ChargeDataDownload(ctx, authority, metadata, store.DownloadCharge{ReplicaID: s.leaseHolder, Bytes: metadata.Size, FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded})
+			_, err = tenant.ChargeDataDownload(ctx, authority, metadata, store.DownloadCharge{Bytes: metadata.Size, FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded})
 			return err
 		}
 	}

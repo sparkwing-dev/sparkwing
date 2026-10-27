@@ -14,7 +14,7 @@ import (
 
 func (c *localController) Ready() error {
 	c.mu.Lock()
-	ready := !c.closed && c.lease.Name != ""
+	ready := !c.closed && c.reconciled
 	c.mu.Unlock()
 	if !ready {
 		return errors.New("wingd: local store is not reconciled and open")
@@ -38,14 +38,12 @@ func (c *localController) FinalizeRun(runID string) {
 
 func (c *localController) FinalizeCancelledRuns(runIDs []string, reason string) error {
 	c.mu.Lock()
-	lease, closed := c.lease, c.closed
+	reconciled, closed := c.reconciled, c.closed
 	c.mu.Unlock()
-	if closed || lease.Name == "" {
+	if closed || !reconciled {
 		return errors.New("wingd: admission cancellation requires a reconciled open controller")
 	}
-	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{
-		Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
-	}}
+	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController}}
 	var result error
 	for _, runID := range runIDs {
 		if wingwire.HolderRef(runID).RunID().Remote() {

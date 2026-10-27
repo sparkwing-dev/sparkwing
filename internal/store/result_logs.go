@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"math"
 	"slices"
 	"unicode/utf8"
 
@@ -141,6 +140,9 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	var seal any
 	finalDigest = ""
 	if commit.Final {
+		if err := markLogSlotCommittedTx(ctx, tx, t.team, commit.Subject.RunID, identity.id, 0); err != nil {
+			return err
+		}
 		seal = tx.now(ctx).UnixNano()
 		completeness = "complete"
 		finalDigest = digest
@@ -155,9 +157,58 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	return tx.Commit()
 }
 
+// logSlot is one object a log stream may store; index 0 is its final manifest.
+type logSlot struct {
+	found, committed bool
+	size, created    int64
+}
+
+func logSlotTx(ctx context.Context, tx *storeTx, team Team, run, stream string, index int64) (logSlot, error) {
+	var slot logSlot
+	err := tx.QueryRowContext(ctx, `SELECT size,committed=1,created_at FROM log_slots WHERE team=? AND run_id=? AND stream_id=? AND n=?`+tx.forUpdate(), team, run, stream, index).Scan(&slot.size, &slot.committed, &slot.created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return logSlot{}, nil
+	}
+	slot.found = err == nil
+	return slot, err
+}
+
+// openLogSlotTx admits a new slot's bytes through the storage rule and counts them retained from now until the
+// object is deleted.
+func openLogSlotTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, index, size int64, key string, committed bool) error {
+	if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: run, bytes: size}); err != nil {
+		return err
+	}
+	_, err := tx.execContext(ctx, `INSERT INTO log_slots(team,run_id,stream_id,generation,n,size,committed,object_key,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+		team, run, identity.id, identity.generation, index, size, boolToInt(committed), key, tx.now(ctx).UnixNano())
+	return err
+}
+
+// commitLogSlotTx marks a segment's slot committed. Its signed size stays counted until Sparkwing deletes the object;
+// an object larger than its slot is refused, and a slot nobody signed is admitted now at the verified size.
+func commitLogSlotTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segment runstate.Segment) error {
+	index, verified := segment.Index, segment.StoredBytes
+	slot, err := logSlotTx(ctx, tx, team, run, identity.id, index)
+	if err != nil {
+		return err
+	}
+	if !slot.found {
+		return openLogSlotTx(ctx, tx, team, run, identity, index, verified, segment.ObjectKey, true)
+	}
+	if verified > slot.size {
+		return authorityError(apierr.Conflict, "log object is larger than its signed slot")
+	}
+	return markLogSlotCommittedTx(ctx, tx, team, run, identity.id, index)
+}
+
+func markLogSlotCommittedTx(ctx context.Context, tx *storeTx, team Team, run, stream string, index int64) error {
+	_, err := tx.execContext(ctx, `UPDATE log_slots SET committed=1 WHERE team=? AND run_id=? AND stream_id=? AND n=?`, team, run, stream, index)
+	return err
+}
+
 func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segments []runstate.Segment) error {
-	var next, offset, stored int64
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,1),COALESCE(MAX(end_offset),0),COALESCE(SUM(stored_bytes),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset, &stored); err != nil {
+	var next, offset int64
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,1),COALESCE(MAX(end_offset),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset); err != nil {
 		return err
 	}
 	for _, segment := range segments {
@@ -182,28 +233,22 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 		if segment.Index != next || segment.Offset != offset {
 			return authorityError(apierr.Conflict, "log segments must be contiguous")
 		}
-		if stored < 0 || stored > math.MaxInt64-segment.StoredBytes {
-			return authorityError(apierr.IntegrityFailure, "log inventory byte total is out of range")
-		}
 		_, err = tx.execContext(ctx, `INSERT INTO log_segments(team,run_id,stream_id,generation,n,stored_bytes,sha256,object_key,start_offset,end_offset) VALUES (?,?,?,?,?,?,?,?,?,?)`, team, run, identity.id, identity.generation, segment.Index, segment.StoredBytes, segment.Digest, segment.ObjectKey, segment.Offset, segment.Offset+segment.Size)
 		if err != nil {
 			return err
 		}
 		next++
 		offset += segment.Size
-		stored += segment.StoredBytes
-	}
-	if stored > 0 {
-		if err := markFreeSlotActiveTx(ctx, tx, team); err != nil {
+		if err := commitLogSlotTx(ctx, tx, team, run, identity, segment); err != nil {
 			return err
 		}
 	}
-	_, err := tx.execContext(ctx, "UPDATE log_streams SET uploaded_through = ?, stored_bytes = ? WHERE team = ? AND run_id = ? AND id = ?", offset, stored, team, run, identity.id)
+	_, err := tx.execContext(ctx, "UPDATE log_streams SET uploaded_through = ? WHERE team = ? AND run_id = ? AND id = ?", offset, team, run, identity.id)
 	return err
 }
 
 func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.LogSubject, actor runstate.Actor, sealedReplay bool) error {
-	p, err := resolveActorTx(ctx, tx, actor)
+	p, err := resolveTeamActorTx(ctx, tx, team, actor, sameTeam)
 	if err != nil {
 		return err
 	}
@@ -211,7 +256,7 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 	if c.Data != nil && c.Data.Use == capability.DataPublish {
 		return checkPublishedLogWriterTx(ctx, tx, team, subject, c)
 	}
-	if c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder {
+	if c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder {
 		return holderRefusal()
 	}
 	if subject.Kind == blob.LogJobAttempt {
@@ -292,7 +337,7 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 		now.UnixNano() >= finished.Int64 && now.UnixNano() < finished.Int64+int64(limits.LogSealGrace) {
 		// Retired rows clear the live writer; the immutable awarded credential retains its identity.
 		award, err := decodeAwardUnit(c.Unit, c.UnitID)
-		if err != nil || (c.Issuance != capability.Award && c.Issuance != capability.Exchange) || c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder || string(award.RunID) != subject.RunID {
+		if err != nil || (c.Issuance != capability.Award && c.Issuance != capability.Exchange) || c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder || string(award.RunID) != subject.RunID {
 			return holderRefusal()
 		}
 		if unit.Source != nil && (string(award.NodeID) != unit.Source.NodeID || award.SourceGeneration != unit.Source.Generation) {
@@ -321,12 +366,12 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor runstate.Actor, requ
 	}
 	// safety: authority rechecks take shared locks, which PostgreSQL forbids in read-only transactions.
 	return inTxResult(ctx, t.s, func(tx *storeTx) (runstate.LogSegments, error) {
-		principal, err := resolveActorTx(ctx, tx, actor)
+		principal, err := resolveTeamActorTx(ctx, tx, t.team, actor, sameTeam)
 		if err != nil {
 			return result, err
 		}
 		c := principal.Capability
-		if c.Team != string(t.team) || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) && !slices.Contains(c.Grants, capability.LogTail) && !slices.Contains(c.Grants, capability.ExpansionSubmit)) {
+		if !slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) && !slices.Contains(c.Grants, capability.LogTail) && !slices.Contains(c.Grants, capability.ExpansionSubmit) {
 			return result, authorityError(apierr.Forbidden, "log read grant is required")
 		}
 		if c.Binding.Kind != capability.BindingNone && c.Binding.RunID != request.Subject.RunID {

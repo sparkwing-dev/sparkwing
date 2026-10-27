@@ -255,7 +255,7 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 		if err := objects.CommitObject(ctx, ticket.StagingKey, ticket.Blob); err != nil {
 			return blob.Receipt{}, err
 		}
-		receipt, err := f.Tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{Authority: request.Authority, TicketID: ticket.ID, Verified: ticket.Blob, ReplicaID: "native-host"})
+		receipt, err := f.Tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{Authority: request.Authority, TicketID: ticket.ID, Verified: ticket.Blob})
 		if err != nil {
 			return blob.Receipt{}, err
 		}

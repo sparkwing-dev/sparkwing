@@ -5,7 +5,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -22,16 +21,12 @@ func profileCompletionFixtureWith(t *testing.T, s *store.Store) (*store.Store, *
 	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "completion", "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	due, err := s.AsOperator().DueProfileFolds(t.Context(), lease, 1)
+	due, err := s.AsOperator().DueProfileFolds(t.Context(), 1)
 	if err != nil || len(due) != 1 {
 		t.Fatalf("profile effects=%+v: %v", due, err)
 	}
 	effect := due[0]
-	return s, tenant, store.EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev, Lease: lease}
+	return s, tenant, store.EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev}
 }
 
 func TestProfileCompletionFoldsAndAcknowledgesAtomicallySQLite(t *testing.T) {
@@ -65,34 +60,28 @@ func TestProfileCompletionFoldsAndAcknowledgesAtomicallySQLite(t *testing.T) {
 			t.Fatalf("profile %q=%+v: %v", node, p, err)
 		}
 	}
-	due, err := s.AsOperator().DueProfileFolds(t.Context(), delivery.Lease, 1)
+	due, err := s.AsOperator().DueProfileFolds(t.Context(), 1)
 	if err != nil || len(due) != 0 {
 		t.Fatalf("delivered fold remains due: %+v: %v", due, err)
 	}
-	effects, err := s.AsOperator().DueRunEffects(t.Context(), delivery.Lease, 100)
+	effects, err := s.AsOperator().DueRunEffects(t.Context(), 100)
 	if err != nil || len(effects) != 3 {
 		t.Fatalf("fold consumed another effect: %+v: %v", effects, err)
 	}
 }
 
-func TestProfileCompletionCannotOutliveLeaseOrCrossTenantProperty(t *testing.T) {
+func TestProfileCompletionCannotCrossTenantProperty(t *testing.T) {
 	s, tenant, delivery := profileCompletionFixture(t)
 	other := tenantFor(t, s, "other")
 	random := rand.New(rand.NewPCG(17, 53))
 	for sample := range 64 {
 		forged, target := delivery, tenant
-		switch sample % 6 {
+		switch sample % 3 {
 		case 0:
-			forged.Lease.Generation += 1 + random.Int64N(1000)
-		case 1:
-			forged.Lease.Holder += "-foreign"
-		case 2:
-			forged.Lease.Name = "controller.owner"
-		case 3:
 			target = other
-		case 4:
+		case 1:
 			forged.Revision += 1 + random.Int64N(1000)
-		case 5:
+		case 2:
 			forged.Effect = "metrics"
 		}
 		if applied, err := target.ApplyProfileFold(t.Context(), forged, map[string]store.ProfileObservation{"job": {CPUMeasured: true, PeakCores: 1}}); err == nil || applied {
@@ -104,7 +93,7 @@ func TestProfileCompletionCannotOutliveLeaseOrCrossTenantProperty(t *testing.T) 
 			}
 		}
 	}
-	due, err := s.AsOperator().DueProfileFolds(t.Context(), delivery.Lease, 1)
+	due, err := s.AsOperator().DueProfileFolds(t.Context(), 1)
 	if err != nil || len(due) != 1 {
 		t.Fatalf("refused fold changed delivery: %+v: %v", due, err)
 	}
@@ -119,17 +108,9 @@ func TestProfileCompletionInvalidSiblingRollsBackBatch(t *testing.T) {
 	if p, err := tenant.GetPipelineProfile(t.Context(), "fixture", "a"); err != nil || p != nil {
 		t.Fatalf("partial batch committed: %+v: %v", p, err)
 	}
-	due, err := s.AsOperator().DueProfileFolds(t.Context(), delivery.Lease, 1)
+	due, err := s.AsOperator().DueProfileFolds(t.Context(), 1)
 	if err != nil || len(due) != 1 {
 		t.Fatalf("failed batch consumed work: %+v: %v", due, err)
-	}
-}
-
-func TestProfileCompletionCannotCommitAfterLeaseExpires(t *testing.T) {
-	s, tenant, delivery := profileCompletionFixtureWith(t, storetest.OpenSQLite(t))
-	s.SetTestClock(t, func() time.Time { return delivery.Lease.ExpiresAt })
-	if applied, err := tenant.ApplyProfileFold(t.Context(), delivery, map[string]store.ProfileObservation{"job": {CPUMeasured: true, PeakCores: 1}}); err == nil || applied {
-		t.Fatalf("expired fold=%v: %v", applied, err)
 	}
 }
 

@@ -241,7 +241,9 @@ execution evidence.
 Run logs use `GET /api/v1/runs/{run}/logs`. Job reads, streams and completeness
 use `/api/v1/runs/{run}/jobs/{job}/logs`, `/logs/stream` and
 `/logs/completeness`. Job segment and manifest writes use the matching
-`/log-segments` and `/log-manifest` routes. Log subjects distinguish job attempts
+`/log-segments` and `/log-manifest` routes. A commit verifies the stored objects it
+records; the final commit's `manifest` names the manifest's stored `size` and
+`digest`, and a mismatch answers `integrity_failure`. Log subjects distinguish job attempts
 from trigger, plan and eval units. A final log-tail exception cannot reopen work
 or write another attempt's logs.
 
@@ -318,20 +320,15 @@ executable's digest in `manifest_digest`, rather than a signed release manifest.
 
 <!-- design:end -->
 
-## Job output and refund records
+## Job output
 
 `GET /api/v1/runs/{run}/jobs/{job}/output` returns `{"output": VALUE}` from the
 job's committed output record. Members need `runs.read`. Execution credentials
 need a current declared read relation. The child output path uses the creating
 job's child relation. Missing or corrupt bytes fail the read.
 
-`POST /api/v1/operator/teams/{team}/refunds` records a refund already completed
-at the payment provider. A configured operator-console session and CSRF are
-required. Send `payment_id`, `refund_id`, positive `amount_cents` and `reason`,
-and retain one `Idempotency-Key` for retries. The payment must belong to the
-path team. The response includes `team`, optional `grant_id`, `paid_micro`,
-`reversed_micro`, `balance_micro` and `created`. The audit names the operator.
-A later webhook for the same refund cannot debit the ledger again.
+Refunds are made in the Stripe dashboard. The controller learns of them only
+through Stripe's refund webhooks, which reverse the refunded credits once.
 
 ## Cloud overflow controls
 

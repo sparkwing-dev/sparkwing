@@ -29,7 +29,7 @@ func TestAMissingLookupNamesWhatItLookedFor(t *testing.T) {
 		}, []string{"not found"}},
 		"GetSecretRow": {
 			func() error {
-				_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetSecretRow("secret-absent", "")
+				_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetSecretRow("secret-absent", "", "")
 				return err
 			},
 			[]string{"secret", "secret-absent"},

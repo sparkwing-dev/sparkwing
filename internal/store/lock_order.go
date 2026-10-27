@@ -19,7 +19,6 @@ type storeLockTier string
 
 const (
 	lockLedger       storeLockTier = "credit ledgers"
-	lockLease        storeLockTier = "singleton leases"
 	lockSettings     storeLockTier = "settings and signup gates"
 	lockTeam         storeLockTier = "teams"
 	lockAccount      storeLockTier = "accounts"
@@ -41,7 +40,7 @@ const (
 )
 
 var storeLockOrder = [...]storeLockTier{
-	lockLease, lockSettings, lockTeam, lockAccount, lockMembership,
+	lockSettings, lockTeam, lockAccount, lockMembership,
 	lockAuthority, lockInstallation, lockCredential, lockSchedule, lockTrigger,
 	lockEval, lockRun, lockNode, lockConcurrency, lockUpload, lockDigest,
 	lockQuota, lockLedger, lockBilling, lockRecord,
@@ -73,7 +72,7 @@ func lockClaimQueueTx(ctx context.Context, tx *storeTx) error {
 // Renewal holds authority while it waits for the run, so taking the run first
 // deadlocks against it (B15).
 func lockAuthorityThenRunTx(ctx context.Context, tx *storeTx, team Team, runID string, actor runstate.Actor) error {
-	if _, err := resolveActorTx(ctx, tx, actor); err != nil {
+	if _, err := resolveTeamActorTx(ctx, tx, team, actor, claimantAccepts(actor)); err != nil {
 		return err
 	}
 	return lockStateRunTx(ctx, tx, team, runID)

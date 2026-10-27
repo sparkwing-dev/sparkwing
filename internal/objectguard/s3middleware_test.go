@@ -149,25 +149,19 @@ func TestClassForOperationBillsAnUnknownOperationAsAWrite(t *testing.T) {
 // fixed wall-clock window: a caller that never stops retrying reaches the
 // store at most its per-minute budget of times, however long it spins.
 func TestBudgetBoundsAHotLoopAgainstAFailingBucket(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
 	const budget = 20
 	endpoint, hits := bucketThatFails(t, 1<<30)
 	l := New(testConfig(budget, 0))
+	// A pinned clock keeps the loop inside one minute window; a wall-clock loop that crossed a minute boundary got a fresh budget.
+	clock := time.Date(2031, 3, 4, 10, 0, 30, 0, time.UTC)
+	setClock(l, func() time.Time { return clock })
 	client := guardedClient(t, endpoint, l, 1)
 
 	ctx := context.Background()
-	calls := 0
-	deadline := time.Now().Add(300 * time.Millisecond)
-	for time.Now().Before(deadline) {
+	for range 5 * budget {
 		_, _ = client.PutObject(ctx, &awss3.PutObjectInput{
 			Bucket: aws.String("b"), Key: aws.String("k"), Body: strings.NewReader("x"),
 		})
-		calls++
-	}
-	if calls <= budget {
-		t.Fatalf("the loop only spun %d times, which is too few to prove the budget bound", calls)
 	}
 	if got := hits.Load(); got != budget {
 		t.Fatalf("%d requests reached the bucket over the window, want the budget of %d", got, budget)

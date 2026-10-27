@@ -31,7 +31,11 @@ type IntakeRequest struct {
 	CapabilityPrefix   string
 	LocalSecrets       map[string]string `json:"-"`
 	VerifiedDeliveryID string
-	RetryMode          string
+	// FetchedRepositoryID is the GitHub repository the controller fetches this
+	// run's code from through the team's App installation; only the controller
+	// sets it, never a request body.
+	FetchedRepositoryID int64 `json:"-"`
+	RetryMode           string
 	// OriginMachine is a short-lived proof of the submitting machine's runner credential; intake verifies it and seals
 	// only the machine's name.
 	OriginMachine string `json:"-"`
@@ -244,7 +248,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 }
 
 func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission) error {
-	preliminary, err := authorityChainTx(ctx, tx, request.Actor.Authority, false)
+	preliminary, err := teamAuthorityChainTx(ctx, tx, team, request.Actor.Authority, false, sameTeam)
 	if err != nil {
 		return err
 	}
@@ -252,18 +256,12 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 	if lease == nil {
 		return holderRefusal()
 	}
-	var controllerGeneration, controllerUntil int64
-	if lease.Kind == capability.UnitEval {
-		if err := tx.QueryRowContext(ctx, `SELECT generation,until FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&controllerGeneration, &controllerUntil); err != nil {
-			return err
-		}
-	}
-	chain, err := authorityChainTx(ctx, tx, request.Actor.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, team, request.Actor.Authority, true, sameTeam)
 	if err != nil {
 		return err
 	}
 	c := chain[0].principal.Capability
-	if c.Team != string(team) || c.Prefix != request.Actor.CapabilityPrefix || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.ExpansionSubmit) || c.Binding.Kind != capability.BindingNode || runspec.RunID(c.Binding.RunID) != request.Source.RunID || runspec.NodeID(c.Binding.NodeID) != request.Source.NodeID || runspec.ClaimGeneration(c.Binding.Generation) != request.SourceGeneration {
+	if c.Prefix != request.Actor.CapabilityPrefix || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.ExpansionSubmit) || c.Binding.Kind != capability.BindingNode || runspec.RunID(c.Binding.RunID) != request.Source.RunID || runspec.NodeID(c.Binding.NodeID) != request.Source.NodeID || runspec.ClaimGeneration(c.Binding.Generation) != request.SourceGeneration {
 		return holderRefusal()
 	}
 	lease = c.Binding.Expansion
@@ -271,7 +269,7 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		return holderRefusal()
 	}
 	var holder, prefix, status string
-	var generation, ownerGeneration int64
+	var generation int64
 	var until, cancelled sql.NullInt64
 	switch lease.Kind {
 	case capability.UnitTrigger:
@@ -293,10 +291,10 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		if err := lockOwnerUnitTx(ctx, tx, team, unit); err != nil {
 			return err
 		}
-		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,owner_generation FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration).Scan(&status, &holder, &prefix, &generation, &until, &ownerGeneration)
+		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`, team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration).Scan(&status, &holder, &prefix, &generation, &until)
 		stored := runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: holder, Generation: runspec.ClaimGeneration(generation)}
 		credential := runspec.EvalFence{RunID: runspec.RunID(c.Binding.RunID), SourceNodeID: runspec.NodeID(c.Binding.NodeID), SourceGeneration: runspec.ClaimGeneration(c.Binding.Generation), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}
-		if err == nil && (prefix != c.Prefix || ownerGeneration != controllerGeneration || request.Actor.Owner.Kind != runstate.OwnerEval || stored != request.Actor.Owner.EvalFence || request.Actor.Owner.EvalFence != credential) {
+		if err == nil && (prefix != c.Prefix || request.Actor.Owner.Kind != runstate.OwnerEval || stored != request.Actor.Owner.EvalFence || request.Actor.Owner.EvalFence != credential) {
 			return holderRefusal()
 		}
 	default:
@@ -306,9 +304,6 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		return err
 	}
 	now := tx.now(ctx)
-	if lease.Kind == capability.UnitEval && controllerUntil <= now.UnixNano() {
-		return holderRefusal()
-	}
 	if status != "claimed" && status != "running" || holder != lease.Holder || generation != lease.Generation || !until.Valid || until.Int64 <= now.UnixNano() || cancelled.Valid {
 		return holderRefusal()
 	}
@@ -316,7 +311,7 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 }
 
 func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUnit, status string, actor runstate.Actor, now time.Time) error {
-	if err := checkReaperTx(ctx, tx, actor); err != nil {
+	if err := checkReaperTx(actor); err != nil {
 		return err
 	}
 	return resolveExpansionLossTx(ctx, tx, target, status, now)
@@ -365,9 +360,6 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	}
 	lineage, err := json.Marshal(snapshot.execution)
 	if err != nil {
-		return err
-	}
-	if err := markFreeSlotActiveTx(ctx, tx, team); err != nil {
 		return err
 	}
 	identity, err := sourceurl.RoutingIdentity(string(input.Git.Repository.Key), input.Git.Repository.Display)
@@ -494,15 +486,8 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 		return AcceptedPlan{}, err
 	}
 	if dispatch == string(runspec.DispatchController) {
-		var holder string
-		var generation, until int64
-		err := tx.QueryRowContext(ctx, `SELECT holder,generation,until FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder, &generation, &until)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return AcceptedPlan{}, err
-		}
-		if err == nil && until > now.UnixNano() {
-			controller = &runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{RunID: runspec.RunID(request.RunID), Holder: holder, Generation: runspec.ClaimGeneration(generation)}}}
-		}
+		actor := controllerActor(request.RunID)
+		controller = &actor
 	}
 	if err := planAuthorityTx(ctx, tx, team, request); err != nil {
 		return AcceptedPlan{}, err

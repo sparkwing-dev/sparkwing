@@ -85,6 +85,9 @@ func (u *nativeLogUploader) signed(ctx context.Context, index int64, body []byte
 	return slot, err
 }
 
+// put uploads one slot's object before the slot's fixed upload deadline (STORE-DATA.md, log slot accounting). A
+// create-only refusal (HTTP 412) follows a PUT whose response was lost; it proves nothing about the bytes, so put
+// reports success and the commit that follows verifies the stored object.
 func (u *nativeLogUploader) put(ctx context.Context, target string, headers map[string]string, expiry time.Time, body []byte) error {
 	if err := validateDataTransfer(controllerwire.DataSignedTransfer{URL: target, Headers: headers, ExpiresAt: expiry}); err != nil {
 		return err
@@ -102,6 +105,9 @@ func (u *nativeLogUploader) put(ctx context.Context, target string, headers map[
 	}
 	_, readErr := io.Copy(io.Discard, response.Body)
 	err = errors.Join(readErr, response.Body.Close())
+	if response.StatusCode == http.StatusPreconditionFailed && err == nil {
+		return nil
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return errors.Join(fmt.Errorf("log upload returned HTTP %d", response.StatusCode), err)
 	}
@@ -113,8 +119,12 @@ func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segme
 	if err != nil {
 		return err
 	}
-	if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
-		return err
+	// safety: a committed slot means an earlier commit succeeded and only its acknowledgement was lost. Re-signing
+	// keeps the slot's first deadline and is refused after it, so a retry never extends upload authority.
+	if !slot.Committed {
+		if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
+			return err
+		}
 	}
 	var offset int64
 	for _, previous := range u.segments {
@@ -131,8 +141,10 @@ func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segme
 		return err
 	}
 	row := runstate.Segment{Index: int64(segment.N), Offset: offset, Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key}
-	if err := u.commit(ctx, []runstate.Segment{row}, false, ""); err != nil {
-		return err
+	if !slot.Committed {
+		if err := u.commit(ctx, []runstate.Segment{row}, nil, ""); err != nil {
+			return err
+		}
 	}
 	u.segments = append(u.segments, row)
 	return nil
@@ -147,7 +159,7 @@ func (u *nativeLogUploader) PutManifest(ctx context.Context, manifest logseg.Man
 		return err
 	}
 	slot, err := u.signed(ctx, 0, body)
-	if err != nil {
+	if err != nil || slot.Committed {
 		return err
 	}
 	if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
@@ -157,22 +169,27 @@ func (u *nativeLogUploader) PutManifest(ctx context.Context, manifest logseg.Man
 	if manifest.Status != logseg.StatusComplete {
 		reason = manifest.Reason
 	}
-	return u.commit(ctx, u.segments, true, reason)
+	sum := sha256.Sum256(body)
+	check := &blob.LogUploadCheck{Subject: u.subject, Size: int64(len(body)), Digest: blob.Digest(hex.EncodeToString(sum[:]))}
+	return u.commit(ctx, u.segments, check, reason)
 }
 
-func (u *nativeLogUploader) commit(ctx context.Context, segments []runstate.Segment, final bool, reason string) error {
+// commit records segments, and seals the stream once the controller verifies the stored manifest. It is
+// idempotent, so a retry after a lost acknowledgement replays it.
+func (u *nativeLogUploader) commit(ctx context.Context, segments []runstate.Segment, manifest *blob.LogUploadCheck, reason string) error {
 	var result struct {
 		Recorded bool `json:"recorded"`
 	}
 	body := struct {
-		Subject          blob.LogSubject    `json:"subject"`
-		Segments         []runstate.Segment `json:"segments"`
-		Final            bool               `json:"final"`
-		IncompleteReason string             `json:"incomplete_reason,omitempty"`
-	}{u.subject, segments, final, reason}
+		Subject          blob.LogSubject      `json:"subject"`
+		Segments         []runstate.Segment   `json:"segments"`
+		Final            bool                 `json:"final"`
+		Manifest         *blob.LogUploadCheck `json:"manifest,omitempty"`
+		IncompleteReason string               `json:"incomplete_reason,omitempty"`
+	}{u.subject, segments, manifest != nil, manifest, reason}
 	err := u.transport.request(ctx, "POST", u.pattern+"/log-manifest", u.path+"/log-manifest", "", body, &result)
 	if err == nil && !result.Recorded {
-		err = dataProtocolError("log segment commit was not acknowledged: " + strconv.FormatBool(final))
+		err = dataProtocolError("log segment commit was not acknowledged: " + strconv.FormatBool(manifest != nil))
 	}
 	return err
 }

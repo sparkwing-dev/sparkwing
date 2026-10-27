@@ -310,7 +310,7 @@ func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest)
 
 func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.HasManyRequest) (blob.Presence, error) {
 	result := blob.Presence{}
-	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: request.Authority.CapabilityRef})
+	p, err := resolveTeamAuthorityTx(ctx, tx, team, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: request.Authority.CapabilityRef}, sameTeam)
 	if err != nil {
 		return result, err
 	}

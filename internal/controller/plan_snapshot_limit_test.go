@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -51,9 +50,6 @@ func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc, opts ...store.O
 		Resolved: runspec.Resolved{SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}},
 	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.Store.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "controller", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	h := New(e.Store, nil).WithEngineController(e.EngineController).Handler()

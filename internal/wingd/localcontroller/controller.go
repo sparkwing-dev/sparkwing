@@ -21,7 +21,7 @@ import (
 // State supplies the local recovery and activity projection over the owned store.
 type State interface {
 	Ready() error
-	Reconcile(context.Context, store.SingletonLease) (wingd.LocalActivity, error)
+	Reconcile(context.Context) (wingd.LocalActivity, error)
 	Watch(context.Context, func(wingd.LocalActivity) error) error
 }
 
@@ -112,11 +112,11 @@ type localController struct {
 	tenant   *store.Tenant
 	queue    *runners.Loop
 	mu       sync.Mutex
-	lease    store.SingletonLease
-	owner    store.SingletonLease
-	running  bool
-	closed   bool
-	closeErr error
+	// reconciled is set once startup recovery has run; workers and admission cancellation need it.
+	reconciled bool
+	running    bool
+	closed     bool
+	closeErr   error
 }
 
 func (c *localController) HTTP() localhostwire.LocalHTTP { return c.services.HTTP }
@@ -124,46 +124,28 @@ func (c *localController) HTTP() localhostwire.LocalHTTP { return c.services.HTT
 func (c *localController) Reconcile(ctx context.Context) (wingd.LocalActivity, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || c.running || c.lease.Name != "" {
+	if c.closed || c.running || c.reconciled {
 		return wingd.LocalActivity{}, errors.New("wingd: local reconciliation requires a new controller")
 	}
-	lease, err := c.operator.AcquireSingletonLease(ctx, "controller.reaper", "wingd", limits.DefaultLease)
-	if err != nil {
+	if err := c.sweep(ctx); err != nil {
 		return wingd.LocalActivity{}, err
 	}
-	if err := c.sweep(ctx, lease); err != nil {
-		return wingd.LocalActivity{}, err
-	}
-	activity, err := c.State.Reconcile(ctx, lease)
+	activity, err := c.State.Reconcile(ctx)
 	if err == nil {
-		lease, err = c.operator.RenewSingletonLease(ctx, lease, limits.DefaultLease)
-	}
-	var owner store.SingletonLease
-	if err == nil {
-		owner, err = c.ownRuns(ctx, store.SingletonLease{})
+		err = c.ownRuns(ctx)
 	}
 	if err == nil {
-		c.lease, c.owner = lease, owner
+		c.reconciled = true
 	}
 	return activity, err
 }
 
-// safety: holding controller.owner is what lets this queue schedule and recover controller-dispatched runs.
-func (c *localController) ownRuns(ctx context.Context, owner store.SingletonLease) (store.SingletonLease, error) {
-	operator := c.operator
-	var err error
-	if owner.Name == "" {
-		owner, err = operator.AcquireSingletonLease(ctx, "controller.owner", "wingd", limits.DefaultLease)
-	} else {
-		owner, err = operator.RenewSingletonLease(ctx, owner, limits.DefaultLease)
-	}
-	if err != nil {
-		return owner, err
-	}
+// ownRuns schedules and recovers controller-dispatched runs; the SQLite store has only this process as its controller.
+func (c *localController) ownRuns(ctx context.Context) error {
 	for after := ""; ; {
-		page, err := operator.ReconcileControllerRuns(ctx, owner, after, 500)
+		page, err := c.operator.ReconcileControllerRuns(ctx, after, 500)
 		if err != nil || len(page) < 500 {
-			return owner, err
+			return err
 		}
 		after = page[len(page)-1].RunID
 	}
@@ -171,12 +153,11 @@ func (c *localController) ownRuns(ctx context.Context, owner store.SingletonLeas
 
 func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivity) error) error {
 	c.mu.Lock()
-	if c.closed || c.running || c.lease.Name == "" || report == nil {
+	if c.closed || c.running || !c.reconciled || report == nil {
 		c.mu.Unlock()
 		return errors.New("wingd: local workers require reconciled state and an activity reporter")
 	}
 	c.running = true
-	lease, owner := c.lease, c.owner
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -200,7 +181,7 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 	}
 	start("queue", c.queue.Run)
 	start("activity", func(ctx context.Context) error { return c.State.Watch(ctx, report) })
-	start("maintenance", func(ctx context.Context) error { return c.maintain(ctx, lease, owner) })
+	start("maintenance", func(ctx context.Context) error { return c.maintain(ctx) })
 	var result error
 	for range 3 {
 		result = errors.Join(result, <-results)
@@ -209,7 +190,7 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 	return result
 }
 
-func (c *localController) maintain(ctx context.Context, lease, owner store.SingletonLease) error {
+func (c *localController) maintain(ctx context.Context) error {
 	tick := time.NewTicker(limits.Renew(limits.DefaultLease))
 	defer tick.Stop()
 	var nextMaintenance time.Time
@@ -218,15 +199,10 @@ func (c *localController) maintain(ctx context.Context, lease, owner store.Singl
 		case <-ctx.Done():
 			return nil
 		case <-tick.C:
-			var err error
-			lease, err = c.operator.RenewSingletonLease(ctx, lease, limits.DefaultLease)
-			if err != nil {
+			if err := c.ownRuns(ctx); err != nil {
 				return err
 			}
-			if owner, err = c.ownRuns(ctx, owner); err != nil {
-				return err
-			}
-			if err := c.sweep(ctx, lease); err != nil {
+			if err := c.sweep(ctx); err != nil {
 				return err
 			}
 			if c.services.Complete != nil {
@@ -242,10 +218,10 @@ func (c *localController) maintain(ctx context.Context, lease, owner store.Singl
 	}
 }
 
-func (c *localController) sweep(ctx context.Context, lease store.SingletonLease) error {
+func (c *localController) sweep(ctx context.Context) error {
 	const batch = 100
 	for {
-		units, err := c.operator.ReapUnits(ctx, lease, batch)
+		units, err := c.operator.ReapUnits(ctx, batch)
 		if err != nil {
 			return err
 		}
@@ -253,7 +229,7 @@ func (c *localController) sweep(ctx context.Context, lease store.SingletonLease)
 			break
 		}
 	}
-	_, err := c.operator.MaintainConcurrency(ctx, lease)
+	_, err := c.operator.MaintainConcurrency(ctx)
 	return err
 }
 

@@ -12,7 +12,7 @@ func TestChangedRevisionChildRequiredSecretSelection(t *testing.T) {
 	s := newTestStore(t)
 	parent, git := referenceAppProvenance(t, "refs/heads/main", referenceMain)
 	tenant, id := childReference(t, s, parent, git, childRequest("deploy", "refs/heads/feature", referenceFeature))
-	s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at,only_on) VALUES ('a','TOKEN','excluded','owner','',1,0,1,1,'prod')`)
+	s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at,only_on) VALUES ('a','TOKEN','excluded','owner','','',1,0,1,1,'prod')`)
 	s.planSecretOpener = fakePlanSecretOpener(func(_ context.Context, _ Team, secret Secret) (string, error) {
 		if secret.Name == "TOKEN" {
 			t.Fatal("excluded row reached plan decryption")
@@ -70,7 +70,7 @@ func TestChangedRevisionChildRequiredSecretSelection(t *testing.T) {
 func TestSecretSelectionScopeAndShadowing(t *testing.T) {
 	s := newTestStore(t)
 	referenceWorld(t, s, "gh:701")
-	s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES ('a','TOKEN','team','owner','',0,1,1,1),('a','TOKEN','pipeline','owner','ci',0,0,1,1),('a','PRIVATE','private','owner','',0,0,1,1)`)
+	s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at) VALUES ('a','TOKEN','team','owner','','',0,1,1,1),('a','TOKEN','pipeline','owner','gh:701','ci',0,0,1,1),('a','PRIVATE','private','owner','','',0,0,1,1)`)
 	for _, tc := range []struct {
 		name      string
 		selection secretSelection
@@ -79,7 +79,8 @@ func TestSecretSelectionScopeAndShadowing(t *testing.T) {
 	}{
 		{"none", secretSelection{}, "", false},
 		{"shared", secretSelection{scope: secretSharedOnly}, "team", false},
-		{"pipeline", secretSelection{scope: secretPipelineScope, pipeline: "ci"}, "pipeline", false},
+		{"pipeline", secretSelection{scope: secretPipelineScope, repo: "gh:701", pipeline: "ci"}, "pipeline", false},
+		{"same pipeline of another repository", secretSelection{scope: secretPipelineScope, repo: "gh:702", pipeline: "ci"}, "team", false},
 		{"member", secretSelection{scope: secretPipelineScope, includeUnshared: true}, "team", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

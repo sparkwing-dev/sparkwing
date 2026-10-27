@@ -34,10 +34,7 @@ func (s *localState) Ready() error {
 	return s.binding.Store.AsOperator().Ping(context.Background())
 }
 
-func (s *localState) Reconcile(ctx context.Context, lease store.SingletonLease) (wingd.LocalActivity, error) {
-	if lease.Name != "controller.reaper" || lease.Holder == "" || lease.Generation <= 0 {
-		return wingd.LocalActivity{}, errors.New("wingd: local state requires the elected reaper fence")
-	}
+func (s *localState) Reconcile(ctx context.Context) (wingd.LocalActivity, error) {
 	activity, err := s.snapshot(ctx)
 	if err == nil {
 		s.mu.Lock()

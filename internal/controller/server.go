@@ -102,10 +102,9 @@ type Server struct {
 	liveLogs  *liveLogs
 	placement placementPolicy
 
-	// safety: names this process in the cron tick lease and on each recorded
-	// tick, so an operator can tell which controller evaluated.
-	cronHolder  string
-	leaseHolder string
+	// safety: names this process on each recorded tick, so an operator can
+	// tell which controller evaluated.
+	cronHolder string
 
 	// safety: the cron evaluator's clock, so a test can resolve a due
 	// instant without waiting a minute for one. Nil reads time.Now.
@@ -445,7 +444,7 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 		servers = append(servers, served{metricsSrv, ln.Metrics})
 	}
 
-	s.reapLeased(ctx)
+	s.reap(ctx)
 
 	s.loadEgressUsage(ctx)
 	s.reconcileOwnedRuns(ctx)
@@ -501,7 +500,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.reapLeased(ctx)
+			s.reap(ctx)
 			s.reconcileOwnedRuns(ctx)
 			if err := s.ReconcileRunEffects(ctx); err != nil && ctx.Err() == nil {
 				s.logger.Error("run completion failed", "err", err)
@@ -510,8 +509,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		}
 	}
 }
-
-const reaperLeaseTTL = time.Minute
 
 const licenseAlarmInterval = time.Hour
 
@@ -533,21 +530,8 @@ func (s *Server) runLicenseAlarm(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func (s *Server) reapLeased(ctx context.Context) bool {
-	lease, err := s.operator.AcquireSingletonLease(ctx, "controller.reaper", s.leaseHolder, reaperLeaseTTL)
-	if errors.Is(err, store.ErrLockHeld) {
-		return false
-	}
-	if err != nil {
-		s.logger.Error("maintenance sweep lease failed", "err", err)
-		return false
-	}
-	s.reap(ctx, lease)
-	return true
-}
-
-func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
-	concurrency, err := s.operator.MaintainConcurrency(ctx, lease)
+func (s *Server) reap(ctx context.Context) {
+	concurrency, err := s.operator.MaintainConcurrency(ctx)
 	if err != nil {
 		s.logger.Error("concurrency maintenance failed", "err", err)
 	}
@@ -562,7 +546,7 @@ func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
 			"node_id", w.NodeID, "policy", w.Policy,
 			"arrived_at", w.ArrivedAt.Format(time.RFC3339))
 	}
-	if recoveries, err := s.operator.ReapUnits(ctx, lease, 500); err != nil {
+	if recoveries, err := s.operator.ReapUnits(ctx, 500); err != nil {
 		s.logger.Error("work recovery sweep failed", "err", err)
 	} else {
 		for _, recovery := range recoveries {

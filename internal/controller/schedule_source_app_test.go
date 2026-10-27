@@ -56,7 +56,7 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 				case "GET /installation/repositories":
 					body = `{"total_count":1,"repositories":[{"id":701,"full_name":"acme/widgets","owner":{"id":42,"login":"acme","type":"Organization"}}]}`
 				case "GET /repositories/701":
-					body = `{"id":701,"default_branch":"main"}`
+					body = `{"id":701,"full_name":"acme/widgets","default_branch":"main"}`
 				case "GET /repos/acme/widgets/git/ref/heads/main":
 					lookups["main"]++
 					body = `{"ref":"refs/heads/main","object":{"type":"commit","sha":"` + execution + `"}}`

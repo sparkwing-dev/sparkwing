@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 func (t *Tenant) teamMutationTx(ctx context.Context, a capability.Authorized, operation, subject string, write func(*storeTx, capability.Principal) error) error {
@@ -37,7 +38,7 @@ func (t *Tenant) teamMutationInTx(ctx context.Context, tx *storeTx, a capability
 	if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 		return err
 	}
-	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 	if err != nil {
 		return err
 	}
@@ -143,7 +144,7 @@ func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authoriz
 		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
 			return err
 		}
-		p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+		p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 		if err != nil {
 			return err
 		}
@@ -182,13 +183,15 @@ func (op *Operator) accountHasOtherTeamTx(ctx context.Context, tx *storeTx, acco
 	return count > 0, err
 }
 
-// DeleteAuthorizedRun removes a finished run under current control authority.
-func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized) error {
+// DeleteAuthorizedRun removes a finished run under current control authority. Once the run is known deletable,
+// deleteLogs removes its log objects before the records go; if it fails, the run, its log slots and their counted
+// bytes stay. A nil deleteLogs means the deployment stores no log objects.
+func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized, deleteLogs func(context.Context) error) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
 		if a.Target.Team != string(t.team) || a.Target.RunID == "" || a.Target.NodeID != "" || a.ResultReplay || a.LogTailAttempt != 0 {
 			return bindingRefusal()
 		}
-		p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+		p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 		if err != nil {
 			return err
 		}
@@ -233,8 +236,21 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		if held != 0 {
 			return authorityError(apierr.Conflict, "run still has claimed work")
 		}
-		if _, err := tx.ResolveAuthority(ctx, a.Principal.Authority); err != nil {
+		// safety: a saved upload URL could recreate a deleted log object, uncounted, until its slot's deadline.
+		var signed sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT MAX(created_at) FROM log_slots WHERE team=? AND run_id=?`, t.team, a.Target.RunID).Scan(&signed); err != nil {
 			return err
+		}
+		if deadline := time.Unix(0, signed.Int64).Add(limits.LogUploadURLTTL); signed.Valid && tx.now(ctx).Before(deadline) {
+			return authorityError(apierr.Conflict, "this run's logs are still uploading; try again after "+deadline.UTC().Format(time.RFC3339))
+		}
+		if _, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam); err != nil {
+			return err
+		}
+		if deleteLogs != nil {
+			if err := deleteLogs(ctx); err != nil {
+				return &apierr.Error{Code: apierr.Unavailable, Message: "run logs could not be deleted; the run is kept, try again"}
+			}
 		}
 		if _, err := tx.execContext(ctx, `DELETE FROM pipeline_success_pins WHERE team=? AND run_id=?`, t.team, a.Target.RunID); err != nil {
 			return err

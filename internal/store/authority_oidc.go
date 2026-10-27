@@ -44,7 +44,7 @@ func (t *Tenant) MintOIDCToken(ctx context.Context, supplied capability.Authoriz
 }
 
 func (t *Tenant) oidcFactsTx(ctx context.Context, tx *storeTx, supplied capability.Authorized) (capability.OIDCFacts, error) {
-	chain, err := authorityChainTx(ctx, tx, supplied.Principal.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, t.team, supplied.Principal.Authority, true, sameTeam)
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
@@ -93,9 +93,6 @@ func (t *Tenant) oidcFactsTx(ctx context.Context, tx *storeTx, supplied capabili
 	facts.NotAfter = state.LeaseExpiresAt
 	if state.Expansion != nil {
 		facts.NotAfter = state.Expansion.ExpiresAt
-		if end := state.Expansion.ControllerLeaseExpiresAt; end != nil && end.Before(facts.NotAfter) {
-			facts.NotAfter = *end
-		}
 	}
 	facts.NotAfter = authorityNotAfter(chain, facts.NotAfter)
 	if !facts.NotAfter.After(facts.Now) {
@@ -112,9 +109,7 @@ func oidcIdentity(team Team, run RunRow) (capability.OIDCFacts, error) {
 	}
 	facts := capability.OIDCFacts{Team: string(team), RunID: run.ID, Pipeline: provenance.Pipeline()}
 	facts.Trigger, facts.RepositoryID, facts.Ref, facts.SHA = provenance.OIDC()
-	if facts.RepositoryID > 0 {
-		facts.Repository = run.Request.Request.Git.Repository.Display
-	}
+	facts.Repository = provenance.Repository()
 	return facts, nil
 }
 

@@ -54,32 +54,28 @@ type EffectDelivery struct {
 	RunID    string
 	Effect   Effect
 	Revision int64
-	Lease    SingletonLease
 }
 
-// DueRunEffects reads revisions under the completion singleton lease; expiry stops further delivery acknowledgements.
-func (o *Operator) DueRunEffects(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error) {
-	return o.dueRunEffects(ctx, lease, "", limit)
+// DueRunEffects reads the revisions due for delivery.
+func (o *Operator) DueRunEffects(ctx context.Context, limit int) ([]DesiredRunEffect, error) {
+	return o.dueRunEffects(ctx, "", limit)
 }
 
 // DueProfileFolds selects terminal profile work without starvation by other effect types.
-func (o *Operator) DueProfileFolds(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error) {
-	return o.dueRunEffects(ctx, lease, EffectProfileFold, limit)
+func (o *Operator) DueProfileFolds(ctx context.Context, limit int) ([]DesiredRunEffect, error) {
+	return o.dueRunEffects(ctx, EffectProfileFold, limit)
 }
 
 // DueGitHubChecks selects GitHub work without starvation by other effect types.
-func (o *Operator) DueGitHubChecks(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error) {
-	return o.dueRunEffects(ctx, lease, effectGitHubCheck, limit)
+func (o *Operator) DueGitHubChecks(ctx context.Context, limit int) ([]DesiredRunEffect, error) {
+	return o.dueRunEffects(ctx, effectGitHubCheck, limit)
 }
 
-func (o *Operator) dueRunEffects(ctx context.Context, lease SingletonLease, effect Effect, limit int) ([]DesiredRunEffect, error) {
+func (o *Operator) dueRunEffects(ctx context.Context, effect Effect, limit int) ([]DesiredRunEffect, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("effect limit must be positive")
 	}
 	return inTxResult(ctx, o.s, func(tx *storeTx) ([]DesiredRunEffect, error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "completion"); err != nil {
-			return nil, err
-		}
 		observedAt := tx.now(ctx)
 		rows, err := tx.queryContext(ctx, `SELECT e.team,e.run_id,e.effect,e.desired_state,e.desired_rev,e.delivered_rev,e.attempts,e.next_at,
 r.pipeline,r.git_sha,r.git_branch,r.error,
@@ -157,9 +153,6 @@ func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, 
 		return fmt.Errorf("invalid effect delivery")
 	}
 	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
-		if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion"); err != nil {
-			return err
-		}
 		var desired, delivered int64
 		err := tx.QueryRowContext(ctx, `SELECT desired_rev,delivered_rev FROM run_effects WHERE team = ? AND run_id = ? AND effect = ?`+tx.forUpdate(), t.team, delivery.RunID, delivery.Effect).Scan(&desired, &delivered)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -188,9 +181,6 @@ func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, 
 			return err
 		}
 
-		if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion"); err != nil {
-			return err
-		}
 		return nil
 	})
 }

@@ -67,7 +67,7 @@ func checkUploadCommitAbortContention(t *testing.T, target *storetest.Target) {
 		committed, aborted := make(chan error, 1), make(chan error, 1)
 		go func() {
 			<-start
-			_, e := f.tenant.CommitBlobUpload(t.Context(), store.VerifiedUploadCommit{Authority: authority, TicketID: ticket.ID, Verified: ticket.Blob, ReplicaID: "first"})
+			_, e := f.tenant.CommitBlobUpload(t.Context(), store.VerifiedUploadCommit{Authority: authority, TicketID: ticket.ID, Verified: ticket.Blob})
 			committed <- e
 		}()
 		go func() { <-start; aborted <- second.AbortBlobUpload(t.Context(), authority, ticket.ID) }()

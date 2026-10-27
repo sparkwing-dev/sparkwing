@@ -524,6 +524,8 @@ components:
           type: string
         repo_key:
           type: string
+        repository:
+          type: string
         runner_environment:
           type: string
         sha:
@@ -2425,47 +2427,6 @@ components:
         - limits
       type: object
       x-sparkwing-go-type: controllerwire.OperatorLimitsWrite
-    internal.controllerwire.OperatorRefund:
-      additionalProperties: true
-      properties:
-        amount_cents:
-          type: integer
-        payment_id:
-          type: string
-        reason:
-          type: string
-        refund_id:
-          type: string
-      required:
-        - payment_id
-        - refund_id
-        - amount_cents
-        - reason
-      type: object
-      x-sparkwing-go-type: controllerwire.OperatorRefund
-    internal.controllerwire.OperatorRefundRecorded:
-      additionalProperties: true
-      properties:
-        balance_micro:
-          type: integer
-        created:
-          type: boolean
-        grant_id:
-          type: string
-        paid_micro:
-          type: integer
-        reversed_micro:
-          type: integer
-        team:
-          type: string
-      required:
-        - team
-        - paid_micro
-        - reversed_micro
-        - balance_micro
-        - created
-      type: object
-      x-sparkwing-go-type: controllerwire.OperatorRefundRecorded
     internal.controllerwire.OperatorStandingQueue:
       additionalProperties: true
       properties:
@@ -3667,20 +3628,6 @@ components:
         - next_due_at
       type: object
       x-sparkwing-go-type: controllerwire.ScheduleView
-    internal.controllerwire.SecretDeletion:
-      additionalProperties: true
-      properties:
-        deleted:
-          type: boolean
-        name:
-          type: string
-        pipeline:
-          type: string
-      required:
-        - name
-        - deleted
-      type: object
-      x-sparkwing-go-type: controllerwire.SecretDeletion
     internal.controllerwire.SecretMetadata:
       additionalProperties: true
       properties:
@@ -3697,6 +3644,10 @@ components:
         pipeline:
           type: string
         principal:
+          type: string
+        repo:
+          type: string
+        repo_key:
           type: string
         shared:
           type: boolean
@@ -3743,6 +3694,8 @@ components:
           type: string
         pipeline:
           type: string
+        repo:
+          type: string
       required:
         - name
       type: object
@@ -3763,6 +3716,10 @@ components:
         pipeline:
           type: string
         principal:
+          type: string
+        repo:
+          type: string
+        repo_key:
           type: string
         shared:
           type: boolean
@@ -3791,6 +3748,8 @@ components:
         only_on:
           type: string
         pipeline:
+          type: string
+        repo:
           type: string
         shared:
           type: boolean
@@ -4899,6 +4858,8 @@ components:
           type: integer
         ref:
           type: string
+        repository:
+          type: string
         repository_id:
           type: integer
         sha:
@@ -5170,6 +5131,8 @@ components:
           type: string
         repository:
           $ref: '#/components/schemas/internal.runspec.Repository'
+        repository_name:
+          $ref: '#/components/schemas/internal.runspec.Optional.string.'
         sha:
           type: string
       required:
@@ -5177,6 +5140,7 @@ components:
         - ref
         - sha
         - default_branch
+        - repository_name
         - app
       type: object
       x-sparkwing-go-type: runspec.Git
@@ -5800,11 +5764,15 @@ components:
               type: string
             event:
               type: string
+            fetched_repository_id:
+              type: integer
             pipeline:
               type: string
             pull_request_base:
               type: string
             ref:
+              type: string
+            repository:
               type: string
             repository_id:
               type: integer
@@ -6569,8 +6537,6 @@ components:
           type: string
         Kind:
           type: string
-        Name:
-          type: string
         RunID:
           type: string
         SourceGeneration:
@@ -6579,7 +6545,6 @@ components:
           type: string
       required:
         - Kind
-        - Name
         - RunID
         - SourceNodeID
         - SourceGeneration
@@ -9188,52 +9153,6 @@ paths:
             liveness: credential
         retry: idempotency_key
       x-sparkwing-wire: undocumented
-  /api/v1/operator/teams/{team}/refunds:
-    post:
-      parameters:
-        - in: path
-          name: team
-          required: true
-          schema:
-            type: string
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/internal.controllerwire.OperatorRefund'
-        required: true
-      responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.OperatorRefundRecorded'
-          description: Successful response.
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: Record a completed provider refund
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/operator/teams/{team}/refunds
-        audience: controller
-        owner: deployment
-        authentication: capability
-        access:
-          - credential: operator_console_session
-            grants:
-              - operator.console
-            binding: none
-            liveness: credential
-        retry: idempotency_key
   /api/v1/operator/teams/{team}/standing-request/decline:
     post:
       parameters:
@@ -14441,16 +14360,16 @@ paths:
           schema:
             type: string
         - in: query
+          name: repo
+          schema:
+            type: string
+        - in: query
           name: pipeline
           schema:
             type: string
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.SecretDeletion'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:
@@ -14476,6 +14395,10 @@ paths:
         - in: path
           name: name
           required: true
+          schema:
+            type: string
+        - in: query
+          name: repo
           schema:
             type: string
         - in: query

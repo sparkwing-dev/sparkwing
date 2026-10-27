@@ -173,3 +173,53 @@ func TestLedgerGuardTruncateTableLists(t *testing.T) {
 		}
 	}
 }
+
+// safety: each entry names a statement that reaches across payment modes on purpose,
+// with its reason; the guard refuses an entry that no longer matches a statement.
+var paymentModeAcrossModes = map[string]string{
+	"(*ledgerTx).relabelCreator|credit_grants":      "account deletion relabels the creator on every mode's grants; no amount or balance is read",
+	"(*Operator).grantCreatorTeamsTx|credit_grants": "account deletion finds every team whose grants name the account, in any mode",
+	"(*Operator).disputeHoldTx|credit_freezes":      "dispute_id is the table's primary key, and provider dispute ids never repeat across modes",
+	"(*Tenant).ListNodes|credit_charges":            "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
+	"(*Tenant).GetNode|credit_charges":              "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
+	"(*Operator).ComputeUsage|credit_charges":       "counts running metered awards per principal, a capacity fact rather than money",
+	"billingPriceTx|credit_charges":                 "reads one award's reservation by its id",
+	"paidBillingTx|credit_charges":                  "settles one award against everything charged to it; cutover refuses to start while any award is unsettled, so an award's charges share one mode",
+	"settledBillingResultTx|credit_charges":         "reports one award's billed seconds, in whatever mode they were charged",
+}
+
+// Decision 63 keeps test-mode money out of every live decision by one column, so
+// every statement on a table that carries payment_mode must filter or set it. The
+// money tables come from the schema, so a new one is judged the day it is added.
+func TestMoneyStatementsCarryPaymentMode(t *testing.T) {
+	money := schemaTablesWithColumn(t, "payment_mode")
+	if len(money) < 10 {
+		t.Fatalf("schema lists only %d payment_mode tables: %v", len(money), money)
+	}
+	checked, used := 0, map[string]bool{}
+	for _, stmt := range tenantSQLStatements(t) {
+		tables := statementTables(stmt.text, money)
+		if len(tables) == 0 {
+			continue
+		}
+		checked++
+		if strings.Contains(strings.ToLower(stmt.text), "payment_mode") {
+			continue
+		}
+		if len(tables) == 1 {
+			if _, ok := paymentModeAcrossModes[stmt.key+"|"+tables[0]]; ok {
+				used[stmt.key+"|"+tables[0]] = true
+				continue
+			}
+		}
+		t.Errorf("%s: statement in %s touches %s without payment_mode.\n\t%s", stmt.pos, stmt.key, strings.Join(tables, ", "), collapse(stmt.text))
+	}
+	if checked < 50 {
+		t.Fatalf("guard judged only %d money statements; it is no longer reading this package", checked)
+	}
+	for key, why := range paymentModeAcrossModes {
+		if strings.TrimSpace(why) == "" || !used[key] {
+			t.Errorf("paymentModeAcrossModes entry %q is stale or has no reason; delete it", key)
+		}
+	}
+}

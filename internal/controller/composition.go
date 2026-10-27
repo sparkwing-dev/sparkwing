@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"crypto/rand"
 	"log/slog"
 	"time"
 
@@ -35,7 +34,6 @@ func NewDeployment(st *store.Store, cfg deployment.Config, logger *slog.Logger) 
 		sessionMaxLifetime: defaultSessionMaxLifetime,
 		liveLogs:           newLiveLogs(),
 		cronHolder:         defaultCronHolder(),
-		leaseHolder:        rand.Text(),
 		requestBudget:      newPrincipalBudget(RequestBudget{}),
 		idleClaimPoll:      DefaultMaxIdleClaimPoll,
 		downloadFree:       DefaultTeamDailyDownloadFreeBytes,
@@ -52,6 +50,9 @@ func NewDeployment(st *store.Store, cfg deployment.Config, logger *slog.Logger) 
 		srv.consoleWrites = st.AsConsole(srv.operatorAccount)
 		if !cfg.Metering() {
 			st.DisableCreditMetering()
+		}
+		if cfg.Hosted() {
+			st.EnableCloudStorage()
 		}
 		srv.resolveTenant = storeTenantResolver(st)
 		srv.credentialIssuer = srv.operator

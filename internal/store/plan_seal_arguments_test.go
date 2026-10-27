@@ -51,7 +51,6 @@ func TestPlanSealPreservesRawListInputsAcrossSubmissionSources(t *testing.T) {
 			owner.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}
 			if admitted.Request.Request.Dispatch == runspec.DispatchController {
 				owner.Unit, owner.Binding.Kind = capability.UnitPlan, capability.BindingRun
-				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',1,?)`, tenant.s.now().Add(time.Hour).UnixNano())
 			}
 			persistPlanOwner(t, tenant.s, owner)
 			seedTriggerClaim(t, tenant.s, admitted.RunID, "host", owner.Prefix, 1, tenant.s.now().Add(time.Hour))

@@ -34,7 +34,7 @@ type checkoutCall struct {
 
 func newFakeCheckout(t *testing.T) (*fakeCheckout, string) {
 	t.Helper()
-	fc := &fakeCheckout{status: http.StatusOK, url: "https://checkout.stripe.test/c/pay/cs_test_1"}
+	fc := &fakeCheckout{status: http.StatusOK, url: "https://checkout.stripe.com/c/pay/cs_test_1"}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/internal/checkout" {
 			http.NotFound(w, r)
@@ -150,7 +150,7 @@ func TestTeamBilling_EveryMemberReadsTheActiveTeamsBilling(t *testing.T) {
 
 func TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam(t *testing.T) {
 	f, fc := billingFixture(t)
-	if _, err := f.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if _, err := f.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	owner, editor, reader := teamOf(f)
@@ -162,7 +162,7 @@ func TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam(t *testing.T) {
 		map[string]any{"amount_cents": 2_500}, &out); code != http.StatusOK {
 		t.Fatalf("owner checkout = %d", code)
 	}
-	if out.URL != "https://checkout.stripe.test/c/pay/cs_test_1" {
+	if out.URL != "https://checkout.stripe.com/c/pay/cs_test_1" {
 		t.Errorf("url = %q", out.URL)
 	}
 	calls := fc.calls()
@@ -212,7 +212,7 @@ func (f *identityFixture) checkoutRequest(auth string, cents int64, key string) 
 
 func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 	f, fc := billingFixture(t)
-	if _, err := f.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if _, err := f.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	owner := f.user("o", "olga@example.com")
@@ -222,7 +222,7 @@ func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 		status int
 		url    string
 	}{
-		{"a failing service", http.StatusBadGateway, "https://checkout.stripe.test/x"},
+		{"a failing service", http.StatusBadGateway, "https://checkout.stripe.com/x"},
 		{"a non-https page", http.StatusOK, "http://checkout.stripe.test/x"},
 	} {
 		fc.mu.Lock()
@@ -233,7 +233,7 @@ func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 		}
 	}
 	fc.mu.Lock()
-	fc.status, fc.url = http.StatusOK, "https://checkout.stripe.test/c/pay/cs_test_1"
+	fc.status, fc.url = http.StatusOK, "https://checkout.stripe.com/c/pay/cs_test_1"
 	fc.mu.Unlock()
 	if w := f.checkoutRequest(owner.auth, 50_000, "retry-checkout"); w.Code != http.StatusOK {
 		t.Fatalf("retrying the reserved checkout = %d %s, want 200", w.Code, w.Body)

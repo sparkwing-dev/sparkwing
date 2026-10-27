@@ -50,12 +50,8 @@ func TestRunCancellationPreventsUnclaimedAwards(t *testing.T) {
 					t.Fatal("cancelled owner unit was awarded")
 				}
 			}
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
 			for replay := range 2 {
-				units, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
+				units, err := s.AsOperator().ReapUnits(t.Context(), 10)
 				if err != nil || len(units) != 1-replay || replay == 0 && !units[0].Cancelled {
 					t.Fatalf("cancel recovery: %+v, %v", units, err)
 				}

@@ -237,8 +237,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 		t.Fatal(err)
 	}
 	controller.EngineSQL(t, e.Store, `UPDATE nodes SET node_id='source',status='done',outcome='success',finished_at=1,generation=7,expansion='expected',spec_json=?,spec_hash=? WHERE run_id='run'`, declaration, declarationHash)
-	controller.EngineSQL(t, e.Store, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, time.Now().Add(time.Hour).UnixNano())
-	controller.EngineSQL(t, e.Store, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','source',7,'pending',3)`)
+	controller.EngineSQL(t, e.Store, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','source',7,'pending')`)
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "eval-test", CreatedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}

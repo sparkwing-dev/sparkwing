@@ -105,14 +105,14 @@ func TestManualRetryRetainsVerifiedRepositoryFacts(t *testing.T) {
 	request := plan.Seal.Request.Request
 	git := request.Git
 	git.Ref, git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
-	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: "verified-delivery", RepositoryID: 42, Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: plan.Seal.Request.AdmittedAt}}
+	git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", Event: "push", DeliveryKey: "verified-delivery", RepositoryID: 42, Ref: git.Ref, SHA: git.SHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: plan.Seal.Request.AdmittedAt}}
 	policy.delivery = &store.VerifiedRunDelivery{Git: git, Actor: runspec.Actor{Kind: "github", ID: "app-actor"}}
 	source, err := own.AdmitRun(t.Context(), store.IntakeRequest{Authority: plan.Seal.Request.AuthorityRef, Request: request, VerifiedDeliveryID: "verified-delivery"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.Lineage.RetryOf, request.Git.SHA = source.RunID, "later-head"
-	request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{RepositoryID: 999}}
+	request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", RepositoryID: 999}}
 	retry, err := own.AdmitRun(t.Context(), store.IntakeRequest{Authority: plan.Seal.Request.AuthorityRef, Request: request})
 	if err != nil || !reflect.DeepEqual(retry.Request, source.Request) {
 		t.Fatalf("retry changed verified facts: %+v, %v", retry.Request, err)

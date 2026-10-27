@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestInvitationExpiresWhileWaitingForSignUpGate(t *testing.T) {
@@ -36,44 +34,6 @@ func TestInvitationExpiresWhileWaitingForSignUpGate(t *testing.T) {
 	}
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM invitations WHERE id='waiting' AND accepted_at IS NOT NULL`).Scan(&accepted); err != nil || accepted != 0 {
 		t.Fatalf("expired acceptances=%d error=%v", accepted, err)
-	}
-}
-
-func TestExpansionRechecksControllerExpiryAfterEvalFenceRead(t *testing.T) {
-	tenant, now, request := expansionFixture(t)
-	s := tenant.s
-	unitID, err := encodeAwardUnit(UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	eval := authorityRoot("evaluation", "a")
-	eval.Grants = []capability.Grant{capability.ExpansionSubmit}
-	eval.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: 2, Expansion: &capability.LeaseRef{Kind: capability.UnitEval, ID: unitID, Holder: "eval-host", Generation: 8}}
-	authorityPersist(t, s, eval)
-	request.Actor.Authority.ID, request.Actor.CapabilityPrefix = eval.Prefix, eval.Prefix
-	request.Actor.Owner = runstate.OwnerLeaseRef{Kind: runstate.OwnerEval, EvalFence: runspec.EvalFence{RunID: request.Source.RunID, SourceNodeID: request.Source.NodeID, SourceGeneration: request.SourceGeneration, Holder: "eval-host", Generation: 8}}
-	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
-	expires := now.Add(time.Minute)
-	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, expires.UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,claimed_at,started_at) VALUES ('a','run','job',2,'running',8,'eval-host','evaluation',?,4,?,?)`, now.Add(time.Hour).UnixNano(), now.UnixNano(), now.UnixNano())
-	connection := recordStoreFences(t, s)
-	s.pinnedClock = func() time.Time { return *now }
-	reads := 0
-	connection.beforeQuery = func(query string) error {
-		if strings.HasPrefix(query, "SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,owner_generation FROM eval_units") {
-			reads++
-			if reads == 2 {
-				*now = expires
-			}
-		}
-		return nil
-	}
-	if _, err := tenant.AcceptExpansion(t.Context(), request); reads != 2 || err == nil {
-		t.Fatalf("eval reads=%d acceptance=%v", reads, err)
-	}
-	var expansion string
-	if err := s.db.QueryRow(`SELECT expansion FROM nodes WHERE run_id='run' AND node_id='job'`).Scan(&expansion); err != nil || expansion != "expected" {
-		t.Fatalf("committed expansion=%s error=%v", expansion, err)
 	}
 }
 

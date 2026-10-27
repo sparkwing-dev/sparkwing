@@ -38,6 +38,9 @@ var paidTierQuota = StorageQuota{
 	MaxObjectsPerRun: 100_000,
 }
 
+// storageLimitRemedy tells whoever hits a storage tier limit how to lift it.
+const storageLimitRemedy = "contact support to raise this limit"
+
 // ErrStorageQuota is returned when a write would take a team past one of its
 // storage limits. The enforcing call returns a [StorageQuotaError], which
 // wraps it and names the limit, so a caller matches the condition with

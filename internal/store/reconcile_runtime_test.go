@@ -93,7 +93,7 @@ func TestReconcileRacingOwnersReclaimOneReapedJob(t *testing.T) {
 	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{}}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET plan_json=?,plan_hash='plan',spec_json=?,spec_hash='spec',sealed_at=1 WHERE id='run'`, []byte(`{"jobs":[{"id":"job"}]}`), []byte(`{}`))
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=? WHERE run_id='run'`, now.Add(-time.Nanosecond).UnixNano())
-	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), SingletonLease{Name: "controller.reaper", Holder: "replica", Generation: 1}, 10)
+	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 	if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 		t.Fatalf("reap: %+v, %v", reaped, err)
 	}

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -100,37 +99,29 @@ func (s *Server) maintainStorage(ctx context.Context) {
 
 func (s *Server) maintainRetainedData(ctx context.Context) {
 	operator := s.operator
-	lease, err := operator.AcquireSingletonLease(ctx, "maintenance", s.leaseHolder, StorageMaintenanceInterval)
-	if errors.Is(err, store.ErrLockHeld) {
-		return
-	}
-	if err != nil {
-		s.logger.Error("storage maintenance lease failed", "err", err)
-		return
-	}
-	if _, err := operator.PruneEgressUsage(ctx, lease); err != nil {
+	if _, err := operator.PruneEgressUsage(ctx); err != nil {
 		s.logger.Error("egress usage prune failed", "err", err)
 		return
 	}
-	retained, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 5000})
+	retained, err := operator.MaintainRetention(ctx, store.RetentionRequest{Limit: 5000})
 	if err != nil {
 		s.logger.Error("storage retention failed", "err", err)
 		return
 	}
-	if retained.Runs > 0 || retained.Metrics > 0 || retained.Records > 0 || retained.Invitations > 0 || retained.Sessions > 0 || retained.AuditEvents > 0 || retained.FreeSlotsReleased > 0 {
-		s.logger.Info("expired retained data", "runs", retained.Runs, "metrics", retained.Metrics, "records", retained.Records, "invitations", retained.Invitations, "sessions", retained.Sessions, "audit_events", retained.AuditEvents, "free_slots_released", retained.FreeSlotsReleased)
+	if retained.Runs > 0 || retained.Metrics > 0 || retained.Records > 0 || retained.Invitations > 0 || retained.Sessions > 0 || retained.AuditEvents > 0 {
+		s.logger.Info("expired retained data", "runs", retained.Runs, "metrics", retained.Metrics, "records", retained.Records, "invitations", retained.Invitations, "sessions", retained.Sessions, "audit_events", retained.AuditEvents)
 	}
-	if _, err := operator.SealAbandonedLogStreams(ctx, lease, 5000); err != nil {
+	if _, err := operator.SealAbandonedLogStreams(ctx, 5000); err != nil {
 		s.logger.Error("seal abandoned log streams failed", "err", err)
 		return
 	}
-	if err := s.maintainDataObjects(ctx, lease); err != nil {
+	if err := s.maintainDataObjects(ctx); err != nil {
 		s.logger.Error("data storage maintenance failed", "err", err)
 	}
 	if !s.deployment.Metering() {
 		return
 	}
-	billed, err := operator.ChargeRetainedStorage(ctx, lease)
+	billed, err := operator.ChargeRetainedStorage(ctx)
 	if err != nil {
 		s.logger.Error("charging retained storage failed", "err", err)
 		return

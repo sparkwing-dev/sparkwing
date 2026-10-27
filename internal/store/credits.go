@@ -539,11 +539,11 @@ func creditSettingsTx(ctx context.Context, tx *storeTx) (CreditSettings, error) 
 	if err != nil {
 		return out, err
 	}
-	storageRate, err := creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0)
+	storageRate, err := storageRateTx(ctx, tx)
 	if err != nil {
 		return out, err
 	}
-	storageFree, err := creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, 0)
+	storageFree, err := storageFreeAllowanceTx(ctx, tx)
 	if err != nil {
 		return out, err
 	}
@@ -593,6 +593,11 @@ func creditLimit(limit int) int {
 // A deployment without metering calls it once while it is composed; there
 // is no call that turns metering back on.
 func (s *Store) DisableCreditMetering() { s.creditMeteringOff.Store(true) }
+
+// EnableCloudStorage applies Sparkwing Cloud's storage defaults: a team without an explicit quota or a deployment
+// default tier gets the free storage tier, or the paid tier once it has bought credits, and stored bytes are priced
+// at CloudStorageRateMicroPerGBDay unless the operator set a rate. Sparkwing Cloud calls it once while it is composed.
+func (s *Store) EnableCloudStorage() { s.cloudStorage.Store(true) }
 
 func newCreditID(prefix string) (string, error) {
 	var suffix [12]byte

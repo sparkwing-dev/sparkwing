@@ -52,11 +52,20 @@ When isolating the CLI with `SPARKWING_HOME`, set `SPARKWING_CONFIG` to a privat
 config path before saving a profile. The runtime home does not relocate the
 machine config.
 
+### Console help contact
+
+`--support-contact` names an email address or an http(s) URL. The dashboard's
+Help button, at the top right of every page, and its limit messages show it.
+Without it they tell people to contact their Sparkwing administrator. Startup
+refuses any other value.
+
 ### Node log retention
 
 The log storage contract assigns a retention class before signing segment
 uploads. Object-store lifecycle rules must cover each class before URLs are
-issued. The shared free and funded classes are thirty and ninety days.
+issued and expire it no sooner than the class: Sparkwing deletes log objects at
+the class age itself, so set each rule longer (for example the class plus seven
+days) as a backstop. The shared free and funded classes are thirty and ninety days.
 Filesystem storage uses its backend's retention mechanism.
 
 Log reads reauthorize at the controller and cover tagged job-attempt and
@@ -88,8 +97,8 @@ controllers require a separately reviewed design. Standbys using filesystem
 data must share the active controller's `SPARKWING_HOME`. S3 data is shared
 through the bucket.
 
-`--payment-mode` and `--free-team-slots` remain shared settings written at
-startup. All controllers on one store must declare matching values.
+`--payment-mode` remains a shared setting written at startup. Every controller
+on one store must declare the same value.
 
 ### Declared deployment
 
@@ -189,7 +198,11 @@ directory. Use the same flag for startup and every restore command. The
 controller restricts that directory to its owner and applies the credential
 file checks above to the epoch. The Helm chart always mounts a dedicated,
 retained PVC at `/var/lib/sparkwing/credential-epoch` and selects it with this
-flag, including when `/data` uses `emptyDir`. Preserve the latest epoch when
+flag, including when `/data` uses `emptyDir`. The chart sets the pod's
+`fsGroupChangePolicy` to `OnRootMismatch`. Without it the kubelet adds group
+write to the 0600 epoch file on every mount, and the controller refuses to
+start after its first restart. A pod spec of your own needs the same setting.
+Preserve the latest epoch when
 restoring a database. Retain its volume independently of database backups.
 Declared restore preparation holds schedules until operator acknowledgment and
 cancels restored unfinished scheduled runs. A normal restore keeps sessions,
@@ -532,7 +545,10 @@ relation sizes, including indexes.
 
 Quotas belong to registered teams. Token principal labels do not select a
 quota. `default_tier` supplies limits only when a team has no explicit row.
-An empty default leaves those teams unlimited. A zero write limit is unbounded.
+An empty default leaves those teams unlimited on a self-hosted deployment.
+Sparkwing Cloud instead gives them the free tier, or the paid tier once the team
+has bought credits ([limits](limits.md#uploads-and-storage-accounting)). An
+allowance alone does not set write limits. A zero write limit is unbounded.
 
 Source uploads reserve monthly capacity before a run exists. Intake applies
 the committed unique-byte charge to the run and its per-run limits.
@@ -557,7 +573,7 @@ curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme" \
   -d '{"tier":"paid"}'
 ```
 
-Monthly reports sum each team's replica counters. They are historical usage,
+Monthly reports read each team's usage counters. They are historical usage,
 so deleting a run does not lower them. `retained_bytes` measures the team's
 unique committed blobs and stored log segments. Multiple references to the
 same blob count once. Each team accounts for its own copy.

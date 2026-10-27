@@ -10,15 +10,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-// uploadVerifier checks an immutable object after an uncertain PUT. The controller
+// UploadVerifier checks an immutable object after an uncertain PUT. The controller
 // must authorize the exact writer and resolve its persisted class before calling
 // Verify. It must repeat that authorization in the subsequent record transaction.
-type uploadVerifier struct{ Objects SegmentObjects }
+type UploadVerifier struct{ Objects SegmentObjects }
 
-// verify derives the key from the subject and server-resolved retention class,
+// Verify derives the key from the subject and server-resolved retention class,
 // then consumes and closes the object before confirming its exact size and digest.
 // It neither creates a record nor grants download authority.
-func (v uploadVerifier) verify(ctx context.Context, check blob.LogUploadCheck, class string) error {
+func (v UploadVerifier) Verify(ctx context.Context, check blob.LogUploadCheck, class string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

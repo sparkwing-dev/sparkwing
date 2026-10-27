@@ -17,16 +17,12 @@ func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 	tenant := &Tenant{s: s, team: "a"}
 	now := s.now()
 	s.clock = func() time.Time { return now }
-	rate := int64(CloudStorageRateMicroPerGBDay)
-	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
-		t.Fatal(err)
-	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "storage", 60*24*time.Hour)
-	if err != nil {
+	rate, free := int64(CloudStorageRateMicroPerGBDay), int64(0)
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
 		t.Fatal(err)
 	}
 	retainedBlob(t, s, "a", "a", StorageBytesPerGB, now)
-	retainedBill(t, s, lease)
+	retainedBill(t, s)
 	warning := paymentWarning{WarningID: "protected", PaymentIntent: event.PaymentID, Actionable: true}
 	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, now); err != nil {
 		t.Fatal(err)
@@ -36,11 +32,11 @@ func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run-a',1,'p','running',?,'request',1,'gh:1','host','execute','account',1,'r30',30)`, []byte(`{"version":1}`))
-	if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run-a", "node", "log", []byte("frozen")); !errors.Is(err, ErrInsufficientCredits) {
+	if err := tenant.AppendEvent(t.Context(), "run-a", "node", "log", []byte("frozen")); !errors.Is(err, ErrInsufficientCredits) {
 		t.Fatalf("storage growth = %v; want held credit refused", err)
 	}
 	now = now.Add(24 * time.Hour)
-	if billed := retainedBill(t, s, lease); len(billed.Charges) != 0 {
+	if billed := retainedBill(t, s); len(billed.Charges) != 0 {
 		t.Fatalf("frozen credit funded retained storage: %+v", billed)
 	}
 	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != before {
@@ -55,7 +51,7 @@ func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = now.Add(24 * time.Hour)
-	if billed := retainedBill(t, s, lease); len(billed.Charges) != 1 || billed.ChargedMicro != min(before, rate) {
+	if billed := retainedBill(t, s); len(billed.Charges) != 1 || billed.ChargedMicro != min(before, rate) {
 		t.Fatalf("released storage = %+v; want only the released day charged", billed)
 	}
 }

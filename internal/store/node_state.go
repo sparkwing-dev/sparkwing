@@ -255,7 +255,7 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 		return runstate.Applied{}, err
 	}
 	if change.Actor.Kind == runstate.ActorReaper {
-		if err := checkReaperTx(ctx, tx, change.Actor); err != nil {
+		if err := checkReaperTx(change.Actor); err != nil {
 			return runstate.Applied{}, err
 		}
 	}
@@ -827,7 +827,7 @@ func timeNS(value *time.Time) any {
 }
 
 func appendStateEventTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, kind string, stateSeq int64, payload any, now time.Time) error {
-	seq, err := appendEventTx(ctx, tx, team, string(ref.RunID), string(ref.NodeID), kind, payload, now)
+	seq, err := appendEventTx(ctx, tx, team, string(ref.RunID), string(ref.NodeID), kind, payload, now, true)
 	if err != nil {
 		return err
 	}
@@ -862,11 +862,11 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row runsta
 		}
 		resolution = "timed_out"
 	} else {
-		principal, err := tx.ResolveAuthority(ctx, change.Actor.Authority)
+		principal, err := resolveTeamAuthorityTx(ctx, tx, team, change.Actor.Authority, sameTeam)
 		if err != nil {
 			return err
 		}
-		if principal.Capability.Team != string(team) || !slices.Contains(principal.Capability.Grants, capability.Grant("approvals.write")) {
+		if !slices.Contains(principal.Capability.Grants, capability.Grant("approvals.write")) {
 			return holderRefusal()
 		}
 		if change.Extra.Approval == nil {

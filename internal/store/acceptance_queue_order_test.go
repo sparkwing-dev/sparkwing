@@ -60,7 +60,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 		t.Fatal(err)
 	}
 	until := time.Now().Add(30 * time.Minute)
-	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(tenant.Team()), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000:1"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", WorkflowRunID: "1000", WorkflowRunAttempt: "1", WorkflowRef: "acme/widgets/.github/workflows/sparkwing.yaml@refs/heads/main"}}, Repositories: []string{"gh:42"}, ExpiresAt: &until})
+	issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(tenant.Team()), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000:1"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Repository: "acme/repo", Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", WorkflowRunID: "1000", WorkflowRunAttempt: "1", WorkflowRef: "acme/widgets/.github/workflows/sparkwing.yaml@refs/heads/main"}}, Repositories: []string{"gh:42"}, ExpiresAt: &until})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	if _, err := s.AsOperator().ClaimUnit(ctx, demand); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("Actions claim of member-asserted work: %v", err)
 	}
-	provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 42, DeliveryKey: "queue-order", VerifiedAt: time.Now(), Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567"}, runspec.Optional[runspec.PullRequest]{}, plan.Seal.Request.Request.Pipeline)
+	provenance, err := runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 42, DeliveryKey: "queue-order", VerifiedAt: time.Now(), Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567"}, runspec.Optional[runspec.PullRequest]{}, plan.Seal.Request.Request.Pipeline)
 	if err != nil {
 		t.Fatal(err)
 	}

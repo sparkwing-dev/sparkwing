@@ -16,12 +16,12 @@ func TestCredentialMutationsUseCurrentActorAndStoreClock(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
 	now := time.Unix(1700000000, 123456789).UTC()
 	tenant.s.clock = func() time.Time { return now }
-	sec := Secret{Name: "KEY", Value: "sealed", Pipeline: "build", Masked: true}
+	sec := Secret{Name: "KEY", Value: "sealed", Repo: fixtureRepo, Pipeline: "build", Masked: true}
 	receipt, err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, sec))
 	if err != nil || receipt.Name != sec.Name || receipt.Pipeline != sec.Pipeline || !receipt.Masked || receipt.Shared || receipt.Principal != "owner" || !receipt.CreatedAt.Equal(now) || !receipt.UpdatedAt.Equal(now) || receipt.Value != "" {
 		t.Fatalf("save receipt: %+v %v", receipt, err)
 	}
-	first, err := tenant.GetSecretRow(sec.Name, sec.Pipeline)
+	first, err := tenant.GetSecretRow(sec.Name, sec.Repo, sec.Pipeline)
 	if err != nil || first.Principal != "owner" || !first.CreatedAt.Equal(now) || !first.UpdatedAt.Equal(now) {
 		t.Fatalf("secret: %+v %v", first, err)
 	}
@@ -33,7 +33,7 @@ func TestCredentialMutationsUseCurrentActorAndStoreClock(t *testing.T) {
 	if err != nil || receipt.Principal != "replacement-author" || !receipt.CreatedAt.Equal(first.CreatedAt) || !receipt.UpdatedAt.Equal(now) || receipt.Value != "" {
 		t.Fatalf("replacement receipt: %+v %v", receipt, err)
 	}
-	second, err := tenant.GetSecretRow(sec.Name, sec.Pipeline)
+	second, err := tenant.GetSecretRow(sec.Name, sec.Repo, sec.Pipeline)
 	if err != nil || openSecretFixture(t, tenant, second) != "replacement" || second.Principal != "replacement-author" || !second.CreatedAt.Equal(first.CreatedAt) || !second.UpdatedAt.Equal(now) {
 		t.Fatalf("replacement: %+v %v", second, err)
 	}
@@ -58,13 +58,13 @@ func TestCredentialMutationsUseCurrentActorAndStoreClock(t *testing.T) {
 	if err != nil || c.ConfirmedAt != nil {
 		t.Fatalf("changed-key replacement: %+v %v", c, err)
 	}
-	if err := tenant.RemoveSecret(t.Context(), a, sec.Name, sec.Pipeline); err != nil {
+	if err := tenant.RemoveSecret(t.Context(), a, sec.Name, sec.Repo, sec.Pipeline); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.RemoveGitCredential(t.Context(), a, c.Host, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.RemoveSecret(t.Context(), a, sec.Name, sec.Pipeline); !errors.Is(err, ErrNotFound) {
+	if err := tenant.RemoveSecret(t.Context(), a, sec.Name, sec.Repo, sec.Pipeline); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing secret: %v", err)
 	}
 	if err := tenant.RemoveGitCredential(t.Context(), a, c.Host, ""); !errors.Is(err, ErrNotFound) {
@@ -105,7 +105,7 @@ func TestCredentialMutationsAuthorityProperty(t *testing.T) {
 		if err == nil || row.ID != "" {
 			t.Fatalf("git write %d returned a row: %+v %v", i, row, err)
 		}
-		for _, err := range []error{target.RemoveSecret(t.Context(), a, name, ""), target.RemoveGitCredential(t.Context(), a, "git.test", "")} {
+		for _, err := range []error{target.RemoveSecret(t.Context(), a, name, "", ""), target.RemoveGitCredential(t.Context(), a, "git.test", "")} {
 			if err == nil || errors.Is(err, ErrNotFound) {
 				t.Fatalf("delete %d did not refuse authority first: %v", i, err)
 			}
@@ -215,7 +215,7 @@ func TestCredentialMutationsSecretLimitsPreserveExistingValues(t *testing.T) {
 					t.Fatalf("secret %s: %v", row.Name, err)
 				}
 			}
-			row, err := tenant.GetSecretRow("KEY_0", "")
+			row, err := tenant.GetSecretRow("KEY_0", "", "")
 			if err != nil || team != DefaultTeam && openSecretFixture(t, tenant, row) != "original" || team == DefaultTeam && len(openSecretFixture(t, tenant, row)) != maxSecretValueBytes+1 {
 				t.Fatalf("size refusal: %+v, %v", row, err)
 			}
@@ -249,33 +249,64 @@ func TestCredentialMutationsDeletionPreservesOtherScopesProperty(t *testing.T) {
 	for range 32 {
 		name := fmt.Sprintf("KEY_%x", random.Uint64())
 		pipeline := fmt.Sprintf("pipeline/%x'", random.Uint64())
+		repo := map[string]string{"": "", pipeline: "gh:7"}
 		for _, scope := range []struct {
 			tenant *Tenant
 			a      capability.Authorized
 		}{{tenant, a}, {foreign, b}} {
 			for _, p := range []string{"", pipeline} {
-				if _, err := scope.tenant.WriteSecret(t.Context(), scope.a, sealedSecretFixture(t, scope.tenant, Secret{Name: name, Pipeline: p, Value: string(scope.tenant.team) + p})); err != nil {
+				if _, err := scope.tenant.WriteSecret(t.Context(), scope.a, sealedSecretFixture(t, scope.tenant, Secret{Name: name, Repo: repo[p], Pipeline: p, Value: string(scope.tenant.team) + p})); err != nil {
 					t.Fatal(err)
 				}
 			}
 		}
-		if err := tenant.RemoveSecret(t.Context(), a, name, pipeline); err != nil {
+		if err := tenant.RemoveSecret(t.Context(), a, name, "gh:7", pipeline); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tenant.GetSecretRow(name, pipeline); !errors.Is(err, ErrNotFound) {
+		if _, err := tenant.GetSecretRow(name, "gh:7", pipeline); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("deleted secret: %v", err)
 		}
-		if err := tenant.RemoveSecret(t.Context(), a, name, pipeline); !errors.Is(err, ErrNotFound) {
+		if err := tenant.RemoveSecret(t.Context(), a, name, "gh:7", pipeline); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("repeated deletion: %v", err)
 		}
 		for _, want := range []struct {
 			tenant   *Tenant
 			pipeline string
 		}{{tenant, ""}, {foreign, ""}, {foreign, pipeline}} {
-			row, err := want.tenant.GetSecretRow(name, want.pipeline)
+			row, err := want.tenant.GetSecretRow(name, repo[want.pipeline], want.pipeline)
 			if err != nil || openSecretFixture(t, want.tenant, row) != string(want.tenant.team)+want.pipeline {
 				t.Fatalf("another scope changed: %+v, %v", row, err)
 			}
 		}
+	}
+}
+
+// A replacement that names no pool keeps the row's reserved-pool restriction;
+// only an explicit pool, empty included, changes it.
+func TestWriteSecretReplacementKeepsOnlyOnUnlessChanged(t *testing.T) {
+	tenant, a := credentialMaintenanceFixture(t)
+	write := func(row Secret) Secret {
+		t.Helper()
+		out, err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, row))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	base := Secret{Name: "DEPLOY", Value: "first", Shared: true, Masked: true}
+	restricted := base
+	restricted.OnlyOn = "prod"
+	if got := write(restricted); got.OnlyOn != "prod" {
+		t.Fatalf("restricted write: %+v", got)
+	}
+	replacement := base
+	replacement.Value, replacement.KeepOnlyOn = "second", true
+	if got := write(replacement); got.OnlyOn != "prod" {
+		t.Fatalf("replacement lifted the restriction: %+v", got)
+	}
+	cleared := base
+	cleared.Value = "third"
+	if got := write(cleared); got.OnlyOn != "" {
+		t.Fatalf("explicit clear kept the pool: %+v", got)
 	}
 }

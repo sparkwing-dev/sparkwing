@@ -36,17 +36,17 @@ func poolBranchRulesMatchLikePathGlobs(t *testing.T, open func(*testing.T) *Stor
 	}
 	s.testOnlyExec(t, `INSERT INTO pool_access_rules(team,id,pool,repo_key,source,created_by,created_at) VALUES ('a','app','app-only','gh:1','github_app','owner',1),('a','other','other-repo','gh:2','','owner',1),('b','foreign','foreign','gh:1','','owner',1)`)
 	app := func(ref string) runspec.Provenance {
-		p, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: time.Unix(1, 0), Ref: ref, SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main"}, runspec.Optional[runspec.PullRequest]{}, "ci")
+		p, err := runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: time.Unix(1, 0), Ref: ref, SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main"}, runspec.Optional[runspec.PullRequest]{}, "ci")
 		if err != nil {
 			t.Fatal(err)
 		}
 		return p
 	}
-	schedule, err := runspec.ScheduleProvenance("nightly", 1, "main", referenceMain, "ci")
+	schedule, err := runspec.ScheduleProvenance("nightly", 1, "acme/repo", "main", referenceMain, "ci")
 	if err != nil {
 		t.Fatal(err)
 	}
-	actions, err := runspec.ActionsProvenance(1, "refs/heads/main", referenceMain, "ci")
+	actions, err := runspec.ActionsProvenance(1, "acme/repo", "refs/heads/main", referenceMain, "ci")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func actionsClaimRefusesEditorAssertedMain(t *testing.T, open func(*testing.T) *
 			s.testOnlyExec(t, `UPDATE triggers SET expires_at=? WHERE id=?`, s.now().Add(time.Hour).UnixNano(), admitted.RunID)
 			root := authorityRoot("actions", "a")
 			root.Grants = []capability.Grant{capability.TriggersClaim}
-			root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:701", Ref: "refs/heads/main", SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/app/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+			root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:701", Repository: "acme/repo", Ref: "refs/heads/main", SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/app/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 			authorityPersist(t, s, root)
 			demand := UnitDemand{CapabilityPrefix: root.Prefix, Kinds: []capability.UnitKind{capability.UnitPlan}}
 			if named {
@@ -121,7 +121,7 @@ func reservedPoolTrustClaimAndExplanationParity(t *testing.T, open func(*testing
 						demand.CapabilityPrefix = root.Prefix
 						s.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["pool=prod"]}}`))
 						if secret {
-							s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'',0,'prod')`)
+							s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,repo,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'','',0,'prod')`)
 						}
 						branch := "feature"
 						if verified {
@@ -171,17 +171,17 @@ func pushClaimProvenanceParity(t *testing.T, open func(*testing.T) *Store) {
 			s, _ := unitClaimFixtureStore(t, open(t))
 			root := authorityRoot("actions", "a")
 			root.Grants = []capability.Grant{capability.TriggersClaim}
-			root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+			root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "refs/heads/main", SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 			authorityPersist(t, s, root)
 			var p runspec.Provenance
 			var err error
 			switch tc.trust {
 			case runspec.TrustActions:
-				p, err = runspec.ActionsProvenance(tc.repo, "refs/heads/main", referenceMain, "ci")
+				p, err = runspec.ActionsProvenance(tc.repo, "acme/repo", "refs/heads/main", referenceMain, "ci")
 			case runspec.TrustVerified, runspec.TrustVerifiedDefault:
-				p, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: tc.repo, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/main", SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: tc.trust == runspec.TrustVerifiedDefault}, runspec.Optional[runspec.PullRequest]{}, "ci")
+				p, err = runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: tc.repo, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/main", SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: tc.trust == runspec.TrustVerifiedDefault}, runspec.Optional[runspec.PullRequest]{}, "ci")
 			case runspec.TrustSchedule:
-				p, err = runspec.ScheduleProvenance("schedule", tc.repo, "main", referenceMain, "ci")
+				p, err = runspec.ScheduleProvenance("schedule", tc.repo, "acme/repo", "main", referenceMain, "ci")
 			case runspec.TrustAsserted:
 				p = assertedProvenance(t, "ci", "refs/heads/main", referenceMain)
 			}
@@ -222,7 +222,7 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					seal.Provenance = assertedProvenance(t, "ci", "refs/heads/main", referenceMain)
 					if source == "schedule" || source == "inherited-schedule" {
 						var err error
-						seal.Provenance, err = runspec.ScheduleProvenance("nightly", 1, "main", referenceMain, "ci")
+						seal.Provenance, err = runspec.ScheduleProvenance("nightly", 1, "acme/repo", "main", referenceMain, "ci")
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -232,7 +232,7 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 						}
 					} else if source != "asserted-main" {
 						var err error
-						seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/" + branch, SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: source == "verified-default"}, runspec.Optional[runspec.PullRequest]{}, "ci")
+						seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/" + branch, SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: source == "verified-default"}, runspec.Optional[runspec.PullRequest]{}, "ci")
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -256,7 +256,7 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 						fundUnitClaim(t, s)
 					}
 					if runner == "actions" {
-						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/" + branch, SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/" + branch}}
+						root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "refs/heads/" + branch, SHA: referenceMain, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/" + branch}}
 					}
 					if runner == "persistent" || runner == "plain-machine" || runner == "launcher" {
 						owner := referenceMember(t, s, "owner", RoleOwner)
@@ -276,7 +276,8 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					// Advertisements cannot turn a persistent enrollment into a fresh pod.
 					demand.Labels = append(demand.Labels, "single-use", "launcher", "class=cloud")
 					indexFixtureUnit(t, s, "a", ref)
-					want := runner != "persistent" || source == "asserted-main" || source == "verified-feature"
+					// safety: a signed main delivery not sealed as a default-branch push is ordinary verified work everywhere.
+					want := runner != "persistent" || source == "asserted-main" || source == "verified-feature" || source == "verified-main"
 					if runner == "launcher" && source == "asserted-main" {
 						want = false
 					}
@@ -335,7 +336,7 @@ func freshPodWaitingExplanation(t *testing.T, open func(*testing.T) *Store) {
 					if mismatch != "" {
 						ctx = WithClaimPlacement(ctx, ClaimPlacement{Liveness: time.Minute})
 					}
-					p, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/main", SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: true}, runspec.Optional[runspec.PullRequest]{}, "ci")
+					p, err := runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/main", SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: true}, runspec.Optional[runspec.PullRequest]{}, "ci")
 					if err != nil {
 						t.Fatal(err)
 					}

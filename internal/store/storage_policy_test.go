@@ -97,18 +97,14 @@ func TestStoreDataStoragePolicyUsesLeasedRetention(t *testing.T) {
 	if err := o.SetStorageSettings(t.Context(), StorageSettings{RunRetentionDays: 11}); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := o.AcquireSingletonLease(t.Context(), "maintenance", "storage", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	retained, err := o.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 10})
+	retained, err := o.MaintainRetention(t.Context(), RetentionRequest{Limit: 10})
 	if err != nil || retained.Runs != 0 {
 		t.Fatalf("early retention=%+v: %v", retained, err)
 	}
 	if err := o.SetStorageSettings(t.Context(), StorageSettings{RunRetentionDays: 9}); err != nil {
 		t.Fatal(err)
 	}
-	retained, err = o.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 10})
+	retained, err = o.MaintainRetention(t.Context(), RetentionRequest{Limit: 10})
 	if err != nil || retained.Runs != 1 {
 		t.Fatalf("expired retention=%+v: %v", retained, err)
 	}

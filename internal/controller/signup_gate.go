@@ -13,43 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// FreeTierState is how much of the deployment's free storage is left to hand
-// out: open, throttled, or closed once it is spent.
-type FreeTierState string
-
-// The free-tier states. freeTierUnreadable is what the gate reports when the
-// source failed; it waitlists new accounts as closed does.
-const (
-	freeTierOpen       FreeTierState = "open"
-	freeTierThrottled  FreeTierState = "throttled"
-	freeTierClosed     FreeTierState = "closed"
-	freeTierUnreadable FreeTierState = "unreadable"
-)
-
-// FreeTierSource reports how much of the deployment's free storage is left.
-// It runs on every sign-in, so it should answer from memory.
-type FreeTierSource interface {
-	SignUpFreeTier(ctx context.Context) (FreeTierState, error)
-}
-
-// SignUpFreeTier reports the free tier closed once every free-team slot is
-// taken, and open while one is left. A slot count it cannot read is an
-// error, never open, so a sign-up gate reading it fails closed.
-func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error) {
-	taken, limit, err := s.operator.FreeSlots(ctx)
-	if err != nil {
-		return freeTierUnreadable, fmt.Errorf("read free-team slots: %w", err)
-	}
-	if taken >= limit {
-		return freeTierClosed, nil
-	}
-	return freeTierOpen, nil
-}
-
 type signUpConfig struct {
 	forceWaitlist bool
-	freeTier      FreeTierSource
-	unwiredLogged atomic.Bool
 	onApproved    func(context.Context, store.Account) error
 	// safety: set while the hourly count sits above the warn threshold, so the warning fires once per
 	// crossing rather than on every sign-up.
@@ -64,50 +29,8 @@ func (s *Server) WithSignUpWaitlist(on bool) *Server {
 	return s
 }
 
-// WithFreeTier installs the report of the deployment's free storage. While it
-// reports closed, or fails, new accounts are waitlisted, because a personal
-// space holds a free allowance the deployment may no longer carry.
-func (s *Server) WithFreeTier(src FreeTierSource) *Server {
-	s.identity.signup.freeTier = src
-	return s
-}
-
-// CheckFreeTierSource logs signup.free_tier_unwired once when a multi-team
-// controller has no free-tier source, in which case the gate treats the free
-// tier as open. Call it at startup, after configuration.
-func (s *Server) CheckFreeTierSource() {
-	if s.identity.signup.freeTier != nil || !s.deployment.MultiTeam() {
-		return
-	}
-	if s.identity.signup.unwiredLogged.Swap(true) {
-		return
-	}
-	s.logger.Warn("signup.free_tier_unwired",
-		"detail", "no free-tier source is configured, so the sign-up gate treats the free tier as open")
-}
-
-// safety: a report that fails reads as unreadable, which waitlists new accounts as closed does: an
-// account held back is one approval away, while one admitted keeps a free allowance for good.
-func (s *Server) freeTierState(ctx context.Context) FreeTierState {
-	src := s.identity.signup.freeTier
-	if src == nil {
-		return freeTierOpen
-	}
-	state, err := src.SignUpFreeTier(ctx)
-	if err != nil {
-		s.logger.Warn("signup.free_tier_unreadable", "error", err.Error())
-		return freeTierUnreadable
-	}
-	return state
-}
-
 func (s *Server) signUpConditions(ctx context.Context) store.SignUpConditions {
-	free := s.freeTierState(ctx)
-	return store.SignUpConditions{
-		ForceWaitlist:      s.identity.signup.forceWaitlist,
-		FreeTierClosed:     free == freeTierClosed,
-		FreeTierUnreadable: free == freeTierUnreadable,
-	}
+	return store.SignUpConditions{ForceWaitlist: s.identity.signup.forceWaitlist}
 }
 
 func (s *Server) observeSignUp(ctx context.Context, provider string, res store.SignInResult, now time.Time) {
@@ -176,7 +99,6 @@ type signUpStatusJSON struct {
 	SetBy              string           `json:"set_by"`
 	UpdatedAt          int64            `json:"updated_at"`
 	DeploymentWaitlist bool             `json:"deployment_waitlist"`
-	FreeTier           string           `json:"free_tier"`
 	Limits             signUpLimitsJSON `json:"limits"`
 	Counts             signUpCountsJSON `json:"counts"`
 	VelocityWarning    bool             `json:"velocity_warning"`
@@ -191,11 +113,10 @@ func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJ
 	if err != nil {
 		return signUpStatusJSON{}, err
 	}
-	free := s.freeTierState(ctx)
 	out := signUpStatusJSON{
 		State: string(store.SignUpOpen), Reasons: []string{}, AccountLimit: store.LaunchAccountLimit,
 		Mode: string(g.Mode), Source: g.Source, Reason: g.Reason, SetBy: g.SetBy, UpdatedAt: g.UpdatedAt.Unix(),
-		DeploymentWaitlist: s.identity.signup.forceWaitlist, FreeTier: string(free),
+		DeploymentWaitlist: s.identity.signup.forceWaitlist,
 		Limits: signUpLimitsJSON{
 			HourlyLimit: g.Limits.HourlyLimit, DailyLimit: g.Limits.DailyLimit,
 			HourlyWarn: g.Limits.HourlyWarn, GitHubMinAccountDays: g.Limits.GitHubMinAccountDays,
@@ -212,12 +133,6 @@ func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJ
 	}
 	if g.Mode == store.SignUpWaitlist {
 		out.Reasons = append(out.Reasons, g.Source)
-	}
-	switch free {
-	case freeTierClosed:
-		out.Reasons = append(out.Reasons, store.WaitlistReasonFreeTier)
-	case freeTierUnreadable:
-		out.Reasons = append(out.Reasons, store.WaitlistReasonFreeTierUnreadable)
 	}
 	if len(out.Reasons) > 0 {
 		out.State = string(store.SignUpWaitlist)

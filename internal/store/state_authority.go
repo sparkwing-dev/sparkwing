@@ -14,12 +14,12 @@ import (
 func holderRefusal() error { return &ErrIllegalTransition{Reason: ReasonHolderRights} }
 
 func checkPublisherTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, runID string) error {
-	principal, err := tx.ResolveAuthority(ctx, actor.Authority)
+	principal, err := resolveTeamAuthorityTx(ctx, tx, team, actor.Authority, sameTeam)
 	if err != nil {
 		return err
 	}
 	c := principal.Capability
-	if actor.Kind != runstate.ActorOperator || c.Team != string(team) || c.Audience != capability.Controller || c.Prefix != actor.CapabilityPrefix || c.Binding.Kind != capability.BindingRun || c.Binding.RunID != runID || !slices.Contains(c.Grants, capability.DataWrite) || c.Data == nil || c.Data.Use != capability.DataPublish || c.Data.RunID != runID {
+	if actor.Kind != runstate.ActorOperator || c.Audience != capability.Controller || c.Prefix != actor.CapabilityPrefix || c.Binding.Kind != capability.BindingRun || c.Binding.RunID != runID || !slices.Contains(c.Grants, capability.DataWrite) || c.Data == nil || c.Data.Use != capability.DataPublish || c.Data.RunID != runID {
 		return holderRefusal()
 	}
 	var mode, repo string
@@ -34,7 +34,7 @@ func checkPublisherTx(ctx context.Context, tx *storeTx, team Team, actor runstat
 
 func checkOwnerTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, runID string) error {
 	if actor.Owner.Kind != runstate.OwnerController {
-		principal, err := tx.ResolveAuthority(ctx, actor.Authority)
+		principal, err := resolveTeamAuthorityTx(ctx, tx, team, actor.Authority, sameTeam)
 		if err != nil {
 			return err
 		}
@@ -51,7 +51,7 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor runsta
 		return holderRefusal()
 	}
 	if ref.Kind == runstate.OwnerController {
-		if actor.Kind != runstate.ActorController || ref.Name != "controller.owner" {
+		if actor.Kind != runstate.ActorController {
 			return holderRefusal()
 		}
 		scheduled, err := controllerOwnershipTx(ctx, tx, team, runID)
@@ -61,17 +61,17 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor runsta
 		if !scheduled {
 			return holderRefusal()
 		}
-		return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: int64(ref.Generation)}, "controller.owner")
+		return nil
 	}
 	if ref.Kind != runstate.OwnerTrigger || ref.RunID != runspec.RunID(runID) || ref.Holder == "" || ref.Generation <= 0 {
 		return holderRefusal()
 	}
-	principal, err := tx.ResolveAuthority(ctx, actor.Authority)
+	principal, err := resolveTeamAuthorityTx(ctx, tx, team, actor.Authority, sameTeam)
 	if err != nil {
 		return err
 	}
 	c := principal.Capability
-	if c.Team != string(team) || c.Binding.RunID != runID || c.Binding.Holder != ref.Holder || runspec.ClaimGeneration(c.Binding.Generation) != ref.Generation || c.Prefix != actor.CapabilityPrefix {
+	if c.Binding.RunID != runID || c.Binding.Holder != ref.Holder || runspec.ClaimGeneration(c.Binding.Generation) != ref.Generation || c.Prefix != actor.CapabilityPrefix {
 		return holderRefusal()
 	}
 	if c.Unit == capability.UnitPlan {
@@ -100,16 +100,16 @@ func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor runsta
 	return nil
 }
 
-func checkReaperTx(ctx context.Context, tx *storeTx, actor runstate.Actor) error {
-	ref := actor.Owner
-	if actor.Kind != runstate.ActorReaper || ref.Kind != runstate.OwnerController || ref.Name != "controller.reaper" {
+// safety: reaper actors are built only inside the controller process, which the store's single-controller lock fences.
+func checkReaperTx(actor runstate.Actor) error {
+	if actor.Kind != runstate.ActorReaper || actor.Owner.Kind != runstate.OwnerController {
 		return holderRefusal()
 	}
-	return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: int64(ref.Generation)}, "controller.reaper")
+	return nil
 }
 
 func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, actor runstate.Actor) error {
-	principal, err := tx.ResolveAuthority(ctx, actor.Authority)
+	principal, err := resolveTeamAuthorityTx(ctx, tx, team, actor.Authority, sameTeam)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row runstate.Nod
 		return holderRefusal()
 	}
 	c := principal.Capability
-	if c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.Kind != capability.BindingNode || claimed != (runspec.NodeFence{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}) {
+	if c.Prefix != actor.CapabilityPrefix || c.Binding.Kind != capability.BindingNode || claimed != (runspec.NodeFence{RunID: runspec.RunID(c.Binding.RunID), NodeID: runspec.NodeID(c.Binding.NodeID), Holder: c.Binding.Holder, Generation: runspec.ClaimGeneration(c.Binding.Generation)}) {
 		return holderRefusal()
 	}
 	return nil
@@ -133,14 +133,14 @@ func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor runst
 	case runstate.ActorController, runstate.ActorRunHost:
 		return checkOwnerLeaseTx(ctx, tx, team, actor, runID)
 	case runstate.ActorReaper:
-		return checkReaperTx(ctx, tx, actor)
+		return checkReaperTx(actor)
 	case runstate.ActorOperator:
-		principal, err := tx.ResolveAuthority(ctx, actor.Authority)
+		principal, err := resolveTeamAuthorityTx(ctx, tx, team, actor.Authority, sameTeam)
 		if err != nil {
 			return err
 		}
 		c := principal.Capability
-		if c.Team != string(team) || !slices.Contains(c.Grants, capability.Grant("runs.control")) || (c.Binding.RunID != "" && c.Binding.RunID != runID) {
+		if !slices.Contains(c.Grants, capability.Grant("runs.control")) || (c.Binding.RunID != "" && c.Binding.RunID != runID) {
 			return holderRefusal()
 		}
 		return nil
@@ -166,21 +166,21 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 		return nil
 	}
 	if actor.Kind == runstate.ActorReaper {
-		return checkReaperTx(ctx, tx, actor)
+		return checkReaperTx(actor)
 	}
 	if actor.Kind == runstate.ActorController {
 		ref := actor.Owner
-		if ref.Kind != runstate.OwnerController || ref.Name != "controller.owner" || (ref.RunID != "" && ref.RunID != runspec.RunID(runID)) {
+		if ref.Kind != runstate.OwnerController || (ref.RunID != "" && ref.RunID != runspec.RunID(runID)) {
 			return holderRefusal()
 		}
-		return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: int64(ref.Generation)}, "controller.owner")
+		return nil
 	}
-	principal, err := tx.ResolveAuthority(ctx, actor.Authority)
+	principal, err := resolveTeamAuthorityTx(ctx, tx, team, actor.Authority, claimantAccepts(actor))
 	if err != nil {
 		return err
 	}
 	c := principal.Capability
-	if c.Team != string(team) && !(actor.Kind == runstate.ActorClaimant && capability.CloudLauncher(c)) || (c.Binding.RunID != "" && c.Binding.RunID != runID) {
+	if c.Binding.RunID != "" && c.Binding.RunID != runID {
 		return holderRefusal()
 	}
 	if actor.CapabilityPrefix != "" && actor.CapabilityPrefix != c.Prefix {
@@ -201,8 +201,15 @@ func stateAuditActorTx(ctx context.Context, tx *storeTx, team Team, actor runsta
 	if storeCancelActor(tx, team, actor) || actor.Kind == runstate.ActorController || actor.Kind == runstate.ActorReaper {
 		return auditActor{system: auditController}, nil
 	}
-	p, err := tx.ResolveAuthority(ctx, actor.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, team, actor.Authority, claimantAccepts(actor))
 	return auditPrincipalActor(p), err
+}
+
+func claimantAccepts(actor runstate.Actor) teamAuthority {
+	if actor.Kind == runstate.ActorClaimant {
+		return sameTeamOrCloudLauncher
+	}
+	return sameTeam
 }
 
 func planAcceptedTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {

@@ -35,7 +35,7 @@ func (t *Tenant) slotAuthorityTx(ctx context.Context, tx *storeTx, a capability.
 	if a.Target.Team != string(t.team) || a.Target.SlotKey == "" || a.ResultReplay || a.LogTailAttempt != 0 {
 		return capability.Authorized{}, time.Time{}, bindingRefusal()
 	}
-	chain, err := authorityChainTx(ctx, tx, a.Principal.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, t.team, a.Principal.Authority, true, sameTeam)
 	if err != nil {
 		return capability.Authorized{}, time.Time{}, err
 	}

@@ -232,8 +232,8 @@ branch or tag pin, such as `origin/main`, runs code whoever can push that ref
 chooses, so unless it resolves to the execution commit itself the run is sealed
 as asserted: its OIDC token claims `trigger:manual` with no `repository_id`,
 `ref` or `sha`, it receives no reserved pool, and it writes under its own cache
-scope. It still receives its pipeline's scoped secrets; see
-[secrets](secrets.md). Pin a full commit to keep an App, schedule or Actions
+scope. It still reads its repository's pipeline secrets, because the
+controller fetches its code from the repository; see [secrets](secrets.md). Pin a full commit to keep an App, schedule or Actions
 run's identity. See [OIDC](oidc.md#what-each-value-proves).
 
 The pinned Go or TypeScript SDK selects its matching verified engine before SDK
@@ -565,7 +565,9 @@ machine `run.routing.local_secrets`. Repository `run.local_secrets` lists names
 only and cannot select requester sources or supply values. Machine secret
 classification also remains in force for local snapshots. The CLI reads those names from its captured environment at
 intake. Required missing values fail before submission. Other declared names
-use the team's normal secret provider. Values travel outside the sealed request
+use the team's normal secret provider; a run of a local checkout or
+working tree reads only its team's `--shared` secrets, never a repository's
+pipeline secrets. Values travel outside the sealed request
 and bundle, stay in controller memory, and are released only to the live
 claiming process with masking enabled. The attached here host re-supplies values
 on authenticated owner heartbeats and when it resumes after a controller restart.
@@ -600,7 +602,10 @@ Use `-o json` for the saved `monthly_minutes`, `used_seconds` and UTC
 use the selected account credential. Team standing tiers and the prepaid
 balance still apply. Once the allowance is reached, new Cloud
 claims wait while local and registered-machine capacity remains eligible.
-Running work finishes.
+Each lease renewal of running Cloud work reserves more time only while it fits
+the allowance. A job the allowance cannot extend keeps the time it already
+reserved, then is cancelled with the reason `monthly overflow allowance
+reached`.
 Deleting run history keeps its usage in the monthly total.
 
 Local publication has a 45-second request deadline. During publication, a second

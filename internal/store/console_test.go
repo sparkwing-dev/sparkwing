@@ -35,10 +35,6 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO session_membership_epochs(session_hash,team,epoch) SELECT 'derived',team,epoch FROM session_membership_epochs WHERE session_hash='operator'`)
 	writes := []func(capability.Authorized) error{
 		func(a capability.Authorized) error {
-			_, err := c.ConsoleRefund(t.Context(), a, OperatorRefund{PaymentID: "pi_test", RefundID: "re_test", AmountCents: 1, Reason: "support"}, "once")
-			return err
-		},
-		func(a capability.Authorized) error {
 			_, err := c.ConsoleGrantCredit(t.Context(), a, CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 1, Reference: "console:ref", CreatedBy: "forged", Reason: "test"})
 			return err
 		},

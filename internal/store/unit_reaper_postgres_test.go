@@ -15,10 +15,6 @@ func TestPostgresUnitReaperLocksRunBeforeNode(t *testing.T) {
 	seedExpiredUnitNode(t, st, "acme", "run", 1, 0)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	lease, err := st.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	db := st.DB()
 	report, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -35,7 +31,7 @@ func TestPostgresUnitReaperLocksRunBeforeNode(t *testing.T) {
 	done := make(chan struct{})
 	var reapErr error
 	go func() {
-		_, reapErr = st.AsOperator().ReapUnits(ctx, lease, 1)
+		_, reapErr = st.AsOperator().ReapUnits(ctx, 1)
 		close(done)
 	}()
 	defer func() { cancel(); _ = report.Rollback(); <-done }()

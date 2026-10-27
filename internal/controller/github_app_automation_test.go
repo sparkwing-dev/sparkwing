@@ -60,8 +60,9 @@ func TestGitHubAppAutomationRevokedDuringDiscoveryStartsNoRun(t *testing.T) {
 					enableAutomation(t, f, owner)
 				}
 			case "suspend":
-				if code, out := f.deliver("installation", map[string]any{"action": "suspend", "installation": map[string]any{"id": 7, "app_id": githubapptest.AppID}}, ""); code != http.StatusOK {
-					t.Fatalf("suspend = %d,%+v", code, out)
+				// The controller's one inbox worker is busy with the push, so the suspension commits directly.
+				if err := f.store.AsOperator().SetGitHubAppInstallationSuspended(t.Context(), 7, true); err != nil {
+					t.Fatal(err)
 				}
 			case "unbind":
 				if code := f.call("DELETE", "/api/v1/team/github-app/installations/7", owner.auth, nil, nil); code != http.StatusNoContent {

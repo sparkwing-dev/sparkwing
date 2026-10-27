@@ -118,7 +118,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 		return runstate.Applied{}, err
 	}
 	if change.Actor.Kind == runstate.ActorRunHost {
-		principal, err := tx.ResolveAuthority(ctx, change.Actor.Authority)
+		principal, err := resolveTeamAuthorityTx(ctx, tx, team, change.Actor.Authority, sameTeam)
 		if err != nil {
 			return runstate.Applied{}, err
 		}
@@ -157,7 +157,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 		return runstate.Applied{}, err
 	}
 	if change.Actor.Kind == runstate.ActorReaper {
-		if err := checkReaperTx(ctx, tx, change.Actor); err != nil {
+		if err := checkReaperTx(change.Actor); err != nil {
 			return runstate.Applied{}, err
 		}
 	}
@@ -319,7 +319,7 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 		if row.CancelRequestedAt != nil && change.To != runstate.RunCancelled {
 			return errors.New("cancellation takes precedence")
 		}
-		if err := checkReaperTx(ctx, tx, change.Actor); err != nil {
+		if err := checkReaperTx(change.Actor); err != nil {
 			return err
 		}
 		var live int

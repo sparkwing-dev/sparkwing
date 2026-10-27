@@ -78,8 +78,8 @@ func wireOperations() map[string]wireOperation {
 		"DELETE /api/v1/pools/{pool}/rules/{rule}":             operation("Remove a pool rule", nil, wire.PoolRuleDeletion{}),
 		"GET /api/v1/secrets":                                  operation("List secret metadata", nil, wire.Secrets{}),
 		"POST /api/v1/secrets":                                 operation("Write a secret or variable", wire.SecretWrite{}, wire.SecretWritten{}),
-		"GET /api/v1/secrets/{name}":                           operation("Read an authorized secret value", nil, wire.SecretValue{}, query("pipeline", "string")),
-		"DELETE /api/v1/secrets/{name}":                        operation("Delete an exact secret row", nil, wire.SecretDeletion{}, query("pipeline", "string")),
+		"GET /api/v1/secrets/{name}":                           operation("Read an authorized secret value", nil, wire.SecretValue{}, query("repo", "string"), query("pipeline", "string")),
+		"DELETE /api/v1/secrets/{name}":                        operation("Delete an exact secret row", nil, nil, query("repo", "string"), query("pipeline", "string")),
 		"POST /api/v1/secrets/rotate":                          operation("Rotate encrypted secrets", wire.SecretRotationRequest{}, wire.SecretRotation{}),
 		"GET /api/v1/runners":                                  operation("List granted runner observations", nil, wire.Runners{}),
 		"GET /api/v1/schedules":                                operation("List schedules and health", nil, wire.ScheduleOverview{}, query("all", "boolean"), query("next", "integer")),
@@ -111,7 +111,6 @@ func wireOperations() map[string]wireOperation {
 	result["GET /api/v1/runs/{run}/local-host/snapshot"] = operation("Read awarded execution state or export completed local history as the verified local peer", nil, runstate.LocalPublication{})
 	result["GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot"] = operation("Read awarded job state and declared terminal artifact selectors", nil, localhostwire.LocalNodeSnapshot{})
 
-	result["POST /api/v1/operator/teams/{team}/refunds"] = operation("Record a completed provider refund", wire.OperatorRefund{}, wire.OperatorRefundRecorded{})
 	result["POST /api/v1/team/billing/standing-request"] = operation("Contact operators for High standing, higher limits or larger payments", wire.StandingRequestWrite{}, wire.StandingRequest{})
 	result["GET /api/v1/operator/standing-requests"] = operation("List open standing requests", nil, wire.OperatorStandingQueue{})
 	result["POST /api/v1/operator/teams/{team}/standing-request/decline"] = operation("Decline a team's open standing request", wire.StandingDecline{}, wire.StandingRequest{})

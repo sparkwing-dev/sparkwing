@@ -131,9 +131,7 @@ func TestRunnerInventoryCloudAwardsKeepIdentityAcrossExchangeAndRenewal(t *testi
 			}
 			if kind == capability.UnitEval {
 				for _, mutate := range []string{
-					`UPDATE eval_units SET owner_lease_name='foreign'`,
-					`UPDATE eval_units SET owner_lease_name='controller.owner',owner_generation=owner_generation+1`,
-					`UPDATE eval_units SET owner_generation=owner_generation-1; UPDATE nodes SET generation=generation+1 WHERE node_id='job'`,
+					`UPDATE nodes SET generation=generation+1 WHERE node_id='job'`,
 				} {
 					rewriteSchemaExec(t, s.db, mutate)
 					if got := readRunnerInventory(t, s, "a"); len(got.Runners) != 1 {

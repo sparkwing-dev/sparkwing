@@ -307,8 +307,7 @@ func TestClaimUnitOwnerKindsAndEvalFences(t *testing.T) {
 			if kind == capability.UnitEval {
 				demand.Target.NodeID, demand.Target.SourceGeneration = "job", 7
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,generation=7,expansion='expected'`)
-				rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, s.now().Add(time.Hour).UnixNano())
-				rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+				rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',7,'pending')`)
 			}
 			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil {
@@ -336,19 +335,12 @@ func TestClaimUnitOwnerKindsAndEvalFences(t *testing.T) {
 				t.Fatal(err)
 			}
 			if kind == capability.UnitEval {
-				rewriteSchemaExec(t, s.db, `UPDATE leases SET generation=4,holder='new-controller' WHERE name='controller.owner'`)
 				demand.Target = nil
 				demand.Kinds = []capability.UnitKind{capability.UnitEval}
 			}
 			second, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 			if err != nil || second.Award.Generation != 2 {
 				t.Fatalf("reclaim=%+v err=%v", second, err)
-			}
-			if kind == capability.UnitEval {
-				var generation int64
-				if err = s.db.QueryRow(`SELECT owner_generation FROM eval_units`).Scan(&generation); err != nil || generation != 4 {
-					t.Fatalf("eval owner generation=%d err=%v", generation, err)
-				}
 			}
 		})
 	}
@@ -647,23 +639,5 @@ func TestNamedClaimReadinessDoesNotRevealForeignWork(t *testing.T) {
 				t.Fatalf("foreign or missing refusal: %v", err)
 			}
 		})
-	}
-}
-
-func TestClaimReadinessDiagnosticCannotRefreshEvaluationOwner(t *testing.T) {
-	s, _ := unitClaimFixture(t)
-	now := s.now()
-	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Hour).UnixNano())
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=7,status='done',outcome='success',finished_at=1,expansion='expected'`)
-	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
-	err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return checkClaimableUnitTx(t.Context(), tx, "a", UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 7})
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var generation int64
-	if err := s.db.QueryRow(`SELECT owner_generation FROM eval_units`).Scan(&generation); err != nil || generation != 3 {
-		t.Fatalf("readiness diagnostic mutated owner generation: %d %v", generation, err)
 	}
 }

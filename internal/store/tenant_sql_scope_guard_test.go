@@ -16,6 +16,8 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).DeleteExpiredLogObjects":        "maintenance deletes every team's log objects past their retention class, matching each slot to its own stream and retiring it by its own team key",
+	"(*Operator).ClaimFailedRefundNotices":       "the billing pass finds every team's failed queued refunds once and marks each announced by its own team key",
 	"(*Operator).setPaymentModeTx":               "startup cutover checks all teams for open test work and restarts every storage watermark before serving",
 	"(*Operator).claimObserversTx":               "claim placement discovers live claimant observations across teams, then checks every pair against authenticated scope",
 	"(*Operator).claimOverflowAccountsTx":        "deployment claims gather each live team's overflow policy before the shared eligibility predicate filters pairs",
@@ -39,24 +41,24 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).getLatestRun":              "the operator locates the latest pipeline run across tenants",
 	"(*Operator).ComputeUsage":              "deployment capacity sums metered awards from every tenant",
 	"(*Operator).ListWaitingNodes":          "deployment attention samples every tenant queue before updating individual tenant nodes",
-	"(*Operator).MarkBlobTombstones":        "leased garbage collection compares every tenant blob with the complete live reference graph",
-	"(*Operator).SealAbandonedLogStreams":   "leased log maintenance discovers abandoned streams across every tenant",
+	"(*Operator).MarkBlobTombstones":        "garbage collection compares every tenant blob with the complete live reference graph",
+	"(*Operator).SealAbandonedLogStreams":   "log maintenance discovers abandoned streams across every tenant",
 	"(*Operator).dueRunEffects":             "the completion worker discovers due effects across tenants before dispatching each tenant run",
-	"(*Operator).expiredUnits":              "the leased reaper discovers expired execution units across tenants before expiring each exact unit",
+	"(*Operator).expiredUnits":              "the reaper discovers expired execution units across tenants before expiring each exact unit",
 	"(*Operator).launcherKeysTx":            "launcher observations name global unit identities whose stored fence and capability ancestry prove ownership before any award is returned",
 	"(*Operator).launcherPrefixesTx":        "launcher reconciliation discovers every tenant award before validating each exact award",
-	"(*Operator).lockMaintenanceCapacityTx": "the leased concurrency pass locks capacity entries across tenants before maintaining each tenant key",
+	"(*Operator).lockMaintenanceCapacityTx": "the concurrency pass locks capacity entries across tenants before maintaining each tenant key",
 	"(*Operator).retainedStorageTeams":      "storage billing discovers every live tenant holding retained records or blobs",
-	"(*Operator).deleteRetentionRunsTx":     "leased retention discovers finished runs across tenants before deleting exact tenant run keys",
-	"(*Operator).deleteRetentionEffectsTx":  "leased retention discovers settled effects across tenants before deleting exact tenant effect keys",
+	"(*Operator).deleteRetentionRunsTx":     "retention discovers finished runs across tenants before deleting exact tenant run keys",
+	"(*Operator).deleteRetentionEffectsTx":  "retention discovers settled effects across tenants before deleting exact tenant effect keys",
 	"(*Operator).SearchTeams":               "the operator console searches every tenant and its owners by deployment search text",
 	"(*Operator).nodeRunActiveSQL":          "the shared predicate correlates a node with its own run; its enclosing statement supplies the tenant scope",
 	"(*Operator).paidGrantForPaymentTx":     "a verified provider payment identity resolves its paid grant before its tenant is known",
 	"(*Operator).accountHasOtherTeamTx":     "an account must retain another membership when deleting its current tenant; account identity spans tenants",
 
-	"(*Operator).abandonExpiredBlobUploads": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
-	"(*Operator).ExpireSourceUploads":       "leased maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
-	"(*Operator).DeleteExpiredBlobStaging":  "leased maintenance selects settled blob tickets across teams, then marks each exact tenant ticket after its staging delete",
+	"(*Operator).abandonExpiredBlobUploads": "maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
+	"(*Operator).ExpireSourceUploads":       "maintenance selects expired source tickets across teams, then expires each exact tenant ticket in its own transaction",
+	"(*Operator).DeleteExpiredBlobStaging":  "maintenance selects settled blob tickets across teams, then marks each exact tenant ticket after its staging delete",
 	"(*Operator).EnsureBootstrapCapability": "the deployment bootstrap seed is a teamless capability, and startup compares a mounted seed with it by prefix",
 	"(*Operator).launcherAwardPrefixTx":     "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
@@ -93,7 +95,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).reconcilePaymentStateTx":   "the payment owner resolves the payer by mode and provider payment identity before settling its normalized state",
 	"(*Operator).paymentTeamTx":             "a provider payment identity is resolved to the checkout or refill that took it before its team is known",
 	"(*Operator).CreditLedgerTotals":        "the deployment credit sampler totals every team's ledger in one snapshot",
-	"(*Operator).DueRefills":                "the elected refill worker lists teams with refill on and open refills, then opens or resumes each under that team's lock",
+	"(*Operator).EachDueRefill":             "the elected refill worker lists teams with refill on and open refills, then authorizes each under that team's lock immediately before its call",
 	"(*Operator).applyCheckoutPaymentTx":    "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 
 	"(*Operator).DueCardRefunds":            "the payment worker lists every team's queued refunds in one pass",
@@ -120,9 +122,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"because the daily cap protects the inbox, not the team",
 	"(*Operator).GitHubAppInstallationTeam": "a webhook delivery and a repository's installation name no team, " +
 		"so the installation's binding is how either finds the team it belongs to",
-	"(*Operator).FreeSlots":              "the free tier is bounded by how many teams hold a slot, so it counts every team's",
-	"(*Operator).freeSlotOpenTx":         "a reservation asks whether any slot is left, so it counts every team's",
-	"(*Operator).releaseIdleFreeSlotsTx": "leased retention inspects every team's slot and releases only its exact team after thirty empty days without bytes or runs",
 	"(*Operator).disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
 
@@ -140,19 +139,46 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).EgressUsageAcrossTeams": "reloads team egress totals into the controller alarm before serving",
 }
 
-// safety: matches only after FROM, JOIN, INTO and UPDATE, because a
-// table name appearing inside a column name or a comment is not a read
-// or a write of that table.
-var tenantOwnedTableRe = regexp.MustCompile(`(?is)\b(?:FROM|JOIN|INTO|UPDATE)\s+([a-z_][a-z0-9_]*)`)
+// safety: operator-owned tables that carry a team column are judged like tenant tables; an entry
+// names one statement's function and table with the reason it reads across teams.
+var reviewedOperatorTableSQL = map[string]string{
+	"(*Store).settlePaymentFacts|payment_events": "a provider event replays by its own id before any team is known",
+	"checkPaymentObjectTx|payment_events":        "a provider object's earlier events are found by the provider's id, whichever team they named",
+	"paymentEventReplayTx|payment_events":        "a provider event replays by its own id before any team is known",
+}
 
-// Unbound SQL belongs to a reviewed Operator operation. Scoped methods and
-// package functions cannot acquire an exemption by adding an allowlist entry.
+// safety: queue_team routes an App delivery after verification and is filtered by hand; the guard's
+// predicate reader knows only team, so this table is reviewed here rather than silently skipped.
+// safety: claim search reads every claimable team; this statement binds each row's team from the
+// proof heads the caller passed as one JSON parameter, so the guard cannot see the binding.
+var reviewedClaimSearchSQL = map[string]string{
+	"claimProofFactsTx": "joins requirement terms on each proof head's own team and requirements, both bound per head",
+}
+
+var reviewedTeamColumnTables = map[string]string{
+	"github_app_deliveries": "an operator inbox keyed by delivery; queue_team is set only after the delivery verifies",
+}
+
+// Unbound SQL belongs to a reviewed Operator operation, with one narrower exception:
+// a statement on an operator-owned table that carries a team column, such as a
+// provider event read by its own id, may be exempted per function and table in
+// reviewedOperatorTableSQL, whatever the function's receiver. A tenant-owned
+// table never takes that exemption.
 func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	seen := map[string]bool{}
 	for _, stmt := range tenantSQLStatements(t) {
+		for _, problem := range unjudgeableTableSyntax(stmt.text) {
+			t.Errorf("%s: statement in %s %s, which the scope guard cannot judge; write a plain table name and an explicit JOIN.\n\t%s", stmt.pos, stmt.key, problem, collapse(stmt.text))
+		}
 		tables := tenantTablesTouchedBy(stmt.text)
 		if len(tables) == 0 {
 			continue
+		}
+		if len(tables) == 1 && !slices.Contains(tenantTables, tables[0]) {
+			if _, ok := reviewedOperatorTableSQL[stmt.key+"|"+tables[0]]; ok {
+				seen[stmt.key+"|"+tables[0]] = true
+				continue
+			}
 		}
 		unscoped := unscopedSubqueries(stmt.text)
 		if outerCarriesTeam(stmt.text) && len(unscoped) == 0 {
@@ -165,6 +191,10 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 			if statementCarriesTeam(output) && len(unscopedSubqueries(output)) == 0 {
 				continue
 			}
+		}
+		if _, ok := reviewedClaimSearchSQL[stmt.key]; ok {
+			seen[stmt.key] = true
+			continue
 		}
 		if _, fragment := reviewedClaimSQLFragments[stmt.key]; fragment {
 			seen[stmt.key] = true
@@ -187,6 +217,21 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	for key, why := range reviewedClaimSQLFragments {
 		if !strings.HasPrefix(key, "(*claimSQL).") || why == "" || !seen[key] {
 			t.Errorf("stale or unexplained claim SQL fragment %s", key)
+		}
+	}
+	for key, why := range reviewedOperatorTableSQL {
+		if strings.TrimSpace(why) == "" || !seen[key] {
+			t.Errorf("reviewedOperatorTableSQL entry %q is stale or has no reason; delete it", key)
+		}
+	}
+	for key, why := range reviewedClaimSearchSQL {
+		if strings.TrimSpace(why) == "" || !seen[key] {
+			t.Errorf("reviewedClaimSearchSQL entry %q is stale or has no reason; delete it", key)
+		}
+	}
+	for table, why := range reviewedTeamColumnTables {
+		if strings.TrimSpace(why) == "" || len(tablesWithColumn("queue_team")) == 0 || !slices.Contains(tablesWithColumn("queue_team"), table) {
+			t.Errorf("reviewedTeamColumnTables entry %q is stale or has no reason", table)
 		}
 	}
 	for key, why := range reviewedUnscopedSQL {
@@ -318,14 +363,86 @@ type sqlStatement struct {
 	holdsTeam bool
 }
 
-func tenantTablesTouchedBy(sql string) []string {
-	var out []string
-	for _, m := range tenantOwnedTableRe.FindAllStringSubmatch(sql, -1) {
-		name := strings.ToLower(m[1])
-		if (slices.Contains(tenantTables, name) || slices.Contains([]string{"audit_events", "capabilities", "sessions"}, name)) && !slices.Contains(out, name) {
-			out = append(out, name)
+func unjudgeableTableSyntax(sql string) []string {
+	tokens := scopeTokens(sql)
+	_, out := sqlRelations(tokens)
+	if commaJoined(tokens) {
+		out = append(out, "joins tables with a comma")
+	}
+	return out
+}
+
+// safety: discovery and refusal share this fail-closed reader: after FROM, JOIN, INTO, UPDATE or USING
+// (and ONLY) it accepts a plain table, a subquery, an INTO column list, information_schema, or the clause
+// word, comma or parenthesis left where the flattener dropped a fragment; every other form is refused.
+func sqlRelations(tokens []string) (tables, problems []string) {
+	for i := 0; i+1 < len(tokens); i++ {
+		switch tokens[i] {
+		case "from", "join", "into", "update", "using":
+		default:
+			continue
+		}
+		if tokens[i] == "from" && i > 0 && tokens[i-1] == "distinct" || tokens[i] == "update" && i > 0 && slices.Contains([]string{"do", "before", "after"}, tokens[i-1]) {
+			continue
+		}
+		j := i + 1
+		if tokens[j] == "only" && j+1 < len(tokens) {
+			j++
+		}
+		next, after := tokens[j], ""
+		if j+1 < len(tokens) {
+			after = tokens[j+1]
+		}
+		switch {
+		case next == "(" && (slices.Contains([]string{"select", "with", "values", ")"}, after) || tokens[i] == "into" && scopeIdentRe.MatchString(after) && j+2 < len(tokens) && (tokens[j+2] == "," || tokens[j+2] == ")")):
+		case slices.Contains(sqlClauseWords, next) || next == ")" || next == ",":
+		case next == "information_schema" && after == ".":
+		case scopeIdentRe.MatchString(next) && after != "." && !slices.Contains(sqlRelationModifiers, next):
+			tables = append(tables, next)
+		default:
+			problems = append(problems, "names a relation as "+strings.Join(tokens[i:min(j+3, len(tokens))], " "))
 		}
 	}
+	return tables, problems
+}
+
+// safety: the flattener leaves a clause word where it dropped an unresolved table fragment; that
+// fragment is judged where it is built, so the word is not a relation to refuse.
+// safety: these words modify a relation rather than name one; the reader does not interpret them.
+var sqlRelationModifiers = []string{"or", "lateral", "natural", "recursive"}
+
+var sqlClauseWords = []string{"where", "join", "left", "inner", "cross", "on", "as", "set", "order", "group", "limit", "union", "returning", "select", "values", "default"}
+
+var scopeIdentRe = regexp.MustCompile(`^[a-z_][a-z0-9_$]*$`)
+
+// safety: a comma at the FROM clause's own depth is a join, however the tables before it were joined.
+func commaJoined(tokens []string) bool {
+	inFrom := []bool{false}
+	for i, token := range tokens {
+		top := len(inFrom) - 1
+		switch token {
+		case "(":
+			inFrom = append(inFrom, false)
+		case ")":
+			if top > 0 {
+				inFrom = inFrom[:top]
+			}
+		case "from", "using":
+			distinct := token == "from" && i > 0 && tokens[i-1] == "distinct"
+			inFrom[top] = !distinct
+		case "where", "group", "order", "limit", "having", "union", "intersect", "except", "returning", "window", "select", "set", "do", "values", ";":
+			inFrom[top] = false
+		case ",":
+			if inFrom[top] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func tenantTablesTouchedBy(sql string) []string {
+	out := statementTables(sql, teamColumnTables())
 	slices.Sort(out)
 	return out
 }
@@ -484,7 +601,7 @@ func tenantSQLStatements(t *testing.T) []sqlStatement {
 
 	var out []sqlStatement
 	for name, f := range files {
-		names := sortedFileNames(f)
+		names := append(sortedFileNames(f), packageLevelSQL(f)...)
 		for _, fn := range names {
 			ast.Inspect(fn.node, func(n ast.Node) bool {
 				expr, ok := n.(ast.Expr)
@@ -522,6 +639,34 @@ func sortedFileNames(f *ast.File) []namedFunc {
 			continue
 		}
 		out = append(out, namedFunc{key: funcKey(fn), node: fn.Body, holdsTeam: funcHoldsTeam(fn)})
+	}
+	return out
+}
+
+// safety: a statement built inside a package-level function or composite literal runs like any other,
+// so it is judged; a bare string constant is a fragment, judged where a function concatenates it.
+func packageLevelSQL(f *ast.File) []namedFunc {
+	var out []namedFunc
+	for _, decl := range f.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, value := range vs.Values {
+				if call, ok := value.(*ast.CallExpr); ok && strings.HasPrefix(exprString(call.Fun), "regexp.") {
+					continue
+				}
+				switch value.(type) {
+				case *ast.CallExpr, *ast.CompositeLit, *ast.FuncLit:
+					out = append(out, namedFunc{key: "var " + vs.Names[0].Name, node: value})
+				}
+			}
+		}
 	}
 	return out
 }
@@ -603,3 +748,60 @@ var sqlVerbRe = regexp.MustCompile(`(?is)\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s
 func looksLikeSQL(s string) bool { return sqlVerbRe.MatchString(s) }
 
 func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// The blind spots security pass 3 reproduced with this guard's own matcher.
+func TestTenantSQLScope_RefusesUnjudgeableSyntax(t *testing.T) {
+	for _, c := range []struct {
+		sql     string
+		refused bool
+	}{
+		{`SELECT r.id FROM runs r, nodes n WHERE r.team=?`, true},
+		{`SELECT 1 FROM sparkwing_meta m, runs r`, true},
+		{`SELECT 1 FROM runs r JOIN nodes n ON n.run_id=r.id, approvals a WHERE r.team=?`, true},
+		{`SELECT id FROM "runs" WHERE id=?`, true},
+		{`SELECT id FROM main.runs WHERE id=?`, true},
+		{"SELECT id FROM `runs` WHERE id=?", true},
+		{`SELECT a, b FROM runs WHERE team=? AND id IN (?, ?)`, false},
+		{`SELECT x IS DISTINCT FROM y, z FROM runs WHERE team=?`, false},
+		{`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema()`, false},
+		{`SELECT n.id FROM nodes n JOIN clock ON TRUE WHERE n.team=?`, false},
+		{`SELECT id FROM ONLY "runs" WHERE id=?`, true},
+		{`SELECT id FROM (runs) WHERE id=?`, true},
+		{`SELECT id FROM (SELECT id FROM runs WHERE team=?) r`, false},
+		{`SELECT id FROM ("runs") WHERE id=?`, true},
+		{`SELECT id FROM ((runs)) WHERE id=?`, true},
+		{`UPDATE OR IGNORE runs SET status=? WHERE id=?`, true},
+		{`INSERT OR REPLACE INTO runs(team,id) VALUES (?,?)`, false},
+		{`INSERT INTO runs(team,id) VALUES (?,?) ON CONFLICT(team,id) DO UPDATE SET id=excluded.id`, false},
+	} {
+		if got := len(unjudgeableTableSyntax(c.sql)) > 0; got != c.refused {
+			t.Errorf("%q: refused=%v, want %v", c.sql, got, c.refused)
+		}
+	}
+	for _, sql := range []string{`SELECT SUM(amount_micro) FROM ((credit_grants)) WHERE team=?`, `UPDATE OR IGNORE credit_grants SET created_by=? WHERE team=?`} {
+		if statementTables(sql, []string{"credit_grants"}) == nil && len(unjudgeableTableSyntax(sql)) == 0 {
+			t.Errorf("%q hid a money table from discovery without being refused", sql)
+		}
+	}
+	if got := tenantTablesTouchedBy(`UPDATE ONLY runs SET status=? WHERE id=?`); !slices.Contains(got, "runs") {
+		t.Errorf("ONLY hid runs from the guard: %v", got)
+	}
+	if got := statementTables(`SELECT SUM(amount_micro) FROM ONLY credit_grants WHERE team=?`, []string{"credit_grants"}); !slices.Contains(got, "credit_grants") {
+		t.Errorf("ONLY hid a money table from discovery: %v", got)
+	}
+	if got := tenantTablesTouchedBy(`DELETE FROM sparkwing_meta USING runs WHERE runs.id=?`); !slices.Contains(got, "runs") {
+		t.Errorf("DELETE ... USING hid runs from the guard: %v", got)
+	}
+	for _, table := range []string{"payment_events", "audit_events", "capabilities", "sessions"} {
+		if !slices.Contains(teamColumnTables(), table) {
+			t.Errorf("operator table %s carries a team column and must be judged", table)
+		}
+	}
+	found := false
+	for _, stmt := range tenantSQLStatements(t) {
+		found = found || stmt.key == "var computeLimitsSQL"
+	}
+	if !found {
+		t.Error("the guard no longer reads SQL built in package-level initializers")
+	}
+}

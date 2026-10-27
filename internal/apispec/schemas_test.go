@@ -9,6 +9,7 @@ import (
 	"time"
 
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func schemaDefinition(t *testing.T, b *schemaBuilder, value schema) schema {
@@ -131,5 +132,54 @@ func TestSchemasRefuseUnsupportedJSONBeforePublishing(t *testing.T) {
 	second := schemaDefinition(t, &b, b.value(reflect.TypeFor[struct{ B int }]()))
 	if first["properties"].(schema)["A"] == nil || second["properties"].(schema)["B"] == nil {
 		t.Fatal("anonymous shapes borrowed one another's fields")
+	}
+}
+
+func TestProvenanceSchemaAcceptsEveryPopulatedField(t *testing.T) {
+	sha := strings.Repeat("c", 40)
+	pr, err := runspec.AppProvenance(runspec.AppFacts{Event: "pull_request", RepositoryID: 3, Repository: "acme/repo", Ref: "refs/pull/1/merge", SHA: sha, DefaultBranch: "main", DeliveryKey: "d", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{BaseRef: "main"}}, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedule, err := runspec.ScheduleProvenance("nightly", 3, "acme/repo", "main", sha, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := runspec.AssertedChildProvenance(runspec.RunWriter("run"), "refs/heads/x", sha, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := schemaBuilder{definitions: schema{}}
+	definition := schemaDefinition(t, &b, b.value(reflect.TypeFor[runspec.Provenance]()))
+	properties := definition["properties"].(schema)
+	kinds := map[string]string{"string": "string", "float64": "integer", "bool": "boolean"}
+	for _, p := range []runspec.Provenance{pr, schedule, child} {
+		raw, err := json.Marshal(struct {
+			Request struct {
+				Provenance runspec.Provenance `json:"provenance"`
+			} `json:"request"`
+		}{Request: struct {
+			Provenance runspec.Provenance `json:"provenance"`
+		}{p}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded struct {
+			Request struct {
+				Provenance map[string]any `json:"provenance"`
+			} `json:"request"`
+		}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		for key, value := range decoded.Request.Provenance {
+			property, ok := properties[key].(schema)
+			if !ok {
+				t.Fatalf("request.provenance.%s is emitted but the schema forbids it", key)
+			}
+			if want := kinds[reflect.TypeOf(value).String()]; property["type"] != want {
+				t.Fatalf("request.provenance.%s is %s, schema says %v", key, want, property["type"])
+			}
+		}
 	}
 }

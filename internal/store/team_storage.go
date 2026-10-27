@@ -18,14 +18,6 @@ const (
 	StorageLogs StorageKind = "logs"
 )
 
-// FreeCacheShare is the part of allowance the cache holds a free team to,
-// three quarters.
-func FreeCacheShare(allowance int64) int64 { return allowance / 4 * 3 }
-
-// FreeLogShare is the part of allowance a free team's node logs are held
-// to, three sixteenths.
-func FreeLogShare(allowance int64) int64 { return allowance / 16 * 3 }
-
 func execStatements(ctx context.Context, tx *storeTx, script string) error {
 	statements, err := splitStatements(script)
 	if err != nil {

@@ -17,7 +17,7 @@ import (
 
 func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
 	property := func(selector uint8, suffix uint64) bool {
-		tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
+		tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
 		p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 		if err != nil {
@@ -65,7 +65,7 @@ func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
 
 func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *testing.T) {
 	property := func(seed uint64) bool {
-		tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
+		tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
 		p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 		if err != nil {
@@ -73,7 +73,7 @@ func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *test
 		}
 		secret := fmt.Sprintf("private-%016x", seed)
 		tenant.s.planSecretOpener = fakePlanSecretOpener(func(_ context.Context, _ Team, _ Secret) (string, error) { return secret, nil })
-		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES ('a','KEY','sealed','owner','p',1,0,1,1)`)
+		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at) VALUES ('a','KEY','sealed','owner','','',1,1,1,1)`)
 		text := "note " + secret + " encoded " + base64.StdEncoding.EncodeToString([]byte(secret)) + " end"
 		a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(tenant.team), RunID: string(ref.RunID)}}
 		for range 2 {
@@ -132,7 +132,7 @@ func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *test
 func TestRunControlRollsBackStateEventsAndReplayTogether(t *testing.T) {
 	for _, approval := range []bool{false, true} {
 		t.Run(fmt.Sprint(approval), func(t *testing.T) {
-			tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
+			tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 			actor := authorityMember(t, tenant.s, "member", RoleEditor)
 			p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 			if err != nil {
@@ -200,7 +200,7 @@ func TestRunControlMasksClassifiedArguments(t *testing.T) {
 
 func TestAccountDeletionDropsOnlyItsPrivateControlReceiptsProperty(t *testing.T) {
 	property := func(seed uint64) bool {
-		tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
+		tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 		first := fmt.Sprintf("account-%016x", seed)
 		var survivor capability.Authorized
 		for _, id := range []string{first, "survivor"} {

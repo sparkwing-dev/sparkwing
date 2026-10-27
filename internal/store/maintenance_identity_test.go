@@ -1,7 +1,6 @@
 package store
 
 import (
-	"errors"
 	"fmt"
 	"math/rand/v2"
 	"testing"
@@ -34,12 +33,8 @@ func TestRetentionIdentityPreservesLiveAuthorityProperty(t *testing.T) {
 			authorityPersist(t, s, child)
 		}
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "worker", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for remaining := expected; remaining > 0; {
-		result, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 3})
+		result, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Limit: 3})
 		if err != nil || result.Sessions <= 0 || result.Sessions > 3 {
 			t.Fatalf("bounded identity pass: %+v %v", result, err)
 		}
@@ -58,7 +53,7 @@ func TestRetentionIdentityPreservesLiveAuthorityProperty(t *testing.T) {
 			t.Fatalf("session %s survived=%d, want %v: %v", id, count, want, err)
 		}
 	}
-	again, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 3})
+	again, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Limit: 3})
 	if err != nil || again.Sessions != 0 {
 		t.Fatalf("repeated identity pass: %+v %v", again, err)
 	}
@@ -86,47 +81,38 @@ func TestRetentionInvitationsKeepsWhatStillAdmits(t *testing.T) {
 		}
 		rewriteSchemaExec(t, s.db, `INSERT INTO invitations(id,team,email,role,invited_by,created_at,expires_at,accepted_at,accepted_by,withdrawn_at) VALUES (?,'a',?,'reader','owner',?,?,?,?,?)`, row.id, row.id+"@example.test", old, row.expires, row.accepted, acceptedBy, row.withdrawn)
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "worker", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for range 3 {
-		result, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 1})
+		result, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Limit: 1})
 		if err != nil || result.Invitations != 1 {
 			t.Fatalf("invitation expiry: %+v %v", result, err)
 		}
 	}
-	again, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 10})
+	again, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Limit: 10})
 	if err != nil || again.Invitations != 0 {
 		t.Fatalf("repeated invitation expiry: %+v %v", again, err)
 	}
 	rewriteSchemaCount(t, s.db, "invitations", 3)
 }
 
-func TestRetentionIdentityRollsBackAndFences(t *testing.T) {
+func TestRetentionIdentityRollsBackAndRetries(t *testing.T) {
 	s, _, now := maintenanceStore(t)
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','account@example.test',1,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('expired','account','runs.read',1,?,'a','account')`, now.UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO invitations(id,team,email,role,invited_by,created_at,expires_at) VALUES ('expired','a','expired@example.test','reader','owner',1,1)`)
 	operator := s.AsOperator()
-	lease, err := operator.AcquireSingletonLease(t.Context(), "maintenance", "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_identity_retention BEFORE DELETE ON sessions BEGIN SELECT RAISE(ABORT,'identity unavailable'); END`)
-	result, err := operator.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 10})
+	result, err := operator.MaintainRetention(t.Context(), RetentionRequest{Limit: 10})
 	if err == nil || result != (RetentionResult{}) {
 		t.Fatalf("failed retention returned committed counters: %+v %v", result, err)
 	}
 	rewriteSchemaCount(t, s.db, "invitations", 1)
 	rewriteSchemaCount(t, s.db, "sessions", 1)
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_identity_retention`)
-	*now = now.Add(time.Minute)
-	if _, err := operator.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 10}); !errors.Is(err, ErrLockHeld) {
-		t.Fatalf("expired maintenance fence: %v", err)
+	if _, err := operator.MaintainRetention(t.Context(), RetentionRequest{Limit: 10}); err != nil {
+		t.Fatalf("retried retention: %v", err)
 	}
-	rewriteSchemaCount(t, s.db, "invitations", 1)
-	rewriteSchemaCount(t, s.db, "sessions", 1)
+	rewriteSchemaCount(t, s.db, "invitations", 0)
+	rewriteSchemaCount(t, s.db, "sessions", 0)
 }
 
 func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {

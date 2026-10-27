@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -19,24 +21,87 @@ func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, a
 	}
 	var class string
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockAuthorityThenRunTx(ctx, tx, t.team, subject.RunID, actor); err != nil {
-			return err
-		}
-		if err := checkLogWriterTx(ctx, tx, t.team, subject, actor, false); err != nil {
-			return err
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT log_retention_class FROM runs WHERE team=? AND id=?`, t.team, subject.RunID).Scan(&class); err != nil {
-			return err
-		}
-		if _, ok := blob.LogClassDays(class); !ok {
-			return authorityError(apierr.Unavailable, "invalid persisted log retention")
-		}
-		return nil
+		var err error
+		class, err = t.prepareLogWriteTx(ctx, tx, subject, actor)
+		return err
 	})
 	if err != nil {
 		return "", err
 	}
 	return class, nil
+}
+
+func (t *Tenant) prepareLogWriteTx(ctx context.Context, tx *storeTx, subject blob.LogSubject, actor runstate.Actor) (string, error) {
+	var class string
+	if err := lockAuthorityThenRunTx(ctx, tx, t.team, subject.RunID, actor); err != nil {
+		return "", err
+	}
+	if err := checkLogWriterTx(ctx, tx, t.team, subject, actor, false); err != nil {
+		return "", err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT log_retention_class FROM runs WHERE team=? AND id=?`, t.team, subject.RunID).Scan(&class); err != nil {
+		return "", err
+	}
+	if _, ok := blob.LogClassDays(class); !ok {
+		return "", authorityError(apierr.Unavailable, "invalid persisted log retention")
+	}
+	return class, nil
+}
+
+// LogSlot is what a signed log upload may store: its byte size and upload deadline, both fixed when first signed,
+// and whether its object is already committed, in which case the uploader has nothing left to send.
+type LogSlot struct {
+	RetentionClass string
+	Size           int64
+	UploadExpires  time.Time
+	Committed      bool
+}
+
+// OpenLogSlot checks the writer as PrepareLogWrite does and, before the caller signs an upload URL, admits a new
+// slot's bytes through the storage rule (see STORE-DATA.md, log slot accounting). Signing the slot again returns
+// its first size and upload deadline, never others, and is refused once that deadline has passed unless the slot is
+// committed, so no URL for a slot outlives its first signing by more than limits.LogUploadURLTTL.
+func (t *Tenant) OpenLogSlot(ctx context.Context, subject blob.LogSubject, actor runstate.Actor, index, size int64) (LogSlot, error) {
+	if subject.Team != string(t.team) {
+		return LogSlot{}, authorityError(apierr.Forbidden, "log belongs to another team")
+	}
+	if err := subject.Validate(); err != nil {
+		return LogSlot{}, authorityError(apierr.BadRequest, "invalid log subject")
+	}
+	identity, err := logIdentity(subject)
+	if err != nil {
+		return LogSlot{}, err
+	}
+	if index < 0 || size < 1 {
+		return LogSlot{}, authorityError(apierr.BadRequest, "invalid log upload slot")
+	}
+	var out LogSlot
+	err = t.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		if out.RetentionClass, err = t.prepareLogWriteTx(ctx, tx, subject, actor); err != nil {
+			return err
+		}
+		slot, err := logSlotTx(ctx, tx, t.team, subject.RunID, identity.id, index)
+		if err != nil {
+			return err
+		}
+		now := tx.now(ctx)
+		if slot.found {
+			out.Size, out.Committed = slot.size, slot.committed
+			out.UploadExpires = time.Unix(0, slot.created).Add(limits.LogUploadURLTTL)
+			if !slot.committed && !now.Before(out.UploadExpires) {
+				return authorityError(apierr.Conflict, "log upload slot expired before its object was committed")
+			}
+			return nil
+		}
+		key, err := blob.LogObjectKey(subject, out.RetentionClass, index)
+		if err != nil {
+			return err
+		}
+		out.Size, out.UploadExpires = size, now.Add(limits.LogUploadURLTTL)
+		return openLogSlotTx(ctx, tx, t.team, subject.RunID, identity, index, size, key, false)
+	})
+	return out, err
 }
 
 // WriteActivity records bounded masked detail under the current result writer's fence.

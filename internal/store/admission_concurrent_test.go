@@ -108,7 +108,7 @@ func runConcurrentAdmissionSuite(t *testing.T, target func(*testing.T) *storetes
 				}
 				wg.Go(func() {
 					<-start
-					if _, err := f.s.AsOperator().MaintainConcurrency(t.Context(), f.lease); err != nil {
+					if _, err := f.s.AsOperator().MaintainConcurrency(t.Context()); err != nil {
 						errors <- fmt.Errorf("maintenance: %w", err)
 					}
 				})

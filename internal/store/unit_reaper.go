@@ -13,15 +13,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-// ReapUnits recovers expired work under the elected reaper fence.
-func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error) {
+// ReapUnits recovers expired work.
+func (o *Operator) ReapUnits(ctx context.Context, limit int) ([]ReapedUnit, error) {
 	if limit <= 0 {
 		return nil, errors.New("reaper limit must be positive")
-	}
-	if err := o.s.inTx(ctx, func(tx *storeTx) error {
-		return assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper")
-	}); err != nil {
-		return nil, err
 	}
 	targets, err := o.expiredUnits(ctx, limit)
 	if err != nil {
@@ -33,14 +28,7 @@ func (o *Operator) ReapUnits(ctx context.Context, lease SingletonLease, limit in
 		var result *ReapedUnit
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
 			now := tx.now(ctx)
-			var holder string
-			if err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder); err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
-			if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
-				return err
-			}
-			actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
+			actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController}}
 			var err error
 			if target.kind == capability.UnitNode {
 				result, err = reapNodeUnitTx(ctx, tx, target, actor, now)
@@ -145,7 +133,25 @@ func reapNodeUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	} else if row.Status == runstate.StatusRunning && row.Disruptions+1 >= limits.MaxDisruptions {
 		to = runstate.NodeFailed
 	}
-	if _, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: actor, Cause: runstate.CauseLeaseLapse}); err != nil {
+	// A lease that ran out because its award was stopped, such as at the requester's overflow allowance, ends the job
+	// with that reason, the way a funding refusal does, rather than requeueing it as a generic lapse.
+	var stop string
+	err = tx.QueryRowContext(ctx, `SELECT stop_reason FROM billing_awards WHERE team=? AND run_id=? AND node_id=? AND unit_kind=? AND generation=?`,
+		target.team, target.ref.RunID, target.ref.NodeID, capability.UnitNode, int64(row.Generation)).Scan(&stop)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if stop != "" && to != runstate.NodeCancelled {
+		to = runstate.NodeCancelled
+		previous := tx.cancelingTeam
+		tx.cancelingTeam = target.team
+		_, err = transitionNodeStateTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: runstate.Actor{Kind: runstate.ActorOperator},
+			Cause: causeCancel, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: to, Reason: stop}}})
+		tx.cancelingTeam = previous
+	} else {
+		_, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: actor, Cause: runstate.CauseLeaseLapse})
+	}
+	if err != nil {
 		return nil, err
 	}
 	disruptions := row.Disruptions

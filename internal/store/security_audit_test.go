@@ -23,7 +23,7 @@ func securityAuditEvent(t *testing.T, s *Store, kind string) {
 
 func TestSecurityMutationsRequireAudit(t *testing.T) {
 	t.Run("approval", func(t *testing.T) {
-		tenant, ref, _, _, change := approvalReaperFixture(t, "fail")
+		tenant, ref, _, change := approvalReaperFixture(t, "fail")
 		change.Extra.Approval.Comment = "private comment person@example.test"
 		rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_security_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 		if _, err := tenant.TransitionNode(t.Context(), change); err == nil {

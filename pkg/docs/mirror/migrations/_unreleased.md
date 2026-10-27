@@ -42,6 +42,23 @@ satisfy the check: it measures a bucket and stores nothing. A
 `--cache-blob-store`. Set `controller.dataStore.s3URL`. A self-hosted install
 may instead switch to `controller.storage.type=pvc`; Cloud still requires S3.
 
+## Storage tiers replace free-tier slots
+
+Sparkwing Cloud no longer hands out free-tier slots. `--free-team-slots`, the
+`free_slots` table and the sign-up gate's `free_tier_closed` and
+`free_tier_unreadable` waitlist reasons are removed; drop the flag from
+controller arguments. Every team stores within its tier quota instead, and every
+write that grows stored data (run events, blob and source uploads, log
+segments) is checked against it, against holds and against an empty balance.
+Team standing JSON drops `cache_share_bytes`, `log_share_bytes` and
+`event_share_bytes`. `Tenant.AppendEventCharged` is removed; events append
+through `Tenant.AppendEvent`.
+
+## Operator refund route removed
+
+`POST /api/v1/operator/teams/{team}/refunds` is removed. Refund in the Stripe
+dashboard; the verified refund webhook reverses the credits once.
+
 ## Fleet-wide hourly run cap removed
 
 The optional `max_global_runs_per_hour` compute guard, and the
@@ -50,6 +67,39 @@ off by default and counted every team's runs against one budget. Per-principal
 hourly limits (`max_runs_per_hour`) and prepaid credits still bound intake.
 `sparkwing operator limits set` refuses the old name; drop it from scripts and
 configuration. A value already stored is ignored.
+
+## Pipeline secrets belong to one repository
+
+A pipeline secret now belongs to one GitHub repository and one pipeline, like a
+GitHub repository secret. Before, a secret set with `--pipeline ci` reached every
+repository's pipeline named `ci`, so anyone who could push to one repository
+could read another repository's `ci` secrets. Pipeline secrets now reach only
+runs whose code Sparkwing fetched from the repository through the team's GitHub
+App (pushes, pull requests, schedule fires, run-now and dashboard or CLI runs of
+a connected repository) or whose repository a GitHub Actions job proved.
+Uploaded, working-tree, local and `--runner here` runs read only `--shared`
+secrets.
+
+- `sparkwing secrets set`, `get` and `delete` take `--repo OWNER/NAME` together
+  with `--pipeline`; `--pipeline` alone is refused. `--repo` also takes a
+  `gh:<id>` key from `sparkwing secrets list -o json`.
+- `sparkwing secrets list` shows each pipeline row's repository and filters by
+  `--repo` and `--pipeline`.
+- `POST /api/v1/secrets` takes `repo` with `pipeline`, and
+  `GET`/`DELETE /api/v1/secrets/{name}` take `repo` with `pipeline` in the query.
+  Secret metadata carries `repo` (the repository's name when the row was
+  written) and `repo_key` (its identity).
+- A local or manual run that needs a secret reads a `--shared` secret or a
+  [local secret](../machine-config.md#local-secrets).
+- `--shared` secrets are unchanged and stay team-wide. Protect deploy secrets
+  with reserved pools or `--only-on`.
+
+v0.68 starts a new store, so set each pipeline secret again with its
+repository:
+
+```sh
+sparkwing secrets set --secret DEPLOY_KEY --file key.pem --repo acme/web --pipeline deploy
+```
 
 ## Secret missing sentinel
 
@@ -88,8 +138,7 @@ completed. The schema drops `teams.card_payment_method`, `card_fingerprint`,
 `card_brand` and `card_last4`, `credit_checkouts.payment_method`,
 `receipt_email` and `warning_id`, `payment_warnings.fingerprint`, the card
 columns of `payment_setups`, and the `payment_cards` table. Verified payment events persisted
-in `payment_events` and `payment_states` no longer carry a payment method or
-card details.
+in `payment_events` no longer carry a payment method or card details.
 
 The checkout service contract changes with this controller. `POST
 /internal/card-setup` receives the team owner's account `email`, which only Stripe
@@ -213,8 +262,9 @@ stores the authentication result and its protection decision at settlement.
 `payment_refunds.kind` distinguishes refunds, lost disputes and warning
 obligations in the same durable settlement path. Pending obligations are
 consumed atomically when their delayed payment grants credit.
-`payment_states` and `payment_setups` retain verified outcomes that arrive
-before their payment or setup association. All events for one payment use
+`payment_setups` retains verified setup outcomes that arrive before their
+setup association; a refill payment names its refill in its metadata, so its
+outcome settles on arrival. All events for one payment use
 the same provider-mode and payment lock, and terminal refund outcomes never
 regress to pending. Warning identities and refund queues also record provider
 mode.
@@ -247,12 +297,11 @@ running Cloud work stops the same way, with the hold named. Retained storage no
 longer takes the balance below zero. Kubernetes is the backstop during a launcher
 outage: a pod can run up to one extra slice plus its start delay beyond its
 funded deadline. This overage is never charged.
-The checkout service drops its pay-now page and charge route. The
-`POST /internal/refill` operation creates an unconfirmed intent using the amount,
-card and receipt address the controller fixed when the refill opened. Separate
-`/internal/refill/reconcile`, `/internal/refill/confirm` and
-`/internal/refill/cancel` operations resolve it after checking eligibility; deploy
-the matching sparkwing-platform release with this controller.
+The checkout service drops its pay-now page and charge route. One
+`POST /internal/refill` call creates and confirms the refill's off-session
+payment, using the amount and Stripe customer the controller fixed when the
+refill opened, with the refill id as idempotency key and payment metadata;
+deploy the matching sparkwing-platform release with this controller.
 
 Go callers of `internal/store` lose `NoCreditsHold`, `EventKindCreditsExhausted`,
 `PoolHeartbeatInterval` and `DispatchedHeartbeatInterval`. A waiting unit's
@@ -1750,9 +1799,10 @@ collection after the 24-hour grace.
 - **Operator steps:** keep the logs service running so its existing logs
   stay readable. On an S3 cache bucket, grant the controller
   `s3:GetLifecycleConfiguration` and add enabled lifecycle rules expiring
-  `<cache prefix>/logs/r90/` after 90 days and `<cache prefix>/logs/r30/`
-  after 30, plus `<cache prefix>/logs/r<days>/` after `<days>` for each
-  team `--log-retention team=days` names; [self-hosting.md](../self-hosting.md#node-log-retention)
+  `<cache prefix>/logs/r90/` after at least 90 days and `<cache prefix>/logs/r30/`
+  after at least 30, plus `<cache prefix>/logs/r<days>/` after at least `<days>`
+  for each team `--log-retention team=days` names. The controller deletes log
+  objects at the class age itself, so set each rule longer as a backstop; [self-hosting.md](../self-hosting.md#node-log-retention)
   has the command. Until a class has its rule, the controller issues no
   upload URLs into it and those nodes' runners keep writing to their logs
   URL, or their own disk without one. A controller that keeps segments on
@@ -2782,12 +2832,12 @@ totals. A failed counter write emits an error. A controller crash before request
 completion can lose that request's egress sample. Thirteen months of reports stay
 available. There is no principal-based persistence or periodic flush.
 
-## Event charges use tenant handles and replica identity
+## Event charges use tenant handles
 
 `Store.AppendEventCharged` is removed. Obtain a tenant with `Store.ForTeam`,
-then call `Tenant.AppendEventCharged(ctx, replicaID, runID, nodeID, kind, payload)`.
-The replica ID is the controller's trusted identity. The caller no longer
-selects a charged principal. The tenant supplies the team and the store owns time.
+then call `Tenant.AppendEvent(ctx, runID, nodeID, kind, payload)`. The caller
+no longer selects a charged principal. The tenant supplies the team and the
+store owns time.
 
 Event writes, retained run counters, shared storage quotas and replica usage
 commit together. Pending uploads and events share monthly and run byte capacity.
@@ -2818,7 +2868,7 @@ authorized console refund transaction. `ValidCreditGrantKind` and
 
 `Tenant.AppendEventOnce` and the unused `Operator.DropCardAttempt` are removed.
 State events commit with their transition. External event ingestion uses
-`Tenant.AppendEventCharged`.
+`Tenant.AppendEvent`.
 
 Queued refund callbacks use verified provider settlement, which selects the
 persisted payment and exact refund object. `Operator.MarkCardRefundMade` applies
@@ -3235,9 +3285,8 @@ current key, including `github-app-webhook-secret.previous` on its own, stops
 startup.
 
 Startup binds every listener before it opens the store, and writes the
-bootstrap seed, `--payment-mode` and `--free-team-slots` only after every other
-check passes. Controllers sharing a store must declare the same payment mode
-and free team slots. `--external-url` follows the runners' rule:
+bootstrap seed and `--payment-mode` only after every other check passes.
+Controllers sharing a store must declare the same payment mode. `--external-url` follows the runners' rule:
 `https`, or `http` only on loopback or a Kubernetes Service. Without
 `--external-url`, the GitHub runner binding routes answer
 `capability_unsupported` rather than a workflow built from the request's host.
@@ -3269,8 +3318,7 @@ former controller's later writes abort and fail-stop. SQLite controllers and
 wingd share the home's `wingd/d.lock` OS file lock. A second owner fails fast,
 while admin remains available. Webhook ordering and bucket write guards use the active
 process's state, so cross-controller ordering and storage-state propagation do
-not apply. `--payment-mode` and `--free-team-slots` remain matching shared
-settings.
+not apply. `--payment-mode` remains a matching shared setting.
 
 Break-glass admin checks the actual table schema and transport endpoint,
 including Unix sockets, and keeps verification and writes on that connection.

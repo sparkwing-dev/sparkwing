@@ -3,7 +3,6 @@ package store
 import (
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -18,10 +17,6 @@ func TestOwnerReaperUsesRenewedLeaseWithoutJobActivity(t *testing.T) {
 			if !hasJob {
 				rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 			}
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
 			beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 			if err != nil {
 				t.Fatal(err)
@@ -33,11 +28,11 @@ func TestOwnerReaperUsesRenewedLeaseWithoutJobActivity(t *testing.T) {
 				t.Fatalf("owner renewal: %+v, %v", beat, err)
 			}
 			*now = firstExpiry
-			if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+			if reaped, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 0 {
 				t.Fatalf("live owner reaped: %+v, %v", reaped, err)
 			}
 			*now = beat.ExpiresAt
-			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
+			reaped, err := s.AsOperator().ReapUnits(t.Context(), 10)
 			if err != nil || len(reaped) != 1 || !reaped[0].Failed || reaped[0].Requeued {
 				t.Fatalf("expired local owner: %+v, %v", reaped, err)
 			}
@@ -50,12 +45,12 @@ func TestOwnerReaperUsesRenewedLeaseWithoutJobActivity(t *testing.T) {
 }
 
 func TestOwnerReaperJobHeartbeatCannotReplaceOwnerLease(t *testing.T) {
-	tenant, now, lease := ownerReaperFixture(t, true, 0, runspec.OriginLocal)
+	tenant, now := ownerReaperFixture(t, true, 0, runspec.OriginLocal)
 	for _, id := range []string{"build", "test", "deploy"} {
 		rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,last_heartbeat) VALUES ('a','run',?,'pending',?,?,?)`, id, []byte(`{"id":"`+id+`"}`), []byte(`{}`), now.UnixNano())
 	}
 	for i := range 2 {
-		reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
+		reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 		if err != nil || len(reaped) != 1-i {
 			t.Fatalf("reap %d: %+v, %v", i, reaped, err)
 		}

@@ -26,10 +26,9 @@ type UploadReservation struct {
 	CommittedAt *time.Time
 }
 
-// VerifiedUploadCommit carries server-observed object evidence and the configured replica identity.
+// VerifiedUploadCommit carries server-observed object evidence.
 type VerifiedUploadCommit struct {
 	Authority blob.Authority
 	TicketID  string
 	Verified  blob.Blob
-	ReplicaID string
 }

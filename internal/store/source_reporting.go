@@ -45,12 +45,12 @@ func checkMetadataWriterTx(ctx context.Context, tx *storeTx, team Team, ref runs
 	if step != "" {
 		return checkResultWriterTx(ctx, tx, team, ref, actor)
 	}
-	p, err := resolveActorTx(ctx, tx, actor)
+	p, err := resolveTeamActorTx(ctx, tx, team, actor, sameTeam)
 	if err != nil {
 		return runstate.NodeRow{}, err
 	}
 	c := p.Capability
-	if c.Team != string(team) || c.Audience != capability.Controller || c.Prefix != actor.CapabilityPrefix || runspec.RunID(c.Binding.RunID) != ref.RunID {
+	if c.Audience != capability.Controller || c.Prefix != actor.CapabilityPrefix || runspec.RunID(c.Binding.RunID) != ref.RunID {
 		return runstate.NodeRow{}, holderRefusal()
 	}
 	if c.Binding.Expansion != nil {

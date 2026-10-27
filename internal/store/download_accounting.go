@@ -8,9 +8,8 @@ import (
 	"time"
 )
 
-// DownloadCharge counts signed bytes or delivered bytes under the controller's replica identity.
+// DownloadCharge counts signed bytes or delivered bytes.
 type DownloadCharge struct {
-	ReplicaID                    string
 	Bytes                        int64
 	Record                       bool
 	FreeCapBytes, FundedCapBytes int64
@@ -45,9 +44,9 @@ func (e *DownloadCapError) Error() string {
 // Unwrap reports ErrDownloadCap.
 func (e *DownloadCapError) Unwrap() error { return ErrDownloadCap }
 
-// ChargeDownload admits under the shared quota lock and records additive replica usage atomically.
+// ChargeDownload admits under the shared quota lock and records the day's usage atomically.
 func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (DownloadCharged, error) {
-	if c.ReplicaID == "" || c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
+	if c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
 		return DownloadCharged{}, fmt.Errorf("%w: invalid download charge", ErrInvalidInput)
 	}
 	return inTxResult(ctx, t.s, func(tx *storeTx) (DownloadCharged, error) {
@@ -56,7 +55,7 @@ func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (Download
 }
 
 func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCharge) (DownloadCharged, error) {
-	if c.ReplicaID == "" || c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
+	if c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
 		return DownloadCharged{}, fmt.Errorf("%w: invalid download charge", ErrInvalidInput)
 	}
 	now := tx.now(ctx)
@@ -104,9 +103,9 @@ func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCh
 		return DownloadCharged{}, err
 	}
 	if c.Bytes > 0 {
-		result, err := tx.execContext(ctx, `INSERT INTO team_download_day(team,period,replica_id,bytes,updated_at) VALUES (?,?,?,?,?)
-ON CONFLICT(team,period,replica_id) DO UPDATE SET bytes=team_download_day.bytes+excluded.bytes,updated_at=excluded.updated_at
-WHERE team_download_day.bytes<=9223372036854775807-excluded.bytes`, t.team, day, c.ReplicaID, c.Bytes, now.UnixNano())
+		result, err := tx.execContext(ctx, `INSERT INTO team_download_day(team,period,bytes,updated_at) VALUES (?,?,?,?)
+ON CONFLICT(team,period) DO UPDATE SET bytes=team_download_day.bytes+excluded.bytes,updated_at=excluded.updated_at
+WHERE team_download_day.bytes<=9223372036854775807-excluded.bytes`, t.team, day, c.Bytes, now.UnixNano())
 		if err != nil {
 			return DownloadCharged{}, err
 		}

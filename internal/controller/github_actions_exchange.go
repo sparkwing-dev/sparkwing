@@ -107,7 +107,7 @@ func (s *Server) actionsProvision(ctx context.Context, team store.Team, claims g
 		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: registration + ":" + claims.RunID + ":" + claims.RunAttempt},
 		Grants:  []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: &expires,
 		Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{
-			RepositoryKey: string(repository.Key), Ref: claims.Ref, SHA: claims.SHA, WorkflowRunID: claims.RunID, WorkflowRunAttempt: claims.RunAttempt, WorkflowRef: claims.WorkflowRef,
+			RepositoryKey: string(repository.Key), Repository: claims.Repository, Ref: claims.Ref, SHA: claims.SHA, WorkflowRunID: claims.RunID, WorkflowRunAttempt: claims.RunAttempt, WorkflowRef: claims.WorkflowRef,
 			RunnerEnvironment: claims.RunnerEnvironment,
 		}}, Repositories: []string{string(repository.Key)},
 	}, nil

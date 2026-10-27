@@ -49,16 +49,12 @@ func TestPostgresOwnerReaperAndClaimerLockTeamBeforeOwner(t *testing.T) {
 			if _, err := s.DB().ExecContext(ctx, `UPDATE `+table+` SET status='claimed',claimed_by='lost',capability_prefix='lost-cap',generation=7,claimed_at=1,lease_expires_at=1`); err != nil {
 				t.Fatal(err)
 			}
-			lease, err := s.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", "reaper", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
 			b := blockFinancialLedger(t, ctx, s, "a")
 			if _, err := b.tx.ExecContext(ctx, `SELECT name FROM teams WHERE name='a' FOR UPDATE`); err != nil {
 				t.Fatal(err)
 			}
 			b.start(func() error {
-				reaped, err := s.AsOperator().ReapUnits(ctx, lease, 1)
+				reaped, err := s.AsOperator().ReapUnits(ctx, 1)
 				if err == nil && (len(reaped) != 1 || !reaped[0].Requeued) {
 					return fmt.Errorf("reap: %+v", reaped)
 				}
@@ -95,7 +91,7 @@ func TestPostgresConcurrencyMaintenanceLocksTeamBeforeCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.start(func() error {
-		_, err := f.s.AsOperator().MaintainConcurrency(ctx, f.lease)
+		_, err := f.s.AsOperator().MaintainConcurrency(ctx)
 		return err
 	})
 	b.waitBlocked(1)
@@ -109,11 +105,11 @@ func TestPostgresWarningLocksItsTeamBeforeLedger(t *testing.T) {
 	s := storetest.OpenPostgres(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
-		`INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at,refill_enabled,refill_amount_cents) VALUES ('a',1,1,'customer',1,1,1000),('z',1,1,'customer',1,1,1000)`,
+		`INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at,refill_enabled,refill_amount_cents) VALUES ('a',1,1,'customer',1,1,1000),('z',1,1,'customer-z',1,1,1000)`,
 		`INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('one','a','session-one','test','usd',100,100000000,1,2),('two','a','session-two','test','usd',100,100000000,1,2)`,
 	} {
 		if _, err := s.DB().ExecContext(ctx, q); err != nil {
@@ -191,10 +187,10 @@ func TestPostgresDirectGrantRacingTeamPurge(t *testing.T) {
 			t.Errorf("%s rows=%d: %v", table, count, err)
 		}
 	}
-	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentLive, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentLive, func() error { return nil }); err != nil {
 		t.Fatalf("live startup after purge: %v", err)
 	}
-	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err == nil || !strings.Contains(err.Error(), "live to test") {
+	if _, err := s.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, func() error { return nil }); err == nil || !strings.Contains(err.Error(), "live to test") {
 		t.Fatalf("test startup after purge: %v", err)
 	}
 }

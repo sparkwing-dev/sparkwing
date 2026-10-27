@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -76,12 +75,10 @@ func (o *Operator) RenewUnit(ctx context.Context, capabilityPrefix string, execu
 
 // OperatorStore restricts deployment work to explicit methods without embedding a tenant or raw Store.
 type OperatorStore interface {
-	AcquireSingletonLease(context.Context, string, string, time.Duration) (SingletonLease, error)
-	RenewSingletonLease(context.Context, SingletonLease, time.Duration) (SingletonLease, error)
-	ReconcileControllerRuns(context.Context, SingletonLease, string, int) ([]ControllerRun, error)
-	DueRunEffects(context.Context, SingletonLease, int) ([]DesiredRunEffect, error)
+	ReconcileControllerRuns(context.Context, string, int) ([]ControllerRun, error)
+	DueRunEffects(context.Context, int) ([]DesiredRunEffect, error)
 	MaintainRetention(context.Context, RetentionRequest) (RetentionResult, error)
-	MaintainConcurrency(context.Context, SingletonLease) (ConcurrencyMaintenanceResult, error)
+	MaintainConcurrency(context.Context) (ConcurrencyMaintenanceResult, error)
 }
 
 var _ OperatorStore = (*Operator)(nil)

@@ -21,10 +21,6 @@ func TestPostgresControllerAdmissionDefersContendedGroupWithoutWaitingOnRunLock(
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 			defer cancel()
-			lease, err := f.s.AsOperator().AcquireSingletonLease(ctx, "controller.owner", "controller", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
 			if _, err := f.s.DB().ExecContext(ctx, `UPDATE runs SET dispatch='controller' WHERE team=$1 AND id=$2`, f.tenant.Team(), f.ref.RunID); err != nil {
 				t.Fatal(err)
 			}
@@ -71,7 +67,7 @@ func TestPostgresControllerAdmissionDefersContendedGroupWithoutWaitingOnRunLock(
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.s.AsOperator().ReconcileControllerRuns(ctx, lease, "", 10); err != nil {
+			if _, err := f.s.AsOperator().ReconcileControllerRuns(ctx, "", 10); err != nil {
 				t.Fatalf("controller waited for an admission transaction while holding its run: %v", err)
 			}
 			var count int
@@ -99,7 +95,7 @@ func TestPostgresConcurrencyMaintenanceDefersBusyAdmission(t *testing.T) {
 	if _, err := admission.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "admission:"+string(f.tenant.Team())); err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.s.AsOperator().MaintainConcurrency(ctx, f.lease)
+	result, err := f.s.AsOperator().MaintainConcurrency(ctx)
 	if err != nil || len(result.StaleHolders) != 0 || len(result.StaleWaiters) != 0 {
 		t.Fatalf("maintenance competed with admission: %+v %v", result, err)
 	}
@@ -110,7 +106,7 @@ func TestPostgresConcurrencyMaintenanceDefersBusyAdmission(t *testing.T) {
 	if err := admission.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	result, err = f.s.AsOperator().MaintainConcurrency(ctx, f.lease)
+	result, err = f.s.AsOperator().MaintainConcurrency(ctx)
 	if err != nil || len(result.StaleHolders) == 0 {
 		t.Fatalf("maintenance did not resume: %+v %v", result, err)
 	}

@@ -15,6 +15,16 @@ type ControllerRun struct {
 	RunID string
 }
 
+// controllerOwnedHorizon bounds the capacity and owner deadlines of controller-owned runs. The controller renews them
+// on every reconciliation pass, so they lapse only while no controller runs.
+const controllerOwnedHorizon = time.Minute
+
+// controllerActor is the actor for the controller's own transitions on runID; the single active controller (the
+// store's advisory lock and write epoch) is its authority, so it carries no fence.
+func controllerActor(runID string) runstate.Actor {
+	return runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, EvalFence: runspec.EvalFence{RunID: runspec.RunID(runID)}}}
+}
+
 const controllerRunOwnership = `r.dispatch='controller' AND r.plan_accepted_generation>0`
 
 const controllerRunScheduling = controllerRunOwnership + ` AND r.intake_mode='execute' AND r.sealed_at IS NOT NULL`
@@ -33,20 +43,17 @@ func controllerSchedulingTx(ctx context.Context, tx *storeTx, team Team, runID s
 	return active, err
 }
 
-// ReconcileControllerRuns resumes settlement under the elected controller fence.
+// ReconcileControllerRuns resumes settlement of controller-owned runs and renews their capacity.
 // Pages use the last returned RunID as after; an empty page ends the sweep.
 // Each visited run commits separately, so an error returns the committed prefix.
 // The next sweep starts with an empty cursor to revisit runs still awaiting work.
-func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonLease, after string, limit int) ([]ControllerRun, error) {
+func (o *Operator) ReconcileControllerRuns(ctx context.Context, after string, limit int) ([]ControllerRun, error) {
 	if limit <= 0 {
 		return nil, errors.New("controller reconciliation limit must be positive")
 	}
 	var targets []ControllerRun
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		targets = targets[:0]
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.owner"); err != nil {
-			return err
-		}
 		rows, err := tx.queryContext(ctx, `SELECT r.team,r.id FROM runs r WHERE `+controllerRunActive+` AND r.id>? ORDER BY r.id LIMIT ?`, after, limit)
 		if err != nil {
 			return err
@@ -67,9 +74,6 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 	var visited []ControllerRun
 	for _, ref := range targets {
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
-			if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.owner"); err != nil {
-				return err
-			}
 			if err := lockStateRunTx(ctx, tx, ref.Team, ref.RunID); err != nil {
 				return err
 			}
@@ -84,7 +88,7 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 			if err != nil {
 				return err
 			}
-			actor := runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation), RunID: runspec.RunID(ref.RunID)}}}
+			actor := controllerActor(ref.RunID)
 			if run.State == runstate.RunPending && run.CancelRequestedAt == nil {
 				if _, err := transitionRunTx(ctx, tx, ref.Team, runstate.RunTransition{RunID: runspec.RunID(ref.RunID), To: runstate.RunRunning, Actor: actor, Cause: runstate.RunStart}); err != nil {
 					return err
@@ -93,15 +97,7 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 			if err := settleControllerTx(ctx, tx, ref.Team, ref.RunID, tx.now(ctx)); err != nil {
 				return err
 			}
-			var until int64
-			if err := tx.QueryRowContext(ctx, "SELECT until FROM leases WHERE name='controller.owner'").Scan(&until); err != nil {
-				return err
-			}
-			if err := renewCapacityTx(ctx, tx, ref.Team, ref.RunID, "", time.Unix(0, until)); err != nil {
-				return err
-			}
-
-			return assertSingletonLeaseTx(ctx, tx, lease, "controller.owner")
+			return renewCapacityTx(ctx, tx, ref.Team, ref.RunID, "", tx.now(ctx).Add(controllerOwnedHorizon))
 		})
 		if err != nil {
 			return visited, err

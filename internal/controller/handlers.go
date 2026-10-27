@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -153,11 +154,13 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request, a capab
 	if err != nil {
 		return err
 	}
-	if err := writer.DeleteAuthorizedRun(r.Context(), a); err != nil {
-		return engineLookupError(err)
-	}
-	if _, err := s.deleteDataLogs(r.Context(), store.Team(a.Target.Team), id); err != nil {
+	// safety: log objects go before the records, so a failed delete keeps the run and its counted log slots.
+	deleteLogs := func(ctx context.Context) error {
+		_, err := s.deleteDataLogs(ctx, store.Team(a.Target.Team), id)
 		return err
+	}
+	if err := writer.DeleteAuthorizedRun(r.Context(), a, deleteLogs); err != nil {
+		return engineLookupError(err)
 	}
 	if localDir {
 		if err := removeLocalRunDir(s.dashboard.Paths.RunsDir(), id); err != nil {

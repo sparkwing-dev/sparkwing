@@ -25,7 +25,7 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 	}
 	in := GitHubAppAdmission{Installation: installation, Event: "push", Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost,
-		Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:701", Display: "acme/app"}, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}},
+		Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:701", Display: "acme/app"}, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", Event: "push", DeliveryKey: digest, InstallationID: 7, RepositoryID: 701, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}},
 		Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
 	}}
 	if automatic {
@@ -182,7 +182,7 @@ func TestAppFullRefRetainsExactDefaultBranchDataTrustProperty(t *testing.T) {
 		if verifiedAt.IsZero() {
 			verifiedAt = time.Unix(1, 0).UTC()
 		}
-		git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "signed", Ref: ref, SHA: git.SHA, DefaultBranch: branch, DefaultBranchPush: true, VerifiedAt: verifiedAt}}
+		git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "signed", Ref: ref, SHA: git.SHA, DefaultBranch: branch, DefaultBranchPush: true, VerifiedAt: verifiedAt}}
 		switch mode % 5 {
 		case 1:
 			git.Ref = "refs/tags/" + branch
@@ -276,8 +276,8 @@ func TestAppAdmissionOIDCUsesSealedEventAfterReplayExpiry(t *testing.T) {
 	}
 }
 
-func TestAppAdmissionFencesDeliveryLeaseAndOriginalTeam(t *testing.T) {
-	for _, state := range []string{"current", "moved", "expired"} {
+func TestAppAdmissionFencesDeliveryAndOriginalTeam(t *testing.T) {
+	for _, state := range []string{"current", "moved"} {
 		t.Run(state, func(t *testing.T) {
 			s, tenant, in := appAdmissionFixture(t, true, "fixture")
 			defer s.Close()
@@ -308,8 +308,6 @@ func TestAppAdmissionFencesDeliveryLeaseAndOriginalTeam(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at,runner) VALUES ('b','gh:701',701,?,7,?,?,?)`, grant.Repository, grant.EnabledBy, grant.EnabledAt.UnixNano(), grant.Runner)
 				in.Installation.Team, in.Request.Team = "b", "b"
 				tenant = &Tenant{s: s, team: "b"}
-			case "expired":
-				s.clock = func() time.Time { return now.Add(3 * time.Minute) }
 			}
 			remote := in.Request.Source.Location.RemoteURL
 			schedule := CronSchedule{Team: tenant.team, RepoPath: remote, Pipeline: "ci", Name: "nightly", Cron: "0 0 * * *", TZ: "UTC", Overlap: CronOverlapSkip, Where: CronWhereController, GitBranch: "main", GitHubInstallationID: 7, GitHubRepositoryID: 701}

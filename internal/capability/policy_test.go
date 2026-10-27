@@ -58,7 +58,6 @@ func TestPrivilegedRouteBoundaries(t *testing.T) {
 		"/api/v1/operator/teams/{team}/grants",
 		"/api/v1/operator/teams/{team}/freeze",
 		"/api/v1/operator/teams/{team}/unfreeze",
-		"/api/v1/operator/teams/{team}/refunds",
 	} {
 		route, ok := LookupRoute("POST", path)
 		if !ok {

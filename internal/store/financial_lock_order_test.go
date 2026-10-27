@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -33,7 +32,7 @@ func TestFinancialLockOrderRejectsNewWorkAfterLedger(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s := authorityStore(t)
 			unitClaimFixtureStore(t, s)
-			rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+			rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',7,'pending')`)
 			acquire := func(ctx context.Context, tx *storeTx) error {
 				switch name {
 				case "trigger":
@@ -84,12 +83,8 @@ func TestOwnerReapersLockTeamBeforeOwner(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind=?`, kind)
 			}
 			rewriteSchemaExec(t, s.db, `UPDATE `+table+` SET status='claimed',claimed_by='lost',capability_prefix='lost-cap',generation=7,claimed_at=1,lease_expires_at=1`)
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
 			recorder.reset()
-			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 1)
+			reaped, err := s.AsOperator().ReapUnits(t.Context(), 1)
 			if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 				t.Fatalf("reap: %+v, %v", reaped, err)
 			}
@@ -115,9 +110,8 @@ func TestConcurrencyMaintenanceLocksTeamBeforeCapacity(t *testing.T) {
 	maintenanceRun(t, s, "run", 1, runstate.RunRunning)
 	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES ('a','job:global:key',1,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO concurrency_waiters(team,key,holder_id,run_id,arrived_at,lease_expires_at,policy) VALUES ('a','job:global:key','expired','run',1,1,'queue')`)
-	lease := maintenanceReaper(t, s)
 	recorder.reset()
-	result, err := s.AsOperator().MaintainConcurrency(t.Context(), lease)
+	result, err := s.AsOperator().MaintainConcurrency(t.Context())
 	if err != nil || len(result.StaleWaiters) != 1 {
 		t.Fatalf("maintenance: %+v, %v", result, err)
 	}

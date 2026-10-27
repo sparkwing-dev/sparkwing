@@ -30,7 +30,7 @@ func SealSecret(cipher SecretSealer, team Team, row Secret) (SealedSecret, error
 	if cipher == nil {
 		return SealedSecret{}, ErrInvalidInput
 	}
-	value, err := cipher.SealBound(secrets.PurposeSecret, string(team), row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
+	value, err := cipher.SealBound(secrets.PurposeSecret, string(team), row.Name, row.SealScope(), row.Shared, row.Masked, row.Value)
 	if err != nil {
 		return SealedSecret{}, err
 	}

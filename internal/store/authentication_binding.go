@@ -125,19 +125,13 @@ func authenticationExpansionTx(ctx context.Context, tx *storeTx, c capability.Ca
 			return err
 		}
 		expansion.ApprovalPredicate = pendingApprovalPredicate(row)
-		var owner string
-		var generation int64
-		var current, until sql.NullInt64
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(e.claimed_by,''),e.generation,e.lease_expires_at,e.owner_lease_name,e.owner_generation,l.generation,l.until,e.finished_at FROM eval_units e LEFT JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=?`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation).Scan(&expansion.Lease.Holder, &expansion.Lease.Generation, &lease, &owner, &generation, &current, &until, &finished)
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(e.claimed_by,''),e.generation,e.lease_expires_at,e.finished_at FROM eval_units e WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=?`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation).Scan(&expansion.Lease.Holder, &expansion.Lease.Generation, &lease, &finished)
 		if err != nil {
 			return err
 		}
 		if finished.Valid && expansion.Lease.Generation == c.Binding.Expansion.Generation {
 			expansion.Lease.Holder = c.Binding.Expansion.Holder
 			out.FinishedAt = stateTime(finished)
-		}
-		if owner == "controller.owner" && current.Valid && current.Int64 == generation {
-			expansion.ControllerLeaseExpiresAt = stateTime(until)
 		}
 		var sealed int
 		err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM log_streams WHERE team=? AND run_id=? AND subject_kind='owner_unit' AND unit_kind='eval' AND source_node_id=? AND source_generation=? AND generation=? AND sealed_at IS NOT NULL`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation, expansion.Lease.Generation).Scan(&sealed)

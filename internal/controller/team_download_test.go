@@ -74,12 +74,12 @@ func TestTeamLogReadsAreNotRefusedPastTheDownloadCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := tenant.ChargeDownload(context.Background(), store.DownloadCharge{
-		ReplicaID: "fixture", Bytes: 150, Record: true, FreeCapBytes: 150,
+		Bytes: 150, Record: true, FreeCapBytes: 150,
 	}); err != nil {
 		t.Fatalf("spend team-a's day: %v", err)
 	}
 	if _, err := tenant.ChargeDownload(context.Background(), store.DownloadCharge{
-		ReplicaID: "fixture", FreeCapBytes: 150,
+		FreeCapBytes: 150,
 	}); !errors.Is(err, store.ErrDownloadCap) {
 		t.Fatalf("team-a after spending its day = %v, want the cap", err)
 	}

@@ -1,7 +1,6 @@
 package controller_test
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -64,25 +63,16 @@ func TestASingleTeamControllerKeepsItsOperatorsRetention(t *testing.T) {
 	}
 }
 
-func TestStorageRetentionPassRequiresMaintenanceFence(t *testing.T) {
+func TestAStorageRetentionPassReleasesRunsPastOperatorRetention(t *testing.T) {
 	s, srv := storageRetentionServer(t, false)
 	if err := s.AsOperator().SetStorageSettings(t.Context(), store.StorageSettings{RunRetentionDays: 1}); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(context.Background(), "maintenance", "other", time.Hour)
-	if err != nil {
-		t.Fatal(err)
+	for range 2 {
+		srv.MaintainStorage(t.Context())
 	}
-	srv.MaintainStorage(t.Context())
 	var count int
-	if err := teststore.SQL(t, s).QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 1 {
-		t.Fatalf("foreign fence deleted run=%d: %v", count, err)
-	}
-	if _, err := teststore.SQL(t, s).Exec("UPDATE leases SET until=0 WHERE name=? AND generation=?", lease.Name, lease.Generation); err != nil {
-		t.Fatal(err)
-	}
-	srv.MaintainStorage(t.Context())
 	if err := teststore.SQL(t, s).QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("new fence retained expired run=%d: %v", count, err)
+		t.Fatalf("retained expired run=%d: %v", count, err)
 	}
 }

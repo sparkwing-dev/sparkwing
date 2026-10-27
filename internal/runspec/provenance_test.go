@@ -12,7 +12,7 @@ import (
 const provenanceSHA = "0123456789abcdef0123456789abcdef01234567"
 
 func TestProvenanceRoundTripsAndRefusesForgedSeals(t *testing.T) {
-	app := runspec.AppFacts{Event: "push", DeliveryKey: "d", RepositoryID: 7, Ref: "refs/heads/main", SHA: provenanceSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: time.Unix(1, 0)}
+	app := runspec.AppFacts{Repository: "acme/repo", Event: "push", DeliveryKey: "d", RepositoryID: 7, Ref: "refs/heads/main", SHA: provenanceSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: time.Unix(1, 0)}
 	verified, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "deploy")
 	if err != nil || verified.Trust() != runspec.TrustVerifiedDefault {
 		t.Fatalf("verified = %+v, %v", verified, err)

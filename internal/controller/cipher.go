@@ -35,7 +35,7 @@ type secretBinding struct {
 }
 
 func bindingForRow(team store.Team, sec *store.Secret) secretBinding {
-	return secretBinding{Purpose: secrets.PurposeSecret, Team: team, Name: sec.Name, Scope: sec.Pipeline, Shared: sec.Shared, Masked: sec.Masked}
+	return secretBinding{Purpose: secrets.PurposeSecret, Team: team, Name: sec.Name, Scope: sec.SealScope(), Shared: sec.Shared, Masked: sec.Masked}
 }
 
 // SealSecretValue encrypts a secret using its complete tenant and row binding.

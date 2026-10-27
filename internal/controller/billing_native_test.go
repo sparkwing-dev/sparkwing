@@ -43,7 +43,7 @@ func billingNativeServer(t *testing.T) (*serverFixture, string, string) {
 		t.Fatal(err)
 	}
 	engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE team='a'`)
-	if _, err := s.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if _, err := s.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	s.WithBillingCheckout("https://checkout.test", "credential")
@@ -62,7 +62,7 @@ func TestBillingModelProductionPages(t *testing.T) {
 		if body["team"] != "a" || body["amount_cents"] != float64(2000) || body["key"] == "" {
 			t.Fatalf("provider: %v", body)
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.test/page","id":"cs_native","expires_at":` + strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10) + `}`))}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_native","expires_at":` + strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10) + `}`))}, nil
 	})
 	h := s.Handler()
 	call := func(method, path, body string, status int) {
@@ -168,13 +168,14 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	}
 	s.WithPayments(verifier, s.store.AsOperator()).WithPaymentDeployment("Staging.Sparkwing.dev")
 	counts := map[string]int{}
+	var refillID string
 	s.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
 		counts[r.URL.Path]++
 		var in map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			t.Fatal(err)
 		}
-		if in["team"] != "a" || r.URL.Path != "/internal/refund" && in["deployment"] != "staging.sparkwing.dev" {
+		if in["team"] != "a" || in["deployment"] != "staging.sparkwing.dev" {
 			t.Fatalf("provider team=%v", in)
 		}
 		body := ""
@@ -183,26 +184,20 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 			if in["setup_id"] != in["key"] || in["email"] != "owner@example.test" {
 				t.Fatalf("setup=%v", in)
 			}
-			body = `{"id":"cs_setup","customer":"cus_native","url":"https://checkout.test/setup"}`
+			body = `{"id":"cs_setup","customer":"cus_native","url":"https://checkout.stripe.com/setup"}`
 		case "/internal/portal":
 			if len(in) != 3 || in["customer"] != "cus_native" {
 				t.Fatalf("portal=%v", in)
 			}
-			body = `{"url":"https://billing.stripe.test/portal"}`
+			body = `{"url":"https://billing.stripe.com/portal"}`
 		case "/internal/checkout":
-			body = `{"id":"cs_prepay","url":"https://checkout.test/prepay"}`
-		case "/internal/refill", "/internal/refill/reconcile", "/internal/refill/confirm":
+			body = `{"id":"cs_prepay","url":"https://checkout.stripe.com/prepay"}`
+		case "/internal/refill":
 			if _, method := in["payment_method"]; in["amount_cents"] != float64(1000) || in["customer"] != "cus_native" || method || in["receipt_email"] != nil {
 				t.Fatalf("refill=%v", in)
 			}
-			status := "created"
-			switch r.URL.Path {
-			case "/internal/refill/reconcile":
-				status = "requires_confirmation"
-			case "/internal/refill/confirm":
-				status = "processing"
-			}
-			body = fmt.Sprintf(`{"payment_intent":"pi_auto","status":%q}`, status)
+			refillID, _ = in["refill_id"].(string)
+			body = `{"payment_intent":"pi_auto","status":"processing"}`
 		default:
 			t.Fatalf("payment page %s", r.URL.Path)
 		}
@@ -251,7 +246,9 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	}
 	const stamp = `"sparkwing_deployment":"staging.sparkwing.dev"`
 	setupIntent := `{"id":"seti_native","object":"setup_intent","livemode":false,"metadata":{"purpose":"card_setup",` + stamp + `},"status":"succeeded","customer":"cus_native","payment_method":"pm_native"}`
-	refilled := `{"id":"pi_auto","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_refill",` + stamp + `},"status":"succeeded","amount":1000,"amount_received":1000,"currency":"usd","customer":"cus_native","latest_charge":"ch_auto"}`
+	refilled := func(refill string) string {
+		return `{"id":"pi_auto","object":"payment_intent","livemode":false,"metadata":{"purpose":"card_refill","refill_id":"` + refill + `",` + stamp + `},"status":"succeeded","amount":1000,"amount_received":1000,"currency":"usd","customer":"cus_native","latest_charge":"ch_auto"}`
+	}
 	for range 2 {
 		call("card", "", 200)
 	}
@@ -292,12 +289,14 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	for range 2 {
 		s.refillPass(t.Context())
 	}
-	webhook("evt_unbound_refill", "payment_intent.succeeded", strings.NewReplacer("pi_auto", "pi_other", "ch_auto", "ch_other").Replace(refilled))
+	if w := deliver("evt_unknown_refill", "payment_intent.succeeded", strings.NewReplacer("pi_auto", "pi_other", "ch_auto", "ch_other").Replace(refilled("refill_unknown"))); w.Code == 204 {
+		t.Fatal("a payment naming no committed refill was acknowledged")
+	}
 	if spend, err := tenant.SpendStanding(t.Context()); err != nil || spend.BalanceMicro != 0 || !spend.Refill.Open {
-		t.Fatalf("unbound refill changed credit or closed the bound refill: %+v: %v", spend, err)
+		t.Fatalf("a payment for an unknown refill changed credit or closed the open refill: %+v: %v", spend, err)
 	}
 	for range 2 {
-		webhook("evt_refill", "payment_intent.succeeded", refilled)
+		webhook("evt_refill", "payment_intent.succeeded", refilled(refillID))
 	}
 	spend, err = tenant.SpendStanding(t.Context())
 	if err != nil || spend.BalanceMicro != 1000*store.MicroCreditsPerCent || spend.Refill.Open || spend.Billing.Tier != "Established" {
@@ -306,8 +305,8 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	if !spend.Billing.History.LastIncidentAt.IsZero() {
 		t.Fatalf("a successful refill restarted clean days: %+v", spend.Billing.History)
 	}
-	if counts["/internal/card-setup"] != 1 || counts["/internal/checkout"] != 1 || counts["/internal/refill"] != 1 || counts["/internal/refill/reconcile"] != 2 || counts["/internal/refill/confirm"] != 2 || counts["/internal/portal"] != 1 {
-		t.Fatalf("provider calls: %v; want one page each, then creation and two confirmations of one refill", counts)
+	if counts["/internal/card-setup"] != 1 || counts["/internal/checkout"] != 1 || counts["/internal/refill"] != 2 || counts["/internal/portal"] != 1 {
+		t.Fatalf("provider calls: %v; want one page each, and one refill sent once per pass until its webhook", counts)
 	}
 }
 
@@ -335,7 +334,7 @@ func TestBillingModelProductionPageFailureKeepsReservation(t *testing.T) {
 				if phase == "revoked" {
 					engineSQL(t, s.store, `UPDATE memberships SET role='reader' WHERE team='a' AND account_id='owner'`)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"id":"cs_retry","url":"https://checkout.test/page"}`))}, nil
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"id":"cs_retry","url":"https://checkout.stripe.com/page"}`))}, nil
 			})
 			h := s.Handler()
 			call := func(want int) {

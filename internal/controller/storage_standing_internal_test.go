@@ -35,8 +35,4 @@ func TestCallerStorageStandingUsesFinalTenantInventory(t *testing.T) {
 	if err != nil || got == nil || got.Team != "a" || got.CacheBytes != 3 || got.LogBytes != 0 || got.EventBytes != 0 {
 		t.Fatalf("controller standing=%+v: %v", got, err)
 	}
-	var slots int
-	if err := teststore.SQL(t, s).QueryRowContext(t.Context(), "SELECT COUNT(*) FROM free_slots").Scan(&slots); err != nil || slots != 0 {
-		t.Fatalf("report took slots: %d: %v", slots, err)
-	}
 }

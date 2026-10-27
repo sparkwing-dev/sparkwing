@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -33,10 +32,6 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", "owner-proof", time.Hour)
-	if err != nil {
-		return err
-	}
 	for range 3 {
 		beat, err := s.AsOperator().RenewUnit(ctx, plan.Actor.CapabilityPrefix, false)
 		if err != nil {
@@ -49,7 +44,7 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 		if expiry != beat.ExpiresAt.UnixNano() {
 			return errors.New("owner renewal did not persist its lease")
 		}
-		if reaped, err := s.AsOperator().ReapUnits(ctx, lease, 10); err != nil || len(reaped) != 0 {
+		if reaped, err := s.AsOperator().ReapUnits(ctx, 10); err != nil || len(reaped) != 0 {
 			return fmt.Errorf("live owner recovered: %+v: %v", reaped, err)
 		}
 		now, err := s.TestOnlyDatabaseTime(ctx)
@@ -60,7 +55,7 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 			return err
 		}
 		for replay := range 2 {
-			reaped, err := s.AsOperator().ReapUnits(ctx, lease, 10)
+			reaped, err := s.AsOperator().ReapUnits(ctx, 10)
 			if err != nil || len(reaped) != 1-replay {
 				return fmt.Errorf("owner recovery %d: %+v: %v", replay, reaped, err)
 			}

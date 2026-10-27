@@ -147,9 +147,30 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 		}
 		engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(encoded), 200)
 	}
-	commit := logCommitRequest{Subject: subject, Segments: []runstate.Segment{first, second}, Final: true}
+	// The final commit verifies the stored manifest, since a create-only refusal on its PUT proves nothing about it.
+	manifest := []byte(`{"status":"complete"}`)
+	manifestSum := sha256.Sum256(manifest)
+	signManifest, err := json.Marshal(blob.LogSigningRequest{Subject: subject, Index: 0, Size: int64(len(manifest)), Digest: blob.Digest(hex.EncodeToString(manifestSum[:]))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifestSlot blob.LogUploadURL
+	if err := json.Unmarshal(engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(signManifest), 200).Body.Bytes(), &manifestSlot); err != nil {
+		t.Fatal(err)
+	}
+	if code := put(manifestSlot, manifest); code != http.StatusCreated {
+		t.Fatalf("manifest PUT = %d", code)
+	}
+	otherSum := sha256.Sum256([]byte("other"))
+	commit := logCommitRequest{Subject: subject, Segments: []runstate.Segment{first, second}, Final: true,
+		Manifest: &blob.LogUploadCheck{Subject: subject, Size: int64(len(manifest)), Digest: blob.Digest(hex.EncodeToString(otherSum[:]))}}
 	encoded, err := json.Marshal(commit)
 	if err != nil {
+		t.Fatal(err)
+	}
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(encoded), http.StatusUnprocessableEntity)
+	commit.Manifest.Digest = blob.Digest(hex.EncodeToString(manifestSum[:]))
+	if encoded, err = json.Marshal(commit); err != nil {
 		t.Fatal(err)
 	}
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(encoded), 200)
@@ -228,4 +249,68 @@ func TestAttemptLogsWithoutSegmentsDoNotNeedPhysicalBackend(t *testing.T) {
 	}
 	body, _ := json.Marshal(logCommitRequest{Subject: subject, Final: true})
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(body), 200)
+}
+
+// A log slot's bytes pass the storage rule before the controller signs anything, so a team at its storage limit
+// gets a quota refusal and no URL to upload to.
+func TestLogSigningRefusesATeamAtItsStorageLimit(t *testing.T) {
+	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{
+		Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{41}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	h := New(e.Store, nil).WithEngineController(e.EngineController).WithDataController(NewDataController(e.Store, DataController{Objects: objects})).Handler()
+	response := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, 200)
+	var award controllerwire.ClaimResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	claim := award.Claim
+	engineAdmitBearer(t, e.Store, claim.Capability)
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Binding.Generation}}
+	sign := func(index, size int64, status int) *httptest.ResponseRecorder {
+		encoded, err := json.Marshal(blob.LogSigningRequest{Subject: subject, Index: index, Size: size, Digest: blob.Digest(strings.Repeat("a", 64))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(encoded), status)
+	}
+	firstURL := sign(1, 3, http.StatusOK)
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := tenant.StorageRetainedBytes(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A signed slot keeps its first size: asking again for more bytes stores no more.
+	againURL := sign(1, 4, http.StatusOK)
+	if after, err := tenant.StorageRetainedBytes(t.Context()); err != nil || after != before {
+		t.Fatalf("re-signing a 3-byte slot for 4 bytes changed retained storage from %d to %d: %v", before, after, err)
+	}
+	// The URL's deadline is fixed at first signing; once it passes, no new URL exists for the uncommitted slot.
+	var first, again blob.LogUploadURL
+	if json.Unmarshal(firstURL.Body.Bytes(), &first) != nil || json.Unmarshal(againURL.Body.Bytes(), &again) != nil || first.ExpiresAt.IsZero() || !again.ExpiresAt.Equal(first.ExpiresAt) {
+		t.Fatalf("re-signed deadline %v; want the first %v", again.ExpiresAt, first.ExpiresAt)
+	}
+	if _, err := teststore.SQL(t, e.Store).ExecContext(t.Context(), `UPDATE log_slots SET created_at=created_at-? WHERE team='a' AND n=1`, int64(limits.LogUploadURLTTL)); err != nil {
+		t.Fatal(err)
+	}
+	sign(1, 3, http.StatusConflict)
+	if err := tenant.SetStorageQuota(t.Context(), store.StorageQuota{MaxBytesPerRun: 4}); err != nil {
+		t.Fatal(err)
+	}
+	refused := sign(2, 1<<20, http.StatusTooManyRequests)
+	if strings.Contains(refused.Body.String(), "url") || !strings.Contains(refused.Body.String(), "contact support to raise this limit") {
+		t.Fatalf("refused signing = %s; want a quota refusal naming the remedy and no URL", refused.Body.String())
+	}
 }

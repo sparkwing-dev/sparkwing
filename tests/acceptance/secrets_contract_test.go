@@ -16,7 +16,7 @@ func TestSurfaceSecretsTransport(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		t.Run(endpoint, func(t *testing.T) {
 			calls := 0
-			metadata := controllerwire.SecretMetadata{Name: "DEPLOY_KEY", Pipeline: "deploy", Principal: "alice", Masked: true, Bound: true, OnlyOn: "prod", CreatedAt: 1, UpdatedAt: 2}
+			metadata := controllerwire.SecretMetadata{Name: "DEPLOY_KEY", Repo: "acme/web", RepoKey: "gh:7", Pipeline: "deploy", Principal: "alice", Masked: true, Bound: true, OnlyOn: "prod", CreatedAt: 1, UpdatedAt: 2}
 			manager, err := client.NewSecretManager(client.EngineOptions{URL: endpoint, Bearer: func(ctx context.Context) (string, error) { return "member-credential", nil }, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
 				calls++
 				if req.Header.Get("Authorization") != "Bearer member-credential" {
@@ -32,7 +32,7 @@ func TestSurfaceSecretsTransport(t *testing.T) {
 					if err := json.NewDecoder(req.Body).Decode(&input); err != nil {
 						t.Fatal(err)
 					}
-					if input.Name != "DEPLOY_KEY" || input.Value != "private" || input.Pipeline != "deploy" || input.OnlyOn != "prod" || !input.Masked || input.Shared {
+					if input.Name != "DEPLOY_KEY" || input.Value != "private" || input.Repo != "acme/web" || input.Pipeline != "deploy" || input.OnlyOn != "prod" || !input.Masked || input.Shared {
 						t.Fatalf("write lost scope: %+v", input)
 					}
 					result = controllerwire.SecretWritten{Secret: metadata, Replayed: true}
@@ -42,20 +42,20 @@ func TestSurfaceSecretsTransport(t *testing.T) {
 					}
 					result = controllerwire.Secrets{Secrets: []controllerwire.SecretMetadata{metadata}}
 				case 3:
-					if req.Method != "GET" || req.URL.Path != "/api/v1/secrets/DEPLOY_KEY" || req.URL.Query().Get("pipeline") != "deploy" {
+					if req.Method != "GET" || req.URL.Path != "/api/v1/secrets/DEPLOY_KEY" || req.URL.Query().Get("repo") != "acme/web" || req.URL.Query().Get("pipeline") != "deploy" {
 						t.Fatalf("read: %s %s", req.Method, req.URL)
 					}
 					result = controllerwire.SecretValue{SecretMetadata: metadata, Value: "private"}
 				case 4:
-					if req.Method != "DELETE" || req.URL.Path != "/api/v1/secrets/DEPLOY_KEY" || req.URL.Query().Get("pipeline") != "deploy" {
+					if req.Method != "DELETE" || req.URL.Path != "/api/v1/secrets/DEPLOY_KEY" || req.URL.Query().Get("repo") != "acme/web" || req.URL.Query().Get("pipeline") != "deploy" {
 						t.Fatalf("delete: %s %s", req.Method, req.URL)
 					}
-					result = controllerwire.SecretDeletion{Name: "DEPLOY_KEY", Pipeline: "deploy", Deleted: false}
+					return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader(""))}, nil
 				case 5:
 					if req.Method != "POST" || req.URL.Path != "/api/v1/secrets/rotate" || req.Header.Get("Idempotency-Key") != "rotate-key" {
 						t.Fatalf("rotate: %s %s", req.Method, req.URL)
 					}
-					result = controllerwire.SecretRotation{Rotated: 3, Skipped: []controllerwire.SecretSelector{{Name: "OTHER", Pipeline: "release"}}, Replayed: true}
+					result = controllerwire.SecretRotation{Rotated: 3, Skipped: []controllerwire.SecretSelector{{Name: "OTHER", Repo: "gh:7", Pipeline: "release"}}, Replayed: true}
 				default:
 					t.Fatal("unexpected request")
 				}
@@ -68,7 +68,7 @@ func TestSurfaceSecretsTransport(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			written, err := manager.WriteSecret(t.Context(), controllerwire.SecretWrite{Name: "DEPLOY_KEY", Value: "private", Pipeline: "deploy", Masked: true, OnlyOn: "prod", IdempotencyKey: "write-key"})
+			written, err := manager.WriteSecret(t.Context(), controllerwire.SecretWrite{Name: "DEPLOY_KEY", Value: "private", Repo: "acme/web", Pipeline: "deploy", Masked: true, OnlyOn: "prod", IdempotencyKey: "write-key"})
 			if err != nil || written.Secret != metadata || !written.Replayed {
 				t.Fatalf("written: %+v %v", written, err)
 			}
@@ -76,13 +76,13 @@ func TestSurfaceSecretsTransport(t *testing.T) {
 			if err != nil || len(listed.Secrets) != 1 || listed.Secrets[0] != metadata {
 				t.Fatalf("list: %+v %v", listed, err)
 			}
-			selector := controllerwire.SecretSelector{Name: "DEPLOY_KEY", Pipeline: "deploy"}
+			selector := controllerwire.SecretSelector{Name: "DEPLOY_KEY", Repo: "acme/web", Pipeline: "deploy"}
 			value, err := manager.ReadSecret(t.Context(), selector)
 			if err != nil || value.Value != "private" || value.SecretMetadata != metadata {
 				t.Fatalf("read: %+v %v", value, err)
 			}
 			deleted, err := manager.DeleteSecret(t.Context(), selector)
-			if err != nil || deleted.Deleted {
+			if err != nil || !deleted.Deleted {
 				t.Fatalf("delete: %+v %v", deleted, err)
 			}
 			rotated, err := manager.RotateSecrets(t.Context(), controllerwire.SecretRotationRequest{IdempotencyKey: "rotate-key"})

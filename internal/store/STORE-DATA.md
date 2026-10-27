@@ -43,7 +43,7 @@ The account and operational records own personal details and deletion of them.
 
 The operator storage settings API exposes `audit_retention_days`, stored as
 `operator.audit_retention_days`. The default is 400 days. A zero or omitted write
-restores that default. Positive values set the horizon. The existing leased
+restores that default. Positive values set the horizon. The existing
 controller maintenance pass prunes expired audit rows in bounded batches,
 including facts for deleted teams. It uses the same database-clock cutoff as the
 SQL guards. The database stamps `recorded_at` at insertion, and that timestamp
@@ -54,12 +54,6 @@ All UPDATEs remain refused, including changes to expired rows.
 `team_first_success` records the team's first successful run in the
 same transaction as its completion and audit fact. It has no run foreign key,
 so run deletion and audit expiry cannot make a later success the first.
-
-`console_refund_receipts` retains each operator refund's request digest and full
-original result with the financial state. Replaying a key returns that result,
-including its balances and `created` value, after audit retention. A changed
-request under the same key conflicts. The separate expiring audit projection
-contains identifiers, digests and financial facts, with no free-form reason.
 
 Editors may delete only runs they submitted. Owners may delete any run in their team.
 
@@ -92,56 +86,87 @@ usage, raw storage counters and other tenants cannot change retained byte totals
 Corrupt inventory or an overflowing total returns an error and no partial report.
 The controller's team storage report consumes this snapshot.
 
-`Tenant.AppendEventCharged` replaces the raw Store event writer. Its trusted
-replica identity comes from the controller. The method accepts no principal,
-team or clock. It locks the tenant's run and commits the event, retained run
-counters, shared storage admission and additive replica usage together. Event
-bytes include the kind and payload. Events consume monthly and lifetime run
-bytes alongside pending uploads, without consuming object capacity. Monthly
-admission resets with the store clock. Run capacity survives month changes.
-The existing event caps, free share, funding and claim fences remain in force.
-Usage is recorded even when no quota is configured. Failed writes and overflow
-return no sequence and roll back every accounting row.
+Every write that grows a team's stored data passes one storage rule,
+`admitStorageGrowthTx`, in the write's own transaction: run events
+(`appendEventTx`, so `Tenant.AppendEvent` and every state transition), blob and
+source upload reservations and tagged log segments (see
+[log slot accounting](#log-slot-accounting)). It refuses a held team,
+growth past the free storage allowance on an empty balance while storage is
+priced, and growth past the team's tier quota (monthly bytes, per-run bytes and
+objects), then counts the growth so a refused write records nothing. A run's
+own state events are counted but never refused, so a run past its limit can
+still finish. Sparkwing Cloud's store applies the automatic free or paid tier to
+teams without an explicit quota and prices storage at the published rate by
+default. One default free allowance, 1 GiB, serves billing, admission and the
+console. The free-tier slot table, its idle release, `AppendEventCharged` and
+the per-store free shares are removed.
+
+### Log slot accounting
+
+This is the one rule for counting tagged log bytes. A log slot (stream and
+index; index 0 is the final manifest) passes the storage rule when it is first
+signed ([`Tenant.OpenLogSlot`](controller_reporting.go)), and its signed size is
+fixed then. That size counts as retained, committed or not, until Sparkwing
+itself deletes the object. Commit never lowers it: a segment larger than its
+slot is refused, the final commit only marks the manifest slot committed, and
+signing a committed slot again reports it committed. Accounting is retired
+only after Sparkwing deletes the object, in that order: the maintenance pass
+([`Operator.DeleteExpiredLogObjects`](log_expiry.go)) deletes each object whose
+slot was signed longer ago than the stream's log class and then drops the slot,
+keeping it counted when the delete fails. Run retention keeps a run while it
+has slots, so cascading run deletion never drops a counted slot. A bucket
+lifecycle rule is a backstop set longer than the class; Sparkwing never infers
+that one deleted an object. Overcounting happens only when a client signs for
+more bytes than it uploads.
+
+A slot's upload authority has one fixed lifetime: it ends at first signing plus
+`limits.LogUploadURLTTL` (fifteen minutes). Re-signing returns a URL with that
+same absolute expiry and is refused (`409`) after it unless the slot is
+committed, which still reports committed. Expiry never retires a slot before
+its deadline, and explicit run deletion is refused (`409`, "this run's logs are
+still uploading; try again after <time>") while any of the run's slot deadlines
+is in the future, so no live URL can store an object after its slot stops
+counting. Otherwise explicit run deletion checks the run is
+deletable, deletes its log objects, then deletes the records, so the slots
+cascade only after their objects are gone; a failed object delete refuses the
+deletion and keeps the run, its slots and their counted bytes. Team deletion
+deletes the team's objects before its rows in the same way.
 
 Download accounting uses `Tenant.ChargeDownload`. The raw Store method is
-removed. The request accepts a trusted replica ID and the existing cap policy,
-with no team or caller clock. The tenant owns the team and the store owns time.
+removed. The request accepts the existing cap policy, with no team or caller
+clock. The tenant owns the team and the store owns time.
 The shared download quota row serializes admission with reservations. Admission
-and additive replica reports commit together. Unexpired holds consume capacity.
+and the day's usage report commit together. Unexpired holds consume capacity.
 Expired holds release before charging. Midnight resets admission but retains
 the earlier day's report. The download that crosses a cap finishes, and bytes
 already delivered can still be recorded. A zero-byte check records no bytes.
 Overflow and write failures roll the entire charge back.
 
 The controller's signed downloads and delivered-byte middleware use the tenant
-method and their existing lease-holder identity for replica accounting. Log and
-live-log reads stay exempt. The SQLite replica acceptance proof races real
-charges through independent clients and checks the exhausted cap after reopening.
+method. Log and live-log reads stay exempt. The SQLite acceptance proof races
+real charges through independent clients and checks the exhausted cap after
+reopening.
 The signed-data capability adapter and native PostgreSQL path remain integration
 work.
 
-Egress writes use `Tenant.AddUsage` with the authenticated team, trusted replica
-identity and UTC day. The controller records actual successful-response bytes
+Egress writes use `Tenant.AddUsage` with the authenticated team and UTC day. The controller records actual successful-response bytes
 when the request ends, including partial writes and requests whose context was
 cancelled. An absent in-memory meter still records tenant usage. Logs consume
 egress bytes while remaining exempt from download caps. A failed write is logged
 as an error. Process termination before a request ends can lose its egress sample.
 
-`Tenant.EgressUsage` sums replicas for one UTC day or month.
+`Tenant.EgressUsage` sums a team's daily rows for one UTC day or month.
 `Operator.EgressUsageAcrossTeams` supplies team aggregates for alarm restoration.
 Neither report exposes principal identities. `Operator.PruneEgressUsage` preserves
-thirteen months under the existing maintenance lease and store clock. The raw
-Store high-water-mark writer, reader, unleased prune and controller timer flush
+thirteen months under the store clock. The raw Store high-water-mark writer,
+reader, separate prune and controller timer flush
 are removed. Deleting an account leaves tenant egress counters unchanged.
 
 `Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
-`Store.ReconcileFreeEventBytes` are removed. `free_slots` retains slot ownership
-and its timestamp. Its duplicate event-byte column and writer are removed.
-Event storage admission reads retained run counters under its existing free-tier
-lock. Run deletion releases retained event bytes without a repair pass. The
+`Store.ReconcileFreeEventBytes` are removed. Run deletion releases retained event bytes without a repair pass. The
 financial storage usage counters survive deletion and remain separate.
-`Store.ReleaseExpiredStorage` and its unleased cross-team scan are removed.
-Final upload expiry uses quota admission and leased blob maintenance. Empty
+`Store.ReleaseExpiredStorage` and its separate cross-team scan are removed.
+Final upload expiry uses quota admission and blob maintenance. Empty
 uploads reserve object capacity too, and expired tickets cannot commit.
 
 The raw paid-credit grant path is removed. `Tenant.GrantCredits` is removed.
@@ -264,10 +289,9 @@ cannot reopen. The internal quota reservation ID is `upload:<ticket>`.
 `LookupBlobUpload` rechecks the exact uploader and live authority before physical
 publication. The backend must verify size and SHA-256 and finish `CommitObject`
 before passing server-observed bytes to `CommitBlobUpload`. The commit request's
-replica ID comes from controller configuration. It never comes from client JSON.
 An existing CAS object alone cannot establish upload authority. Commit checks
 the ticket and authority again, then records existence, the exact receipt, ticket
-completion, quota settlement and per-replica usage in one transaction. A job
+completion, quota settlement and usage in one transaction. A job
 receipt retains team, run, job, attempt, generation and capability. Owner and
 publication identities remain tagged.
 
@@ -292,7 +316,7 @@ Commit rechecks whether it inserted new content before consuming the reservation
 Deduplicated and empty uploads still commit their reservations. Exact replay
 requires the original receipt and size and remains valid after ticket expiry.
 `AbortBlobUpload` releases only an uncommitted reservation. Abort replay and an
-abort following commit preserve the receipt. The leased tombstone-mark phase
+abort following commit preserve the receipt. The tombstone-mark phase
 releases expired ticket reservations, including those orphaned by run deletion.
 
 `BlobRecords(manifestReader)` provides the `blob.RecordStore` contract. The
@@ -368,27 +392,22 @@ and through the transaction that owns receipt changes.
 large requests. It checks the budget after its final read and returns an empty
 presence result with `blob.ErrBudget` when the deadline has passed.
 
-`MarkBlobTombstones` and `CollectBlobTombstones` require the maintenance lease.
-Leased record expiry and reachability GC replace `ExpiredOutputRuns`,
+`MarkBlobTombstones` and `CollectBlobTombstones` run in the controller's
+maintenance pass. Record expiry and reachability GC replace `ExpiredOutputRuns`,
 `ReleaseRunOutputs` and `ForgetRunOutputs`. The controller's output-key sweep
 and its separate `output_runs` and `output_tombstones` bookkeeping are removed.
 Copied output records keep their bytes and manifest members after the source
 run is deleted. Collection removes the graph after its last record disappears.
-Collection checks its persisted holder, generation and expiry before selecting
-candidates, including empty passes and passes with only grace-period tombstones.
-Each deletion rechecks the fence in its own transaction. A supplied expiry cannot
-extend an expired lease or revive a generation replaced by the same holder.
 Records and live receipts root the graph, including transitive manifest members.
 Collection waits `limits.BlobGCGrace`, takes the same blob lock as writers,
 rechecks reachability and sets the tombstone's `collecting_at` before it commits.
-Immediately before each physical delete, a fresh transaction rechecks the live
-maintenance lease and the same collecting tombstone. It then calls `BlobDeleter`
+Immediately before each physical delete, a fresh transaction rechecks the same
+collecting tombstone. It then calls `BlobDeleter`
 outside any transaction and finally deletes the blob row under the blob lock,
 matching the collection timestamp. A new upload, source upload or record clears
 a plain tombstone through `clearBlobTombstoneTx`, which refuses a collecting one with a
 conflict. A deletion failure or crash leaves the collecting tombstone, and the
-next leased pass repeats the idempotent deletion. These checks narrow the window
-for an overlapping collector. S3 uses the observed ETag as `If-Match` on delete.
+next pass repeats the idempotent deletion. S3 uses the observed ETag as `If-Match` on delete.
 Recoverable bytes can still be lost in a rare race, including identical S3
 bytes with the same ETag. A referenced digest with missing bytes fails loudly.
 A collecting digest that has gained a reference fails the pass loudly.
@@ -414,26 +433,26 @@ segments after the writer ends. Log incompleteness never changes the job result.
 Segment replay counts retained bytes once. Refused content and byte-limit
 violations preserve the committed inventory. Run deletion cascades streams and
 segments. A later job finish cannot extend an attempt's persisted tail grace.
-Generated tests check reads, segment commits, final seals and leased maintenance
+Generated tests check reads, segment commits, final seals and maintenance
 on both sides of that grace boundary. A historical reader keeps the same bytes,
 and maintenance preserves the job's successful result and finish time.
-The unused raw `Store.RunFinished` pruning query is removed. Leased retention
+The unused raw `Store.RunFinished` pruning query is removed. Retention
 and tagged-stream maintenance own log lifetime.
 
-`SealAbandonedLogStreams` closes existing execution streams as incomplete under
-the maintenance lease. Finished job attempts keep their final tail grace through
+`SealAbandonedLogStreams` closes existing execution streams as incomplete. Finished job attempts keep their final tail grace through
 its exact boundary. Completed trigger, plan and eval streams keep that final
 tail window. Expired or replaced unit fences seal incomplete immediately.
 Eval also checks the source generation. The bounded batch
-locks runs and rechecks the maintenance fence before writing. Any error rolls
+locks runs before writing. Any error rolls
 the batch back. Existing final seals remain immutable. Publication streams keep
 their publisher's final-commit contract because publication has no lease.
 
 The independent bucket-listing storage pass is removed with its mark/reconcile
 APIs, raw download-day pruning, legacy receipt pruning and free-share log row
-selection. The controller's maintenance timer uses the existing singleton lease,
-final retention, tagged-stream sealing and committed-inventory billing. Physical
-bucket bytes cannot overwrite replica counters or become retained billing facts.
+selection. The controller's maintenance timer runs final retention,
+tagged-stream sealing, log expiry under [log slot accounting](#log-slot-accounting)
+and committed-inventory billing. Physical bucket bytes cannot overwrite usage
+counters or become retained billing facts.
 Allowance-driven physical eviction still requires the final record/log adapter.
 
 `Store.ReserveStorage`, `Store.CommitStorage`, their exported request/response
@@ -512,8 +531,14 @@ after source deletion. GC uses a controlled store clock across grace and takeove
 The ledger retention proof creates all financial-table rows through their mutation
 owners, then verifies them unchanged after run retention and reopening. The signed
 refund proof also joins C2 verification to settlement, using the schema fake below.
-The unused legacy storage-pass lease API is removed; maintenance uses the elected
-Operator pass.
+Decision 29 leaves one active controller per store: a PostgreSQL session advisory
+lock and a write epoch fence every write, and SQLite stores are single-process. The
+singleton maintenance leases (`leases`, their generations and the lease parameters
+on maintenance calls), per-delivery GitHub inbox leases and the `replica_id`
+usage columns are removed. Correctness inside the one controller still rests on
+idempotent maintenance, transactional watermarks and the `crons.tick` window stamp
+that stops a schedule window ticking twice. Controller-owned runs renew their
+capacity and owner deadlines to one minute ahead on every reconciliation pass.
 
 
 `payment_provider_settlement.go` dispatches verified card setup, refill,
@@ -531,15 +556,16 @@ are capped by the paid grant. Only refund-kind rows count as money returned by
 Stripe when closing the card-refund queue.
 
 Refill reservations persist amount and Stripe customer, never a card or email.
-Unbound reservations may expire or be explicitly replaced. A bound payment
-keeps the team's single refill slot until its payment outcome is known.
-`CanConfirmRefill` rechecks the team's Stripe customer, refill authorization,
-holds and limits before the worker confirms an unconfirmed intent. The worker
-reconciles processing and succeeded intents without confirming again. An
-ineligible unconfirmed intent is canceled at Stripe; `RecordRefillCanceled`
-retains its binding and closes the reservation only after Stripe reports
-cancellation. Unresolved reservations and every confirmed payment count against
-refill limits, including refusals and refunds; canceled payments do not.
+`EachDueRefill` authorizes each team's refill in its own transaction
+immediately before that refill's checkout call, with one eligibility rule
+(refills on, not blocked, no hold, within limits, balance below threshold) for
+opening a reservation and for every retry of its fixed request under its id.
+A reservation stays open until a signed outcome or a refusal closes it, a
+recheck withdraws it, or it expires after 23 hours. A card payment's signed
+outcome finds its reservation by the refill id in the payment's metadata and
+records the payment id then; a reservation funds at most one payment. Open
+reservations and every refill payment count against refill limits, including
+refusals and refunds; reservations closed without a payment do not.
 Resolved outcomes enter their spending windows when recorded, so delayed
 settlement cannot age a new charge out of its limits.
 `credit_checkouts.refill_blocked` records an active failure independently of
@@ -580,14 +606,14 @@ The unused raw `Store.AccountEmail` read is also removed.
 Blob and source upload reservations take the digest lock and clear its
 tombstone. Expiry abandons one ticket per transaction, and source expiry deletes
 staged bytes before a per-ticket transaction releases the ticket. Pending tickets
-protect that tenant's digest until commit or abandonment. Abort and leased expiry
+protect that tenant's digest until commit or abandonment. Abort and expiry
 register possible copied bytes as a tombstoned blob before releasing quota. The
 nullable `uploads.abandoned_at` records that handoff once, including tickets whose
 expired quota was released by another admission. GC tolerates absent object bytes.
 `DeleteExpiredBlobStaging` deletes the staging object of every committed or
 abandoned blob ticket once `limits.BlobGCGrace` has passed since its expiry,
 which also catches a commit whose immediate staging delete failed. It deletes
-outside any transaction, then sets `uploads.staging_deleted_at` in a leased
+outside any transaction, then sets `uploads.staging_deleted_at` in its own
 transaction. A failed delete leaves the column unset for the next pass.
 Abandonment creates no receipt or successful-upload usage. Live tickets, receipts
 and record graphs still protect a shared digest.
@@ -622,7 +648,7 @@ The schema enforces one billing award per capability and per unit generation.
 Refill settlement scopes its checkout and grant to the same team. Every new job attempt clears its job summary and annotations.
 
 Upload tickets retain their run and job identifiers without cascading foreign
-keys. They survive run deletion because leased expiry still needs the digest to
+keys. They survive run deletion because upload expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
 
 ## Run-anywhere claim ranking

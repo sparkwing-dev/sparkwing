@@ -135,7 +135,7 @@ func TestFilesystemDataStartupRequiresOriginForWildcard(t *testing.T) {
 
 func TestFilesystemWildcardRefusesBeforeOpeningStore(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	if err := run([]string{"--addr=:0", "--free-team-slots=5"}); err == nil || !strings.Contains(err.Error(), "--external-url") {
+	if err := run([]string{"--addr=:0"}); err == nil || !strings.Contains(err.Error(), "--external-url") {
 		t.Fatalf("wildcard --addr: %v", err)
 	}
 	p, err := paths.DefaultPaths()

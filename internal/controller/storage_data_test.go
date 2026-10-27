@@ -45,7 +45,7 @@ func storeDataRequest(t *testing.T, s *serverFixture, method, path, body string,
 	return r
 }
 
-func TestStoreDataStorageRoutesScopeQuotaAndReplicaReports(t *testing.T) {
+func TestStoreDataStorageRoutesScopeQuotaAndUsageReports(t *testing.T) {
 	s := storeDataServer(t)
 	admin := true
 	r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/quotas/a", `{"max_bytes_per_month":123}`, admin)
@@ -71,12 +71,12 @@ func TestStoreDataStorageRoutesScopeQuotaAndReplicaReports(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, replica := range []string{"r1", "r2"} {
+		for range 2 {
 			amount := int64(7)
 			if team == "b" {
 				amount = 100
 			}
-			if err := tenant.AddUsage(t.Context(), store.UsageDelta{Period: store.StorageMonth(time.Now()), ReplicaID: replica, Counter: "storage_bytes", Amount: amount}); err != nil {
+			if err := tenant.AddUsage(t.Context(), store.UsageDelta{Period: store.StorageMonth(time.Now()), Counter: "storage_bytes", Amount: amount}); err != nil {
 				t.Fatal(err)
 			}
 		}

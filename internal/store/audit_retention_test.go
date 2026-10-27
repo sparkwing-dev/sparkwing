@@ -45,17 +45,13 @@ func assertAuditRetention(t *testing.T, s *store.Store) {
 	if n := countWhere(t, s, "audit_events", "kind='retention'"); n != 4 {
 		t.Fatalf("mixed delete was not atomic: %d", n)
 	}
-	lease, err := op.AcquireSingletonLease(ctx, "maintenance", "audit-worker", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for i := 0; i < 2; i++ {
-		result, err := op.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 1})
+		result, err := op.MaintainRetention(ctx, store.RetentionRequest{Limit: 1})
 		if err != nil || result.AuditEvents != 1 {
 			t.Fatalf("bounded audit pruning: %+v %v", result, err)
 		}
 	}
-	result, err := op.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 1})
+	result, err := op.MaintainRetention(ctx, store.RetentionRequest{Limit: 1})
 	if err != nil || result.AuditEvents != 0 {
 		t.Fatalf("pruned young events: %+v %v", result, err)
 	}
@@ -136,11 +132,7 @@ func assertBackdatedOccurrenceCannotExpireAudit(t *testing.T, s *store.Store) {
 	if _, err := s.DB().Exec(`DELETE FROM audit_events`); err == nil {
 		t.Fatal("backdated caller time expired a newly recorded audit row")
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "backdate", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := s.AsOperator().MaintainRetention(t.Context(), store.RetentionRequest{Lease: lease, Limit: 100})
+	result, err := s.AsOperator().MaintainRetention(t.Context(), store.RetentionRequest{Limit: 100})
 	if err != nil || result.AuditEvents != 0 {
 		t.Fatalf("pruned backdated new audit: %+v %v", result, err)
 	}

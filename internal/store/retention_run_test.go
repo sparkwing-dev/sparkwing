@@ -13,11 +13,7 @@ func TestRetentionUsesFinishTimeForLongRunningWork(t *testing.T) {
 	maintenanceRun(t, s, "recent", 1, runstate.RunSuccess)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET started_at=? WHERE id='recent'`, now.Add(-120*24*time.Hour).UnixNano())
 	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)`, []byte(`90`))
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 10})
+	result, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Limit: 10})
 	if err != nil || result.Runs != 0 {
 		t.Fatalf("recent finish pruned: %+v err=%v", result, err)
 	}
@@ -34,11 +30,7 @@ func TestRetentionRollsBackAllRunDeletesAfterLaterFailure(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)`, []byte(`90`))
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER deny_second_delete BEFORE DELETE ON runs WHEN OLD.id='second' BEGIN SELECT RAISE(ABORT,'retained'); END`)
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 10})
+	result, err := s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Limit: 10})
 	if err == nil || !reflect.DeepEqual(result, RetentionResult{}) {
 		t.Fatalf("failed pass reported committed deletions: %+v err=%v", result, err)
 	}
@@ -48,7 +40,7 @@ func TestRetentionRollsBackAllRunDeletesAfterLaterFailure(t *testing.T) {
 		}
 	}
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER deny_second_delete`)
-	result, err = s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 10})
+	result, err = s.AsOperator().MaintainRetention(t.Context(), RetentionRequest{Limit: 10})
 	if err != nil || result.Runs != 2 || result.ReleasedBytes != 34 {
 		t.Fatalf("successful pass: %+v err=%v", result, err)
 	}

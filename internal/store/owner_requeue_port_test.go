@@ -29,10 +29,6 @@ func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
 			generation := int64(random.IntN(1000) + 1)
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind=?,generation=?`, kind, generation)
 			tenant := &Tenant{s: s, team: "a"}
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
 			var previous []UnitClaim
 			var charged int64
 			for cycle := range random.IntN(3) + 2 {
@@ -57,7 +53,7 @@ func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
 						t.Fatal("former holder finished a replacement's run")
 					}
 				}
-				if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+				if reaped, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 0 {
 					t.Fatalf("live owner recovered: %+v, %v", reaped, err)
 				}
 				after, err := tenant.ReadSnapshot(t.Context(), "run")
@@ -69,7 +65,7 @@ func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
 				}
 				*now = claim.Award.LeaseExpiresAt
 				for replay := range 2 {
-					reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
+					reaped, err := s.AsOperator().ReapUnits(t.Context(), 10)
 					if err != nil || len(reaped) != 1-replay {
 						t.Fatalf("recovery %d: %+v, %v", replay, reaped, err)
 					}
@@ -87,12 +83,12 @@ func TestOwnerUnstartedRecoveryFencesPriorAwardsProperty(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE credit_charges SET charged_at=?`, now.Add(time.Duration(random.IntN(100)+1)*time.Hour).UnixNano())
 				previous = append(previous, claim)
 			}
-			checkRecoveredOwnerFinish(t, s, demand, lease, charged, cloud)
+			checkRecoveredOwnerFinish(t, s, demand, charged, cloud)
 		})
 	}
 }
 
-func checkRecoveredOwnerFinish(t *testing.T, s *Store, demand UnitDemand, lease SingletonLease, charged int64, cloud bool) {
+func checkRecoveredOwnerFinish(t *testing.T, s *Store, demand UnitDemand, charged int64, cloud bool) {
 	t.Helper()
 	claim, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: claim.Team}
@@ -112,7 +108,7 @@ func checkRecoveredOwnerFinish(t *testing.T, s *Store, demand UnitDemand, lease 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+	if reaped, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 0 {
 		t.Fatalf("terminal owner recovered: %+v, %v", reaped, err)
 	}
 	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err == nil {

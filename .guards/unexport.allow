@@ -71,7 +71,6 @@ internal/settings	1
 # Store.ApproveOldestWaitlisted: external signup tests exercise FIFO approval and reservations.
 # Store.SetSignUpMode: external signup tests configure the signup gate.
 # Store.WaitlistedAccounts: external signup tests inspect durable waitlist state.
-# Tenant.AppendEventCharged: external accounting tests exercise event authority and quota transactions.
 # Tenant.GitHubAppExtraRepos: external GitHub tests inspect persisted repository permissions.
 # Tenant.ReadBlob: external blob tests exercise metadata authority checks.
 # Tenant.RecordContention: external profile tests exercise tenant-scoped contention updates.
@@ -82,7 +81,7 @@ internal/settings	1
 # Tenant.ResetPipelineProfile: external profile tests exercise pipeline-scoped reset isolation.
 # Tenant.SettleQuota: external quota tests exercise settlement transactions.
 # secretPreflightError.Error: implements error; callers use the error interface.
-internal/store	35
+internal/store	33
 # SeedUpload: external fixture tests share this upload setup implementation.
 internal/store/teststore	1
 # FieldError.Error: implements error; callers use the error interface.

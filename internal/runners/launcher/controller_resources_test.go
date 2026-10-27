@@ -64,8 +64,7 @@ func TestCloudAwardResourcesFromControllerThroughLauncher(t *testing.T) {
 				cloudResourceSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), execution)
 				if kind == capability.UnitEval {
 					cloudResourceSQL(t, e.Store, `UPDATE nodes SET status='done',outcome='success',finished_at=1,generation=7,expansion='expected'`)
-					cloudResourceSQL(t, e.Store, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, time.Now().Add(time.Hour).UnixNano())
-					cloudResourceSQL(t, e.Store, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+					cloudResourceSQL(t, e.Store, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',7,'pending')`)
 				}
 			}
 			raw := cloudResourceRoot(t, e)

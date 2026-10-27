@@ -54,17 +54,16 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 	}
 }
 
-// A frozen team's events are held to the free share as its tier says: the
-// admission of an append and the tier lookup read one funded predicate.
-func TestAFrozenTeamsEventsAreHeldToTheFreeShare(t *testing.T) {
+// A frozen team's events are refused while the hold lasts: the admission of an append and the tier lookup read one
+// funded predicate, so the credits the disputed payment bought fund neither.
+func TestAFrozenTeamsEventsAreRefused(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	setFreeAllowance(t, st, 1600)
 	acme := teamHandle(t, st, "acme")
 	teamRun(t, acme, "r1")
 	fund(t, acme)
 	if err := appendBytes(acme, "r1", 500); err != nil {
-		t.Fatalf("a funded team's write past the share: %v", err)
+		t.Fatalf("a funded team's write: %v", err)
 	}
 	if _, err := teststore.ForTeam(t, st, "acme").TestOnlyHoldForDispute(ctx, "dp_ev", "", "dispute opened", teststore.Now(st)); err != nil {
 		t.Fatal(err)
@@ -73,8 +72,8 @@ func TestAFrozenTeamsEventsAreHeldToTheFreeShare(t *testing.T) {
 		t.Fatalf("a frozen team's tier = %+v, want not funded", got)
 	}
 	err := appendBytes(acme, "r1", 200)
-	var quota *store.StorageQuotaError
-	if !errors.As(err, &quota) || quota.Limit != "free_event_share" {
-		t.Fatalf("a frozen team's write past the share = %v, want a free event share refusal", err)
+	var held *store.InsufficientCreditsError
+	if !errors.As(err, &held) || held.Hold == "" {
+		t.Fatalf("a frozen team's write = %v, want a hold refusal", err)
 	}
 }

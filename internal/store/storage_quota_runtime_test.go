@@ -1,7 +1,6 @@
 package store
 
 import (
-	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -46,21 +45,20 @@ func TestStoreDataQuotaConfigurationIsTenantScoped(t *testing.T) {
 	}
 }
 
-func TestStoreDataUsageReportSumsReplicaAndPeriodRows(t *testing.T) {
+func TestStoreDataUsageReportSumsPeriodRows(t *testing.T) {
 	s := authorityStore(t)
 	a := &Tenant{s: s, team: "a"}
 	ctx := t.Context()
 	for _, row := range []struct {
-		team, period, replica, run string
-		bytes, objects             int64
+		team, period, run string
+		bytes, objects    int64
 	}{
-		{"a", "2026-10", "r1", "run", 7, 1},
-		{"a", "2026-10", "r2", "run", 11, 2},
-		{"a", "2026-09", "r1", "run", 13, 3},
-		{"b", "2026-10", "r1", "run", 1000, 4},
+		{"a", "2026-10", "run", 18, 3},
+		{"a", "2026-09", "run", 13, 3},
+		{"b", "2026-10", "run", 1000, 4},
 	} {
-		rewriteSchemaExec(t, s.db, "INSERT INTO storage_run_usage(team,period,replica_id,run_id,bytes,objects,updated_at) VALUES (?,?,?,?,?,?,1)", row.team, row.period, row.replica, row.run, row.bytes, row.objects)
-		rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,replica_id,bytes,objects,updated_at) VALUES (?,?,?,?,?,1)", row.team, row.period, row.replica, row.bytes, row.objects)
+		rewriteSchemaExec(t, s.db, "INSERT INTO storage_run_usage(team,period,run_id,bytes,objects,updated_at) VALUES (?,?,?,?,?,1)", row.team, row.period, row.run, row.bytes, row.objects)
+		rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,bytes,objects,updated_at) VALUES (?,?,?,?,1)", row.team, row.period, row.bytes, row.objects)
 	}
 	got, err := a.StorageUsageFor(ctx, "run", "2026-10")
 	want := StorageUsage{Team: "a", RunID: "run", Month: "2026-10", RunBytes: 31, RunObjects: 6, MonthBytes: 18, MonthObjects: 3}
@@ -83,7 +81,7 @@ func TestStoreDataRetainedReportCountsUniquePhysicalInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,7,1),('b',?,100,1)", strings.Repeat("a", 64), strings.Repeat("a", 64))
-	rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,replica_id,bytes,updated_at) VALUES ('a','old','r1',1000,1),('a','old','r2',1000,1)")
+	rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,bytes,updated_at) VALUES ('a','old',1000,1),('a','older',1000,1)")
 	got, err := tenant.StorageRetainedBytes(t.Context())
 	if err != nil || got != 10 {
 		t.Fatalf("retained=%d: %v", got, err)
@@ -98,12 +96,9 @@ func TestStoreDataRetainedReportCountsUniquePhysicalInventory(t *testing.T) {
 func TestStoreDataQuotaReportRejectsOverflowAndCorruption(t *testing.T) {
 	s := authorityStore(t)
 	tenant := &Tenant{s: s, team: "a"}
-	rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,replica_id,bytes,updated_at) VALUES ('a','period','r1',?,1),('a','period','r2',1,1)", int64(math.MaxInt64))
-	if _, err := tenant.StorageUsageFor(t.Context(), "", "period"); err == nil {
-		t.Fatal("overflowing usage accepted")
-	}
+	rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,bytes,updated_at) VALUES ('a','period',1,1)")
 	rewriteSchemaExec(t, s.db, "PRAGMA ignore_check_constraints=ON")
-	rewriteSchemaExec(t, s.db, "UPDATE storage_month_usage SET bytes=-1 WHERE team='a' AND replica_id='r2'")
+	rewriteSchemaExec(t, s.db, "UPDATE storage_month_usage SET bytes=-1 WHERE team='a' AND period='period'")
 	if _, err := tenant.StorageUsageFor(t.Context(), "", "period"); err == nil {
 		t.Fatal("negative counter concealed in sum")
 	}

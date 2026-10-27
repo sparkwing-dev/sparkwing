@@ -70,7 +70,7 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 		if err != nil {
 			return UploadReservation{}, err
 		}
-		if err := reserveBlobUploadQuotaTx(ctx, tx, t.team, request.ID, a.source.RunID, reserved, objects, request.ExpiresAt); err != nil {
+		if err := admitStorageGrowthTx(ctx, tx, t.team, storageGrowth{reservation: blobUploadQuotaID(request.ID), expires: request.ExpiresAt, run: a.source.RunID, bytes: reserved, objects: objects}); err != nil {
 			return UploadReservation{}, err
 		}
 		u := UploadReservation{ID: request.ID, Blob: blob.Blob{Team: string(t.team), Digest: request.Intent.Digest, Size: request.Intent.Size}, Identity: a.source, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, ExpiresAt: request.ExpiresAt.UTC()}
@@ -78,11 +78,6 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 		node, attempt, generation, unitKind, unitID, unitGeneration, unitSource, err := blobUploadColumns(u.Identity)
 		if err != nil {
 			return UploadReservation{}, err
-		}
-		if u.Blob.Size > 0 {
-			if err := markFreeSlotActiveTx(ctx, tx, t.team); err != nil {
-				return UploadReservation{}, err
-			}
 		}
 		_, err = tx.execContext(ctx, `INSERT INTO uploads(id,team,run_id,store,size,provenance,expires_at,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,node_id,attempt,generation,uploader_principal,capability_prefix,repo_key,ref_scope) VALUES (?,?,?,'blob',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, u.ID, t.team, u.Identity.RunID, u.Blob.Size, u.Provenance, u.ExpiresAt.UnixNano(), u.Identity.Kind, unitKind, unitID, unitGeneration, unitSource, u.Blob.Digest, node, attempt, generation, u.Identity.Principal, u.Identity.CapabilityRef, a.authority.Repo, u.RefFacts.Scope.CapabilityScope())
 		if err != nil {
@@ -137,8 +132,8 @@ func (t *Tenant) LookupBlobUpload(ctx context.Context, authority blob.Authority,
 
 // CommitBlobUpload atomically settles verified bytes, quota and the exact uploader receipt.
 func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCommit) (blob.Receipt, error) {
-	if !validUploadTicket(request.TicketID) || request.ReplicaID == "" || request.Verified.Team != string(t.team) || !validBlobDigest(request.Verified.Digest) || request.Verified.Size < 0 {
-		return blob.Receipt{}, authorityError(apierr.BadRequest, "verified upload and replica are required")
+	if !validUploadTicket(request.TicketID) || request.Verified.Team != string(t.team) || !validBlobDigest(request.Verified.Digest) || request.Verified.Size < 0 {
+		return blob.Receipt{}, authorityError(apierr.BadRequest, "a verified upload is required")
 	}
 	return inTxResult(ctx, t.s, func(tx *storeTx) (blob.Receipt, error) {
 		a, err := resolveBlobAuthorityTx(ctx, tx, t.team, request.Authority, capability.DataWrite)
@@ -159,7 +154,7 @@ func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCom
 			return blob.Receipt{}, blob.ErrIntegrity
 		}
 		intent := blob.UploadIntent{Authority: request.Authority, Identity: u.Identity, Digest: u.Blob.Digest, Size: u.Blob.Size}
-		receipt, err := commitVerifiedBlobTx(ctx, tx, t.team, a, intent, blobAccounting{ReservationID: blobUploadQuotaID(u.ID), ReplicaID: request.ReplicaID})
+		receipt, err := commitVerifiedBlobTx(ctx, tx, t.team, a, intent, blobAccounting{ReservationID: blobUploadQuotaID(u.ID)})
 		if err != nil {
 			return blob.Receipt{}, err
 		}

@@ -132,9 +132,6 @@ func TestRunAnywhereRunnerHostsPlanEvaluationAndJobs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 	offlineStopDaemon(t, os.Getenv("SPARKWING_HOME"))
-	if _, err := state.AsOperator().AcquireSingletonLease(ctx, "controller.owner", "run-anywhere-test", time.Hour); err != nil {
-		t.Fatal(err)
-	}
 	runnerConfig := burstPublicPersonalRunner(t, ctx, cli, repo, state)
 	section, err := userconfig.Node(runnerConfig, userconfig.Runner)
 	if err != nil || section == nil {

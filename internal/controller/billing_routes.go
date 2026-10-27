@@ -59,7 +59,7 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 	if page.Kind != kind || page.Team != a.Target.Team || page.ReservationID == "" || kind == capability.BillingPageCredits && page.AmountCents != amount {
 		return routepolicy.MissingEndpointPolicy()
 	}
-	if page.URL != "" && !validBillingPageURL(page.URL) {
+	if page.URL != "" && !validBillingPageURL(page.URL, stripeCheckoutHost) {
 		return routepolicy.MissingEndpointPolicy()
 	}
 	if page.URL == "" {

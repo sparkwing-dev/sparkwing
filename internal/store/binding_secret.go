@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"slices"
+	"strconv"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -19,19 +20,36 @@ const (
 
 type secretSelection struct {
 	scope           secretScope
+	repo            string
 	pipeline        string
 	includeUnshared bool
 }
 
+// runSecretSelection selects the pipeline secrets of the repository and
+// pipeline a run speaks for, and only shared team-wide secrets when
+// [secretRepository] names no repository.
 func runSecretSelection(r runspec.SealedRequest) (secretSelection, error) {
 	p := r.Provenance
 	if !p.Valid() {
 		return secretSelection{}, bindingRefusal()
 	}
-	if p.SharedSecretsOnly() {
+	repo := secretRepository(r)
+	if p.SharedSecretsOnly() || repo == "" {
 		return secretSelection{scope: secretSharedOnly}, nil
 	}
-	return secretSelection{scope: secretPipelineScope, pipeline: p.Pipeline()}, nil
+	return secretSelection{scope: secretPipelineScope, repo: repo, pipeline: p.Pipeline()}, nil
+}
+
+// secretRepository is the one repository identity pipeline secrets are
+// released to: the GitHub repository a verified delivery, an Actions push or an
+// admin-armed schedule proved, or the one the controller fetched an asserted
+// run's code from. A run whose code or repository the submitter supplied
+// proves none, so it reads only shared team-wide secrets (decision 68).
+func secretRepository(r runspec.SealedRequest) string {
+	if id := r.Provenance.SecretRepositoryID(); id > 0 {
+		return "gh:" + strconv.FormatInt(id, 10)
+	}
+	return ""
 }
 
 func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {

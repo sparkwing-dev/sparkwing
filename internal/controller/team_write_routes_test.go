@@ -71,7 +71,7 @@ func (f *teamWriteFake) SetAuthorizedBuildTrust(_ context.Context, a capability.
 	return f.record(a, fmt.Sprint(trust))
 }
 
-func (f *teamWriteFake) DeleteAuthorizedRun(_ context.Context, a capability.Authorized) error {
+func (f *teamWriteFake) DeleteAuthorizedRun(_ context.Context, a capability.Authorized, _ func(context.Context) error) error {
 	return f.record(a, a.Target.RunID)
 }
 
@@ -233,7 +233,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 		if mode == 3 {
 			return nil, errors.New("private-provider-password")
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.example/page","id":"cs_17","setup_intent":"seti_17","payment_intent":"pi_17","expires_at":200}`))}, nil
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_17","setup_intent":"seti_17","payment_intent":"pi_17","expires_at":200}`))}, nil
 	})}}
 	for _, tc := range []struct {
 		path, body string
@@ -252,7 +252,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 					writer.err = &apierr.Error{Code: apierr.Conflict, Message: "refused"}
 					want = 409
 				case 2:
-					writer.page.URL = "https://checkout.example/replay"
+					writer.page.URL = "https://checkout.stripe.com/replay"
 				case 3:
 					want = 503
 				case 4:

@@ -39,10 +39,6 @@ func TestBlobStagingCleanupRetriesUntilDeleted(t *testing.T) {
 	if _, err := tenant.ReserveBlobUpload(t.Context(), live); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "gc", 8*limits.BlobGCGrace)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var deleted []string
 	fail := errors.New("object store unavailable")
 	failing := map[string]bool{expired.StagingKey: true}
@@ -53,9 +49,9 @@ func TestBlobStagingCleanupRetriesUntilDeleted(t *testing.T) {
 		}
 		return nil
 	})
-	sweep := func() error { return s.AsOperator().DeleteExpiredBlobStaging(t.Context(), lease, 10, deleter) }
+	sweep := func() error { return s.AsOperator().DeleteExpiredBlobStaging(t.Context(), 10, deleter) }
 	now = request.ExpiresAt
-	if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil {
+	if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), 10); err != nil {
 		t.Fatal(err)
 	}
 	if err := sweep(); err != nil || len(deleted) != 0 {
@@ -73,10 +69,5 @@ func TestBlobStagingCleanupRetriesUntilDeleted(t *testing.T) {
 	deleted = nil
 	if err := sweep(); err != nil || len(deleted) != 0 {
 		t.Fatalf("settled sweep = %v, deleted %v", err, deleted)
-	}
-	stale := lease
-	stale.Generation++
-	if err := s.AsOperator().DeleteExpiredBlobStaging(t.Context(), stale, 10, deleter); err == nil {
-		t.Fatal("stale maintenance swept staging")
 	}
 }

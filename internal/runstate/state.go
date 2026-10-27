@@ -102,7 +102,6 @@ const (
 // OwnerLeaseRef identifies a fence to re-read under the store clock, never a caller's liveness assertion.
 type OwnerLeaseRef struct {
 	Kind OwnerLeaseKind
-	Name string
 	runspec.EvalFence
 }
 

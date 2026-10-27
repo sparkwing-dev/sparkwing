@@ -236,7 +236,7 @@ func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor runstate
 	if err := checkOwnerTx(ctx, tx, team, actor, string(ref.RunID)); err != nil {
 		return UnitClaim{}, err
 	}
-	p, err := tx.ResolveAuthority(ctx, actor.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, team, actor.Authority, sameTeam)
 	if err != nil {
 		return UnitClaim{}, err
 	}

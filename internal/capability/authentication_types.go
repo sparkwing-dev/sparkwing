@@ -42,10 +42,9 @@ type RecordedResult struct {
 
 // ExpansionState supplies the owner/eval lease independently of the evaluated source.
 type ExpansionState struct {
-	ApprovalPredicate        bool
-	Lease                    LeaseRef
-	ExpiresAt                time.Time
-	ControllerLeaseExpiresAt *time.Time
+	ApprovalPredicate bool
+	Lease             LeaseRef
+	ExpiresAt         time.Time
 }
 
 // BindingState is a committed snapshot, not a caller assertion or cached liveness verdict.

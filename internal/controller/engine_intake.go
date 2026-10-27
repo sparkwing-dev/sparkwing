@@ -190,7 +190,7 @@ func expansionActor(a capability.Authorized) (runstate.Actor, error) {
 		Authority: a.Principal.Authority, Kind: runstate.ActorRunHost, CapabilityPrefix: a.Principal.Capability.Prefix,
 
 		Owner: runstate.OwnerLeaseRef{
-			Kind: kind, Name: lease.ID, EvalFence: runspec.EvalFence{RunID: runspec.RunID(a.Target.RunID), SourceNodeID: runspec.NodeID(a.Target.NodeID), SourceGeneration: runspec.ClaimGeneration(a.Target.UnitSourceGeneration), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
+			Kind: kind, EvalFence: runspec.EvalFence{RunID: runspec.RunID(a.Target.RunID), SourceNodeID: runspec.NodeID(a.Target.NodeID), SourceGeneration: runspec.ClaimGeneration(a.Target.UnitSourceGeneration), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
 		}, NodeFence: runspec.NodeFence{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID), Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)},
 	}, nil
 }

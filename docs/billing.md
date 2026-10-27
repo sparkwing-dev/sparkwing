@@ -163,31 +163,33 @@ High still has the $1,000 maximum per payment and uses the team's own weekly
 and monthly limits.
 
 The controller checks for due refills every 30 seconds and keeps at most one
-refill in flight per team. A refill fixes its amount and Stripe customer when it
-opens, and every retry sends that same request under the
-refill's own id, so a retried or interrupted refill never charges twice. The
-payment is created before it is confirmed. A refill whose payment was never
-created is closed after 23 hours, or when the team's Stripe customer changes
-first, and the next one starts fresh. Once its payment exists, the refill keeps the
-team's one refill slot until its payment outcome is known. Before confirming
-an unconfirmed payment, the controller rechecks that refills remain enabled,
-the team has no hold, its Stripe customer is unchanged, and the payment fits
-the current limits. Otherwise it cancels the unconfirmed payment at Stripe and
-retains its reservation record. Processing and succeeded payments are
-reconciled without another confirmation. Credits settle only from Stripe's
-signed webhook, through the same path as Add funds: the same fraud-warning
-handling, refund ordering and standing update apply.
+refill in flight per team. It opens a refill only after checking, in the same
+transaction, that refills are on, no failed refill blocks them, the team has no
+hold, the balance is below the threshold and the refill fits every limit. The
+refill fixes its amount and Stripe customer when it opens. The controller then
+makes one call that creates and confirms the off-session payment, with the
+refill's id as Stripe's idempotency key and in the payment's metadata. Until
+the payment settles, every pass rechecks the same eligibility, setting the
+refill's own reservation aside, and repeats that same request under the same
+key, so a crash or a lost answer never charges twice. A refill the team is no
+longer eligible for, for example because refills were turned off or the card
+changed, is withdrawn without another call; a payment an earlier call made is
+still credited. A refill that nothing settles within 23 hours is closed
+as expired and the next one starts fresh; a payment that settles later is still
+credited. Credits settle only from Stripe's signed webhook, which names the
+refill in its metadata, through the same path as Add funds: the same
+fraud-warning handling, refund ordering and standing update apply.
 
-Every unresolved reservation and confirmed refill counts against the limits,
-whether granted, declined, refused or refunded. A payment Stripe confirms was
-canceled releases its reservation without consuming the limits. A refill
-that would exceed a team limit or a cap is not made. The credits run down and Cloud work stops at zero; the
+Every open refill and every refill payment counts against the limits, whether
+granted, declined, refused or refunded. A refill that closes without a payment,
+such as one with no card or one that expired, does not. A refill that would
+exceed a team limit or a cap is not made. The credits run down and Cloud work stops at zero; the
 billing page names the limit that stopped the refill (`refill.limit` in
 `GET /api/v1/team/billing`).
 
-A refill that returns `requires_action` closes as failed with `authentication_required`,
-whether the status arrives from reconciliation, confirmation or a signed webhook.
-A refill the card declines, or that asks for authentication, is recorded with
+A refill that needs the cardholder to authenticate closes as failed with
+`authentication_required`, whether the checkout service's answer or a signed
+webhook reports it first. A refill the card declines, or that asks for authentication, is recorded with
 its decline code, and the team's owners receive an email asking them to update
 the card with Manage card. A refill that cannot be created because the Stripe
 customer has no card, for example after the card was removed in Stripe's portal,
@@ -333,7 +335,9 @@ when an earlier partial refund leaves less than the original payment to return.
 The worker refunds under the payment as its idempotency key, so a call that
 fails before Stripe answers repeats the same refund. A refund Stripe reports
 failed or canceled is not retried: the operator console lists it on the team
-under Refunds Stripe did not make, and the operator returns the money in Stripe. A
+under Refunds Stripe did not make, and the operator returns the money in Stripe.
+The team's owners get one email saying the refund of that amount for the payment
+on its date could not be completed by Stripe and that Sparkwing will follow up. A
 terminal refund outcome survives a later pending delivery, and a conflicting
 terminal outcome is refused.
 

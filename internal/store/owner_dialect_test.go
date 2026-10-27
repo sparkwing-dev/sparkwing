@@ -25,11 +25,7 @@ VALUES ('acme','local',1,'ci','running',?,'request',1,'local:repo','host','execu
 	exec(`INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,needs_labels,prefers_labels,claimed_at) VALUES ('acme','local','claimed','trigger',1,1,'host','owner',1,?,?,?,?,1)`, now.Add(-time.Minute).UnixNano(), now.Add(-time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
 	exec(`INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json)
 VALUES ('acme','local','job','pending',?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-	lease, err := st.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reaped, err := st.AsOperator().ReapUnits(t.Context(), lease, 10)
+	reaped, err := st.AsOperator().ReapUnits(t.Context(), 10)
 	if err != nil || len(reaped) != 1 || reaped[0].Team != "acme" || !reaped[0].Failed {
 		t.Fatalf("reaped owners: %+v, %v", reaped, err)
 	}

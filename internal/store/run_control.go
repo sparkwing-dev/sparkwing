@@ -70,7 +70,7 @@ func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Au
 		if _, err = tx.execContext(ctx, `UPDATE nodes SET status_detail='paused' WHERE team=? AND run_id=? AND node_id=?`, t.team, target.RunID, job); err != nil {
 			return err
 		}
-		if _, err = appendEventTx(ctx, tx, t.team, target.RunID, job, "debug.paused", map[string]any{"reason": reason, "expires_at": expires}, now); err != nil {
+		if _, err = appendEventTx(ctx, tx, t.team, target.RunID, job, "debug.paused", map[string]any{"reason": reason, "expires_at": expires}, now, true); err != nil {
 			return err
 		}
 		_, err = t.runControlAuthorityTx(ctx, tx, a, "/api/v1/runs/{run}/debug-pauses")
@@ -150,7 +150,7 @@ func (t *Tenant) runControlAuthorityTx(ctx context.Context, tx *storeTx, a capab
 	if a.Target.Team != string(t.team) || a.Target.RunID == "" {
 		return capability.Principal{}, bindingRefusal()
 	}
-	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 	if err != nil {
 		return p, err
 	}

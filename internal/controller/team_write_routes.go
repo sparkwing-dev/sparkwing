@@ -17,7 +17,7 @@ type teamWriter interface {
 	CreateAuthorizedInvitation(context.Context, capability.Authorized, string, store.Role, string) (store.Invitation, error)
 	DeleteAuthorizedInvitation(context.Context, capability.Authorized, string) error
 	SetAuthorizedBuildTrust(context.Context, capability.Authorized, bool) error
-	DeleteAuthorizedRun(context.Context, capability.Authorized) error
+	DeleteAuthorizedRun(context.Context, capability.Authorized, func(context.Context) error) error
 }
 
 func (s *Server) teamWriter(r *http.Request, a capability.Authorized) (teamWriter, error) {

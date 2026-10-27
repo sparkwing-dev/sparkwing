@@ -264,15 +264,6 @@ type auditSourceRelease struct {
 	MachineID        auditDigest `json:"machine_digest"`
 	CapabilityPrefix auditDigest `json:"capability_digest"`
 }
-type auditRefund struct {
-	ReceiptID     string      `json:"-"`
-	GrantID       string      `json:"grant_id"`
-	PaidMicro     int64       `json:"paid_micro"`
-	ReversedMicro int64       `json:"reversed_micro"`
-	BalanceMicro  int64       `json:"balance_micro"`
-	PaymentID     auditDigest `json:"payment_digest"`
-	RefundID      auditDigest `json:"refund_digest"`
-}
 
 // These closed variants are the only audit inputs. Adding a kind requires a closed payload
 // and its projection here; arbitrary attrs and caller prose cannot enter it.
@@ -300,7 +291,6 @@ func (auditRefill) isAuditPayload()               {}
 func (auditSecretRelease) isAuditPayload()        {}
 func (auditSourceRelease) isAuditPayload()        {}
 func (auditOIDCMint) isAuditPayload()             {}
-func (auditRefund) isAuditPayload()               {}
 
 func auditOneOf[T ~string](value T, choices ...string) bool {
 	for _, choice := range choices {
@@ -419,8 +409,6 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 		valid = p.Audience != "" && !strings.ContainsAny(p.Audience, "\r\n\t ") && p.TokenID != "" && p.Subject != "" && p.ExpiresAt > 0
 	case auditSourceRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, ev.Account, repeat = "git_credential.released", p.CredentialID.String(), p.RunID, p.AccountID, true
-	case auditRefund:
-		ev.Kind, ev.SubjectID = "operator.refund_recorded", p.ReceiptID
 	default:
 		valid = false
 	}
@@ -463,5 +451,5 @@ func validAuditStanding(value auditStanding) bool {
 }
 
 func validAuditOperation(value auditOperation) bool {
-	return auditOneOf(value, "RenameAuthorizedTeam", "SetAuthorizedBuildTrust", "CreateAuthorizedInvitation", "DeleteAuthorizedInvitation", "DeleteAuthorizedTeam", "RotateCredentials", "WriteSecret", "RemoveSecret", "WriteGitCredential", "RemoveGitCredential", "ConfirmGitCredentialFor", "PutAuthorizedGitHubTrigger", "DeleteAuthorizedGitHubTrigger", "PutAuthorizedGitHubAutomation", "DeleteAuthorizedGitHubAutomation", "ProcessGitHubDeliveryAgain", "SetAuthorizedGitHubExtraRepos", "SetAuthorizedTeamSettings", "membership.removed", "membership.role:owner", "membership.role:admin", "membership.role:editor", "membership.role:reader", "runner.metered", "authority.revoked", "WriteComputeLimits", "WriteSignUpSettings", "WriteStorageSettings", "WriteTeamStorageQuota", "WriteStorageQuota", "WriteStorageAllowance", "UnbindAuthorizedGitHubInstallation", "RegisterGitHubRunner", "RevokeGitHubRunner", "githubConnectTx", "billingMutationTx")
+	return auditOneOf(value, "RenameAuthorizedTeam", "SetAuthorizedBuildTrust", "CreateAuthorizedInvitation", "DeleteAuthorizedInvitation", "DeleteAuthorizedTeam", "RotateCredentials", "WriteSecret", "RemoveSecret", "WriteGitCredential", "RemoveGitCredential", "ConfirmGitCredentialFor", "PutAuthorizedGitHubTrigger", "DeleteAuthorizedGitHubTrigger", "PutAuthorizedGitHubAutomation", "DeleteAuthorizedGitHubAutomation", "ProcessGitHubDeliveryAgain", "SetAuthorizedGitHubExtraRepos", "SetAuthorizedTeamSettings", "membership.removed", "membership.role:owner", "membership.role:admin", "membership.role:editor", "membership.role:reader", "runner.metered", "authority.revoked", "WriteComputeLimits", "WriteSignUpSettings", "WriteStorageSettings", "WriteTeamStorageQuota", "WriteStorageQuota", "WriteStorageAllowance", "UnbindAuthorizedGitHubInstallation", "RegisterGitHubRunner", "RevokeGitHubRunner", "PauseAppSchedule", "ResumeAppSchedule", "githubConnectTx", "billingMutationTx")
 }

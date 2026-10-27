@@ -68,33 +68,27 @@ func TestStoreReachabilityRetention(t *testing.T) {
 		s.db = blobAccountingDB(t, path)
 	}
 	op := s.AsOperator()
-	lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "gc-boundary", 200*24*time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkStoreGCFences(t, op, lease)
 	now = expires
-	retained, err := op.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 100})
+	retained, err := op.MaintainRetention(t.Context(), RetentionRequest{Limit: 100})
 	if err != nil || retained.Records != 1 || retained.PinnedOutputs != 1 {
 		t.Fatalf("retention: %+v: %v", retained, err)
 	}
-	if n, err := op.MarkBlobTombstones(t.Context(), lease, 100); err != nil || n != 0 {
+	if n, err := op.MarkBlobTombstones(t.Context(), 100); err != nil || n != 0 {
 		t.Fatalf("receipts did not protect bytes: %d: %v", n, err)
 	}
 	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
-	if n, err := op.MarkBlobTombstones(t.Context(), lease, 100); err != nil || n != 1 {
+	if n, err := op.MarkBlobTombstones(t.Context(), 100); err != nil || n != 1 {
 		t.Fatalf("expired cache marks=%d: %v", n, err)
 	}
 	reopen()
-	checkStoreGCFences(t, op, lease)
 	calls := 0
 	failure := errors.New("physical deletion unavailable")
 	deleter := blobDeleteFunc(func(context.Context, blob.Blob) error { calls++; return failure })
-	if n, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); err != nil || n != 0 || calls != 0 {
+	if n, err := op.CollectBlobTombstones(t.Context(), 100, deleter); err != nil || n != 0 || calls != 0 {
 		t.Fatalf("grace: removed=%d calls=%d: %v", n, calls, err)
 	}
 	now = now.Add(limits.BlobGCGrace)
-	if _, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); !errors.Is(err, failure) || calls != 1 {
+	if _, err := op.CollectBlobTombstones(t.Context(), 100, deleter); !errors.Is(err, failure) || calls != 1 {
 		t.Fatalf("deletion failure: calls=%d: %v", calls, err)
 	}
 	rewriteSchemaCount(t, s.db, "blobs", 4)
@@ -105,7 +99,7 @@ func TestStoreReachabilityRetention(t *testing.T) {
 		}
 		return nil
 	})
-	if n, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); err != nil || n != 1 {
+	if n, err := op.CollectBlobTombstones(t.Context(), 100, deleter); err != nil || n != 1 {
 		t.Fatalf("collect=%d: %v", n, err)
 	}
 	reopen()
@@ -115,13 +109,13 @@ func TestStoreReachabilityRetention(t *testing.T) {
 		t.Fatalf("copied provenance: %d: %v", sources, err)
 	}
 	now = now.Add(120 * 24 * time.Hour)
-	retained, err = op.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 100})
+	retained, err = op.MaintainRetention(t.Context(), RetentionRequest{Limit: 100})
 	if err != nil || retained.PinnedRuns != 1 || retained.PinnedOutputs != 1 || retained.Records != 0 {
 		t.Fatalf("pinned output: %+v: %v", retained, err)
 	}
 	rewriteSchemaExec(t, s.db, "DELETE FROM pipeline_success_pins WHERE team='a'")
 	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='target'")
-	if n, err := op.MarkBlobTombstones(t.Context(), lease, 100); err != nil || n != 2 {
+	if n, err := op.MarkBlobTombstones(t.Context(), 100); err != nil || n != 2 {
 		t.Fatalf("last copy marks=%d: %v", n, err)
 	}
 	now = now.Add(limits.BlobGCGrace)
@@ -131,20 +125,16 @@ func TestStoreReachabilityRetention(t *testing.T) {
 		}
 		return nil
 	})
-	if n, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); err != nil || n != 2 {
+	if n, err := op.CollectBlobTombstones(t.Context(), 100, deleter); err != nil || n != 2 {
 		t.Fatalf("last copy collection=%d: %v", n, err)
 	}
 	checkStoreRetainedGraphBytes(t, tenant, 19)
 	now = now.Add(80 * 24 * time.Hour)
-	lease, err = op.AcquireSingletonLease(t.Context(), "maintenance", "gc-boundary", 2*limits.BlobGCGrace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	retained, err = op.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 100})
+	retained, err = op.MaintainRetention(t.Context(), RetentionRequest{Limit: 100})
 	if err != nil || retained.Records != 1 {
 		t.Fatalf("source expiry: %+v: %v", retained, err)
 	}
-	if n, err := op.MarkBlobTombstones(t.Context(), lease, 100); err != nil || n != 1 {
+	if n, err := op.MarkBlobTombstones(t.Context(), 100); err != nil || n != 1 {
 		t.Fatalf("source mark=%d: %v", n, err)
 	}
 	now = now.Add(limits.BlobGCGrace)
@@ -154,18 +144,11 @@ func TestStoreReachabilityRetention(t *testing.T) {
 		}
 		return nil
 	})
-	if n, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); err != nil || n != 1 {
+	if n, err := op.CollectBlobTombstones(t.Context(), 100, deleter); err != nil || n != 1 {
 		t.Fatalf("source collection=%d: %v", n, err)
 	}
 	checkStoreRetainedGraphBytes(t, tenant, 0)
-	now = lease.ExpiresAt
-	refuseStoreGCCollection(t, op, lease)
-	replacement, err := op.AcquireSingletonLease(t.Context(), "maintenance", lease.Holder, time.Hour)
-	if err != nil || replacement.Generation <= lease.Generation {
-		t.Fatalf("takeover: %+v: %v", replacement, err)
-	}
-	refuseStoreGCCollection(t, op, lease)
-	if n, err := op.CollectBlobTombstones(t.Context(), replacement, 100, deleter); err != nil || n != 0 {
+	if n, err := op.CollectBlobTombstones(t.Context(), 100, deleter); err != nil || n != 0 {
 		t.Fatalf("empty collection=%d: %v", n, err)
 	}
 }
@@ -184,12 +167,8 @@ func TestStoreReachabilityNewReferenceWinsMarkedCollection(t *testing.T) {
 	now := s.now()
 	s.clock = func() time.Time { return now }
 	op := s.AsOperator()
-	lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "late-reference", 3*limits.BlobGCGrace)
-	if err != nil {
-		t.Fatal(err)
-	}
 	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
-	if n, err := op.MarkBlobTombstones(t.Context(), lease, 100); err != nil || n != 2 {
+	if n, err := op.MarkBlobTombstones(t.Context(), 100); err != nil || n != 2 {
 		t.Fatalf("retired source marks=%d: %v", n, err)
 	}
 	identity := blob.UploadIdentity{
@@ -211,7 +190,7 @@ func TestStoreReachabilityNewReferenceWinsMarkedCollection(t *testing.T) {
 		}
 		return nil
 	})
-	if n, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); err != nil || n != 1 {
+	if n, err := op.CollectBlobTombstones(t.Context(), 100, deleter); err != nil || n != 1 {
 		t.Fatalf("rechecked collection=%d: %v", n, err)
 	}
 	rewriteSchemaCount(t, s.db, "blobs", 1)

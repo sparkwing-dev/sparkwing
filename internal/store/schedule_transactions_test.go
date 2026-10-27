@@ -619,3 +619,41 @@ func TestScheduleOverrideReplacesPreviousEditAndResetsToDeclaration(t *testing.T
 		t.Fatalf("reset: %+v", row)
 	}
 }
+
+// Decision 67: a team admin pauses and resumes a schedule the GitHub App declared, audited, but cannot edit or delete it.
+func TestAdminPausesAndResumesAppScheduleButCannotEditIt(t *testing.T) {
+	tenant, a, body, _ := consentedScheduleFixture(t)
+	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET github_installation_id=7,github_repository_id=701 WHERE team=? AND id=?`, tenant.team, ids[0])
+	admin := teamAuthorization(t, tenant.s, authorityMember(t, tenant.s, "schedule-admin", RoleOwner), tenant.team, "POST", "/api/v1/schedules/{schedule}/pause")
+	for _, paused := range []bool{true, false} {
+		if _, err := tenant.PauseAuthorizedSchedule(t.Context(), admin, ids[0], paused); err != nil {
+			t.Fatalf("admin pause=%t: %v", paused, err)
+		}
+		row, err := tenant.GetCronSchedule(t.Context(), ids[0])
+		if err != nil || row.Paused != paused || row.GitHubRepositoryID != 701 {
+			t.Fatalf("App schedule after admin pause=%t: %+v %v", paused, row, err)
+		}
+	}
+	var audited int
+	if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE team=? AND kind='team.mutated' AND subject_id=? AND attrs LIKE '%AppSchedule%'`, tenant.team, ids[0]).Scan(&audited); err != nil || audited != 2 {
+		t.Fatalf("audited App schedule pauses = %d, %v; want 2", audited, err)
+	}
+	before, err := tenant.GetCronSchedule(t.Context(), ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cron := "*/5 * * * *"
+	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), admin, ids[0], &cronspec.Override{Cron: &cron}); err == nil {
+		t.Fatal("admin edited an App schedule")
+	}
+	if _, _, err := tenant.DeleteAuthorizedSchedule(t.Context(), admin, ids[0]); err == nil {
+		t.Fatal("admin deleted an App schedule")
+	}
+	if after, err := tenant.GetCronSchedule(t.Context(), ids[0]); err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused admin edit changed App schedule: %v", err)
+	}
+}

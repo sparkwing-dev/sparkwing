@@ -43,11 +43,7 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 			}
 			rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=1000000`)
 			*now = beat.ExpiresAt
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
-			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
+			reaped, err := s.AsOperator().ReapUnits(t.Context(), 10)
 			if err != nil || len(reaped) != 1 || reaped[0].Requeued || !reaped[0].Failed {
 				t.Fatalf("stopped unit recovered = %+v, %v", reaped, err)
 			}
@@ -61,7 +57,7 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 			if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: "run", NodeID: "customer"}, Actor: customerActor, To: runstate.NodeSuccess, Cause: runstate.CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
+			if _, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil {
 				t.Fatal(err)
 			}
 			source, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
@@ -125,11 +121,7 @@ func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=1000000`)
 				// Lose both host connections. The reaper must drain the cancelled graph without taking it over.
 				*now = now.Add(4 * time.Minute)
-				lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
+				if _, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil {
 					t.Fatal(err)
 				}
 				run, err = tenant.ReadRun(t.Context(), "run")

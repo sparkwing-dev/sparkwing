@@ -73,12 +73,12 @@ type blobActor struct {
 }
 
 func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input blob.Authority, grant capability.Grant) (blobActor, error) {
-	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.CapabilityRef})
+	p, err := resolveTeamAuthorityTx(ctx, tx, team, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.CapabilityRef}, sameTeam)
 	if err != nil {
 		return blobActor{}, err
 	}
 	c := p.Capability
-	if c.Team != string(team) || c.Data == nil || !slices.Contains(c.Grants, grant) ||
+	if c.Data == nil || !slices.Contains(c.Grants, grant) ||
 		c.Delivery == capability.DeliveryBootstrap && grant != capability.SourceRead || grant == capability.SourceRead && c.Delivery != capability.DeliveryBootstrap {
 		return blobActor{}, authorityError(apierr.Forbidden, "blob grant and data scope are required")
 	}
@@ -285,11 +285,6 @@ func blobIsCache(kind blob.Kind) bool         { return kind == blob.KindMemo || 
 func blobLocalRepo(repo runspec.RepoKey) bool { return strings.HasPrefix(string(repo), "local:") }
 
 func commitBlobBytesTx(ctx context.Context, tx *storeTx, team Team, object blob.Blob, reserved int64) (int64, error) {
-	if object.Size > 0 {
-		if err := markFreeSlotActiveTx(ctx, tx, team); err != nil {
-			return 0, err
-		}
-	}
 	now := tx.now(ctx)
 	inserted, err := tx.execContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, object.Digest, object.Size, now.UnixNano())
 	if err != nil {
@@ -356,7 +351,7 @@ func provenanceRefFacts(sealed runspec.SealedRequest) (blob.RefFacts, error) {
 		return facts, nil
 	}
 	facts.AppDeliveryKey = p.Delivery()
-	facts.DefaultBranchVerified = p.Trust() == runspec.TrustVerifiedDefault
+	facts.DefaultBranchVerified = p.DefaultBranchWork()
 	if base := p.PullRequestBase(); base != "" {
 		facts.PullRequestBase = runspec.Optional[string]{Set: true, Value: "refs/heads/" + base}
 	}

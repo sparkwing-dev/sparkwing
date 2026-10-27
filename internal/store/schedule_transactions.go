@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -59,7 +60,7 @@ func (t *Tenant) checkGitHubAppScheduleTx(ctx context.Context, tx *storeTx, inst
 }
 
 func (t *Tenant) scheduleAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) (capability.Principal, error) {
-	p, err := tx.ResolveAuthority(ctx, ref)
+	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, ref, sameTeam)
 	if err != nil {
 		return p, err
 	}
@@ -423,35 +424,49 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a *capability.Au
 	return ids, withdrawn, nil
 }
 
-func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, selector string, edit func(*storeTx, CronSchedule) error) (string, error) {
+// editSchedule edits a schedule the host declared. appAudit names the audited operation that lets a team admin
+// apply this edit to a schedule the GitHub App declared; empty refuses App schedules to every caller.
+func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, selector, appAudit string, edit func(*storeTx, CronSchedule) error) (string, error) {
 	var id string
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		if a.Target.Team != string(t.team) {
 			return bindingRefusal()
 		}
-		if _, err := t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority); err != nil {
+		p, err := t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)
+		if err != nil {
 			return err
 		}
 		row, err := t.resolveScheduleTx(ctx, tx, selector)
 		if err != nil {
 			return err
 		}
+		app := false
 		if !ownsSchedule(nil, row.RepoPath, row) {
-			return bindingRefusal()
+			// safety: decision 67 lets team admins pause and resume App schedules; their declaration stays the repository's.
+			if appAudit == "" || row.GitHubRepositoryID == 0 || !slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
+				return bindingRefusal()
+			}
+			app = true
 		}
 		id = row.ID
 		if err = edit(tx, row); err != nil {
 			return err
 		}
-		_, err = t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)
-		return err
+		if p, err = t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority); err != nil || !app {
+			return err
+		}
+		return recordMutationAuditTx(ctx, tx, t.team, auditPrincipalActor(p), appAudit, row.ID)
 	})
 	return id, err
 }
 
 // PauseAuthorizedSchedule changes pause state under current tenant authority.
 func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, paused bool) (string, error) {
-	return t.editSchedule(ctx, a, id, func(tx *storeTx, row CronSchedule) error {
+	operation := "ResumeAppSchedule"
+	if paused {
+		operation = "PauseAppSchedule"
+	}
+	return t.editSchedule(ctx, a, id, operation, func(tx *storeTx, row CronSchedule) error {
 		if row.Paused && !paused {
 			next, err := scheduleNext(row, tx.now(ctx), 0)
 			if err != nil {
@@ -469,7 +484,7 @@ func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Autho
 
 // OverrideAuthorizedSchedule validates and persists an effective cadence atomically.
 func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, body *cronspec.Override) (string, error) {
-	return t.editSchedule(ctx, a, id, func(tx *storeTx, row CronSchedule) error {
+	return t.editSchedule(ctx, a, id, "", func(tx *storeTx, row CronSchedule) error {
 		if body == nil {
 			row.Override = nil
 		} else {
@@ -525,7 +540,7 @@ func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Au
 
 // DeleteAuthorizedSchedule removes a resolved schedule and history under current tenant authority.
 func (t *Tenant) DeleteAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string) (string, bool, error) {
-	resolved, err := t.editSchedule(ctx, a, id, func(tx *storeTx, row CronSchedule) error { return deleteScheduleTx(ctx, tx, t.team, row.ID) })
+	resolved, err := t.editSchedule(ctx, a, id, "", func(tx *storeTx, row CronSchedule) error { return deleteScheduleTx(ctx, tx, t.team, row.ID) })
 	return resolved, err == nil, err
 }
 

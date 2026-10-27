@@ -32,9 +32,6 @@ func controllerCapacityFixture(t *testing.T, opts ...store.Option) (*serverFixtu
 	engineSQL(t, engine.Store, `UPDATE triggers SET unit_kind='plan' WHERE id='run'`)
 	owner := engineRuntimeClaim(t, engine, capability.UnitPlan)
 	server := New(engine.Store, nil)
-	if _, err := engine.Store.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", server.leaseHolder, time.Hour); err != nil {
-		t.Fatal(err)
-	}
 	return &serverFixture{Server: server, store: engine.Store, engine: engine}, tenant, owner.Principal
 }
 
@@ -189,11 +186,7 @@ func TestControllerReleaseAcquiresPlanCapacityBeforeReleasingJobs(t *testing.T) 
 					t.Fatalf("run did not wait before release: %+v", state)
 				}
 				engineSQL(t, server.store, `UPDATE runs SET status='success',finished_at=? WHERE team='a' AND id='other'`, time.Now().UnixNano())
-				reaper, err := server.store.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Minute)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := server.store.AsOperator().MaintainConcurrency(t.Context(), reaper); err != nil {
+				if _, err := server.store.AsOperator().MaintainConcurrency(t.Context()); err != nil {
 					t.Fatal(err)
 				}
 				server.reconcileOwnedRuns(t.Context())
@@ -211,7 +204,6 @@ func TestControllerReleaseAcquiresPlanCapacityBeforeReleasingJobs(t *testing.T) 
 			if err := teststore.SQL(t, server.store).QueryRowContext(t.Context(), `SELECT generation FROM concurrency_holders WHERE team='a' AND key='plan:global:serial' AND run_id='run' AND node_id=''`).Scan(&previousGeneration); err != nil {
 				t.Fatal(err)
 			}
-			engineSQL(t, server.store, `UPDATE leases SET until=0 WHERE name='controller.owner'`)
 			successor := New(server.store, nil)
 			successor.reconcileOwnedRuns(t.Context())
 			successor.reconcileOwnedRuns(t.Context())

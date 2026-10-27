@@ -304,7 +304,7 @@ func (s *admissionSimulation) handoff(i int) {
 	}
 	s.observeAuthorityLeases(i)
 	s.check()
-	units, err := s.f.s.AsOperator().ReapUnits(s.t.Context(), s.f.lease, 10)
+	units, err := s.f.s.AsOperator().ReapUnits(s.t.Context(), 10)
 	if err != nil || len(units) != 1 || !units[0].Requeued {
 		s.t.Fatalf("owner crash run=%d: %+v, %v", i, units, err)
 	}
@@ -333,7 +333,7 @@ func (s *admissionSimulation) crashClaim(i int) {
 	if _, err := s.f.tenant.MayStart(s.t.Context(), runstate.CapacityBinding{RunID: run.id, NodeID: "job", Generation: int64(stale.Generation)}, stale); err == nil {
 		s.t.Fatal("expired claim obtained execution permit")
 	}
-	units, err := s.f.s.AsOperator().ReapUnits(s.t.Context(), s.f.lease, 10)
+	units, err := s.f.s.AsOperator().ReapUnits(s.t.Context(), 10)
 	if err != nil || len(units) != 1 || !units[0].Requeued || units[0].NodeID != "job" {
 		s.t.Fatalf("claim crash: %+v, %v", units, err)
 	}

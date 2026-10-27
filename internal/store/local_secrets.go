@@ -92,9 +92,6 @@ func (o *Operator) ResupplyHereSecrets(ctx context.Context, authority capability
 	var key localSecretKey
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		o.s.uninstallLocalSecrets(key, &installed)
-		if err := lockClaimControllerTx(ctx, tx); err != nil {
-			return err
-		}
 		p, err := tx.ResolveAuthority(ctx, authority)
 		if err != nil {
 			return err

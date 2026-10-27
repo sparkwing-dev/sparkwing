@@ -274,7 +274,7 @@ func expansionServer(t *testing.T, b *credentialBoundary, f *engineTransactions)
 }
 
 func TestEngineExpansionHTTP(t *testing.T) {
-	for _, name := range []string{"success", "failure", "replay", "owner", "anonymous", "ended source claim", "revoked", "cancelled", "expired eval", "expired controller", "wrong grant", "wrong audience", "sibling source", "wrong run", "stale source", "stale persisted generation", "transaction race", "bad body", "body actor", "trailing body", "nested error", "missing error code", "duplicate error code", "unknown source", "dead with unknown source", "private store error", "corrupt persisted expansion"} {
+	for _, name := range []string{"success", "failure", "replay", "owner", "anonymous", "ended source claim", "revoked", "cancelled", "expired eval", "wrong grant", "wrong audience", "sibling source", "wrong run", "stale source", "stale persisted generation", "transaction race", "bad body", "body actor", "trailing body", "nested error", "missing error code", "duplicate error code", "unknown source", "dead with unknown source", "private store error", "corrupt persisted expansion"} {
 		t.Run(name, func(t *testing.T) {
 			b := newCredentialBoundary()
 			a := expansionAuthority()
@@ -282,7 +282,7 @@ func TestEngineExpansionHTTP(t *testing.T) {
 			finished := b.snapshot.Now.Add(-time.Second)
 			leaseUntil := b.snapshot.Now.Add(time.Minute)
 			b.snapshot.Binding.FinishedAt = &finished
-			b.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *a.Binding.Expansion, ExpiresAt: leaseUntil, ControllerLeaseExpiresAt: &leaseUntil}
+			b.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *a.Binding.Expansion, ExpiresAt: leaseUntil}
 			f := &engineTransactions{
 				node:     runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Generation: 4},
 				expanded: store.AcceptedExpansion{SourceGeneration: 4, State: runstate.ExpansionAccepted, BodyHash: "committed"},
@@ -325,9 +325,6 @@ func TestEngineExpansionHTTP(t *testing.T) {
 				status, code = 401, apierr.Unauthenticated
 			case "expired eval":
 				b.snapshot.Binding.Expansion.ExpiresAt = b.snapshot.Now
-				status, code = 401, apierr.Unauthenticated
-			case "expired controller":
-				b.snapshot.Binding.Expansion.ControllerLeaseExpiresAt = &b.snapshot.Now
 				status, code = 401, apierr.Unauthenticated
 			case "wrong grant":
 				b.snapshot.Authorities[0].Principal.Capability.Grants = nil

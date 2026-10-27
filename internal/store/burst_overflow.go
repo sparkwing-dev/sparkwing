@@ -20,13 +20,13 @@ type OverflowControl struct {
 }
 
 func overflowAccountTx(ctx context.Context, tx *storeTx, team Team, authority capability.AuthorityRef, grant capability.Grant) (string, error) {
-	p, err := tx.ResolveAuthority(ctx, authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, team, authority, sameTeam)
 	if err != nil {
 		return "", err
 	}
 	c := p.Capability
 	allowed := slices.Contains(c.Grants, grant) || grant == capability.RunsRead && slices.Contains(c.Grants, capability.RunsWrite)
-	if c.Subject.Kind != capability.SubjectAccount || c.Team != string(team) || c.Binding.Kind != capability.BindingNone || c.Unit != "" || !allowed {
+	if c.Subject.Kind != capability.SubjectAccount || c.Binding.Kind != capability.BindingNone || c.Unit != "" || !allowed {
 		return "", bindingRefusal()
 	}
 	return c.Subject.ID, nil
@@ -135,25 +135,35 @@ func overflowControlTx(ctx context.Context, tx *storeTx, team Team, account stri
 	return out, nil
 }
 
+// overflowAllowanceReached is why Cloud work stops when its requester's overflow allowance cannot extend its lease.
+const overflowAllowanceReached = "monthly overflow allowance reached"
+
 func checkOverflowTx(ctx context.Context, tx *storeTx, team Team, run string) error {
+	exhausted, err := overflowExhaustedTx(ctx, tx, team, run, SliceSeconds)
+	if err != nil || !exhausted {
+		return err
+	}
+	return authorityError(apierr.LockHeld, "user monthly overflow budget reached; local capacity remains available")
+}
+
+// overflowExhaustedTx reports whether run's requester lacks room for reserving seconds more in its monthly overflow
+// budget, counting every second its overflow work has already reserved.
+func overflowExhaustedTx(ctx context.Context, tx *storeTx, team Team, run string, seconds int64) (bool, error) {
 	burst, err := burstPlacementTx(ctx, tx, team, run)
 	if err != nil || burst == nil {
-		return err
+		return false, err
 	}
 	var account string
 	if err := tx.QueryRowContext(ctx, `SELECT created_principal FROM runs WHERE team=? AND id=?`, team, run).Scan(&account); err != nil {
-		return err
+		return false, err
 	}
 	control, err := overflowControlTx(ctx, tx, team, account)
 	if err != nil {
-		return err
+		return false, err
 	}
 	limit := control.MonthlyMinutes
 	if burst.OverflowMinutes != nil && (limit == nil || *burst.OverflowMinutes < *limit) {
 		limit = burst.OverflowMinutes
 	}
-	if limit != nil && (control.UsedSeconds > *limit*60 || SliceSeconds > *limit*60-control.UsedSeconds) {
-		return authorityError(apierr.LockHeld, "user monthly overflow budget reached; local capacity remains available")
-	}
-	return nil
+	return limit != nil && (control.UsedSeconds > *limit*60 || seconds > *limit*60-control.UsedSeconds), nil
 }

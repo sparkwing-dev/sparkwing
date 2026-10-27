@@ -27,13 +27,9 @@ func checkBlobCollection(t testing.TB, ctx context.Context, root string, objects
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
 	operator := s.AsOperator()
-	lease, err := operator.AcquireSingletonLease(ctx, "maintenance", "physical-gc", time.Hour)
-	if err != nil {
-		return err
-	}
 	random := rand.New(rand.NewPCG(24, 66))
 	for seed := range 12 {
-		if err := checkBlobCollectionGraph(ctx, teststore.SQL(t, s), operator, lease, objects, transfers, random, seed); err != nil {
+		if err := checkBlobCollectionGraph(ctx, teststore.SQL(t, s), operator, objects, transfers, random, seed); err != nil {
 			return fmt.Errorf("graph %d: %w", seed, err)
 		}
 	}
@@ -67,7 +63,7 @@ func (g collectionGraph) reachable() map[int]bool {
 	return found
 }
 
-func checkBlobCollectionGraph(ctx context.Context, db *sql.DB, op *store.Operator, lease store.SingletonLease, objects blob.ObjectBackend, transfers blob.HTTPClient, random *rand.Rand, seed int) error {
+func checkBlobCollectionGraph(ctx context.Context, db *sql.DB, op *store.Operator, objects blob.ObjectBackend, transfers blob.HTTPClient, random *rand.Rand, seed int) error {
 	graphs, err := seedCollectionGraphs(ctx, db, objects, transfers, random, seed)
 	if err != nil {
 		return err
@@ -76,10 +72,10 @@ func checkBlobCollectionGraph(ctx context.Context, db *sql.DB, op *store.Operato
 	for _, g := range graphs {
 		unreachable += int64(len(g.blobs) - len(g.reachable()))
 	}
-	if n, err := op.MarkBlobTombstones(ctx, lease, 100); err != nil || n != unreachable {
+	if n, err := op.MarkBlobTombstones(ctx, 100); err != nil || n != unreachable {
 		return fmt.Errorf("marked=%d want=%d: %v", n, unreachable, err)
 	}
-	if n, err := op.CollectBlobTombstones(ctx, lease, 100, objects); err != nil || n != 0 {
+	if n, err := op.CollectBlobTombstones(ctx, 100, objects); err != nil || n != 0 {
 		return fmt.Errorf("collected within grace=%d: %v", n, err)
 	}
 	if err := checkCollectionObjects(ctx, objects, transfers, graphs, false); err != nil {
@@ -99,16 +95,16 @@ func checkBlobCollectionGraph(ctx context.Context, db *sql.DB, op *store.Operato
 	for _, g := range graphs {
 		unreachable += int64(len(g.blobs) - len(g.reachable()))
 	}
-	if err := checkInterruptedCollection(ctx, db, op, lease, objects); err != nil {
+	if err := checkInterruptedCollection(ctx, db, op, objects); err != nil {
 		return err
 	}
-	if n, err := op.CollectBlobTombstones(ctx, lease, 100, objects); err != nil || n != unreachable {
+	if n, err := op.CollectBlobTombstones(ctx, 100, objects); err != nil || n != unreachable {
 		return fmt.Errorf("collected=%d want=%d: %v", n, unreachable, err)
 	}
 	if err := checkCollectionObjects(ctx, objects, transfers, graphs, true); err != nil {
 		return err
 	}
-	if n, err := op.CollectBlobTombstones(ctx, lease, 100, objects); err != nil || n != 0 {
+	if n, err := op.CollectBlobTombstones(ctx, 100, objects); err != nil || n != 0 {
 		return fmt.Errorf("collection replay=%d: %v", n, err)
 	}
 	for _, g := range graphs {
@@ -117,13 +113,13 @@ func checkBlobCollectionGraph(ctx context.Context, db *sql.DB, op *store.Operato
 		}
 	}
 	remaining := int64(len(graphs)*16) - unreachable
-	if n, err := op.MarkBlobTombstones(ctx, lease, 100); err != nil || n != remaining {
+	if n, err := op.MarkBlobTombstones(ctx, 100); err != nil || n != remaining {
 		return fmt.Errorf("remaining marks=%d want=%d: %v", n, remaining, err)
 	}
 	if _, err := db.ExecContext(ctx, "UPDATE blob_tombstones SET marked_at=?", time.Now().Add(-25*time.Hour).UnixNano()); err != nil {
 		return err
 	}
-	if n, err := op.CollectBlobTombstones(ctx, lease, 100, objects); err != nil || n != remaining {
+	if n, err := op.CollectBlobTombstones(ctx, 100, objects); err != nil || n != remaining {
 		return fmt.Errorf("last reference collection=%d want=%d: %v", n, remaining, err)
 	}
 	for i := range graphs {
@@ -171,7 +167,7 @@ func seedCollectionGraphs(ctx context.Context, db *sql.DB, objects blob.ObjectBa
 	return graphs, nil
 }
 
-func checkInterruptedCollection(ctx context.Context, db *sql.DB, op *store.Operator, lease store.SingletonLease, objects blob.ObjectBackend) error {
+func checkInterruptedCollection(ctx context.Context, db *sql.DB, op *store.Operator, objects blob.ObjectBackend) error {
 	failure := errors.New("collection checkpoint")
 	for _, physicalDelete := range []bool{false, true} {
 		calls := 0
@@ -184,7 +180,7 @@ func checkInterruptedCollection(ctx context.Context, db *sql.DB, op *store.Opera
 			}
 			return failure
 		})
-		if n, err := op.CollectBlobTombstones(ctx, lease, 100, interrupted); n != 0 || !errors.Is(err, failure) || calls != 1 {
+		if n, err := op.CollectBlobTombstones(ctx, 100, interrupted); n != 0 || !errors.Is(err, failure) || calls != 1 {
 			return fmt.Errorf("interrupted collection: removed=%d calls=%d: %v", n, calls, err)
 		}
 		var rows int

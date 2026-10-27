@@ -170,7 +170,7 @@ func TestClaimedAdmissionRetainsPlanThroughOwnerRecovery(t *testing.T) {
 	if _, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder); err != nil {
 		t.Fatal(err)
 	}
-	if units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10); err != nil || len(units) != 1 || !units[0].Requeued {
+	if units, err := f.s.AsOperator().ReapUnits(ctx, 10); err != nil || len(units) != 1 || !units[0].Requeued {
 		t.Fatalf("owner recovery: %+v, %v", units, err)
 	}
 	owner, err := f.claimOwner(ctx, string(f.ref.RunID), "successor")

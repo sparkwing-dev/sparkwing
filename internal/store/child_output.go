@@ -26,7 +26,7 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 		return blob.Blob{}, err
 	}
 	defer rollbackOrLog(tx)
-	chain, err := authorityChainTx(ctx, tx, supplied.Principal.Authority, false)
+	chain, err := teamAuthorityChainTx(ctx, tx, t.team, supplied.Principal.Authority, false, sameTeam)
 	if err != nil {
 		return blob.Blob{}, err
 	}

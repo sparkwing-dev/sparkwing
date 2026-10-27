@@ -166,8 +166,7 @@ func TestMeteredUnitEvalSettlementUsesPersistedLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
-	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Hour).UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,claimed_at) VALUES ('a','run','job',2,'claimed',8,'eval-host','evaluation',?,4,1)`, now.Add(time.Minute).UnixNano())
+	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,claimed_at) VALUES ('a','run','job',2,'claimed',8,'eval-host','evaluation',?,1)`, now.Add(time.Minute).UnixNano())
 	if _, err := s.AsOperator().RenewUnit(t.Context(), c.Prefix, true); err != nil {
 		t.Fatal(err)
 	}
@@ -358,11 +357,7 @@ func TestMeteredUnitReaperSettlesAtLeaseLapse(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = claim.Award.LeaseExpiresAt.Add(time.Hour)
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
+	if _, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil {
 		t.Fatal(err)
 	}
 	unitBillingTotal(t, s, max(60, int64(claim.Award.LeaseExpiresAt.Sub(start)/time.Second))*10, true)
@@ -456,11 +451,7 @@ func TestMeteredLeaseNeverOutrunsWhatWasPaid(t *testing.T) {
 	}
 	before := paid()
 	*now = lease.Add(time.Hour)
-	reaper, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AsOperator().ReapUnits(t.Context(), reaper, 10); err != nil {
+	if _, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil {
 		t.Fatal(err)
 	}
 	if settled := paid(); settled > before {

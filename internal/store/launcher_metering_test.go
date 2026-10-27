@@ -102,10 +102,6 @@ func TestUnstartedLauncherAwardRefundsItsReservation(t *testing.T) {
 				if chargedMicro(t, s) == 0 {
 					t.Fatal("award reserved nothing")
 				}
-				lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", 10*time.Hour)
-				if err != nil {
-					t.Fatal(err)
-				}
 				if path == "renewed_lapse" {
 					for range 3 {
 						*now = now.Add(limits.DefaultLease / 2)
@@ -115,7 +111,7 @@ func TestUnstartedLauncherAwardRefundsItsReservation(t *testing.T) {
 					}
 				}
 				*now = now.Add(limits.DefaultLease * 2)
-				if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
+				if _, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil {
 					t.Fatal(err)
 				}
 				if path == "lapse_then_cancel" {

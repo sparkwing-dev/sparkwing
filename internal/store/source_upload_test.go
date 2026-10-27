@@ -49,10 +49,6 @@ func TestSourceUploadQuotaExpiryAndUniqueAccounting(t *testing.T) {
 	if _, err := tenant.ReserveSourceUpload(t.Context(), intake.Authority, u); !errors.Is(err, ErrStorageQuota) {
 		t.Fatalf("concurrent upload exceeded quota: %v", err)
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "source-expiry", 2*sourceBundleRetention)
-	if err != nil {
-		t.Fatal(err)
-	}
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller", SigningKey: []byte(strings.Repeat("k", 32))})
 	if err != nil {
 		t.Fatal(err)
@@ -63,10 +59,10 @@ func TestSourceUploadQuotaExpiryAndUniqueAccounting(t *testing.T) {
 		}
 	})
 	*now = now.Add(2 * time.Minute)
-	if err := s.AsOperator().ExpireSourceUploads(t.Context(), lease, 10, objects); err != nil {
+	if err := s.AsOperator().ExpireSourceUploads(t.Context(), 10, objects); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.CommitSourceUpload(t.Context(), intake.Authority, first.ID, first.Blob, "replica"); err == nil {
+	if _, err := tenant.CommitSourceUpload(t.Context(), intake.Authority, first.ID, first.Blob); err == nil {
 		t.Fatal("expired source committed")
 	}
 	u.ExpiresAt = now.Add(time.Minute)
@@ -75,7 +71,7 @@ func TestSourceUploadQuotaExpiryAndUniqueAccounting(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if _, err := tenant.CommitSourceUpload(t.Context(), intake.Authority, second.ID, second.Blob, "replica"); err != nil {
+		if _, err := tenant.CommitSourceUpload(t.Context(), intake.Authority, second.ID, second.Blob); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -84,10 +80,10 @@ func TestSourceUploadQuotaExpiryAndUniqueAccounting(t *testing.T) {
 		t.Fatalf("usage=%d reserved=%d: %v", used, reserved, err)
 	}
 	*now = now.Add(sourceBundleRetention + time.Minute)
-	if err := s.AsOperator().ExpireSourceUploads(t.Context(), lease, 10, objects); err != nil {
+	if err := s.AsOperator().ExpireSourceUploads(t.Context(), 10, objects); err != nil {
 		t.Fatal(err)
 	}
-	marked, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10)
+	marked, err := s.AsOperator().MarkBlobTombstones(t.Context(), 10)
 	if err != nil || marked != 1 {
 		t.Fatalf("expired source root: marked=%d %v", marked, err)
 	}

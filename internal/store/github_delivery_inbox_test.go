@@ -51,7 +51,7 @@ func TestGitHubDeliveryReplayAndEventBinding(t *testing.T) {
 	}
 }
 
-func TestGitHubDeliveryLeaseExpiryNeverRetries(t *testing.T) {
+func TestGitHubDeliveryInterruptedProcessingNeverRetries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inbox.db")
 	st, err := teststore.Open(path)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestGitHubDeliveryLeaseExpiryNeverRetries(t *testing.T) {
 		t.Fatal("stale completion accepted")
 	}
 	var state, reason string
-	if err := teststore.SQL(t, st).QueryRow(`SELECT state,last_error FROM github_app_deliveries`).Scan(&state, &reason); err != nil || state != "failed" || reason != "processing lease expired" {
+	if err := teststore.SQL(t, st).QueryRow(`SELECT state,last_error FROM github_app_deliveries`).Scan(&state, &reason); err != nil || state != "failed" || reason != "processing was interrupted" {
 		t.Fatalf("expiry: %q %q %v", state, reason, err)
 	}
 }
@@ -166,9 +166,6 @@ func TestGitHubDeliveryLifecycleCrashDoesNotReplayAppliedSuspend(t *testing.T) {
 	replay, err := op.ClaimGitHubDelivery(ctx)
 	if err != nil || replay == nil || replay.ID != "suspend" {
 		t.Fatalf("replay: %+v, %v", replay, err)
-	}
-	if err := op.SetGitHubAppInstallationSuspended(old.Context(ctx), 7, true); err == nil {
-		t.Fatal("stale worker applied lifecycle mutation")
 	}
 	if err := op.SetGitHubAppInstallationSuspended(replay.Context(ctx), 7, true); err != nil {
 		t.Fatal(err)
