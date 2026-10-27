@@ -337,8 +337,9 @@ func scopeHost(scope blob.RefScope) string {
 }
 
 // scopeAcceptsCopy reports whether a record written under source may be
-// republished under dest: the same scope, or a record copied down from a
-// fresh host into the same writer's host scope of the same ref. A record
+// republished under dest: the same scope, or a record copied down from the
+// unpartitioned scope (written by fresh hosts and by persistent hosts on a
+// high_trust team) into the same writer's host scope of the same ref. A record
 // never moves to a more trusted scope.
 func scopeAcceptsCopy(dest, source blob.RefScope) bool {
 	host := scopeHost(dest)

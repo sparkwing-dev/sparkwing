@@ -363,3 +363,23 @@ func (s *syncBuffer) String() string {
 	defer s.mu.Unlock()
 	return s.b.String()
 }
+
+func TestAnOperatorAccountIsAdmittedAtSignIn(t *testing.T) {
+	f := newIdentityFixture(t)
+	f.setSignUp(map[string]any{"mode": "waitlist", "reason": "launch"})
+	waiting := f.signIn(person("g-op", "op@example.com", "Op"))
+	if !waiting.Waitlisted {
+		t.Fatalf("sign-up while the gate is closed = %+v, want waitlisted", waiting)
+	}
+	f.srv.WithOperatorAccounts([]string{waiting.User.ID})
+	again := f.signIn(person("g-op", "op@example.com", "Op"))
+	if again.Waitlisted || again.ActiveTeam == nil {
+		t.Fatalf("operator sign-in = %+v, want admitted with a team", again)
+	}
+	if me := f.me(sessionAuth(again.SessionID)); me.Waitlisted || me.ActiveTeam == nil {
+		t.Fatalf("/me = %+v", me)
+	}
+	if other := f.signIn(person("g-x", "x@example.com", "X")); !other.Waitlisted {
+		t.Fatal("a non-operator sign-up skipped the waitlist")
+	}
+}

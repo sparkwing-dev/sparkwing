@@ -55,7 +55,7 @@ job may run. Payment history alone caps its automatic refills; see
 | Trusted | 128 | 6 hours | At least $50 paid and 30 clean days | $100 |
 | High | 512 | 6 hours | At least $500 paid and 30 clean days, or operator grant of standing. More capacity is available by request. | None; prepaid funds never back High |
 | Held | 0 new admissions | Running Cloud work receives a durable cancellation | Dispute, early fraud warning, operator hold or revoked standing | An active hold takes precedence over prepaid funds |
-| Launch admission | Automatic admission stops at 100 admitted accounts. Further signups join the waitlist until an operator admits them. | | | |
+| Launch admission | Automatic admission stops at 100 admitted accounts. Further signups join the waitlist until an operator admits them. An account named in `--operator-accounts` is admitted at its next sign-in. | | | |
 
 Standing is the higher of the history tier and the tier backed by the current
 prepaid balance. Prepaid funds raise standing at most one tier above the

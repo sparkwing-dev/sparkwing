@@ -149,7 +149,8 @@ func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 func (s *Server) cronTickOnce(ctx context.Context) {
 	var report crons.TickReport
 	ran, err := s.operator.RunCronTick(ctx, func(tickCtx context.Context) error {
-		// safety: a bounded tick cannot hold back the next minute's offer.
+		// safety: the tick runs synchronously, so the timeout bounds how long
+		// it can delay the next minute's offer.
 		deadline, cancel := context.WithTimeout(tickCtx, cronTickTimeout)
 		defer cancel()
 		var terr error

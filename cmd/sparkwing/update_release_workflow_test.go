@@ -56,9 +56,9 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	instructions := dockerfileInstructions(runnerDockerfile)
-	const goVersion = "1.26.9"
-	const buildImage = "golang:" + goVersion + "-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0"
-	const goImage = "golang:" + goVersion + "-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c"
+	const goVersion = "1.26.10"
+	const buildImage = "golang:" + goVersion + "-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308"
+	const goImage = "golang:" + goVersion + "-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af"
 	const runtimeImage = "debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251"
 	for _, required := range []string{
 		"FROM --platform=$BUILDPLATFORM " + buildImage + " AS build",

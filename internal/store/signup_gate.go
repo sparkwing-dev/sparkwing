@@ -107,6 +107,10 @@ type SignUpConditions struct {
 	// ForceWaitlist is the deployment's own setting, which no stored state
 	// overrides.
 	ForceWaitlist bool
+	// Operator names the deployment's operator accounts, which are admitted
+	// at sign-in so the waitlist never locks one out of the console that
+	// approves it.
+	Operator func(accountID string) bool
 }
 
 // SignUpCounts are the accounts created over the two windows the gate reads,

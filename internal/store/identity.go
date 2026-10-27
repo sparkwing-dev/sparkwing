@@ -386,7 +386,8 @@ var errSignInIdentityChanged = errors.New("store: sign-in identity changed durin
 //
 // An account left holding no membership, new or returning, gets a personal
 // space: a team whose only member is its owner. The exception is a waitlisted
-// account, which gets one only when an operator admits it.
+// account, which gets one only when an operator admits it; an account c names
+// as an operator is admitted here.
 //
 // Only a new account meets the sign-up gate: c and the stored gate decide
 // whether it is admitted or waitlisted. An account that already exists, or an
@@ -544,6 +545,14 @@ func (op *Operator) resolveSignInTx(ctx context.Context, tx *storeTx, p SignInPr
 		       COALESCE((SELECT waitlisted_at FROM accounts WHERE id = ?), 0)`,
 		accountID, accountID).Scan(&members, &waitlisted); err != nil {
 		return SignInResult{}, err
+	}
+	if waitlisted != 0 && c.Operator != nil && c.Operator(accountID) {
+		acct, _, err := op.approveOneTx(ctx, tx, accountID, auditActor{system: auditController}, now)
+		if err != nil {
+			return SignInResult{}, err
+		}
+		res.Account = acct
+		return res, nil
 	}
 	if members == 0 && waitlisted == 0 {
 		slug, err := createPersonalTeamTx(ctx, tx, accountID, slugBase(p.Email), personalDisplayName(p), now)

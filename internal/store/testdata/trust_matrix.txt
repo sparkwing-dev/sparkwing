@@ -10,7 +10,7 @@
 # shared_secrets               runSecretSelection: team-wide --shared secrets (only_on ones still need the pool,
 #                              and bindingSecretTx refuses them to --runner here)
 # oidc_*                       oidcIdentity, which reads Provenance.OIDC(); the subject's runner segment is the
-#                              claimant's kind (runner, actions, personal, user, service) and is not shown
+#                              claimant's kind (runner, github-actions, personal, user, service) and is not shown
 # oidc_runner_environment_<host>  the runner_environment claim, from the claimant's FreshHost as authority_oidc
 #                              reads it: fresh only on a fresh host, whatever the team's high_trust
 # cache_reads                  awardDataScope for a job claim (ReadRefs)

@@ -57,7 +57,14 @@ func TestStepPredicateObservesSkippedPredecessor(t *testing.T) {
 				if result, err := host.Eval(t.Context(), plan, "job", "job/step/source/skip/0", nil); err != nil || string(result) != "true" {
 					t.Fatalf("source predicate: %s, %v", result, err)
 				}
+				result, err := host.Eval(t.Context(), plan, "job", "job/step/consumer/skip/0", nil)
+				if err != nil || string(result) != "true" || job.seen != 0 {
+					t.Fatalf("consumer predicate: %s, %v, observed=%d", result, err, job.seen)
+				}
+				return
 			}
+			// safety: entering the predicate cancels the evaluation, so one that wrongly
+			// runs before its predecessor settles fails the test instead of hanging it.
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			joined := make(chan struct{})
@@ -72,19 +79,13 @@ func TestStepPredicateObservesSkippedPredecessor(t *testing.T) {
 			result, err := host.Eval(ctx, plan, "job", "job/step/consumer/skip/0", nil)
 			cancel()
 			<-joined
-			if !skipped {
-				if err == nil {
-					t.Fatalf("predicate accepted an unsettled predecessor: %s", result)
-				}
-				select {
-				case <-job.entered:
-					t.Fatal("predicate ran before its predecessor settled")
-				default:
-				}
-				return
+			if err == nil {
+				t.Fatalf("predicate accepted an unsettled predecessor: %s", result)
 			}
-			if err != nil || string(result) != "true" || job.seen != 0 {
-				t.Fatalf("consumer predicate: %s, %v, observed=%d", result, err, job.seen)
+			select {
+			case <-job.entered:
+				t.Fatal("predicate ran before its predecessor settled")
+			default:
 			}
 		})
 	}

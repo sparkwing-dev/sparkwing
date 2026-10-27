@@ -45,8 +45,10 @@ team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:run
 Runs from a GitHub Actions binding now mint `trigger:actions`; replace
 `trigger:manual` in policies written for them. A run whose code Sparkwing
 fetched from a GitHub repository now carries that `repository_id` with
-`trigger:manual` and an empty `ref`, so a policy that names the repository
-and accepts `trigger:*` now also admits those runs. See
+`trigger:manual`, plus the `ref` and `sha` it ran when they are the branch or
+tag head Sparkwing resolved, so a policy that names the repository and accepts
+`trigger:*` now also admits those runs, and one that also pins
+`ref:refs/heads/main` admits a member's run of main. See
 [OIDC tokens](../oidc.md#what-each-value-proves).
 
 ## An ephemeral controller home needs PostgreSQL and S3
