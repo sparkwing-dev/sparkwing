@@ -260,15 +260,13 @@ func (op *Operator) unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, ac
 				FROM identities i WHERE i.account_id = accounts.id AND i.email = accounts.email AND i.email_verified = 1)`,
 			[]any{at, accountID},
 		},
-		{
-			`DELETE FROM email_owners WHERE account_id = ? AND NOT EXISTS (SELECT 1
-				FROM identities i WHERE i.account_id = email_owners.account_id AND i.email = email_owners.email AND i.email_verified = 1)`,
-			[]any{accountID},
-		},
 	} {
 		if _, err := tx.execContext(ctx, stmt.sql, stmt.args...); err != nil {
 			return IdentityUnlink{}, err
 		}
+	}
+	if err := dropUnprovenEmailOwnershipTx(ctx, tx, accountID); err != nil {
+		return IdentityUnlink{}, err
 	}
 	rows, err := tx.queryContext(ctx, `DELETE FROM sessions WHERE account_id = ? AND hash <> ? RETURNING hash,account_id,COALESCE(team,'')`, accountID, keepHash)
 	if err != nil {

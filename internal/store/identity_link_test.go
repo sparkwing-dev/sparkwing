@@ -860,3 +860,41 @@ func TestConcurrentLinksLeaveOneAddressOwnerPostgres(t *testing.T) {
 		t.Fatalf("%d accounts accepted, want exactly one", accepted)
 	}
 }
+
+// When a sign-in's provider reports a new address, the former address stops
+// belonging to the account unless another of its sign-ins still verifies it.
+func TestChangedSignInAddressReleasesTheFormerOne(t *testing.T) {
+	for _, linked := range []bool{false, true} {
+		t.Run(fmt.Sprint("linked=", linked), func(t *testing.T) {
+			st := storetest.Open(t)
+			ctx := context.Background()
+			acct := signIn(t, st, "g-acct", "old@corp.example")
+			change := func(email string) {
+				t.Helper()
+				if linked {
+					resolve(t, st, gh("gh-acct", email))
+				} else {
+					signIn(t, st, "g-acct", email)
+				}
+			}
+			if linked {
+				acct = signIn(t, st, "g-acct", "home@example.com")
+				if _, err := st.LinkIdentity(ctx, acct.Account.ID, gh("gh-acct", "old@corp.example"), time.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			change("new@corp.example")
+			owner := signIn(t, st, "g-owner", "owner@corp.example")
+			inv, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "old@corp.example", store.RoleReader, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, acct.Account.ID); err != nil || len(listed) != 0 {
+				t.Fatalf("the former address's invitation is still listed: %+v %v", listed, err)
+			}
+			if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID); !errors.Is(err, store.ErrEmailMismatch) {
+				t.Fatalf("accepting through the former address = %v, want ErrEmailMismatch", err)
+			}
+		})
+	}
+}

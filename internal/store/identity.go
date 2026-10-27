@@ -68,6 +68,15 @@ func releaseEmailTx(ctx context.Context, tx *storeTx, email, keepID string, at i
 	return err
 }
 
+// dropUnprovenEmailOwnershipTx ends the account's ownership of every address
+// none of its current sign-ins verifies, after an identity changes address or
+// is unlinked.
+func dropUnprovenEmailOwnershipTx(ctx context.Context, tx *storeTx, accountID string) error {
+	_, err := tx.execContext(ctx, `DELETE FROM email_owners WHERE account_id = ? AND NOT EXISTS (SELECT 1
+		FROM identities i WHERE i.account_id = email_owners.account_id AND i.email = email_owners.email AND i.email_verified = 1)`, accountID)
+	return err
+}
+
 // safety: an unknown role ranks below every real one, so a row holding one grants nothing.
 func (r Role) rank() int {
 	switch r {
@@ -443,6 +452,9 @@ func (op *Operator) resolveSignInTx(ctx context.Context, tx *storeTx, p SignInPr
 			`UPDATE identities SET email = ?, email_verified = ? WHERE provider = ? AND subject = ?`,
 			p.Email, boolInt(p.EmailVerified), p.Provider, p.Subject); err != nil {
 			return SignInResult{}, fmt.Errorf("identity: refresh: %w", err)
+		}
+		if err := dropUnprovenEmailOwnershipTx(ctx, tx, accountID); err != nil {
+			return SignInResult{}, err
 		}
 		// safety: the account's address is its linking and invitation key, so it follows what the
 		// provider asserts now; an address left behind would let whoever holds it next walk in. A
