@@ -115,7 +115,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 				logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
 				cooldown = time.Now().Add(retryWait(synced, 0))
 			} else if synced != nil {
-				logger.Error("Cloud node faults require operator inspection; suspect nodes are excluded from placement and quarantines use "+quarantineAnnotation+"; claiming continues", "error", synced)
+				logger.Error("Cloud node or Job teardown faults require operator inspection if they persist; suspect nodes are excluded from placement and quarantines use "+quarantineAnnotation+"; claiming continues", "error", synced)
 			}
 			if blocking(synced) == nil {
 				if _, err := l.LaunchOne(ctx); err != nil {
@@ -271,7 +271,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	if remaining <= 0 {
 		return true, errors.Join(limits.ErrNoTime, l.teardown(ctx, created, r.Reservation))
 	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"resourceVersion": created.ResourceVersion, "annotations": map[string]string{deadlineAnnotation: r.JobDeadline.Format(time.RFC3339Nano), launchAnnotation: launchedAt.Format(time.RFC3339Nano)}}, "spec": map[string]any{"suspend": false, "activeDeadlineSeconds": remaining}})
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": created.UID, "annotations": map[string]string{deadlineAnnotation: r.JobDeadline.Format(time.RFC3339Nano), launchAnnotation: launchedAt.Format(time.RFC3339Nano)}}, "spec": map[string]any{"suspend": false, "activeDeadlineSeconds": remaining}})
 	if err != nil {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
@@ -295,7 +295,7 @@ func (l *Launcher) retainBootstrap(ctx context.Context, job *batchv1.Job, secret
 	if err != nil {
 		return nil, err
 	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "resourceVersion": job.ResourceVersion, "annotations": map[string]string{bootstrapAnnotation: string(reference)}}})
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "annotations": map[string]string{bootstrapAnnotation: string(reference)}}})
 	if err != nil {
 		return nil, err
 	}

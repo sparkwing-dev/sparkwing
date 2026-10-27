@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 )
 
 // errContainersRunning keeps the reservation until Kubernetes confirms every container has stopped.
@@ -72,9 +73,7 @@ func (l *Launcher) sync(ctx context.Context) (result error) {
 			observations = append(observations, CloudJobObservation{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID})
 		}
 		if remove {
-			if err := l.teardown(ctx, &job, reservation); err != nil && !errors.Is(err, errContainersRunning) {
-				errs = append(errs, err)
-			}
+			errs = append(errs, teardownFault(job.Name, l.teardown(ctx, &job, reservation)))
 		}
 	}
 	if len(observations) > 0 {
@@ -97,14 +96,19 @@ func (l *Launcher) sync(ctx context.Context) (result error) {
 				continue
 			}
 			if err == nil {
-				err = l.teardown(ctx, job, reservation)
+				err = teardownFault(job.Name, l.teardown(ctx, job, reservation))
 			}
-			if err != nil && !errors.Is(err, errContainersRunning) {
-				errs = append(errs, err)
-			}
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(append(errs, l.syncCapacity(ctx))...)
+}
+
+func teardownFault(job string, err error) error {
+	if err == nil || errors.Is(err, errContainersRunning) {
+		return nil
+	}
+	return &jobFault{job: job, cause: err.Error()}
 }
 
 func (l *Launcher) renewJobDeadline(ctx context.Context, job *batchv1.Job, binding CloudJobBinding, expires time.Time) error {
@@ -126,7 +130,7 @@ func (l *Launcher) renewJobDeadline(ctx context.Context, job *batchv1.Job, bindi
 	if job.Spec.ActiveDeadlineSeconds != nil && *job.Spec.ActiveDeadlineSeconds == seconds && job.Annotations[deadlineAnnotation] == expires.Format(time.RFC3339Nano) {
 		return nil
 	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "resourceVersion": job.ResourceVersion, "annotations": map[string]string{deadlineAnnotation: expires.Format(time.RFC3339Nano)}}, "spec": map[string]any{"activeDeadlineSeconds": seconds}})
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "annotations": map[string]string{deadlineAnnotation: expires.Format(time.RFC3339Nano)}}, "spec": map[string]any{"activeDeadlineSeconds": seconds}})
 	if err != nil {
 		return err
 	}
@@ -302,8 +306,11 @@ func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation C
 			return l.discardMalformedJob(ctx, job, fmt.Errorf("Job %s has invalid bootstrap cleanup ownership", job.Name))
 		}
 	}
-	foreground := metav1.DeletePropagationForeground
-	jobErr := l.Kube.BatchV1().Jobs(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: &foreground, Preconditions: &metav1.Preconditions{UID: &job.UID}})
+	var jobErr error
+	if job.DeletionTimestamp == nil {
+		foreground := metav1.DeletePropagationForeground
+		jobErr = l.Kube.BatchV1().Jobs(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: &foreground, Preconditions: &metav1.Preconditions{UID: &job.UID}})
+	}
 	if apierrors.IsNotFound(jobErr) {
 		jobErr = nil
 	}
@@ -330,15 +337,26 @@ func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation C
 	if err = l.Boundary.Release(ctx, reservation); err != nil {
 		return err
 	}
-	if !slices.Contains(job.Finalizers, cleanupFinalizer) {
-		return nil
-	}
-	finalizers := slices.DeleteFunc(slices.Clone(job.Finalizers), func(s string) bool { return s == cleanupFinalizer })
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "resourceVersion": job.ResourceVersion, "finalizers": finalizers}})
-	if err != nil {
+	return l.removeCleanupFinalizer(ctx, job.Name, job.UID)
+}
+
+// removeCleanupFinalizer rereads the Job on each attempt: the Job controller
+// and the garbage collector write it between any read and this patch.
+func (l *Launcher) removeCleanupFinalizer(ctx context.Context, name string, uid types.UID) error {
+	jobs := l.Kube.BatchV1().Jobs(l.Config.Namespace)
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		current, err := jobs.Get(ctx, name, metav1.GetOptions{})
+		if err != nil || current.UID != uid || !slices.Contains(current.Finalizers, cleanupFinalizer) {
+			return err
+		}
+		finalizers := slices.DeleteFunc(slices.Clone(current.Finalizers), func(s string) bool { return s == cleanupFinalizer })
+		patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": uid, "resourceVersion": current.ResourceVersion, "finalizers": finalizers}})
+		if err != nil {
+			return err
+		}
+		_, err = jobs.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
 		return err
-	}
-	_, err = l.Kube.BatchV1().Jobs(namespace).Patch(ctx, job.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+	})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}

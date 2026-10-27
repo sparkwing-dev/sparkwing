@@ -210,9 +210,14 @@ reserved.
 Release and Retire leave a node untouched when it was replaced or no longer
 holds the expected reservation, because it may hold another award. The Job keeps
 its cleanup finalizer and sync retries it. Rejection still fails the award.
-These node faults are logged at error level on every pass while claiming
-continues. Admission mismatch, Kubernetes and controller API failures and every
-other reconciliation error still stop claims.
+A Job whose teardown fails is a Job fault: its node keeps its reservation and
+sync retries the teardown on the next pass. The launcher patches only fields it
+owns on its Jobs, fenced by UID rather than resourceVersion, and removes the
+cleanup finalizer from a fresh read retried on conflict, because the Job
+controller writes status between any read and patch.
+These node and Job faults are logged at error level on every pass while
+claiming continues. Admission mismatch, Kubernetes and controller API failures
+outside a Job's teardown and every other reconciliation error still stop claims.
 
 The launcher's ClusterRole grants `update` and `patch` on every Node, and RBAC cannot
 narrow it. `resourceNames` needs names known at install, while Karpenter names

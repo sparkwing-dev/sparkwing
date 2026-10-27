@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
 
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -67,25 +66,5 @@ func (l *Launcher) discardMalformedJob(ctx context.Context, job *batchv1.Job, ca
 	if err != nil {
 		return err
 	}
-	current, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Get(ctx, job.Name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if current.UID != job.UID {
-		return errors.New("malformed Job was replaced before cleanup")
-	}
-	job = current
-	finalizers := slices.DeleteFunc(slices.Clone(job.Finalizers), func(f string) bool { return f == cleanupFinalizer })
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "resourceVersion": job.ResourceVersion, "finalizers": finalizers}})
-	if err != nil {
-		return err
-	}
-	_, err = l.Kube.BatchV1().Jobs(l.Config.Namespace).Patch(ctx, job.Name, types.MergePatchType, patch, metav1.PatchOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	return err
+	return l.removeCleanupFinalizer(ctx, job.Name, job.UID)
 }

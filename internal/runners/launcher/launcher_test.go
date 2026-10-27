@@ -301,8 +301,8 @@ func TestLauncherDeletesBootstrapWhenJobDeletionFails(t *testing.T) {
 		return true, nil, failure
 	})
 	control.remove = true
-	if err := l.Sync(t.Context()); !errors.Is(err, failure) {
-		t.Fatalf("Job deletion failure lost: %v", err)
+	if err := l.Sync(t.Context()); err == nil || !strings.Contains(err.Error(), failure.Error()) || blocking(err) != nil {
+		t.Fatalf("Job deletion failure = %v, want a non-blocking fault naming it", err)
 	}
 	name := jobName(control.award.Binding)
 	if _, err := kube.CoreV1().Secrets("cloud").Get(t.Context(), name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
