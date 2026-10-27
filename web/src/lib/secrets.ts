@@ -44,7 +44,7 @@ export interface SecretWriteBody {
 export type SecretsAudience = "team" | "local";
 
 export const scopeHelp: Record<SecretsAudience, string> = {
-  team: "A pipeline secret belongs to one GitHub repository and one pipeline, like a GitHub repository secret: only runs whose code Sparkwing fetched from that repository read it, never uploaded or local runs. Team-wide rows answer every pipeline of every repository in the team, like a GitHub organization secret with no repository list.",
+  team: "A pipeline secret belongs to one GitHub repository and one pipeline, like a GitHub repository secret: only runs whose code Sparkwing fetched from that repository, or a GitHub Actions job of that repository, read it, never uploaded or local runs. Team-wide rows answer every pipeline of every repository in the team, like a GitHub organization secret with no repository list.",
   local:
     "Stored in this machine's local sparkwing database. Runs started here read only team-wide rows; a pipeline row reaches only runs whose code Sparkwing fetched from its repository.",
 };
