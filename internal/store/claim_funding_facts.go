@@ -21,8 +21,8 @@ func (o *Operator) claimOverflowAccountsTx(ctx context.Context, tx *storeTx, tea
 	}
 	// Index seeks skip whole policy ranges belonging to the same account.
 	query := `WITH RECURSIVE clock(now) AS (SELECT CAST(` + clock + ` AS BIGINT)),accounts(team,account) AS (
- SELECT tm.name,(SELECT MIN(cc.overflow_account) FROM claim_contexts cc,clock WHERE cc.team=tm.name AND cc.overflow_account IS NOT NULL AND ` + q.readyClaimContextSQL() + `) FROM teams tm WHERE ` + scope + `
- UNION ALL SELECT accounts.team,(SELECT MIN(cc.overflow_account) FROM claim_contexts cc,clock WHERE cc.team=accounts.team AND cc.overflow_account>accounts.account AND ` + q.readyClaimContextSQL() + `) FROM accounts WHERE account IS NOT NULL
+ SELECT tm.name,(SELECT MIN(cc.overflow_account) FROM claim_contexts cc JOIN clock ON TRUE WHERE cc.team=tm.name AND cc.overflow_account IS NOT NULL AND ` + q.readyClaimContextSQL() + `) FROM teams tm WHERE ` + scope + `
+ UNION ALL SELECT accounts.team,(SELECT MIN(cc.overflow_account) FROM claim_contexts cc JOIN clock ON TRUE WHERE cc.team=accounts.team AND cc.overflow_account>accounts.account AND ` + q.readyClaimContextSQL() + `) FROM accounts WHERE account IS NOT NULL
  ) SELECT team,account FROM accounts WHERE account IS NOT NULL`
 	// Narrow claims gather funding only after their indexed binding lookup.
 	bound := claimSQL{dialect: tx.dialect}

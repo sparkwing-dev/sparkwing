@@ -48,7 +48,7 @@ type SummaryWrite struct {
 }
 
 func checkResultWriterTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, actor runstate.Actor) (runstate.NodeRow, error) {
-	p, err := resolveActorTx(ctx, tx, actor)
+	p, err := resolveTeamActorTx(ctx, tx, team, actor, sameTeam)
 	if err != nil {
 		return runstate.NodeRow{}, err
 	}

@@ -87,16 +87,16 @@ func checkSelfClaimTx(ctx context.Context, tx *storeTx, team Team, actor runstat
 	if node.Status != runstate.StatusPending || node.OwnerCapabilityPrefix != actor.CapabilityPrefix || node.ClaimedBy != actor.Owner.Holder || node.LeaseExpiresAt == nil || !node.LeaseExpiresAt.After(tx.now(ctx)) {
 		return holderRefusal()
 	}
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: node.CapabilityPrefix}, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, team, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: node.CapabilityPrefix}, true, sameTeam)
 	if err != nil {
 		return err
 	}
-	owner, err := authorityChainTx(ctx, tx, actor.Authority, true)
+	owner, err := teamAuthorityChainTx(ctx, tx, team, actor.Authority, true, sameTeam)
 	if err != nil {
 		return err
 	}
 	claim := chain[0].principal.Capability
-	if chain[len(chain)-1].principal.Authority != owner[len(owner)-1].principal.Authority || claim.Subject != owner[0].principal.Capability.Subject || claim.Team != string(team) || runspec.RunID(claim.Binding.RunID) != node.Ref.RunID || runspec.NodeID(claim.Binding.NodeID) != node.Ref.NodeID || runspec.ClaimGeneration(claim.Binding.Generation) != node.Generation || claim.Binding.Holder != node.ClaimedBy {
+	if chain[len(chain)-1].principal.Authority != owner[len(owner)-1].principal.Authority || claim.Subject != owner[0].principal.Capability.Subject || runspec.RunID(claim.Binding.RunID) != node.Ref.RunID || runspec.NodeID(claim.Binding.NodeID) != node.Ref.NodeID || runspec.ClaimGeneration(claim.Binding.Generation) != node.Generation || claim.Binding.Holder != node.ClaimedBy {
 		return holderRefusal()
 	}
 	return nil

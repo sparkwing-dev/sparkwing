@@ -524,6 +524,8 @@ components:
           type: string
         repo_key:
           type: string
+        repository:
+          type: string
         sha:
           type: string
         workflow_ref:
@@ -4934,6 +4936,8 @@ components:
           type: integer
         ref:
           type: string
+        repository:
+          type: string
         repository_id:
           type: integer
         sha:
@@ -5205,6 +5209,8 @@ components:
           type: string
         repository:
           $ref: '#/components/schemas/internal.runspec.Repository'
+        repository_name:
+          $ref: '#/components/schemas/internal.runspec.Optional.string.'
         sha:
           type: string
       required:
@@ -5212,6 +5218,7 @@ components:
         - ref
         - sha
         - default_branch
+        - repository_name
         - app
       type: object
       x-sparkwing-go-type: runspec.Git
@@ -5842,6 +5849,8 @@ components:
             pull_request_base:
               type: string
             ref:
+              type: string
+            repository:
               type: string
             repository_id:
               type: integer

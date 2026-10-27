@@ -43,7 +43,7 @@ VALUES ('a','r',1,'p','pending',?,'request',1,'gh:1','host','execute','account',
 				Binding: capability.Binding{
 					Kind: capability.BindingNode, RunID: "r", NodeID: "job", Generation: 2, Holder: "holder", Attempt: 3,
 					ClaimBy: &deadline, Deadline: &deadline, Reservation: "here:r",
-					Push:      &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: "sha", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"},
+					Push:      &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "main", SHA: "sha", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"},
 					Expansion: &capability.LeaseRef{Kind: capability.UnitEval, ID: "eval", Generation: 4, Holder: "evaluator"},
 				},
 				Data: &capability.DataScope{

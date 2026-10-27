@@ -166,8 +166,8 @@ func TestPaymentStateEverySetupDeliveryPermutation(t *testing.T) {
 	}
 }
 
-func TestPaymentStateEveryRefillAssociationPermutation(t *testing.T) {
-	for _, order := range deliveryOrders("bind", "success", "failure") {
+func TestPaymentStateEveryRefillOutcomePermutation(t *testing.T) {
+	for _, order := range deliveryOrders("refused", "success", "failure") {
 		t.Run(strings.Join(order, "-"), func(t *testing.T) {
 			s, tenant, now := providerPaymentFixture(t)
 			if err := s.inTx(t.Context(), func(tx *storeTx) error {
@@ -175,18 +175,18 @@ func TestPaymentStateEveryRefillAssociationPermutation(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			due, err := s.AsOperator().DueRefills(t.Context())
+			due, err := collectDueRefills(t.Context(), s.AsOperator())
 			if err != nil || len(due) != 1 {
 				t.Fatalf("reservation=%+v: %v", due, err)
 			}
-			paid := refillPaid(now, "payment", 15_000)
+			paid := refillPaid(now, due[0], "payment")
 			failed := paid
 			failed.Kind, failed.EventID, failed.Status, failed.DeclineCode = capability.PaymentCardFailed, "failed", "requires_payment_method", "card_declined"
 			failed.ChargeID = ""
 			for _, name := range order {
 				for range 2 {
-					if name == "bind" {
-						if err := s.AsOperator().RecordRefillIntent(t.Context(), "a", due[0].ID, "payment"); err != nil {
+					if name == "refused" {
+						if _, err := s.AsOperator().RecordRefillFailed(t.Context(), due[0], "card_declined"); err != nil {
 							t.Fatal(err)
 						}
 					} else {
@@ -195,13 +195,13 @@ func TestPaymentStateEveryRefillAssociationPermutation(t *testing.T) {
 							event = failed
 						}
 						if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
-							t.Fatalf("%s before or after association: %v", name, err)
+							t.Fatalf("%s before or after the refusal: %v", name, err)
 						}
 					}
 				}
 			}
 			if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 15_000*MicroCreditsPerCent {
-				t.Fatalf("successful payment lost across binding: %d: %v", balance, err)
+				t.Fatalf("successful payment lost across a refusal: %d: %v", balance, err)
 			}
 			var failure string
 			if err := s.db.QueryRow(`SELECT failure FROM credit_checkouts WHERE kind='refill' AND payment_id='payment'`).Scan(&failure); err != nil || failure != "" {

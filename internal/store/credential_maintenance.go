@@ -11,12 +11,12 @@ import (
 )
 
 func (t *Tenant) credentialAdminTx(ctx context.Context, tx *storeTx, a capability.Authorized) error {
-	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 	if err != nil {
 		return err
 	}
 	c := p.Capability
-	if a.Target.Team != string(t.team) || c.Team != string(t.team) || c.Audience != capability.Controller || c.Subject.Kind != capability.SubjectAccount || c.Binding.Kind != capability.BindingNone || c.Unit != "" || c.Purpose != "" ||
+	if a.Target.Team != string(t.team) || c.Audience != capability.Controller || c.Subject.Kind != capability.SubjectAccount || c.Binding.Kind != capability.BindingNone || c.Unit != "" || c.Purpose != "" ||
 		a.Access.Credential != capability.CredentialMember || a.Access.Binding != capability.BindNone || a.Access.Liveness != capability.LiveCredential || !slices.Equal(a.Access.Grants, []capability.Grant{capability.TeamAdmin}) || !slices.Contains(c.Grants, capability.TeamAdmin) {
 		return bindingRefusal()
 	}

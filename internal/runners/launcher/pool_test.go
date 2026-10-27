@@ -124,7 +124,7 @@ func poolControllerStore(t *testing.T) (*store.Store, string) {
 	request.Git.Repository.Display = "https://github.com/team/repo"
 	request.Version, request.Team, request.Pipeline, request.Mode, request.Dispatch = 1, "team", "ci", runspec.IntakeExecute, runspec.DispatchHost
 	request.Source.Ref = request.Git.SHA
-	app := runspec.AppFacts{Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: true, DeliveryKey: "pool-delivery", VerifiedAt: time.Unix(1, 0)}
+	app := runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: true, DeliveryKey: "pool-delivery", VerifiedAt: time.Unix(1, 0)}
 	provenance, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "ci")
 	if err != nil {
 		t.Fatal(err)

@@ -113,7 +113,7 @@ func TestPostgresWarningLocksItsTeamBeforeLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
-		`INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at,refill_enabled,refill_amount_cents) VALUES ('a',1,1,'customer',1,1,1000),('z',1,1,'customer',1,1,1000)`,
+		`INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at,refill_enabled,refill_amount_cents) VALUES ('a',1,1,'customer',1,1,1000),('z',1,1,'customer-z',1,1,1000)`,
 		`INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('one','a','session-one','test','usd',100,100000000,1,2),('two','a','session-two','test','usd',100,100000000,1,2)`,
 	} {
 		if _, err := s.DB().ExecContext(ctx, q); err != nil {

@@ -119,6 +119,7 @@ type AppFacts struct {
 	DeliveryKey       string    `json:"delivery_key"`
 	InstallationID    int64     `json:"installation_id"`
 	RepositoryID      int64     `json:"repository_id"`
+	Repository        string    `json:"repository,omitempty"`
 	Ref               string    `json:"ref"`
 	SHA               string    `json:"sha"`
 	DefaultBranch     string    `json:"default_branch"`
@@ -128,11 +129,14 @@ type AppFacts struct {
 
 // safety: Git pins checkout to the sealed SHA, never the later head of Ref.
 type Git struct {
-	Repository    Repository         `json:"repository"`
-	Ref           string             `json:"ref"`
-	SHA           string             `json:"sha"`
-	DefaultBranch Optional[string]   `json:"default_branch"`
-	App           Optional[AppFacts] `json:"app"`
+	Repository    Repository       `json:"repository"`
+	Ref           string           `json:"ref"`
+	SHA           string           `json:"sha"`
+	DefaultBranch Optional[string] `json:"default_branch"`
+	// RepositoryName is GitHub's owner/name for the repository, in GitHub's case, from
+	// the same fire-time App lookup that proved its id; only schedule intake sets it.
+	RepositoryName Optional[string]   `json:"repository_name"`
+	App            Optional[AppFacts] `json:"app"`
 }
 
 // safety: EnvSnapshot persists only names, a salt and a salted digest; values remain in private host storage.

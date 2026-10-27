@@ -78,8 +78,8 @@ inventory is:
 | Provider type | Kind | Required facts |
 | --- | --- | --- |
 | setup_intent.succeeded | card_setup | succeeded setup ID, customer, the presence of a payment method (never stored) and event creation time; no provider read |
-| payment_intent.succeeded | card_paid | succeeded intent, positive amount equal to received amount, currency, latest charge and its fetched 3-D Secure result |
-| payment_intent.payment_failed | card_failed | failed intent in requires_payment_method, positive amount, currency and optional decline code |
+| payment_intent.succeeded | card_paid | succeeded intent, refill ID from metadata, positive amount equal to received amount, currency, latest charge and its fetched 3-D Secure result |
+| payment_intent.payment_failed | card_failed | failed intent in requires_payment_method, refill ID from metadata, positive amount, currency and optional decline code |
 | refund.created / refund.updated / refund.failed | refund | individual refund ID, payment, charge, positive amount, currency and explicit pending/requires_action/succeeded/failed/canceled status |
 | radar.early_fraud_warning.created / updated | warning | warning ID, payment, charge and explicit actionable; no provider read |
 | charge.dispute.created | dispute_opened | dispute ID, payment, charge, positive amount, currency, reason and open status |
@@ -91,8 +91,10 @@ warning or dispute ID. PaymentID is the payment intent. CustomerID identifies
 the card setup's customer. ChargeID selects the verified charge. Status, Reason,
 DeclineCode, ThreeDS, LiabilityShift, Created (provider event Unix seconds) and
 Actionable retain only provider facts; the table above is the complete
-inventory, and no card detail is among them. No team, credit value, local charge
-ID, attempt ID, or metadata field is accepted as authority.
+inventory, and no card detail is among them. RefillID is the `refill_id` the
+checkout service put in a card payment's metadata. It only routes the event to
+its committed refill, which decides the team, amount and customer. No team,
+credit value, local charge ID or attempt ID is accepted as authority.
 
 Signature, timestamp and configured event mode precede object decoding and
 provider access. Every non-checkout object must match the configured mode and

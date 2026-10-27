@@ -109,7 +109,7 @@ func TestActionsIssuanceHTTPUsesVerifiedOrigin(t *testing.T) {
 				t.Fatalf("issuer=%+v lookups=%d", f.issuer, f.calls)
 			}
 			spec := f.issuer.provisions[0]
-			want := capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "1000", WorkflowRunAttempt: "1", WorkflowRef: "acme/widgets/.github/workflows/ci.yaml@refs/heads/main"}}
+			want := capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Repository: "acme/widgets", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "1000", WorkflowRunAttempt: "1", WorkflowRef: "acme/widgets/.github/workflows/ci.yaml@refs/heads/main"}}
 			if spec.Kind != capability.ProvisionActions || spec.Team != "team" || spec.Subject.Kind != capability.SubjectMachine || spec.Subject.ID == "" || spec.RegistrationID == "" || spec.Authority != nil || spec.Metered || spec.Data != nil || len(spec.ReservedPools) != 0 || !reflect.DeepEqual(spec.Repositories, []string{"gh:42"}) || !reflect.DeepEqual(spec.Binding, want) || !reflect.DeepEqual(spec.Grants, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}) {
 				t.Fatalf("spec=%+v", spec)
 			}

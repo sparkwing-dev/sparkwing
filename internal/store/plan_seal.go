@@ -17,12 +17,12 @@ import (
 )
 
 func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAcceptance) error {
-	p, err := tx.ResolveAuthority(ctx, request.Actor.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, team, request.Actor.Authority, sameTeam)
 	if err != nil {
 		return err
 	}
 	c := p.Capability
-	if c.Team != string(team) || c.Audience != capability.Controller || c.Prefix != request.Actor.CapabilityPrefix || c.Binding.RunID != request.RunID {
+	if c.Audience != capability.Controller || c.Prefix != request.Actor.CapabilityPrefix || c.Binding.RunID != request.RunID {
 		return holderRefusal()
 	}
 	var mode, dispatch string

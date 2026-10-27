@@ -289,7 +289,7 @@ func TestPaymentHTTPFinancialProviderHandoffProperty(t *testing.T) {
 					if json.Unmarshal([]byte(tc.object), &object) != nil {
 						return false
 					}
-					object["metadata"] = map[string]any{"team": metadata, "amount_micro": metadata, "attempt": metadata, "purpose": "card_refill"}
+					object["metadata"] = map[string]any{"team": metadata, "amount_micro": metadata, "attempt": metadata, "purpose": "card_refill", "refill_id": "refill_committed"}
 					object["livemode"] = mode == capability.PaymentLive
 					encoded, _ := json.Marshal(object)
 					body := fmt.Sprintf(`{"id":"evt_provider","object":"event","created":900,"type":%q,"livemode":%t,"data":{"object":%s}}`, tc.kind, mode == capability.PaymentLive, encoded)

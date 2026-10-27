@@ -69,7 +69,7 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 }
 
 func (t *Tenant) authorizeSecretReadTx(ctx context.Context, tx *storeTx, a capability.Authorized) (capability.Principal, error) {
-	chain, err := authorityChainTx(ctx, tx, a.Principal.Authority, true)
+	chain, err := teamAuthorityChainTx(ctx, tx, t.team, a.Principal.Authority, true, sameTeam)
 	if err != nil {
 		return capability.Principal{}, err
 	}

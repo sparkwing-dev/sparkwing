@@ -4,12 +4,11 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -38,16 +37,16 @@ const (
 	refillLimitTeamMonthly    = "team_monthly"
 )
 
-// safety: Stripe keeps an idempotency key for 24 hours, so a refill still unbound after this is closed and the next
-// one gets a new key. Unbound means the checkout service never returned an intent, and an intent is only confirmed
-// after the controller binds it, so an unbound refill moved no money. A bound refill keeps its slot until its
-// payment outcome is known.
+// safety: Stripe keeps an idempotency key for at least 24 hours, so a refill is retried under its key only this long;
+// after that it is closed as expired and the next refill gets a new key. A late signed outcome still settles it.
 const refillKeyLife = 23 * time.Hour
 
-// safety: these closures moved no money, so they neither count against limits nor stop later refills.
+// A refill closed without an outcome: expired after its key life, or withdrawn when a recheck before a retry found
+// the team no longer eligible. Unless a payment later binds to it, it neither counts against limits nor stops later
+// refills.
 const (
-	refillExpired  = "expired"
-	refillReplaced = "replaced"
+	refillExpired   = "expired"
+	refillWithdrawn = "withdrawn"
 )
 
 const (
@@ -91,15 +90,13 @@ type RefillState struct {
 	Limit string
 }
 
-// Refill is one refill the worker must create, or reconcile once PaymentIntent is set.
-// Its amount and customer are fixed when it opens, so every retry under its idempotency key sends the same request;
-// Stripe charges the customer's default payment method.
+// Refill is one open refill the worker charges in a single checkout-service call. Its amount and customer are fixed
+// when it opens, so every retry under its id, the idempotency key, sends Stripe the same request.
 type Refill struct {
-	Team          Team
-	ID            string
-	AmountCents   int64
-	Customer      string
-	PaymentIntent string
+	Team        Team
+	ID          string
+	AmountCents int64
+	Customer    string
 }
 
 func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing BillingStanding, now time.Time) (RefillState, error) {
@@ -135,7 +132,7 @@ func refillStateTx(ctx context.Context, q rowQuerier, team Team, standing Billin
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillWeek)+` THEN amount_minor ELSE 0 END), 0),
 	    COALESCE(SUM(CASE WHEN COALESCE(closed_at, opened_at) >= `+window(refillMonth)+` THEN amount_minor ELSE 0 END), 0)
 	  FROM credit_checkouts WHERE team = ? AND payment_mode = ? AND kind = ? AND (COALESCE(closed_at, opened_at) >= ? OR closed_at IS NULL)
-	    AND NOT ((payment_id = '' OR failure = 'canceled') AND closed_at IS NOT NULL)`,
+	    AND NOT (payment_id = '' AND closed_at IS NOT NULL)`,
 		string(team), mode, checkoutKindRefill, now.Add(-refillMonth).UnixNano()).Scan(&open, &s.DayCount, &s.WeekCents, &s.MonthCents); err != nil {
 		return s, err
 	}
@@ -198,6 +195,26 @@ func (s RefillSettings) validate() error {
 // ErrNoCard refuses turning on refills for a team that never added a card.
 var ErrNoCard = errors.New("card billing: save a card before turning on automatic refill")
 
+// refillEligible is the one rule for charging a refill, applied when one opens and before every retry: refills on, no
+// failed refill blocking them, no hold, the balance below the threshold and every limit respected. own is the open
+// refill a retry would charge, whose reservation the windows already count and whose customer must still be the
+// team's; nil asks about opening a new one.
+func (st SpendStanding) refillEligible(own *Refill) bool {
+	refill := st.Refill
+	if own != nil {
+		if own.Customer != st.Card.Customer {
+			return false
+		}
+		// An open refill is younger than its key life, so every window already counts it.
+		refill.AmountCents = own.AmountCents
+		refill.DayCount--
+		refill.WeekCents -= own.AmountCents
+		refill.MonthCents -= own.AmountCents
+	}
+	return refill.Enabled && refill.FailedAt.IsZero() && st.Billing.HoldCause == "" && refill.limit() == "" &&
+		st.BalanceMicro < refill.ThresholdCents*MicroCreditsPerCent
+}
+
 func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, actor auditActor) error {
 	if err := s.validate(); err != nil {
 		return err
@@ -219,9 +236,13 @@ func setRefillTx(ctx context.Context, tx *storeTx, team Team, s RefillSettings, 
 	return tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: actor, At: tx.now(ctx)}, auditRefillSettings{ReceiptID: change, Enabled: s.Enabled, ThresholdCents: s.ThresholdCents, AmountCents: s.AmountCents, WeekLimitCents: s.WeekLimitCents, MonthLimitCents: s.MonthLimitCents})
 }
 
-// DueRefills opens a refill for every opted-in team whose balance fell below its threshold, within its limits, and
-// returns each refill still waiting on the checkout service, opened now or earlier.
-func (o *Operator) DueRefills(ctx context.Context) ([]Refill, error) {
+// EachDueRefill visits every team that opted in or has an open refill. For each, it authorizes in one transaction
+// the refill to charge now, opening a new one or keeping an open one only while refillEligible holds, and passes it
+// to charge after that transaction commits and before the next team is checked.
+//
+// safety: authorization is per call, immediately before it, so no team is charged on a check made before another
+// team's provider call.
+func (o *Operator) EachDueRefill(ctx context.Context, charge func(Refill)) error {
 	var teams []Team
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		mode, err := paymentModeTx(ctx, tx)
@@ -243,25 +264,23 @@ func (o *Operator) DueRefills(ctx context.Context) ([]Refill, error) {
 		return errors.Join(rows.Err(), rows.Close())
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var due []Refill
-	err = o.EachTeam(ctx, teams, func(t *Tenant) error {
+	return o.EachTeam(ctx, teams, func(t *Tenant) error {
 		var r *Refill
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
 			var err error
-			r, err = dueRefillTx(ctx, tx, t.team)
+			r, err = authorizeRefillTx(ctx, tx, t.team)
 			return err
 		})
 		if err == nil && r != nil {
-			due = append(due, *r)
+			charge(*r)
 		}
 		return err
 	})
-	return due, err
 }
 
-func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
+func authorizeRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	if err := lockPaymentTeamTx(ctx, tx, team); err != nil {
 		return nil, err
 	}
@@ -278,42 +297,41 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	if err != nil {
 		return nil, err
 	}
+	// safety: the checkout service charges whatever it is asked, so an open refill is retried, with its own request
+	// under its own key, only while refillEligible holds. One that is not is withdrawn; if an earlier call did charge,
+	// its signed payment still credits the closed refill.
 	r := Refill{Team: team}
 	var opened int64
-	var closed string
-	err = tx.QueryRowContext(ctx, `SELECT id, amount_minor, payment_id, opened_at, customer_id
+	err = tx.QueryRowContext(ctx, `SELECT id, amount_minor, opened_at, customer_id
 	    FROM credit_checkouts WHERE team = ? AND payment_mode = ? AND kind = ? AND closed_at IS NULL`+tx.forUpdate(), string(team), mode,
-		checkoutKindRefill).Scan(&r.ID, &r.AmountCents, &r.PaymentIntent, &opened, &r.Customer)
+		checkoutKindRefill).Scan(&r.ID, &r.AmountCents, &opened, &r.Customer)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
 		return nil, err
-	case r.PaymentIntent != "":
-		return &r, nil
-	case r.AmountCents > MaxCardPaymentCents || !st.Refill.Enabled || !st.Refill.FailedAt.IsZero() || st.Billing.HoldCause != "":
-		closed = refillReplaced
-	case now.Sub(time.Unix(0, opened)) < refillKeyLife && r.Customer == st.Card.Customer:
-		return &r, nil
 	default:
-		closed = refillExpired
+		closed := refillExpired
 		if now.Sub(time.Unix(0, opened)) < refillKeyLife {
-			closed = refillReplaced
+			if st.refillEligible(&r) {
+				return &r, nil
+			}
+			closed = refillWithdrawn
 		}
-	}
-	if closed != "" {
-		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ?
-		    WHERE team = ? AND id = ? AND payment_id = ''`, now.UnixNano(), closed, string(team), r.ID); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ? WHERE team = ? AND payment_mode = ? AND id = ?`,
+			now.UnixNano(), closed, string(team), mode, r.ID); err != nil {
 			return nil, err
+		}
+		if closed == refillWithdrawn {
+			return nil, nil
 		}
 		if st, err = spendStandingTx(ctx, tx, team, now); err != nil {
 			return nil, err
 		}
 	}
-	refill := st.Refill
-	if !refill.Enabled || !refill.FailedAt.IsZero() || st.Billing.HoldCause != "" || refill.Limit != "" ||
-		st.BalanceMicro >= refill.ThresholdCents*MicroCreditsPerCent {
+	if !st.refillEligible(nil) {
 		return nil, nil
 	}
+	refill := st.Refill
 	r = Refill{Team: team, AmountCents: refill.AmountCents, Customer: st.Card.Customer}
 	if r.ID, err = newCreditID("refill"); err != nil {
 		return nil, err
@@ -331,148 +349,26 @@ func dueRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, error) {
 	return &r, nil
 }
 
-// RecordRefillIntent binds a provider payment to its refill and reconciles provider facts that arrived before binding.
-func (o *Operator) RecordRefillIntent(ctx context.Context, team Team, refill, paymentIntent string) error {
-	if paymentIntent == "" {
-		return fmt.Errorf("%w: a refill intent names its payment", ErrInvalidInput)
-	}
-	return o.s.inTx(ctx, func(tx *storeTx) error {
-		mode, err := paymentModeTx(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
-			return err
-		}
-		if err := lockPaymentTx(ctx, tx, mode, paymentIntent); err != nil {
-			return err
-		}
-		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
-			return err
-		}
-		res, err := tx.execContext(ctx, `UPDATE credit_checkouts SET payment_id = ? WHERE team = ? AND id = ? AND kind = ?
-		    AND payment_mode=? AND (closed_at IS NULL OR payment_id=?) AND payment_id IN ('', ?)`, paymentIntent, string(team), refill, checkoutKindRefill, mode, paymentIntent, paymentIntent)
-		if err != nil {
-			return err
-		}
-		if n, err := res.RowsAffected(); err != nil || n == 0 {
-			return cmp.Or(err, authorityError(apierr.Conflict, "refill is closed or bound to another payment"))
-		}
-		var encoded []byte
-		err = tx.QueryRowContext(ctx, `SELECT outcome_json FROM payment_states WHERE payment_mode=? AND payment_id=?`, mode, paymentIntent).Scan(&encoded)
-		if errors.Is(err, sql.ErrNoRows) {
-			return tx.operator.reconcilePaymentStateTx(ctx, tx, mode, paymentIntent, paymentAttribution{})
-		}
-		if err != nil {
-			return err
-		}
-		var event capability.PaymentEvent
-		if err := json.Unmarshal(encoded, &event); err != nil {
-			return err
-		}
-		_, err = tx.operator.applyPaymentStateTx(ctx, tx, event, auditActor{system: auditPaymentProvider})
-		return err
-	})
-}
+// RefillNoCard closes a refill the checkout service could not charge because the customer has no card in Stripe.
+const RefillNoCard = "no_card"
 
-// CanConfirmRefill rechecks a bound refill against the team's current authorization and limits.
-// A reservation preserves the payment's identity, not permission to charge its card.
-func (o *Operator) CanConfirmRefill(ctx context.Context, r Refill) (bool, error) {
-	var allowed bool
-	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		if _, err := lockLedgerTx(ctx, tx, r.Team); err != nil {
-			return err
-		}
-		mode, err := paymentModeTx(ctx, tx)
-		if err != nil {
-			return err
-		}
-		var opened, amount int64
-		var customer string
-		err = tx.QueryRowContext(ctx, `SELECT opened_at, amount_minor, customer_id FROM credit_checkouts
-		    WHERE payment_mode = ? AND team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
-			mode, string(r.Team), r.ID, checkoutKindRefill, r.PaymentIntent).Scan(&opened, &amount, &customer)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		now := tx.now(ctx)
-		st, err := spendStandingTx(ctx, tx, r.Team, now)
-		if err != nil {
-			return err
-		}
-		if !st.Refill.Enabled || !st.Refill.FailedAt.IsZero() || st.Billing.HoldCause != "" || customer != st.Card.Customer {
-			return nil
-		}
-		// The windows already include this reservation; replace its contribution with the charge being authorized.
-		refill := st.Refill
-		refill.AmountCents = amount
-		age := now.Sub(time.Unix(0, opened))
-		if age <= refillDay {
-			refill.DayCount--
-		}
-		if age <= refillWeek {
-			refill.WeekCents -= amount
-		}
-		if age <= refillMonth {
-			refill.MonthCents -= amount
-		}
-		allowed = refill.limit() == ""
-		return nil
-	})
-	return allowed, err
-}
-
-// RecordRefillCanceled closes a bound reservation after the checkout service reports Stripe canceled its intent.
-// The record and payment binding remain available for reconciliation and audit.
-func (o *Operator) RecordRefillCanceled(ctx context.Context, r Refill) error {
-	return o.s.inTx(ctx, func(tx *storeTx) error {
-		if _, err := lockLedgerTx(ctx, tx, r.Team); err != nil {
-			return err
-		}
-		mode, err := paymentModeTx(ctx, tx)
-		if err != nil {
-			return err
-		}
-		_, err = tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = 'canceled'
-		    WHERE payment_mode = ? AND team = ? AND id = ? AND kind = ? AND payment_id = ? AND payment_id <> '' AND closed_at IS NULL`,
-			tx.now(ctx).UnixNano(), mode, string(r.Team), r.ID, checkoutKindRefill, r.PaymentIntent)
-		return err
-	})
-}
-
-// Failures the refill worker records without a signed payment outcome.
-const (
-	// RefillAuthenticationRequired closes a refill whose payment cannot complete off-session.
-	RefillAuthenticationRequired = "authentication_required"
-	// RefillNoCard closes a refill the checkout service could not create because the customer has no card in Stripe.
-	RefillNoCard = "no_card"
-)
-
-// RecordRefillFailed closes an unpaid refill with code, stopping refills like a declined payment, and reports the
-// failure for owner notification.
+// RecordRefillFailed closes an unpaid refill with the failure code the checkout service reported, such as no_card,
+// authentication_required or a Stripe decline code, stopping refills like a declined payment, and reports the failure
+// for owner notification. A signed outcome for the same payment that arrives later finds the refill closed.
 func (o *Operator) RecordRefillFailed(ctx context.Context, r Refill, code string) (out PaymentSettlement, err error) {
-	if code != RefillAuthenticationRequired && code != RefillNoCard {
-		return out, fmt.Errorf("%w: unknown refill failure %q", ErrInvalidInput, code)
+	if code == "" || len(code) > 64 || strings.Trim(code, "abcdefghijklmnopqrstuvwxyz_") != "" {
+		return out, fmt.Errorf("%w: invalid refill failure %q", ErrInvalidInput, code)
 	}
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
 		mode, err := paymentModeTx(ctx, tx)
 		if err != nil {
 			return err
 		}
-		if err := lockFinancialTeamsTx(ctx, tx, r.Team); err != nil {
-			return err
-		}
-		if err := lockPaymentTx(ctx, tx, mode, cmp.Or(r.PaymentIntent, r.ID)); err != nil {
-			return err
-		}
 		if _, err := lockLedgerTx(ctx, tx, r.Team); err != nil {
 			return err
 		}
 		var checkout paymentCheckout
-		err = tx.QueryRowContext(ctx, `SELECT id,team,kind,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id FROM credit_checkouts WHERE payment_mode=? AND team=? AND id=? AND kind=? AND payment_id=?`+tx.forUpdate(), mode, r.Team, r.ID, checkoutKindRefill, r.PaymentIntent).Scan(checkout.scan()...)
+		err = tx.QueryRowContext(ctx, `SELECT id,team,kind,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id FROM credit_checkouts WHERE payment_mode=? AND team=? AND id=? AND kind=?`+tx.forUpdate(), mode, r.Team, r.ID, checkoutKindRefill).Scan(checkout.scan()...)
 		if err != nil {
 			return err
 		}

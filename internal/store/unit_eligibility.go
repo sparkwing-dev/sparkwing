@@ -47,7 +47,7 @@ func explainUnitEligibilityTx(ctx context.Context, tx *storeTx, team Team, unit 
 
 func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, claimant UnitDemand) (eligibility, error) {
 	var e eligibility
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claimant.CapabilityPrefix}, false)
+	chain, err := teamAuthorityChainTx(ctx, tx, team, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claimant.CapabilityPrefix}, false, sameTeamOrCloudLauncher)
 	if unavailableRunner(err) || refusal(err) {
 		e.failed, e.refused = stepAccess, err
 		return e, nil

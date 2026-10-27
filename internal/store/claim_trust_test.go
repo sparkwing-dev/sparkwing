@@ -127,7 +127,7 @@ func grantPool(ctx context.Context, s *store.Store, team store.Team, run, pool, 
 		return err
 	}
 	var err error
-	seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "pool-delivery", VerifiedAt: time.Now(), Ref: "refs/heads/" + branch, SHA: seal.Request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: branch == "main"}, runspec.Optional[runspec.PullRequest]{}, seal.Request.Pipeline)
+	seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "pool-delivery", VerifiedAt: time.Now(), Ref: "refs/heads/" + branch, SHA: seal.Request.Git.SHA, DefaultBranch: "main", DefaultBranchPush: branch == "main"}, runspec.Optional[runspec.PullRequest]{}, seal.Request.Pipeline)
 	if err != nil {
 		return err
 	}

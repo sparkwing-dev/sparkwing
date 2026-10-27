@@ -32,7 +32,7 @@ func proveFixtureRun(t *testing.T, tenant *Tenant, run string) runspec.SealedReq
 	if err := json.Unmarshal(raw, &request); err != nil {
 		t.Fatal(err)
 	}
-	provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), DeliveryKey: "delivery-" + run, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, request.Provenance.Pipeline())
+	provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, Repository: "acme/repo", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), DeliveryKey: "delivery-" + run, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, request.Provenance.Pipeline())
 	if err != nil {
 		t.Fatal(err)
 	}

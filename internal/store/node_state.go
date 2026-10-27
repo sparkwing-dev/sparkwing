@@ -862,11 +862,11 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row runsta
 		}
 		resolution = "timed_out"
 	} else {
-		principal, err := tx.ResolveAuthority(ctx, change.Actor.Authority)
+		principal, err := resolveTeamAuthorityTx(ctx, tx, team, change.Actor.Authority, sameTeam)
 		if err != nil {
 			return err
 		}
-		if principal.Capability.Team != string(team) || !slices.Contains(principal.Capability.Grants, capability.Grant("approvals.write")) {
+		if !slices.Contains(principal.Capability.Grants, capability.Grant("approvals.write")) {
 			return holderRefusal()
 		}
 		if change.Extra.Approval == nil {

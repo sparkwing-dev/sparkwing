@@ -40,7 +40,7 @@ func secretClaimAs(t *testing.T, f *browserFixture, team store.Team, pipeline st
 	}
 	if verified {
 		sha := strings.Repeat("a", 40)
-		provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: sha, DeliveryKey: "delivery-" + id, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, pipeline)
+		provenance, err := runspec.AppProvenance(runspec.AppFacts{Event: "push", RepositoryID: 1, Repository: "acme/repo", Ref: "refs/heads/main", SHA: sha, DeliveryKey: "delivery-" + id, DefaultBranch: "main", VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, pipeline)
 		if err != nil {
 			t.Fatal(err)
 		}

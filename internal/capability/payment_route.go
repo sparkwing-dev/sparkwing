@@ -14,6 +14,7 @@ const (
 	paymentPurposeMetadata = "purpose"
 	paymentPurposeSetup    = "card_setup"
 	paymentPurposeRefill   = "card_refill"
+	paymentRefillMetadata  = "refill_id"
 )
 
 // PaymentRoute names the provider objects a signed event concerns, read from the event before any provider call.
@@ -23,6 +24,7 @@ type PaymentRoute struct {
 	ObjectID   string
 	CheckoutID string
 	PaymentID  string
+	RefillID   string
 }
 
 // PaymentRecords answers whether this deployment committed the parent object an event concerns.
@@ -72,7 +74,7 @@ func (a *paymentAuthenticator) classify(ctx context.Context, policy paymentEvent
 		route.CheckoutID = head.ID
 	}
 	if policy.Kind == PaymentCardPaid || policy.Kind == PaymentCardFailed {
-		route.PaymentID = head.ID
+		route.PaymentID, route.RefillID = head.ID, head.Metadata.get(paymentRefillMetadata)
 	}
 	if scope.Records == nil {
 		return route, false, paymentProviderUnavailable()

@@ -37,8 +37,7 @@ func providerCheckoutPaid(t *testing.T, s *Store) {
 
 func providerRefillEvent(t *testing.T, s *Store, now time.Time, kind capability.PaymentEventKind) capability.PaymentEvent {
 	t.Helper()
-	openRefill(t, s, "a", 15000, "payment")
-	e := refillPaid(now, "payment", 15000)
+	e := refillPaid(now, openRefill(t, s, "a", 15000), "payment")
 	e.EventID, e.Kind = "event-"+string(kind), kind
 	if kind == capability.PaymentCardFailed {
 		e.Status, e.ChargeID, e.DeclineCode = "requires_payment_method", "", "card_declined"
@@ -174,6 +173,9 @@ func TestProviderPaymentsCommitFinancialStateWithReceipt(t *testing.T) {
 func TestProviderPaymentAssociationCannotChangeProperty(t *testing.T) {
 	s, _, now := providerPaymentFixture(t)
 	e := providerRefillEvent(t, s, now, capability.PaymentCardPaid)
+	if _, err := s.settlePaymentFacts(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
 	before := paymentMutationSnapshot(t, s)
 	property := func(seed uint32, field uint8) bool {
 		changed := e
@@ -195,9 +197,6 @@ func TestProviderPaymentAssociationCannotChangeProperty(t *testing.T) {
 			changed.AmountMinor = 0
 		}
 		got, err := s.settlePaymentFacts(t.Context(), changed)
-		if field%6 == 2 {
-			return err == nil && got.Team == "" && got.GrantID == "" && reflect.DeepEqual(before, paymentMutationSnapshot(t, s))
-		}
 		return err != nil && got == (PaymentSettlement{}) && reflect.DeepEqual(before, paymentMutationSnapshot(t, s))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(740))}); err != nil {

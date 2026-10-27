@@ -314,7 +314,7 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 		iteration++
 		request := input
 		request.Git.Repository.Display = data
-		request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{
+		request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo",
 			Event: "push", DeliveryKey: data, InstallationID: 7, RepositoryID: 42,
 			Ref: "refs/heads/main", SHA: input.Git.SHA, DefaultBranch: data,
 			DefaultBranchPush: true, VerifiedAt: time.Now().UTC(),

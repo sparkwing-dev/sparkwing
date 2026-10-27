@@ -145,7 +145,7 @@ func TestClaimSearchActionsFindsBoundPushBehindOlderRuns(t *testing.T) {
 	actions := authorityRoot("actions", "a")
 	actions.Grants = []capability.Grant{capability.NodesClaim}
 	actions.Repositories = []string{"gh:1"}
-	actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+	actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "refs/heads/main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 	authorityPersist(t, s, actions)
 	provenance, git := referenceAppProvenance(t, "refs/heads/main", fixtureOtherSHA)
 	git.Repository.Display = "https://github.com/acme/repo"
@@ -203,7 +203,7 @@ func TestClaimSearchActionsRejectsUntrustedPushBeforeNodeLookup(t *testing.T) {
 			actions := authorityRoot("actions", "a")
 			actions.Grants = []capability.Grant{capability.NodesClaim}
 			actions.Repositories = []string{"gh:1"}
-			actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+			actions.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "refs/heads/main", SHA: fixtureFeatureSHA, WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 			authorityPersist(t, s, actions)
 			_, git := referenceAppProvenance(t, "refs/heads/main", fixtureFeatureSHA)
 			raw := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: git}}, assertedProvenance(t, "ci", git.Ref, git.SHA))
