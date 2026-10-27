@@ -56,17 +56,14 @@ func writingJobController(t *testing.T, kube *fake.Clientset) {
 	})
 	kube.PrependReactor("patch", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
 		patch := action.(ktesting.PatchAction)
-		obj, err := tracker.Get(gvr, patch.GetNamespace(), patch.GetName())
-		if err != nil {
-			return false, nil, nil
-		}
 		var body struct {
 			Metadata struct {
 				ResourceVersion string `json:"resourceVersion"`
 			} `json:"metadata"`
 		}
 		_ = json.Unmarshal(patch.GetPatch(), &body)
-		if body.Metadata.ResourceVersion != "" && body.Metadata.ResourceVersion != obj.(*batchv1.Job).ResourceVersion {
+		obj, err := tracker.Get(gvr, patch.GetNamespace(), patch.GetName())
+		if err == nil && body.Metadata.ResourceVersion != "" && body.Metadata.ResourceVersion != obj.(*batchv1.Job).ResourceVersion {
 			return true, nil, apierrors.NewConflict(gvr.GroupResource(), patch.GetName(), errors.New("the object has been modified"))
 		}
 		bump(patch.GetNamespace(), patch.GetName())
