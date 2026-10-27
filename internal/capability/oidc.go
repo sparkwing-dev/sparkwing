@@ -11,11 +11,11 @@ type OIDCFacts struct {
 	Pipeline   string
 	Trigger    string
 	RunnerKind string
-	// RunnerEnvironment is fresh for a host no earlier job touched and
-	// persistent for any other.
-	RunnerEnvironment string
-	Ref               string
-	SHA               string
-	Repository        string
-	RepositoryID      int64
+	// FreshHost is a host no earlier job touched; the issuer spells it as the
+	// runner_environment claim.
+	FreshHost    bool
+	Ref          string
+	SHA          string
+	Repository   string
+	RepositoryID int64
 }

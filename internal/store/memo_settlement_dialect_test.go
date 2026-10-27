@@ -77,4 +77,3 @@ func TestMemoPublicationCommitsWithProducerOutcome(t *testing.T) {
 		})
 	}
 }
-

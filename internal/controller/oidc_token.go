@@ -100,7 +100,7 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 		}
 		claims := oidcissuer.Claims{
 			Audience: body.Audience, Team: facts.Team, RunID: facts.RunID, Pipeline: facts.Pipeline,
-			Trigger: facts.Trigger, RunnerKind: facts.RunnerKind, RunnerEnvironment: facts.RunnerEnvironment, Ref: facts.Ref, SHA: facts.SHA, Repository: facts.Repository, RepositoryID: facts.RepositoryID,
+			Trigger: facts.Trigger, RunnerKind: facts.RunnerKind, FreshHost: facts.FreshHost, Ref: facts.Ref, SHA: facts.SHA, Repository: facts.Repository, RepositoryID: facts.RepositoryID,
 		}
 		if _, err := claims.Subject(); err != nil {
 			return store.OIDCMint{}, &apierr.Error{Code: apierr.BadRequest, Message: "run identity cannot form an OIDC subject"}

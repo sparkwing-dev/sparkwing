@@ -136,7 +136,7 @@ func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObser
 	if err != nil {
 		t.Fatal(err)
 	}
-	subject, err := oidcissuer.Claims{Team: facts.Team, Pipeline: facts.Pipeline, Trigger: facts.Trigger, RunnerKind: "runner", RunnerEnvironment: "persistent", Ref: facts.Ref, SHA: facts.SHA, RepositoryID: facts.RepositoryID}.Subject()
+	subject, err := oidcissuer.Claims{Team: facts.Team, Pipeline: facts.Pipeline, Trigger: facts.Trigger, RunnerKind: "runner", Ref: facts.Ref, SHA: facts.SHA, RepositoryID: facts.RepositoryID}.Subject()
 	if err != nil {
 		t.Fatal(err)
 	}

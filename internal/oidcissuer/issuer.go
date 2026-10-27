@@ -138,13 +138,16 @@ func (i *Issuer) KeyIDs() []string {
 // TTL is the lifetime of a token minted without a shorter cap.
 func (i *Issuer) TTL() time.Duration { return i.ttl }
 
-// Fresh names a host no earlier job touched: a launcher pod, a Cloud pod or a
-// GitHub-hosted Actions runner. Persistent names any other host, where an
+// runnerEnvironment spells the runner_environment claim, like GitHub's: fresh
+// for a host no earlier job touched (a launcher pod, a Cloud pod or a
+// GitHub-hosted Actions runner), persistent for any other host, where an
 // earlier job may have left something behind.
-const (
-	Fresh      = "fresh"
-	Persistent = "persistent"
-)
+func runnerEnvironment(fresh bool) string {
+	if fresh {
+		return "fresh"
+	}
+	return "persistent"
+}
 
 // Claims are the run facts a token carries. Empty optional fields are
 // left out of the token.
@@ -154,11 +157,11 @@ type Claims struct {
 	Pipeline   string
 	Trigger    string
 	RunnerKind string
-	// RunnerEnvironment is Fresh or Persistent, like GitHub's runner_environment.
-	RunnerEnvironment string
-	Ref               string
-	SHA               string
-	Repository        string
+	// FreshHost is a host no earlier job touched.
+	FreshHost  bool
+	Ref        string
+	SHA        string
+	Repository string
 	// RepositoryID is GitHub's numeric repository id, zero when the run
 	// proved no repository. It survives renames and transfers, which the
 	// repository name does not.
@@ -187,7 +190,7 @@ func (c Claims) Subject() (string, error) {
 		{"pipeline", c.Pipeline},
 		{"trigger", c.Trigger},
 		{"runner", c.RunnerKind},
-		{"runner_environment", c.RunnerEnvironment},
+		{"runner_environment", runnerEnvironment(c.FreshHost)},
 		{"ref", c.Ref},
 	}
 	var b strings.Builder
@@ -273,7 +276,7 @@ func (i *Issuer) Mint(c Claims, now, notAfter time.Time) (Token, error) {
 		"trigger":            c.Trigger,
 		"runner_kind":        c.RunnerKind,
 		"run_id":             c.RunID,
-		"runner_environment": c.RunnerEnvironment,
+		"runner_environment": runnerEnvironment(c.FreshHost),
 	}
 	if c.RepositoryID > 0 {
 		payload["repository_id"] = strconv.FormatInt(c.RepositoryID, 10)

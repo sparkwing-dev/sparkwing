@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
@@ -396,8 +395,8 @@ func TestLauncherPodOIDCIsFresh(t *testing.T) {
 		got = facts
 		return OIDCMint{Token: "token", ID: "id", Subject: "subject", ExpiresAt: facts.NotAfter}, nil
 	})
-	if err != nil || got.RunnerEnvironment != oidcissuer.Fresh {
-		t.Fatalf("launcher pod runner_environment = %q, %v", got.RunnerEnvironment, err)
+	if err != nil || !got.FreshHost {
+		t.Fatalf("launcher pod fresh host = %v, %v", got.FreshHost, err)
 	}
 }
 

@@ -38,7 +38,7 @@ func rsaPEM(t *testing.T, bits int, pkcs8 bool) []byte {
 func runClaims() Claims {
 	return Claims{
 		Audience: "sts.amazonaws.com", Team: "acme", Pipeline: "deploy", Trigger: "push",
-		RunnerKind: "runner", RunnerEnvironment: Fresh, Ref: "refs/heads/main", SHA: "abc123", Repository: "acme/api",
+		RunnerKind: "runner", FreshHost: true, Ref: "refs/heads/main", SHA: "abc123", Repository: "acme/api",
 		RepositoryID: 123456789, RunID: "run-1",
 	}
 }
@@ -90,8 +90,6 @@ func TestSubjectRefusesValuesThatForgeSegments(t *testing.T) {
 		{"pipeline", "d\u00e9ploy"},
 		{"team", ""},
 		{"pipeline", ""},
-		{"runner_environment", ""},
-		{"runner_environment", "fresh:ref:refs/heads/main"},
 	} {
 		c := runClaims()
 		switch bad.field {
@@ -101,8 +99,6 @@ func TestSubjectRefusesValuesThatForgeSegments(t *testing.T) {
 			c.Ref = bad.value
 		case "team":
 			c.Team = bad.value
-		case "runner_environment":
-			c.RunnerEnvironment = bad.value
 		}
 		if _, err := c.Subject(); !errors.Is(err, errInvalidClaim) {
 			t.Errorf("%s %q: err = %v, want ErrInvalidClaim", bad.field, bad.value, err)

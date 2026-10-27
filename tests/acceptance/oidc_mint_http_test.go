@@ -57,7 +57,7 @@ func oidcBoundary() (*credentialBoundary, *oidcFacts) {
 	b.snapshot.Authorities[0].Principal.Capability.Grants = append(b.snapshot.Authorities[0].Principal.Capability.Grants, capability.OIDCMint)
 	f := &oidcFacts{selectorTransactions: selectorTransactions{team: "team"}, facts: capability.OIDCFacts{
 		Now: b.snapshot.Now, NotAfter: b.snapshot.Now.Add(5 * time.Minute),
-		Team: "team", RunID: "run", Pipeline: "deploy", Trigger: "push", RunnerKind: "runner", RunnerEnvironment: "persistent", Ref: "refs/heads/main",
+		Team: "team", RunID: "run", Pipeline: "deploy", Trigger: "push", RunnerKind: "runner", Ref: "refs/heads/main",
 		SHA: strings.Repeat("a", 40), Repository: "acme/api", RepositoryID: 42,
 	}}
 	return b, f
@@ -352,11 +352,11 @@ func TestOIDCMintHTTPCommittedSubjects(t *testing.T) {
 		{"push", "refs/heads/main", "runner", "persistent", 9001},
 	} {
 		b, f := oidcBoundary()
-		f.facts.Trigger, f.facts.Ref, f.facts.RunnerKind, f.facts.RunnerEnvironment, f.facts.RepositoryID = tc.event, tc.ref, tc.kind, tc.environment, tc.repositoryID
+		f.facts.Trigger, f.facts.Ref, f.facts.RunnerKind, f.facts.FreshHost, f.facts.RepositoryID = tc.event, tc.ref, tc.kind, tc.environment == "fresh", tc.repositoryID
 		h := oidcServer(t, b, f, private, nil).Handler()
 		w := authorityHTTP(h, b, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`)
 		_, claims := oidcResponse(t, w, &key.PublicKey)
-		expected := oidcissuer.Claims{Team: "team", Pipeline: "deploy", Trigger: tc.event, RunnerKind: tc.kind, RunnerEnvironment: tc.environment, Ref: tc.ref, RepositoryID: tc.repositoryID}
+		expected := oidcissuer.Claims{Team: "team", Pipeline: "deploy", Trigger: tc.event, RunnerKind: tc.kind, FreshHost: tc.environment == "fresh", Ref: tc.ref, RepositoryID: tc.repositoryID}
 		subject, err := expected.Subject()
 		if err != nil || claims["sub"] != subject || claims["trigger"] != tc.event || claims["runner_kind"] != tc.kind || claims["runner_environment"] != tc.environment || (tc.ref != "" && claims["ref"] != tc.ref) {
 			t.Fatalf("%+v: %v", tc, claims)
@@ -369,7 +369,7 @@ func TestOIDCMintHTTPSubjectInjectionProperty(t *testing.T) {
 	property := func(input []byte, field, invalid uint8) bool {
 		b, f := oidcBoundary()
 		value := "private-subject-" + hex.EncodeToString(input) + []string{":trigger:push", "*", "?", " ", "\x00", "é"}[invalid%6]
-		fields := []*string{&f.facts.Pipeline, &f.facts.Trigger, &f.facts.RunnerKind, &f.facts.RunnerEnvironment, &f.facts.Ref}
+		fields := []*string{&f.facts.Pipeline, &f.facts.Trigger, &f.facts.RunnerKind, &f.facts.Ref}
 		*fields[field%uint8(len(fields))] = value
 		w := authorityHTTP(oidcServer(t, b, f, private, nil).Handler(), b, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`)
 		var result apierr.Envelope
