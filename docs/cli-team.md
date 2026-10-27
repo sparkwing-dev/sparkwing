@@ -47,7 +47,7 @@ Only team administrators change team settings. Changes are audited. Pass --membe
 
 --max-children-per-root takes an integer from 1 to 1000 (default 50) and limits descendants across every depth, excluding retries. --claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it.
 
---high-trust true lets verified runs on plain-machine and persistent runners write the verified cache that fresh pods, Sparkwing Cloud and remote readers restore. Off (the default), those runs write only their own host's cache, because an earlier job on the same host could have tampered with what they archive. Turn it on only when every job those runners take is trusted.
+--high-trust true lets verified runs on plain-machine, persistent and self-hosted Actions runners write the verified cache that fresh pods, Sparkwing Cloud and remote readers restore. Off (the default), those runs write only their own host's cache, because an earlier job on the same host could have tampered with what they archive. Turn it on only when every job those runners take is trusted.
 
 ### Flags
 

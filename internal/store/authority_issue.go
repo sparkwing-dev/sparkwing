@@ -435,8 +435,8 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 }
 
 // awardCacheHostTx names the cache scope of a claimant whose host serves many
-// jobs (plain-machine and persistent runners), or "" for a fresh pod, Cloud,
-// an Actions job or a high-trust team.
+// jobs (plain-machine, persistent and self-hosted Actions runners), or "" for a
+// fresh pod, Cloud, a GitHub-hosted Actions runner or a high-trust team.
 func awardCacheHostTx(ctx context.Context, tx *storeTx, team Team, facts claimantFacts) (string, error) {
 	if facts.FreshHost {
 		return "", nil

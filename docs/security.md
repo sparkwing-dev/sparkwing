@@ -200,11 +200,12 @@ repositories that trust each other, and use launcher pools or Sparkwing Cloud,
 which give each claim a fresh pod, where repositories must stay apart. Pools
 that hold reserved secrets already require a launcher.
 
-A verified run on a host that outlives its jobs (plain-machine runners and
-persistent Kubernetes runners) writes memo, depcache and output records only to
-that host's own cache scope. Fresh pods, Sparkwing Cloud and remote cache
-readers restore only the shared verified scope, which launcher pods, Cloud pods
-and Actions jobs write, so state an earlier job left on a long-lived host never
+A verified run on a host that outlives its jobs (plain-machine runners,
+persistent Kubernetes runners and self-hosted GitHub Actions runners) writes
+memo, depcache and output records only to that host's own cache scope. Fresh
+pods, Sparkwing Cloud and remote cache readers restore only the shared verified
+scope, which launcher pods, Cloud pods and GitHub-hosted Actions runners write,
+as GitHub's signed `runner_environment` claim reports, so state an earlier job left on a long-lived host never
 reaches them through the cache. Runs on that host still read the verified
 default branch. A team administrator can turn on the `high_trust` team setting
 (console team settings, or `sparkwing team settings set --high-trust true`; off

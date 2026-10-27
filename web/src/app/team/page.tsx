@@ -117,7 +117,7 @@ function Members({ me }: { me: Me }) {
           />
           Members can add personal machines (members_can_add_machines)
         </label>
-        <label className="flex items-center gap-3 p-4 text-sm" title="Off by default. On, verified runs on plain-machine and persistent runners write the verified cache that fresh pods, Sparkwing Cloud and remote readers restore. Off, they write only their own host's cache, because an earlier job on that host could have tampered with it. Changes are audited.">
+        <label className="flex items-center gap-3 p-4 text-sm" title="Off by default. On, verified runs on plain-machine, persistent and self-hosted Actions runners write the verified cache that fresh pods, Sparkwing Cloud and remote readers restore. Off, they write only their own host's cache, because an earlier job on that host could have tampered with it. Changes are audited.">
           <input
             type="checkbox"
             checked={settings?.high_trust ?? false}

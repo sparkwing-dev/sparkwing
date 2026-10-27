@@ -61,8 +61,12 @@ type Claims struct {
 	WorkflowRef string
 	RunID       string
 	RunAttempt  string
-	Subject     string
-	ExpiresAt   time.Time
+	// RunnerEnvironment is github-hosted for a fresh GitHub-hosted runner and
+	// self-hosted for a machine the repository's owner runs, which may keep
+	// state between jobs.
+	RunnerEnvironment string
+	Subject           string
+	ExpiresAt         time.Time
 }
 
 // Verifier checks tokens for one audience.
@@ -95,6 +99,7 @@ type tokenClaims struct {
 	WorkflowRef       string        `json:"workflow_ref"`
 	RunID             string        `json:"run_id"`
 	RunAttempt        string        `json:"run_attempt"`
+	RunnerEnvironment string        `json:"runner_environment"`
 }
 
 // Verify checks token's signature, issuer, audience and validity window, and
@@ -140,7 +145,7 @@ func (v *Verifier) Verify(ctx context.Context, token string) (Claims, error) {
 	return Claims{
 		Repository: cl.Repository, RepositoryID: repoID, RepositoryOwnerID: ownerID,
 		Ref: cl.Ref, SHA: cl.SHA, EventName: cl.EventName,
-		WorkflowRef: cl.WorkflowRef, RunID: cl.RunID, RunAttempt: cl.RunAttempt, Subject: cl.Sub,
+		WorkflowRef: cl.WorkflowRef, RunID: cl.RunID, RunAttempt: cl.RunAttempt, RunnerEnvironment: cl.RunnerEnvironment, Subject: cl.Sub,
 		ExpiresAt: time.Unix(cl.Exp, 0),
 	}, nil
 }
