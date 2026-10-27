@@ -36,7 +36,8 @@ func TestJobDeadlineFollowsFundedLeaseAcrossRenewalAndOutage(t *testing.T) {
 	if _, err := kube.CoreV1().Pods(l.Config.Namespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now().Add(-10 * time.Second)
+	// Kubernetes records StartTime in whole seconds, and the fake's patch round trip truncates it the same way.
+	start := time.Now().Add(-10 * time.Second).Truncate(time.Second)
 	job.Status.StartTime = &metav1.Time{Time: start}
 	if _, err := jobs.UpdateStatus(t.Context(), job, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
