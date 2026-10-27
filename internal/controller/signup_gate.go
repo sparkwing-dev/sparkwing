@@ -30,7 +30,7 @@ func (s *Server) WithSignUpWaitlist(on bool) *Server {
 }
 
 func (s *Server) signUpConditions(ctx context.Context) store.SignUpConditions {
-	return store.SignUpConditions{ForceWaitlist: s.identity.signup.forceWaitlist}
+	return store.SignUpConditions{ForceWaitlist: s.identity.signup.forceWaitlist, Operator: s.operatorAccount}
 }
 
 func (s *Server) observeSignUp(ctx context.Context, provider string, res store.SignInResult, now time.Time) {

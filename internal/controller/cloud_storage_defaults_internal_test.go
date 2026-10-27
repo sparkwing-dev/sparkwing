@@ -57,8 +57,8 @@ func TestHostedDeploymentAppliesCloudStorageDefaults(t *testing.T) {
 				t.Fatalf("quota = %+v, %v; want %+v", got, err, tc.want)
 			}
 
-			if c := srv.signUpConditions(t.Context()); c != (store.SignUpConditions{}) {
-				t.Fatalf("sign-up conditions = %+v; want none", c)
+			if c := srv.signUpConditions(t.Context()); c.ForceWaitlist {
+				t.Fatal("sign-up conditions force the waitlist; want none")
 			}
 			status, err := srv.signUpStatus(t.Context(), time.Now())
 			if err != nil {

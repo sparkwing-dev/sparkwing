@@ -93,7 +93,8 @@ func run(args []string) error {
 	paymentMode := fs.String("payment-mode", "", "Stripe callback mode: test or live. Requires stripe-api-key and stripe-webhook-secret in --credentials-dir. Empty disables settlement.")
 	operatorAccounts := fs.String("operator-accounts", "",
 		"comma-separated account ids whose signed-in dashboard sessions may use the "+
-			"operator console. No token reaches the console. Empty leaves it off.")
+			"operator console, and which are admitted past the sign-up waitlist at sign-in. "+
+			"No token reaches the console. Empty leaves it off.")
 	externalURL := fs.String("external-url", "",
 		"base URL this controller answers on from outside the cluster, which is "+
 			"where runners transfer signed filesystem data and logs, and what GitHub Actions workflows "+
