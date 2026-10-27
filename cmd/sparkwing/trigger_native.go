@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result controllerwire.CreateRunRequest, resultErr error) {
@@ -109,14 +110,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	input.Machine.SubmitEnvAllow.Set, input.Machine.SubmitEnvAllow.Value = allow != nil, allow
 	input.Machine.SubmitEnvAllow.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: path, Key: "run.submit_env_allow"}
 	if flags.runner != "" {
-		selection := runspec.RunnerSelection{Kind: runspec.RunnerName, Value: flags.runner}
-		if flags.runner == hereRunnerFlag {
-			selection.Kind, selection.Value = runspec.RunnerHere, ""
-		}
-		if label, ok := strings.CutPrefix(flags.runner, "label="); ok {
-			selection.Kind, selection.Value = runspec.RunnerLabel, label
-		}
-		input.Flags.Runner.Set, input.Flags.Runner.Value = true, selection
+		input.Flags.Runner.Set, input.Flags.Runner.Value = true, runnerFlagSelection(flags.runner)
 	}
 	result, err = prepareTriggerRequest(triggerRequestInput{home: home, source: selected, settings: input, declarations: described, reason: flags.reason, args: flags.passthrough, submittedEnv: submitted})
 	if err != nil || snapshot == nil {
@@ -133,4 +127,20 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	}
 	result.Request.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: digest}
 	return result, nil
+}
+
+// runnerFlagSelection reads --runner. cloud selects the Cloud launcher by its
+// granted class, as the GitHub App's cloud owner does; a runner name would only
+// match a self-hosted runner enrolled under that name.
+func runnerFlagSelection(flag string) runspec.RunnerSelection {
+	switch flag {
+	case hereRunnerFlag:
+		return runspec.RunnerSelection{Kind: runspec.RunnerHere}
+	case match.ClassCloud:
+		return runspec.RunnerSelection{Kind: runspec.RunnerLabel, Value: "class=" + match.ClassCloud}
+	}
+	if label, ok := strings.CutPrefix(flag, "label="); ok {
+		return runspec.RunnerSelection{Kind: runspec.RunnerLabel, Value: label}
+	}
+	return runspec.RunnerSelection{Kind: runspec.RunnerName, Value: flag}
 }

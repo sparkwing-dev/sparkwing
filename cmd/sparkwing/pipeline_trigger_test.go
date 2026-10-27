@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"io"
 	"os"
 	"os/exec"
@@ -98,4 +99,19 @@ func enterGitCheckout(t *testing.T, origin string) {
 			t.Fatalf("restore cwd: %v", err)
 		}
 	})
+}
+
+// Staging qa.8: --runner cloud sealed a runner name no Cloud launcher holds,
+// so the run stayed unclaimed.
+func TestRunnerFlagCloudSelectsTheCloudClass(t *testing.T) {
+	for flag, want := range map[string]runspec.RunnerSelection{
+		"cloud":       {Kind: runspec.RunnerLabel, Value: "class=cloud"},
+		"here":        {Kind: runspec.RunnerHere},
+		"label=gpu":   {Kind: runspec.RunnerLabel, Value: "gpu"},
+		"build-box-1": {Kind: runspec.RunnerName, Value: "build-box-1"},
+	} {
+		if got := runnerFlagSelection(flag); got != want {
+			t.Errorf("--runner %s = %+v, want %+v", flag, got, want)
+		}
+	}
 }
