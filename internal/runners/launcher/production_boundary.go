@@ -177,7 +177,11 @@ func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservatio
 	if err != nil {
 		return "", nil, err
 	}
-	targets = append(targets, kubeletTargets(nodes.Items, r.NodeName)...)
+	kubelets, err := kubeletTargets(ctx, nodes.Items, r.NodeName, net.DefaultResolver.LookupHost)
+	if err != nil {
+		return "", nil, err
+	}
+	targets = append(targets, kubelets...)
 	slices.Sort(targets)
 	targets = slices.Compact(targets)
 	if slices.Contains(targets, p.required) {
@@ -207,27 +211,45 @@ const (
 	readOnlyKubeletPort      = 10255
 )
 
-func kubeletTargets(nodes []corev1.Node, own string) []string {
+// kubeletTargets lists every advertised node address, names resolved to IPs,
+// on each kubelet port, minus only the job's own internal IP on 10250.
+func kubeletTargets(ctx context.Context, nodes []corev1.Node, own string, resolve func(context.Context, string) ([]string, error)) ([]string, error) {
 	var targets []string
 	for _, node := range nodes {
 		ports := []int{authenticatedKubeletPort, readOnlyKubeletPort}
 		if port := int(node.Status.DaemonEndpoints.KubeletEndpoint.Port); port > 0 {
 			ports = append(ports, port)
 		}
+		excepted := map[string]bool{}
+		var ips []string
 		for _, address := range node.Status.Addresses {
-			if address.Type != corev1.NodeInternalIP && address.Type != corev1.NodeExternalIP {
-				continue
+			switch address.Type {
+			case corev1.NodeInternalIP, corev1.NodeExternalIP:
+				ips = append(ips, address.Address)
+				if node.Name == own && address.Type == corev1.NodeInternalIP {
+					excepted[address.Address] = true
+				}
+			case corev1.NodeHostName, corev1.NodeInternalDNS, corev1.NodeExternalDNS:
+				resolved, err := resolve(ctx, address.Address)
+				if err != nil || len(resolved) == 0 {
+					return nil, fmt.Errorf("resolve node %s address %s: %w", node.Name, address.Address, errors.Join(err, errors.New("no addresses")))
+				}
+				ips = append(ips, resolved...)
+			default:
+				return nil, fmt.Errorf("node %s advertises an unknown address type %q", node.Name, address.Type)
 			}
+		}
+		for _, ip := range ips {
 			for _, port := range ports {
-				if node.Name == own && address.Type == corev1.NodeInternalIP && port == authenticatedKubeletPort {
+				if port == authenticatedKubeletPort && excepted[ip] {
 					continue
 				}
-				targets = append(targets, net.JoinHostPort(address.Address, strconv.Itoa(port)))
+				targets = append(targets, net.JoinHostPort(ip, strconv.Itoa(port)))
 			}
 		}
 	}
 	slices.Sort(targets)
-	return slices.Compact(targets)
+	return slices.Compact(targets), nil
 }
 
 func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) (evidence CloudNetworkEvidence, err error) {

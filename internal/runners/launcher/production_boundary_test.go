@@ -394,24 +394,33 @@ func TestProbesNeverShareANamePrefix(t *testing.T) {
 	}
 }
 
-// The job's own node's internal address on the authenticated kubelet port is
-// the one expected reachable destination; every other node address, internal
-// or external, and every other kubelet port stays forbidden.
+// The job's own node's internal IP on the authenticated kubelet port is the one
+// expected reachable destination. Every other advertised address, names
+// resolved to IPs, stays forbidden on every kubelet port, and an unresolvable
+// name fails the inventory.
 func TestKubeletTargetsExceptOnlyTheOwnNodesAuthenticatedPort(t *testing.T) {
 	node := func(name, internal, external string) corev1.Node {
 		n := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
-		n.Status.Addresses = []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: internal}, {Type: corev1.NodeExternalIP, Address: external}, {Type: corev1.NodeHostName, Address: name}}
+		n.Status.Addresses = []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: internal}, {Type: corev1.NodeExternalIP, Address: external}, {Type: corev1.NodeHostName, Address: name + ".host"}, {Type: corev1.NodeInternalDNS, Address: name + ".internal"}, {Type: corev1.NodeExternalDNS, Address: name + ".external"}}
 		n.Status.DaemonEndpoints.KubeletEndpoint.Port = 10250
 		return n
 	}
-	targets := kubeletTargets([]corev1.Node{node("own", "10.0.0.1", "203.0.113.1"), node("other", "10.0.0.2", "203.0.113.2")}, "own")
-	want := []string{"10.0.0.1:10255", "10.0.0.2:10250", "10.0.0.2:10255", "203.0.113.1:10250", "203.0.113.1:10255", "203.0.113.2:10250", "203.0.113.2:10255"}
+	names := map[string][]string{"own.host": {"10.0.0.1"}, "own.internal": {"10.0.0.9"}, "own.external": {"198.51.100.1"}, "other.host": {"10.0.0.2"}, "other.internal": {"10.0.0.2"}, "other.external": {"198.51.100.2"}}
+	resolve := func(_ context.Context, name string) ([]string, error) {
+		if ips, ok := names[name]; ok {
+			return ips, nil
+		}
+		return nil, errors.New("no such host")
+	}
+	targets, err := kubeletTargets(t.Context(), []corev1.Node{node("own", "10.0.0.1", "203.0.113.1"), node("other", "10.0.0.2", "203.0.113.2")}, "own", resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"10.0.0.1:10255", "10.0.0.2:10250", "10.0.0.2:10255", "10.0.0.9:10250", "10.0.0.9:10255", "198.51.100.1:10250", "198.51.100.1:10255", "198.51.100.2:10250", "198.51.100.2:10255", "203.0.113.1:10250", "203.0.113.1:10255", "203.0.113.2:10250", "203.0.113.2:10255"}
 	if !slices.Equal(targets, want) {
 		t.Fatalf("kubelet targets = %v, want %v", targets, want)
 	}
-	odd := node("own", "10.0.0.1", "203.0.113.1")
-	odd.Status.DaemonEndpoints.KubeletEndpoint.Port = 10260
-	if got := kubeletTargets([]corev1.Node{odd}, "own"); !slices.Contains(got, "10.0.0.1:10260") || slices.Contains(got, "10.0.0.1:10250") {
-		t.Errorf("own node with its kubelet on a nonstandard port = %v", got)
+	if _, err := kubeletTargets(t.Context(), []corev1.Node{node("unknown", "10.0.0.3", "203.0.113.3")}, "own", resolve); err == nil {
+		t.Fatal("an unresolvable node name was left out of the inventory")
 	}
 }
