@@ -160,7 +160,7 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	if pipeline == "" {
 		pipeline = run.Request.Provenance.Pipeline()
 	}
-	repo := run.Request.Request.Git.Repository.Display
+	repo := run.Request.Provenance.Repository()
 	if repo == "" {
 		repo = selection.repo
 	}
