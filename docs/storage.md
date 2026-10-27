@@ -125,8 +125,11 @@ URLs and one manifest URL with a fifteen-minute expiry. The filesystem signer
 accepts an identical retry and refuses different bytes under an existing key.
 These URLs grant no log download access.
 
-S3 lifecycle readiness requires an enabled prefix rule with the stored class's
-days. Tag and size conditions cannot establish expiry for all objects. The
+S3 lifecycle readiness requires an enabled prefix rule expiring the stored
+class after at least its days. The controller's maintenance pass deletes each
+log object once its class has passed since its upload was signed, so set the
+rule longer than the class (for example the class plus seven days) as a
+backstop. Tag and size conditions cannot establish expiry for all objects. The
 backend reads the rules and leaves their configuration to the operator.
 The filesystem backend provides an expiry pass for the controller's maintenance
 lease. It expires objects by their stored class, including retired classes.

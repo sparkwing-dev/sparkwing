@@ -1220,8 +1220,8 @@ in-process transport.
 
 `Segment.Offset` and `Segment.Size` describe decoded log bytes. `StoredBytes`
 and `Digest` describe the immutable compressed payload. Both sizes are positive
-and participate in replay identity. `log_segments.stored_bytes` and
-`log_streams.stored_bytes` count retained physical bytes. Segment start/end
+and participate in replay identity. `log_segments.stored_bytes` records each
+segment's physical size; retained log bytes follow the [one log-slot rule](../../../internal/store/STORE-DATA.md#log-slot-accounting). Segment start/end
 offsets and `uploaded_through` count decoded bytes. Reads return both sizes.
 The schema needs no new column because decoded size is `end_offset-start_offset`.
 The subject uploader supplies both sizes on append and final sealing. The
@@ -2316,16 +2316,18 @@ needs an imported unit identity contract before it can bypass a live unit lease.
 subject and run. Each segment URL includes its required `Headers`; the final
 manifest uses `ManifestURL` and `ManifestHeaders`. Storage transports must send
 those headers, including S3's signed create-only condition. HTTP 412 proves only
-that the key exists and cannot authorize a commit or an identical replay.
-`LogTransport.VerifyUpload` recovers an uncertain PUT by reauthorizing the exact
-writer and verifying the stored bytes. `LogUploadCheck` carries the subject,
-index, stored size and SHA-256. Index zero selects the final manifest. Positive
-indexes select segments. The controller derives the key from the subject and
-the run's persisted retention class. `logseg.UploadVerifier.Verify` consumes and
+that the key exists, so the native uploader treats it as an uncertain PUT and
+moves on to the commit, which verifies the stored bytes under the reauthorized
+writer. Segment commits verify each segment through `CommittedReader`. The final
+commit carries the manifest's `LogUploadCheck` (subject, index zero, stored size
+and SHA-256); the controller derives the key from the subject and the run's
+persisted retention class, and `logseg.UploadVerifier.Verify` consumes and
 closes that object before confirming its exact size and digest. Verification
 returns no bytes or read URL and creates no record edge. The subsequent
-`RecordSegments` transaction repeats writer authorization. Cancellation remains
-an error. A changed payload, missing object or failed close cannot recover.
+`RecordSegments` transaction repeats writer authorization. Commits are
+idempotent, so a lost acknowledgement replays; signing a committed slot reports
+it committed. Cancellation remains an error. A changed payload, missing object
+or failed close cannot recover and answers `integrity_failure` or `blob_missing`.
 `ReadLogSegments` and `LogTransport.ReadLog` reauthorize the same
 subject, proxy bytes through the controller, meter egress and apply the log
 exception to download caps. Persisted segments fill gaps or stalls in the ring.
@@ -2588,7 +2590,8 @@ output records. Runs otherwise expire after the configured window (Cloud 90
 days; self-hosted disabled). Outputs expire after 30 days except pinned outputs.
 Metrics use their own setting. Log classes retain funded logs for 90 days and
 free logs for 30, or an operator-defined class. Standing changes affect new runs
-only; signing refuses a class without its backend lifecycle rule. Unpinned blob
+only; Sparkwing deletes log objects at their class age under the [one log-slot rule](../../../internal/store/STORE-DATA.md#log-slot-accounting),
+and signing refuses a class without a backend lifecycle rule at least that long. Unpinned blob
 records expire by their own time; reachability GC uses a 24-hour tombstone grace.
 Capabilities expire seven days after expiry or revocation. Fully delivered
 terminal effects expire seven days after delivery; undelivered effects remain due.
@@ -2671,8 +2674,7 @@ admission while preserving earlier report rows. Overflow or a failed counter
 write rolls back both sides. Logs retain their download-cap exemption.
 
 [`Operator.ChargeRetainedStorage`](../../../internal/store/retained_storage_billing.go) bills unique `blobs`
-and committed `log_streams.stored_bytes`, which include a sealed stream's final
-manifest. Historical usage and reference counts cannot multiply the charge. The team's cache and log rows share their
+and log slots under the [one log-slot rule](../../../internal/store/STORE-DATA.md#log-slot-accounting), including a stream's final manifest. Historical usage and reference counts cannot multiply the charge. The team's cache and log rows share their
 existing `storage_charged_through` watermark because the free allowance applies
 once to the combined bytes. The tenant's retained allowance caps that total
 before the free allowance comes off. An absent quota row adds no ceiling.
@@ -2771,7 +2773,7 @@ Malformed, sealed, negative and overflowing values fail loudly.
 The controller's storage maintenance calls retention and billing in one pass. The independent bucket-listing reconciliation pass and its
 StorageMarks, ReconcileStorage, TeamsOverFreeLogShare and
 PrunableNodeLogs APIs are removed. Retained-byte reports and billing read unique
-blobs and committed tagged log streams. Bucket listings cannot replace replica
+blobs and log slots under the [one log-slot rule](../../../internal/store/STORE-DATA.md#log-slot-accounting). Bucket listings cannot replace replica
 usage counters. PruneStorageCommitReceipts and PruneDownloadDays are removed with
 the pass. Final upload tickets and quota reservations retain their atomic replay
 state through maintenance. Cloud seeds 90-day run retention only when absent. Metric

@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"math"
 	"slices"
 	"unicode/utf8"
 
@@ -27,8 +26,6 @@ type SegmentCommit struct {
 	Final            bool
 	IncompleteReason string
 	RetentionClass   string
-	// ManifestBytes is the final manifest object's verified stored size, zero when none is stored.
-	ManifestBytes int64
 }
 
 type logStreamIdentity struct {
@@ -143,17 +140,8 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	var seal any
 	finalDigest = ""
 	if commit.Final {
-		if commit.ManifestBytes > 0 {
-			if err := commitLogSlotTx(ctx, tx, t.team, commit.Subject.RunID, identity, 0, commit.ManifestBytes); err != nil {
-				return err
-			}
-		} else if manifest, err := logSlotTx(ctx, tx, t.team, commit.Subject.RunID, identity.id, 0); err != nil {
+		if err := markLogSlotCommittedTx(ctx, tx, t.team, commit.Subject.RunID, identity.id, 0); err != nil {
 			return err
-		} else if manifest.found {
-			// safety: the controller found no manifest object, so the signed slot stores nothing.
-			if err := commitLogSlotTx(ctx, tx, t.team, commit.Subject.RunID, identity, 0, 0); err != nil {
-				return err
-			}
 		}
 		seal = tx.now(ctx).UnixNano()
 		completeness = "complete"
@@ -187,35 +175,40 @@ func logSlotTx(ctx context.Context, tx *storeTx, team Team, run, stream string, 
 
 // openLogSlotTx admits a new slot's bytes through the storage rule and counts them retained from now until the
 // object is deleted.
-func openLogSlotTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, index, size int64, committed bool) error {
+func openLogSlotTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, index, size int64, key string, committed bool) error {
 	if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: run, bytes: size}); err != nil {
 		return err
 	}
-	_, err := tx.execContext(ctx, `INSERT INTO log_slots(team,run_id,stream_id,generation,n,size,committed,created_at) VALUES (?,?,?,?,?,?,?,?)`,
-		team, run, identity.id, identity.generation, index, size, boolToInt(committed), tx.now(ctx).UnixNano())
+	_, err := tx.execContext(ctx, `INSERT INTO log_slots(team,run_id,stream_id,generation,n,size,committed,object_key,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+		team, run, identity.id, identity.generation, index, size, boolToInt(committed), key, tx.now(ctx).UnixNano())
 	return err
 }
 
-// commitLogSlotTx marks a slot committed at its verified stored size. A commit only ever lowers a signed slot's
-// bytes; an object larger than its slot is refused, and a slot nobody signed is admitted now.
-func commitLogSlotTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, index, verified int64) error {
+// commitLogSlotTx marks a segment's slot committed. Its signed size stays counted until Sparkwing deletes the object;
+// an object larger than its slot is refused, and a slot nobody signed is admitted now at the verified size.
+func commitLogSlotTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segment runstate.Segment) error {
+	index, verified := segment.Index, segment.StoredBytes
 	slot, err := logSlotTx(ctx, tx, team, run, identity.id, index)
 	if err != nil {
 		return err
 	}
 	if !slot.found {
-		return openLogSlotTx(ctx, tx, team, run, identity, index, verified, true)
+		return openLogSlotTx(ctx, tx, team, run, identity, index, verified, segment.ObjectKey, true)
 	}
 	if verified > slot.size {
 		return authorityError(apierr.Conflict, "log object is larger than its signed slot")
 	}
-	_, err = tx.execContext(ctx, `UPDATE log_slots SET size=?,committed=1 WHERE team=? AND run_id=? AND stream_id=? AND n=?`, verified, team, run, identity.id, index)
+	return markLogSlotCommittedTx(ctx, tx, team, run, identity.id, index)
+}
+
+func markLogSlotCommittedTx(ctx context.Context, tx *storeTx, team Team, run, stream string, index int64) error {
+	_, err := tx.execContext(ctx, `UPDATE log_slots SET committed=1 WHERE team=? AND run_id=? AND stream_id=? AND n=?`, team, run, stream, index)
 	return err
 }
 
 func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segments []runstate.Segment) error {
-	var next, offset, stored int64
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,1),COALESCE(MAX(end_offset),0),COALESCE(SUM(stored_bytes),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset, &stored); err != nil {
+	var next, offset int64
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,1),COALESCE(MAX(end_offset),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset); err != nil {
 		return err
 	}
 	for _, segment := range segments {
@@ -240,21 +233,17 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 		if segment.Index != next || segment.Offset != offset {
 			return authorityError(apierr.Conflict, "log segments must be contiguous")
 		}
-		if stored < 0 || stored > math.MaxInt64-segment.StoredBytes {
-			return authorityError(apierr.IntegrityFailure, "log inventory byte total is out of range")
-		}
 		_, err = tx.execContext(ctx, `INSERT INTO log_segments(team,run_id,stream_id,generation,n,stored_bytes,sha256,object_key,start_offset,end_offset) VALUES (?,?,?,?,?,?,?,?,?,?)`, team, run, identity.id, identity.generation, segment.Index, segment.StoredBytes, segment.Digest, segment.ObjectKey, segment.Offset, segment.Offset+segment.Size)
 		if err != nil {
 			return err
 		}
 		next++
 		offset += segment.Size
-		stored += segment.StoredBytes
-		if err := commitLogSlotTx(ctx, tx, team, run, identity, segment.Index, segment.StoredBytes); err != nil {
+		if err := commitLogSlotTx(ctx, tx, team, run, identity, segment); err != nil {
 			return err
 		}
 	}
-	_, err := tx.execContext(ctx, "UPDATE log_streams SET uploaded_through = ?, stored_bytes = ? WHERE team = ? AND run_id = ? AND id = ?", offset, stored, team, run, identity.id)
+	_, err := tx.execContext(ctx, "UPDATE log_streams SET uploaded_through = ? WHERE team = ? AND run_id = ? AND id = ?", offset, team, run, identity.id)
 	return err
 }
 

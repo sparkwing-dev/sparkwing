@@ -1,7 +1,10 @@
 package store_test
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -239,8 +242,8 @@ func TestUncommittedLogSlotsStayCountedAndAdmitted(t *testing.T) {
 	})
 }
 
-// A slot's size is fixed when it is first signed: signing it again for fewer bytes keeps charging the first size,
-// and signing it again for more never grows it.
+// A slot's size is fixed when it is first signed: signing it again for fewer bytes keeps counting the first size,
+// signing it again for more never grows it, and committing a smaller object or sealing the stream never lowers it.
 func TestLogSlotSizeIsFixedAtFirstSigning(t *testing.T) {
 	bothDialects(t, func(t *testing.T, target *storetest.Target) {
 		f := newGrowthFixture(t, target)
@@ -252,17 +255,31 @@ func TestLogSlotSizeIsFixedAtFirstSigning(t *testing.T) {
 				t.Fatalf("signing the manifest slot for %d bytes = %+v, %v; want its first size", size, slot, err)
 			}
 		}
-		if grew := f.retained(t) - before; grew != limits.LogManifestBytes {
-			t.Fatalf("manifest slot counts %d bytes; want its first size", grew)
-		}
-		if err := f.tenant.RecordSegments(t.Context(), store.SegmentCommit{Subject: f.logSubject(), Actor: f.holder, RetentionClass: f.retention, Final: true, ManifestBytes: limits.LogManifestBytes + 1}); err == nil {
-			t.Fatal("a manifest larger than its signed slot was committed")
-		}
-		if err := f.tenant.RecordSegments(t.Context(), store.SegmentCommit{Subject: f.logSubject(), Actor: f.holder, RetentionClass: f.retention, Final: true, ManifestBytes: 100}); err != nil {
+		if _, err := f.tenant.OpenLogSlot(t.Context(), f.logSubject(), f.holder, 1, 8); err != nil {
 			t.Fatal(err)
 		}
-		if grew := f.retained(t) - before; grew != 100 {
-			t.Fatalf("committed manifest counts %d bytes; want its verified 100", grew)
+		if err := f.recordSegment(t); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.tenant.RecordSegments(t.Context(), store.SegmentCommit{Subject: f.logSubject(), Actor: f.holder, RetentionClass: f.retention, Final: true}); err != nil {
+			t.Fatal(err)
+		}
+		if grew := f.retained(t) - before; grew != limits.LogManifestBytes+8 {
+			t.Fatalf("committed slots count %d bytes; want their signed %d", grew, limits.LogManifestBytes+8)
+		}
+	})
+}
+
+// A segment larger than the slot it was signed for is refused at commit.
+func TestLogSegmentLargerThanItsSlotIsRefused(t *testing.T) {
+	bothDialects(t, func(t *testing.T, target *storetest.Target) {
+		f := newGrowthFixture(t, target)
+		fundTeam(t, f.tenant, "pay-larger")
+		if _, err := f.tenant.OpenLogSlot(t.Context(), f.logSubject(), f.holder, 1, 2); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.recordSegment(t); err == nil {
+			t.Fatal("a 3-byte segment was committed into a 2-byte slot")
 		}
 	})
 }
@@ -285,27 +302,74 @@ func TestCommittedLogSlotReportsCommittedOnResign(t *testing.T) {
 	})
 }
 
-// Counted log bytes fall once their objects are gone: the maintenance pass stops counting slots of streams past
-// their retention class, which the object store's lifecycle deleted.
+type failingLogDeleter struct{}
+
+func (failingLogDeleter) DeleteLogObject(context.Context, string, string, string) error {
+	return errors.New("object store unavailable")
+}
+
+// Sparkwing deletes a log object once its slot is older than the retention class, keyed on the slot's own signing
+// time, and only then stops counting it. A slot signed later in the same stream stays, and a failed delete keeps
+// counting its bytes for the next pass.
 func TestExpiredLogObjectsStopCounting(t *testing.T) {
 	bothDialects(t, func(t *testing.T, target *storetest.Target) {
 		f := newGrowthFixture(t, target)
 		fundTeam(t, f.tenant, "pay-expiry")
-		before := f.retained(t)
-		if _, err := f.tenant.OpenLogSlot(t.Context(), f.logSubject(), f.holder, 1, 8); err != nil {
+		dir := t.TempDir()
+		objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "http://objects", SigningKey: []byte(strings.Repeat("k", 32))})
+		if err != nil {
 			t.Fatal(err)
 		}
 		days, ok := blob.LogClassDays(f.retention)
 		if !ok {
 			t.Fatalf("invalid retention class %q", f.retention)
 		}
-		f.now = f.now.Add(time.Duration(days+1) * 24 * time.Hour)
-		result, err := f.s.AsOperator().MaintainRetention(t.Context(), store.RetentionRequest{Limit: 100})
-		if err != nil || result.LogSlots != 1 {
-			t.Fatalf("retention = %+v, %v; want the expired log slot dropped", result, err)
+		before := f.retained(t)
+		put := func(index, size int64) string {
+			t.Helper()
+			if _, err := f.tenant.OpenLogSlot(t.Context(), f.logSubject(), f.holder, index, size); err != nil {
+				t.Fatal(err)
+			}
+			key, err := blob.LogObjectKey(f.logSubject(), f.retention, index)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, filepath.FromSlash(key))
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, make([]byte, size), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return key
 		}
-		if after := f.retained(t); after != before {
-			t.Fatalf("retained after the log object expired = %d; want %d", after, before)
+		old, recent := put(1, 8), put(2, 5)
+		// Age the slots rather than the clock, which would end the job's authority: the first was signed just past
+		// its class, the second just inside it.
+		for index, age := range map[int64]time.Duration{1: time.Duration(days)*24*time.Hour + time.Hour, 2: time.Duration(days)*24*time.Hour - time.Hour} {
+			if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, "UPDATE log_slots SET created_at=? WHERE team=? AND n=?"), f.now.Add(-age).UnixNano(), f.tenant.Team(), index); err != nil {
+				t.Fatal(err)
+			}
+		}
+		operator := f.s.AsOperator()
+		if _, err := operator.DeleteExpiredLogObjects(t.Context(), 100, failingLogDeleter{}); err == nil {
+			t.Fatal("a failed object delete was reported as success")
+		}
+		if grew := f.retained(t) - before; grew != 13 {
+			t.Fatalf("after a failed delete the slots count %d bytes; want 13", grew)
+		}
+		if n, err := operator.DeleteExpiredLogObjects(t.Context(), 100, objects); err != nil || n != 1 {
+			t.Fatalf("expiry deleted %d objects, %v; want the one past its class", n, err)
+		}
+		exists := func(key string) bool {
+			_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(key)))
+			return err == nil
+		}
+		if exists(old) || !exists(recent) {
+			t.Fatal("expiry deleted the wrong log object")
+		}
+		if grew := f.retained(t) - before; grew != 5 {
+			t.Fatalf("after expiry the slots count %d bytes; want the recent 5", grew)
 		}
 	})
 }

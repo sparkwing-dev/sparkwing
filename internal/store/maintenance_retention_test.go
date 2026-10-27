@@ -12,7 +12,7 @@ func TestRewriteRetentionKeepsPinsEffectsAndFinancialRows(t *testing.T) {
 	s, _, now := maintenanceStore(t)
 	ctx := context.Background()
 	old := now.Add(-120 * 24 * time.Hour).UnixNano()
-	for i, id := range []string{"old_failure", "old_success", "pinned", "undelivered", "fresh"} {
+	for i, id := range []string{"old_failure", "old_success", "pinned", "undelivered", "fresh", "logged"} {
 		state := runstate.RunSuccess
 		if id == "old_failure" {
 			state = runstate.RunFailed
@@ -23,6 +23,9 @@ func TestRewriteRetentionKeepsPinsEffectsAndFinancialRows(t *testing.T) {
 		}
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO pipeline_success_pins(team,pipeline,run_id,finished_at) VALUES ('a','pipeline','pinned',?)`, old)
+	// A run whose log object Sparkwing has not yet deleted keeps its counted slot, so retention keeps the run.
+	rewriteSchemaExec(t, s.db, `INSERT INTO log_streams(team,run_id,id,subject_kind,generation,unit_kind,prefix,retention_class,created_at,updated_at) VALUES ('a','logged','stream','owner_unit',1,'plan','stream','r30',?,?)`, old, old)
+	rewriteSchemaExec(t, s.db, `INSERT INTO log_slots(team,run_id,stream_id,generation,n,size,committed,object_key,created_at) VALUES ('a','logged','stream',1,1,8,1,'key',?)`, old)
 	rewriteSchemaExec(t, s.db, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES ('a','undelivered','github_check','success',1,?)`, old)
 	rewriteSchemaExec(t, s.db, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,delivered_rev,next_at,delivered_at) VALUES ('a','pinned','metrics','success',1,1,?,?)`, old, old)
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','pinned','job','pending',?,?)`, []byte(`{}`), []byte(`{}`))
@@ -48,7 +51,7 @@ VALUES ('digest','expired','a','account','one','controller',?,'delegate',1,?,'no
 	if result.Runs != 2 || result.Metrics != 1 || result.Records != 1 || result.Capabilities != 1 || result.Effects != 1 || result.PinnedRuns != 1 || result.PinnedOutputs != 1 || result.ReleasedBytes != 20 {
 		t.Fatalf("retention: %+v", result)
 	}
-	for table, want := range map[string]int{"runs": 3, "blob_records": 1, "credit_charges": 1, "storage_run_usage": 1, "run_effects": 1, "github_app_deliveries": 2} {
+	for table, want := range map[string]int{"runs": 4, "log_slots": 1, "blob_records": 1, "credit_charges": 1, "storage_run_usage": 1, "run_effects": 1, "github_app_deliveries": 2} {
 		rewriteSchemaCount(t, s.db, table, want)
 	}
 	var balance int64

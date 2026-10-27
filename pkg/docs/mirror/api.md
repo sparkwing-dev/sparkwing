@@ -241,7 +241,9 @@ execution evidence.
 Run logs use `GET /api/v1/runs/{run}/logs`. Job reads, streams and completeness
 use `/api/v1/runs/{run}/jobs/{job}/logs`, `/logs/stream` and
 `/logs/completeness`. Job segment and manifest writes use the matching
-`/log-segments` and `/log-manifest` routes. Log subjects distinguish job attempts
+`/log-segments` and `/log-manifest` routes. A commit verifies the stored objects it
+records; the final commit's `manifest` names the manifest's stored `size` and
+`digest`, and a mismatch answers `integrity_failure`. Log subjects distinguish job attempts
 from trigger, plan and eval units. A final log-tail exception cannot reopen work
 or write another attempt's logs.
 

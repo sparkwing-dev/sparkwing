@@ -202,22 +202,22 @@ writer. The first payload wins, an identical retry succeeds, and different bytes
 cannot replace it.
 S3 signs `If-None-Match: *` because future slots have no known payload digest or
 length. The batch and uploader carry that header through the PUT. S3 refuses
-every existing object with HTTP 412, including an identical retry. After a
-transfer error, the uploader asks the controller's `VerifyUpload` route to reauthorize the
-writer and verify that exact object's stored size and SHA-256. Only a successful
-verification permits the record commit to proceed. `logseg.uploadVerifier`
-performs the bounded object read after the controller supplies the run's
-persisted retention class. Cancellation, mismatched bytes and failed close
-remain errors. A precondition failure alone never proves matching bytes.
-The controller route and upload admission for unknown future payloads still
-need integration.
+every existing object with HTTP 412, including an identical retry. The native
+uploader treats 412 as an uncertain PUT and proceeds to the commit, whose
+controller route reauthorizes the writer and verifies that exact object's stored
+size and SHA-256 before recording it. `logseg.UploadVerifier` performs the
+bounded manifest read after the controller supplies the run's persisted
+retention class. Cancellation, mismatched bytes and failed close remain errors.
+A precondition failure alone never proves matching bytes.
 `Get` opens a log object only for a controller-side authorized segment read.
 The S3 backend opens exact log keys and refuses objects beyond the shared
 segment or manifest size bound. The committed reader verifies each persisted
 segment before sending bytes. Missing or corrupt objects remain read failures.
 
 `S3.LogClassReady` checks the bucket's lifecycle configuration for the batch
-signer's callback. It requires an enabled prefix rule with the class's days.
+signer's callback. It requires an enabled prefix rule expiring the class after
+at least its days. Sparkwing's maintenance pass deletes each log object at the
+class age (`DeleteLogObject`), so the rule is a backstop and should be longer.
 Rules limited by tags or object size cannot establish expiry for the whole
 class. The backend reads the rules and leaves their configuration to the operator.
 

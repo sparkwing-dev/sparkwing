@@ -37,8 +37,14 @@ func (s *Server) maintainDataObjects(ctx context.Context) error {
 	if err := operator.DeleteExpiredBlobStaging(ctx, 5000, s.dataController.Objects); err != nil {
 		return fmt.Errorf("delete expired blob staging: %w", err)
 	}
-	if marked > 0 || removed > 0 {
-		s.logger.Info("collected unreachable data", "marked", marked, "removed", removed)
+	logs := 0
+	if objects, ok := s.dataController.Objects.(blob.LogObjectDeleter); ok {
+		if logs, err = operator.DeleteExpiredLogObjects(ctx, 5000, objects); err != nil {
+			return fmt.Errorf("delete expired log objects: %w", err)
+		}
+	}
+	if marked > 0 || removed > 0 || logs > 0 {
+		s.logger.Info("collected unreachable data", "marked", marked, "removed", removed, "expired_logs", logs)
 	}
 	if objects, ok := s.dataController.Objects.(*blob.Filesystem); ok {
 		if _, err := objects.ExpireLogs(ctx); err != nil {

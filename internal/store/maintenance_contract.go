@@ -47,8 +47,6 @@ type RetentionResult struct {
 	ReleasedBytes int64
 	PinnedRuns    int64
 	PinnedOutputs int64
-	// LogSlots counts log objects no longer counted as stored because their retention class expired them.
-	LogSlots int64
 }
 
 // MaintainRetention is the single deployment pass for run, metric, object and credential expiration.

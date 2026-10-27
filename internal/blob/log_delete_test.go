@@ -211,3 +211,47 @@ func TestFilesystemSignedLogSlotHasOneConcurrentWinner(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Expiry deletes one log object only inside the run it names; a key in another run or outside the log tree is
+// refused, and a key already gone is success.
+func TestFilesystemDeleteLogObjectStaysInItsRun(t *testing.T) {
+	dir := t.TempDir()
+	objects, err := NewFilesystem(FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{7}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	key, err := LogObjectKey(LogSubject{Kind: LogOwnerUnit, Team: "team", RunID: "run", Unit: &LogUnit{Kind: LogPlan, Generation: 1}}, "r30", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, filepath.FromSlash(key))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("log"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, refused := range []struct{ team, run, key string }{
+		{"team", "other", key}, {"other", "run", key}, {"team", "run", "teams/team/pending/x"}, {"team", "run", "logs/r30/teams/team/runs/run/../../other/runs/run/x"},
+	} {
+		if err := objects.DeleteLogObject(t.Context(), refused.team, refused.run, refused.key); err == nil {
+			t.Fatalf("deleted %+v outside its run", refused)
+		}
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("a refused delete removed the object: %v", err)
+	}
+	for range 2 {
+		if err := objects.DeleteLogObject(t.Context(), "team", "run", key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("object survived its delete: %v", err)
+	}
+}

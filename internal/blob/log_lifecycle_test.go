@@ -30,15 +30,16 @@ func TestLifecycleRuleMustExpireTheClassPrefixAfterItsDays(t *testing.T) {
 		rules []types.LifecycleRule
 		want  bool
 	}{
-		"exact rule":     {[]types.LifecycleRule{rule(prefix, 90, true)}, true},
-		"broader rule":   {[]types.LifecycleRule{rule("logs/", 90, true)}, true},
-		"wrong days":     {[]types.LifecycleRule{rule(prefix, 30, true)}, false},
-		"disabled":       {[]types.LifecycleRule{rule(prefix, 90, false)}, false},
-		"another prefix": {[]types.LifecycleRule{rule("logs/r30/", 90, true)}, false},
-		"no rules":       {nil, false},
-		"tag filter":     {[]types.LifecycleRule{{Status: types.ExpirationStatusEnabled, Expiration: &types.LifecycleExpiration{Days: aws.Int32(90)}, Filter: &types.LifecycleRuleFilter{Tag: &types.Tag{Key: aws.String("k"), Value: aws.String("v")}}}}, false},
-		"size filter":    {[]types.LifecycleRule{{Status: types.ExpirationStatusEnabled, Expiration: &types.LifecycleExpiration{Days: aws.Int32(90)}, Filter: &types.LifecycleRuleFilter{Prefix: aws.String(prefix), ObjectSizeGreaterThan: aws.Int64(1)}}}, false},
-		"and filter":     {[]types.LifecycleRule{{Status: types.ExpirationStatusEnabled, Expiration: &types.LifecycleExpiration{Days: aws.Int32(90)}, Filter: &types.LifecycleRuleFilter{And: &types.LifecycleRuleAndOperator{Prefix: aws.String(prefix)}}}}, false},
+		"exact rule":      {[]types.LifecycleRule{rule(prefix, 90, true)}, true},
+		"broader rule":    {[]types.LifecycleRule{rule("logs/", 90, true)}, true},
+		"longer backstop": {[]types.LifecycleRule{rule(prefix, 97, true)}, true},
+		"shorter rule":    {[]types.LifecycleRule{rule(prefix, 30, true)}, false},
+		"disabled":        {[]types.LifecycleRule{rule(prefix, 90, false)}, false},
+		"another prefix":  {[]types.LifecycleRule{rule("logs/r30/", 90, true)}, false},
+		"no rules":        {nil, false},
+		"tag filter":      {[]types.LifecycleRule{{Status: types.ExpirationStatusEnabled, Expiration: &types.LifecycleExpiration{Days: aws.Int32(90)}, Filter: &types.LifecycleRuleFilter{Tag: &types.Tag{Key: aws.String("k"), Value: aws.String("v")}}}}, false},
+		"size filter":     {[]types.LifecycleRule{{Status: types.ExpirationStatusEnabled, Expiration: &types.LifecycleExpiration{Days: aws.Int32(90)}, Filter: &types.LifecycleRuleFilter{Prefix: aws.String(prefix), ObjectSizeGreaterThan: aws.Int64(1)}}}, false},
+		"and filter":      {[]types.LifecycleRule{{Status: types.ExpirationStatusEnabled, Expiration: &types.LifecycleExpiration{Days: aws.Int32(90)}, Filter: &types.LifecycleRuleFilter{And: &types.LifecycleRuleAndOperator{Prefix: aws.String(prefix)}}}}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := logLifecycleExpires(tc.rules, prefix, 90); got != tc.want {
@@ -58,15 +59,18 @@ func TestLifecycleRuleMustExpireTheClassPrefixAfterItsDays(t *testing.T) {
 
 func TestS3LogLifecycleReadiness(t *testing.T) {
 	for _, class := range []string{"r30", "r90", "r120"} {
-		for _, response := range []string{"configured", "absent", "wrong days", "denied"} {
+		for _, response := range []string{"configured", "longer backstop", "shorter rule", "absent", "denied"} {
 			t.Run(class+"/"+response, func(t *testing.T) {
 				backend := logS3(t, func(r *http.Request) (*http.Response, error) {
 					if r.Method != http.MethodGet || r.URL.Path != "/bucket" || !r.URL.Query().Has("lifecycle") {
 						t.Fatalf("unexpected lifecycle request: %s %s", r.Method, r.URL.Path)
 					}
 					days, _ := LogClassDays(class)
-					if response == "wrong days" {
-						days++
+					switch response {
+					case "longer backstop":
+						days += 7
+					case "shorter rule":
+						days--
 					}
 					status := http.StatusOK
 					raw := fmt.Sprintf(`<LifecycleConfiguration><Rule><ID>logs</ID><Status>Enabled</Status><Filter><Prefix>logs/%s/</Prefix></Filter><Expiration><Days>%d</Days></Expiration></Rule></LifecycleConfiguration>`, class, days)
@@ -79,7 +83,7 @@ func TestS3LogLifecycleReadiness(t *testing.T) {
 					return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(raw)), Request: r}, nil
 				})
 				err := backend.LogClassReady(t.Context(), class)
-				if (err == nil) != (response == "configured") {
+				if (err == nil) != (response == "configured" || response == "longer backstop") {
 					t.Fatalf("lifecycle = %v", err)
 				}
 				if response == "denied" && !strings.Contains(err.Error(), "AccessDenied") {

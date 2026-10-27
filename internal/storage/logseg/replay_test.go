@@ -35,8 +35,8 @@ func TestLogUploadReplayVerifiesExactObject(t *testing.T) {
 			sum := sha256.Sum256(raw)
 			check := blob.LogUploadCheck{Subject: subject, Index: index, Size: int64(len(raw)), Digest: blob.Digest(hex.EncodeToString(sum[:]))}
 			objects := &replayObject{body: &observedLogBody{Reader: bytes.NewReader(raw)}}
-			verifier := uploadVerifier{Objects: objects}
-			if err := verifier.verify(t.Context(), check, "r90"); err != nil {
+			verifier := UploadVerifier{Objects: objects}
+			if err := verifier.Verify(t.Context(), check, "r90"); err != nil {
 				t.Fatal(err)
 			}
 			prefix, err := blob.LogSubjectPrefix("r90", subject)
@@ -101,7 +101,7 @@ func TestLogUploadReplayRefusals(t *testing.T) {
 			case "cancelled":
 				cancel()
 			}
-			err := (uploadVerifier{Objects: objects}).verify(ctx, check, class)
+			err := (UploadVerifier{Objects: objects}).Verify(ctx, check, class)
 			if err == nil {
 				t.Fatal("invalid replay succeeded")
 			}

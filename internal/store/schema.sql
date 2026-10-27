@@ -1186,8 +1186,6 @@ CREATE TABLE log_streams (
     prefix TEXT NOT NULL,
     retention_class TEXT NOT NULL,
     uploaded_through BIGINT NOT NULL DEFAULT 0 CHECK(uploaded_through >= 0),
-    stored_bytes BIGINT NOT NULL DEFAULT 0 CHECK(stored_bytes >= 0),
-    charged_bytes BIGINT NOT NULL DEFAULT 0 CHECK(charged_bytes >= 0),
     sealed_at BIGINT,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
@@ -1211,8 +1209,8 @@ CREATE UNIQUE INDEX log_job_subject ON log_streams(team,run_id,node_id,attempt) 
 CREATE UNIQUE INDEX log_owner_subject ON log_streams(team,run_id,unit_kind,generation) WHERE unit_kind IN ('trigger','plan');
 CREATE UNIQUE INDEX log_eval_subject ON log_streams(team,run_id,source_node_id,source_generation,generation) WHERE unit_kind = 'eval';
 
--- safety: a log slot's bytes count as retained from its first signing until the object is deleted, so an
--- upload that is never committed still counts; a commit only lowers it to the verified stored size.
+-- safety: a log slot's signed size counts as retained from its first signing until Sparkwing deletes its object,
+-- so an upload that is never committed still counts and no commit lowers it.
 CREATE TABLE log_slots (
     team TEXT NOT NULL REFERENCES teams(name),
     run_id TEXT NOT NULL,
@@ -1221,11 +1219,14 @@ CREATE TABLE log_slots (
     n BIGINT NOT NULL CHECK(n >= 0),
     size BIGINT NOT NULL CHECK(size >= 0),
     committed BIGINT NOT NULL DEFAULT 0 CHECK(committed IN (0,1)),
+    object_key TEXT NOT NULL,
     created_at BIGINT NOT NULL,
     PRIMARY KEY(team,run_id,stream_id,n),
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
     FOREIGN KEY(team,run_id,stream_id,generation) REFERENCES log_streams(team,run_id,id,generation) ON DELETE CASCADE
 );
+
+CREATE INDEX log_slots_created ON log_slots(created_at);
 
 CREATE TABLE log_segments (
     team TEXT NOT NULL REFERENCES teams(name),

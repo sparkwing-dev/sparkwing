@@ -89,14 +89,8 @@ The controller's team storage report consumes this snapshot.
 Every write that grows a team's stored data passes one storage rule,
 `admitStorageGrowthTx`, in the write's own transaction: run events
 (`appendEventTx`, so `Tenant.AppendEvent` and every state transition), blob and
-source upload reservations and tagged log segments. A log slot (stream and
-index; index 0 is the final manifest) passes the rule when it is first signed
-([`Tenant.OpenLogSlot`](controller_reporting.go)). Its size is fixed then, and
-its bytes count as retained, committed or not, until the object is deleted:
-run retention cascades the slot, and maintenance drops slots of streams past
-their log class, which the object store's lifecycle removed. A commit only
-lowers a slot to the verified stored size (the controller reads the manifest
-object), and signing a committed slot again reports it committed. It refuses a held team,
+source upload reservations and tagged log segments (see
+[log slot accounting](#log-slot-accounting)). It refuses a held team,
 growth past the free storage allowance on an empty balance while storage is
 priced, and growth past the team's tier quota (monthly bytes, per-run bytes and
 objects), then counts the growth so a refused write records nothing. A run's
@@ -106,6 +100,24 @@ teams without an explicit quota and prices storage at the published rate by
 default. One default free allowance, 1 GiB, serves billing, admission and the
 console. The free-tier slot table, its idle release, `AppendEventCharged` and
 the per-store free shares are removed.
+
+### Log slot accounting
+
+This is the one rule for counting tagged log bytes. A log slot (stream and
+index; index 0 is the final manifest) passes the storage rule when it is first
+signed ([`Tenant.OpenLogSlot`](controller_reporting.go)), and its signed size is
+fixed then. That size counts as retained, committed or not, until Sparkwing
+itself deletes the object. Commit never lowers it: a segment larger than its
+slot is refused, the final commit only marks the manifest slot committed, and
+signing a committed slot again reports it committed. Accounting is retired
+only after Sparkwing deletes the object, in that order: the maintenance pass
+([`Operator.DeleteExpiredLogObjects`](log_expiry.go)) deletes each object whose
+slot was signed longer ago than the stream's log class and then drops the slot,
+keeping it counted when the delete fails. Run retention keeps a run while it
+has slots, so cascading run deletion never drops a counted slot. A bucket
+lifecycle rule is a backstop set longer than the class; Sparkwing never infers
+that one deleted an object. Overcounting happens only when a client signs for
+more bytes than it uploads.
 
 Download accounting uses `Tenant.ChargeDownload`. The raw Store method is
 removed. The request accepts the existing cap policy, with no team or caller
@@ -425,8 +437,9 @@ their publisher's final-commit contract because publication has no lease.
 The independent bucket-listing storage pass is removed with its mark/reconcile
 APIs, raw download-day pruning, legacy receipt pruning and free-share log row
 selection. The controller's maintenance timer runs final retention,
-tagged-stream sealing and committed-inventory billing. Physical bucket bytes
-cannot overwrite usage counters or become retained billing facts.
+tagged-stream sealing, log expiry under [log slot accounting](#log-slot-accounting)
+and committed-inventory billing. Physical bucket bytes cannot overwrite usage
+counters or become retained billing facts.
 Allowance-driven physical eviction still requires the final record/log adapter.
 
 `Store.ReserveStorage`, `Store.CommitStorage`, their exported request/response

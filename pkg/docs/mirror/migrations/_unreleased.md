@@ -1768,9 +1768,10 @@ collection after the 24-hour grace.
 - **Operator steps:** keep the logs service running so its existing logs
   stay readable. On an S3 cache bucket, grant the controller
   `s3:GetLifecycleConfiguration` and add enabled lifecycle rules expiring
-  `<cache prefix>/logs/r90/` after 90 days and `<cache prefix>/logs/r30/`
-  after 30, plus `<cache prefix>/logs/r<days>/` after `<days>` for each
-  team `--log-retention team=days` names; [self-hosting.md](../self-hosting.md#node-log-retention)
+  `<cache prefix>/logs/r90/` after at least 90 days and `<cache prefix>/logs/r30/`
+  after at least 30, plus `<cache prefix>/logs/r<days>/` after at least `<days>`
+  for each team `--log-retention team=days` names. The controller deletes log
+  objects at the class age itself, so set each rule longer as a backstop; [self-hosting.md](../self-hosting.md#node-log-retention)
   has the command. Until a class has its rule, the controller issues no
   upload URLs into it and those nodes' runners keep writing to their logs
   URL, or their own disk without one. A controller that keeps segments on

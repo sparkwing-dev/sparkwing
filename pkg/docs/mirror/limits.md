@@ -97,14 +97,16 @@ replace those authoritative counts. Exact ticket replay never charges twice.
 Deployment reports sum usage by tenant and period.
 
 Expired staging uploads still count until garbage collection removes them. A
-log segment or manifest counts from the moment its upload is signed, committed or
-not, until its log retention class expires it.
+log segment or manifest counts at the size its upload was signed for, committed
+or not, from signing until Sparkwing deletes the object: maintenance deletes it
+once its retention class has passed since signing, or its run is deleted.
 
 The controller's maintenance pass expires records, marks unreachable
 blobs and collects tombstones after the 24-hour grace period. New references
 preserve their bytes. Physical deletion failures retain the tombstone for retry.
-S3 uses log lifecycle rules. A filesystem backend expires classed objects during
-maintenance. The former bucket-reconciliation pass, free-log-share pruner
+Sparkwing deletes log objects at their retention class age. An S3 lifecycle
+rule must expire each class no sooner than that, as a backstop. A filesystem
+backend also expires classed objects during maintenance. The former bucket-reconciliation pass, free-log-share pruner
 and `storage_pass` health field are removed.
 
 The controller authorizes `/api/v1/data/upload` and reserves quota before signing

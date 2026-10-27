@@ -63,6 +63,14 @@ func TestStoreBillingRetention(t *testing.T) {
 	}
 	*now = now.Add(120 * 24 * time.Hour)
 	rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)", []byte(`90`))
+	// Retention keeps a run until Sparkwing has deleted its counted log objects.
+	if result, err := op.MaintainRetention(t.Context(), RetentionRequest{Limit: 100}); err != nil || result.Runs != 0 {
+		t.Fatalf("retention before log expiry: %+v: %v", result, err)
+	}
+	deleted := &recordingLogDeleter{}
+	if n, err := op.DeleteExpiredLogObjects(t.Context(), 100, deleted); err != nil || n == 0 || n != len(deleted.keys) {
+		t.Fatalf("log expiry deleted %d objects (%v): %v", n, deleted.keys, err)
+	}
 	result, err := op.MaintainRetention(t.Context(), RetentionRequest{Limit: 100})
 	if err != nil || result.Runs != 1 {
 		t.Fatalf("retention: %+v: %v", result, err)
@@ -248,4 +256,11 @@ func billingFinancialSnapshot(ctx context.Context, db *sql.DB) (map[string][]str
 		slices.Sort(snapshot[table])
 	}
 	return snapshot, nil
+}
+
+type recordingLogDeleter struct{ keys []string }
+
+func (d *recordingLogDeleter) DeleteLogObject(_ context.Context, _, _, key string) error {
+	d.keys = append(d.keys, key)
+	return nil
 }

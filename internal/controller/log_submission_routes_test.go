@@ -147,9 +147,30 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 		}
 		engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(encoded), 200)
 	}
-	commit := logCommitRequest{Subject: subject, Segments: []runstate.Segment{first, second}, Final: true}
+	// The final commit verifies the stored manifest, since a create-only refusal on its PUT proves nothing about it.
+	manifest := []byte(`{"status":"complete"}`)
+	manifestSum := sha256.Sum256(manifest)
+	signManifest, err := json.Marshal(blob.LogSigningRequest{Subject: subject, Index: 0, Size: int64(len(manifest)), Digest: blob.Digest(hex.EncodeToString(manifestSum[:]))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifestSlot blob.LogUploadURL
+	if err := json.Unmarshal(engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(signManifest), 200).Body.Bytes(), &manifestSlot); err != nil {
+		t.Fatal(err)
+	}
+	if code := put(manifestSlot, manifest); code != http.StatusCreated {
+		t.Fatalf("manifest PUT = %d", code)
+	}
+	otherSum := sha256.Sum256([]byte("other"))
+	commit := logCommitRequest{Subject: subject, Segments: []runstate.Segment{first, second}, Final: true,
+		Manifest: &blob.LogUploadCheck{Subject: subject, Size: int64(len(manifest)), Digest: blob.Digest(hex.EncodeToString(otherSum[:]))}}
 	encoded, err := json.Marshal(commit)
 	if err != nil {
+		t.Fatal(err)
+	}
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(encoded), http.StatusUnprocessableEntity)
+	commit.Manifest.Digest = blob.Digest(hex.EncodeToString(manifestSum[:]))
+	if encoded, err = json.Marshal(commit); err != nil {
 		t.Fatal(err)
 	}
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-manifest", string(encoded), 200)

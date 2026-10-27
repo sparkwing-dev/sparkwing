@@ -127,10 +127,11 @@ func (s *Server) handleLogSigning(w http.ResponseWriter, r *http.Request, a capa
 }
 
 type logCommitRequest struct {
-	Subject          blob.LogSubject    `json:"subject"`
-	Segments         []runstate.Segment `json:"segments"`
-	Final            bool               `json:"final"`
-	IncompleteReason string             `json:"incomplete_reason,omitempty"`
+	Subject          blob.LogSubject      `json:"subject"`
+	Segments         []runstate.Segment   `json:"segments"`
+	Final            bool                 `json:"final"`
+	Manifest         *blob.LogUploadCheck `json:"manifest,omitempty"`
+	IncompleteReason string               `json:"incomplete_reason,omitempty"`
 }
 
 type proposedLogSegments struct{ view runstate.LogSegments }
@@ -163,23 +164,32 @@ func (s *Server) handleLogCommit(w http.ResponseWriter, r *http.Request, a capab
 		}
 		body.Segments[i].ObjectKey = key
 	}
-	if len(body.Segments) > 0 {
+	if body.Manifest != nil && (!body.Final || body.Manifest.Index != 0) {
+		return invalidEngineBody("invalid manifest check")
+	}
+	// safety: a create-only PUT refused with 412 proves only that the key exists, so every commit verifies the
+	// stored bytes it records before the store accepts them.
+	if len(body.Segments) > 0 || body.Manifest != nil {
 		objects, err := s.submissionObjects()
 		if err != nil {
 			return err
 		}
-		reader := logseg.CommittedReader{Objects: objects, Records: proposedLogSegments{runstate.LogSegments{Subject: subject, Segments: body.Segments}}}
-		offset := body.Segments[0].Offset
-		if _, err := reader.Read(r.Context(), actor, blob.LogReadRequest{Subject: subject, Offset: offset}, io.Discard); err != nil {
-			return err
+		if len(body.Segments) > 0 {
+			reader := logseg.CommittedReader{Objects: objects, Records: proposedLogSegments{runstate.LogSegments{Subject: subject, Segments: body.Segments}}}
+			offset := body.Segments[0].Offset
+			if _, err := reader.Read(r.Context(), actor, blob.LogReadRequest{Subject: subject, Offset: offset}, io.Discard); err != nil {
+				return dataRouteError(err)
+			}
+		}
+		if body.Manifest != nil {
+			check := *body.Manifest
+			check.Subject = subject
+			if err := (logseg.UploadVerifier{Objects: objects}).Verify(r.Context(), check, class); err != nil {
+				return dataRouteError(err)
+			}
 		}
 	}
 	commit := store.SegmentCommit{Subject: subject, Actor: actor, Segments: body.Segments, Final: body.Final, IncompleteReason: body.IncompleteReason, RetentionClass: class}
-	if body.Final {
-		if commit.ManifestBytes, err = s.storedManifestBytes(r.Context(), subject, class); err != nil {
-			return err
-		}
-	}
 	if err := tenant.RecordSegments(r.Context(), commit); err != nil {
 		return engineLookupError(err)
 	}
@@ -246,29 +256,4 @@ func storageGrowthRefusal(err error) error {
 	default:
 		return engineLookupError(err)
 	}
-}
-
-// storedManifestBytes measures a stream's final manifest object, zero when none was stored, so its commit counts
-// what the object store actually holds.
-func (s *Server) storedManifestBytes(ctx context.Context, subject blob.LogSubject, class string) (int64, error) {
-	objects, err := s.submissionObjects()
-	if err != nil {
-		return 0, nil
-	}
-	prefix, err := blob.LogSubjectPrefix(class, subject)
-	if err != nil {
-		return 0, err
-	}
-	object, err := objects.Get(ctx, blob.LogManifestKey(prefix))
-	if errors.Is(err, blob.ErrNotFound) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	n, err := io.Copy(io.Discard, io.LimitReader(object, limits.LogManifestBytes+1))
-	if err = errors.Join(err, object.Close()); err != nil {
-		return 0, err
-	}
-	return n, nil
 }

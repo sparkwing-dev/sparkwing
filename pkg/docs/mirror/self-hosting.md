@@ -63,7 +63,9 @@ refuses any other value.
 
 The log storage contract assigns a retention class before signing segment
 uploads. Object-store lifecycle rules must cover each class before URLs are
-issued. The shared free and funded classes are thirty and ninety days.
+issued and expire it no sooner than the class: Sparkwing deletes log objects at
+the class age itself, so set each rule longer (for example the class plus seven
+days) as a backstop. The shared free and funded classes are thirty and ninety days.
 Filesystem storage uses its backend's retention mechanism.
 
 Log reads reauthorize at the controller and cover tagged job-attempt and

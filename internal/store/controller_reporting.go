@@ -55,8 +55,8 @@ type LogSlot struct {
 }
 
 // OpenLogSlot checks the writer as PrepareLogWrite does and, before the caller signs an upload URL, admits a new
-// slot's bytes through the storage rule. They count as retained from then until the object is deleted, whether or
-// not it is ever committed, so a refused team gets no URL and an abandoned upload still counts. Signing the slot
+// slot's bytes through the storage rule. They count as retained from then until Sparkwing deletes the object,
+// whether or not it is ever committed, so a refused team gets no URL and an abandoned upload still counts. Signing the slot
 // again returns its first size, never another.
 func (t *Tenant) OpenLogSlot(ctx context.Context, subject blob.LogSubject, actor runstate.Actor, index, size int64) (LogSlot, error) {
 	if subject.Team != string(t.team) {
@@ -86,8 +86,12 @@ func (t *Tenant) OpenLogSlot(ctx context.Context, subject blob.LogSubject, actor
 			out.Size, out.Committed = slot.size, slot.committed
 			return nil
 		}
+		key, err := blob.LogObjectKey(subject, out.RetentionClass, index)
+		if err != nil {
+			return err
+		}
 		out.Size = size
-		return openLogSlotTx(ctx, tx, t.team, subject.RunID, identity, index, size, false)
+		return openLogSlotTx(ctx, tx, t.team, subject.RunID, identity, index, size, key, false)
 	})
 	return out, err
 }

@@ -179,7 +179,8 @@ access under `controller/`. Scope object permissions to
 `controller/*` through its `s3:prefix` condition. Allow
 `s3:GetLifecycleConfiguration` on the bucket and configure lifecycle expiry
 rules for `controller/logs/r30/`, `controller/logs/r90/` and every other retention
-class in use. Set `AWS_REGION` through `controller.extraEnv`. Configure
+class in use, each longer than its class (for example 37 and 97 days). The
+controller deletes log objects at the class age; the rule is a backstop. Set `AWS_REGION` through `controller.extraEnv`. Configure
 CloudFront's origin access to that prefix with an empty origin path, because
 signed download paths already include `controller/`. Add its public key to a
 trusted key group, set `controller.cloudfront.domain` and `keyPairID`, and mount
