@@ -221,20 +221,6 @@ func TestSignUpsOutsideTheDayDoNotCount(t *testing.T) {
 	}
 }
 
-// A closed free tier waitlists new accounts while it lasts and records
-// nothing, so the gate reopens as soon as storage does.
-func TestAClosedFreeTierWaitlistsWithoutLatching(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.Open(t)
-	requireWaitlisted(t, signUpAt(t, st, googleProfile("f1", "f1@example.com"),
-		store.SignUpConditions{FreeTierClosed: true}, time.Now()), store.WaitlistReasonFreeTier)
-	g, err := st.AsOperator().SignUpGate(ctx)
-	if err != nil || g.Mode != store.SignUpOpen {
-		t.Fatalf("gate = %+v, %v; a free-tier closure must not be stored", g, err)
-	}
-	requireAdmitted(t, signUpAt(t, st, googleProfile("f2", "f2@example.com"), store.SignUpConditions{}, time.Now()))
-}
-
 func TestTheDeploymentSettingWaitlistsEveryNewAccount(t *testing.T) {
 	st := storetest.Open(t)
 	old := signIn(t, st, "o1", "o1@example.com")

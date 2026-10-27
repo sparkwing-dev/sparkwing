@@ -238,9 +238,6 @@ func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, k
 			return err
 		}
 	}
-	if err := lockClaimControllerTx(ctx, tx); err != nil {
-		return err
-	}
 	if fence.actor.Authority.Kind != "" {
 		if _, err := teamAuthorityChainTx(ctx, tx, team, fence.actor.Authority, true, claimantAccepts(fence.actor)); err != nil {
 			return err

@@ -21,23 +21,19 @@ func TestBlobGCGraceReachabilityAndDeletionFailure(t *testing.T) {
 	now := time.Unix(1000, 0).UTC()
 	s.clock = func() time.Time { return now }
 	op := s.AsOperator()
-	lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "gc", 3*limits.BlobGCGrace)
-	if err != nil {
-		t.Fatal(err)
-	}
 	digest := strings.Repeat("a", 64)
 	rewriteSchemaExec(t, s.db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,3,1)", digest)
-	marked, err := op.MarkBlobTombstones(t.Context(), lease, 10)
+	marked, err := op.MarkBlobTombstones(t.Context(), 10)
 	if err != nil || marked != 1 {
 		t.Fatalf("mark=%d,%v", marked, err)
 	}
 	calls := 0
 	refuse := blobDeleteFunc(func(context.Context, blob.Blob) error { calls++; return errors.New("object store unavailable") })
-	if n, err := op.CollectBlobTombstones(t.Context(), lease, 10, refuse); err != nil || n != 0 || calls != 0 {
+	if n, err := op.CollectBlobTombstones(t.Context(), 10, refuse); err != nil || n != 0 || calls != 0 {
 		t.Fatalf("deleted before grace: %d,%v,%d", n, err, calls)
 	}
 	now = now.Add(limits.BlobGCGrace)
-	if _, err := op.CollectBlobTombstones(t.Context(), lease, 10, refuse); err == nil {
+	if _, err := op.CollectBlobTombstones(t.Context(), 10, refuse); err == nil {
 		t.Fatal("object deletion failure ignored")
 	}
 	rewriteSchemaCount(t, s.db, "blobs", 1)
@@ -48,7 +44,7 @@ func TestBlobGCGraceReachabilityAndDeletionFailure(t *testing.T) {
 		}
 		return nil
 	})
-	if n, err := op.CollectBlobTombstones(t.Context(), lease, 10, success); err != nil || n != 1 {
+	if n, err := op.CollectBlobTombstones(t.Context(), 10, success); err != nil || n != 1 {
 		t.Fatalf("collect=%d,%v", n, err)
 	}
 	rewriteSchemaCount(t, s.db, "blobs", 0)
@@ -64,11 +60,7 @@ func TestBlobGCReceiptProtectsUploadedBytesAndClearsTombstone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "blob_tombstones", 0)
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "gc", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil || n != 0 {
+	if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), 10); err != nil || n != 0 {
 		t.Fatalf("live receipt collected: %d,%v", n, err)
 	}
 }
@@ -81,10 +73,6 @@ func TestBlobGCReferenceProtectsOldBytesAcrossTeams(t *testing.T) {
 			now := time.Unix(1_800_000_000, 0).UTC()
 			s.clock = func() time.Time { return now }
 			op := s.AsOperator()
-			lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "gc", 3*limits.BlobGCGrace)
-			if err != nil {
-				t.Fatal(err)
-			}
 			root, leaf := strings.Repeat("a", 64), strings.Repeat("b", 64)
 			teams := []Team{DefaultTeam, "a", "b"}
 			protected := 0
@@ -99,7 +87,7 @@ func TestBlobGCReferenceProtectsOldBytesAcrossTeams(t *testing.T) {
 				}
 			}
 			want := int64(2 * (3 - protected))
-			if n, err := op.MarkBlobTombstones(t.Context(), lease, 20); err != nil || n != want {
+			if n, err := op.MarkBlobTombstones(t.Context(), 20); err != nil || n != want {
 				t.Fatalf("tenant reachability mark=%d, want %d: %v", n, want, err)
 			}
 			now = now.Add(limits.BlobGCGrace)
@@ -113,7 +101,7 @@ func TestBlobGCReferenceProtectsOldBytesAcrossTeams(t *testing.T) {
 				removed[b.Team]++
 				return nil
 			})
-			if n, err := op.CollectBlobTombstones(t.Context(), lease, 20, deleter); err != nil || n != want {
+			if n, err := op.CollectBlobTombstones(t.Context(), 20, deleter); err != nil || n != want {
 				t.Fatalf("tenant collection=%d, want %d: %v", n, want, err)
 			}
 			for i, team := range teams {

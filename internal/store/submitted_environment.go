@@ -148,7 +148,7 @@ func checkExecutionUnitTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		if err != nil {
 			return err
 		}
-		if state.RunCancelled || state.Expansion == nil || state.Expansion.Lease != *c.Binding.Expansion || state.Expansion.ControllerLeaseExpiresAt == nil || !state.Expansion.ControllerLeaseExpiresAt.After(tx.now(ctx)) {
+		if state.RunCancelled || state.Expansion == nil || state.Expansion.Lease != *c.Binding.Expansion {
 			return bindingRefusal()
 		}
 	}

@@ -346,7 +346,7 @@ func (*nativeLocalStateW8) Ready() error { return nil }
 
 func (*nativeLocalStateW8) TypeSafeAPIKey(context.Context) (string, error) { return "", nil }
 
-func (*nativeLocalStateW8) Reconcile(context.Context, store.SingletonLease) (wingd.LocalActivity, error) {
+func (*nativeLocalStateW8) Reconcile(context.Context) (wingd.LocalActivity, error) {
 	return wingd.LocalActivity{Runs: 1, QueuedTriggers: 1}, nil
 }
 

@@ -16,6 +16,49 @@ type LogDeleter interface {
 	DeleteLogs(context.Context, string, string) (int64, error)
 }
 
+// LogObjectDeleter removes one log object of a run once its retention class has elapsed; absence is success.
+type LogObjectDeleter interface {
+	DeleteLogObject(ctx context.Context, team, run, key string) error
+}
+
+func logObjectInRun(team, run, key string) error {
+	class, _, _ := strings.Cut(strings.TrimPrefix(key, "logs/"), "/")
+	prefix, err := logRunPrefix(class, team, run)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(key, prefix) || !fs.ValidPath(key) {
+		return fmt.Errorf("log object key is outside its run")
+	}
+	return nil
+}
+
+// DeleteLogObject removes one log object of the run.
+func (f *Filesystem) DeleteLogObject(ctx context.Context, team, run, key string) error {
+	if err := logObjectInRun(team, run, key); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := f.root.Remove(key); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// DeleteLogObject removes one log object of the run.
+func (s *S3) DeleteLogObject(ctx context.Context, team, run, key string) error {
+	if err := logObjectInRun(team, run, key); err != nil {
+		return err
+	}
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(key))})
+	if s3Error(err, "NoSuchKey", "NotFound") {
+		return nil
+	}
+	return err
+}
+
 func logDeletionPrefix(class, team, run string) (string, error) {
 	if run != "" {
 		return logRunPrefix(class, team, run)

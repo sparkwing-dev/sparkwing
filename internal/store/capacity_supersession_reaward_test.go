@@ -41,7 +41,7 @@ func TestCapacitySupersessionCancelsCurrentAwardAfterReclaim(t *testing.T) {
 			if err := f.expireHolder(ctx); err != nil {
 				t.Fatal(err)
 			}
-			reaped, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
+			reaped, err := f.s.AsOperator().ReapUnits(ctx, 10)
 			if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 				t.Fatalf("unstarted award recovery: %+v, %v", reaped, err)
 			}

@@ -44,10 +44,10 @@ func TestTenantEventsStayInTheRunsTeam(t *testing.T) {
 	acme := tenantFor(t, st, "acme")
 	globex := tenantFor(t, st, "globex")
 	seedTenantRun(t, acme, "run-a", "deploy")
-	if _, err := globex.AppendEventCharged(ctx, "replica", "run-a", "", "credits_blocked", []byte(`{}`)); !errors.Is(err, store.ErrNotFound) {
+	if err := globex.AppendEvent(ctx, "run-a", "", "credits_blocked", []byte(`{}`)); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("foreign event append: %v", err)
 	}
-	if _, err := acme.AppendEventCharged(ctx, "replica", "run-a", "", "credits_blocked", []byte(`{}`)); err != nil {
+	if err := acme.AppendEvent(ctx, "run-a", "", "credits_blocked", []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 	if events, err := globex.ListEventsAfter(ctx, "run-a", 0, 10); err != nil || len(events) != 0 {

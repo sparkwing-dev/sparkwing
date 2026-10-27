@@ -11,10 +11,10 @@ import (
 // errUnknownPayment is returned when a provider payment has no settled grant.
 var errUnknownPayment = errors.New("credits: no settled grant belongs to this payment id")
 
-// CreditReversal reports what reversing a payment did. Grant is the reversal
+// creditReversal reports what reversing a payment did. Grant is the reversal
 // the call wrote, or the one an earlier call wrote under the same reference;
 // it is nil when the payment's reversals already took back all it paid.
-type CreditReversal struct {
+type creditReversal struct {
 	Team          Team
 	PaidMicro     int64
 	ReversedMicro int64

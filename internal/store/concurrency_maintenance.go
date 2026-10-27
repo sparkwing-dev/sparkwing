@@ -11,12 +11,9 @@ type ConcurrencyMaintenanceResult struct {
 	StaleWaiters []ConcurrencyWaiter `json:"stale_waiters,omitempty"`
 }
 
-// MaintainConcurrency removes dead reservations under the elected reaper fence.
-func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease) (ConcurrencyMaintenanceResult, error) {
+// MaintainConcurrency removes dead reservations.
+func (o *Operator) MaintainConcurrency(ctx context.Context) (ConcurrencyMaintenanceResult, error) {
 	return inTxResult(ctx, o.s, func(tx *storeTx) (ConcurrencyMaintenanceResult, error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
-			return ConcurrencyMaintenanceResult{}, err
-		}
 		keys, err := tx.operator.lockMaintenanceCapacityTx(ctx, tx)
 		if err != nil {
 			return ConcurrencyMaintenanceResult{}, err
@@ -38,9 +35,6 @@ func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease
 			if err := txCheckConcurrencyInvariants(ctx, tx, key.team, key.key, tx.now(ctx).UnixNano()); err != nil {
 				return ConcurrencyMaintenanceResult{}, err
 			}
-		}
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper"); err != nil {
-			return ConcurrencyMaintenanceResult{}, err
 		}
 		return result, nil
 	})

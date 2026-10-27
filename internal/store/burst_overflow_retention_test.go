@@ -120,12 +120,8 @@ func TestOverflowBudgetBoundsARunningJobAtRenewal(t *testing.T) {
 		t.Fatalf("declined renewal recorded %q, %v; want the overflow allowance", reason, err)
 	}
 	*now = start.Add(time.Minute + time.Second)
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "overflow", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for range 2 {
-		if _, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
+		if _, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil {
 			t.Fatal(err)
 		}
 	}

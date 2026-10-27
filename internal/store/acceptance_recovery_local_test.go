@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -49,10 +48,6 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 			if _, err := f.s.AsOperator().RenewUnit(ctx, f.owner.CapabilityPrefix, started); err != nil {
 				t.Fatal(err)
 			}
-			f.lease, err = f.s.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", "recovery", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
 			now, err := f.s.TestOnlyDatabaseTime(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -61,7 +56,7 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 				t.Fatal(err)
 			}
 			for pass := range 2 {
-				units, err := f.s.AsOperator().ReapUnits(ctx, f.lease, 10)
+				units, err := f.s.AsOperator().ReapUnits(ctx, 10)
 				if err != nil {
 					t.Fatal(err)
 				}

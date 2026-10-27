@@ -116,8 +116,7 @@ func TestControllerApprovalPredicateRecoversAnExpiredEvaluation(t *testing.T) {
 	if _, err := tenant.TransitionNode(t.Context(), OpenApprovalNode{Ref: ref, Actor: actor}); err == nil {
 		t.Fatal("expired evaluator opened approval")
 	}
-	lease := maintenanceReaper(t, tenant.s)
-	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
+	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 	if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 		t.Fatalf("approval evaluator did not recover: %+v %v", reaped, err)
 	}
@@ -164,8 +163,7 @@ func TestControllerApprovalPredicateSettlesExhaustedEvaluator(t *testing.T) {
 	tenant, ref, _ := approvalEvaluationFixture(t)
 	now := tenant.s.now()
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE eval_units SET lease_expires_at=?,started_at=?,disruptions=2 WHERE team=? AND run_id=? AND source_node_id=?`, now.UnixNano(), now.Add(-time.Second).UnixNano(), tenant.team, ref.RunID, ref.NodeID)
-	lease := maintenanceReaper(t, tenant.s)
-	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
+	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 	if err != nil || len(reaped) != 1 || !reaped[0].Failed {
 		t.Fatalf("exhausted evaluator: %+v %v", reaped, err)
 	}
@@ -251,7 +249,7 @@ func TestApprovalEvaluationReadsOnlyDeclaredDependencyOutputs(t *testing.T) {
 }
 
 func TestApprovalEvaluationSecretAndReferenceReadsRequireDeclaredLiveAuthority(t *testing.T) {
-	for _, change := range []string{"live", "undeclared_secret", "undeclared_reference", "eval_holder", "eval_generation", "source_generation", "eval_expiry", "controller_generation", "controller_expiry"} {
+	for _, change := range []string{"live", "undeclared_secret", "undeclared_reference", "eval_holder", "eval_generation", "source_generation", "eval_expiry"} {
 		t.Run(change, func(t *testing.T) {
 			tenant, ref, claim := approvalEvaluationFixture(t, func(tenant *Tenant, request *PlanAcceptance) {
 				var plan nodeproto.PlanDoc
@@ -277,10 +275,6 @@ func TestApprovalEvaluationSecretAndReferenceReadsRequireDeclaredLiveAuthority(t
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET generation=generation+1 WHERE team=? AND run_id=? AND node_id=?`, tenant.team, ref.RunID, ref.NodeID)
 			case "eval_expiry":
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE eval_units SET lease_expires_at=? WHERE team=? AND run_id=?`, tenant.s.now().UnixNano(), tenant.team, ref.RunID)
-			case "controller_generation":
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET generation=generation+1 WHERE name='controller.owner'`)
-			case "controller_expiry":
-				rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET until=? WHERE name='controller.owner'`, tenant.s.now().UnixNano())
 			}
 			for _, read := range []struct {
 				path     string

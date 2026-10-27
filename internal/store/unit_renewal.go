@@ -12,9 +12,6 @@ import (
 func (s *Store) renewUnit(ctx context.Context, prefix string, executing bool) (runstate.LeaseBeat, error) {
 	var beat runstate.LeaseBeat
 	err := s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockClaimControllerTx(ctx, tx); err != nil {
-			return err
-		}
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, prefix); err != nil {
 			return err

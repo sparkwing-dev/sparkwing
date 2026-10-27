@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"reflect"
@@ -102,15 +103,23 @@ func (s *Server) handleLogSigning(w http.ResponseWriter, r *http.Request, a capa
 	if err != nil {
 		return engineLookupError(err)
 	}
-	class, err := tenant.PrepareLogWrite(r.Context(), subject, logActor(a, subject))
+	// safety: the slot's bytes pass the storage rule before any URL exists, so a team at its limit gets none.
+	opened, err := tenant.OpenLogSlot(r.Context(), subject, logActor(a, subject), body.Index, body.Size)
 	if err != nil {
-		return engineLookupError(err)
+		return storageGrowthRefusal(err)
+	}
+	if opened.Committed {
+		writeJSON(w, http.StatusOK, blob.LogUploadURL{Subject: subject, RetentionClass: opened.RetentionClass, Index: body.Index, Committed: true})
+		return nil
 	}
 	objects, err := s.submissionObjects()
 	if err != nil {
 		return err
 	}
-	slot, err := (logseg.Signer{Objects: objects, ClassReady: objects.LogClassReady}).Sign(r.Context(), body, class)
+	// safety: the URL carries the slot's first admitted size and upload deadline, so signing again can never store
+	// more or upload later.
+	body.Size = opened.Size
+	slot, err := (logseg.Signer{Objects: objects, ClassReady: objects.LogClassReady, Expires: opened.UploadExpires}).Sign(r.Context(), body, opened.RetentionClass)
 	if err != nil {
 		return err
 	}
@@ -119,10 +128,11 @@ func (s *Server) handleLogSigning(w http.ResponseWriter, r *http.Request, a capa
 }
 
 type logCommitRequest struct {
-	Subject          blob.LogSubject    `json:"subject"`
-	Segments         []runstate.Segment `json:"segments"`
-	Final            bool               `json:"final"`
-	IncompleteReason string             `json:"incomplete_reason,omitempty"`
+	Subject          blob.LogSubject      `json:"subject"`
+	Segments         []runstate.Segment   `json:"segments"`
+	Final            bool                 `json:"final"`
+	Manifest         *blob.LogUploadCheck `json:"manifest,omitempty"`
+	IncompleteReason string               `json:"incomplete_reason,omitempty"`
 }
 
 type proposedLogSegments struct{ view runstate.LogSegments }
@@ -155,18 +165,33 @@ func (s *Server) handleLogCommit(w http.ResponseWriter, r *http.Request, a capab
 		}
 		body.Segments[i].ObjectKey = key
 	}
-	if len(body.Segments) > 0 {
+	if body.Manifest != nil && (!body.Final || body.Manifest.Index != 0) {
+		return invalidEngineBody("invalid manifest check")
+	}
+	// safety: a create-only PUT refused with 412 proves only that the key exists, so every commit verifies the
+	// stored bytes it records before the store accepts them.
+	if len(body.Segments) > 0 || body.Manifest != nil {
 		objects, err := s.submissionObjects()
 		if err != nil {
 			return err
 		}
-		reader := logseg.CommittedReader{Objects: objects, Records: proposedLogSegments{runstate.LogSegments{Subject: subject, Segments: body.Segments}}}
-		offset := body.Segments[0].Offset
-		if _, err := reader.Read(r.Context(), actor, blob.LogReadRequest{Subject: subject, Offset: offset}, io.Discard); err != nil {
-			return err
+		if len(body.Segments) > 0 {
+			reader := logseg.CommittedReader{Objects: objects, Records: proposedLogSegments{runstate.LogSegments{Subject: subject, Segments: body.Segments}}}
+			offset := body.Segments[0].Offset
+			if _, err := reader.Read(r.Context(), actor, blob.LogReadRequest{Subject: subject, Offset: offset}, io.Discard); err != nil {
+				return dataRouteError(err)
+			}
+		}
+		if body.Manifest != nil {
+			check := *body.Manifest
+			check.Subject = subject
+			if err := (logseg.UploadVerifier{Objects: objects}).Verify(r.Context(), check, class); err != nil {
+				return dataRouteError(err)
+			}
 		}
 	}
-	if err := tenant.RecordSegments(r.Context(), store.SegmentCommit{Subject: subject, Actor: actor, Segments: body.Segments, Final: body.Final, IncompleteReason: body.IncompleteReason, RetentionClass: class}); err != nil {
+	commit := store.SegmentCommit{Subject: subject, Actor: actor, Segments: body.Segments, Final: body.Final, IncompleteReason: body.IncompleteReason, RetentionClass: class}
+	if err := tenant.RecordSegments(r.Context(), commit); err != nil {
 		return engineLookupError(err)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"recorded": true})
@@ -217,3 +242,19 @@ var (
 	_ logSubmissionObjects = (*blob.Filesystem)(nil)
 	_ logSubmissionObjects = (*blob.S3)(nil)
 )
+
+// storageGrowthRefusal answers a write the storage rule refused with its limit or funding reason. The native
+// uploader keeps the segment and retries it, so the refusal clears once the team has room.
+func storageGrowthRefusal(err error) error {
+	var held *store.InsufficientCreditsError
+	switch {
+	case errors.As(err, &held):
+		return creditsRefusal(held)
+	case errors.Is(err, store.ErrStorageQuota):
+		return &apierr.Error{Code: apierr.QuotaExceeded, Message: err.Error()}
+	case errors.Is(err, store.ErrInsufficientCredits):
+		return &apierr.Error{Code: apierr.InsufficientCredit, Message: err.Error(), Details: map[string]any{"reason": creditsRefusedCode}}
+	default:
+		return engineLookupError(err)
+	}
+}

@@ -238,11 +238,13 @@ func asciiSpace(c byte) bool {
 }
 
 // RuntimeConfig serves the script the dashboard loads before its bundle:
-// the version its navigation shows and whether the page signs in with a
-// session cookie, which decides whether its writes carry a CSRF header.
-func RuntimeConfig(version string, signIn bool) http.Handler {
+// the version its navigation shows, whether the page signs in with a
+// session cookie, which decides whether its writes carry a CSRF header, and
+// the deployment's support contact.
+func RuntimeConfig(version string, signIn bool, supportContact string) http.Handler {
 	body := "window.__SPARKWING_VERSION__=" + jsStringLiteral(version) + ";\n" +
-		"window.__SPARKWING_REQUIRE_LOGIN__=" + jsStringLiteral(strconv.FormatBool(signIn)) + ";\n"
+		"window.__SPARKWING_REQUIRE_LOGIN__=" + jsStringLiteral(strconv.FormatBool(signIn)) + ";\n" +
+		"window.__SPARKWING_SUPPORT_CONTACT__=" + jsStringLiteral(supportContact) + ";\n"
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")

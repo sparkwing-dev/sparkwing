@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"testing/quick"
 	"time"
@@ -82,55 +81,25 @@ func armAppRowForTick(t *testing.T, tenant *store.Tenant, armedBy string) store.
 	return row
 }
 
-func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
+func TestCronTick_ASecondTickInTheWindowFiresNothing(t *testing.T) {
 	st := newStoreForTick(t)
 	sched := armPushedForTick(t, st)
 
-	// safety: both evaluators read the same instant two minutes on, so one due
+	// safety: the evaluator reads an instant two minutes on, so one due
 	// instant exists without the test waiting a minute for the clock.
-	ahead := func() time.Time { return time.Now().Add(2 * time.Minute) }
-	alpha := New(st, nil)
-	alpha.cronHolder, alpha.cronNow = "alpha", ahead
-	beta := New(st, nil)
-	beta.cronHolder, beta.cronNow = "beta", ahead
-
+	srv := New(st, nil)
+	srv.cronHolder = "alpha"
+	evaluations := 0
+	srv.cronNow = func() time.Time {
+		evaluations++
+		return time.Now().Add(2 * time.Minute)
+	}
 	ctx := context.Background()
-	var mu sync.Mutex
-	holding := map[string]bool{}
-	peak := 0
-	// safety: cronNow is only read from inside the leased tick, so marking the
-	// holder there measures the window the lease is supposed to keep to one.
-	watch := func(holder string) func() time.Time {
-		return func() time.Time {
-			mu.Lock()
-			holding[holder] = true
-			if len(holding) > peak {
-				peak = len(holding)
-			}
-			mu.Unlock()
-			return time.Now().Add(2 * time.Minute)
-		}
-	}
-	alpha.cronNow, beta.cronNow = watch("alpha"), watch("beta")
-
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for _, c := range []*Server{alpha, beta} {
-		wg.Add(1)
-		go func(srv *Server) {
-			defer wg.Done()
-			<-start
-			srv.cronTickOnce(ctx)
-			mu.Lock()
-			delete(holding, srv.cronHolder)
-			mu.Unlock()
-		}(c)
-	}
-	close(start)
-	wg.Wait()
-
-	if peak > 1 {
-		t.Errorf("%d controllers held the tick at once, want at most 1", peak)
+	srv.cronTickOnce(ctx)
+	ran := evaluations
+	srv.cronTickOnce(ctx)
+	if ran == 0 || evaluations != ran {
+		t.Errorf("evaluations = %d then %d, want the second tick in the window skipped", ran, evaluations)
 	}
 
 	triggers, err := teststore.ForTeam(t, st, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Pipelines: []string{"nightly"}})
@@ -170,8 +139,8 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 	if tick.At.IsZero() {
 		t.Error("the tick recorded nothing")
 	}
-	if tick.Host != "alpha" && tick.Host != "beta" {
-		t.Errorf("tick host = %q, want one of the two holders", tick.Host)
+	if tick.Host != "alpha" {
+		t.Errorf("tick host = %q, want alpha", tick.Host)
 	}
 }
 

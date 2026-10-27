@@ -73,7 +73,7 @@ func TestTeamMutationsRequireCurrentAuthorityProperty(t *testing.T) {
 		if caseID%7 != 4 {
 			a.Access.Grants = []capability.Grant{capability.RunsControl}
 		}
-		prune := tenant.DeleteAuthorizedRun(t.Context(), a)
+		prune := tenant.DeleteAuthorizedRun(t.Context(), a, nil)
 		return rename != nil && deletion != nil && invite != nil && withdraw != nil && trust != nil && prune != nil && reflect.DeepEqual(before, purgeRows(t, s, "a", true))
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 36}); err != nil {
@@ -234,16 +234,16 @@ func TestRunDeletionUsesCredentialGrantsForOtherMembersRuns(t *testing.T) {
 	}
 	a := teamAuthorization(t, s, token, "a", "DELETE", "/api/v1/runs/{run}")
 	a.Target.RunID = "other"
-	if err := tenant.DeleteAuthorizedRun(t.Context(), a); err == nil {
+	if err := tenant.DeleteAuthorizedRun(t.Context(), a, nil); err == nil {
 		t.Fatal("owner token without team.admin deleted another member's run")
 	}
 	a.Target.RunID = "owner"
-	if err := tenant.DeleteAuthorizedRun(t.Context(), a); err != nil {
+	if err := tenant.DeleteAuthorizedRun(t.Context(), a, nil); err != nil {
 		t.Fatalf("owner token deleting its own run: %v", err)
 	}
 	a = teamAuthorization(t, s, owner, "a", "DELETE", "/api/v1/runs/{run}")
 	a.Target.RunID = "other"
-	if err := tenant.DeleteAuthorizedRun(t.Context(), a); err != nil {
+	if err := tenant.DeleteAuthorizedRun(t.Context(), a, nil); err != nil {
 		t.Fatalf("admin deleting another member's run: %v", err)
 	}
 }

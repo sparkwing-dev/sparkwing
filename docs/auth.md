@@ -493,7 +493,7 @@ Its public work queue is `/api/v1/runners/claim`.
 
 Operational deployment credentials carry `operator.limits`,
 `operator.object_store` or `operator.tokens` for their selected operations.
-Trust changes, grants, freezes, refunds and account deletion require an
+Trust changes, grants, freezes and account deletion require an
 operator-console session. Those powers do not follow from a deployment token.
 
 ## Claim ownership
@@ -694,8 +694,8 @@ gate.
 
 ## Operator console
 
-Operator-console sessions own trust changes, credit grants, freezes, refunds
-and account deletion. They also read the standing queue, where team owners'
+Operator-console sessions own trust changes, credit grants, freezes and
+account deletion. Refunds are made in the Stripe dashboard. They also read the standing queue, where team owners'
 requests for High standing wait. A grant naming the reviewed request approves
 it, and a decline names the request and records the reason its owners see. Deployment tokens manage operational limits, object-store
 settings, deployment service credentials and new-team onboarding through their separate routes.

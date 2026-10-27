@@ -132,7 +132,7 @@ func registerTeamTx(ctx context.Context, tx *storeTx, team Team) error {
 const liveTeamsSQL = `SELECT name FROM teams WHERE NOT EXISTS (SELECT 1 FROM team_deletions d WHERE d.slug = teams.name)`
 
 // EachTeam visits selected live tenants, or all live tenants when query is nil.
-// Tenant failures are logged; database failures and loss of the maintenance lease stop the sweep.
+// Tenant failures are logged; database failures stop the sweep.
 func (o *Operator) EachTeam(ctx context.Context, query []Team, fn func(*Tenant) error) error {
 	rows, err := o.s.query(ctx, liveTeamsSQL+` ORDER BY name`)
 	if err != nil {

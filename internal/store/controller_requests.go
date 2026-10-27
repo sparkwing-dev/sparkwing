@@ -28,14 +28,6 @@ type FailedGitHubDelivery struct {
 	LastError  string    `json:"last_error"`
 }
 
-// OperatorRefund records a completed provider refund against its persisted payer.
-type OperatorRefund struct {
-	PaymentID   string `json:"payment_id"`
-	RefundID    string `json:"refund_id"`
-	AmountCents int64  `json:"amount_cents"`
-	Reason      string `json:"reason"`
-}
-
 // ScheduleRepoRequest reconciles one repository’s schedule declarations.
 type ScheduleRepoRequest struct {
 	Mode      ScheduleWriteMode             `json:"mode"`

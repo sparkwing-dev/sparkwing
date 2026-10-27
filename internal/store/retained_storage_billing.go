@@ -9,20 +9,17 @@ import (
 )
 
 // ChargeRetainedStorage bills unique committed blobs and persisted log bytes.
-// The maintenance fence and each team's watermarks commit with its ledger debit.
+// Each team's watermarks commit with its ledger debit.
 // The initial sample starts billing without charging for earlier storage.
-func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLease) (StorageChargeSweep, error) {
+func (o *Operator) ChargeRetainedStorage(ctx context.Context) (StorageChargeSweep, error) {
 	var out StorageChargeSweep
 	var rate, free int64
 	if err := o.s.inTx(ctx, func(tx *storeTx) error {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return err
-		}
 		var err error
-		if rate, err = creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0); err != nil {
+		if rate, err = storageRateTx(ctx, tx); err != nil {
 			return err
 		}
-		free, err = creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, 0)
+		free, err = storageFreeAllowanceTx(ctx, tx)
 		return err
 	}); err != nil {
 		return out, err
@@ -32,7 +29,7 @@ func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLea
 		return out, err
 	}
 	err = o.EachTeam(ctx, teams, func(t *Tenant) error {
-		charge, err := o.chargeRetainedTeam(ctx, lease, t.team, rate, free)
+		charge, err := o.chargeRetainedTeam(ctx, t.team, rate, free)
 		if err != nil {
 			return err
 		}
@@ -53,7 +50,7 @@ func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLea
 func (o *Operator) retainedStorageTeams(ctx context.Context) (_ []Team, err error) {
 	rows, err := o.s.query(ctx, `SELECT t.name FROM teams t
 WHERE EXISTS(SELECT 1 FROM blobs b WHERE b.team=t.name)
-   OR EXISTS(SELECT 1 FROM log_streams l WHERE l.team=t.name)
+   OR EXISTS(SELECT 1 FROM log_slots l WHERE l.team=t.name)
    OR EXISTS(SELECT 1 FROM team_storage s WHERE s.team=t.name)
 ORDER BY t.name`)
 	if err != nil {
@@ -71,19 +68,13 @@ ORDER BY t.name`)
 	return teams, rows.Err()
 }
 
-func (o *Operator) chargeRetainedTeam(ctx context.Context, lease SingletonLease, team Team, rate, free int64) (*CreditCharge, error) {
+func (o *Operator) chargeRetainedTeam(ctx context.Context, team Team, rate, free int64) (*CreditCharge, error) {
 	return inTxResult(ctx, o.s, func(tx *storeTx) (*CreditCharge, error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return nil, err
-		}
 		charge, err := chargeRetainedTeamTx(ctx, tx, team, rate, free)
 		if err != nil {
 			return nil, err
 		}
 
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return nil, err
-		}
 		return charge, nil
 	})
 }
@@ -130,7 +121,9 @@ func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team, rate, fre
 		bytes = min(bytes, allowance)
 	}
 	bytes = max(bytes-free, 0)
-	// safety: after an idle gap, fresh bytes cannot be billed before they existed.
+	// safety: an idle gap bills no longer than the team's oldest stored byte has existed. Mixed-age inventory is
+	// billed for the whole interval at its current size, so bytes added just before a pass are charged for time
+	// before they existed; normal passes are minutes apart, and an exceptional gap is reconciled by hand.
 	seconds := min(gap, max((now.UnixNano()-inventory.oldest)/int64(time.Second), 0))
 	amount, err := storageChargeMicro(bytes, rate, seconds)
 	if err != nil {
@@ -180,7 +173,7 @@ type retainedStorageInventory struct {
 
 func retainedStorageSampleTx(ctx context.Context, tx *storeTx, team Team) (out retainedStorageInventory, err error) {
 	out.oldest = tx.now(ctx).UnixNano()
-	rows, err := tx.queryContext(ctx, "SELECT size,created_at,0 FROM blobs WHERE team=? UNION ALL SELECT stored_bytes,created_at,1 FROM log_streams WHERE team=?", team, team)
+	rows, err := tx.queryContext(ctx, "SELECT size,created_at,0 FROM blobs WHERE team=? UNION ALL SELECT size,created_at,1 FROM log_slots WHERE team=?", team, team)
 	if err != nil {
 		return out, err
 	}

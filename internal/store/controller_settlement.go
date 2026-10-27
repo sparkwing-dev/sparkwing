@@ -51,19 +51,8 @@ func controllerOwnerTx(ctx context.Context, tx *storeTx, team Team, runID string
 	if err != nil || !scheduled {
 		return nil, err
 	}
-	var holder string
-	var generation, until int64
-	err = tx.QueryRowContext(ctx, `SELECT holder,generation,until FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder, &generation, &until)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if until <= tx.now(ctx).UnixNano() {
-		return nil, nil
-	}
-	return &runstate.Actor{Kind: runstate.ActorController, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: "controller.owner", EvalFence: runspec.EvalFence{RunID: runspec.RunID(runID), Holder: holder, Generation: runspec.ClaimGeneration(generation)}}}, nil
+	actor := controllerActor(runID)
+	return &actor, nil
 }
 
 func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID string, now time.Time) error {
@@ -105,7 +94,7 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 				if permission.Waiting {
 					continue
 				}
-				_, err = tx.execContext(ctx, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES (?,?,?,?,'pending',?) ON CONFLICT(team,run_id,source_node_id,source_generation) DO NOTHING`, team, runID, node.NodeID, node.Generation, actor.Owner.Generation)
+				_, err = tx.execContext(ctx, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES (?,?,?,?,'pending') ON CONFLICT(team,run_id,source_node_id,source_generation) DO NOTHING`, team, runID, node.NodeID, node.Generation)
 				if err != nil {
 					return err
 				}

@@ -59,10 +59,6 @@ func parseIdentity(f identityFlags) (identityConfig, error) {
 func configureIdentity(srv *controller.Server, cfg identityConfig, logger *slog.Logger) {
 	f := cfg.flags
 	srv.WithSignUpWaitlist(cfg.waitlist)
-	// safety: the server counts the free-team slots itself, so a multi-team
-	// controller's gate always reads the free tier and never treats it as open.
-	srv.WithFreeTier(srv)
-	srv.CheckFreeTierSource()
 	if len(cfg.googleURIs) != 0 {
 		srv.WithGoogleSignIn(googleauth.New(googleauth.Google(f.GoogleClientID, f.GoogleClientSecret)), cfg.googleURIs)
 	}

@@ -228,7 +228,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 				until := now.Add(time.Hour)
 				finished := now.Add(-time.Minute)
 				snapshot.Binding.FinishedAt = &finished
-				snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *binding.Expansion, ExpiresAt: until, ControllerLeaseExpiresAt: &until}
+				snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *binding.Expansion, ExpiresAt: until}
 			}
 			response = localhostwire.LocalAuthentication{Snapshot: snapshot, Digests: [][32]byte{principal.Capability.Digest}}
 		case "GET " + prefix + "/data-authority":

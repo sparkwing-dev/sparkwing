@@ -218,11 +218,7 @@ func TestBlobUploadExpiryReleasesOrphansAfterMonthlyHoldWasReleased(t *testing.T
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "replica", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 1); err != nil {
+	if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), 1); err != nil {
 		t.Fatal(err)
 	}
 	var held, reserved int64

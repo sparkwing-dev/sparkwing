@@ -159,7 +159,7 @@ func TestTeamCreationIsCappedOverTheAccountsLifetime(t *testing.T) {
 	}
 }
 
-func TestTeamPurgeRemovesOnlyItsReplicaStorageUsage(t *testing.T) {
+func TestTeamPurgeRemovesOnlyItsStorageUsage(t *testing.T) {
 	st := storetest.Open(t)
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
@@ -167,8 +167,8 @@ func TestTeamPurgeRemovesOnlyItsReplicaStorageUsage(t *testing.T) {
 		if _, err := st.AsOperator().CreateAccountTeam(t.Context(), storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: team, DisplayName: ""}); err != nil {
 			t.Fatal(err)
 		}
-		for _, replica := range []string{"one", "two"} {
-			if err := tenant(t, st, team).AddUsage(t.Context(), store.UsageDelta{Period: "period", ReplicaID: replica, Counter: "storage_bytes", Amount: 1}); err != nil {
+		for range 2 {
+			if err := tenant(t, st, team).AddUsage(t.Context(), store.UsageDelta{Period: "period", Counter: "storage_bytes", Amount: 1}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -177,8 +177,8 @@ func TestTeamPurgeRemovesOnlyItsReplicaStorageUsage(t *testing.T) {
 	if n := countWhere(t, st, "storage_month_usage", "team = 'acme'"); n != 0 {
 		t.Fatalf("purge left %d storage rows", n)
 	}
-	if n := countWhere(t, st, "storage_month_usage", "team = 'keep'"); n != 2 {
-		t.Fatalf("purge changed another tenant's replica rows: %d", n)
+	if n := countWhere(t, st, "storage_month_usage", "team = 'keep' AND bytes = 2"); n != 1 {
+		t.Fatalf("purge changed another tenant's usage rows: %d", n)
 	}
 }
 
@@ -250,7 +250,7 @@ func TestTeamRecheckRemovesOperationalRowsFromTombstone(t *testing.T) {
 	}
 	deleteAndPurge(t, st, "acme", now)
 	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
-		`INSERT INTO egress_usage (replica_id, period, bytes, updated_at, team) VALUES ('replica', '2026-09', 1, 1, 'acme')`)); err != nil {
+		`INSERT INTO egress_usage (period, bytes, updated_at, team) VALUES ('2026-09', 1, 1, 'acme')`)); err != nil {
 		t.Fatal(err)
 	}
 	op := st.AsOperator()
@@ -307,7 +307,7 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	team := string(owner.PersonalTeam)
 	bystander := string(leaver.PersonalTeam)
 	for _, q := range []string{
-		`INSERT INTO egress_usage (replica_id, period, bytes, updated_at, team) VALUES ('replica', '2026-09', 700, 1, '` + team + `')`,
+		`INSERT INTO egress_usage (period, bytes, updated_at, team) VALUES ('2026-09', 700, 1, '` + team + `')`,
 		`INSERT INTO debug_pauses (run_id, node_id, reason, paused_at, expires_at, released_by, team) VALUES ('run-l', 'n', 'r', 1, 2, 'leaver@example.com', '` + team + `')`,
 		`INSERT INTO approvals (run_id, node_id, requested_at, approver, team) VALUES ('run-l', 'n', 1, '` + leaver.Account.ID + `', '` + team + `')`,
 		`INSERT INTO cron_schedules (id, repo_path, pipeline, cron, tz, overlap, catch_up_ns, armed_at, armed_by, updated_at, cursor_at, team, repo_key)
@@ -361,7 +361,7 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	if payload != `{"by":"deleted user"}` {
 		t.Errorf("event payload = %s", payload)
 	}
-	if n := countWhere(t, st, "egress_usage", "replica_id = 'replica' AND team = '"+team+"' AND bytes = 700"); n != 1 {
+	if n := countWhere(t, st, "egress_usage", "team = '"+team+"' AND bytes = 700"); n != 1 {
 		t.Error("tenant egress bytes changed during account deletion")
 	}
 }

@@ -14,9 +14,6 @@ import (
 func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secret, error) {
 	var out *Secret
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockClaimControllerTx(ctx, tx); err != nil {
-			return err
-		}
 		p, err := t.authorizeSecretReadTx(ctx, tx, a)
 		if err != nil {
 			return err

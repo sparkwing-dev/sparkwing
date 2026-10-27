@@ -17,7 +17,7 @@ import (
 
 func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
 	property := func(selector uint8, suffix uint64) bool {
-		tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
+		tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
 		p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 		if err != nil {
@@ -65,7 +65,7 @@ func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
 
 func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *testing.T) {
 	property := func(seed uint64) bool {
-		tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
+		tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
 		p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 		if err != nil {
@@ -132,7 +132,7 @@ func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *test
 func TestRunControlRollsBackStateEventsAndReplayTogether(t *testing.T) {
 	for _, approval := range []bool{false, true} {
 		t.Run(fmt.Sprint(approval), func(t *testing.T) {
-			tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
+			tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 			actor := authorityMember(t, tenant.s, "member", RoleEditor)
 			p, err := tenant.s.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
 			if err != nil {
@@ -200,7 +200,7 @@ func TestRunControlMasksClassifiedArguments(t *testing.T) {
 
 func TestAccountDeletionDropsOnlyItsPrivateControlReceiptsProperty(t *testing.T) {
 	property := func(seed uint64) bool {
-		tenant, ref, _, _, _ := approvalReaperFixture(t, "fail")
+		tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 		first := fmt.Sprintf("account-%016x", seed)
 		var survivor capability.Authorized
 		for _, id := range []string{first, "survivor"} {

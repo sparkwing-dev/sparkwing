@@ -188,7 +188,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		b.Fatal(err)
 	}
 	if dialect == DialectPostgres {
-		for _, table := range []string{"teams", "runs", "nodes", "claim_contexts", "claim_requirements", "claim_requirement_terms", "triggers", "eval_units", "leases", "team_deletions", "capabilities"} {
+		for _, table := range []string{"teams", "runs", "nodes", "claim_contexts", "claim_requirements", "claim_requirement_terms", "triggers", "eval_units", "team_deletions", "capabilities"} {
 			exec(`ANALYZE ` + table)
 		}
 	}

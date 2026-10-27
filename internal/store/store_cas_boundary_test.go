@@ -43,7 +43,7 @@ func checkStoreCASBoundary(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	commit := VerifiedUploadCommit{TicketID: interrupted.ID, Authority: request.Intent.Authority, Verified: interrupted.Blob, ReplicaID: "first"}
+	commit := VerifiedUploadCommit{TicketID: interrupted.ID, Authority: request.Intent.Authority, Verified: interrupted.Blob}
 	for _, changed := range []string{"digest", "short", "long", "team", "ticket"} {
 		bad := commit
 		switch changed {
@@ -78,7 +78,7 @@ func checkStoreCASBoundary(t *testing.T) (err error) {
 	if err != nil {
 		return fmt.Errorf("expired reservation blocked replacement: %w", err)
 	}
-	commit.TicketID, commit.Authority, commit.Verified, commit.ReplicaID = replacement.ID, request.Intent.Authority, replacement.Blob, "replacement"
+	commit.TicketID, commit.Authority, commit.Verified = replacement.ID, request.Intent.Authority, replacement.Blob
 	if _, err := s.DB().ExecContext(ctx, `CREATE TRIGGER refuse_cas_receipt BEFORE INSERT ON blob_receipts BEGIN SELECT RAISE(ABORT,'receipt unavailable'); END`); err != nil {
 		return err
 	}

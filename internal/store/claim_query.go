@@ -576,7 +576,7 @@ func (q *claimSQL) source(kinds []capability.UnitKind) string {
 				clockJoin = ``
 			}
 			from += ` JOIN triggers req ON req.team=e.team AND req.id=e.run_id`
-			queries = append(queries, `SELECT e.team,e.run_id,e.source_node_id AS node_id,e.source_generation,`+q.evaluationArrivalSQL()+` AS arrived,'eval' AS kind,NULL AS execution,req.claim_requirements AS requirements FROM `+from+` JOIN leases l ON l.name=e.owner_lease_name`+clockJoin+` WHERE `+q.sourceScope("e", kind)+` AND e.status='pending' AND e.claimed_by IS NULL AND e.capability_prefix='' AND (e.expires_at IS NULL OR e.expires_at>clock.now) AND l.name='controller.owner' AND l.until>clock.now AND n.generation=e.source_generation AND `+evaluationSourceSQL(q, "n"))
+			queries = append(queries, `SELECT e.team,e.run_id,e.source_node_id AS node_id,e.source_generation,`+q.evaluationArrivalSQL()+` AS arrived,'eval' AS kind,NULL AS execution,req.claim_requirements AS requirements FROM `+from+clockJoin+` WHERE `+q.sourceScope("e", kind)+` AND e.status='pending' AND e.claimed_by IS NULL AND e.capability_prefix='' AND (e.expires_at IS NULL OR e.expires_at>clock.now) AND n.generation=e.source_generation AND `+evaluationSourceSQL(q, "n"))
 		default:
 			from := `triggers t JOIN runs tr ON tr.team=t.team AND tr.id=t.id JOIN clock ON TRUE`
 			if q.heads != nil {

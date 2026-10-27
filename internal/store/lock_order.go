@@ -19,7 +19,6 @@ type storeLockTier string
 
 const (
 	lockLedger       storeLockTier = "credit ledgers"
-	lockLease        storeLockTier = "singleton leases"
 	lockSettings     storeLockTier = "settings and signup gates"
 	lockTeam         storeLockTier = "teams"
 	lockAccount      storeLockTier = "accounts"
@@ -41,7 +40,7 @@ const (
 )
 
 var storeLockOrder = [...]storeLockTier{
-	lockLease, lockSettings, lockTeam, lockAccount, lockMembership,
+	lockSettings, lockTeam, lockAccount, lockMembership,
 	lockAuthority, lockInstallation, lockCredential, lockSchedule, lockTrigger,
 	lockEval, lockRun, lockNode, lockConcurrency, lockUpload, lockDigest,
 	lockQuota, lockLedger, lockBilling, lockRecord,

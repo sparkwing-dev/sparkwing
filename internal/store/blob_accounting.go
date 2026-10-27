@@ -10,7 +10,6 @@ import (
 
 type blobAccounting struct {
 	ReservationID string
-	ReplicaID     string
 }
 
 type blobQuota struct {
@@ -19,7 +18,7 @@ type blobQuota struct {
 }
 
 func lockBlobQuotaTx(ctx context.Context, tx *storeTx, team Team, run string, accounting blobAccounting) ([]blobQuota, error) {
-	if accounting.ReservationID == "" || accounting.ReplicaID == "" {
+	if accounting.ReservationID == "" {
 		return nil, authorityError(apierr.BadRequest, "upload accounting is required")
 	}
 	var quotas []blobQuota
@@ -56,7 +55,7 @@ func lockUploadQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, id,
 	return q, nil
 }
 
-// safety: the blob insert, receipt, reservation and replica counters share one commit.
+// safety: the blob insert, receipt, reservation and usage counters share one commit.
 // Even deduplicated uploads commit their reservation so an abort cannot be replayed as a PUT.
 func settleBlobQuotaTx(ctx context.Context, tx *storeTx, team Team, run string, accounting blobAccounting, quotas []blobQuota, size, objects int64) error {
 	period := quotas[0].period
@@ -65,7 +64,7 @@ func settleBlobQuotaTx(ctx context.Context, tx *storeTx, team Team, run string, 
 			return err
 		}
 	}
-	return recordStorageUsageTx(ctx, tx, team, run, accounting.ReplicaID, period, size, objects)
+	return recordStorageUsageTx(ctx, tx, team, run, period, size, objects)
 }
 
 func settleUploadQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d uploadQuotaDimension, q blobQuota) error {
@@ -85,13 +84,13 @@ func settleUploadQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d
 	return err
 }
 
-func recordStorageUsageTx(ctx context.Context, tx *storeTx, team Team, run, replica, period string, size, objects int64) error {
+func recordStorageUsageTx(ctx context.Context, tx *storeTx, team Team, run, period string, size, objects int64) error {
 	if size == 0 && objects == 0 {
 		return nil
 	}
-	result, err := tx.execContext(ctx, `INSERT INTO storage_month_usage(team,period,replica_id,bytes,objects,updated_at) VALUES (?,?,?,?,?,?)
-ON CONFLICT(team,period,replica_id) DO UPDATE SET bytes=storage_month_usage.bytes+excluded.bytes,objects=storage_month_usage.objects+excluded.objects,updated_at=excluded.updated_at
-WHERE storage_month_usage.bytes<=9223372036854775807-excluded.bytes AND storage_month_usage.objects<=9223372036854775807-excluded.objects`, team, period, replica, size, objects, tx.now(ctx).UnixNano())
+	result, err := tx.execContext(ctx, `INSERT INTO storage_month_usage(team,period,bytes,objects,updated_at) VALUES (?,?,?,?,?)
+ON CONFLICT(team,period) DO UPDATE SET bytes=storage_month_usage.bytes+excluded.bytes,objects=storage_month_usage.objects+excluded.objects,updated_at=excluded.updated_at
+WHERE storage_month_usage.bytes<=9223372036854775807-excluded.bytes AND storage_month_usage.objects<=9223372036854775807-excluded.objects`, team, period, size, objects, tx.now(ctx).UnixNano())
 	if err != nil {
 		return err
 	}
@@ -101,16 +100,16 @@ WHERE storage_month_usage.bytes<=9223372036854775807-excluded.bytes AND storage_
 	if run == "" {
 		return nil
 	}
-	return recordStorageRunUsageTx(ctx, tx, team, run, replica, period, size, objects)
+	return recordStorageRunUsageTx(ctx, tx, team, run, period, size, objects)
 }
 
-func recordStorageRunUsageTx(ctx context.Context, tx *storeTx, team Team, run, replica, period string, size, objects int64) error {
+func recordStorageRunUsageTx(ctx context.Context, tx *storeTx, team Team, run, period string, size, objects int64) error {
 	if size == 0 && objects == 0 {
 		return nil
 	}
-	result, err := tx.execContext(ctx, `INSERT INTO storage_run_usage(team,period,replica_id,run_id,bytes,objects,updated_at) VALUES (?,?,?,?,?,?,?)
-ON CONFLICT(team,period,replica_id,run_id) DO UPDATE SET bytes=storage_run_usage.bytes+excluded.bytes,objects=storage_run_usage.objects+excluded.objects,updated_at=excluded.updated_at
-WHERE storage_run_usage.bytes<=9223372036854775807-excluded.bytes AND storage_run_usage.objects<=9223372036854775807-excluded.objects`, team, period, replica, run, size, objects, tx.now(ctx).UnixNano())
+	result, err := tx.execContext(ctx, `INSERT INTO storage_run_usage(team,period,run_id,bytes,objects,updated_at) VALUES (?,?,?,?,?,?)
+ON CONFLICT(team,period,run_id) DO UPDATE SET bytes=storage_run_usage.bytes+excluded.bytes,objects=storage_run_usage.objects+excluded.objects,updated_at=excluded.updated_at
+WHERE storage_run_usage.bytes<=9223372036854775807-excluded.bytes AND storage_run_usage.objects<=9223372036854775807-excluded.objects`, team, period, run, size, objects, tx.now(ctx).UnixNano())
 	if err != nil {
 		return err
 	}

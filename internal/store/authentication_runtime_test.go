@@ -105,23 +105,11 @@ func TestAuthenticationSnapshotSeparatesEvalAndSourceLiveness(t *testing.T) {
 	eval := authorityRoot("eval", "a")
 	eval.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: 2, Expansion: &capability.LeaseRef{Kind: capability.UnitEval, ID: unitID, Holder: "eval-host", Generation: 8}}
 	authorityPersist(t, tenant.s, eval)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Minute).UnixNano())
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation,claimed_at,started_at) VALUES ('a','run','job',2,'running',8,'eval-host','eval',?,4,1,1)`, now.Add(time.Minute).UnixNano())
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,claimed_at,started_at) VALUES ('a','run','job',2,'running',8,'eval-host','eval',?,1,1)`, now.Add(time.Minute).UnixNano())
 	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Digest: eval.Digest, Audience: capability.Controller}
-	for _, owner := range []string{"live", "replaced", "absent"} {
-		if owner == "replaced" {
-			rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET generation=5 WHERE name='controller.owner'`)
-		}
-		if owner == "absent" {
-			rewriteSchemaExec(t, tenant.s.db, `DELETE FROM leases WHERE name='controller.owner'`)
-		}
-		got, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
-		if err != nil || got.Binding.Current.Generation != 2 || got.Binding.Expansion == nil || got.Binding.Expansion.Lease.Generation != 8 || got.Binding.Expansion.Lease.Holder != "eval-host" || !got.Binding.Expansion.ExpiresAt.After(*now) {
-			t.Fatalf("eval snapshot %s: %+v, %v", owner, got.Binding, err)
-		}
-		if (got.Binding.Expansion.ControllerLeaseExpiresAt != nil) != (owner == "live") {
-			t.Fatalf("controller fence %s: %+v", owner, got.Binding.Expansion)
-		}
+	got, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), lookup, capability.RequestEvidence{})
+	if err != nil || got.Binding.Current.Generation != 2 || got.Binding.Expansion == nil || got.Binding.Expansion.Lease.Generation != 8 || got.Binding.Expansion.Lease.Holder != "eval-host" || !got.Binding.Expansion.ExpiresAt.After(*now) {
+		t.Fatalf("eval snapshot: %+v, %v", got.Binding, err)
 	}
 }
 

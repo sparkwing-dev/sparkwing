@@ -119,6 +119,7 @@ func (s *Server) runBilling(ctx context.Context, every time.Duration) {
 	for {
 		s.refillPass(ctx)
 		s.refundQueuedPayments(ctx)
+		s.noticeFailedRefunds(ctx)
 		select {
 		case <-ctx.Done():
 			return

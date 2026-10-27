@@ -143,7 +143,7 @@ func dataResultUpload(t *testing.T, tenant *store.Tenant, objects *blob.Filesyst
 	if err := objects.CommitObject(t.Context(), reservation.StagingKey, reservation.Blob); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.CommitBlobUpload(t.Context(), store.VerifiedUploadCommit{Authority: authority, TicketID: id, Verified: reservation.Blob, ReplicaID: "fixture"}); err != nil {
+	if _, err := tenant.CommitBlobUpload(t.Context(), store.VerifiedUploadCommit{Authority: authority, TicketID: id, Verified: reservation.Blob}); err != nil {
 		t.Fatal(err)
 	}
 	if err := objects.DeleteObject(t.Context(), reservation.StagingKey); err != nil {

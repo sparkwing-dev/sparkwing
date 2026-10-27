@@ -12,7 +12,8 @@ removed. `CommittedReader` checks the store-selected subject and object keys
 before opening bytes. Physical manifests and object listings grant no read
 authority. The object-side reader and abandoned-log sealer are removed.
 `Operator.SealAbandonedLogStreams` owns abandoned seals under the maintenance
-lease and preserves every committed segment. `AttemptPrefix` is removed.
+lease and preserves every committed segment. `AttemptPrefix` is removed. Slot
+sizes, upload deadlines and deletion follow [log slot accounting](../../store/STORE-DATA.md#log-slot-accounting).
 
 Dashboard completeness uses the selected attempt's persisted finish time and
 `RunSnapshot.StoreNow`. A later job finish or an unrelated attempt cannot extend
@@ -44,14 +45,16 @@ overwrite. Index zero selects the final manifest. A 412 alone cannot
 establish a matching payload.
 
 The controller must authorize the current writer and resolve the run's persisted
-retention class before calling `uploadVerifier.verify`. The verifier derives one
+retention class before calling `UploadVerifier.Verify`. The verifier derives one
 key, reads bounded bytes and requires successful close, exact size and SHA-256.
 It returns no bytes or read URL and creates no reference edge. `RecordSegments`
 rechecks the writer before committing that edge. The verifier works with both
-object backends. Its controller route remains an integration point.
+object backends; the controller's final log commit uses it for the manifest.
 `LogClassReady` is part of the controller's physical log binding. S3 validates
-the bucket lifecycle. Filesystem validates the class handled by its expiry pass.
-The controller runs filesystem expiry after renewing its maintenance lease.
+the bucket lifecycle, which must expire the class no sooner than its days.
+Filesystem validates the class handled by its expiry pass.
+The controller runs filesystem expiry after renewing its maintenance lease. Both
+are backstops: Sparkwing deletes log objects itself under [log slot accounting](../../store/STORE-DATA.md#log-slot-accounting).
 
 `CommittedReader` calls `ReadLogSegments` before each segment. It checks the returned
 subject, keys and contiguous ranges before reading any object. Each segment must

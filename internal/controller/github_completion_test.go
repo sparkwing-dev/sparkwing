@@ -480,38 +480,6 @@ func TestGitHubCompletionCancellationLeavesDurableWork(t *testing.T) {
 	}
 }
 
-func TestGitHubCompletionTwoControllersDeliverOnce(t *testing.T) {
-	f := newGitHubCompletion(t)
-	f.finish(runstate.RunSuccess)
-	entered, release := make(chan struct{}), make(chan struct{})
-	var unblock sync.Once
-	t.Cleanup(func() { unblock.Do(func() { close(release) }) })
-	f.api.before = func(r *http.Request) {
-		if r.Method == "POST" && r.URL.Path == "/repos/acme/app/check-runs" {
-			close(entered)
-			<-release
-		}
-	}
-	done := make(chan error, 1)
-	go func() { done <- f.server.ReconcileRunEffects(t.Context()) }()
-	select {
-	case <-entered:
-	case err := <-done:
-		t.Fatalf("reconcile created no check: %v", err)
-	}
-	other := New(f.server.store, nil).WithGitHubApp(f.cfg)
-	if err := other.ReconcileRunEffects(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	unblock.Do(func() { close(release) })
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if len(f.api.checks) != 1 {
-		t.Fatalf("two controllers created checks=%+v", f.api.checks)
-	}
-}
-
 func TestGitHubCompletionReaperPreservesTimeoutConclusion(t *testing.T) {
 	for _, reason := range []string{"timeout", "queue_timeout"} {
 		t.Run(reason, func(t *testing.T) {
@@ -527,14 +495,7 @@ func TestGitHubCompletionReaperPreservesTimeoutConclusion(t *testing.T) {
 				engineSQL(t, f.server.store, `UPDATE runs SET status='pending',sealed_at=NULL,spec_json=NULL,spec_hash='',plan_json=NULL,plan_hash='',claim_wait_ns=? WHERE team='a' AND id='run'`, int64(time.Second))
 				engineSQL(t, f.server.store, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',claimed_at=NULL,started_at=NULL,lease_expires_at=NULL WHERE team='a' AND id='run'`)
 			}
-			lease, err := f.server.store.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "test", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := f.server.store.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil {
-				t.Fatal(err)
-			}
-			if err := f.server.store.AsOperator().ReleaseSingletonLease(t.Context(), lease); err != nil {
+			if _, err := f.server.store.AsOperator().ReapUnits(t.Context(), 10); err != nil {
 				t.Fatal(err)
 			}
 			f.reconcile()

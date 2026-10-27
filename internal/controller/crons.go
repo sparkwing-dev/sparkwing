@@ -18,15 +18,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-// safety: shorter than a minute, so a wake the store's lease turns away is
-// followed by another inside the same minute. The store's cron tick window
-// spaces the ticks that actually run.
+// safety: shorter than a minute, so a wake the store's tick window turns away is
+// followed by another inside the same minute. That window spaces the ticks
+// that actually run.
 const cronTickOffer = 20 * time.Second
 
 // safety: long enough that a tick which dies mid-flight does not hand the next
 // minute a claim it will never release, short enough that the minute after that
 // still runs.
-const cronTickLeaseTTL = 90 * time.Second
+const cronTickTimeout = 90 * time.Second
 
 const cronDetailFires = 200
 
@@ -131,9 +131,9 @@ func defaultCronHolder() string {
 
 // safety: a store has one active controller, which holds a PostgreSQL session
 // advisory lock for its whole life (SQLite is single-process). Ticks run
-// synchronously in this loop; the store lease fences any concurrent caller,
-// and its stored timestamp keeps a window from being ticked twice. A tick that
-// fails is logged so the next interval still runs.
+// synchronously in this loop, and the store's stamp of the last successful
+// tick keeps a window from being ticked twice. A tick that fails is logged so
+// the next interval still runs.
 func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -149,10 +149,9 @@ func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 
 func (s *Server) cronTickOnce(ctx context.Context) {
 	var report crons.TickReport
-	ran, err := s.operator.RunCronTickLeased(ctx, s.cronHolder, cronTickLeaseTTL, func(tickCtx context.Context) error {
-		// safety: the tick ends by the lease's expiry, so it never runs
-		// unfenced after another caller could acquire the lease.
-		deadline, cancel := context.WithTimeout(tickCtx, cronTickLeaseTTL)
+	ran, err := s.operator.RunCronTick(ctx, func(tickCtx context.Context) error {
+		// safety: a bounded tick cannot hold back the next minute's offer.
+		deadline, cancel := context.WithTimeout(tickCtx, cronTickTimeout)
 		defer cancel()
 		var terr error
 		report, terr = s.cronService().Tick(deadline, false)

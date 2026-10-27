@@ -8,24 +8,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// ReconcileRunEffects delivers committed effects under the completion lease.
-func (s *Server) ReconcileRunEffects(ctx context.Context) (err error) {
+// ReconcileRunEffects delivers committed effects.
+func (s *Server) ReconcileRunEffects(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	op := s.operator
-	lease, err := op.AcquireSingletonLease(ctx, "completion", s.leaseHolder, time.Minute)
-	if errors.Is(err, store.ErrLockHeld) {
-		return nil
-	}
+	profiles, err := op.DueProfileFolds(ctx, 100)
 	if err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, op.ReleaseSingletonLease(context.WithoutCancel(ctx), lease)) }()
-	profiles, err := op.DueProfileFolds(ctx, lease, 100)
-	if err != nil {
-		return err
-	}
-	checks, err := op.DueGitHubChecks(ctx, lease, 100)
+	checks, err := op.DueGitHubChecks(ctx, 100)
 	if err != nil {
 		return err
 	}
@@ -39,7 +31,7 @@ func (s *Server) ReconcileRunEffects(ctx context.Context) (err error) {
 			if effect.Team != tenant.Team() {
 				continue
 			}
-			delivery := store.EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev, Lease: lease}
+			delivery := store.EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev}
 			if err := s.deliverRunEffect(ctx, tenant, effect, delivery); err != nil {
 				var recordErr error
 				if errors.Is(err, errInvalidGitHubCompletion) {

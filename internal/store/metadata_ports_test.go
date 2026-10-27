@@ -247,7 +247,7 @@ func TestMetadataRunnerClockAheadDoesNotBlockRecovery(t *testing.T) {
 	if err := f.expireHolder(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	units, err := f.s.AsOperator().ReapUnits(t.Context(), f.lease, 10)
+	units, err := f.s.AsOperator().ReapUnits(t.Context(), 10)
 	if err != nil || len(units) != 1 || !units[0].Requeued {
 		t.Fatalf("recover ahead-clock runner: %+v, %v", units, err)
 	}

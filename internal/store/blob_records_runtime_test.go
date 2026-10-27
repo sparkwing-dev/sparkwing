@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -299,11 +298,7 @@ func TestBlobRecordsCacheSurvivesSourceRetention(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "gc", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if marked, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil || marked != 0 {
+	if marked, err := s.AsOperator().MarkBlobTombstones(t.Context(), 10); err != nil || marked != 0 {
 		t.Fatalf("retained memo was collected: %d,%v", marked, err)
 	}
 }

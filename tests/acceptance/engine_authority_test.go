@@ -39,7 +39,7 @@ func TestEngineExpansionAuthorityAdapter(t *testing.T) {
 		}
 		if got.Source != (runspec.NodeRef{RunID: "run", NodeID: "job"}) || got.SourceGeneration != 4 ||
 			got.Actor.Authority != a.Principal.Authority || got.Actor.CapabilityPrefix != "claim" ||
-			got.Actor.Owner.Kind != runstate.OwnerEval || got.Actor.Owner.Name != "eval" ||
+			got.Actor.Owner.Kind != runstate.OwnerEval ||
 			got.Actor.Owner.Generation != 9 || got.Actor.Owner.Holder != "controller" ||
 			got.Actor.Owner.SourceGeneration != 4 || got.Actor.Owner.SourceNodeID != "job" {
 			t.Fatalf("authority was lost: %+v", got)

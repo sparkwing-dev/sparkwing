@@ -224,7 +224,7 @@ func TestSizingHTTPRefusals(t *testing.T) {
 				p.Capability.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: "unit", Holder: "eval-host", Generation: 1}
 				expires := b.snapshot.Now.Add(time.Minute)
 				b.snapshot.Binding.FinishedAt = &b.snapshot.Now
-				b.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *p.Capability.Binding.Expansion, ExpiresAt: expires, ControllerLeaseExpiresAt: &expires}
+				b.snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *p.Capability.Binding.Expansion, ExpiresAt: expires}
 				status, code = 403, apierr.Forbidden
 			case "nodehost":
 				b.raw = "swn_" + strings.TrimPrefix(b.raw, "swk_")

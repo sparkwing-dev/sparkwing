@@ -10,49 +10,49 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
-func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference string, actor auditActor, amountMicro int64) (CreditReversal, error) {
+func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference string, actor auditActor, amountMicro int64) (creditReversal, error) {
 	paymentID, reference = strings.TrimSpace(paymentID), strings.TrimSpace(reference)
 	createdBy := actor.subject.ID
 	if actor.system != "" {
 		createdBy = string(actor.system)
 	}
 	if paymentID == "" || reference == "" {
-		return CreditReversal{}, errors.New("credits: a reversal names the payment and its own reference")
+		return creditReversal{}, errors.New("credits: a reversal names the payment and its own reference")
 	}
 	paid, found, err := tx.operator.paidGrantForPaymentTx(ctx, tx, paymentID)
 	if err != nil {
-		return CreditReversal{}, err
+		return creditReversal{}, err
 	}
 	if !found {
-		return CreditReversal{}, fmt.Errorf("%w: %q", errUnknownPayment, paymentID)
+		return creditReversal{}, fmt.Errorf("%w: %q", errUnknownPayment, paymentID)
 	}
 	l, err := lockLedgerTx(ctx, tx, paid.Team)
 	if err != nil {
-		return CreditReversal{}, err
+		return creditReversal{}, err
 	}
 	if _, err := refuseBoundDisputeTx(ctx, tx, reference, paid.Team, paymentID); err != nil {
-		return CreditReversal{}, err
+		return creditReversal{}, err
 	}
-	out := CreditReversal{Team: paid.Team, PaidMicro: paid.AmountMicro}
+	out := creditReversal{Team: paid.Team, PaidMicro: paid.AmountMicro}
 	existing, found, err := creditGrantByReferenceTx(ctx, tx, paid.Team, creditGrantReversal, reference)
 	if err != nil {
-		return CreditReversal{}, err
+		return creditReversal{}, err
 	}
 	if found {
 		if existing.Reverses != paid.Reference || existing.ReversesKind != CreditGrantPaid {
-			return CreditReversal{}, fmt.Errorf("%w: %q reverses %q, not %q",
+			return creditReversal{}, fmt.Errorf("%w: %q reverses %q, not %q",
 				ErrCreditGrantConflict, reference, existing.Reverses, paid.Reference)
 		}
 		out.Grant = &existing
 	}
 	already, err := reversedMicroTx(ctx, tx, paid.Team, CreditGrantPaid, paid.Reference)
 	if err != nil {
-		return CreditReversal{}, err
+		return creditReversal{}, err
 	}
 	if out.Grant == nil && already < paid.AmountMicro {
 		id, err := newCreditID("grant")
 		if err != nil {
-			return CreditReversal{}, err
+			return creditReversal{}, err
 		}
 		take := paid.AmountMicro - already
 		if amountMicro > 0 && amountMicro < take {
@@ -63,17 +63,17 @@ func reversePaymentTx(ctx context.Context, tx *storeTx, paymentID, reference str
 			Reference: reference, Reverses: paid.Reference, ReversesKind: CreditGrantPaid, CreatedBy: createdBy, CreatedAt: tx.now(ctx),
 		}
 		if err := l.insertGrant(ctx, grant); err != nil {
-			return CreditReversal{}, err
+			return creditReversal{}, err
 		}
 		if err := recordGrantEventTx(ctx, tx, grant, actor, auditGrant{}); err != nil {
-			return CreditReversal{}, err
+			return creditReversal{}, err
 		}
 		out.Grant, out.Created = &grant, true
 		already += take
 	}
 	out.ReversedMicro = already
 	if out.BalanceMicro, err = l.balance(ctx); err != nil {
-		return CreditReversal{}, err
+		return creditReversal{}, err
 	}
 	return out, nil
 }

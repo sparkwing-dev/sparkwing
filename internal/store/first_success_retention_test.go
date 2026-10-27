@@ -38,11 +38,7 @@ func assertFirstSuccessfulRunSurvivesAuditRetention(t *testing.T, s *store.Store
 		t.Fatalf("first-success events before retention: %+v, %v", events, err)
 	}
 	ageAuditEvents(t, s, "run.first_succeeded", time.Now().Add(-401*24*time.Hour))
-	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "maintenance", "first-success-retention", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := s.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
+	result, err := s.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Limit: 100})
 	if err != nil || result.AuditEvents != 1 {
 		t.Fatalf("prune first-success audit: %+v, %v", result, err)
 	}

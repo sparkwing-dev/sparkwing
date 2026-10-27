@@ -22,10 +22,6 @@ func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {
 			t.Fatal(err)
 		}
 		activateMemoFixture(t, s)
-		lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "copy-gc", time.Hour)
-		if err != nil {
-			t.Fatal(err)
-		}
 		rewriteSchemaExec(t, s.db, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES ('a',?,?)", intent.Digest, now.Add(-limits.BlobGCGrace).UnixNano())
 		var hit blob.MemoHit
 		var copyErr, retireErr error
@@ -45,7 +41,7 @@ func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {
 				return err
 			})
 			if retireErr == nil {
-				deleted, retireErr = s.AsOperator().CollectBlobTombstones(t.Context(), lease, 10, blobDeleteFunc(func(_ context.Context, b blob.Blob) error {
+				deleted, retireErr = s.AsOperator().CollectBlobTombstones(t.Context(), 10, blobDeleteFunc(func(_ context.Context, b blob.Blob) error {
 					if b.Team != "a" || b.Digest != intent.Digest || b.Size != intent.Size {
 						t.Errorf("wrong physical deletion: %+v", b)
 					}

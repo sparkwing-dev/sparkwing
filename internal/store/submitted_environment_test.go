@@ -263,11 +263,7 @@ func FuzzExecutionEnvironmentUsesOnlyLiveUnitFence(f *testing.F) {
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=1 WHERE id='run'`)
 			}
 		case 9:
-			if kind == capability.UnitEval {
-				rewriteSchemaExec(t, s.db, `UPDATE leases SET generation=generation+1`)
-			} else {
-				rewriteSchemaExec(t, s.db, "UPDATE "+table+" SET lease_expires_at=1 WHERE "+predicate)
-			}
+			rewriteSchemaExec(t, s.db, "UPDATE "+table+" SET lease_expires_at=1 WHERE "+predicate)
 		case 10:
 			if kind == capability.UnitEval {
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET cancel_requested_at=1 WHERE run_id='run'`)

@@ -12,7 +12,7 @@ import (
 )
 
 func (o *Operator) setPaymentMode(ctx context.Context, mode capability.PaymentMode) error {
-	_, err := o.ConfigureDeployment(ctx, mode, DefaultFreeTeamSlots, func() error { return nil })
+	_, err := o.ConfigureDeployment(ctx, mode, func() error { return nil })
 	return err
 }
 
@@ -68,7 +68,7 @@ func TestPaymentModeTestActivityCanSwitchToLive(t *testing.T) {
 			if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
 				t.Fatalf("second live startup: %v", err)
 			}
-			if _, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, DefaultFreeTeamSlots, func() error { t.Fatal("published a forbidden mode change"); return nil }); err == nil || !strings.Contains(err.Error(), "live to test") {
+			if _, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, func() error { t.Fatal("published a forbidden mode change"); return nil }); err == nil || !strings.Contains(err.Error(), "live to test") {
 				t.Fatalf("test startup after live: %v", err)
 			}
 		})
@@ -290,7 +290,7 @@ func TestLiveCutoverRollsBackIfDeploymentPublicationFails(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='test-customer',card_added_at=1 WHERE name='a'`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO team_storage(team,store,updated_at,storage_charged_through) VALUES ('a','cache',1,7),('a','logs',1,7)`)
-	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, DefaultFreeTeamSlots, func() error { return context.Canceled }); err != context.Canceled {
+	if _, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, func() error { return context.Canceled }); err != context.Canceled {
 		t.Fatalf("publication failure=%v", err)
 	}
 	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentTest); err != nil {
@@ -345,7 +345,7 @@ func TestLiveCutoverRequiresDrainedTestWork(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			_, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, DefaultFreeTeamSlots, func() error { t.Error("published before draining test work"); return nil })
+			_, err := s.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentLive, func() error { t.Error("published before draining test work"); return nil })
 			if err == nil || !strings.Contains(err.Error(), "drain metered work before switching to live; see the cutover runbook") {
 				t.Fatalf("live startup with open %s: %v", activity, err)
 			}
@@ -358,9 +358,9 @@ func TestLiveCutoverRequiresDrainedTestWork(t *testing.T) {
 }
 
 func TestLiveCutoverRestartsStorageAccounting(t *testing.T) {
-	s, lease, now := retainedBillingFixture(t)
+	s, now := retainedBillingFixture(t)
 	retainedBlob(t, s, "a", "a", StorageBytesPerGB, now.Add(-time.Hour))
-	retainedBill(t, s, lease)
+	retainedBill(t, s)
 	*now = now.Add(time.Hour)
 	cutover := *now
 	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
@@ -374,7 +374,7 @@ func TestLiveCutoverRestartsStorageAccounting(t *testing.T) {
 	if err := s.AsOperator().setPaymentMode(t.Context(), capability.PaymentLive); err != nil {
 		t.Fatal(err)
 	}
-	billed := retainedBill(t, s, lease)
+	billed := retainedBill(t, s)
 	if len(billed.Charges) != 1 || billed.Charges[0].Seconds != 60 {
 		t.Fatalf("live billing includes test time or restarted live watermark: %+v (cutover %s)", billed, cutover)
 	}

@@ -65,9 +65,6 @@ func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authoriz
 	facts.NotAfter = state.LeaseExpiresAt
 	if state.Expansion != nil {
 		facts.NotAfter = state.Expansion.ExpiresAt
-		if end := state.Expansion.ControllerLeaseExpiresAt; end != nil && end.Before(facts.NotAfter) {
-			facts.NotAfter = *end
-		}
 	}
 	facts.NotAfter = authorityNotAfter(chain, facts.NotAfter)
 	if !facts.NotAfter.After(facts.Now) {

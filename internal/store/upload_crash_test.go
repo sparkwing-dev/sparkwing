@@ -96,7 +96,7 @@ func TestBlobUploadCrashReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commit.TicketID, commit.Verified, commit.ReplicaID = duplicate.ID, duplicate.Blob, "replica-b"
+	commit.TicketID, commit.Verified = duplicate.ID, duplicate.Blob
 	if _, err := tenant.CommitBlobUpload(t.Context(), commit); err != nil {
 		t.Fatal(err)
 	}

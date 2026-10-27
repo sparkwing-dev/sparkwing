@@ -13,7 +13,6 @@ func TestAwardedRunInputReachesNativeOwner(t *testing.T) {
 			t.Run(original+map[bool]string{false: "/new", true: "/resumed"}[resumed], func(t *testing.T) {
 				state, host, prepared := newOwnerFixture(t, resumed)
 				row := &state.snapshot.Run
-				row.Owner.Name = ""
 				row.Request.RunID, row.Request.Request.Team = original, "team"
 				unit := controllerwire.ClaimedUnit{
 					RunID: row.ID, Request: row.Request, Runner: prepared.GrantedRunner,

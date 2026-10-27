@@ -31,37 +31,6 @@ repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_reten
 VALUES ('a',?,?,'pipeline',?,?,'request',1,'gh:1','host','execute','account',1,?,'r30',30)`, id, number, state, []byte(`{"version":1,"provenance":{"trust":"asserted","pipeline":"pipeline","writer":"account/fixture"}}`), finished)
 }
 
-func TestRewriteSingletonLeaseFencesExpiredOwners(t *testing.T) {
-	s, _, now := maintenanceStore(t)
-	ctx := context.Background()
-	op := s.AsOperator()
-	first, err := op.AcquireSingletonLease(ctx, "maintenance", "one", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := op.AcquireSingletonLease(ctx, "maintenance", "two", time.Minute); !errors.Is(err, ErrLockHeld) {
-		t.Fatalf("live foreign holder: %v", err)
-	}
-	continued, err := op.AcquireSingletonLease(ctx, "maintenance", "one", time.Minute)
-	if err != nil || continued.Generation != first.Generation {
-		t.Fatalf("same live holder: %+v %v", continued, err)
-	}
-	*now = now.Add(time.Minute)
-	if _, err := op.RenewSingletonLease(ctx, first, time.Minute); !errors.Is(err, ErrLockHeld) {
-		t.Fatalf("expired renewal: %v", err)
-	}
-	second, err := op.AcquireSingletonLease(ctx, "maintenance", "two", time.Minute)
-	if err != nil || second.Generation != first.Generation+1 {
-		t.Fatalf("new fence: %+v %v", second, err)
-	}
-	if _, err := op.RenewSingletonLease(ctx, first, time.Minute); !errors.Is(err, ErrLockHeld) {
-		t.Fatalf("stale renewal: %v", err)
-	}
-	if _, err := op.AcquireSingletonLease(ctx, "unknown", "one", time.Minute); err == nil {
-		t.Fatal("accepted unknown singleton")
-	}
-}
-
 func maintenanceEffects(t *testing.T, s *Store, state runstate.RunState) {
 	t.Helper()
 	tx, err := s.beginTx(context.Background())
@@ -85,16 +54,12 @@ func TestRewriteCompletionOldAcknowledgmentLeavesTerminalDue(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
 	ctx := context.Background()
 	maintenanceRun(t, s, "run", 1, runstate.RunPending)
-	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "completion", "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	maintenanceEffects(t, s, runstate.RunPending)
-	due, err := s.AsOperator().DueRunEffects(ctx, lease, 10)
+	due, err := s.AsOperator().DueRunEffects(ctx, 10)
 	if err != nil || len(due) != 1 || due[0].Phase != effectPending {
 		t.Fatalf("pending: %+v %v", due, err)
 	}
-	old := EffectDelivery{RunID: "run", Effect: effectGitHubCheck, Revision: due[0].DesiredRev, Lease: lease}
+	old := EffectDelivery{RunID: "run", Effect: effectGitHubCheck, Revision: due[0].DesiredRev}
 	maintenanceEffects(t, s, runstate.RunSuccess)
 	if err := tenant.AcknowledgeRunEffect(ctx, old); err != nil {
 		t.Fatal(err)
@@ -102,7 +67,7 @@ func TestRewriteCompletionOldAcknowledgmentLeavesTerminalDue(t *testing.T) {
 	if err := tenant.RetryRunEffect(ctx, old, now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	due, err = s.AsOperator().DueRunEffects(ctx, lease, 10)
+	due, err = s.AsOperator().DueRunEffects(ctx, 10)
 	if err != nil || len(due) != 4 {
 		t.Fatalf("terminal still due: %+v %v", due, err)
 	}
@@ -110,26 +75,22 @@ func TestRewriteCompletionOldAcknowledgmentLeavesTerminalDue(t *testing.T) {
 		if effect.Phase != effectTerminal {
 			t.Fatalf("regressed phase: %+v", effect)
 		}
-		if err := tenant.AcknowledgeRunEffect(ctx, EffectDelivery{RunID: "run", Effect: effect.Effect, Revision: effect.DesiredRev, Lease: lease}); err != nil {
+		if err := tenant.AcknowledgeRunEffect(ctx, EffectDelivery{RunID: "run", Effect: effect.Effect, Revision: effect.DesiredRev}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	due, err = s.AsOperator().DueRunEffects(ctx, lease, 10)
+	due, err = s.AsOperator().DueRunEffects(ctx, 10)
 	if err != nil || len(due) != 0 {
 		t.Fatalf("delivered: %+v %v", due, err)
 	}
-	*now = now.Add(time.Minute)
-	if err := tenant.AcknowledgeRunEffect(ctx, old); !errors.Is(err, ErrLockHeld) {
-		t.Fatalf("expired acknowledgement: %v", err)
-	}
 }
 
-func TestRewriteReplicaUsageAndQuotaSettlement(t *testing.T) {
+func TestRewriteUsageAndQuotaSettlement(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
 	ctx := context.Background()
-	for _, replica := range []string{"one", "two"} {
+	for range 2 {
 		for _, counter := range []string{"egress_bytes", "download_bytes", "storage_bytes", "storage_objects", "runs"} {
-			if err := tenant.AddUsage(ctx, UsageDelta{Period: "2027-01", ReplicaID: replica, Counter: counter, Amount: 7}); err != nil {
+			if err := tenant.AddUsage(ctx, UsageDelta{Period: "2027-01", Counter: counter, Amount: 7}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -177,7 +138,7 @@ func TestRewriteReplicaUsageAndQuotaSettlement(t *testing.T) {
 	}
 }
 
-func TestRewriteReplicasRaceQuotaAndSingletonLease(t *testing.T) {
+func TestRewriteStoresRaceQuota(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "replicas.db")
 	stores := make([]*Store, 2)
 	now := time.Unix(1_800_000_000, 0)
@@ -202,41 +163,32 @@ func TestRewriteReplicasRaceQuotaAndSingletonLease(t *testing.T) {
 	rewriteSchemaExec(t, stores[0].db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
 	rewriteSchemaExec(t, stores[0].db, `INSERT INTO settings(key,value) VALUES ('operator.download_daily_max_bytes',?)`, []byte(`100`))
 	rewriteSchemaExec(t, stores[0].db, `INSERT INTO quota_admission(team,quota,period,used,updated_at) VALUES ('a','download',?,90,1)`, now.UTC().Format("2006-01-02"))
-	for _, kind := range []string{"quota", "singleton"} {
-		t.Run(kind, func(t *testing.T) {
-			start := make(chan struct{})
-			results := make(chan error, 2)
-			for i, s := range stores {
-				go func() {
-					<-start
-					var err error
-					if kind == "quota" {
-						_, err = (&Tenant{s: s, team: "a"}).ReserveQuota(context.Background(), "download", 8)
-					} else {
-						_, err = s.AsOperator().AcquireSingletonLease(context.Background(), "maintenance", []string{"first", "second"}[i], time.Minute)
-					}
-					results <- err
-				}()
-			}
-			close(start)
-			successes := 0
-			for range stores {
-				if err := <-results; err == nil {
-					successes++
-				} else if !errors.Is(err, ErrLockHeld) && !errors.Is(err, ErrStorageQuota) {
-					t.Fatal(err)
-				}
-			}
-			if successes != 1 {
-				t.Fatalf("%d winners", successes)
-			}
-		})
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, s := range stores {
+		go func() {
+			<-start
+			_, err := (&Tenant{s: s, team: "a"}).ReserveQuota(context.Background(), "download", 8)
+			results <- err
+		}()
+	}
+	close(start)
+	successes := 0
+	for range stores {
+		if err := <-results; err == nil {
+			successes++
+		} else if !errors.Is(err, ErrLockHeld) && !errors.Is(err, ErrStorageQuota) {
+			t.Fatal(err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("%d winners", successes)
 	}
 }
 
 func TestRewriteUsageOverflowLeavesCounterUnchanged(t *testing.T) {
 	s, tenant, _ := maintenanceStore(t)
-	delta := UsageDelta{Period: "period", ReplicaID: "replica", Counter: "egress_bytes", Amount: math.MaxInt64}
+	delta := UsageDelta{Period: "period", Counter: "egress_bytes", Amount: math.MaxInt64}
 	if err := tenant.AddUsage(context.Background(), delta); err != nil {
 		t.Fatal(err)
 	}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -121,7 +120,6 @@ type poolPin struct {
 	input    IntakeRequest
 	admitted AdmissionResult
 	root     capability.Capability
-	lease    SingletonLease
 }
 
 func (f poolPin) claim(t *testing.T, kind capability.UnitKind, run string) (capability.Capability, error) {
@@ -181,11 +179,7 @@ func poolPinFixtureOn(t *testing.T, reserved []string, secrets ...string) poolPi
 	root := authorityRoot("deploy-launcher", "a")
 	root.Grants, root.ReservedPools, root.Trust = []capability.Grant{capability.ClaimsLaunch}, reserved, capability.TrustVerifiedDefault
 	authorityPersist(t, s, root)
-	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "controller.owner", "controller", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := poolPin{tenant: tenant, input: input, admitted: admitted, root: root, lease: lease}
+	f := poolPin{tenant: tenant, input: input, admitted: admitted, root: root}
 	planner, err := f.claim(t, capability.UnitPlan, "")
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +229,7 @@ func TestRunLevelPoolPinCompletesThroughLauncher(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.AsOperator().ReconcileControllerRuns(ctx, f.lease, "", 10); err != nil {
+	if _, err := s.AsOperator().ReconcileControllerRuns(ctx, "", 10); err != nil {
 		t.Fatal(err)
 	}
 	run, err := tenant.ReadRun(ctx, admitted.RunID)

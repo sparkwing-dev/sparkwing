@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -62,11 +61,7 @@ func TestControllerApprovalEvaluationCommitsInEachDialect(t *testing.T) {
 					if _, err := s.DB().ExecContext(t.Context(), storetest.Rebind(s, `UPDATE runs SET dispatch='controller' WHERE team=? AND id=?`), tenant.Team(), plan.RunID); err != nil {
 						t.Fatal(err)
 					}
-					lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.owner", "controller", time.Hour)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if _, err := s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 100); err != nil {
+					if _, err := s.AsOperator().ReconcileControllerRuns(t.Context(), "", 100); err != nil {
 						t.Fatal(err)
 					}
 					authority := plan.Seal.Request.AuthorityRef

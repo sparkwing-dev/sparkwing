@@ -162,7 +162,7 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 		Objects: objects, Access: tenant,
 		ReadBlob: tenant.ReadBlob,
 		ChargeDownload: func(ctx context.Context, _ blob.Authority, object blob.Blob) error {
-			_, err := tenant.ChargeDownload(ctx, store.DownloadCharge{ReplicaID: "materialization", Bytes: object.Size})
+			_, err := tenant.ChargeDownload(ctx, store.DownloadCharge{Bytes: object.Size})
 			return err
 		},
 	})
@@ -224,7 +224,7 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 		t.Fatalf("copied artifact mode: %v: %v", info, err)
 	}
 	var charged int64
-	if err := s.DB().QueryRowContext(t.Context(), "SELECT COALESCE(SUM(bytes),0) FROM team_download_day WHERE team='a' AND replica_id='materialization'").Scan(&charged); err != nil {
+	if err := s.DB().QueryRowContext(t.Context(), "SELECT COALESCE(SUM(bytes),0) FROM team_download_day WHERE team='a'").Scan(&charged); err != nil {
 		t.Fatal(err)
 	}
 	if want := int64(len(output) + len(manifest) + len(artifact)); charged != want {

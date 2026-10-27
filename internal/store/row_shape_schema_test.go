@@ -34,10 +34,10 @@ func TestSchemaRejectsIncompleteLifecycleRows(t *testing.T) {
 		{"resolved approval without timestamp", `INSERT INTO approvals(team,run_id,node_id,requested_at,resolution) VALUES ('a','run','job',1,'approved')`},
 		{"unresolved approval with timestamp", `INSERT INTO approvals(team,run_id,node_id,requested_at,resolved_at) VALUES ('a','run','job',1,2)`},
 		{"approval missing node", `INSERT INTO approvals(team,run_id,node_id,requested_at) VALUES ('a','run','missing',1)`},
-		{"claimed eval without claim", `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',0,'claimed',1)`},
-		{"running eval without start", `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation,claimed_by,capability_prefix,lease_expires_at,generation,claimed_at) VALUES ('a','run','job',0,'running',1,'runner','claim',2,1,1)`},
-		{"finished eval without timestamp", `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',0,'done',1)`},
-		{"unfinished eval with timestamp", `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation,finished_at) VALUES ('a','run','job',0,'pending',1,2)`},
+		{"claimed eval without claim", `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',0,'claimed')`},
+		{"running eval without start", `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,claimed_by,capability_prefix,lease_expires_at,generation,claimed_at) VALUES ('a','run','job',0,'running','runner','claim',2,1,1)`},
+		{"finished eval without timestamp", `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',0,'done')`},
+		{"unfinished eval with timestamp", `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,finished_at) VALUES ('a','run','job',0,'pending',2)`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s := lifecycleSchemaFixture(t, false)

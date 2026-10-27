@@ -26,10 +26,6 @@ func TestOwnerLeaseAloneDeterminesLivenessProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
 			ownerEnd := owner.Award.LeaseExpiresAt
 			for range random.IntN(4) + 1 {
 				*now = now.Add(time.Duration(random.IntN(5)+1) * time.Second)
@@ -41,7 +37,7 @@ func TestOwnerLeaseAloneDeterminesLivenessProperty(t *testing.T) {
 				if _, err := s.AsOperator().RenewUnit(t.Context(), remote.Award.CapabilityPrefix, false); err != nil {
 					t.Fatal(err)
 				}
-				if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+				if reaped, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 0 {
 					t.Fatalf("renewed owner recovered: %+v, %v", reaped, err)
 				}
 			}
@@ -62,7 +58,7 @@ func TestOwnerLeaseAloneDeterminesLivenessProperty(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("refused renewal changed work: %v", err)
 			}
-			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
+			reaped, err := s.AsOperator().ReapUnits(t.Context(), 10)
 			if err != nil || len(reaped) != 1 || !reaped[0].Requeued || reaped[0].RunID != owner.RunID || reaped[0].Disruptions != 0 {
 				t.Fatalf("remote activity retained lost owner: %+v, %v", reaped, err)
 			}

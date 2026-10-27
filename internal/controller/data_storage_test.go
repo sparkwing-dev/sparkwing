@@ -146,7 +146,7 @@ func TestDataStorageMaintenancePreservesReachableTenantBytes(t *testing.T) {
 	server.maintainRetainedData(t.Context())
 }
 
-func TestDataStorageMaintenanceHonorsForeignLease(t *testing.T) {
+func TestDataStorageMaintenanceRemovesExpiredLogBytes(t *testing.T) {
 	root := t.TempDir()
 	st, err := teststore.OpenExisting(filepath.Join(root, "state.db"))
 	if err != nil {
@@ -179,16 +179,6 @@ func TestDataStorageMaintenanceHonorsForeignLease(t *testing.T) {
 	}
 	old := time.Now().Add(-3 * 24 * time.Hour)
 	if err := os.Chtimes(path, old, old); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "other", time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	New(st, nil).WithDataObjects(objects).maintainRetainedData(t.Context())
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("foreign holder removed bytes: %v", err)
-	}
-	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "UPDATE leases SET until=0 WHERE name='maintenance'"); err != nil {
 		t.Fatal(err)
 	}
 	New(st, nil).WithDataObjects(objects).maintainRetainedData(t.Context())

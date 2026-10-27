@@ -27,9 +27,6 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 		return RetentionResult{}, fmt.Errorf("retention limit must be positive")
 	}
 
-	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance"); err != nil {
-		return RetentionResult{}, err
-	}
 	now := tx.now(ctx)
 	runDays, err := numericSettingTx(ctx, tx, "operator.run_retention_days", 0)
 	if err != nil {
@@ -90,13 +87,6 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 	if err := tx.operator.deleteRetentionIdentityTx(ctx, tx, now, request.Limit, &result); err != nil {
 		return RetentionResult{}, err
 	}
-	result.FreeSlotsReleased, err = tx.operator.releaseIdleFreeSlotsTx(ctx, tx)
-	if err != nil {
-		return RetentionResult{}, err
-	}
-	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance"); err != nil {
-		return RetentionResult{}, err
-	}
 	return result, nil
 }
 
@@ -115,10 +105,13 @@ type retentionRun struct {
 	bytes int64
 }
 
+// deleteRetentionRunsTx keeps a run while it still has counted log slots: deleting the run would stop counting log
+// objects Sparkwing has not deleted, so the run waits for the log expiry pass to delete them first.
 func (op *Operator) deleteRetentionRunsTx(ctx context.Context, tx *storeTx, cutoff time.Time, limit int) (int64, int64, error) {
 	rows, err := tx.queryContext(ctx, `SELECT r.team,r.id,r.event_bytes FROM runs r WHERE r.finished_at < ?
 AND NOT EXISTS (SELECT 1 FROM pipeline_success_pins p WHERE p.team = r.team AND p.run_id = r.id)
 AND NOT EXISTS (SELECT 1 FROM run_effects e WHERE e.team = r.team AND e.run_id = r.id AND e.delivered_rev < e.desired_rev)
+AND NOT EXISTS (SELECT 1 FROM log_slots l WHERE l.team = r.team AND l.run_id = r.id)
 ORDER BY r.finished_at,r.team,r.id LIMIT ?`, cutoff.UnixNano(), limit)
 	if err != nil {
 		return 0, 0, err
@@ -137,7 +130,7 @@ ORDER BY r.finished_at,r.team,r.id LIMIT ?`, cutoff.UnixNano(), limit)
 	var count, released int64
 	var teams []Team
 	for _, run := range runs {
-		res, err := tx.execContext(ctx, `DELETE FROM runs WHERE team = ? AND id = ? AND finished_at < ? AND NOT EXISTS (SELECT 1 FROM pipeline_success_pins p WHERE p.team = runs.team AND p.run_id = runs.id) AND NOT EXISTS (SELECT 1 FROM run_effects e WHERE e.team = runs.team AND e.run_id = runs.id AND e.delivered_rev < e.desired_rev)`, run.team, run.id, cutoff.UnixNano())
+		res, err := tx.execContext(ctx, `DELETE FROM runs WHERE team = ? AND id = ? AND finished_at < ? AND NOT EXISTS (SELECT 1 FROM pipeline_success_pins p WHERE p.team = runs.team AND p.run_id = runs.id) AND NOT EXISTS (SELECT 1 FROM run_effects e WHERE e.team = runs.team AND e.run_id = runs.id AND e.delivered_rev < e.desired_rev) AND NOT EXISTS (SELECT 1 FROM log_slots l WHERE l.team = runs.team AND l.run_id = runs.id)`, run.team, run.id, cutoff.UnixNano())
 		if err != nil {
 			return 0, 0, err
 		}

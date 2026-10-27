@@ -140,8 +140,6 @@ func TestAuthenticationExpansionUsesOwnLease(t *testing.T) {
 		"source is not terminal":    func(r *authenticationReader) { r.snapshot.Binding.FinishedAt = nil },
 		"eval lease expired":        func(r *authenticationReader) { r.snapshot.Binding.Expansion.ExpiresAt = r.snapshot.Now },
 		"eval holder changed":       func(r *authenticationReader) { r.snapshot.Binding.Expansion.Lease.Holder = "other" },
-		"controller lease missing":  func(r *authenticationReader) { r.snapshot.Binding.Expansion.ControllerLeaseExpiresAt = nil },
-		"controller lease expired":  func(r *authenticationReader) { r.snapshot.Binding.Expansion.ControllerLeaseExpiresAt = &r.snapshot.Now },
 		"cancelled":                 func(r *authenticationReader) { r.snapshot.Binding.RunCancelled = true },
 	}
 	for name, mutate := range tests {
@@ -153,8 +151,7 @@ func TestAuthenticationExpansionUsesOwnLease(t *testing.T) {
 			finish := r.snapshot.Now.Add(-time.Hour)
 			r.snapshot.Binding.FinishedAt = &finish
 			r.snapshot.Binding.LeaseExpiresAt = finish
-			controllerExpires := r.snapshot.Now.Add(time.Minute)
-			r.snapshot.Binding.Expansion = &ExpansionState{Lease: *c.Binding.Expansion, ExpiresAt: controllerExpires, ControllerLeaseExpiresAt: &controllerExpires}
+			r.snapshot.Binding.Expansion = &ExpansionState{Lease: *c.Binding.Expansion, ExpiresAt: r.snapshot.Now.Add(time.Minute)}
 			route, _ := LookupRoute("POST", "/api/v1/runs/{run}/jobs/{job}/expansion")
 			a := NewAuthenticator(r)
 			if _, err := a.Authenticate(t.Context(), p, route); err != nil {

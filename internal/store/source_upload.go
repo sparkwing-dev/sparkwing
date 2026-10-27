@@ -62,10 +62,6 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 		if err := clearBlobTombstoneTx(ctx, tx, t.team, u.Blob.Digest); err != nil {
 			return u, err
 		}
-		policy, err := storageQuotaForTeamTx(ctx, tx, t.team)
-		if err != nil {
-			return u, err
-		}
 		reserved := u.Blob.Size
 		var own int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM source_uploads WHERE team=? AND authority_kind=? AND authority_id=? AND repo_key=? AND digest=? AND size=? AND committed_at>0 AND expires_at>?`, t.team, authority.Kind, authority.ID, u.Scope.Repository, u.Blob.Digest, u.Blob.Size, tx.now(ctx).UnixNano()).Scan(&own); err != nil {
@@ -74,16 +70,10 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 		if own > 0 {
 			reserved = 0
 		}
-		d := uploadQuotaDimension{id: blobUploadQuotaID(u.ID), quota: "storage", period: tx.now(ctx).Format("2006-01"), amount: reserved, ceiling: policy.MaxBytesPerMonth, limitName: storageLimitBytesPerMonth, unit: "bytes"}
-		if err := reserveUploadQuotaDimensionTx(ctx, tx, t.team, d, u.ExpiresAt); err != nil {
+		if err := admitStorageGrowthTx(ctx, tx, t.team, storageGrowth{reservation: blobUploadQuotaID(u.ID), expires: u.ExpiresAt, bytes: reserved}); err != nil {
 			return u, err
 		}
-		if u.Blob.Size > 0 {
-			if err := markFreeSlotActiveTx(ctx, tx, t.team); err != nil {
-				return u, err
-			}
-		}
-		_, err = tx.execContext(ctx, `INSERT INTO source_uploads(team,id,authority_kind,authority_id,repo_key,repo_display,execution_sha,pipeline_sha,digest,size,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, t.team, u.ID, authority.Kind, authority.ID, u.Scope.Repository, u.Scope.RepositoryDisplay, u.Scope.ExecutionSHA, u.Scope.PipelineSHA, u.Blob.Digest, u.Blob.Size, u.ExpiresAt.UnixNano())
+		_, err := tx.execContext(ctx, `INSERT INTO source_uploads(team,id,authority_kind,authority_id,repo_key,repo_display,execution_sha,pipeline_sha,digest,size,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, t.team, u.ID, authority.Kind, authority.ID, u.Scope.Repository, u.Scope.RepositoryDisplay, u.Scope.ExecutionSHA, u.Scope.PipelineSHA, u.Blob.Digest, u.Blob.Size, u.ExpiresAt.UnixNano())
 		if err != nil {
 			return u, err
 		}
@@ -120,13 +110,13 @@ func (t *Tenant) ReadSourceUpload(ctx context.Context, authority capability.Auth
 }
 
 // CommitSourceUpload settles only bytes verified by the shared object backend.
-func (t *Tenant) CommitSourceUpload(ctx context.Context, authority capability.AuthorityRef, id string, verified blob.Blob, replica string) (SourceUpload, error) {
+func (t *Tenant) CommitSourceUpload(ctx context.Context, authority capability.AuthorityRef, id string, verified blob.Blob) (SourceUpload, error) {
 	return inTxResult(ctx, t.s, func(tx *storeTx) (SourceUpload, error) {
 		u, err := readSourceUploadTx(ctx, tx, t.team, authority, id)
 		if err != nil {
 			return u, err
 		}
-		if verified.Team != string(t.team) || verified.Digest != u.Blob.Digest || verified.Size != u.Blob.Size || replica == "" {
+		if verified.Team != string(t.team) || verified.Digest != u.Blob.Digest || verified.Size != u.Blob.Size {
 			return u, blob.ErrIntegrity
 		}
 		if u.CommittedAt != 0 {
@@ -147,12 +137,12 @@ func (t *Tenant) CommitSourceUpload(ctx context.Context, authority capability.Au
 		if err := settleUploadQuotaDimensionTx(ctx, tx, t.team, d, q); err != nil {
 			return u, err
 		}
-		if err := recordStorageUsageTx(ctx, tx, t.team, "", replica, q.period, u.Blob.Size*n, n); err != nil {
+		if err := recordStorageUsageTx(ctx, tx, t.team, "", q.period, u.Blob.Size*n, n); err != nil {
 			return u, err
 		}
 		u.CommittedAt = tx.now(ctx).UnixNano()
 		u.ExpiresAt = tx.now(ctx).Add(sourceBundleRetention)
-		_, err = tx.execContext(ctx, "UPDATE source_uploads SET committed_at=?,expires_at=?,replica_id=?,period=?,charged_objects=? WHERE team=? AND id=?", u.CommittedAt, u.ExpiresAt.UnixNano(), replica, q.period, n, t.team, id)
+		_, err = tx.execContext(ctx, "UPDATE source_uploads SET committed_at=?,expires_at=?,period=?,charged_objects=? WHERE team=? AND id=?", u.CommittedAt, u.ExpiresAt.UnixNano(), q.period, n, t.team, id)
 		if err != nil {
 			return u, err
 		}
@@ -184,9 +174,9 @@ func bindSourceUploadTx(ctx context.Context, tx *storeTx, team Team, request Int
 	if err != nil {
 		return err
 	}
-	var period, replica string
+	var period string
 	var objects int64
-	if err := tx.QueryRowContext(ctx, "SELECT period,replica_id,charged_objects FROM source_uploads WHERE team=? AND id=?", team, id).Scan(&period, &replica, &objects); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT period,charged_objects FROM source_uploads WHERE team=? AND id=?", team, id).Scan(&period, &objects); err != nil {
 		return err
 	}
 	dimensions := uploadQuotaDimensions("", result.RunID, "", u.Blob.Size*objects, objects)
@@ -197,7 +187,7 @@ func bindSourceUploadTx(ctx context.Context, tx *storeTx, team Team, request Int
 			return err
 		}
 	}
-	if err := recordStorageRunUsageTx(ctx, tx, team, result.RunID, replica, period, u.Blob.Size*objects, objects); err != nil {
+	if err := recordStorageRunUsageTx(ctx, tx, team, result.RunID, period, u.Blob.Size*objects, objects); err != nil {
 		return err
 	}
 	identity := blob.UploadIdentity{Kind: blob.UploadSubmission, Team: string(team), RunID: result.RunID, Principal: blob.Principal(principal.Capability.Subject.ID), CapabilityRef: request.Authority.ID}
@@ -226,16 +216,13 @@ func copyRetrySourceRecordTx(ctx context.Context, tx *storeTx, team Team, previo
 	return requireOneRow(result, "retry source binding")
 }
 
-// ExpireSourceUploads removes staged source bytes under the maintenance lease before releasing tickets.
-func (o *Operator) ExpireSourceUploads(ctx context.Context, lease SingletonLease, limit int, objects blob.ObjectBackend) error {
+// ExpireSourceUploads removes staged source bytes before releasing tickets.
+func (o *Operator) ExpireSourceUploads(ctx context.Context, limit int, objects blob.ObjectBackend) error {
 	if limit <= 0 || objects == nil {
 		return ErrInvalidInput
 	}
 	var expired []teamKey
 	err := o.s.inTx(ctx, func(tx *storeTx) (err error) {
-		if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-			return err
-		}
 		expired, err = teamKeysTx(ctx, tx, "SELECT team,id FROM source_uploads WHERE expires_at<=? ORDER BY team,expires_at,id LIMIT ?", tx.now(ctx).UnixNano(), limit)
 		return err
 	})
@@ -245,9 +232,6 @@ func (o *Operator) ExpireSourceUploads(ctx context.Context, lease SingletonLease
 		}
 		if err = objects.DeleteObject(ctx, "teams/"+e.team+"/pending/"+e.key); err == nil {
 			err = o.s.inTx(ctx, func(tx *storeTx) error {
-				if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance"); err != nil {
-					return err
-				}
 				return expireSourceUploadTx(ctx, tx, Team(e.team), e.key)
 			})
 		}

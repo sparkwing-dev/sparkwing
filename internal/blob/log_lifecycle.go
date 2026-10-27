@@ -11,8 +11,11 @@ import (
 )
 
 // LogClassReady checks that the bucket expires every object in the requested
-// class. Use it as the batch signer's lifecycle check. It never changes bucket
-// rules, which may also govern unrelated operator-owned prefixes.
+// class no sooner than the class. Sparkwing's maintenance pass deletes each log
+// object at its class age and only then stops counting it, so the rule is a
+// backstop and should be set longer than the class. Use it as the batch
+// signer's lifecycle check. It never changes bucket rules, which may also
+// govern unrelated operator-owned prefixes.
 func (s *S3) LogClassReady(ctx context.Context, class string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -29,7 +32,7 @@ func (s *S3) LogClassReady(ctx context.Context, class string) error {
 	if err == nil && logLifecycleExpires(out.Rules, prefix, days) {
 		return nil
 	}
-	return fmt.Errorf("bucket %s has no enabled lifecycle rule expiring prefix %q after %d days", s.bucket, prefix, days)
+	return fmt.Errorf("bucket %s has no enabled lifecycle rule expiring prefix %q after at least %d days", s.bucket, prefix, days)
 }
 
 // logLifecycleExpires checks an already-fetched lifecycle configuration. A pure
@@ -40,7 +43,7 @@ func logLifecycleExpires(rules []types.LifecycleRule, prefix string, days int) b
 		return false
 	}
 	for _, r := range rules {
-		if r.Status != types.ExpirationStatusEnabled || r.Expiration == nil || int64(aws.ToInt32(r.Expiration.Days)) != int64(days) {
+		if r.Status != types.ExpirationStatusEnabled || r.Expiration == nil || int64(aws.ToInt32(r.Expiration.Days)) < int64(days) {
 			continue
 		}
 		rulePrefix := aws.ToString(r.Prefix) //nolint:staticcheck // the deprecated element still selects objects on rules written with it.

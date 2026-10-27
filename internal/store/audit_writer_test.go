@@ -140,7 +140,6 @@ func TestAuditWriterRejectsSystemActorsForOtherKinds(t *testing.T) {
 		{"team", auditTeamCreation{AccountID: "account"}, nil},
 		{"mutation", auditMutation{Operation: "WriteStorageSettings"}, nil},
 		{"release", auditSecretRelease{}, nil},
-		{"refund", auditRefund{}, nil},
 		{"run_deletion", auditRunDeletion{}, nil},
 		{"approval", auditApprovalDecision{Decision: "approved"}, []auditSystem{auditController}},
 		{"cancel", auditCancellation{}, []auditSystem{auditController}},

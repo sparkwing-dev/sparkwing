@@ -591,11 +591,7 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 				}
 				now = now.Add(limits.LogSealGrace + time.Second)
 				op := f.Store.AsOperator()
-				lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "logs", time.Hour)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if count, err := op.SealAbandonedLogStreams(t.Context(), lease, 10); err != nil || count != 1 {
+				if count, err := op.SealAbandonedLogStreams(t.Context(), 10); err != nil || count != 1 {
 					t.Fatalf("lost attempt stream was not sealed: %d %v", count, err)
 				}
 				_, reader, err := teststore.ProvisionCredential(t.Context(), f.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "log-reader"}, Grants: []capability.Grant{capability.LogsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})

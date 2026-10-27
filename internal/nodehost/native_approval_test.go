@@ -106,11 +106,7 @@ func TestControllerApprovalEvaluationRunsPredicateAndCommitsTypedResult(t *testi
 			if _, err := teststore.SQL(t, f.Store).ExecContext(ctx, `UPDATE runs SET dispatch='controller' WHERE id=?`, f.Input.RunID); err != nil {
 				t.Fatal(err)
 			}
-			controllerLease, err := f.Store.AsOperator().AcquireSingletonLease(ctx, "controller.owner", "controller", time.Hour)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := f.Store.AsOperator().ReconcileControllerRuns(ctx, controllerLease, "", 100); err != nil {
+			if _, err := f.Store.AsOperator().ReconcileControllerRuns(ctx, "", 100); err != nil {
 				t.Fatal(err)
 			}
 			award, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(f.Input.RunID), NodeID: "gate", SourceGeneration: 0}})
@@ -210,11 +206,7 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 				if _, err := teststore.SQL(t, f.Store).ExecContext(ctx, `UPDATE runs SET dispatch='controller' WHERE id=?`, f.Input.RunID); err != nil {
 					t.Fatal(err)
 				}
-				lease, err := f.Store.AsOperator().AcquireSingletonLease(ctx, "controller.owner", "controller", time.Hour)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := f.Store.AsOperator().ReconcileControllerRuns(ctx, lease, "", 100); err != nil {
+				if _, err := f.Store.AsOperator().ReconcileControllerRuns(ctx, "", 100); err != nil {
 					t.Fatal(err)
 				}
 				award, err := f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitEval, RunID: runspec.RunID(f.Input.RunID), NodeID: "gate"}})

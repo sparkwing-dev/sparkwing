@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -9,15 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
-
-func freeTeam(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
-	t.Helper()
-	tenant := teamHandle(t, st, team)
-	if err := st.GrantFreeSlot(context.Background(), team); err != nil {
-		t.Fatalf("%s's free slot: %v", team, err)
-	}
-	return tenant
-}
 
 type legacyStorageUsage struct{ UsedBytes, ReservedBytes int64 }
 

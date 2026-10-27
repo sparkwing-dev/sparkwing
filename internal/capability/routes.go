@@ -221,7 +221,6 @@ var routes = []RoutePolicy{
 	route("POST", "/api/v1/operator/teams/{team}/grants", OwnerDeployment, RetryIdempotencyKey, console()),
 	route("POST", "/api/v1/operator/teams/{team}/freeze", OwnerDeployment, RetryIdempotencyKey, console()),
 	route("POST", "/api/v1/operator/teams/{team}/unfreeze", OwnerDeployment, RetryIdempotencyKey, console()),
-	route("POST", "/api/v1/operator/teams/{team}/refunds", OwnerDeployment, RetryIdempotencyKey, console()),
 	route("DELETE", "/api/v1/operator/accounts/{account}", OwnerDeployment, RetrySafe, console()),
 	route("GET", "/api/v1/operator/waitlist", OwnerDeployment, RetrySafe, console()),
 	route("POST", "/api/v1/operator/waitlist/approve", OwnerDeployment, RetryIdempotencyKey, console()),

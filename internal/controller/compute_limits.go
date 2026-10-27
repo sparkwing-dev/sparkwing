@@ -129,11 +129,6 @@ const computeLimitRetryAfterSeconds = 5
 func (s *Server) writeComputeLimitRefusal(
 	w http.ResponseWriter, r *http.Request, err error,
 ) bool {
-	switch {
-	case errors.Is(err, store.ErrFreeStoragePaused):
-		writeError(w, http.StatusPaymentRequired, err)
-		return true
-	}
 	var refused *store.ComputeLimitError
 	if !errors.As(err, &refused) {
 		return false

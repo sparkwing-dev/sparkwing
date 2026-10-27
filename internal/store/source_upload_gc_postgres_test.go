@@ -8,7 +8,6 @@ import (
 	"errors"
 	"runtime"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,7 +24,6 @@ type sourceGCFixture struct {
 	tenant    *store.Tenant
 	authority capability.AuthorityRef
 	digest    blob.Digest
-	lease     store.SingletonLease
 }
 
 func newSourceGCFixture(t *testing.T, ctx context.Context) sourceGCFixture {
@@ -53,9 +51,6 @@ func newSourceGCFixture(t *testing.T, ctx context.Context) sourceGCFixture {
 	f.exec(t, ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES ($1,'storage',$2,$3)`, tenant.Team(), now.Format("2006-01"), now.UnixNano())
 	f.exec(t, ctx, `INSERT INTO blobs(team,digest,size,created_at) VALUES ($1,$2,3,1)`, tenant.Team(), f.digest)
 	f.exec(t, ctx, `INSERT INTO blob_tombstones(team,digest,marked_at) VALUES ($1,$2,$3)`, tenant.Team(), f.digest, now.Add(-limits.BlobGCGrace-time.Minute).UnixNano())
-	if f.lease, err = s.AsOperator().AcquireSingletonLease(ctx, "maintenance", "collector", time.Hour); err != nil {
-		t.Fatal(err)
-	}
 	return f
 }
 
@@ -142,7 +137,7 @@ func TestPostgresSourceCommitLocksDigestBeforeQuota(t *testing.T) {
 	blocker := lockBlobDigest(t, ctx, f)
 	done := make(chan error, 1)
 	go func() {
-		_, err := f.tenant.CommitSourceUpload(ctx, f.authority, u.ID, blob.Blob{Team: string(f.tenant.Team()), Digest: f.digest, Size: 3}, "replica")
+		_, err := f.tenant.CommitSourceUpload(ctx, f.authority, u.ID, blob.Blob{Team: string(f.tenant.Team()), Digest: f.digest, Size: 3})
 		done <- err
 	}()
 	f.blockedBehind(t, ctx, blocker, done)
@@ -172,7 +167,7 @@ func TestPostgresBlobCollectionFencesSourceReservationDuringDeletion(t *testing.
 		_, during = f.reserve(ctx, "during")
 		return nil
 	})
-	removed, err := f.s.AsOperator().CollectBlobTombstones(ctx, f.lease, 10, deleter)
+	removed, err := f.s.AsOperator().CollectBlobTombstones(ctx, 10, deleter)
 	if err != nil || removed != 1 {
 		t.Fatalf("collection: removed=%d: %v", removed, err)
 	}
@@ -183,32 +178,6 @@ func TestPostgresBlobCollectionFencesSourceReservationDuringDeletion(t *testing.
 	var blobs int
 	if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM blobs WHERE team=$1 AND digest=$2`, f.tenant.Team(), f.digest).Scan(&blobs); err != nil || blobs != 0 {
 		t.Fatalf("collected blob row survived: %d: %v", blobs, err)
-	}
-}
-
-func TestPostgresBlobCollectionRechecksLeaseAfterDigestWait(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	f := newSourceGCFixture(t, ctx)
-	blocker := lockBlobDigest(t, ctx, f)
-	var calls atomic.Int32
-	done := make(chan error, 1)
-	go func() {
-		_, err := f.s.AsOperator().CollectBlobTombstones(ctx, f.lease, 10, sourceGCDeleter(func(context.Context, blob.Blob) error {
-			calls.Add(1)
-			return nil
-		}))
-		done <- err
-	}()
-	f.blockedBehind(t, ctx, blocker, done)
-	if _, err := blocker.ExecContext(ctx, `UPDATE leases SET until=0 WHERE name='maintenance'`); err != nil {
-		t.Fatal(err)
-	}
-	if err := blocker.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; !errors.Is(err, store.ErrLockHeld) || calls.Load() != 0 {
-		t.Fatalf("collection after lease expiry: deletes=%d error=%v", calls.Load(), err)
 	}
 }
 

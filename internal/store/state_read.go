@@ -51,14 +51,8 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 		return v, nil
 	}
 	if controller {
-		var owner runstate.OwnerLeaseRef
-		owner.Kind, owner.Name, owner.RunID = runstate.OwnerController, "controller.owner", runspec.RunID(id)
-		err = tx.QueryRowContext(ctx, `SELECT holder,generation FROM leases WHERE name='controller.owner'`).Scan(&owner.Holder, &owner.Generation)
-		if err == nil {
-			v.Owner = &owner
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return v, err
-		}
+		owner := controllerActor(id).Owner
+		v.Owner = &owner
 	} else {
 		owner := runstate.OwnerLeaseRef{Kind: runstate.OwnerTrigger, EvalFence: runspec.EvalFence{RunID: runspec.RunID(id)}}
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation FROM triggers WHERE team=? AND id=?`, team, id).Scan(&owner.Holder, &owner.Generation)

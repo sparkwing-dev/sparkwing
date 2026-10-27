@@ -76,9 +76,6 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 }
 
 func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, authorized capability.Authorized) (capability.SourceReleaseRequest, error) {
-	if err := lockClaimControllerTx(ctx, tx); err != nil {
-		return capability.SourceReleaseRequest{}, err
-	}
 	chain, err := teamAuthorityChainTx(ctx, tx, t.team, authorized.Principal.Authority, true, sameTeam)
 	if err != nil {
 		return capability.SourceReleaseRequest{}, err

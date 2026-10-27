@@ -338,8 +338,8 @@ func deploymentIDTx(ctx context.Context, tx *storeTx) (string, error) {
 // ConfigureDeployment commits startup settings only after publish records the deployment.
 // Call before serving requests or starting workers; payment mode is fixed for that startup.
 // An empty mode preserves the existing payment mode. publish must not call the store.
-func (o *Operator) ConfigureDeployment(ctx context.Context, mode capability.PaymentMode, freeSlots int64, publish func() error) (string, error) {
-	if (mode != "" && mode != capability.PaymentTest && mode != capability.PaymentLive) || freeSlots < 0 || publish == nil {
+func (o *Operator) ConfigureDeployment(ctx context.Context, mode capability.PaymentMode, publish func() error) (string, error) {
+	if (mode != "" && mode != capability.PaymentTest && mode != capability.PaymentLive) || publish == nil {
 		return "", ErrInvalidInput
 	}
 	return inTxResult(ctx, o.s, func(tx *storeTx) (string, error) {
@@ -351,9 +351,6 @@ func (o *Operator) ConfigureDeployment(ctx context.Context, mode capability.Paym
 			if err := tx.operator.setPaymentModeTx(ctx, tx, mode); err != nil {
 				return "", err
 			}
-		}
-		if err := setCreditSettingTx(ctx, tx, metaKeyFreeTeamSlots, formatCreditSetting(freeSlots)); err != nil {
-			return "", err
 		}
 		return id, publish()
 	})

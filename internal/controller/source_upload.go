@@ -80,7 +80,7 @@ func (s *Server) handleSourceCommit(w http.ResponseWriter, r *http.Request, a ca
 			return dataRouteError(err)
 		}
 	}
-	u, err = tenant.CommitSourceUpload(r.Context(), a.Principal.Authority, u.ID, u.Blob, s.dataController.replicaID)
+	u, err = tenant.CommitSourceUpload(r.Context(), a.Principal.Authority, u.ID, u.Blob)
 	if err != nil {
 		return dataRouteError(err)
 	}

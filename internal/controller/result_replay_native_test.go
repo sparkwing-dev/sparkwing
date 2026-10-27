@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -187,7 +186,6 @@ func TestNativeControllerPlanReplayAfterOwnerHandoff(t *testing.T) {
 	}
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller' WHERE team='a' AND id='run'`)
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan' WHERE team='a' AND id='run'`)
-	engineSQL(t, e.Store, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,1)`, time.Now().Add(time.Hour).UnixNano())
 	launcher := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	p, err := e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(launcher)))
 	if err != nil {

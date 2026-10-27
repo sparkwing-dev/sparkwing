@@ -46,9 +46,6 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 	if a.Target.Team != string(t.team) || a.Target.RunID == "" || a.Target.NodeID == "" || a.ResultReplay || a.LogTailAttempt != 0 {
 		return bindingRefusal()
 	}
-	if err := lockClaimControllerTx(ctx, tx); err != nil {
-		return err
-	}
 	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 	if err != nil {
 		return err

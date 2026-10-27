@@ -183,3 +183,17 @@ func TestDashboardHTMLNoncesItsInlineScripts(t *testing.T) {
 		t.Errorf("nonce leaked onto an external script: %s", body)
 	}
 }
+
+func TestRuntimeConfigCarriesTheSupportContactAsAString(t *testing.T) {
+	for contact, want := range map[string]string{
+		"support@example.com":           `window.__SPARKWING_SUPPORT_CONTACT__="support@example.com";`,
+		"":                              `window.__SPARKWING_SUPPORT_CONTACT__="";`,
+		"</script><script>x()</script>": `window.__SPARKWING_SUPPORT_CONTACT__="\u003c/script\u003e\u003cscript\u003ex()\u003c/script\u003e";`,
+	} {
+		rec := httptest.NewRecorder()
+		RuntimeConfig("v1", true, contact).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sparkwing-runtime.js", nil))
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("runtime config for %q = %q, want %s", contact, rec.Body.String(), want)
+		}
+	}
+}

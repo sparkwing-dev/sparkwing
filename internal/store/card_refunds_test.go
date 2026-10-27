@@ -140,6 +140,10 @@ func TestPartialRefundThenWarningRefundFailureIsListed(t *testing.T) {
 	if err != nil || len(failedRefunds) != 1 || failedRefunds[0].RefundID != "remaining-refund" {
 		t.Fatalf("failed remainder refund = %+v, %v; want it listed", failedRefunds, err)
 	}
+	// The owners hear about the $6 refund that failed, not the $10 payment.
+	if notices, err := s.AsOperator().ClaimFailedRefundNotices(ctx); err != nil || len(notices) != 1 || notices[0].AmountMicro != 600*MicroCreditsPerCent {
+		t.Fatalf("failed refund notices = %+v, %v; want one for $6", notices, err)
+	}
 	var refunded int64
 	if err := s.inTx(ctx, func(tx *storeTx) error {
 		var err error
@@ -250,12 +254,7 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 	s, tenant, now := queuedRefundFixture(t, true)
 	ctx := t.Context()
-	owner := authorityMember(t, s, "operator", RoleReader)
-	console := s.AsConsole(func(id string) bool { return id == "operator" })
-	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
-	if _, err := console.ConsoleRefund(ctx, a, OperatorRefund{PaymentID: "payment", RefundID: "operator-refund", AmountCents: 400, Reason: "partial"}, "once"); err != nil {
-		t.Fatal(err)
-	}
+	// safety: a refund made in the Stripe dashboard arrives only as its webhook.
 	event := providerPaymentEvent(now, capability.PaymentRefund)
 	event.ObjectID, event.Status, event.AmountMinor = "operator-refund", "succeeded", 400
 	if _, err := s.settlePaymentFacts(ctx, event); err != nil {

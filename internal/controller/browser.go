@@ -46,6 +46,10 @@ type Dashboard struct {
 	// /api/v1/capabilities reports beside the controller's identity fields.
 	Capabilities backend.Capabilities
 
+	// SupportContact is the email address or URL the console's Help panel and
+	// limit messages name. Empty sends people to their Sparkwing administrator.
+	SupportContact string
+
 	// InsecureCookies drops Secure, and with it the __Host- prefix, from the
 	// session cookies so a browser keeps a session over plain HTTP. Only a
 	// dashboard published without TLS needs it.
@@ -63,7 +67,7 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	d := s.dashboard
 	pages := web.Pages(d.Bundle)
 	browser := newRegisteredMux()
-	browser.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, !d.Local))
+	browser.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, !d.Local, d.SupportContact))
 	top := http.NewServeMux()
 	if d.Local {
 		browser.Handle("/", pages)
@@ -80,7 +84,7 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 func (s *Server) localShell() http.Handler {
 	d := s.dashboard
 	shell := http.NewServeMux()
-	shell.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, false))
+	shell.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, false, d.SupportContact))
 	shell.Handle("GET /", web.Pages(d.Bundle))
 	return web.SecurityHeaders(d.HSTS, shell)
 }

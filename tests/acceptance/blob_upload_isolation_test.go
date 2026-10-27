@@ -59,7 +59,7 @@ func checkBlobUploadIsolation(t testing.TB, ctx context.Context, root string, ob
 			return fmt.Errorf("physical publication granted a receipt at case %d: %+v: %v", i, presence, err)
 		}
 		if _, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{
-			TicketID: first.ID, Authority: request.Intent.Authority, Verified: first.Blob, ReplicaID: "a",
+			TicketID: first.ID, Authority: request.Intent.Authority, Verified: first.Blob,
 		}); err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ func checkBlobUploadIsolation(t testing.TB, ctx context.Context, root string, ob
 			return fmt.Errorf("physical deduplication granted a receipt at case %d: %+v: %v", i, presence, err)
 		}
 		receipt, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{
-			TicketID: second.ID, Authority: request.Intent.Authority, Verified: second.Blob, ReplicaID: "b",
+			TicketID: second.ID, Authority: request.Intent.Authority, Verified: second.Blob,
 		})
 		if err != nil || receipt.Identity != request.Intent.Identity {
 			return fmt.Errorf("independent upload receipt at case %d: %+v: %v", i, receipt, err)
@@ -113,7 +113,7 @@ func checkBlobUploadIsolation(t testing.TB, ctx context.Context, root string, ob
 			return err
 		}
 		replayed, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{
-			TicketID: second.ID, Authority: request.Intent.Authority, Verified: second.Blob, ReplicaID: "b",
+			TicketID: second.ID, Authority: request.Intent.Authority, Verified: second.Blob,
 		})
 		if err != nil || replayed != receipt {
 			return fmt.Errorf("settled receipt replay after staging cleanup at case %d: %+v: %v", i, replayed, err)

@@ -166,7 +166,7 @@ func bindingSourceTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 	now := tx.now(ctx)
 	if b.Expansion != nil {
 		lease := state.Expansion
-		if lease == nil || lease.Lease != *b.Expansion || !lease.ExpiresAt.After(now) || lease.Lease.Kind == capability.UnitEval && (lease.ControllerLeaseExpiresAt == nil || !lease.ControllerLeaseExpiresAt.After(now)) {
+		if lease == nil || lease.Lease != *b.Expansion || !lease.ExpiresAt.After(now) {
 			return bindingRefusal()
 		}
 		return nil

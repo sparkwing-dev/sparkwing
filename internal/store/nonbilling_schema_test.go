@@ -34,7 +34,7 @@ func TestNonBillingSchemaRejectsCounterexamples(t *testing.T) {
 	exec(`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES ('a','secret','sealed','account',1,1)`)
 	exec(`INSERT INTO storage_quotas(team,storage_allowance_bytes,updated_at) VALUES ('a',1,1)`)
 	exec(`INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('a',0)`)
-	exec(`INSERT INTO egress_usage(team,period,replica_id,bytes,updated_at) VALUES ('a','day','replica',1,1)`)
+	exec(`INSERT INTO egress_usage(team,period,bytes,updated_at) VALUES ('a','day',1,1)`)
 	exec(`INSERT INTO team_counters(team) VALUES ('a')`)
 	for _, tc := range []struct{ name, query string }{
 		{"null installation identity", `UPDATE github_app_installations SET installation_id=NULL WHERE installation_id=2`},

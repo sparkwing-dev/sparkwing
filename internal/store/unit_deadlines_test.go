@@ -37,11 +37,7 @@ func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
 		}
 		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,ready_at,queue_started_at) VALUES ('a','run',?,'pending',?,?,?,?)`, id, []byte(`{"id":"`+id+`"}`), []byte(`{}`), started.UnixNano(), started.UnixNano())
 	}
-	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
+	reaped, err := s.AsOperator().ReapUnits(t.Context(), 10)
 	if err != nil || len(reaped) != 1 || reaped[0].NodeID != "old" || !reaped[0].Failed {
 		t.Fatalf("queue expiry: %+v, %v", reaped, err)
 	}
@@ -76,11 +72,7 @@ func TestReaperUsesAcceptedPlanClaimWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = now.Add(time.Minute)
-	lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
+	reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 	if err != nil || len(reaped) != 1 || !reaped[0].Failed {
 		t.Fatalf("accepted claim wait: %+v, %v", reaped, err)
 	}
@@ -93,7 +85,7 @@ func TestReaperUsesAcceptedPlanClaimWait(t *testing.T) {
 func TestReaperExpiresUnclaimedOwnerAndJobQueues(t *testing.T) {
 	for _, kind := range []string{"owner", "job"} {
 		t.Run(kind, func(t *testing.T) {
-			tenant, now, lease := ownerReaperFixture(t, false, 0, runspec.OriginTrigger)
+			tenant, now := ownerReaperFixture(t, false, 0, runspec.OriginTrigger)
 			request := runspec.SealedRequest{AdmittedAt: now.Add(-time.Minute), Request: runspec.Request{Options: runspec.Options{ClaimWait: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Minute}}}}}
 			raw, err := json.Marshal(request)
 			if err != nil {
@@ -106,11 +98,11 @@ func TestReaperExpiresUnclaimedOwnerAndJobQueues(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,ready_at,queue_started_at) VALUES ('a','run','queued','pending',?, ?,?,?)`, []byte(`{"id":"queued"}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(-time.Minute).UnixNano())
 			}
 			*now = now.Add(-time.Nanosecond)
-			if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {
+			if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 0 {
 				t.Fatalf("early expiry = %+v, %v", reaped, err)
 			}
 			*now = now.Add(time.Nanosecond)
-			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
+			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 			if err != nil || len(reaped) != 1 || !reaped[0].Failed || reaped[0].Disruptions != 0 {
 				t.Fatalf("queue expiry = %+v, %v", reaped, err)
 			}
@@ -121,7 +113,7 @@ func TestReaperExpiresUnclaimedOwnerAndJobQueues(t *testing.T) {
 func TestReaperApprovalDeadlineAndCancellation(t *testing.T) {
 	for _, policy := range []string{"approve", "deny", "cancel", "indefinite"} {
 		t.Run(policy, func(t *testing.T) {
-			tenant, now, lease := ownerReaperFixture(t, false, 0, runspec.OriginTrigger)
+			tenant, now := ownerReaperFixture(t, false, 0, runspec.OriginTrigger)
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET lease_expires_at=? WHERE id='run'`, now.Add(time.Hour).UnixNano())
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','approval','approval_pending',?,?)`, []byte(`{"id":"approval","approval":{}}`), []byte(`{}`))
 			timeout := time.Minute.Milliseconds()
@@ -134,7 +126,7 @@ func TestReaperApprovalDeadlineAndCancellation(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET cancel_requested_at=? WHERE id='run'`, now.UnixNano())
 			}
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO approvals(team,run_id,node_id,requested_at,timeout_ms,on_timeout) VALUES ('a','run','approval',?,?,?)`, now.Add(-time.Minute).UnixNano(), timeout, storedPolicy)
-			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
+			reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -161,7 +153,7 @@ func TestReaperApprovalDeadlineAndCancellation(t *testing.T) {
 }
 
 func TestReaperRetryQueueStartsAtNewRunCreation(t *testing.T) {
-	tenant, now, lease := ownerReaperFixture(t, false, 0, runspec.OriginTrigger)
+	tenant, now := ownerReaperFixture(t, false, 0, runspec.OriginTrigger)
 	request := runspec.SealedRequest{AdmittedAt: now.Add(-24 * time.Hour), Request: runspec.Request{Options: runspec.Options{ClaimWait: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Minute}}}}}
 	raw, err := json.Marshal(request)
 	if err != nil {
@@ -169,19 +161,15 @@ func TestReaperRetryQueueStartsAtNewRunCreation(t *testing.T) {
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=?,created_at=?,claim_wait_ns=?,status='pending',lineage_json=? WHERE id='run'`, raw, now.UnixNano(), int64(time.Minute), []byte(`{"retry_of":"earlier"}`))
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,started_at=NULL WHERE id='run'`)
-	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController, Name: lease.Name, EvalFence: runspec.EvalFence{Holder: lease.Holder, Generation: runspec.ClaimGeneration(lease.Generation)}}}
+	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController}}
 	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: "run", To: runstate.RunFailed, Cause: runstate.RunQueueTimeout, Actor: actor}); err == nil {
 		t.Fatal("old seal expired the new queue")
 	}
-	if got, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {
+	if got, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(got) != 0 {
 		t.Fatalf("early reaping: %+v, %v", got, err)
 	}
 	*now = now.Add(time.Minute)
-	lease, err = tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := tenant.s.AsOperator().ReapUnits(t.Context(), lease, 10)
+	got, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10)
 	if err != nil || len(got) != 1 || !got[0].Failed {
 		t.Fatalf("queue deadline: %+v, %v", got, err)
 	}

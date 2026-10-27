@@ -73,11 +73,7 @@ func TestIgnoredCancellationCannotRenewBeyondDrain(t *testing.T) {
 			if beat, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err == nil {
 				t.Fatalf("ignored cancel renewed past deadline: %+v", beat)
 			}
-			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
-			reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10)
+			reaped, err := s.AsOperator().ReapUnits(t.Context(), 10)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -159,8 +155,7 @@ func TestControllerOwnerCannotRenewPastCancellationDrain(t *testing.T) {
 		if err != nil || !beat.CancelRequested || beat.ExpiresAt.After(deadline) {
 			t.Fatalf("controller renewal: %+v %v", beat, err)
 		}
-		lease := SingletonLease{Name: owner.Owner.Name, Holder: owner.Owner.Holder, Generation: int64(owner.Owner.Generation)}
-		if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), lease, "", 10); err != nil {
+		if _, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
 			t.Fatal(err)
 		}
 		for _, table := range []string{"concurrency_holders", "concurrency_waiters"} {

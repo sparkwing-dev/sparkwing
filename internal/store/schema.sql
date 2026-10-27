@@ -536,6 +536,8 @@ CREATE TABLE storage_quotas (
     max_bytes_per_month BIGINT NOT NULL DEFAULT 0 CHECK(max_bytes_per_month >= 0),
     max_objects_per_run BIGINT NOT NULL DEFAULT 0 CHECK(max_objects_per_run >= 0),
     storage_allowance_bytes BIGINT NOT NULL DEFAULT 0 CHECK(storage_allowance_bytes >= 0),
+    -- safety: 0 when the row only records an allowance, so the team keeps its default or automatic write limits.
+    limits_set BIGINT NOT NULL DEFAULT 1 CHECK(limits_set IN (0,1)),
     updated_at BIGINT NOT NULL,
     team TEXT NOT NULL REFERENCES teams(name),
     PRIMARY KEY(team)
@@ -548,8 +550,7 @@ CREATE TABLE storage_run_usage (
     updated_at BIGINT NOT NULL,
     team TEXT NOT NULL REFERENCES teams(name),
     period TEXT NOT NULL,
-    replica_id TEXT NOT NULL,
-    PRIMARY KEY(team,period,replica_id,run_id)
+    PRIMARY KEY(team,period,run_id)
 );
 
 CREATE TABLE storage_month_usage (
@@ -558,8 +559,7 @@ CREATE TABLE storage_month_usage (
     objects BIGINT NOT NULL DEFAULT 0 CHECK(objects >= 0),
     updated_at BIGINT NOT NULL,
     team TEXT NOT NULL REFERENCES teams(name),
-    replica_id TEXT NOT NULL,
-    PRIMARY KEY(team,period,replica_id)
+    PRIMARY KEY(team,period)
 );
 
 CREATE TABLE egress_usage (
@@ -567,8 +567,7 @@ CREATE TABLE egress_usage (
     bytes BIGINT NOT NULL DEFAULT 0 CHECK(bytes >= 0),
     updated_at BIGINT NOT NULL,
     team TEXT NOT NULL REFERENCES teams(name),
-    replica_id TEXT NOT NULL,
-    PRIMARY KEY(team,period,replica_id)
+    PRIMARY KEY(team,period)
 );
 
 CREATE TABLE secrets (
@@ -826,9 +825,7 @@ CREATE TABLE github_app_deliveries (
     received_at BIGINT NOT NULL,
     event TEXT NOT NULL DEFAULT '',
     body BLOB,
-    state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','leased','done','failed')),
-    lease_until BIGINT NOT NULL DEFAULT 0,
-    lease BIGINT NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','processing','done','failed')),
     last_error TEXT NOT NULL DEFAULT '',
     CHECK(state != 'done' OR body IS NULL),
     CHECK(state = 'done' OR body IS NOT NULL)
@@ -872,12 +869,6 @@ CREATE TABLE team_deletions (
 CREATE TABLE invitation_email_log (
     address TEXT NOT NULL,
     sent_at BIGINT NOT NULL
-);
-
-CREATE TABLE free_slots (
-    team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
-    taken_at BIGINT NOT NULL,
-    empty_since BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE signup_gate (
@@ -1022,8 +1013,7 @@ CREATE TABLE team_download_day (
     period TEXT NOT NULL,
     bytes BIGINT NOT NULL DEFAULT 0 CHECK(bytes >= 0),
     updated_at BIGINT NOT NULL,
-    replica_id TEXT NOT NULL,
-    PRIMARY KEY(team,period,replica_id)
+    PRIMARY KEY(team,period)
 );
 
 CREATE TABLE git_credentials (
@@ -1133,6 +1123,8 @@ CREATE TABLE card_refunds (
     -- safety: a refund Stripe reports failed or canceled is terminal and listed for the operator, never retried.
     status TEXT NOT NULL DEFAULT 'due' CHECK(status IN ('due','pending','succeeded','failed','canceled')),
     created_at BIGINT NOT NULL,
+    -- safety: set when the owners are emailed about a failed refund, so each refund is announced once.
+    owners_notified_at BIGINT,
     PRIMARY KEY (payment_mode, team, payment_intent)
 );
 
@@ -1166,14 +1158,6 @@ CREATE TABLE payment_refunds (
     PRIMARY KEY (payment_mode, kind, refund_id)
 );
 
-CREATE TABLE console_refund_receipts (
-    team TEXT NOT NULL REFERENCES teams(name),
-    receipt_id TEXT NOT NULL CHECK(length(receipt_id)=64),
-    request_digest TEXT NOT NULL CHECK(length(request_digest)=64),
-    result_json BLOB NOT NULL,
-    PRIMARY KEY(team,receipt_id)
-);
-
 CREATE TABLE github_app_automation (
     team TEXT NOT NULL REFERENCES teams(name),
     repository_id BIGINT NOT NULL,
@@ -1201,8 +1185,6 @@ CREATE TABLE log_streams (
     prefix TEXT NOT NULL,
     retention_class TEXT NOT NULL,
     uploaded_through BIGINT NOT NULL DEFAULT 0 CHECK(uploaded_through >= 0),
-    stored_bytes BIGINT NOT NULL DEFAULT 0 CHECK(stored_bytes >= 0),
-    charged_bytes BIGINT NOT NULL DEFAULT 0 CHECK(charged_bytes >= 0),
     sealed_at BIGINT,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
@@ -1225,6 +1207,25 @@ CREATE TABLE log_streams (
 CREATE UNIQUE INDEX log_job_subject ON log_streams(team,run_id,node_id,attempt) WHERE subject_kind = 'job_attempt';
 CREATE UNIQUE INDEX log_owner_subject ON log_streams(team,run_id,unit_kind,generation) WHERE unit_kind IN ('trigger','plan');
 CREATE UNIQUE INDEX log_eval_subject ON log_streams(team,run_id,source_node_id,source_generation,generation) WHERE unit_kind = 'eval';
+
+-- safety: a log slot's signed size counts as retained from its first signing until Sparkwing deletes its object,
+-- so an upload that is never committed still counts and no commit lowers it.
+CREATE TABLE log_slots (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    stream_id TEXT NOT NULL,
+    generation BIGINT NOT NULL CHECK(generation > 0),
+    n BIGINT NOT NULL CHECK(n >= 0),
+    size BIGINT NOT NULL CHECK(size >= 0),
+    committed BIGINT NOT NULL DEFAULT 0 CHECK(committed IN (0,1)),
+    object_key TEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY(team,run_id,stream_id,n),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,run_id,stream_id,generation) REFERENCES log_streams(team,run_id,id,generation) ON DELETE CASCADE
+);
+
+CREATE INDEX log_slots_created ON log_slots(created_at);
 
 CREATE TABLE log_segments (
     team TEXT NOT NULL REFERENCES teams(name),
@@ -1272,8 +1273,6 @@ CREATE TABLE eval_units (
     expires_at BIGINT,
     started_at BIGINT,
     finished_at BIGINT,
-    owner_lease_name TEXT NOT NULL DEFAULT 'controller.owner',
-    owner_generation BIGINT NOT NULL CHECK(owner_generation > 0),
     disruptions BIGINT NOT NULL DEFAULT 0 CHECK(disruptions BETWEEN 0 AND 3),
     PRIMARY KEY(team,run_id,source_node_id,source_generation),
     CHECK((status IN ('claimed','running')) = (claimed_by IS NOT NULL)),
@@ -1472,14 +1471,6 @@ CREATE TABLE settings (
     CHECK(key <> 'session_csrf_key' OR sealed = 1)
 );
 
-CREATE TABLE leases (
-    name TEXT NOT NULL PRIMARY KEY,
-    holder TEXT NOT NULL,
-    until BIGINT NOT NULL,
-    last_run_at BIGINT,
-    generation BIGINT NOT NULL DEFAULT 0
-);
-
 CREATE TABLE flow_nonces (
     kind TEXT NOT NULL CHECK(kind IN ('github_app_connect','identity_link')),
     nonce TEXT NOT NULL,
@@ -1510,11 +1501,10 @@ CREATE TABLE quota_admission (
 CREATE TABLE run_rate_usage (
     team TEXT NOT NULL REFERENCES teams(name),
     period TEXT NOT NULL,
-    replica_id TEXT NOT NULL,
     principal TEXT NOT NULL,
     runs BIGINT NOT NULL DEFAULT 0 CHECK(runs >= 0),
     updated_at BIGINT NOT NULL,
-    PRIMARY KEY(team,period,replica_id,principal)
+    PRIMARY KEY(team,period,principal)
 );
 
 CREATE TABLE quota_reservations (
@@ -1786,7 +1776,6 @@ CREATE TABLE source_uploads (
     authority_kind TEXT NOT NULL,
     authority_id TEXT NOT NULL,
     repo_key TEXT NOT NULL,
-    replica_id TEXT NOT NULL DEFAULT '',
     period TEXT NOT NULL DEFAULT '',
     repo_display TEXT NOT NULL,
     execution_sha TEXT NOT NULL,

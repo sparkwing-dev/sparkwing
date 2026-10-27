@@ -22,8 +22,7 @@ func cloudRenewalBillingFixture(t *testing.T, kind capability.UnitKind) (*Store,
 	if kind == capability.UnitEval {
 		demand.Target.NodeID, demand.Target.SourceGeneration = "job", 7
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,generation=7,expansion='expected'`)
-		rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, now.Add(time.Hour).UnixNano())
-		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',7,'pending')`)
 	}
 	claim, actor := meteredUnitClaim(t, s, demand)
 	return s, claim, actor, now
@@ -71,11 +70,7 @@ func TestCloudRenewalBillsHeldTimeRegardlessOfActivityProperty(t *testing.T) {
 					*now = now.Add(10 * time.Second)
 				}
 				*now = beat.ExpiresAt
-				lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if reaped, err := s.AsOperator().ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 {
+				if reaped, err := s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 1 {
 					t.Fatalf("reaped=%+v, %v", reaped, err)
 				}
 				heldSeconds := int64(beat.ExpiresAt.Sub(start) / time.Second)

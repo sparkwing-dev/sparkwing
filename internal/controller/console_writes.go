@@ -10,7 +10,6 @@ import (
 
 // consoleWriteTransactions rechecks a direct operator session in every committing transaction.
 type consoleWriteTransactions interface {
-	ConsoleRefund(context.Context, capability.Authorized, store.OperatorRefund, string) (store.CreditReversal, error)
 	ConsoleGrantCredit(context.Context, capability.Authorized, store.CreditGrantRequest) (store.CreditGrantResult, error)
 	ConsoleSetBillingTrust(context.Context, capability.Authorized, store.BillingTrustChange) (store.BillingStanding, error)
 	ConsoleDeclineStandingRequest(context.Context, capability.Authorized, string, string) (store.StandingRequest, error)

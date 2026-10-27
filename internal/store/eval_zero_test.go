@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -23,8 +22,7 @@ func zeroEvalFixture(t *testing.T) (*Store, *Tenant, UnitClaim, capability.Issue
 	demand.Target = &UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "job", SourceGeneration: 0}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=0,status='done',outcome='memoized',finished_at=1,expansion='expected'`)
-	rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, s.now().Add(time.Hour).UnixNano())
-	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',0,'pending',3)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','job',0,'pending')`)
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)

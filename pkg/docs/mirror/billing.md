@@ -335,7 +335,9 @@ when an earlier partial refund leaves less than the original payment to return.
 The worker refunds under the payment as its idempotency key, so a call that
 fails before Stripe answers repeats the same refund. A refund Stripe reports
 failed or canceled is not retried: the operator console lists it on the team
-under Refunds Stripe did not make, and the operator returns the money in Stripe. A
+under Refunds Stripe did not make, and the operator returns the money in Stripe.
+The team's owners get one email saying the refund of that amount for the payment
+on its date could not be completed by Stripe and that Sparkwing will follow up. A
 terminal refund outcome survives a later pending delivery, and a conflicting
 terminal outcome is refused.
 

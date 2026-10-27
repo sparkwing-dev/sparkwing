@@ -689,9 +689,9 @@ type holderRow struct {
 func capacityLeaseCeilingTx(ctx context.Context, tx *storeTx, team Team, run, job string, expires int64) (int64, error) {
 	var lease sql.NullInt64
 	err := tx.QueryRowContext(ctx, `SELECT MAX(deadline) FROM (
- SELECT CASE WHEN `+controllerRunOwnership+` THEN (SELECT until FROM leases WHERE name='controller.owner' AND holder<>'') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id AND status='claimed') END AS deadline FROM runs r WHERE team=? AND id=?
+ SELECT CASE WHEN `+controllerRunOwnership+` THEN CAST(? AS BIGINT) ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id AND status='claimed') END AS deadline FROM runs r WHERE team=? AND id=?
  UNION ALL SELECT lease_expires_at FROM nodes WHERE team=? AND run_id=? AND status<>'done' AND claimed_by IS NOT NULL AND (?='' OR node_id=?)
-) live`, team, run, team, run, job, job).Scan(&lease)
+) live`, tx.now(ctx).Add(controllerOwnedHorizon).UnixNano(), team, run, team, run, job, job).Scan(&lease)
 	if err != nil {
 		return 0, err
 	}

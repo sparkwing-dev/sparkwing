@@ -16,7 +16,8 @@ func openCredentialFile(root *os.Root, name string) (*os.File, error) {
 
 func verifyCredentialFile(_ *os.File, info os.FileInfo) error {
 	if info.Mode().Perm()&0o022 != 0 {
-		return errors.New("credential target is writable by group or others")
+		return errors.New("credential target is writable by group or others; make it mode 0600, and on Kubernetes " +
+			"set the pod's fsGroupChangePolicy to OnRootMismatch so a remount does not add group write again")
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {

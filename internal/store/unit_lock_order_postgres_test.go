@@ -130,7 +130,7 @@ func postgresTeamMutationWaitsForClaimBeforeLedger(t *testing.T, billing bool) {
 	f.At(time.Second)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	if _, err := st.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, store.DefaultFreeTeamSlots, func() error { return nil }); err != nil {
+	if _, err := st.AsOperator().ConfigureDeployment(ctx, capability.PaymentTest, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.DB().ExecContext(ctx, `UPDATE capabilities SET authority_json=convert_to(jsonb_set(convert_from(authority_json,'UTF8')::jsonb,'{root_metered}','true')::text,'UTF8') WHERE prefix=$1`, f.Self); err != nil {

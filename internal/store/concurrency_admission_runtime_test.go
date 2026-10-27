@@ -108,7 +108,7 @@ func TestAdmissionClaimOrOwnerLossRetainsLiveFIFO(t *testing.T) {
 						t.Fatalf("live head lost FIFO: %+v", state)
 					}
 					if loss == "claim" {
-						if reaped, err := f.s.AsOperator().ReapUnits(t.Context(), f.lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+						if reaped, err := f.s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 							t.Fatalf("reap: %+v %v", reaped, err)
 						}
 						next, err := f.tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: f.ref, Actor: f.owner, Policy: runstate.SourceResume})
@@ -297,7 +297,7 @@ func TestAdmissionPlanWaitingHandoffPreservesFIFO(t *testing.T) {
 			laterBinding := runstate.CapacityBinding{RunID: later.RunID, Generation: int64(laterOwner.Owner.Generation)}
 			admissionWant(t, f, laterBinding, laterOwner, runstate.AcquireQueued)
 			admissionExpiry(t, f, "triggers", own.RunID, now)
-			if reaped, err := f.s.AsOperator().ReapUnits(t.Context(), f.lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+			if reaped, err := f.s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 				t.Fatalf("owner reaping: %+v %v", reaped, err)
 			}
 			successor, err := f.claimOwner(t.Context(), own.RunID, "successor")
@@ -439,7 +439,7 @@ func TestAdmissionCancelledWaiterCannotBlockLiveWork(t *testing.T) {
 	if err := f.expireHolder(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if reaped, err := f.s.AsOperator().ReapUnits(t.Context(), f.lease, 10); err != nil || len(reaped) != 1 {
+	if reaped, err := f.s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 1 {
 		t.Fatalf("cancel recovery: %+v %v", reaped, err)
 	}
 

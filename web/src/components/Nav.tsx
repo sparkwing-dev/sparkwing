@@ -8,6 +8,7 @@ import { readCSRFCookie } from "@/lib/csrfCookie";
 import { localSession, logOutLocal } from "@/lib/localSession";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 import TeamSwitcher from "@/components/TeamSwitcher";
+import HelpMenu from "@/components/HelpMenu";
 import { useTeamState } from "@/lib/useTeam";
 import { navTabs } from "@/lib/navTabs";
 
@@ -111,6 +112,7 @@ export default function Nav() {
         onToggle={() => setOpen((v) => !v)}
         onClose={() => setOpen(false)}
       />
+      <HelpMenu />
       <LogoutControl />
       <LocalLogoutControl />
     </div>

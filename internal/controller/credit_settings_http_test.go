@@ -67,7 +67,7 @@ func creditPolicyWrite(t *testing.T, h http.Handler, raw, csrf, body string, wan
 func TestCreditSettingsHTTPPolicyWritesPersist(t *testing.T) {
 	s, h, raw, csrf := creditPolicyFixture(t)
 	initial, err := s.store.AsOperator().CreditSettings(t.Context())
-	if err != nil || initial.RateTableSet || initial.WarmCPUClassCores != store.DefaultWarmCPUClassCores || initial.StorageFreeAllowanceBytes != 0 || !reflect.DeepEqual(initial.RateTable, store.DefaultCreditRateTable(store.DefaultCreditRateMicro)) {
+	if err != nil || initial.RateTableSet || initial.WarmCPUClassCores != store.DefaultWarmCPUClassCores || initial.StorageFreeAllowanceBytes != 1<<30 || !reflect.DeepEqual(initial.RateTable, store.DefaultCreditRateTable(store.DefaultCreditRateMicro)) {
 		t.Fatalf("default policy=%+v: %v", initial, err)
 	}
 	view := creditPolicyWrite(t, h, raw, csrf, `{"rate_micro_per_second":30000,"warm_cpu_class_cores":0,"storage_free_allowance_bytes":45}`, 200)
