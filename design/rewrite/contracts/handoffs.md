@@ -1150,3 +1150,7 @@ copy of the example in `testdata/refill_contract.json`.
 
 - Sparkwing does not probe network enforcement at job launch or at launcher start. The launcher keeps applying the Cloud job network rule (block cloud instance metadata and private/cluster-internal ranges; outbound internet open on any port, like other CI providers), and the docs state that the cluster must enforce NetworkPolicy. Verifying enforcement is an operator check run periodically (for Sparkwing Cloud, Korey's own checks, e.g. with stormwing), not a guarantee the product makes to self-hosters.
 - The per-job boundary probe machinery and decision 69's kubelet exception are deleted.
+
+## 2026-10-27 Korey decision 72: fetched runs carry their branch in OIDC
+
+- Amends decision 70. A run whose code Sparkwing fetched from the repository through the App at a branch or tag head (run-now, console runs, unlocked schedule overrides) carries the ref and sha it ran in its OIDC token, alongside the repository claims, with trigger manual. The branch head was resolved and verified by Sparkwing, so it is the source of truth, matching GitHub's workflow_dispatch tokens. Deploy policies that pin ref:refs/heads/main accept a run-now on main and refuse one on another branch; policies that care how a run started can require trigger:push. Uploads, local and here runs still carry no repository or ref claims.

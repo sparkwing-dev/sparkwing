@@ -181,8 +181,12 @@ refill in its metadata, through the same path as Add funds: the same
 fraud-warning handling, refund ordering and standing update apply.
 
 Every open refill and every refill payment counts against the limits, whether
-granted, declined, refused or refunded. A refill that closes without a payment,
-such as one with no card or one that expired, does not. A refill that would
+granted, declined, refused or refunded. A refill the checkout service answered
+as charged keeps counting after it is withdrawn or expires. A refill that closes
+without a payment, such as one with no card or one that expired uncharged, does
+not. Runbook: a charge whose answer was lost is known only from its webhook, so
+if its refill is withdrawn or expires first, the next refill can pass a limit
+by that one payment; refund the extra payment in Stripe. A refill that would
 exceed a team limit or a cap is not made. The credits run down and Cloud work stops at zero; the
 billing page names the limit that stopped the refill (`refill.limit` in
 `GET /api/v1/team/billing`).
