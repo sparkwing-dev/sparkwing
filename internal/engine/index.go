@@ -97,7 +97,9 @@ func (r *Resolver) localIndex(now time.Time) IndexResult {
 		}
 		return IndexResult{Index: VerifiedIndex{offline: true}, Notices: []engineid.Notice{notice}}
 	}
-	return indexResult(r.index, errors.Join(fmt.Errorf("local-only execution uses cached policy without a network refresh"), err))
+	result := indexResult(r.index, errors.Join(fmt.Errorf("local-only execution uses cached policy without a network refresh"), err))
+	result.Index.localCache = true
+	return result
 }
 
 func (r *Resolver) fetchIndex(ctx context.Context, now time.Time) (VerifiedIndex, error) {

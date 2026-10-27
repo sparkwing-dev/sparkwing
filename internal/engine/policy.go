@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -113,6 +114,10 @@ func (v VerifiedIndex) Offline() bool { return v.offline }
 func Evaluate(index VerifiedIndex, version string, now time.Time) ([]engineid.Notice, error) {
 	if index.offline {
 		return nil, nil
+	}
+	// safety: a release newer than the never-refreshed cache cannot be restricted by it.
+	if index.localCache && !slices.ContainsFunc(index.index.Versions, func(v engineid.VersionInfo) bool { return v.Version == version }) {
+		return []engineid.Notice{{Kind: engineid.NoticePolicyUnavailable, Version: version, Reason: "The cached version policy does not list this release; local-only execution continues without policy enforcement.", Hint: "Controller runners still require a verified version policy."}}, nil
 	}
 	return evaluate(index, version, now, UpgradeCommand)
 }

@@ -68,7 +68,8 @@ release, minimum version, individual revocations and per-release support windows
 Its detached signature is `versions.json.sig`. Clients verify the exact bytes,
 refuse rollback and retain the last verified copy when refresh fails. There is
 no fallback-age cutoff. Local-only execution reads cached policy without any
-network refresh. Without a verified cached policy it proceeds with a warning.
+network refresh. Without a verified cached policy, or for a release newer than
+the cached one lists, it proceeds with a warning.
 Cached restrictions still apply, and executable signatures and exact pins remain
 required. Controller runners fail closed when no verified policy is available.
 
