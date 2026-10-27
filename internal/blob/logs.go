@@ -99,6 +99,8 @@ type LogUploadURL struct {
 	URL            string            `json:"url"`
 	Headers        map[string]string `json:"headers,omitempty"`
 	ExpiresAt      time.Time         `json:"expires_at"`
+	// Committed reports the slot's object is already committed, so the uploader has nothing to send and no URL.
+	Committed bool `json:"committed,omitempty"`
 }
 
 // LogReadRequest resumes by byte offset within exactly one subject and generation.

@@ -30,12 +30,7 @@ AND q.quota='storage' AND q.state='held' AND q.expires_at>?`, t.team, now, now).
 	if err != nil {
 		return StorageStanding{}, err
 	}
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount),0) FROM quota_reservations
-WHERE team=? AND quota='storage' AND state='held' AND expires_at>? AND id LIKE 'log:%'`, t.team, now).Scan(&out.ReservedLogBytes)
-	if err != nil {
-		return StorageStanding{}, err
-	}
-	if out.ReservedBlobBytes < 0 || out.BlobBytes > math.MaxInt64-out.ReservedBlobBytes || out.ReservedLogBytes < 0 || out.LogBytes > math.MaxInt64-out.ReservedLogBytes {
+	if out.ReservedBlobBytes < 0 || out.BlobBytes > math.MaxInt64-out.ReservedBlobBytes {
 		return StorageStanding{}, errors.New("storage: invalid retained upload inventory")
 	}
 	if err := tx.Commit(); err != nil {

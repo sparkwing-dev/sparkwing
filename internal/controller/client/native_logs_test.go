@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 )
 
 func TestNativeLogCommitRequiresAcknowledgement(t *testing.T) {
@@ -98,5 +100,33 @@ func TestNativeLogUploaderUsesCommittedBearerWithoutMetadataReads(t *testing.T) 
 				t.Fatal("changed bearer reached log persistence")
 			}
 		})
+	}
+}
+
+// A segment whose commit succeeded but whose acknowledgement was lost recovers on the retry: signing reports the
+// slot committed, and the uploader records the segment without uploading or committing it again.
+func TestNativeLogUploaderRecoversALostCommitAcknowledgement(t *testing.T) {
+	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "team", RunID: "run", Unit: &blob.LogUnit{Kind: "plan", Generation: 1}}
+	signs := 0
+	transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
+		if request.Method != "POST" || request.URL.Path != "/api/v1/claims/plan/log-segments" {
+			t.Fatalf("a committed slot was uploaded or committed again: %s %s", request.Method, request.URL.Path)
+		}
+		signs++
+		body, err := json.Marshal(blob.LogUploadURL{Subject: subject, RetentionClass: "r30", Index: 1, Committed: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return engineResponse(200, string(body)), nil
+	})
+	uploader := &nativeLogUploader{transport: transport, subject: subject, pattern: "/api/v1/claims/{claim}", path: "/api/v1/claims/plan"}
+	segment := logseg.Segment{N: 1, Bytes: 3, StoredBytes: 3, SHA256: strings.Repeat("a", 64)}
+	for range 2 {
+		if err := uploader.PutSegment(t.Context(), segment, []byte("abc")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if signs != 2 || len(uploader.segments) != 1 || uploader.segments[0].Index != 1 {
+		t.Fatalf("signs=%d segments=%+v; want the committed segment recorded once", signs, uploader.segments)
 	}
 }

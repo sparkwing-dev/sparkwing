@@ -263,11 +263,18 @@ func TestLogSigningRefusesATeamAtItsStorageLimit(t *testing.T) {
 		return engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(encoded), status)
 	}
 	sign(1, 3, http.StatusOK)
-	// A signed slot keeps its admitted size: asking again for more bytes gets no larger URL.
-	sign(1, 4, http.StatusConflict)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
+	}
+	before, err := tenant.StorageRetainedBytes(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A signed slot keeps its first size: asking again for more bytes stores no more.
+	sign(1, 4, http.StatusOK)
+	if after, err := tenant.StorageRetainedBytes(t.Context()); err != nil || after != before {
+		t.Fatalf("re-signing a 3-byte slot for 4 bytes changed retained storage from %d to %d: %v", before, after, err)
 	}
 	if err := tenant.SetStorageQuota(t.Context(), store.StorageQuota{MaxBytesPerRun: 4}); err != nil {
 		t.Fatal(err)

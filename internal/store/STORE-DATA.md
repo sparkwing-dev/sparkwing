@@ -89,14 +89,14 @@ The controller's team storage report consumes this snapshot.
 Every write that grows a team's stored data passes one storage rule,
 `admitStorageGrowthTx`, in the write's own transaction: run events
 (`appendEventTx`, so `Tenant.AppendEvent` and every state transition), blob and
-source upload reservations and tagged log segments. A log upload slot is held
-through the rule before its URL is signed
-([`Tenant.ReserveLogUpload`](controller_reporting.go)). The first admission binds
-the slot to its size and expiry, and signing it again returns that same size and
-expiry. The segment commit settles the hold at the stored bytes, and the final
-commit moves the manifest's signed size into the stream's retained bytes,
-admitting it then if its hold expired. An expired slot is admitted again in
-place. It refuses a held team,
+source upload reservations and tagged log segments. A log slot (stream and
+index; index 0 is the final manifest) passes the rule when it is first signed
+([`Tenant.OpenLogSlot`](controller_reporting.go)). Its size is fixed then, and
+its bytes count as retained, committed or not, until the object is deleted:
+run retention cascades the slot, and maintenance drops slots of streams past
+their log class, which the object store's lifecycle removed. A commit only
+lowers a slot to the verified stored size (the controller reads the manifest
+object), and signing a committed slot again reports it committed. It refuses a held team,
 growth past the free storage allowance on an empty balance while storage is
 priced, and growth past the team's tier quota (monthly bytes, per-run bytes and
 objects), then counts the growth so a refused write records nothing. A run's

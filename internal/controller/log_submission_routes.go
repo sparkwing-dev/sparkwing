@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"reflect"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -105,15 +104,21 @@ func (s *Server) handleLogSigning(w http.ResponseWriter, r *http.Request, a capa
 		return engineLookupError(err)
 	}
 	// safety: the slot's bytes pass the storage rule before any URL exists, so a team at its limit gets none.
-	class, expires, err := tenant.ReserveLogUpload(r.Context(), subject, logActor(a, subject), body.Index, body.Size)
+	opened, err := tenant.OpenLogSlot(r.Context(), subject, logActor(a, subject), body.Index, body.Size)
 	if err != nil {
 		return storageGrowthRefusal(err)
+	}
+	if opened.Committed {
+		writeJSON(w, http.StatusOK, blob.LogUploadURL{Subject: subject, RetentionClass: opened.RetentionClass, Index: body.Index, Committed: true})
+		return nil
 	}
 	objects, err := s.submissionObjects()
 	if err != nil {
 		return err
 	}
-	slot, err := (logseg.Signer{Objects: objects, ClassReady: objects.LogClassReady, Now: func() time.Time { return expires.Add(-limits.LogUploadURLTTL) }}).Sign(r.Context(), body, class)
+	// safety: the URL carries the slot's first admitted size, so signing again can never store more.
+	body.Size = opened.Size
+	slot, err := (logseg.Signer{Objects: objects, ClassReady: objects.LogClassReady}).Sign(r.Context(), body, opened.RetentionClass)
 	if err != nil {
 		return err
 	}
@@ -169,7 +174,13 @@ func (s *Server) handleLogCommit(w http.ResponseWriter, r *http.Request, a capab
 			return err
 		}
 	}
-	if err := tenant.RecordSegments(r.Context(), store.SegmentCommit{Subject: subject, Actor: actor, Segments: body.Segments, Final: body.Final, IncompleteReason: body.IncompleteReason, RetentionClass: class}); err != nil {
+	commit := store.SegmentCommit{Subject: subject, Actor: actor, Segments: body.Segments, Final: body.Final, IncompleteReason: body.IncompleteReason, RetentionClass: class}
+	if body.Final {
+		if commit.ManifestBytes, err = s.storedManifestBytes(r.Context(), subject, class); err != nil {
+			return err
+		}
+	}
+	if err := tenant.RecordSegments(r.Context(), commit); err != nil {
 		return engineLookupError(err)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"recorded": true})
@@ -235,4 +246,29 @@ func storageGrowthRefusal(err error) error {
 	default:
 		return engineLookupError(err)
 	}
+}
+
+// storedManifestBytes measures a stream's final manifest object, zero when none was stored, so its commit counts
+// what the object store actually holds.
+func (s *Server) storedManifestBytes(ctx context.Context, subject blob.LogSubject, class string) (int64, error) {
+	objects, err := s.submissionObjects()
+	if err != nil {
+		return 0, nil
+	}
+	prefix, err := blob.LogSubjectPrefix(class, subject)
+	if err != nil {
+		return 0, err
+	}
+	object, err := objects.Get(ctx, blob.LogManifestKey(prefix))
+	if errors.Is(err, blob.ErrNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n, err := io.Copy(io.Discard, io.LimitReader(object, limits.LogManifestBytes+1))
+	if err = errors.Join(err, object.Close()); err != nil {
+		return 0, err
+	}
+	return n, nil
 }

@@ -113,8 +113,11 @@ func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segme
 	if err != nil {
 		return err
 	}
-	if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
-		return err
+	// safety: a committed slot means an earlier commit succeeded and only its acknowledgement was lost.
+	if !slot.Committed {
+		if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
+			return err
+		}
 	}
 	var offset int64
 	for _, previous := range u.segments {
@@ -131,8 +134,10 @@ func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segme
 		return err
 	}
 	row := runstate.Segment{Index: int64(segment.N), Offset: offset, Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key}
-	if err := u.commit(ctx, []runstate.Segment{row}, false, ""); err != nil {
-		return err
+	if !slot.Committed {
+		if err := u.commit(ctx, []runstate.Segment{row}, false, ""); err != nil {
+			return err
+		}
 	}
 	u.segments = append(u.segments, row)
 	return nil
@@ -147,7 +152,7 @@ func (u *nativeLogUploader) PutManifest(ctx context.Context, manifest logseg.Man
 		return err
 	}
 	slot, err := u.signed(ctx, 0, body)
-	if err != nil {
+	if err != nil || slot.Committed {
 		return err
 	}
 	if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {

@@ -50,7 +50,7 @@ func (o *Operator) ChargeRetainedStorage(ctx context.Context) (StorageChargeSwee
 func (o *Operator) retainedStorageTeams(ctx context.Context) (_ []Team, err error) {
 	rows, err := o.s.query(ctx, `SELECT t.name FROM teams t
 WHERE EXISTS(SELECT 1 FROM blobs b WHERE b.team=t.name)
-   OR EXISTS(SELECT 1 FROM log_streams l WHERE l.team=t.name)
+   OR EXISTS(SELECT 1 FROM log_slots l WHERE l.team=t.name)
    OR EXISTS(SELECT 1 FROM team_storage s WHERE s.team=t.name)
 ORDER BY t.name`)
 	if err != nil {
@@ -173,7 +173,7 @@ type retainedStorageInventory struct {
 
 func retainedStorageSampleTx(ctx context.Context, tx *storeTx, team Team) (out retainedStorageInventory, err error) {
 	out.oldest = tx.now(ctx).UnixNano()
-	rows, err := tx.queryContext(ctx, "SELECT size,created_at,0 FROM blobs WHERE team=? UNION ALL SELECT stored_bytes,created_at,1 FROM log_streams WHERE team=?", team, team)
+	rows, err := tx.queryContext(ctx, "SELECT size,created_at,0 FROM blobs WHERE team=? UNION ALL SELECT size,created_at,1 FROM log_slots WHERE team=?", team, team)
 	if err != nil {
 		return out, err
 	}

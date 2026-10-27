@@ -1211,6 +1211,22 @@ CREATE UNIQUE INDEX log_job_subject ON log_streams(team,run_id,node_id,attempt) 
 CREATE UNIQUE INDEX log_owner_subject ON log_streams(team,run_id,unit_kind,generation) WHERE unit_kind IN ('trigger','plan');
 CREATE UNIQUE INDEX log_eval_subject ON log_streams(team,run_id,source_node_id,source_generation,generation) WHERE unit_kind = 'eval';
 
+-- safety: a log slot's bytes count as retained from its first signing until the object is deleted, so an
+-- upload that is never committed still counts; a commit only lowers it to the verified stored size.
+CREATE TABLE log_slots (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    stream_id TEXT NOT NULL,
+    generation BIGINT NOT NULL CHECK(generation > 0),
+    n BIGINT NOT NULL CHECK(n >= 0),
+    size BIGINT NOT NULL CHECK(size >= 0),
+    committed BIGINT NOT NULL DEFAULT 0 CHECK(committed IN (0,1)),
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY(team,run_id,stream_id,n),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,run_id,stream_id,generation) REFERENCES log_streams(team,run_id,id,generation) ON DELETE CASCADE
+);
+
 CREATE TABLE log_segments (
     team TEXT NOT NULL REFERENCES teams(name),
     run_id TEXT NOT NULL,

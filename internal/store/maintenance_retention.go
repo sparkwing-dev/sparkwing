@@ -7,6 +7,8 @@ import (
 	"math"
 	"slices"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 func (o *Operator) maintainRetention(ctx context.Context, request RetentionRequest) (RetentionResult, error) {
@@ -87,7 +89,52 @@ func (op *Operator) maintainRetentionTx(ctx context.Context, tx *storeTx, reques
 	if err := tx.operator.deleteRetentionIdentityTx(ctx, tx, now, request.Limit, &result); err != nil {
 		return RetentionResult{}, err
 	}
+	result.LogSlots, err = tx.operator.deleteExpiredLogSlotsTx(ctx, tx, now)
+	if err != nil {
+		return RetentionResult{}, err
+	}
 	return result, nil
+}
+
+// deleteExpiredLogSlotsTx stops counting the log objects of streams older than their retention class, which the
+// object store's lifecycle (or filesystem expiry) deletes outside Sparkwing, so retained bytes fall with them.
+func (op *Operator) deleteExpiredLogSlotsTx(ctx context.Context, tx *storeTx, now time.Time) (int64, error) {
+	rows, err := tx.queryContext(ctx, `SELECT DISTINCT s.retention_class FROM log_streams s WHERE EXISTS(SELECT 1 FROM log_slots l WHERE l.team=s.team AND l.run_id=s.run_id AND l.stream_id=s.id) ORDER BY s.retention_class`)
+	if err != nil {
+		return 0, err
+	}
+	var classes []string
+	for rows.Next() {
+		var class string
+		if err := rows.Scan(&class); err != nil {
+			return 0, errors.Join(err, rows.Close())
+		}
+		classes = append(classes, class)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, err
+	}
+	var removed int64
+	for _, class := range classes {
+		days, ok := blob.LogClassDays(class)
+		if !ok {
+			return removed, fmt.Errorf("storage: invalid persisted log retention class %q", class)
+		}
+		cutoff, err := retentionBoundary(now, int64(days))
+		if err != nil {
+			return removed, err
+		}
+		res, err := tx.execContext(ctx, `DELETE FROM log_slots WHERE EXISTS(SELECT 1 FROM log_streams s WHERE s.team=log_slots.team AND s.run_id=log_slots.run_id AND s.id=log_slots.stream_id AND s.retention_class=? AND s.created_at<=?)`, class, cutoff.UnixNano())
+		if err != nil {
+			return removed, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return removed, err
+		}
+		removed += n
+	}
+	return removed, nil
 }
 
 const maxRetentionDays = math.MaxInt64 / int64(24*time.Hour)

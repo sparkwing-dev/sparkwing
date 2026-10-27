@@ -2,10 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
-	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -50,51 +46,50 @@ func (t *Tenant) prepareLogWriteTx(ctx context.Context, tx *storeTx, subject blo
 	return class, nil
 }
 
-// ReserveLogUpload checks the writer as PrepareLogWrite does and admits the slot's bytes through the storage rule
-// before the caller signs an upload URL, so a refused team gets no URL. The first admission binds the slot (stream
-// and index) to its size and expiry; signing it again while that hold lives returns the same expiry and refuses any
-// other size, so every signed byte stays covered for the URL's whole life. An expired slot is admitted again in
-// place. The segment commit, or the final commit for the manifest at index 0, settles the hold.
-func (t *Tenant) ReserveLogUpload(ctx context.Context, subject blob.LogSubject, actor runstate.Actor, index, size int64) (string, time.Time, error) {
+// LogSlot is what a signed log upload may store: its byte size, fixed when first signed, and whether its object is
+// already committed, in which case the uploader has nothing left to send.
+type LogSlot struct {
+	RetentionClass string
+	Size           int64
+	Committed      bool
+}
+
+// OpenLogSlot checks the writer as PrepareLogWrite does and, before the caller signs an upload URL, admits a new
+// slot's bytes through the storage rule. They count as retained from then until the object is deleted, whether or
+// not it is ever committed, so a refused team gets no URL and an abandoned upload still counts. Signing the slot
+// again returns its first size, never another.
+func (t *Tenant) OpenLogSlot(ctx context.Context, subject blob.LogSubject, actor runstate.Actor, index, size int64) (LogSlot, error) {
 	if subject.Team != string(t.team) {
-		return "", time.Time{}, authorityError(apierr.Forbidden, "log belongs to another team")
+		return LogSlot{}, authorityError(apierr.Forbidden, "log belongs to another team")
 	}
 	if err := subject.Validate(); err != nil {
-		return "", time.Time{}, authorityError(apierr.BadRequest, "invalid log subject")
+		return LogSlot{}, authorityError(apierr.BadRequest, "invalid log subject")
 	}
 	identity, err := logIdentity(subject)
 	if err != nil {
-		return "", time.Time{}, err
+		return LogSlot{}, err
 	}
 	if index < 0 || size < 1 {
-		return "", time.Time{}, authorityError(apierr.BadRequest, "invalid log upload slot")
+		return LogSlot{}, authorityError(apierr.BadRequest, "invalid log upload slot")
 	}
-	var class string
-	var expires time.Time
+	var out LogSlot
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
-		if class, err = t.prepareLogWriteTx(ctx, tx, subject, actor); err != nil {
+		if out.RetentionClass, err = t.prepareLogWriteTx(ctx, tx, subject, actor); err != nil {
 			return err
 		}
-		id := logReservationID(identity.id, index)
-		slot, err := logSlotTx(ctx, tx, t.team, id)
+		slot, err := logSlotTx(ctx, tx, t.team, subject.RunID, identity.id, index)
 		if err != nil {
 			return err
 		}
-		switch {
-		case slot.state == "committed":
-			return authorityError(apierr.Conflict, "log slot is already committed")
-		case slot.live(tx.now(ctx)):
-			if slot.amount != size {
-				return authorityError(apierr.Conflict, fmt.Sprintf("log slot was signed for %d bytes", slot.amount))
-			}
-			expires = slot.expires
+		if slot.found {
+			out.Size, out.Committed = slot.size, slot.committed
 			return nil
 		}
-		expires = tx.now(ctx).Add(limits.LogUploadURLTTL)
-		return admitStorageGrowthTx(ctx, tx, t.team, storageGrowth{reservation: id, expires: expires, run: subject.RunID, bytes: size})
+		out.Size = size
+		return openLogSlotTx(ctx, tx, t.team, subject.RunID, identity, index, size, false)
 	})
-	return class, expires, err
+	return out, err
 }
 
 // WriteActivity records bounded masked detail under the current result writer's fence.

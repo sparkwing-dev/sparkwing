@@ -7,10 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"slices"
-	"time"
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -29,6 +27,8 @@ type SegmentCommit struct {
 	Final            bool
 	IncompleteReason string
 	RetentionClass   string
+	// ManifestBytes is the final manifest object's verified stored size, zero when none is stored.
+	ManifestBytes int64
 }
 
 type logStreamIdentity struct {
@@ -143,8 +143,17 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	var seal any
 	finalDigest = ""
 	if commit.Final {
-		if err := settleLogManifestTx(ctx, tx, t.team, commit.Subject.RunID, identity.id); err != nil {
+		if commit.ManifestBytes > 0 {
+			if err := commitLogSlotTx(ctx, tx, t.team, commit.Subject.RunID, identity, 0, commit.ManifestBytes); err != nil {
+				return err
+			}
+		} else if manifest, err := logSlotTx(ctx, tx, t.team, commit.Subject.RunID, identity.id, 0); err != nil {
 			return err
+		} else if manifest.found {
+			// safety: the controller found no manifest object, so the signed slot stores nothing.
+			if err := commitLogSlotTx(ctx, tx, t.team, commit.Subject.RunID, identity, 0, 0); err != nil {
+				return err
+			}
 		}
 		seal = tx.now(ctx).UnixNano()
 		completeness = "complete"
@@ -160,69 +169,52 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	return tx.Commit()
 }
 
-func logReservationID(stream string, index int64) string {
-	return fmt.Sprintf("log:%s:%d", stream, index)
-}
-
-// logSlot is a signed log slot's monthly storage hold: the size it was signed for, until when, and its state.
+// logSlot is one object a log stream may store; index 0 is its final manifest.
 type logSlot struct {
-	amount  int64
-	expires time.Time
-	state   string
+	found, committed bool
+	size             int64
 }
 
-func (s logSlot) live(now time.Time) bool { return s.state == "held" && s.expires.After(now) }
-
-// logSlotTx reads a log slot's monthly hold; a slot never signed has an empty state.
-func logSlotTx(ctx context.Context, tx *storeTx, team Team, id string) (logSlot, error) {
+func logSlotTx(ctx context.Context, tx *storeTx, team Team, run, stream string, index int64) (logSlot, error) {
 	var slot logSlot
-	var expires int64
-	err := tx.QueryRowContext(ctx, `SELECT amount,expires_at,state FROM quota_reservations WHERE team=? AND id=? AND quota='storage'`+tx.forUpdate(), team, id).Scan(&slot.amount, &expires, &slot.state)
+	err := tx.QueryRowContext(ctx, `SELECT size,committed=1 FROM log_slots WHERE team=? AND run_id=? AND stream_id=? AND n=?`+tx.forUpdate(), team, run, stream, index).Scan(&slot.size, &slot.committed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return logSlot{}, nil
 	}
-	slot.expires = time.Unix(0, expires)
+	slot.found = err == nil
 	return slot, err
 }
 
-// settleLogSlotTx commits a signed slot's live hold at the bytes actually stored, and reports false when the slot
-// holds nothing to settle.
-func settleLogSlotTx(ctx context.Context, tx *storeTx, team Team, run, id string, used int64) (bool, error) {
-	slot, err := logSlotTx(ctx, tx, team, id)
-	if err != nil || !slot.live(tx.now(ctx)) {
-		return false, err
+// openLogSlotTx admits a new slot's bytes through the storage rule and counts them retained from now until the
+// object is deleted.
+func openLogSlotTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, index, size int64, committed bool) error {
+	if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: run, bytes: size}); err != nil {
+		return err
 	}
-	accounting := blobAccounting{ReservationID: id}
-	quotas, err := lockBlobQuotaTx(ctx, tx, team, run, accounting)
-	if err != nil {
-		return false, err
-	}
-	return true, settleBlobQuotaTx(ctx, tx, team, run, accounting, quotas, used, 0)
+	_, err := tx.execContext(ctx, `INSERT INTO log_slots(team,run_id,stream_id,generation,n,size,committed,created_at) VALUES (?,?,?,?,?,?,?,?)`,
+		team, run, identity.id, identity.generation, index, size, boolToInt(committed), tx.now(ctx).UnixNano())
+	return err
 }
 
-// settleLogManifestTx moves a signed final manifest into the stream's retained bytes at the size its slot was signed
-// for, which the URL bound exactly. A live hold settles; a hold that expired first is admitted now, like a segment.
-func settleLogManifestTx(ctx context.Context, tx *storeTx, team Team, run, stream string) error {
-	id := logReservationID(stream, 0)
-	slot, err := logSlotTx(ctx, tx, team, id)
-	if err != nil || slot.state == "" || slot.state == "committed" {
-		return err
-	}
-	settled, err := settleLogSlotTx(ctx, tx, team, run, id, slot.amount)
+// commitLogSlotTx marks a slot committed at its verified stored size. A commit only ever lowers a signed slot's
+// bytes; an object larger than its slot is refused, and a slot nobody signed is admitted now.
+func commitLogSlotTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, index, verified int64) error {
+	slot, err := logSlotTx(ctx, tx, team, run, identity.id, index)
 	if err != nil {
 		return err
 	}
-	if !settled {
-		if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: run, bytes: slot.amount}); err != nil {
-			return err
-		}
+	if !slot.found {
+		return openLogSlotTx(ctx, tx, team, run, identity, index, verified, true)
 	}
-	_, err = tx.execContext(ctx, `UPDATE log_streams SET stored_bytes=stored_bytes+? WHERE team=? AND run_id=? AND id=?`, slot.amount, team, run, stream)
+	if verified > slot.size {
+		return authorityError(apierr.Conflict, "log object is larger than its signed slot")
+	}
+	_, err = tx.execContext(ctx, `UPDATE log_slots SET size=?,committed=1 WHERE team=? AND run_id=? AND stream_id=? AND n=?`, verified, team, run, identity.id, index)
 	return err
 }
 
 func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segments []runstate.Segment) error {
-	var next, offset, stored, added int64
+	var next, offset, stored int64
 	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,1),COALESCE(MAX(end_offset),0),COALESCE(SUM(stored_bytes),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset, &stored); err != nil {
 		return err
 	}
@@ -258,17 +250,9 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 		next++
 		offset += segment.Size
 		stored += segment.StoredBytes
-		settled, err := settleLogSlotTx(ctx, tx, team, run, logReservationID(identity.id, segment.Index), segment.StoredBytes)
-		if err != nil {
+		if err := commitLogSlotTx(ctx, tx, team, run, identity, segment.Index, segment.StoredBytes); err != nil {
 			return err
 		}
-		if !settled {
-			added += segment.StoredBytes
-		}
-	}
-	// safety: a segment whose signed slot expired before its commit is admitted now.
-	if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: run, bytes: added}); err != nil {
-		return err
 	}
 	_, err := tx.execContext(ctx, "UPDATE log_streams SET uploaded_through = ?, stored_bytes = ? WHERE team = ? AND run_id = ? AND id = ?", offset, stored, team, run, identity.id)
 	return err

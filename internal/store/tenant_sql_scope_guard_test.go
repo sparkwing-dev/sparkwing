@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).deleteExpiredLogSlotsTx":        "maintenance stops counting every team's log objects past their retention class, matching each slot to its own stream by team key",
 	"(*Operator).ClaimFailedRefundNotices":       "the billing pass finds every team's failed queued refunds once and marks each announced by its own team key",
 	"(*Operator).setPaymentModeTx":               "startup cutover checks all teams for open test work and restarts every storage watermark before serving",
 	"(*Operator).claimObserversTx":               "claim placement discovers live claimant observations across teams, then checks every pair against authenticated scope",

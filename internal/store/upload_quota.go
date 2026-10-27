@@ -28,14 +28,8 @@ func reserveUploadQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, 
 	if err != nil {
 		return err
 	}
-	// safety: a released hold renews in place, so an expired log slot can be admitted again under its own id.
-	result, err := tx.execContext(ctx, `INSERT INTO quota_reservations(team,id,quota,period,amount,expires_at,state) VALUES (?,?,?,?,?,?,'held')
-ON CONFLICT(team,id) DO UPDATE SET quota=excluded.quota,period=excluded.period,amount=excluded.amount,expires_at=excluded.expires_at,used=0,state='held'
-WHERE quota_reservations.state='released'`, team, d.id, d.quota, period, d.amount, expires.UnixNano())
-	if err != nil {
-		return err
-	}
-	return requireOneRow(result, "quota reservation")
+	_, err = tx.execContext(ctx, `INSERT INTO quota_reservations(team,id,quota,period,amount,expires_at,state) VALUES (?,?,?,?,?,?,'held')`, team, d.id, d.quota, period, d.amount, expires.UnixNano())
+	return err
 }
 
 func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d uploadQuotaDimension, reserve bool) (string, error) {

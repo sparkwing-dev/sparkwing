@@ -96,7 +96,9 @@ live blob-upload holds. Historical usage counters and bucket listings do not
 replace those authoritative counts. Exact ticket replay never charges twice.
 Deployment reports sum usage by tenant and period.
 
-Expired staging uploads still count until garbage collection removes them.
+Expired staging uploads still count until garbage collection removes them. A
+log segment or manifest counts from the moment its upload is signed, committed or
+not, until its log retention class expires it.
 
 The controller's maintenance pass expires records, marks unreachable
 blobs and collects tombstones after the 24-hour grace period. New references

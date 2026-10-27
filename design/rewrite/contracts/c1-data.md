@@ -700,7 +700,7 @@ excluded.
 
 Audit rows are append-only against application code. Both dialects reject every
 UPDATE and permit DELETE only for rows older than `operator.audit_retention_days`
-(default 400 days, set through the operator storage settings API). The leased
+(default 400 days, set through the operator storage settings API). The
 controller maintenance pass prunes expired rows in bounded batches using the same
 database-clock cutoff as the triggers. The database stamps `recorded_at` at
 insertion and callers cannot set it. Retention uses that recording time. The
@@ -1271,7 +1271,7 @@ The raw `Store.StorageStandingFor` and `Store.TeamStorage` reads, their
 `TeamStorageUsage` type, and `Store.ReconcileFreeEventBytes` are removed.
 Event bytes come from retained `runs.event_bytes`.
 `Store.ReleaseExpiredStorage` is removed. Upload expiry uses quota admission
-and the leased blob-maintenance pass.
+and the blob-maintenance pass.
 
 ## Amendment 1: authority and execution seams
 
@@ -1355,7 +1355,7 @@ provider identity in the creating transaction.
 Identity-link and GitHub-connect consumption use `flow_nonces` with separate
 kinds, store-clock expiry checks and nanosecond timestamps. The existing unique
 key arbitrates concurrent consumption. Replay survives reopening. Expiration
-cleanup belongs to the leased retention pass, rather than a request-side delete.
+cleanup belongs to the retention pass, rather than a request-side delete.
 No separate identity-link or GitHub-connect state table exists.
 
 Future revocation timestamps remain live until their exact deadline. Transactional
@@ -1400,7 +1400,7 @@ The legacy `Store.OpenNodeLog`, `SignNodeLogSegment`, `NodeLogSegments`,
 `MarkNodeLogSealed`, `GetNodeLog` and `CurrentNodeAttempt` APIs are removed.
 Their node `log-segments` and `log-manifest` HTTP writers and S3 signing code
 are removed too. No Go writer references `node_logs` or `node_log_segments`,
-and reads no longer seal abandoned logs. `Tenant.RecordSegments` and leased
+and reads no longer seal abandoned logs. `Tenant.RecordSegments` and
 `Operator.SealAbandonedLogStreams` own tagged persistence and sealing.
 Legacy capabilities no longer advertise segment upload support. Old output
 reads and host/client interfaces still need their final record cutover.
@@ -1576,7 +1576,7 @@ requeues without consuming a disruption. Terminal owner timestamps stay recorded
 The old dispatcher-expiry path and its application-retry accounting are removed.
 Metered recovery uses the lifecycle settlement join. C2's production billing
 calculator remains an integration point.
-`Store.RequeueUnstartedClaim` and its Tenant twin are removed. Only the leased
+`Store.RequeueUnstartedClaim` and its Tenant twin are removed. Only the maintenance
 pass recovers expired owners. Unstarted owner recovery preserves intake identity,
 clears holder authority, consumes no disruption and fences every previous award.
 C2's billing start rule still determines whether compute began at award or awaits
@@ -1597,7 +1597,7 @@ reservation's original claim generation. No separate promotion lease or waiter-a
 policy remains.
 
 `Store.MaintainConcurrency`, the `Maintenance` function registry and its six
-unfenced operations are removed. `OperatorStore` includes the leased pass. The
+unfenced operations are removed. `OperatorStore` includes the pass. The
 obsolete concurrency memo sweep, cache-count API and cache-cap fields are removed
 because the final schema stores memo records through C1's blob-record contract.
 Record expiry remains in `Operator.MaintainRetention`.
@@ -1755,11 +1755,11 @@ maintenance tick. It pages across all teams. A reconciliation failure stops the
 pass. The hostname is displayed in schedule history. Another process on the same machine
 cannot reuse that holder's live fence.
 
-Final run pruning uses `Operator.MaintainRetention`. The unleased
+Final run pruning uses `Operator.MaintainRetention`. The separate
 `Store.PruneRunsOlderThan` API is removed. Finish time controls eligibility, and
 a failed pass rolls back every removal and discards its result counters.
 
-Identity expiry also uses `Operator.MaintainRetention`. The unleased
+Identity expiry also uses `Operator.MaintainRetention`. The separate
 `Store.PruneSpentIdentity` and `Store.ExpireSessions` methods, `IdentityPrune` and
 `SpentIdentityRetention` are removed. Invitations expire thirty days after
 acceptance, withdrawal or expiry. Invitation and email-delivery timestamps use
@@ -1857,7 +1857,7 @@ The ticket ID also binds the persisted quota reservation.
 It is one ASCII letter/digit/underscore/hyphen path segment selected by the
 trusted adapter within its tenant/principal idempotency scope.
 Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
-leased retention releases uncommitted reservations without deleting a live blob.
+retention releases uncommitted reservations without deleting a live blob.
 
 `blob.ObjectBackend` owns signed physical transfers, verified immutable publication
 and deletion. Both filesystem and S3 implementations consume stored bytes through
@@ -1893,7 +1893,7 @@ transaction. Controller binding supplies the adapter to `Tenant.BlobRecords`.
 
 `ObjectBackend.DeleteBlob` implements W1's existing `BlobDeleter` interface for
 filesystem and S3 collection. It derives the tenant CAS key from the selected
-blob. Missing bytes are an idempotent success. The leased collector owns the
+blob. Missing bytes are an idempotent success. The collector owns the
 reachability recheck and tombstone grace, including references added after
 marking. The controller's age-based output pruner and the bucket measurement
 expiry callback are removed. The maintenance coordinator must bind the final
@@ -1905,7 +1905,7 @@ Both common backends implement it and return the removed byte count. Invalid
 selectors fail before I/O. Filesystem traversal follows no symlink. S3 deletion
 checks each listed key against the selected prefix and rejects stalled pages.
 Neither backend removes CAS objects through this operation. Run deletion and
-the team's leased purge/recheck call it through the configured data backend
+the team's purge/recheck call it through the configured data backend
 before removing rows. Listings establish no record or read authority.
 This is a W7-local contract addition. Authenticated log bindings remain with W2.
 
@@ -1959,7 +1959,7 @@ The aggregate keys are `storage`, `storage.run.bytes:<run>` and
 `storage.run.objects:<run>`. All paths acquire them in that order. Run dimensions
 have no calendar reset. Commit charges only newly inserted tenant blobs, with
 one object even when its size is zero. Authorized existing bytes reserve zero
-in every dimension. Abort and leased expiry release all three holds, including
+in every dimension. Abort and expiry release all three holds, including
 holds whose upload row was removed by a run cascade. Effective default-tier
 policy is read for every new upload without creating an override row.
 
@@ -2374,7 +2374,7 @@ and segment digests are contract fixtures. Physical bytes, owner-unit transport,
 ring fallback, signing, lifecycle expiry and proxy egress remain integration
 obligations.
 
-`Operator.SealAbandonedLogStreams(ctx, maintenanceLease, limit)` closes existing
+[`Operator.SealAbandonedLogStreams`](../../../internal/store/log_maintenance.go) closes existing
 unsealed execution streams with `writer_lost`. Job attempts wait until strictly
 after their persisted finish plus `limits.LogSealGrace`. Trigger and plan streams
 need no matching live unit generation. Eval checks its own generation and its
@@ -2383,7 +2383,7 @@ eligibility, and commits a bounded batch atomically.
 It preserves segments, stored-byte accounting, final seals and execution results.
 Publish-mode streams retain their publisher's final-commit contract because
 publication has no executable lease. The controller invokes this operation from
-its leased retention pass. The old `Store.AbandonedNodeLogs` query and unfenced
+its retention pass. The old `Store.AbandonedNodeLogs` query and unfenced
 controller sweep are removed. Physical manifests and ring fallback remain with
 the log transport.
 
@@ -2583,7 +2583,7 @@ revision. GitHub deliveries retain their report lock and stale-phase check.
 Metrics and profile folding act once per terminal run. Parent notification is
 also terminal-only in this contract.
 
-The leased retention pass keeps each pipeline's newest successful run and its
+The retention pass keeps each pipeline's newest successful run and its
 output records. Runs otherwise expire after the configured window (Cloud 90
 days; self-hosted disabled). Outputs expire after 30 days except pinned outputs.
 Metrics use their own setting. Log classes retain funded logs for 90 days and
@@ -2613,7 +2613,7 @@ time alone cannot delete a live record's bytes, including the default tenant's.
 `DirectCacheMaxAge` and the controller's `CacheObjectMaxAge` are removed.
 The controller's cache listing has no age-expiry callback. Source records retain
 bytes independently of their originating run. Upload-ticket expiry releases
-quota through the leased final retention pass. Physical GC wiring remains with
+quota through the final retention pass. Physical GC wiring remains with
 the storage adapter.
 
 `Store.ExpiredOutputRuns`, `Store.ReleaseRunOutputs`, `Store.ForgetRunOutputs`,
@@ -2774,7 +2774,7 @@ PrunableNodeLogs APIs are removed. Retained-byte reports and billing read unique
 blobs and committed tagged log streams. Bucket listings cannot replace replica
 usage counters. PruneStorageCommitReceipts and PruneDownloadDays are removed with
 the pass. Final upload tickets and quota reservations retain their atomic replay
-state through leased maintenance. Cloud seeds 90-day run retention only when absent. Metric
+state through maintenance. Cloud seeds 90-day run retention only when absent. Metric
 retention stays independent. The old event-only and principal allowance sweeps
 are removed. Allowance-driven eviction, physical GC and full elected-worker
 coordination remain integration obligations.
@@ -3539,7 +3539,7 @@ derive concurrency or queue depth from CPU counts or leases.
 
 ## Upload abandonment and billing ledger ownership
 
-`uploads.abandoned_at BIGINT` is nullable. Abort and leased upload expiry set it
+`uploads.abandoned_at BIGINT` is nullable. Abort and upload expiry set it
 once under the upload and digest locks, register a tombstoned blob for possible
 copied bytes, and release quota in the same transaction. Pending tickets with no
 abandonment timestamp are roots in the tenant's reachable blob graph. Reservation
@@ -3909,7 +3909,7 @@ index (team, requester_account) for account-scoped overflow lookup.
 ## Profile completion delivery
 
 `Operator.DueProfileFolds(ctx, completionLease, limit)` selects the profile lane
-through the same leased completion reader as `DueRunEffects`. Other due effect
+through the same completion reader as `DueRunEffects`. Other due effect
 types cannot starve this lane. It leaves their revisions unchanged.
 
 `Tenant.ApplyProfileFold(ctx, EffectDelivery, map[string]ProfileObservation)`
