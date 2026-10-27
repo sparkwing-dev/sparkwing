@@ -42,8 +42,8 @@ const (
 const refillKeyLife = 23 * time.Hour
 
 // A refill closed without an outcome: expired after its key life, or withdrawn when a recheck before a retry found
-// the team no longer eligible. Unless a payment later binds to it, it neither counts against limits nor stops later
-// refills.
+// the team no longer eligible. Unless a payment binds to it, from the checkout service's answer or a later signed
+// outcome, it neither counts against limits nor stops later refills.
 const (
 	refillExpired   = "expired"
 	refillWithdrawn = "withdrawn"
@@ -348,6 +348,27 @@ func authorizeRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, er
 		return nil, err
 	}
 	return &r, nil
+}
+
+// RecordRefillCharged binds the payment intent the checkout service answered for refill r, so the refill counts against
+// every limit even when a recheck withdraws it before its signed payment arrives. A lost answer binds nothing; that
+// charge counts once its webhook lands, and a refill a withdrawal let through before then is refunded by hand.
+func (o *Operator) RecordRefillCharged(ctx context.Context, r Refill, paymentIntent string) error {
+	if paymentIntent = strings.TrimSpace(paymentIntent); paymentIntent == "" {
+		return fmt.Errorf("%w: a charged refill names its payment intent", ErrInvalidInput)
+	}
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		mode, err := paymentModeTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if _, err := lockLedgerTx(ctx, tx, r.Team); err != nil {
+			return err
+		}
+		_, err = tx.execContext(ctx, `UPDATE credit_checkouts SET payment_id = ? WHERE team = ? AND payment_mode = ? AND id = ? AND kind = ? AND payment_id = ''`,
+			paymentIntent, string(r.Team), mode, r.ID, checkoutKindRefill)
+		return err
+	})
 }
 
 // RefillNoCard closes a refill the checkout service could not charge because the customer has no card in Stripe.

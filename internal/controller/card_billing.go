@@ -144,6 +144,10 @@ func (s *Server) refillPass(ctx context.Context) {
 			s.logger.Error("charging a refill failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
 		case res.Failure != "":
 			s.recordRefillFailure(ctx, r, res.Failure)
+		default:
+			if err := s.operator.RecordRefillCharged(ctx, r, res.PaymentIntent); err != nil {
+				s.logger.Error("recording a charged refill failed; its webhook still binds it", "team", string(r.Team), "refill", r.ID, "err", err)
+			}
 		}
 	})
 	if err != nil && ctx.Err() == nil {

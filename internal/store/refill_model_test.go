@@ -36,9 +36,10 @@ type modelRefill struct {
 	opened, closed time.Time
 	// failed is a failure outcome; cleared is a later Add funds lifting the stop it caused.
 	failed, cleared bool
-	// captured is Stripe's charge; credited is its signed payment granting credit.
-	captured, credited bool
-	capturedAt         time.Time
+	// captured is Stripe's charge; answered is the controller recording its payment intent from the checkout
+	// service's answer; credited is its signed payment granting credit.
+	captured, answered, credited bool
+	capturedAt                   time.Time
 }
 
 func (r *modelRefill) open() bool { return r.closed.IsZero() }
@@ -73,7 +74,7 @@ func (m *modelTeam) blocked() bool {
 
 // spent is what refills other than own took or reserved since since: captured charges at their capture time and
 // open, uncaptured reservations at their opening. Unless unseen is set, it leaves out a charge the store cannot see
-// yet: one whose refill was closed (withdrawn or expired) before its signed payment arrived.
+// yet: a lost answer's, whose refill was closed (withdrawn or expired) before its signed payment arrived.
 func (m *modelTeam) spent(own *modelRefill, since time.Time, unseen bool) int64 {
 	var sum int64
 	for _, r := range m.refills {
@@ -81,7 +82,7 @@ func (m *modelTeam) spent(own *modelRefill, since time.Time, unseen bool) int64 
 		switch {
 		case r == own:
 			continue
-		case r.captured && !unseen && !r.credited && !r.open():
+		case r.captured && !unseen && !r.answered && !r.credited && !r.open():
 			continue
 		case r.captured:
 			at = r.capturedAt
@@ -403,9 +404,9 @@ func (w *refillWorld) charge(visited map[store.Team]string, refill store.Refill)
 	case !ok:
 		w.fatalf("%s: charged refill %s while ineligible: %s", m.name, r.id, why)
 	case gap:
-		// A refill withdrawn or expired after Stripe charged it counts against the limits only once its signed payment
-		// arrives, so a refill opened before that webhook can pass a limit by one payment. Reported to the lead as a
-		// runbook case (refund in Stripe); a fix makes this branch a failure.
+		// A refill withdrawn or expired after a charge whose answer was lost counts against the limits only once its
+		// signed payment arrives, so a refill opened before that webhook can pass a limit by one payment: the runbook
+		// case, refunded in Stripe. A charge the controller heard about counts from its answer.
 		*w.gaps++
 		w.logf("%s: refill %s passes a limit by a charge the store has not seen: %s", m.name, r.id, why)
 	}
@@ -417,6 +418,11 @@ func (w *refillWorld) charge(visited map[store.Team]string, refill store.Refill)
 	case err != nil:
 	case outcome != "":
 		w.recordFailure(m, r, outcome)
+	default:
+		if err := w.s.AsOperator().RecordRefillCharged(w.t.Context(), refill, "pi_"+r.id); err != nil {
+			w.fatalf("record charged refill: %v", err)
+		}
+		r.answered = true
 	}
 }
 
@@ -627,7 +633,7 @@ func TestRefillModel(t *testing.T) {
 				runRefillHistory(t, s, &now, seed, history, &gaps)
 			}
 			if gaps > 0 {
-				t.Logf("%d charges passed a limit by a charge whose refill closed before its webhook", gaps)
+				t.Logf("%d charges passed a limit by a lost-answer charge whose refill closed before its webhook", gaps)
 			}
 		})
 	}

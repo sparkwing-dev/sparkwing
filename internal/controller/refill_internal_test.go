@@ -314,3 +314,20 @@ func TestARefillIsAuthorizedImmediatelyBeforeItsOwnCall(t *testing.T) {
 		})
 	}
 }
+
+// The pass records the payment intent a charged answer names, so a refill withdrawn before its webhook still counts
+// against the team's limits.
+func TestAChargedAnswerKeepsAWithdrawnRefillInTheLimits(t *testing.T) {
+	e, tenant := refillFixture(t)
+	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
+	worker.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+		return refillReply(http.StatusOK, `{"payment_intent":"pi_answered","status":"succeeded"}`), nil
+	})
+	worker.refillPass(t.Context())
+	engineSQL(t, e.Store, `UPDATE teams SET refill_enabled=0 WHERE name='a'`)
+	worker.refillPass(t.Context())
+	standing, err := tenant.SpendStanding(t.Context())
+	if err != nil || standing.Refill.Open || standing.Refill.DayCount != 1 || standing.Refill.WeekCents != 2000 {
+		t.Fatalf("refill state %+v: %v; want the withdrawn charged refill counted", standing.Refill, err)
+	}
+}

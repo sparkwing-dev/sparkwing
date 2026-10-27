@@ -676,3 +676,45 @@ func TestARefillInFlightBlocksASecondUntilItsGrantLands(t *testing.T) {
 		}
 	}
 }
+
+// A refill the checkout service answered as charged keeps counting against the limits after a recheck withdraws it,
+// so turning refills off and on before its webhook cannot charge past a weekly limit.
+func TestAWithdrawnChargedRefillStillCountsAgainstTheLimits(t *testing.T) {
+	s, tenant, now := refillFixture(t, true)
+	settings := RefillSettings{Enabled: true, ThresholdCents: 1_000_000, AmountCents: 1_000, WeekLimitCents: 1_500}
+	if err := setRefill(t, s, "a", settings); err != nil {
+		t.Fatal(err)
+	}
+	first := dueRefillsFor(t, s, "a")
+	if len(first) != 1 {
+		t.Fatalf("refill = %+v", first)
+	}
+	if err := s.AsOperator().RecordRefillCharged(t.Context(), first[0], "pi_charged"); err != nil {
+		t.Fatal(err)
+	}
+	settings.Enabled = false
+	if err := setRefill(t, s, "a", settings); err != nil {
+		t.Fatal(err)
+	}
+	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
+		t.Fatalf("a disabled team was charged: %+v", due)
+	}
+	rewriteSchemaCount(t, s.db, "credit_checkouts WHERE kind='refill' AND failure='withdrawn' AND payment_id='pi_charged'", 1)
+	settings.Enabled = true
+	if err := setRefill(t, s, "a", settings); err != nil {
+		t.Fatal(err)
+	}
+	tenant.s.SetTestClock(t, func() time.Time { return now })
+	if st, err := tenant.SpendStanding(t.Context()); err != nil || st.Refill.WeekCents != 1_000 || st.Refill.Limit != refillLimitTeamWeekly {
+		t.Fatalf("a withdrawn charged refill left the windows: %+v, %v", st.Refill, err)
+	}
+	if due := dueRefillsFor(t, s, "a"); len(due) != 0 {
+		t.Fatalf("a second refill passed the weekly limit before the first webhook: %+v", due)
+	}
+	if got, err := s.settlePaymentFacts(t.Context(), refillPaid(now, first[0], "pi_charged")); err != nil || !got.Granted {
+		t.Fatalf("the charged refill's webhook = %+v, %v", got, err)
+	}
+	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 1_000*MicroCreditsPerCent {
+		t.Fatalf("the charged refill's webhook did not credit it: %d, %v", balance, err)
+	}
+}

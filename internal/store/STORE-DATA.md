@@ -561,11 +561,16 @@ immediately before that refill's checkout call, with one eligibility rule
 (refills on, not blocked, no hold, within limits, balance below threshold) for
 opening a reservation and for every retry of its fixed request under its id.
 A reservation stays open until a signed outcome or a refusal closes it, a
-recheck withdraws it, or it expires after 23 hours. A card payment's signed
-outcome finds its reservation by the refill id in the payment's metadata and
-records the payment id then; a reservation funds at most one payment. Open
-reservations and every refill payment count against refill limits, including
-refusals and refunds; reservations closed without a payment do not.
+recheck withdraws it, or it expires after 23 hours. `RecordRefillCharged`
+records the payment intent from the checkout service's charged answer, and a
+card payment's signed outcome finds its reservation by the refill id in the
+payment's metadata and records the payment id if the answer did not; a
+reservation funds at most one payment. Open reservations and every refill
+payment count against refill limits, including refusals, refunds and a
+withdrawn or expired reservation with a recorded payment; reservations closed
+without a payment do not. A charge whose answer was lost has no payment until
+its webhook, so a reservation withdrawn or expired in that window lets the
+next refill pass a limit by that payment; an operator refunds it in Stripe.
 Resolved outcomes enter their spending windows when recorded, so delayed
 settlement cannot age a new charge out of its limits.
 `credit_checkouts.refill_blocked` records an active failure independently of
