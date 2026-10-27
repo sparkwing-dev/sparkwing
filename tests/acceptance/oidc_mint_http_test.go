@@ -289,11 +289,18 @@ func TestOIDCMintHTTPInputAndBudget(t *testing.T) {
 
 func TestOIDCMintHTTPKeyRotation(t *testing.T) {
 	b, f := oidcBoundary()
-	_, oldKey := oidcPrivate(t)
-	_, nextKey := oidcPrivate(t)
+	oldPrivate, oldKey := oidcPrivate(t)
+	nextPrivate, nextKey := oidcPrivate(t)
+	public := func(key *rsa.PrivateKey) []byte {
+		der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
+	}
 	servers := []http.Handler{
-		oidcServer(t, b, f, oldKey, nil).Handler(), oidcServer(t, b, f, oldKey, nextKey).Handler(),
-		oidcServer(t, b, f, nextKey, oldKey).Handler(), oidcServer(t, b, f, nextKey, nil).Handler(),
+		oidcServer(t, b, f, oldKey, nil).Handler(), oidcServer(t, b, f, oldKey, public(nextPrivate)).Handler(),
+		oidcServer(t, b, f, nextKey, public(oldPrivate)).Handler(), oidcServer(t, b, f, nextKey, nil).Handler(),
 	}
 	minted := make([]string, len(servers))
 	for i, h := range servers {
