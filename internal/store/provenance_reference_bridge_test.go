@@ -95,7 +95,7 @@ type referenceIntakePolicy struct{ fakeIntakePolicy }
 
 func (referenceIntakePolicy) ResolveScheduleSource(_ context.Context, row CronSchedule, input runspec.Request) (runspec.Request, error) {
 	input.Version, input.Pipeline, input.Mode, input.Origin = 1, row.Pipeline, runspec.IntakeExecute, runspec.OriginSchedule
-	input.Git.Repository, input.Git.Ref = runspec.Repository{Key: "gh:701", Display: "acme/app"}, row.GitBranch
+	input.Git.Repository, input.Git.Ref = runspec.Repository{Key: "gh:701", Display: "acme/app"}, "refs/heads/"+strings.TrimPrefix(row.GitBranch, "refs/heads/")
 	input.Source.Location = runspec.SourceLocation{RemoteURL: row.RepoPath, PipelineDir: ".sparkwing"}
 	input.Git.SHA, input.Source.Ref = referenceMain, referenceMain
 	if row.LockedRef != "" {
@@ -214,12 +214,17 @@ func manualReference(t *testing.T, s *Store, account string) string {
 }
 
 // fetchedManualReference admits a member's run whose code the controller
-// fetches from GitHub repository fetched, or zero for code the member supplied.
+// fetches from GitHub repository fetched at the head of main, or zero for code
+// the member supplied.
 func fetchedManualReference(t *testing.T, s *Store, account string, fetched int64) string {
 	t.Helper()
 	actor := referenceMember(t, s, account, RoleEditor)
 	tenant := &Tenant{s: s, team: "a"}
-	result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: actor.Authority, IdempotencyKey: "manual-" + account, FetchedRepository: FetchedRepository{ID: fetched, Name: "acme/app"}, Request: runspec.Request{
+	repository := FetchedRepository{ID: fetched, Name: "acme/app"}
+	if fetched > 0 {
+		repository.Ref, repository.SHA = "refs/heads/main", referenceFeature
+	}
+	result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: actor.Authority, IdempotencyKey: "manual-" + account, FetchedRepository: repository, Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
 		Git:     runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "refs/heads/main", SHA: referenceFeature},
 		Source:  runspec.Source{Ref: referenceFeature},
@@ -393,9 +398,15 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 		return provenanceObservation{Subject: "team:a:repository_id::pipeline:" + pipeline + ":trigger:manual:runner:runner:runner_environment:persistent:ref:", Write: write, Reads: []string{write, "refs/heads/main"}, Pools: []string{}, Secrets: secrets}
 	}
 	// Decision 70: code the controller fetched from a repository proves that
-	// repository's id and name, never the ref or commit.
+	// repository's id and name. Decision 72: when the code ran at the branch or
+	// tag head the App resolved, it also claims that ref and commit.
 	fetched := func(o provenanceObservation, repository string) provenanceObservation {
 		o.Repository, o.Subject = repository, strings.Replace(o.Subject, "repository_id::", "repository_id:701:", 1)
+		return o
+	}
+	fetchedAt := func(o provenanceObservation, repository, ref, sha string) provenanceObservation {
+		o = fetched(o, repository)
+		o.Subject, o.SHA = o.Subject+ref, sha
 		return o
 	}
 	verifiedSchedule := provenanceObservation{Repository: "acme/app", Subject: "team:a:repository_id:701:pipeline:nightly:trigger:cron:runner:runner:runner_environment:persistent:ref:refs/heads/main", SHA: referenceMain, Write: "manual:schedule/schedule-9:refs/heads/main", Reads: []string{"manual:schedule/schedule-9:refs/heads/main", "refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"nightly-token", "team-token"}}
@@ -450,7 +461,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return referenceWorld(t, s, "gh:701"), fetchedManualReference(t, s, "alice", 701)
 			},
-			want: fetched(asserted("ci", "account/alice", "refs/heads/main", "ci-token", "team-token"), "acme/app"),
+			want: fetchedAt(asserted("ci", "account/alice", "refs/heads/main", "ci-token", "team-token"), "acme/app", "refs/heads/main", referenceFeature),
 		},
 		{
 			name: "a fetch from another repository than the run names proves nothing",
@@ -475,26 +486,26 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 		{
 			name:  "a schedule an editor armed is asserted under the armer",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return memberScheduleReference(t, s, RoleEditor) },
-			want:  asserted("nightly", "armer/armer", "main", "team-token"),
+			want:  asserted("nightly", "armer/armer", "refs/heads/main", "team-token"),
 		},
 		{
 			// 11 M2 and the M1 review: any override, here only the time zone, means a
 			// principal chose part of the fire, so it cannot keep trigger:cron.
 			name:  "a schedule fire with any override is asserted",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "override") },
-			want:  fetched(asserted("nightly", "run/{run}", "main", "nightly-token", "team-token"), "acme/app"),
+			want:  fetchedAt(asserted("nightly", "run/{run}", "refs/heads/main", "nightly-token", "team-token"), "acme/app", "refs/heads/main", referenceMain),
 		},
 		{
 			// A locked commit may be one GitHub serves from a fork, so it proves no
 			// repository for pipeline secrets.
 			name:  "a schedule locked to a commit is asserted",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "locked") },
-			want:  asserted("nightly", "run/{run}", "main", "team-token"),
+			want:  asserted("nightly", "run/{run}", "refs/heads/main", "team-token"),
 		},
 		{
 			name:  "a schedule run-now is asserted by the member who pressed it",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "run-now") },
-			want:  fetched(asserted("nightly", "account/owner", "main", "nightly-token", "team-token"), "acme/app"),
+			want:  fetchedAt(asserted("nightly", "account/owner", "refs/heads/main", "nightly-token", "team-token"), "acme/app", "refs/heads/main", referenceMain),
 		},
 		{
 			name:  "a GitHub Actions push keeps its proven ref under its own scope",

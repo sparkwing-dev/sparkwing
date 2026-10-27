@@ -363,22 +363,33 @@ func TestFetchedGitHubRepositoryFollowsSourceSelection(t *testing.T) {
 				return []byte(config), ok, nil
 			},
 		})
+		if err != nil {
+			return git, code, err
+		}
+		git, err = qualifyFetchedRef(ctx, git, func(_ context.Context, ref string) (string, error) { return refs[ref], nil })
 		return git, code, err
 	}
 	cli := runspec.Request{Pipeline: "ci", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "main", SHA: head}, Source: runspec.Source{Ref: head, Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app"}}}
 	app := &Server{githubApp: &githubAppState{}}
-	for name, change := range map[string]func(*runspec.Request){
-		"unqualified current branch": func(*runspec.Request) {},
-		"qualified branch":           func(r *runspec.Request) { r.Git.Ref = "refs/heads/main" },
-		"unqualified tag":            func(r *runspec.Request) { r.Git.Ref = "v1" },
-		"branch, commit unnamed":     func(r *runspec.Request) { r.Git.SHA, r.Source.Ref = "", "" },
-		"configured source pin": func(r *runspec.Request) {
+	// Decision 72: the claimed head is the branch or tag the App resolved, and
+	// none when the code ran at a pinned branch's commit.
+	for name, tc := range map[string]struct {
+		change func(*runspec.Request)
+		ref    string
+	}{
+		"unqualified current branch": {func(*runspec.Request) {}, "refs/heads/main"},
+		"qualified branch":           {func(r *runspec.Request) { r.Git.Ref = "refs/heads/main" }, "refs/heads/main"},
+		"unqualified tag":            {func(r *runspec.Request) { r.Git.Ref = "v1" }, "refs/tags/v1"},
+		"branch, commit unnamed":     {func(r *runspec.Request) { r.Git.SHA, r.Source.Ref = "", "" }, "refs/heads/main"},
+		"configured source pin": {func(r *runspec.Request) {
 			r.Pipeline, r.Source.Ref, r.Source.RequestedRef = "deploy", pinned, "release"
-		},
+		}, ""},
 	} {
 		request := cli
-		change(&request)
-		if got, err := app.selectFetchedSource(t.Context(), &request, selectSource); err != nil || got.ID != 701 || !strings.EqualFold(request.Git.SHA, head) {
+		tc.change(&request)
+		ref := request.Git.Ref
+		got, err := app.selectFetchedSource(t.Context(), &request, selectSource)
+		if err != nil || got.ID != 701 || !strings.EqualFold(request.Git.SHA, head) || request.Git.Ref != ref || got.Ref != tc.ref || (got.SHA == head) != (tc.ref != "") {
 			t.Errorf("%s = %+v %v %+v", name, got, err, request.Git)
 		}
 	}
@@ -414,7 +425,8 @@ func TestFetchedGitHubRepositoryFollowsSourceSelection(t *testing.T) {
 // The console names only a repository and branch. Intake resolves that intent
 // once through the App, admits the selected commit, and seals the repository
 // that selection proved for pipeline secrets and OIDC repository claims
-// (decision 70), with the owner/name GitHub reported, never the request's text.
+// (decision 70), with the owner/name GitHub reported, never the request's text,
+// and the branch head it ran for the OIDC ref and sha claims (decision 72).
 func TestConsoleTriggerAdmitsSelectedSourceAndProvesRepository(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -464,7 +476,7 @@ func TestConsoleTriggerAdmitsSelectedSourceAndProvesRepository(t *testing.T) {
 	if got.Request.Git.SHA != head || got.Request.Source.Ref != head || got.Provenance.Trust() != runspec.TrustAsserted || got.Provenance.SecretRepositoryID() != 42 {
 		t.Fatalf("sealed git=%+v source ref=%q trust=%s proven=%d", got.Request.Git, got.Request.Source.Ref, got.Provenance.Trust(), got.Provenance.SecretRepositoryID())
 	}
-	if trigger, id, ref, sha := got.Provenance.OIDC(); trigger != "manual" || id != 42 || ref != "" || sha != "" || got.Provenance.Repository() != "acme/app" {
+	if trigger, id, ref, sha := got.Provenance.OIDC(); trigger != "manual" || id != 42 || ref != "refs/heads/main" || sha != head || got.Provenance.Repository() != "acme/app" || got.Request.Git.Ref != "main" {
 		t.Fatalf("OIDC identity = %s %d %q %q repository %q", trigger, id, ref, sha, got.Provenance.Repository())
 	}
 }

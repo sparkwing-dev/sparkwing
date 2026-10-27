@@ -129,6 +129,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		{"manual_cannot_claim_app", "push", "refs/heads/main", "manual", "", true, runspec.OriginLocal, 0, ""},
 		{"unverified_app", "push", "refs/heads/main", "manual", "", false, runspec.OriginApp, 0, ""},
 		{"fetched", "push", "refs/heads/main", "manual", "", false, runspec.OriginLocal, 42, "fetched"},
+		{"fetched_head", "push", "refs/heads/main", "manual", "refs/heads/main", false, runspec.OriginLocal, 42, "fetched_head"},
 		{"actions", "push", "refs/heads/main", "actions", "refs/heads/main", false, runspec.OriginLocal, 42, "actions"},
 		{"push", "push", "refs/heads/main", "push", "refs/heads/main", true, runspec.OriginApp, 42, "app"},
 		{"tag", "push", "refs/tags/v1", "push", "refs/tags/v1", true, runspec.OriginApp, 42, "app"},
@@ -152,7 +153,9 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 			case "app":
 				p = appProvenance(t, request.Request.Git.App.Value, request.Request.PullRequest, "ci")
 			case "fetched":
-				p, err = p.FetchedFrom(42, "acme/repo")
+				p, err = p.FetchedFrom(42, "acme/repo", "", "")
+			case "fetched_head":
+				p, err = p.FetchedFrom(42, "acme/repo", tc.ref, strings.Repeat("a", 40))
 			case "actions":
 				p, err = runspec.ActionsProvenance(42, "acme/repo", tc.ref, strings.Repeat("a", 40), "ci")
 			}

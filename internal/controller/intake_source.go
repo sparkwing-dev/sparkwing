@@ -143,17 +143,46 @@ func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Reque
 	probe := *request
 	probe.Git.SHA, probe.Source.Ref, probe.Source.RequestedRef = "", "", ""
 	git, selected, err := selectSource(ctx, probe)
+	fetched := store.FetchedRepository{ID: id, Name: git.RepositoryName.Value}
+	// Decision 72: the head the App resolved is claimed when the code ran there.
+	if strings.EqualFold(selected.Ref, git.SHA) && (strings.HasPrefix(git.Ref, "refs/heads/") || strings.HasPrefix(git.Ref, "refs/tags/")) {
+		fetched.Ref, fetched.SHA = git.Ref, git.SHA
+	}
 	if request.Git.SHA == "" {
 		if err != nil {
 			return store.FetchedRepository{}, err
 		}
+		git.Ref = request.Git.Ref
 		request.Git, request.Source = git, selected
-		return store.FetchedRepository{ID: id, Name: git.RepositoryName.Value}, nil
+		return fetched, nil
 	}
 	if err != nil || !strings.EqualFold(git.SHA, request.Git.SHA) || code.Ref != "" && !strings.EqualFold(selected.Ref, code.Ref) {
 		return store.FetchedRepository{}, nil
 	}
-	return store.FetchedRepository{ID: id, Name: git.RepositoryName.Value}, nil
+	return fetched, nil
+}
+
+// qualifyFetchedRef names the one branch or tag an unqualified ref resolved to
+// at the selected commit, so the OIDC ref claim is exact. It leaves the ref
+// alone when neither or both resolve there.
+func qualifyFetchedRef(ctx context.Context, git runspec.Git, resolve func(context.Context, string) (string, error)) (runspec.Git, error) {
+	if git.Ref == "" || git.Ref == "HEAD" || runspec.IsCommitID(git.Ref) || strings.HasPrefix(git.Ref, "refs/") || strings.HasPrefix(git.Ref, "origin/") {
+		return git, nil
+	}
+	var matches []string
+	for _, candidate := range []string{"refs/heads/" + git.Ref, "refs/tags/" + git.Ref} {
+		sha, err := resolve(ctx, candidate)
+		if err != nil {
+			return git, err
+		}
+		if sha != "" && strings.EqualFold(sha, git.SHA) {
+			matches = append(matches, candidate)
+		}
+	}
+	if len(matches) == 1 {
+		git.Ref = matches[0]
+	}
+	return git, nil
 }
 
 // appSourceSelector selects a remote run's source the way a schedule fire
@@ -171,7 +200,11 @@ func (s *Server) appSourceSelector(team store.Team) func(context.Context, runspe
 			return s.githubApp.client.FileAtCommit(ctx, installation.InstallationID, repository.ID, repo.Owner, repo.Name, sha, name)
 		}
 		git, selected, err := s.selectIntakeSource(ctx, team, request, read)
+		if err != nil {
+			return git, selected, err
+		}
 		git.RepositoryName = runspec.Optional[string]{Set: true, Value: repository.FullName}
+		git, err = qualifyFetchedRef(ctx, git, access.resolveGitHubAppRef(spec))
 		return git, selected, err
 	}
 }

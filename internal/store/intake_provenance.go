@@ -25,7 +25,11 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 		return sealed, err
 	}
 	if fetched := fetchedRepositoryTx(tx, request, input); fetched.ID > 0 && sealed.Trust() == runspec.TrustAsserted && !sealed.SharedSecretsOnly() && input.Lineage.ParentRunID == "" && input.Git.Repository.Key == runspec.RepoKey("gh:"+strconv.FormatInt(fetched.ID, 10)) {
-		if sealed, err = refused(sealed.FetchedFrom(fetched.ID, fetched.Name)); err != nil {
+		// safety: a head the App resolved names the commit the run executes, or none.
+		if !strings.EqualFold(fetched.SHA, input.Git.SHA) {
+			fetched.Ref, fetched.SHA = "", ""
+		}
+		if sealed, err = refused(sealed.FetchedFrom(fetched.ID, fetched.Name, fetched.Ref, fetched.SHA)); err != nil {
 			return sealed, err
 		}
 	}
@@ -50,15 +54,24 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 // or a remote branch run the controller checked. Zero when the submitter
 // supplies the code, the repository claim or an arbitrary commit.
 func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Request) FetchedRepository {
+	// safety: the ref is a delivery's verified ref or a schedule's server-resolved
+	// branch, claimed only when the run's code ran at that head.
+	head := func(id int64, name string) FetchedRepository {
+		fetched := FetchedRepository{ID: id, Name: name}
+		if strings.EqualFold(input.Source.Ref, input.Git.SHA) && (strings.HasPrefix(input.Git.Ref, "refs/heads/") || strings.HasPrefix(input.Git.Ref, "refs/tags/")) {
+			fetched.Ref, fetched.SHA = input.Git.Ref, input.Git.SHA
+		}
+		return fetched
+	}
 	switch {
 	case input.Origin == runspec.OriginApp && request.VerifiedDeliveryID != "" && input.Git.App.Set:
-		return FetchedRepository{ID: input.Git.App.Value.RepositoryID, Name: input.Git.App.Value.Repository}
+		return head(input.Git.App.Value.RepositoryID, input.Git.App.Value.Repository)
 	case input.Origin == runspec.OriginSchedule && tx.scheduleAdmission != nil && tx.scheduleAdmission.authority() == request.Authority:
 		// safety: a schedule locked to a commit runs a SHA GitHub may serve from a
 		// fork, not a branch head the App resolved.
 		if s := tx.scheduleAdmission.schedule; s.GitHubInstallationID > 0 && s.LockedRef == "" {
 			// safety: the fire-time App lookup that proved the id reported the name, as for a verified fire.
-			return FetchedRepository{ID: s.GitHubRepositoryID, Name: request.Request.Git.RepositoryName.Value}
+			return head(s.GitHubRepositoryID, request.Request.Git.RepositoryName.Value)
 		}
 		return FetchedRepository{}
 	}

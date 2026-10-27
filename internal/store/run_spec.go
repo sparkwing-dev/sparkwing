@@ -18,10 +18,14 @@ import (
 )
 
 // FetchedRepository is a GitHub repository id and the owner/name the App
-// lookup that proved it reported; Name may be empty.
+// lookup that proved it reported; Name may be empty. Ref and SHA are the
+// qualified branch or tag head the App resolved and the run's code ran at, or
+// both empty when its code ran at another commit or no single ref was resolved.
 type FetchedRepository struct {
 	ID   int64
 	Name string
+	Ref  string
+	SHA  string
 }
 
 // IntakeRequest carries client input and server-derived tagged authority, re-resolved
