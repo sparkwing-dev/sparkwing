@@ -27,6 +27,8 @@ unlock.
 - **schedules:** Team admins can pause and resume schedules declared through the GitHub App, and each pause or resume is audited. Editing and deleting them stays refused.
 - **console:** Every page has a Help button naming the deployment's support contact (`--support-contact`, an email address or URL), and limit settings say who can raise them.
 - **chart:** The controller pod sets `fsGroupChangePolicy: OnRootMismatch`, so a restart no longer adds group write to the credential-epoch file and the controller starts again.
+- **controller:** A private credential such as `oidc-key` may be group-readable (mode 0440) when its group is one of the controller process's own groups, which is how Kubernetes mounts secrets for a non-root pod under its `fsGroup`; group write, group read by any other group and any access for other users are still refused.
+- **Release images:** The controller, runner, cache and logs images and release binaries build with Go 1.26.10 (GO-2026-6809).
 - **controller (Breaking):** One controller per store makes singleton maintenance leases, GitHub delivery leases and per-replica usage rows unnecessary; they are removed. A GitHub delivery interrupted by a restart is listed as failed for an admin to process again.
 
 - **store (Breaking):** v0.68 starts a new store and cannot read or import one from v0.67 or earlier. It refuses an old store by name, leaves it unchanged, and says how to move it aside (local) or switch to an empty database (server). See [migration](docs/migrations/_unreleased.md#upgrading-from-v067-v068-starts-a-new-store).
