@@ -329,9 +329,11 @@ Rejoining or promotion cannot revive them. `team.admin` requires
 Omitted expiry uses the applicable ceiling. A requested expiry beyond that
 ceiling is refused, including during rotation.
 Invitation acceptance checks that the inviter still holds team administration,
-and that one of the account's current sign-ins verifies the invited address.
-Unlinking the sign-in that verified an address stops the account seeing or
-accepting invitations to it, and frees the address for its next holder.
+and that the account owns the invited address: the last sign-in to verify an
+address, through any account, makes that account its one owner. Unlinking the
+account's last sign-in that verifies an address, or that sign-in's provider
+reporting another address, stops the account seeing or accepting invitations
+to it.
 
 `GET /api/v1/team/settings` returns `members_can_add_machines`,
 `claim_ranking`, `max_children_per_root` and `high_trust` under `runs.read`. `PUT /api/v1/team/settings` requires

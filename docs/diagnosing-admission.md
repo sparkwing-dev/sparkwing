@@ -86,14 +86,6 @@ refuses `--profile`. The result preserves prior and new priorities and
 positions. A holder keeps its existing lease. A missing run
 returns a receipt and exits 1.
 
-<!-- design:begin -->
-The rewrite implements these CLI and client adapters against fakes. Native
-queue/group projections still need controller integration. Priority is local
-admission only and uses the admission wire. Per-team run numbers resolve
-through the controller before changing a rank. Native controller
-startup and queue ownership remain runtime integration work.
-<!-- design:end -->
-
 ## Doctor reports
 
 ```sh
