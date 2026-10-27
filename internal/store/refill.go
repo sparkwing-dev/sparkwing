@@ -91,7 +91,8 @@ type RefillState struct {
 }
 
 // Refill is one open refill the worker charges in a single checkout-service call. Its amount and customer are fixed
-// when it opens, so every retry under its id, the idempotency key, sends Stripe the same request.
+// when it opens, so every retry under its id, the idempotency key, sends the checkout service the same request; the
+// service resolves the customer's card again on each call.
 type Refill struct {
 	Team        Team
 	ID          string

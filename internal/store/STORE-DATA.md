@@ -619,9 +619,12 @@ Abandonment creates no receipt or successful-upload usage. Live tickets, receipt
 and record graphs still protect a shared digest.
 
 Every metered renewal charges usage and reserves the next slice under the team's
-ledger lock. A refusal writes `billing_awards.stop_reason` and
+ledger lock. A funding refusal writes `billing_awards.stop_reason` and
 `drain_deadline_at` (one slice out) and cancels the metered job in the same
-transaction. A job stop leaves its owner orchestrating independent unmetered
+transaction. A Cloud renewal the requester's overflow allowance cannot extend
+is not a funding refusal: it records the overflow reason with the drain at the
+end of the award's prepaid time and cancels nothing; when that time runs out,
+the reaper cancels the job with the recorded reason. A job stop leaves its owner orchestrating independent unmetered
 jobs. An owner-unit stop cancels the whole run. Placing a dispute, warning or
 operator hold records only the hold, whose `credit_freezes.drain_deadline_at`
 is one slice after it was placed; revoking standing records `billing_trust_at`,
