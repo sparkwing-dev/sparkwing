@@ -40,7 +40,7 @@ func TestOpenPrivateCredentialAcceptsGroupReadUnderTheProcessGroup(t *testing.T)
 	if err := os.Chown(path, -1, os.Getegid()); err != nil {
 		t.Fatal(err)
 	}
-	for mode, ok := range map[os.FileMode]bool{0o440: true, 0o444: false, 0o460: false} {
+	for mode, ok := range map[os.FileMode]bool{0o440: true, 0o444: false, 0o460: false, 0o660: false} {
 		if err := os.Chmod(path, mode); err != nil {
 			t.Fatal(err)
 		}
@@ -102,5 +102,36 @@ func TestEnsureDirKeepsTheFSGroupModeOfAPodVolume(t *testing.T) {
 	}
 	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
 		t.Fatalf("plain directory = %v %v, want 0700", info, err)
+	}
+}
+
+// Only state the controller writes on a kubelet-managed volume may be
+// group-writable, and only under the process's own group.
+func TestOnlyStateCredentialsAdmitOwnGroupWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "target")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(path, -1, os.Getegid()); err != nil {
+		t.Fatal(err)
+	}
+	for mode, state := range map[os.FileMode]bool{0o660: true, 0o662: false} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		for open, want := range map[string]bool{"credential": false, "state": state} {
+			opener := OpenCredential
+			if open == "state" {
+				opener = OpenStateCredential
+			}
+			f, err := opener(dir, "target")
+			if err == nil {
+				_ = f.Close()
+			}
+			if (err == nil) != want {
+				t.Errorf("%s at %04o: %v, want ok=%v", open, mode, err, want)
+			}
+		}
 	}
 }

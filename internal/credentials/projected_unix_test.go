@@ -52,7 +52,7 @@ func TestCredentialTargetPermissionsAndConfinement(t *testing.T) {
 			t.Fatal(err)
 		}
 		got, err := dir.Read("token")
-		if escape || bits&0o02 != 0 {
+		if escape || bits&0o22 != 0 {
 			return err != nil && got == ""
 		}
 		return err == nil && got == "credential"

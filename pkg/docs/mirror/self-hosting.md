@@ -183,8 +183,7 @@ these file names, mounted whole.
 | `stripe-webhook-secret` | Signature key for `/webhooks/stripe` | a configured payment callback refuses to start |
 
 Credential targets must be regular files owned by the process user or root,
-with no other-write bit, and group-writable only when the group is one of the
-process's own groups, such as the pod's `fsGroup`. Symlinks are accepted when their resolved
+with no group or other write bit. Symlinks are accepted when their resolved
 target stays inside the configured credentials directory, including Kubernetes
 `..data` projections. Escaping links and writable targets stop startup. On
 Windows, targets must belong to the process user, LocalSystem or local
@@ -199,7 +198,7 @@ directory. Use the same flag for startup and every restore command. The
 controller restricts that directory to its owner and applies the credential
 file checks above to the epoch. On a pod volume whose root is setgid under one
 of the controller's own groups (the pod's `fsGroup`), it keeps that group's
-access. The Helm chart always mounts a dedicated,
+access, and the epoch file may be group-writable by that group. The Helm chart always mounts a dedicated,
 retained PVC at `/var/lib/sparkwing/credential-epoch` and selects it with this
 flag, including when `/data` uses `emptyDir`, and sets the pod's
 `fsGroupChangePolicy` to `OnRootMismatch` so the kubelet does not relabel the

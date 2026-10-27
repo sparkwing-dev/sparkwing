@@ -233,14 +233,14 @@ func TestKeyring_ReadsAKeyAnotherProcessCreatedLater(t *testing.T) {
 
 func TestKeyring_RefusesAKeyFileOthersCanWrite(t *testing.T) {
 	path := keyFileIn(t, t.TempDir())
-	if err := os.WriteFile(path, bytes.Repeat([]byte{5}, secrets.KeySize), 0o662); err != nil {
+	if err := os.WriteFile(path, bytes.Repeat([]byte{5}, secrets.KeySize), 0o664); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0o662); err != nil {
+	if err := os.Chmod(path, 0o664); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadKeyring(KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "writable") {
-		t.Fatalf("load with a world-writable key file = %v, want a writable-target refusal", err)
+		t.Fatalf("load with a group-writable key file = %v, want a writable-target refusal", err)
 	}
 }
 

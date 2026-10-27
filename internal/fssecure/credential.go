@@ -27,6 +27,17 @@ func OpenPrivateCredential(directory, name string) (*os.File, error) {
 
 // OpenCredential opens a regular, trusted-owner file confined to directory after resolving links.
 func OpenCredential(directory, name string) (*os.File, error) {
+	return openCredential(directory, name, false)
+}
+
+// OpenStateCredential is OpenCredential for state the controller writes on a
+// kubelet-managed pod volume, such as the credential epoch: it may also be
+// group-writable under one of this process's own groups (the pod fsGroup).
+func OpenStateCredential(directory, name string) (*os.File, error) {
+	return openCredential(directory, name, true)
+}
+
+func openCredential(directory, name string, ownGroupWrite bool) (*os.File, error) {
 	if !filepath.IsLocal(name) {
 		return nil, errors.New("credential name must stay within its directory")
 	}
@@ -70,7 +81,7 @@ func OpenCredential(directory, name string) (*os.File, error) {
 		err = errors.New("credential changed while opening")
 	}
 	if err == nil {
-		err = verifyCredentialFile(file, opened)
+		err = verifyCredentialFile(file, opened, ownGroupWrite)
 	}
 	if err != nil {
 		_ = file.Close()

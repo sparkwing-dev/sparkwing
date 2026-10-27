@@ -17,7 +17,7 @@ func epochPath(dir string) string { return filepath.Join(dir, "credential-epoch"
 
 // LoadEpoch reads an existing external credential fence without changing its directory.
 func LoadEpoch(dir string) (string, error) {
-	f, err := fssecure.OpenCredential(dir, "credential-epoch")
+	f, err := fssecure.OpenStateCredential(dir, "credential-epoch")
 	if err != nil {
 		return "", err
 	}

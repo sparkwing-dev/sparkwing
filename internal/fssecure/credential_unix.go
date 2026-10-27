@@ -47,10 +47,13 @@ func ownerOnly(perm os.FileMode, gid uint32, groups []int) error {
 	return nil
 }
 
-func verifyCredentialFile(_ *os.File, info os.FileInfo) error {
+func verifyCredentialFile(_ *os.File, info os.FileInfo, ownGroupWrite bool) error {
 	gid, groups, err := fileGroup(info)
 	if err != nil {
 		return err
+	}
+	if !ownGroupWrite {
+		groups = nil
 	}
 	if err := groupWritableOnlyByOwnGroup(info.Mode().Perm(), gid, groups); err != nil {
 		return err
@@ -62,13 +65,12 @@ func verifyCredentialFile(_ *os.File, info os.FileInfo) error {
 	return nil
 }
 
-// groupWritableOnlyByOwnGroup admits group write only for a group this process
-// belongs to: kubelet makes every file on a pod volume group-writable under the
-// pod's fsGroup.
+// groupWritableOnlyByOwnGroup admits group write only for one of groups:
+// kubelet makes every file on a pod volume group-writable under the pod's
+// fsGroup. Callers pass no groups for credentials others provision.
 func groupWritableOnlyByOwnGroup(perm os.FileMode, gid uint32, groups []int) error {
 	if perm&0o002 != 0 || perm&0o020 != 0 && !slices.Contains(groups, int(gid)) {
-		return errors.New("credential target is writable by others or by a group this process is not in; " +
-			"make it mode 0600, or group-writable only under one of this process's own groups (the pod fsGroup)")
+		return errors.New("credential target is writable by group or others; make it mode 0600")
 	}
 	return nil
 }
