@@ -1145,3 +1145,8 @@ copy of the example in `testdata/refill_contract.json`.
 - Runs whose repository is proven because Sparkwing fetched the code from it (decision 68 run-now refinement) carry the repository claim; ref and sha claims stay off for them because their trust class is manual.
 - Runs from GitHub Actions bindings say trigger:actions in their subject, not trigger:manual.
 - Decision 68's secrets rule reads: pipeline secrets go to runs whose repository is proven, either verified (App delivery, Actions, admin-armed schedule) or fetched by Sparkwing from the repository at a branch or tag head (run-now, console runs, unlocked schedules); uploads, local, here, raw commits and pull request refs get shared secrets only.
+
+## 2026-10-27 Korey decision 71: no runtime network probes; network policy is the operator's job
+
+- Sparkwing does not probe network enforcement at job launch or at launcher start. The launcher keeps applying the Cloud job network rule (block cloud instance metadata and private/cluster-internal ranges; outbound internet open on any port, like other CI providers), and the docs state that the cluster must enforce NetworkPolicy. Verifying enforcement is an operator check run periodically (for Sparkwing Cloud, Korey's own checks, e.g. with stormwing), not a guarantee the product makes to self-hosters.
+- The per-job boundary probe machinery and decision 69's kubelet exception are deleted.
