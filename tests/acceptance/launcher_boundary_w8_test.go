@@ -91,13 +91,13 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 				return true, nil, kube.Tracker().Update(gvr, job, cfg.Namespace)
 			})
 			clears := 0
-			boundary := &launcher.KubernetesBoundary{
-				Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace,
-				Probe: func(_ context.Context, r launcher.CloudNodeReservation) (launcher.CloudNetworkEvidence, error) {
-					return launcher.CloudNetworkEvidence{Namespace: cfg.Namespace, NodeUID: r.NodeUID, PolicyRevision: "tested-policy", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
-				},
-				Clear: func(context.Context, launcher.CloudNodeReservation) error { clears++; return nil },
-			}
+			kube.PrependReactor("update", "nodes", func(action ktesting.Action) (bool, runtime.Object, error) {
+				if node := action.(ktesting.UpdateAction).GetObject().(*corev1.Node); node.Annotations["sparkwing.dev/node-reservation"] == "" {
+					clears++
+				}
+				return false, nil, nil
+			})
+			boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace}
 			first := &launcher.Launcher{Kube: kube, Control: control, Boundary: boundary, Config: cfg}
 			if claimed, err := first.LaunchOne(t.Context()); err != nil || !claimed {
 				t.Fatalf("launch: %t %v", claimed, err)
@@ -107,7 +107,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 				t.Fatalf("jobs: %+v %v", jobs, err)
 			}
 			job := jobs.Items[0]
-			if _, _, err := boundary.Reserve(t.Context(), award.Binding, "competing-job"); !errors.Is(err, launcher.ErrNoDedicatedNode) {
+			if _, err := boundary.Reserve(t.Context(), award.Binding, "competing-job"); !errors.Is(err, launcher.ErrNoDedicatedNode) {
 				t.Fatalf("occupied node reused: %v", err)
 			}
 			pod := &corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: job.Spec.Template.Spec, Status: corev1.PodStatus{Phase: corev1.PodRunning, InitContainerStatuses: []corev1.ContainerStatus{{Name: "docker", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
@@ -145,7 +145,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 			if err != nil || slices.Contains(finished.Finalizers, "sparkwing.dev/cloud-cleanup") {
 				t.Fatalf("teardown finalizer: %+v %v", finished, err)
 			}
-			if _, _, err := reconstructedBoundary.Reserve(t.Context(), award.Binding, "next-job"); err != nil {
+			if _, err := reconstructedBoundary.Reserve(t.Context(), award.Binding, "next-job"); err != nil {
 				t.Fatalf("clean node could not be reused: %v", err)
 			}
 		})

@@ -461,8 +461,8 @@ func (h cloudDispatchHost) Host(ctx context.Context, unit controllerwire.Claimed
 
 type cloudDispatchBoundary struct{}
 
-func (cloudDispatchBoundary) Reserve(_ context.Context, binding launcher.CloudJobBinding, job string) (launcher.CloudNodeReservation, launcher.CloudNetworkEvidence, error) {
-	return launcher.CloudNodeReservation{NodeName: "cloud-node", NodeUID: "cloud-node-uid", Team: binding.Team, JobName: job, ReservationID: "reservation-" + job, Award: binding.LeaseRef()}, launcher.CloudNetworkEvidence{Namespace: "cloud", NodeUID: "cloud-node-uid", PolicyRevision: "fixture", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
+func (cloudDispatchBoundary) Reserve(_ context.Context, binding launcher.CloudJobBinding, job string) (launcher.CloudNodeReservation, error) {
+	return launcher.CloudNodeReservation{NodeName: "cloud-node", NodeUID: "cloud-node-uid", Team: binding.Team, JobName: job, ReservationID: "reservation-" + job, Award: binding.LeaseRef()}, nil
 }
 
 func (cloudDispatchBoundary) Release(context.Context, launcher.CloudNodeReservation) error {

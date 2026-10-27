@@ -222,15 +222,11 @@ run. A node's team and run are recorded in labels the node itself cannot
 change; a node whose run label does not name the run is never reused. Cloud nodes may
 pull only Sparkwing's own images.
 
-Before a Cloud node runs a job, the launcher probes from a pod on that node
-that default-deny egress holds: the Kubernetes API, instance metadata, the Pod
-Identity agent, every DaemonSet port and every node's kubelet ports (10250 and
-the read-only 10255) must be unreachable, or the job does not start. The one
-expected exception is the job's own node's kubelet on port 10250, which the AWS
-VPC CNI network policy cannot block from that node's pods. That kubelet refuses
-anonymous requests, Cloud pods mount no service-account token, and a Cloud node
-serves one run, so the connection reaches nothing the job may use. Port 10255
-on the same node, and port 10250 on any other node, still fail the check.
+Cloud jobs get the chart's NetworkPolicy: outbound internet on any port, as on
+other CI providers, and nothing in private, carrier-grade NAT or link-local
+ranges, which covers instance metadata and the Pod Identity agent. The cluster
+must enforce NetworkPolicy; Sparkwing does not probe enforcement at runtime.
+Verifying it is the operator's periodic check.
 
 Child runs nest at most 10 levels deep counting the root, and one root run
 uses the team-set descendant ceiling, from 1 to 1000, default 50 at every depth, retries excluded.

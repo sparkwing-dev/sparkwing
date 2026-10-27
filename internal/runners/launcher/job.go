@@ -99,11 +99,11 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, fmt.Errorf("invalid award binding: %w", err)
 	}
-	reservation, network, err := boundary.Reserve(ctx, b, name)
+	reservation, err := boundary.Reserve(ctx, b, name)
 	if err != nil {
 		return CloudJobResources{}, fmt.Errorf("reserve Cloud boundary: %w", err)
 	}
-	if err = validateBoundary(cfg.Namespace, b, name, reservation, network); err != nil {
+	if err = validateBoundary(b, name, reservation); err != nil {
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
 	}
 	labels := map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: name, TeamLabel: TeamNodeValue(cfg.Namespace, b.Team)}
@@ -113,7 +113,7 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	}
 	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano), launchAnnotation: now.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: map[string]string{doNotDisrupt: "true"}}, Spec: cloudPod(cfg, award, reservation, name, budget)}}}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels}, Immutable: ptr(true), Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"bootstrap": append([]byte(nil), award.Bootstrap...), awardFileName: metadata}}
-	return CloudJobResources{Job: job, BootstrapSecret: secret, Reservation: reservation, Network: network, JobDeadline: deadline}, nil
+	return CloudJobResources{Job: job, BootstrapSecret: secret, Reservation: reservation, JobDeadline: deadline}, nil
 }
 
 // Kubernetes starts this clock at StartTime, which can lag activation.
@@ -204,12 +204,9 @@ func validateAward(a CloudJobAward) error {
 	return nil
 }
 
-func validateBoundary(namespace string, binding CloudJobBinding, name string, r CloudNodeReservation, n CloudNetworkEvidence) error {
+func validateBoundary(binding CloudJobBinding, name string, r CloudNodeReservation) error {
 	if r.NodeName == "" || r.NodeUID == "" || r.ReservationID == "" || r.Team != binding.Team || r.JobName != name || r.Award != binding.LeaseRef() {
 		return errors.New("Cloud boundary did not reserve a dedicated node for this team and Job")
-	}
-	if n.Namespace != namespace || n.NodeUID != r.NodeUID || n.PolicyRevision == "" || !n.DefaultDenyEgressEnforced || !n.RequiredDestinationsAllowed || !n.DaemonSetPortsInventoried || !n.EscapeProbePassed {
-		return errors.New("Cloud boundary has no complete network enforcement evidence")
 	}
 	return nil
 }

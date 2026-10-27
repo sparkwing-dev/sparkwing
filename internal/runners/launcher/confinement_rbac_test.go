@@ -175,14 +175,6 @@ func chartLauncherGrant(group, resource, name, namespace, verb string) bool {
 		if namespace == "cloud-cloud-jobs" {
 			verbs = "create delete"
 		}
-	case "networkpolicies":
-		if namespace == "cloud-cloud-jobs" {
-			verbs = "list create delete"
-		}
-	case "endpointslices":
-		if namespace == "default" {
-			verbs = "list"
-		}
 	case "nodes":
 		verbs = "get list update patch"
 	case "nodeclaims":

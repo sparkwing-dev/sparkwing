@@ -169,8 +169,8 @@ func (w *burstLauncherWire) Claim(ctx context.Context, request controllerwire.Cl
 
 type burstCloudBoundary struct{ releases int }
 
-func (*burstCloudBoundary) Reserve(_ context.Context, binding launcher.CloudJobBinding, job string) (launcher.CloudNodeReservation, launcher.CloudNetworkEvidence, error) {
-	return launcher.CloudNodeReservation{NodeName: "cloud-node", NodeUID: "cloud-node-uid", Team: binding.Team, JobName: job, ReservationID: "burst-reservation", Award: binding.LeaseRef()}, launcher.CloudNetworkEvidence{Namespace: "cloud", NodeUID: "cloud-node-uid", PolicyRevision: "fixture-probe", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
+func (*burstCloudBoundary) Reserve(_ context.Context, binding launcher.CloudJobBinding, job string) (launcher.CloudNodeReservation, error) {
+	return launcher.CloudNodeReservation{NodeName: "cloud-node", NodeUID: "cloud-node-uid", Team: binding.Team, JobName: job, ReservationID: "burst-reservation", Award: binding.LeaseRef()}, nil
 }
 
 func (b *burstCloudBoundary) Release(context.Context, launcher.CloudNodeReservation) error {

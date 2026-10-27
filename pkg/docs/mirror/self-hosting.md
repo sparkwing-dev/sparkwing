@@ -437,7 +437,7 @@ every pool holding reserved secrets, including with `--trust=any`. Pool and trus
 credential. A run-level `--requires pool=deploy` uses controller dispatch so
 its plan and jobs can be claimed by the launcher.
 The launcher runs each plan, evaluation and job claim in a fresh pod through the
-same admission policy, bootstrap exchange, quarantine and boundary probe as Cloud.
+same admission policy, bootstrap exchange and quarantine as Cloud.
 Only the launcher mounts the pool credential. Each job receives a one-time
 bootstrap, its own scratch storage and no persistent cache volumes. Self-hosted
 pool claims consume no Cloud credits. See the [runner chart](../charts/sparkwing-runner-bundle/README.md)

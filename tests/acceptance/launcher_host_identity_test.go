@@ -8,6 +8,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -39,13 +41,13 @@ func TestLauncherCapacityWaitDoesNotSealExecutionHost(t *testing.T) {
 		}
 	}
 	reserved := false
-	boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: provisioner, Namespace: cfg.Namespace,
-		Probe: func(_ context.Context, r launcher.CloudNodeReservation) (launcher.CloudNetworkEvidence, error) {
+	kube.PrependReactor("update", "nodes", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if node := action.(ktesting.UpdateAction).GetObject().(*corev1.Node); node.Annotations["sparkwing.dev/node-reservation"] != "" {
 			reserved = true
-			host("")
-			return launcher.CloudNetworkEvidence{Namespace: cfg.Namespace, NodeUID: r.NodeUID, PolicyRevision: "verified", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
-		}, Clear: func(context.Context, launcher.CloudNodeReservation) error { return nil },
-	}
+		}
+		return false, nil, nil
+	})
+	boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: provisioner, Namespace: cfg.Namespace}
 	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: cfg, Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}}, Bearer: func(context.Context) (string, error) { return root.Raw, nil }, NewController: func(options client.EngineOptions) (launcher.LauncherController, error) {
 		return cloudStoreClientW8(t, server)(options)
 	}})

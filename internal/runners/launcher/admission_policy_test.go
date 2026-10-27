@@ -256,7 +256,8 @@ func TestLauncherVerifiesLiveAdmissionPolicies(t *testing.T) {
 	}
 }
 
-func TestLaunchBoundariesRefuseMissingOrWeakenedAdmission(t *testing.T) {
+// The launcher checks its admission policies once, at start.
+func TestRunRefusesMissingOrWeakenedAdmission(t *testing.T) {
 	for name, weaken := range map[string]func(*fake.Clientset){
 		"missing_policy": func(kube *fake.Clientset) {
 			if err := kube.Tracker().Delete(admissionv1.SchemeGroupVersion.WithResource("validatingadmissionpolicies"), "", admissionPolicyName("jobs", "cloud")); err != nil {
@@ -287,9 +288,6 @@ func TestLaunchBoundariesRefuseMissingOrWeakenedAdmission(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			l, kube, _, control := fixture()
 			weaken(kube)
-			if launched, err := l.LaunchOne(t.Context()); launched || err == nil || control.claims != 0 {
-				t.Fatalf("launcher claimed without admission policy: %v claims=%d", err, control.claims)
-			}
 			if err := l.Run(t.Context()); err == nil || control.claims != 0 {
 				t.Fatalf("launcher ran without its admission policy: %v claims=%d", err, control.claims)
 			}

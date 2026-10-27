@@ -39,6 +39,11 @@ func capacityName(b CloudJobBinding) string {
 	return capacityPrefix + strings.TrimPrefix(jobName(b), "sw-")
 }
 
+// capacityPodSecurity runs a capacity request unprivileged with the runtime seccomp profile.
+func capacityPodSecurity() *corev1.PodSecurityContext {
+	return &corev1.PodSecurityContext{RunAsUser: ptr(int64(65534)), RunAsGroup: ptr(int64(65534)), RunAsNonRoot: ptr(true), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}
+}
+
 func teamTolerations(namespace, team string) []corev1.Toleration {
 	return []corev1.Toleration{{Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}, {Key: TeamNodeLabel, Value: TeamNodeValue(namespace, team), Operator: corev1.TolerationOpEqual, Effect: corev1.TaintEffectNoSchedule}}
 }
@@ -77,7 +82,7 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 			}}}},
 			ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: ptr(int64(1)),
-			SecurityContext:               probePodSecurity(),
+			SecurityContext:               capacityPodSecurity(),
 			Containers: []corev1.Container{{
 				Name: "capacity", Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: []string{"version"},
 				Resources:       corev1.ResourceRequirements{Requests: requests, Limits: requests.DeepCopy()},
@@ -257,9 +262,8 @@ func (l *Launcher) releaseCapacity(ctx context.Context, b CloudJobBinding) error
 	return l.deleteCapacityPod(ctx, pod)
 }
 
-// capacitySecurity is the probe profile with a read-only root filesystem.
+// capacitySecurity drops every capability and privilege escalation and keeps
+// the root filesystem read-only.
 func capacitySecurity() *corev1.SecurityContext {
-	sc := probeSecurity()
-	sc.ReadOnlyRootFilesystem = ptr(true)
-	return sc
+	return &corev1.SecurityContext{AllowPrivilegeEscalation: ptr(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}, ReadOnlyRootFilesystem: ptr(true)}
 }

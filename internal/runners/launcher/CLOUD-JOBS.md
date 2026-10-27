@@ -10,7 +10,7 @@ local queue has no launcher adapter. The controller uses the transactional launc
 
 `BuildJob` builds plan, eval and work Jobs from an awarded binding. It checks
 images, resources, deadlines and engine identity before reserving an exclusive
-team node. `CloudBoundary` must return matching placement and network evidence.
+team node. `CloudBoundary` must return a matching placement.
 A failed boundary check releases its reservation and returns no runnable object.
 Plan awards have no job or expansion source. Eval awards identify the terminal
 source job and generation, while work awards have no expansion source. The
@@ -41,23 +41,20 @@ only. The Pod policy covers Pod CREATE and UPDATE, `pods/ephemeralcontainers`,
 `pods/resize` and CONNECT on `pods/exec`, `pods/attach` and `pods/portforward`;
 the Job policy covers Job CREATE and UPDATE. Validating admission runs after
 every mutating webhook, so the rules judge the final object. They take no
-params: the namespace, the launcher's username, the runner and Docker digests
-and the probe commands are CEL literals.
+params: the namespace, the launcher's username and the runner and Docker
+digests are CEL literals.
 
-- Only the launcher creates Jobs, capacity requests (`sw-capacity-`) and
-  boundary probes (`sw-boundary-`). Only
+- Only the launcher creates Jobs and capacity requests (`sw-capacity-`). Only
   `system:serviceaccount:kube-system:job-controller` creates Pods, each
   controlled by one `batch/v1` Job named by its `sparkwing.dev/job` label. Every
   other Pod and creator is refused. The policy names the launcher as
   `system:serviceaccount:<release namespace>:<launcher ServiceAccount>`; an
   externally managed launcher must run under exactly that identity.
 - Job Pods run exactly `docker` (Docker image), `fetch-source` and `run-node`
-  (runner image). Capacity requests and probes run one runner-image container,
-  and each probe container runs its pinned listener, witness or measurement
-  command.
+  (runner image). Capacity requests run one runner-image container.
 - Environment names are `HOME`, `DOCKER_HOST` and the EKS region values.
   No `valueFrom` or `envFrom` is allowed.
-  Capacity requests and probes carry none. AWS role,
+  Capacity requests carry none. AWS role,
   web-identity and container-credential variables are refused, as is any
   projected token volume.
 - Volumes are only the Job's `scratch` emptyDir and its own bootstrap Secret.
@@ -76,9 +73,9 @@ and the probe commands are CEL literals.
   by field with the launcher's canonical values (`exactly` in
   `admission_security.go`): any other field, including `seLinuxOptions` (no
   `super_t` or any type), `windowsOptions`, sysctls, `fsGroup` or a field a
-  later API adds, is refused. Capacity requests and probes run as UID 65534
+  later API adds, is refused. Capacity requests run as UID 65534
   with every capability dropped. `runtimeClassName`, `shareProcessNamespace`,
-  resource claims and probe `host` fields must stay unset, as must
+  resource claims and health-check `host` fields must stay unset, as must
   `dnsConfig` and `hostAliases`; the scheduler is the default one, service
   links are off and no `system-` priority class may be named. The fields come
   from the vendored k8s.io/api, so a field a newer API server adds stays
@@ -96,11 +93,11 @@ and the probe commands are CEL literals.
 - The service account is `sparkwing-customer-job` with
   `automountServiceAccountToken: false`.
 - Every Pod selects `node-restriction.kubernetes.io/sparkwing-team-node` equal
-  to its `sparkwing.dev/team` label and tolerates that team taint. Job and probe
-  Pods are bound to a node; capacity requests are not.
+  to its `sparkwing.dev/team` label and tolerates that team taint. Job Pods are
+  bound to a node; capacity requests are not.
 - Labels are limited to the launcher's keys for each shape, and Job and capacity
-  Pods carry the labels that select the default-deny egress policy. Job and
-  probe Pods may also carry `topology.kubernetes.io/region` and
+  Pods carry the labels that select the default-deny egress policy. Job Pods
+  may also carry `topology.kubernetes.io/region` and
   `topology.kubernetes.io/zone` with any value, because the API server's
   PodTopologyLabels admission copies them from the Node onto every Pod created
   with `spec.nodeName`. Job templates and capacity requests may not.
@@ -121,8 +118,8 @@ and the probe commands are CEL literals.
 `Run` first reads its own username through a SelfSubjectReview, then refuses to
 start unless both policies and bindings exist with exactly the specs
 `AdmissionPolicies` builds for that username, its job namespace and images. It
-repeats the check before every sync. On a mismatch it logs an error, keeps
-reconciling existing Jobs and claims no work until the policies match again.
+checks once, at start, which catches a chart and launcher mismatch after an
+upgrade; it does not re-prove the environment on later passes.
 The launcher can read only those four objects.
 
 The job namespace must hold no other NetworkPolicies, since an additive policy
@@ -131,13 +128,15 @@ chart's privileged level.
 
 ## Award backstop
 
-Admission cannot know an award. `LaunchOne` verifies the live admission policies before any claim, then checks every create and patch
+Admission cannot know an award. `LaunchOne` checks every create and patch
 response for the Job and its Secret; the activated template must equal the one
 built from the award, including `demandFor(award)` resources. After activation,
 and for each live Job on every sync, the launcher compares the Job template's
 team label, node selector, node, container set and resources with those built
 from the Job's binding and reservation, and each Pod controlled by that Job UID
-with the template, including the pod-level CPU and memory. Sync takes the
+with the template, including the pod-level CPU and memory. Each Pod is compared
+once, on the first pass that sees it: admission keeps its spec immutable after
+that. Sync takes the
 expected size from the template itself: the binding carries no resources, the
 template matched the award at creation and admission keeps it unchanged. A Pod
 the Job controller has not created yet is not an error. VPC Pod ENI resources
@@ -166,8 +165,7 @@ ServiceAccount must have no role annotation or Pod Identity association.
 RBAC grants Pod and Job creation in the job namespace only to the launcher, and
 admission refuses any other creator. Customer ServiceAccounts receive no API
 credential or role. Team nodes carry a team-specific NoSchedule taint. Among
-workload Pods only Job Pods, that team's capacity requests and boundary probes
-tolerate it, but cluster DaemonSets such as `aws-node`, `ebs-csi-node` and
+workload Pods only Job Pods and that team's capacity requests tolerate it, but cluster DaemonSets such as `aws-node`, `ebs-csi-node` and
 `kube-proxy` tolerate every taint and run privileged on team nodes. They and
 Kubernetes administrators remain trusted.
 
@@ -454,8 +452,7 @@ checks that a changed Job binding cannot release another award's reservation.
 controller handlers, SQLite issuance and persisted cleanup reader. It publishes
 and activates a Job, exchanges its bootstrap, retains the Job through a running
 attempt, and retires it after committed completion. Kubernetes and the Cloud
-boundary remain fixtures in that test. `NewProductionBoundary` supplies live
-Kubernetes canaries and reservation-scoped cleanup for the installed launcher. `FuzzStoreLauncherAuthorityW8` checks
+boundary remain fixtures in that test. `FuzzStoreLauncherAuthorityW8` checks
 changed, narrowed and revoked credentials, route selection and provider failure
 across claims and synchronization. Refusals leave work unclaimed. Other
 components retain their fake controller boundaries. Deployed egress, node
@@ -475,62 +472,22 @@ exchange tests do not establish a working pod entrypoint.
 
 <!-- design:end -->
 
-## Production boundary
+## Network isolation
 
 The installed launcher loads the standard Kubernetes client configuration and
-composes its award transport with `NewProductionBoundary`. The launcher account
-can create, read and delete probe Pods, and list, create and delete NetworkPolicies
-in the jobs namespace. It retains create/delete-only Secret access. It can list
-EndpointSlices in `default` to find the API server's addresses.
+composes its award transport with a `KubernetesBoundary`. It retains
+create/delete-only Secret access in the jobs namespace and checks its admission
+policies once, at start, so a chart and launcher mismatch after an upgrade stops
+it before it claims work.
 
-Before work starts, the boundary requires default-deny egress and ingress
-policies selecting the exact Job labels. It inventories declared DaemonSet ports
-and observed kubelet endpoints. Each probe role has its own name prefix, `sw-boundary-<role>-<random>`. The
-EKS VPC CNI network-policy agent shares one policy map among Pods in a
-namespace whose names match up to the last `-`, so probes named only
-`sw-boundary-<random>` gave the peer the control's allow-all ingress and every
-probe failed. Customer Pods in one namespace named `<prefix>-<suffix>` share
-policy the same way; Job Pods are named after their Job, so no two share.
+Job Pods carry the labels the chart's default-deny ingress and egress policy and
+its `launcher.networkPolicy.egress` allow rule select: outbound internet on any
+port, and nothing in private, carrier-grade NAT or link-local ranges. The
+cluster must enforce NetworkPolicy. Sparkwing does not probe enforcement at
+launch or at launcher start; verifying it is the operator's periodic check.
+Job Pods hold no node root, so Job code cannot reach the node network namespace.
 
-Two listener Pods run on the reserved node, each readiness-confirmed
-before any connection is judged. The control listener has an explicit ingress
-allow rule. The peer listener carries a Job's labels, so only the Job ingress
-policy governs it; its readiness check runs on loopback, which no policy
-filters. A witness Pod whose temporary policy allows egress to both must reach
-the control, which proves its egress and the policy engine, and must fail to
-reach the peer. Because the peer is listening and the witness may send to it,
-that failure measures Job ingress denial apart from source egress.
-
-A separate canary uses the workload's labels and runs as UID 65534 with every
-capability dropped. It must reach the controller, and must be refused by the
-control listener, the in-cluster API address, every address in the
-`default/kubernetes` EndpointSlices, the instance metadata service
-(169.254.169.254 and fd00:ec2::254), the Pod Identity agent (169.254.170.23),
-DaemonSet TCP ports and every node address's kubelet ports (10250, 10255 and
-the advertised port), except the job's own node's internal address on 10250,
-which the VPC CNI cannot block and whose kubelet refuses anonymous requests.
-That proves Job egress denial,
-including against an operator egress rule that drops the metadata exception.
-
-All of it runs in the Pod network namespace. Job Pods hold no node root, so
-Job code cannot reach the node network namespace, and the canaries need no
-privilege or hostPID to measure what Job code can reach. The kubelet still
-reaches the API from the node; node credentials and authorization protect it
-there. DNS ports remain available. Declared UDP ports are inventoried, while
-UDP denial needs protocol-specific native checks. The runner image needs `nc`.
-
-Probe Pods carry the team label, node selector and team toleration admission
-requires. Canary results require unchanged admitted commands, images, labels apart
-from the two node topology labels, annotations, reservation and node. Both listener readiness and a successful measurement Pod are
-required. Policy and endpoint snapshots must match after canary cleanup. Probe
-Pods inherit the award deadline. Failures preserve the reservation until cleanup
-can finish. A new launcher can remove only probe Pod and policy instances bound
-to that exact reservation, using Kubernetes UID preconditions. No launcher
-credential or service-account token enters a canary.
-
-The known required destination is the controller. Source, blob and provider
-origins depend on deployment and still need native verification. The checks do
-not exhaust every network destination. A kernel escape from the user namespace
+A kernel escape from the user namespace
 is outside them. The sidecar's seccomp profile stacks over every container the
 customer starts, so it, not the customer's own `--security-opt`, bounds the
 syscalls reachable as namespace root; nf_tables through `NET_ADMIN` remains
@@ -538,15 +495,14 @@ reachable, so kernel patch latency is the control there. Native enforcement, UDP
 DinD shutdown and kubelet reclamation remain cluster acceptance requirements.
 
 All authored workload state uses container writable layers and emptyDir storage.
-Release waits for all non-DaemonSet Pods to disappear, then removes
-reservation-owned probe state before permitting reuse. Kubernetes owns the
+Release waits for all non-DaemonSet Pods to disappear before permitting reuse. Kubernetes owns the
 associated ephemeral-state reclamation. Job code holds no node root, so it cannot
 change host state outside its Pod. A node is reused only by later jobs of the
 run that first used it, so even within a team no run reaches another's node.
 
 ## Preparation leases
 
-Boundary probes, image startup and source checkout can take longer than a unit's
+Image startup and source checkout can take longer than a unit's
 three-minute lease. The launcher keeps unexchanged awards alive using the existing
 sync route's `preparing` fences and `prepared` acknowledgements. Its root credential
 owns those requests. The bootstrap still grants only source read and one exchange.
@@ -586,9 +542,8 @@ and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
   and a held award requests again.
 - Each launcher pass retries held awards. Reservation may consume the team's
   own requests on a node: it persists the reservation and its taint first, then
-  deletes them and waits for their removal. Boundary probe Pods then occupy
-  the node during measurement and are removed before Job creation. The NodePool's
-  consolidateAfter covers the empty gaps around those probes.
+  deletes them and waits for their removal before Job creation. The NodePool's
+  consolidateAfter covers the empty gap.
 - Sync observes each request through its recorded award. Awards this launcher
   holds are renewed by that observation; others are only checked. A request
   is deleted when the controller ends its award or the award deadline passes.
@@ -638,7 +593,7 @@ The same launcher accepts an enrolled machine root with the exclusive
 repository and pool scope, self-hosted ranking and unmetered billing. Cloud's
 cross-team scope, credit checks and standing limits apply only to deployment
 service launchers. Plan, eval and work still use the same builder, admission
-policies, preparation renewal, bootstrap exchange, quarantine and boundary probe.
+policies, preparation renewal, bootstrap exchange and quarantine.
 For pool awards, resource pins remain exact; an unpinned dimension uses the
 operator's configured ceiling. The launcher projects that allocation identically
 for claim and capacity-request reconciliation.

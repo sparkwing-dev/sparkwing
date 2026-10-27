@@ -871,7 +871,7 @@ a Pod outside the exact namespace, reservation and observed instance UID.
 `FuzzProductionBoundaryCleanupReservationFence` exercise these boundaries.
 
 `cluster.productionLauncher` loads the standard Kubernetes context and composes
-`launcher.NewLauncher` with `launcher.NewProductionBoundary`. Claim demand uses
+`launcher.NewLauncher` with a `launcher.KubernetesBoundary`; decision 71 removed the runtime network probes. Claim demand uses
 the linker version, plan/eval/node kinds and advertised labels. Physical pod
 ceilings are enforced when the selected catalog allocation is delivered.
 Launcher authority remains confined to the controller transport.
@@ -1041,7 +1041,7 @@ operator-supplied through `launcher.networkPolicy.egress`.
 
 BuildJob retains the exact TeamNodeValue label and adds a NoSchedule CPU-band
 Exists toleration, so the existing small-band nodes remain usable. Every Job Pod
-and production boundary probe carries `karpenter.sh/do-not-disrupt=true`.
+carries `karpenter.sh/do-not-disrupt=true`.
 Admission validation preserves the Job template annotations as well as placement.
 Each Ready node must carry its exact team's hashed label, and one reservation
 occupies the whole node. When no vacant Ready team node exists, the launcher holds
@@ -1313,7 +1313,7 @@ of its NodeClaim before reservation release. Retirement failures retain cleanup
 ownership. Malformed Job annotations trigger UID-fenced deletion, leaving orphan
 reservation cleanup subject to its current award and container vacancy.
 
-NewProductionBoundary requires the Karpenter dynamic client. LauncherFactory
+KubernetesBoundary requires the Karpenter dynamic client. LauncherFactory
 receives a bearer reader instead of a captured string. The installed launcher
 rereads its private credential file on every controller request. Charts grant
 NodeClaim get/delete, NodePool get and PriorityClass list. LimitRange list is
