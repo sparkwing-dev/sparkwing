@@ -21,7 +21,9 @@ type billingAward struct {
 	unit                capability.UnitKind
 	generation, awarded int64
 	settled             sql.NullInt64
-	// safety: stop is the durable funding refusal, never cleared; from then on drain bounds every lease.
+	// safety: stop is the durable refusal reason, never cleared; from then on drain bounds every lease. A funding
+	// refusal cancels at once; an overflow stop is recorded while funding is healthy and ends the work only when its
+	// prepaid time, the drain, runs out.
 	stop  string
 	drain sql.NullInt64
 }
