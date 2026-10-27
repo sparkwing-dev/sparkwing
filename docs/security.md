@@ -141,8 +141,8 @@ this value.
 A job may start only the child pipelines its plan declares with
 `StartsChildren`; an undeclared child is refused with `403`. A child either runs
 its parent's exact revision (same repository, ref, commit and code commit) and
-inherits the parent's identity whole, including its pipeline for OIDC and
-pipeline-scoped secrets, or names a branch that the controller resolves and is
+inherits the parent's identity whole, including its repository and pipeline
+for OIDC and pipeline secrets, or names a branch that the controller resolves and is
 sealed `asserted` under its own pipeline name. An asserted child reads only
 team-wide shared secrets, like a GitHub reusable workflow called without
 `secrets: inherit`. A request that pairs another ref or code commit with its
@@ -165,7 +165,8 @@ and commit.
 A `source:` code pin that is a full commit ID keeps the run's class. A branch or
 tag pin that does not resolve to the execution commit demotes the run to
 `asserted`, because whoever can push that ref chooses the code. The demoted run
-still receives its pipeline's scoped secrets; see [secrets](secrets.md).
+still reads its repository's pipeline secrets, because the controller fetches its
+code from the repository; see [secrets](secrets.md).
 Bare names must identify a branch or tag. If both exist at different commits,
 resolution fails. Use `refs/heads/main` or `refs/tags/main` to choose one.
 Commit pins require a full commit ID. Scheduled execution resolves the named

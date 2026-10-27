@@ -67,6 +67,7 @@ type CredentialRotation struct {
 // SecretRotationSkip contains the fields exposed by the controller.
 type SecretRotationSkip struct {
 	Name     string `json:"name"`
+	Repo     string `json:"repo,omitempty"`
 	Pipeline string `json:"pipeline,omitempty"`
 }
 

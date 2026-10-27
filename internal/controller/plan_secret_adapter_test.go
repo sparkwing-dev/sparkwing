@@ -30,7 +30,7 @@ type planSecretProbe struct {
 
 func (p *planSecretProbe) OpenBound(purpose secrets.Purpose, team, name, scope string, shared, masked bool, value string) (string, error) {
 	p.opens++
-	if team != "a" || name != "TOKEN" || scope != "ci" || shared || !masked || value != "sealed-value" {
+	if team != "a" || name != "TOKEN" || scope != "" || !shared || !masked || value != "sealed-value" {
 		p.t.Fatal("plan secret lost its stored binding")
 	}
 	return "", errors.New("probe decryption refused")
@@ -44,7 +44,7 @@ func TestPlanSecretOpenerUsesStoreSelectedBinding(t *testing.T) {
 				s.WithSecretsCipher(probe)
 			}
 		})
-		engineSQL(t, e.Store, `INSERT INTO secrets(team,name,pipeline,value,masked,principal,created_at,updated_at) VALUES ('a','TOKEN','ci','sealed-value',1,'account',1,1)`)
+		engineSQL(t, e.Store, `INSERT INTO secrets(team,name,shared,value,masked,principal,created_at,updated_at) VALUES ('a','TOKEN',1,'sealed-value',1,'account',1,1)`)
 		owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
 		_, err := e.AcceptPlan(t.Context(), owner, controllerwire.PlanSubmission{Plan: []byte(`{"jobs":[]}`), Resolved: runspec.Resolved{SecretArgs: []string{}}})
 		var failure *apierr.Error
@@ -68,7 +68,7 @@ func planSecretCipherFixture(t *testing.T) (planSecretCipher, store.Secret) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secret := store.Secret{Name: "TOKEN", Pipeline: "ci", Masked: true}
+	secret := store.Secret{Name: "TOKEN", Shared: true, Masked: true}
 	secret.Value, err = SealSecretValue(cipher, "a", &secret, "private-value")
 	if err != nil {
 		t.Fatal(err)
@@ -92,10 +92,11 @@ func TestPlanSecretOpenerOpensOriginalEnvelopeAndHonorsCancellation(t *testing.T
 func FuzzPlanSecretOpenerCannotOpenRelocatedEnvelope(f *testing.F) {
 	f.Add("foreign", uint8(0))
 	f.Add("", uint8(4))
+	f.Add("", uint8(5))
 	f.Fuzz(func(t *testing.T, value string, field uint8) {
 		opener, secret := planSecretCipherFixture(t)
 		team := store.Team("a")
-		switch field % 5 {
+		switch field % 6 {
 		case 0:
 			team = store.Team("foreign-" + value)
 		case 1:
@@ -105,7 +106,9 @@ func FuzzPlanSecretOpenerCannotOpenRelocatedEnvelope(f *testing.F) {
 		case 3:
 			secret.Masked = false
 		case 4:
-			secret.Shared = true
+			secret.Shared = !secret.Shared
+		case 5:
+			secret.Repo = "gh:2"
 		}
 		if plain, err := opener.OpenPlanSecret(t.Context(), team, secret); err == nil || plain != "" {
 			t.Fatal("relocated envelope returned plaintext")
@@ -116,7 +119,7 @@ func FuzzPlanSecretOpenerCannotOpenRelocatedEnvelope(f *testing.F) {
 func TestPlanSecretOpenerRejectsSecretIdentifiersInAcceptance(t *testing.T) {
 	opener, secret := planSecretCipherFixture(t)
 	e, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithSecretsCipher(opener.cipher) })
-	engineSQL(t, e.Store, `INSERT INTO secrets(team,name,pipeline,value,masked,principal,created_at,updated_at) VALUES ('a','TOKEN','ci',?,1,'account',1,1)`, secret.Value)
+	engineSQL(t, e.Store, `INSERT INTO secrets(team,name,shared,value,masked,principal,created_at,updated_at) VALUES ('a','TOKEN',1,?,1,'account',1,1)`, secret.Value)
 	owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
 	property := func(input []byte, field uint8) bool {
 		if len(input) > 16 {
@@ -167,7 +170,7 @@ func TestPlanSecretOpenerRejectsSecretIdentifiersInAcceptance(t *testing.T) {
 func TestPlanSecretOpenerAllowsValidatedPlan(t *testing.T) {
 	opener, secret := planSecretCipherFixture(t)
 	e, tenant := engineServerFixture(t, deployment.Config{}, func(s *Server) { s.WithSecretsCipher(opener.cipher) })
-	engineSQL(t, e.Store, `INSERT INTO secrets(team,name,pipeline,value,masked,principal,created_at,updated_at) VALUES ('a','TOKEN','ci',?,1,'account',1,1)`, secret.Value)
+	engineSQL(t, e.Store, `INSERT INTO secrets(team,name,shared,value,masked,principal,created_at,updated_at) VALUES ('a','TOKEN',1,?,1,'account',1,1)`, secret.Value)
 	owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil {

@@ -152,11 +152,11 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 		t.Fatalf("list secrets: %v", err)
 	}
 	for _, sec := range list {
-		row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow(sec.Name, sec.Pipeline)
+		row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow(sec.Name, sec.Repo, sec.Pipeline)
 		if err != nil {
 			t.Fatalf("read secret %s: %v", sec.Name, err)
 		}
-		plain, err := cipher.OpenBound(secrets.PurposeSecret, string(store.DefaultTeam), row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
+		plain, err := cipher.OpenBound(secrets.PurposeSecret, string(store.DefaultTeam), row.Name, row.SealScope(), row.Shared, row.Masked, row.Value)
 		if err != nil {
 			t.Fatalf("open secret %s: %v", sec.Name, err)
 		}
@@ -347,14 +347,14 @@ func drillSQLiteWithoutKey(t *testing.T) {
 		t.Fatal("the restored store holds no secrets, so the check proves nothing")
 	}
 	for _, sec := range list {
-		row, err := teststore.ForTeam(t, rst, store.DefaultTeam).GetSecretRow(sec.Name, sec.Pipeline)
+		row, err := teststore.ForTeam(t, rst, store.DefaultTeam).GetSecretRow(sec.Name, sec.Repo, sec.Pipeline)
 		if err != nil {
 			t.Fatalf("read secret %s: %v", sec.Name, err)
 		}
 		if !secrets.IsEncrypted(row.Value) {
 			t.Fatalf("secret %s restored unsealed", sec.Name)
 		}
-		if _, err := wrong.OpenBound(secrets.PurposeSecret, string(store.DefaultTeam), row.Name, row.Pipeline, row.Shared, row.Masked, row.Value); err == nil {
+		if _, err := wrong.OpenBound(secrets.PurposeSecret, string(store.DefaultTeam), row.Name, row.SealScope(), row.Shared, row.Masked, row.Value); err == nil {
 			t.Fatalf("secret %s opened under a key the install never used", sec.Name)
 		}
 	}

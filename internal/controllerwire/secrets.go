@@ -4,9 +4,13 @@ import "context"
 
 // SecretMetadata is safe to list. OnlyOn is a pool restriction, enforced by
 // plan acceptance and release against the awarded claim, never machine labels.
+// A pipeline secret names its one repository: RepoKey is the canonical key a
+// run's repository must match, and Repo its display when the row was written.
 type SecretMetadata struct {
 	Name      string `json:"name"`
 	Principal string `json:"principal"`
+	Repo      string `json:"repo,omitempty"`
+	RepoKey   string `json:"repo_key,omitempty"`
 	Pipeline  string `json:"pipeline,omitempty"`
 	Masked    bool   `json:"masked"`
 	Shared    bool   `json:"shared"`
@@ -21,8 +25,11 @@ type Secrets struct {
 }
 
 // SecretSelector distinguishes pipeline-owned and unscoped rows of one name.
+// Repo and Pipeline are both set or both empty. Repo is GitHub owner/name or a
+// gh:<id> key; the controller resolves it to the key.
 type SecretSelector struct {
 	Name     string `json:"name"`
+	Repo     string `json:"repo,omitempty"`
 	Pipeline string `json:"pipeline,omitempty"`
 }
 
@@ -38,6 +45,7 @@ type SecretValue struct {
 type SecretWrite struct {
 	Name           string `json:"name"`
 	Value          string `json:"value"`
+	Repo           string `json:"repo,omitempty"`
 	Pipeline       string `json:"pipeline,omitempty"`
 	Masked         bool   `json:"masked"`
 	Shared         bool   `json:"shared"`
@@ -53,6 +61,7 @@ type SecretWritten struct {
 
 type SecretDeletion struct {
 	Name     string `json:"name"`
+	Repo     string `json:"repo,omitempty"`
 	Pipeline string `json:"pipeline,omitempty"`
 	Deleted  bool   `json:"deleted"`
 }

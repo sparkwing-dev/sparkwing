@@ -91,16 +91,35 @@ describe("draftProblem", () => {
     value: "v",
     masked: true,
     scope: "team" as const,
+    repo: "",
     pipeline: "",
   };
 
-  it("needs a pipeline name when scoped to a pipeline", () => {
+  it("needs a repository and pipeline name when scoped to a pipeline", () => {
     assert.notEqual(
-      secrets.draftProblem({ ...base, scope: "pipeline", pipeline: "  " }),
+      secrets.draftProblem({
+        ...base,
+        scope: "pipeline",
+        repo: "acme/web",
+        pipeline: "  ",
+      }),
       null,
     );
+    assert.match(
+      secrets.draftProblem({
+        ...base,
+        scope: "pipeline",
+        pipeline: "deploy",
+      }) ?? "",
+      /repository/,
+    );
     assert.equal(
-      secrets.draftProblem({ ...base, scope: "pipeline", pipeline: "deploy" }),
+      secrets.draftProblem({
+        ...base,
+        scope: "pipeline",
+        repo: "acme/web",
+        pipeline: "deploy",
+      }),
       null,
     );
   });
@@ -129,6 +148,7 @@ describe("write bodies", () => {
         value: "us-west-2",
         masked: false,
         scope: "team",
+        repo: "ignored",
         pipeline: "ignored",
       }),
       { name: "REGION", value: "us-west-2", masked: false, shared: true },
@@ -142,12 +162,14 @@ describe("write bodies", () => {
         value: "line1\nline2\n",
         masked: true,
         scope: "pipeline",
+        repo: " acme/web ",
         pipeline: " deploy-web ",
       }),
       {
         name: "KEY",
         value: "line1\nline2\n",
         masked: true,
+        repo: "acme/web",
         pipeline: "deploy-web",
       },
     );
@@ -155,12 +177,29 @@ describe("write bodies", () => {
 
   it("keeps an updated row's scope, sharing and kind", () => {
     assert.deepEqual(
-      secrets.updateBody(row({ name: "A", pipeline: "p", masked: true }), "n"),
-      { name: "A", value: "n", masked: true, pipeline: "p" },
+      secrets.updateBody(
+        row({
+          name: "A",
+          repo: "acme/web",
+          repo_key: "gh:7",
+          pipeline: "p",
+          masked: true,
+        }),
+        "n",
+      ),
+      { name: "A", value: "n", masked: true, repo: "gh:7", pipeline: "p" },
     );
     assert.deepEqual(
       secrets.updateBody(row({ name: "B", shared: true, masked: false }), "n"),
       { name: "B", value: "n", masked: false, shared: true },
+    );
+    // A page loaded before the pool changed must not send the old pool back.
+    assert.deepEqual(
+      secrets.updateBody(
+        row({ name: "D", shared: true, only_on: "staging" }),
+        "n",
+      ),
+      { name: "D", value: "n", masked: true, shared: true },
     );
     assert.deepEqual(secrets.updateBody(row({ name: "C" }), "n"), {
       name: "C",
@@ -190,8 +229,8 @@ describe("listing", () => {
 
   it("labels each scope", () => {
     assert.equal(
-      secrets.scopeLabel({ pipeline: "deploy" }),
-      "Pipeline: deploy",
+      secrets.scopeLabel({ repo: "acme/web", pipeline: "deploy" }),
+      "Pipeline: deploy in acme/web",
     );
     assert.equal(secrets.scopeLabel({ shared: true }), "Team");
     assert.match(secrets.scopeLabel({}), /No runs/);
@@ -203,22 +242,37 @@ describe("listing", () => {
       "Every pipeline",
     );
     assert.equal(
-      secrets.scopeLabel({ pipeline: "deploy" }, "local"),
-      "Pipeline: deploy",
+      secrets.scopeLabel({ repo: "acme/web", pipeline: "deploy" }, "local"),
+      "Pipeline: deploy in acme/web",
     );
-    assert.equal(secrets.scopeLabel({}, "local"), "No runs (operator reads only)");
+    assert.equal(
+      secrets.scopeLabel({}, "local"),
+      "No runs (operator reads only)",
+    );
   });
 
   it("finds the row a draft would replace", () => {
-    const rows = [row({ name: "A" }), row({ name: "A", pipeline: "p" })];
+    const rows = [
+      row({ name: "A" }),
+      row({ name: "A", repo: "acme/web", repo_key: "gh:7", pipeline: "p" }),
+    ];
     const draft = {
       name: "A",
       value: "",
       masked: true,
       scope: "pipeline" as const,
+      repo: "Acme/Web",
       pipeline: "p",
     };
     assert.equal(secrets.existingRow(rows, draft)?.pipeline, "p");
+    assert.equal(
+      secrets.existingRow(rows, { ...draft, repo: "gh:7" })?.pipeline,
+      "p",
+    );
+    assert.equal(
+      secrets.existingRow(rows, { ...draft, repo: "acme/api" }),
+      undefined,
+    );
     assert.equal(
       secrets.existingRow(rows, { ...draft, scope: "team" })?.pipeline,
       undefined,
@@ -243,7 +297,8 @@ describe("API helpers", () => {
   });
 
   it("posts a write with an explicit masked flag", async () => {
-    respond = () => Response.json({ secret: row({ name: "R", masked: false }) });
+    respond = () =>
+      Response.json({ secret: row({ name: "R", masked: false }) });
     const result = await secrets.writeSecret({
       name: "R",
       value: "v",
@@ -266,18 +321,24 @@ describe("API helpers", () => {
       "Secret values shorter than 4 characters cannot be masked in logs.";
     respond = () => Response.json({ secret: row({ name: "KEY" }), warning });
     const result = await secrets.writeSecret({
-      name: "KEY", value: "abc", masked: true,
+      name: "KEY",
+      value: "abc",
+      masked: true,
     });
     assert.equal(result.warning, warning);
   });
 
-  it("escapes the name and names the pipeline on delete", async () => {
-    await secrets.deleteSecret({ name: "team/key", pipeline: "deploy web" });
+  it("escapes the name and names the repository and pipeline on delete", async () => {
+    await secrets.deleteSecret({
+      name: "team/key",
+      repo_key: "gh:7",
+      pipeline: "deploy web",
+    });
     await secrets.deleteSecret({ name: "TEAM_KEY" });
     assert.deepEqual(
       calls.map((c) => `${c.method} ${c.url}`),
       [
-        "DELETE /api/v1/secrets/team%2Fkey?pipeline=deploy%20web",
+        "DELETE /api/v1/secrets/team%2Fkey?repo=gh%3A7&pipeline=deploy%20web",
         "DELETE /api/v1/secrets/TEAM_KEY",
       ],
     );

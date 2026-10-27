@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -343,5 +344,123 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Decision 68: only code the controller fetches through the team's GitHub App,
+// as source selection resolves it, proves the repository for its pipeline
+// secrets. Requests take the CLI's shape: an unqualified current branch with
+// the locally resolved commits, and a configured source: pin.
+func TestFetchedGitHubRepositoryFollowsSourceSelection(t *testing.T) {
+	head, pinned, fork := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("f", 40)
+	refs := map[string]string{"refs/heads/main": head, "refs/tags/v1": head, "refs/heads/release": pinned, "refs/heads/pinned": head}
+	configs := map[string]string{head: "pipelines:\n  - name: ci\n    entrypoint: CI\n  - name: deploy\n    entrypoint: Deploy\n    source: release\n"}
+	selectSource := func(ctx context.Context, request runspec.Request) (runspec.Git, runspec.Source, error) {
+		git, code, _, err := source.Select(ctx, source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL}, request.Pipeline, request.Git, request.Source, "", source.Options{
+			ResolveRef: func(_ context.Context, ref string) (string, error) { return refs[ref], nil },
+			ReadFile: func(_ context.Context, sha, _ string) ([]byte, bool, error) {
+				config, ok := configs[sha]
+				return []byte(config), ok, nil
+			},
+		})
+		return git, code, err
+	}
+	cli := runspec.Request{Pipeline: "ci", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "main", SHA: head}, Source: runspec.Source{Ref: head, Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app"}}}
+	app := &Server{githubApp: &githubAppState{}}
+	for name, change := range map[string]func(*runspec.Request){
+		"unqualified current branch": func(*runspec.Request) {},
+		"qualified branch":           func(r *runspec.Request) { r.Git.Ref = "refs/heads/main" },
+		"unqualified tag":            func(r *runspec.Request) { r.Git.Ref = "v1" },
+		"branch, commit unnamed":     func(r *runspec.Request) { r.Git.SHA, r.Source.Ref = "", "" },
+		"configured source pin": func(r *runspec.Request) {
+			r.Pipeline, r.Source.Ref, r.Source.RequestedRef = "deploy", pinned, "release"
+		},
+	} {
+		request := cli
+		change(&request)
+		if got, err := app.selectFetchedSource(t.Context(), &request, selectSource); err != nil || got != 701 || !strings.EqualFold(request.Git.SHA, head) {
+			t.Errorf("%s = %d %v %+v", name, got, err, request.Git)
+		}
+	}
+	for name, change := range map[string]func(*runspec.Request){
+		"fork commit on a branch":         func(r *runspec.Request) { r.Git.SHA, r.Source.Ref = fork, fork },
+		"code at a commit no pin selects": func(r *runspec.Request) { r.Source.Ref = fork },
+		"source pin bypassed":             func(r *runspec.Request) { r.Pipeline = "deploy" },
+		"pull request ref":                func(r *runspec.Request) { r.Git.Ref = "refs/pull/7/head" },
+		"bare commit":                     func(r *runspec.Request) { r.Git.Ref = fork },
+		"no ref":                          func(r *runspec.Request) { r.Git.Ref = "" },
+		"upload": func(r *runspec.Request) {
+			r.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:x"}
+		},
+		"working tree":   func(r *runspec.Request) { r.Source.WorkingTree = true },
+		"local checkout": func(r *runspec.Request) { r.Source.Location.LocalCheckout = "/src" },
+		"no remote":      func(r *runspec.Request) { r.Source.Location.RemoteURL = "" },
+		"other host":     func(r *runspec.Request) { r.Git.Repository.Key = "git:git.example.com/acme/app" },
+		"here": func(r *runspec.Request) {
+			r.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
+		},
+	} {
+		request := cli
+		change(&request)
+		if got, _ := app.selectFetchedSource(t.Context(), &request, selectSource); got != 0 {
+			t.Errorf("%s proved repository %d", name, got)
+		}
+	}
+	if got, _ := (&Server{}).selectFetchedSource(t.Context(), &cli, selectSource); got != 0 {
+		t.Fatalf("controller without the App proved repository %d", got)
+	}
+}
+
+// The console names only a repository and branch. Intake resolves that intent
+// once through the App, admits the selected commit, and seals the repository
+// that selection proved for pipeline secrets.
+func TestConsoleTriggerAdmitsSelectedSourceAndProvesRepository(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := strings.Repeat("c", 40)
+	s, session := credentialSessionServer(t)
+	teststore.SeedGitHubInstallation(t, s.store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "member", GitHubUserID: 71}, time.Now())
+	s.WithGitHubApp(githubapp.Config{AppID: 1, Slug: "test", ClientID: "id", ClientSecret: "secret", WebhookSecret: "webhook", PrivateKey: key, HTTP: &http.Client{Transport: intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
+		status, payload := 200, ""
+		switch r.URL.Path {
+		case "/repos/acme/app/installation":
+			payload = `{"id":7,"app_id":1,"account":{"id":70,"login":"acme","type":"Organization"}}`
+		case "/app/installations/7/access_tokens":
+			payload = `{"token":"private","expires_at":"2100-01-01T00:00:00Z","permissions":{"metadata":"read","contents":"read"}}`
+		case "/installation/repositories":
+			payload = `{"total_count":1,"repositories":[{"id":42,"full_name":"acme/app","owner":{"id":70,"login":"acme"}}]}`
+		case "/repos/acme/app/git/ref/heads/main":
+			payload = `{"ref":"refs/heads/main","object":{"type":"commit","sha":"` + head + `"}}`
+		case "/repos/acme/app/git/ref/tags/main", "/repos/acme/app/contents/.sparkwing/sparkwing.yaml":
+			status, payload = 404, `{"message":"Not Found"}`
+		default:
+			return nil, fmt.Errorf("unexpected GitHub request %s", r.URL)
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
+	})}})
+	body := `{"idempotency_key":"console","request":{"version":1,"pipeline":"p","mode":"execute","origin":"trigger","dispatch":"host","requested_args":{},` +
+		`"git":{"repository":{"display":"https://github.com/acme/app"},"ref":"main"},` +
+		`"source":{"ref":"main","location":{"remote_url":"https://github.com/acme/app","pipeline_dir":".sparkwing"}}}}`
+	w := resumeHTTP(s, session, "/api/v1/runs", body)
+	if w.Code != 201 {
+		t.Fatalf("console trigger: HTTP %d %s", w.Code, w.Body)
+	}
+	var created controllerwire.CreateRunResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := s.store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := tenant.ReadRun(t.Context(), created.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := run.Request
+	if got.Request.Git.SHA != head || got.Request.Source.Ref != head || got.Provenance.Trust() != runspec.TrustAsserted || got.Provenance.SecretRepositoryID() != 42 {
+		t.Fatalf("sealed git=%+v source ref=%q trust=%s proven=%d", got.Request.Git, got.Request.Source.Ref, got.Provenance.Trust(), got.Provenance.SecretRepositoryID())
 	}
 }

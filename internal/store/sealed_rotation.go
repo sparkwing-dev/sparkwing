@@ -189,7 +189,7 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 		return err
 	}
 	for _, row := range rows {
-		value, err := r.reseal(secrets.PurposeSecret, t.team, row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
+		value, err := r.reseal(secrets.PurposeSecret, t.team, row.Name, row.SealScope(), row.Shared, row.Masked, row.Value)
 		if errors.Is(err, errSealedUnreadable) {
 			continue
 		}
@@ -200,7 +200,7 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 		if r.verify {
 			continue
 		}
-		if _, err := r.tx.execContext(ctx, `UPDATE secrets SET value=? WHERE team=? AND name=? AND pipeline=?`, value, t.team, row.Name, row.Pipeline); err != nil {
+		if _, err := r.tx.execContext(ctx, `UPDATE secrets SET value=? WHERE team=? AND name=? AND repo=? AND pipeline=?`, value, t.team, row.Name, row.Repo, row.Pipeline); err != nil {
 			return err
 		}
 	}

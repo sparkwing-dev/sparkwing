@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"slices"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -27,7 +26,7 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 		}
 		claim := a.Access.Binding == capability.BindDeclaredSecret
 		run := a.Target.RunID
-		selection := secretSelection{scope: secretPipelineScope, pipeline: a.Target.Pipeline, includeUnshared: true}
+		selection := secretSelection{scope: secretPipelineScope, repo: a.Target.Repo, pipeline: a.Target.Pipeline, includeUnshared: true}
 		if claim {
 			run = p.Capability.Binding.RunID
 		}
@@ -148,7 +147,7 @@ type selectedSecretRow struct {
 }
 
 func selectedSecretsTx(ctx context.Context, tx *storeTx, team Team, name string, selection secretSelection) ([]selectedSecretRow, error) {
-	rows, err := tx.queryContext(ctx, `SELECT name,value,principal,pipeline,masked,shared,created_at,updated_at,only_on FROM secrets WHERE team=? AND (?='' OR name=?) AND ((?=1 AND pipeline<>'' AND pipeline=?) OR (?=1 AND pipeline='' AND (shared=1 OR ?=1))) ORDER BY name,CASE WHEN pipeline='' THEN 1 ELSE 0 END`+tx.forShare(), team, name, name, boolInt(selection.scope == secretPipelineScope), selection.pipeline, boolInt(selection.scope != secretNone), boolInt(selection.includeUnshared))
+	rows, err := tx.queryContext(ctx, `SELECT `+secretCols+` FROM secrets WHERE team=? AND (?='' OR name=?) AND ((?=1 AND pipeline<>'' AND repo=? AND pipeline=?) OR (?=1 AND pipeline='' AND (shared=1 OR ?=1))) ORDER BY name,CASE WHEN pipeline='' THEN 1 ELSE 0 END`+tx.forShare(), team, name, name, boolInt(selection.scope == secretPipelineScope), selection.repo, selection.pipeline, boolInt(selection.scope != secretNone), boolInt(selection.includeUnshared))
 	if err != nil {
 		return nil, err
 	}
@@ -156,16 +155,13 @@ func selectedSecretsTx(ctx context.Context, tx *storeTx, team Team, name string,
 	var out []selectedSecretRow
 	for rows.Next() {
 		var row selectedSecretRow
-		var masked, shared int
-		var created, updated int64
-		if err := rows.Scan(&row.secret.Name, &row.secret.Value, &row.secret.Principal, &row.secret.Pipeline, &masked, &shared, &created, &updated, &row.pool); err != nil {
+		if err := scanSecret(rows, &row.secret); err != nil {
 			return nil, err
 		}
+		row.pool = row.secret.OnlyOn
 		if len(out) > 0 && out[len(out)-1].secret.Name == row.secret.Name {
 			continue
 		}
-		row.secret.Masked, row.secret.Shared = masked != 0, shared != 0
-		row.secret.CreatedAt, row.secret.UpdatedAt = time.Unix(0, created).UTC(), time.Unix(0, updated).UTC()
 		out = append(out, row)
 	}
 	return out, rows.Err()

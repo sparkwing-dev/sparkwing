@@ -12,16 +12,16 @@ func TestStoredShortSecretsStayEncryptedAndClassified(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, value := range []string{"abc", "ééé", ""} {
-		sealed, err := SealSecret(cipher, "team", Secret{Name: "TOKEN", Value: value, Masked: true, Pipeline: "deploy"})
+		sealed, err := SealSecret(cipher, "team", Secret{Name: "TOKEN", Value: value, Masked: true, Repo: fixtureRepo, Pipeline: "deploy"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		row := sealed.Row()
-		plain, err := cipher.OpenBound(secrets.PurposeSecret, "team", row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
+		plain, err := cipher.OpenBound(secrets.PurposeSecret, "team", row.Name, row.SealScope(), row.Shared, row.Masked, row.Value)
 		if err != nil || plain != value || row.Value == value || !row.Masked {
 			t.Fatalf("short secret lost protection: %+v %v", row, err)
 		}
-		if _, err := cipher.OpenBound(secrets.PurposeSecret, "other", row.Name, row.Pipeline, row.Shared, row.Masked, row.Value); err == nil {
+		if _, err := cipher.OpenBound(secrets.PurposeSecret, "other", row.Name, row.SealScope(), row.Shared, row.Masked, row.Value); err == nil {
 			t.Fatal("foreign team opened secret")
 		}
 	}

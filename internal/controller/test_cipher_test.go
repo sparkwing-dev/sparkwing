@@ -23,7 +23,7 @@ func testCipher(t testing.TB) *secrets.Cipher {
 
 func sealedSecret(t testing.TB, team store.Team, sec store.Secret) store.Secret {
 	t.Helper()
-	v, err := testCipher(t).SealBound(secrets.PurposeSecret, string(team), sec.Name, sec.Pipeline, sec.Shared, sec.Masked, sec.Value)
+	v, err := testCipher(t).SealBound(secrets.PurposeSecret, string(team), sec.Name, sec.SealScope(), sec.Shared, sec.Masked, sec.Value)
 	if err != nil {
 		t.Fatal(err)
 	}

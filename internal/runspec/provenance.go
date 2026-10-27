@@ -115,6 +115,29 @@ func AssertedChildProvenance(writer Writer, ref, sha, pipeline string) (Provenan
 // SharedSecretsOnly reports a run that may read only team-wide shared secrets.
 func (p Provenance) SharedSecretsOnly() bool { return p.identity.SharedOnly }
 
+// FetchedFrom records that the controller itself fetched an asserted run's code
+// from this GitHub repository through the team's App installation. It proves
+// the repository for pipeline secrets only; the trust class, OIDC claims, pools
+// and data scopes stay asserted, so the run still seals no repository id or
+// name; the fetched id is read only by secret selection.
+func (p Provenance) FetchedFrom(repositoryID int64) (Provenance, error) {
+	if p.identity.Trust != TrustAsserted || p.identity.SharedOnly || repositoryID <= 0 {
+		return Provenance{}, errors.New("only an asserted run the controller fetched names a fetched repository")
+	}
+	p.identity.Fetched = repositoryID
+	return p, p.validate()
+}
+
+// SecretRepositoryID is the proven GitHub repository whose pipeline secrets the
+// run reads: the repository a verified run sealed, or the one the controller
+// fetched an asserted run's code from. Zero means shared secrets only.
+func (p Provenance) SecretRepositoryID() int64 {
+	if p.identity.RepositoryID > 0 {
+		return p.identity.RepositoryID
+	}
+	return p.identity.Fetched
+}
+
 // ReadingDefault adds the repository's verified default branch, which intake learned
 // from verified records, as a cache read fallback for an unverified run. It never
 // changes the scope the run writes or the identity it claims.
@@ -154,6 +177,9 @@ func escapeWriter(s string) string {
 func (p Provenance) validate() error {
 	if p.identity.Pipeline == "" {
 		return errors.New("provenance requires a pipeline")
+	}
+	if p.identity.Fetched < 0 || p.identity.Fetched > 0 && (p.identity.Trust != TrustAsserted || p.identity.SharedOnly) {
+		return errors.New("only an asserted run the controller fetched names a fetched repository")
 	}
 	if p.identity.SHA != "" && !IsCommitID(p.identity.SHA) {
 		return errors.New("provenance commit must be a full commit ID")
@@ -272,6 +298,7 @@ type provenanceJSON struct {
 	Delivery      string     `json:"delivery,omitempty"`
 	Writer        string     `json:"writer,omitempty"`
 	SharedOnly    bool       `json:"shared_secrets_only,omitempty"`
+	Fetched       int64      `json:"fetched_repository_id,omitempty"`
 }
 
 // MarshalJSON persists the sealed fields inside the request seal.

@@ -24,8 +24,8 @@ func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {
 		}
 		return w.Body.String()
 	}
-	call("POST", "/api/v1/secrets?team=foreign", `{"name":"KEY","value":"private-value","pipeline":"deploy","masked":false}`, 200)
-	body := call("GET", "/api/v1/secrets/KEY?pipeline=deploy&team=foreign", "", 200)
+	call("POST", "/api/v1/secrets?team=foreign", `{"name":"KEY","value":"private-value","repo":"gh:1","pipeline":"deploy","masked":false}`, 200)
+	body := call("GET", "/api/v1/secrets/KEY?repo=gh:1&pipeline=deploy&team=foreign", "", 200)
 	var row struct{ Value, Principal, Pipeline string }
 	if err := json.Unmarshal([]byte(body), &row); err != nil || row.Value != "private-value" || row.Principal != "member" || row.Pipeline != "deploy" {
 		t.Fatalf("secret response: %s %v", body, err)
@@ -50,17 +50,17 @@ func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {
 	if rows, err := foreign.GitCredentials(t.Context()); err != nil || len(rows) != 0 {
 		t.Fatalf("foreign credentials changed: %d %v", len(rows), err)
 	}
-	if _, err := foreign.GetSecretRow("KEY", "deploy"); err == nil {
+	if _, err := foreign.GetSecretRow("KEY", "gh:1", "deploy"); err == nil {
 		t.Fatal("foreign secret changed")
 	}
 	call("DELETE", "/api/v1/team/git-credentials/git.example.test", "", 204)
-	call("DELETE", "/api/v1/secrets/KEY?pipeline=deploy", "", 204)
+	call("DELETE", "/api/v1/secrets/KEY?repo=gh:1&pipeline=deploy", "", 204)
 	if _, err := teststore.SQL(t, f.store).ExecContext(t.Context(), `UPDATE memberships SET role='reader' WHERE team='team' AND account_id='member'`); err != nil {
 		t.Fatal(err)
 	}
 	call("POST", "/api/v1/secrets", `{"name":"DENIED","value":"private-value"}`, 403)
 	call("POST", "/api/v1/team/git-credentials", `{"host_wide":true, "host":"git.example.test","kind":"https","token":"private-key"}`, 403)
-	if _, err := tenant.GetSecretRow("DENIED", ""); err == nil {
+	if _, err := tenant.GetSecretRow("DENIED", "", ""); err == nil {
 		t.Fatal("demoted member stored secret")
 	}
 	if _, err := tenant.GitCredentialForRepository(t.Context(), "", "git.example.test"); err == nil {

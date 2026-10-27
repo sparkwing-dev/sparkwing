@@ -16,11 +16,12 @@ import (
 
 func TestPlanSecretPreflightNamesUnreadableScopes(t *testing.T) {
 	tenant, request, now := planFixture(t, runspec.DispatchHost)
-	for _, secret := range []Secret{{Name: "TEAM_ONLY", Value: "valid-secret"}, {Name: "ELSEWHERE", Value: "valid-secret", Pipeline: "release"}, {Name: "OWN", Value: "valid-secret", Pipeline: "p"}, {Name: "SHARED", Value: "valid-secret", Shared: true}} {
+	for _, secret := range []Secret{{Name: "TEAM_ONLY", Value: "valid-secret"}, {Name: "ELSEWHERE", Value: "valid-secret", Repo: fixtureRepo, Pipeline: "release"}, {Name: "OWN", Value: "valid-secret", Repo: fixtureRepo, Pipeline: "p"}, {Name: "SHARED", Value: "valid-secret", Shared: true}} {
 		if err := seedSecret(t, tenant, secret, *now); err != nil {
 			t.Fatal(err)
 		}
 	}
+	request.Seal.Request = proveFixtureRun(t, tenant, request.RunID)
 	request.Seal.Resolved.SecretNames = []string{"OWN", "SHARED", "ABSENT", "TEAM_ONLY", "ELSEWHERE"}
 	_, err := tenant.AcceptPlan(t.Context(), request)
 	var refused *secretPreflightError

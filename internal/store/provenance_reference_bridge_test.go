@@ -61,13 +61,21 @@ func referenceWorld(t *testing.T, s *Store, repo string) *Tenant {
 	s.testOnlyExec(t, `INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,1,1)`, digest)
 	s.testOnlyExec(t, `INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at) VALUES ('a','depcache','default','modules',?,?,'refs/heads/main','runner','cloud',?,'job','main-run',1,1,?,1)`, digest, repo, []byte(`{}`), []byte(`{}`))
 	s.testOnlyExec(t, `INSERT INTO pool_access_rules(team,id,pool,repo_key,branch,source,route,created_by,created_at) VALUES ('a','main-only.000000','deploy-pool',?,'main','','','owner',1)`, repo)
-	for _, row := range [][2]string{{"team-token", ""}, {"ci-token", "ci"}, {"deploy-token", "deploy"}} {
-		shared := 0
-		if row[1] == "" {
-			shared = 1
+	for _, row := range [][2]string{{"team-token", ""}, {"ci-token", "ci"}, {"deploy-token", "deploy"}, {"nightly-token", "nightly"}} {
+		// A world built before its repository is known seeds gh:701, which the
+		// schedule fixtures then move to the key their schedule resolved.
+		shared, owner := 0, repo
+		if owner == "" {
+			owner = "gh:701"
 		}
-		s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES ('a',?,'value','owner',?,1,?,1,1)`, row[0], row[1], shared)
+		if row[1] == "" {
+			shared, owner = 1, ""
+		}
+		s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at) VALUES ('a',?,'value','owner',?,?,1,?,1,1)`, row[0], owner, row[1], shared)
 	}
+	// Decision 66: another repository of the team has a pipeline named ci too.
+	// No run of this world's repository, verified or asserted, reads its secret.
+	s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at) VALUES ('a','outsider-token','value','owner','gh:999999','ci',1,0,1,1)`)
 	return &Tenant{s: s, team: "a"}
 }
 
@@ -147,7 +155,7 @@ func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObser
 		if err != nil {
 			return err
 		}
-		for _, name := range []string{"ci-token", "deploy-token", "team-token"} {
+		for _, name := range []string{"ci-token", "deploy-token", "nightly-token", "outsider-token", "team-token"} {
 			selection, err := runSecretSelection(row.Request)
 			if err != nil {
 				return err
@@ -202,9 +210,16 @@ func appReference(t *testing.T, s *Store, ref, sha, pin string) (*Tenant, string
 
 func manualReference(t *testing.T, s *Store, account string) string {
 	t.Helper()
+	return fetchedManualReference(t, s, account, 0)
+}
+
+// fetchedManualReference admits a member's run whose code the controller
+// fetches from GitHub repository fetched, or zero for code the member supplied.
+func fetchedManualReference(t *testing.T, s *Store, account string, fetched int64) string {
+	t.Helper()
 	actor := referenceMember(t, s, account, RoleEditor)
 	tenant := &Tenant{s: s, team: "a"}
-	result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: actor.Authority, IdempotencyKey: "manual-" + account, Request: runspec.Request{
+	result, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: actor.Authority, IdempotencyKey: "manual-" + account, FetchedRepositoryID: fetched, Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
 		Git:     runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "refs/heads/main", SHA: referenceFeature},
 		Source:  runspec.Source{Ref: referenceFeature},
@@ -230,6 +245,7 @@ func scheduleReference(t *testing.T, s *Store, mode string) (*Tenant, string) {
 		t.Fatal(err)
 	}
 	s.testOnlyExec(t, `UPDATE pool_access_rules SET repo_key=?`, sched.RepositoryKey)
+	s.testOnlyExec(t, `UPDATE secrets SET repo=? WHERE repo='gh:701'`, sched.RepositoryKey)
 	s.testOnlyExec(t, `UPDATE blob_records SET repo_key=?`, sched.RepositoryKey)
 	if mode == "locked" {
 		s.testOnlyExec(t, `UPDATE cron_schedules SET locked_ref=?`, referenceMain)
@@ -376,7 +392,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 		write := "manual:" + writer + ":" + ref
 		return provenanceObservation{Subject: "team:a:repository_id::pipeline:" + pipeline + ":trigger:manual:runner:runner:ref:", Write: write, Reads: []string{write, "refs/heads/main"}, Pools: []string{}, Secrets: secrets}
 	}
-	verifiedSchedule := provenanceObservation{Repository: "acme/app", Subject: "team:a:repository_id:701:pipeline:nightly:trigger:cron:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:schedule/schedule-9:refs/heads/main", Reads: []string{"manual:schedule/schedule-9:refs/heads/main", "refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"team-token"}}
+	verifiedSchedule := provenanceObservation{Repository: "acme/app", Subject: "team:a:repository_id:701:pipeline:nightly:trigger:cron:runner:runner:ref:refs/heads/main", SHA: referenceMain, Write: "manual:schedule/schedule-9:refs/heads/main", Reads: []string{"manual:schedule/schedule-9:refs/heads/main", "refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"nightly-token", "team-token"}}
 	memberSchedule := verifiedSchedule
 	// safety: a manually registered schedule, stored as ACME/App, seals the name fire-time resolution reported.
 	memberSchedule.Repository = "acme/app"
@@ -405,6 +421,8 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return appReference(t, s, "refs/heads/main", referenceMain, "pipelines")
 			},
+			// The controller still fetches the code from the repository, so the
+			// pipeline secrets arrive (decision 68 refinement).
 			want: asserted("ci", "run/{run}", "refs/heads/main", "ci-token", "team-token"),
 		},
 		{
@@ -419,7 +437,21 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return referenceWorld(t, s, "gh:701"), manualReference(t, s, "alice")
 			},
+			want: asserted("ci", "account/alice", "refs/heads/main", "team-token"),
+		},
+		{
+			name: "a member's run the controller fetches from the connected repository reads its pipeline secrets",
+			admit: func(t *testing.T, s *Store) (*Tenant, string) {
+				return referenceWorld(t, s, "gh:701"), fetchedManualReference(t, s, "alice", 701)
+			},
 			want: asserted("ci", "account/alice", "refs/heads/main", "ci-token", "team-token"),
+		},
+		{
+			name: "a fetch from another repository than the run names proves nothing",
+			admit: func(t *testing.T, s *Store) (*Tenant, string) {
+				return referenceWorld(t, s, "gh:701"), fetchedManualReference(t, s, "alice", 999999)
+			},
+			want: asserted("ci", "account/alice", "refs/heads/main", "team-token"),
 		},
 		{
 			// A schedule an admin armed on the default branch, unmodified,
@@ -444,9 +476,11 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			// principal chose part of the fire, so it cannot keep trigger:cron.
 			name:  "a schedule fire with any override is asserted",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "override") },
-			want:  asserted("nightly", "run/{run}", "main", "team-token"),
+			want:  asserted("nightly", "run/{run}", "main", "nightly-token", "team-token"),
 		},
 		{
+			// A locked commit may be one GitHub serves from a fork, so it proves no
+			// repository for pipeline secrets.
 			name:  "a schedule locked to a commit is asserted",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "locked") },
 			want:  asserted("nightly", "run/{run}", "main", "team-token"),
@@ -454,7 +488,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 		{
 			name:  "a schedule run-now is asserted by the member who pressed it",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "run-now") },
-			want:  asserted("nightly", "account/owner", "main", "team-token"),
+			want:  asserted("nightly", "account/owner", "main", "nightly-token", "team-token"),
 		},
 		{
 			name:  "a GitHub Actions push keeps its proven ref under its own scope",
@@ -466,7 +500,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				return actionsReferenceRunning(t, s, runspec.Source{Ref: referenceFeature, RequestedRef: referenceFeature})
 			},
-			want: asserted("ci", "run/{run}", "refs/heads/main", "ci-token", "team-token"),
+			want: asserted("ci", "run/{run}", "refs/heads/main", "team-token"),
 		},
 		{
 			name: "a retry by another member copies the App provenance whole",
@@ -528,7 +562,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 				git := runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "refs/heads/main", SHA: referenceMain}
 				return childReference(t, s, parent, git, childRequest("deploy", "refs/heads/main", referenceMain))
 			},
-			want: provenanceObservation{Subject: "team:a:repository_id::pipeline:ci:trigger:manual:runner:runner:ref:", Write: "manual:account/alice:refs/heads/main", Reads: []string{"manual:account/alice:refs/heads/main", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"ci-token", "team-token"}},
+			want: provenanceObservation{Subject: "team:a:repository_id::pipeline:ci:trigger:manual:runner:runner:ref:", Write: "manual:account/alice:refs/heads/main", Reads: []string{"manual:account/alice:refs/heads/main", "refs/heads/main"}, Pools: []string{}, Secrets: []string{"team-token"}},
 		},
 		{
 			name: "a child of an asserted run keeps its parent's writer",

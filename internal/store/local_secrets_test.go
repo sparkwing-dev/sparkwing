@@ -99,7 +99,7 @@ func TestLocalSecretsReplayRejectsChangedValues(t *testing.T) {
 
 func TestLocalSecretsLossFailsInsteadOfFallingBack(t *testing.T) {
 	tenant, a := localSecretFixture(t, "requester-private-value")
-	if err := seedSecret(t, tenant, Secret{Name: "KEY", Pipeline: "p", Value: "different", Masked: true}, tenant.s.now()); err != nil {
+	if err := seedSecret(t, tenant, Secret{Name: "KEY", Repo: fixtureRepo, Pipeline: "p", Value: "different", Masked: true}, tenant.s.now()); err != nil {
 		t.Fatal(err)
 	}
 	tenant.s.localSecrets.Clear()

@@ -121,7 +121,7 @@ func reservedPoolTrustClaimAndExplanationParity(t *testing.T, open func(*testing
 						demand.CapabilityPrefix = root.Prefix
 						s.testOnlyExec(t, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"value":["pool=prod"]}}`))
 						if secret {
-							s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'',0,'prod')`)
+							s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,repo,pipeline,shared,only_on) VALUES ('a','DEPLOY','ciphertext','account',1,1,1,'','',0,'prod')`)
 						}
 						branch := "feature"
 						if verified {

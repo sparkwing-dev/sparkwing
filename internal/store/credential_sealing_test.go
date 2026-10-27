@@ -35,7 +35,7 @@ func TestCredentialWritersRejectUnsealedValuesProperty(t *testing.T) {
 		if _, err := tenant.WriteSecret(t.Context(), a, secret); err != nil {
 			t.Fatal(err)
 		}
-		stored, err := tenant.GetSecretRow(secret.Row().Name, "")
+		stored, err := tenant.GetSecretRow(secret.Row().Name, "", "")
 		if err != nil || stored.Value == plain || openSecretFixture(t, tenant, stored) != plain {
 			t.Fatalf("sealed round trip: %v", err)
 		}

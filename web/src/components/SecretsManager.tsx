@@ -145,10 +145,7 @@ export default function SecretsManager({
           and read the variables.
         </div>
       )}
-      <Panel
-        title="Secrets"
-        hint={copy[audience].secretsHint}
-      >
+      <Panel title="Secrets" hint={copy[audience].secretsHint}>
         {listBody(secrets, "No secrets yet.", (row) => (
           <SecretRow
             key={rowKey(row)}
@@ -161,10 +158,7 @@ export default function SecretsManager({
           />
         ))}
       </Panel>
-      <Panel
-        title="Variables"
-        hint={copy[audience].variablesHint}
-      >
+      <Panel title="Variables" hint={copy[audience].variablesHint}>
         {listBody(variables, "No variables yet.", (row) => (
           <VariableRow
             key={rowKey(row)}
@@ -269,11 +263,7 @@ function SecretRow({
             onChange={(e) => setValue(e.target.value)}
           />
           <div className="flex gap-2">
-            <button
-              type="submit"
-              className={buttonClass}
-              disabled={saving}
-            >
+            <button type="submit" className={buttonClass} disabled={saving}>
               {saving ? "Saving…" : "Replace value"}
             </button>
             <button type="button" className={quietButtonClass} onClick={close}>
@@ -402,11 +392,12 @@ function CreateForm({
   const [value, setValue] = useState("");
   const [masked, setMasked] = useState(true);
   const [scope, setScope] = useState<ScopeKind>("team");
+  const [repo, setRepo] = useState("");
   const [pipeline, setPipeline] = useState("");
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const draft = { name, value, masked, scope, pipeline };
+  const draft = { name, value, masked, scope, repo, pipeline };
   const problem = draftProblem(draft);
   const replaces = name ? existingRow(rows, draft) : undefined;
 
@@ -505,6 +496,17 @@ function CreateForm({
             />
             Pipeline
           </label>
+          {scope === "pipeline" ? (
+            <input
+              aria-label="Repository"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="repository, e.g. acme/web"
+              className={`${inputClass} flex-1 min-w-[14rem] font-mono`}
+              value={repo}
+              onChange={(e) => setRepo(e.target.value)}
+            />
+          ) : null}
           {scope === "pipeline" ? (
             <input
               aria-label="Pipeline name"

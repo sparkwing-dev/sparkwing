@@ -18,13 +18,14 @@ func TestSecretNameIsUniquePerTeam(t *testing.T) {
 	now := time.Now()
 
 	for _, pipeline := range []string{"", "ci"} {
+		repo := map[string]string{"": "", "ci": "gh:1"}[pipeline]
 		if err := teststore.SeedSecret(st, alpha.Team(), store.Secret{
-			Name: "DEPLOY_KEY", Value: "alpha-" + pipeline, Pipeline: pipeline, Shared: true,
+			Name: "DEPLOY_KEY", Value: "alpha-" + pipeline, Repo: repo, Pipeline: pipeline, Shared: repo == "",
 		}, now); err != nil {
 			t.Fatalf("alpha DEPLOY_KEY on pipeline %q: %v", pipeline, err)
 		}
 		if err := teststore.SeedSecret(st, beta.Team(), store.Secret{
-			Name: "DEPLOY_KEY", Value: "beta-" + pipeline, Pipeline: pipeline, Shared: true,
+			Name: "DEPLOY_KEY", Value: "beta-" + pipeline, Repo: repo, Pipeline: pipeline, Shared: repo == "",
 		}, now); err != nil {
 			t.Fatalf("beta DEPLOY_KEY on pipeline %q: %v", pipeline, err)
 		}
@@ -34,7 +35,7 @@ func TestSecretNameIsUniquePerTeam(t *testing.T) {
 		tn   *store.Tenant
 		want string
 	}{{alpha, "alpha-ci"}, {beta, "beta-ci"}} {
-		got, err := c.tn.GetSecretRow("DEPLOY_KEY", "ci")
+		got, err := c.tn.GetSecretRow("DEPLOY_KEY", "gh:1", "ci")
 		if err != nil {
 			t.Fatalf("%s GetSecretRow: %v", c.tn.Team(), err)
 		}
@@ -56,10 +57,10 @@ func TestSecretNameIsUniquePerTeam(t *testing.T) {
 	if _, err := st.DB().ExecContext(t.Context(), storetest.Rebind(st, `DELETE FROM secrets WHERE team=? AND name=? AND pipeline=?`), alpha.Team(), "DEPLOY_KEY", "ci"); err != nil {
 		t.Fatalf("alpha DeleteSecret: %v", err)
 	}
-	if _, err := alpha.GetSecretRow("DEPLOY_KEY", "ci"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := alpha.GetSecretRow("DEPLOY_KEY", "gh:1", "ci"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("alpha reads its deleted secret: %v", err)
 	}
-	got, err := beta.GetSecretRow("DEPLOY_KEY", "ci")
+	got, err := beta.GetSecretRow("DEPLOY_KEY", "gh:1", "ci")
 	if err != nil {
 		t.Fatalf("beta lost its secret to alpha's delete: %v", err)
 	}

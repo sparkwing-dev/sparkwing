@@ -59,7 +59,7 @@ func checkPoolTrust(t *testing.T, named, secret bool, trust capability.Trust, ve
 		t.Fatal(err)
 	}
 	if secret {
-		if _, err := s.DB().ExecContext(ctx, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,pipeline,shared,only_on) VALUES (?,'DEPLOY','ciphertext','account',1,1,1,'',0,'prod')`, tenant.Team()); err != nil {
+		if _, err := s.DB().ExecContext(ctx, `INSERT INTO secrets(team,name,value,principal,created_at,updated_at,masked,repo,pipeline,shared,only_on) VALUES (?,'DEPLOY','ciphertext','account',1,1,1,'','',0,'prod')`, tenant.Team()); err != nil {
 			t.Fatal(err)
 		}
 	}

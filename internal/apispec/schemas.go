@@ -39,18 +39,19 @@ func (b *schemaBuilder) value(t reflect.Type) schema {
 	if t == reflect.TypeFor[runspec.Provenance]() {
 		text := schema{"type": "string"}
 		return schema{"type": "object", "additionalProperties": false, "required": []string{"trust"}, "properties": schema{
-			"trust":               schema{"type": "string", "enum": []string{string(runspec.TrustVerifiedDefault), string(runspec.TrustVerified), string(runspec.TrustActions), string(runspec.TrustSchedule), string(runspec.TrustAsserted)}},
-			"repository_id":       schema{"type": "integer"},
-			"repository":          text,
-			"ref":                 text,
-			"sha":                 text,
-			"event":               text,
-			"pipeline":            text,
-			"default_branch":      text,
-			"pull_request_base":   text,
-			"delivery":            text,
-			"writer":              text,
-			"shared_secrets_only": schema{"type": "boolean"},
+			"trust":                 schema{"type": "string", "enum": []string{string(runspec.TrustVerifiedDefault), string(runspec.TrustVerified), string(runspec.TrustActions), string(runspec.TrustSchedule), string(runspec.TrustAsserted)}},
+			"repository_id":         schema{"type": "integer"},
+			"repository":            text,
+			"ref":                   text,
+			"sha":                   text,
+			"event":                 text,
+			"pipeline":              text,
+			"default_branch":        text,
+			"pull_request_base":     text,
+			"delivery":              text,
+			"writer":                text,
+			"shared_secrets_only":   schema{"type": "boolean"},
+			"fetched_repository_id": schema{"type": "integer"},
 		}}
 	}
 	if t.Implements(reflect.TypeFor[json.Marshaler]()) || reflect.PointerTo(t).Implements(reflect.TypeFor[json.Marshaler]()) {
