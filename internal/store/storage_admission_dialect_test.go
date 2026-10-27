@@ -243,6 +243,23 @@ func TestUncommittedLogSlotsStayCountedAndAdmitted(t *testing.T) {
 	})
 }
 
+// Every new log slot is one object of its run, so a free run signs 1,000 slots and
+// the 1,001st is refused before its upload URL exists.
+func TestLogSlotsCountAgainstTheRunObjectLimit(t *testing.T) {
+	bothDialects(t, func(t *testing.T, target *storetest.Target) {
+		f := newGrowthFixture(t, target)
+		for index := int64(0); index < 1000; index++ {
+			if _, err := f.tenant.OpenLogSlot(t.Context(), f.logSubject(), f.holder, index, 1); err != nil {
+				t.Fatalf("slot %d: %v", index, err)
+			}
+		}
+		var quota *store.StorageQuotaError
+		if _, err := f.tenant.OpenLogSlot(t.Context(), f.logSubject(), f.holder, 1000, 1); !errors.As(err, &quota) || quota.Limit != "objects_per_run" {
+			t.Fatalf("1,001st slot = %v; want the per-run object limit", err)
+		}
+	})
+}
+
 // A slot's size is fixed when it is first signed: signing it again for fewer bytes keeps counting the first size,
 // signing it again for more never grows it, and committing a smaller object or sealing the stream never lowers it.
 func TestLogSlotSizeIsFixedAtFirstSigning(t *testing.T) {
