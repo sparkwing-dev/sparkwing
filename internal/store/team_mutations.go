@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 func (t *Tenant) teamMutationTx(ctx context.Context, a capability.Authorized, operation, subject string, write func(*storeTx, capability.Principal) error) error {
@@ -234,6 +235,14 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		}
 		if held != 0 {
 			return authorityError(apierr.Conflict, "run still has claimed work")
+		}
+		// safety: a saved upload URL could recreate a deleted log object, uncounted, until its slot's deadline.
+		var signed sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT MAX(created_at) FROM log_slots WHERE team=? AND run_id=?`, t.team, a.Target.RunID).Scan(&signed); err != nil {
+			return err
+		}
+		if deadline := time.Unix(0, signed.Int64).Add(limits.LogUploadURLTTL); signed.Valid && tx.now(ctx).Before(deadline) {
+			return authorityError(apierr.Conflict, "this run's logs are still uploading; try again after "+deadline.UTC().Format(time.RFC3339))
 		}
 		if _, err := tx.ResolveAuthority(ctx, a.Principal.Authority); err != nil {
 			return err

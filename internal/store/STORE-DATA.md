@@ -122,9 +122,11 @@ more bytes than it uploads.
 A slot's upload authority has one fixed lifetime: it ends at first signing plus
 `limits.LogUploadURLTTL` (fifteen minutes). Re-signing returns a URL with that
 same absolute expiry and is refused (`409`) after it unless the slot is
-committed, which still reports committed. No live URL can therefore store an
-object after expiry or deletion retires its slot, and the expiry query also
-requires the deadline to have passed. Explicit run deletion checks the run is
+committed, which still reports committed. Expiry never retires a slot before
+its deadline, and explicit run deletion is refused (`409`, "this run's logs are
+still uploading; try again after <time>") while any of the run's slot deadlines
+is in the future, so no live URL can store an object after its slot stops
+counting. Otherwise explicit run deletion checks the run is
 deletable, deletes its log objects, then deletes the records, so the slots
 cascade only after their objects are gone; a failed object delete refuses the
 deletion and keeps the run, its slots and their counted bytes. Team deletion
