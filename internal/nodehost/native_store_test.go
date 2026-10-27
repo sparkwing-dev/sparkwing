@@ -269,11 +269,11 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 		}
 		attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: int64(input.Attempt), Generation: int64(input.Generation)}}
 		identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: request.Team, RunID: input.Accepted.RunID, Principal: blob.Principal(principal.Capability.Subject.ID), CapabilityRef: input.Authority.CapabilityPrefix, Attempt: attempt}
-		run, err := f.Tenant.ReadRun(ctx, input.Accepted.RunID)
-		if err != nil {
-			return JobUpload{}, err
+		if principal.Capability.Data == nil {
+			return JobUpload{}, errors.New("claim carries no data scope")
 		}
-		authority := blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Repo: request.Git.Repository.Key, Attempt: attempt, Ref: blob.RefFacts{Scope: blob.ScopeFor(run.Request.Provenance), SHA: request.Git.SHA}}
+		// The claim's runner is a long-lived host, so the award sealed that host's scope.
+		authority := blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Repo: request.Git.Repository.Key, Attempt: attempt, Ref: blob.RefFacts{Scope: blob.ParseCapabilityScope(principal.Capability.Data.WriteRef), SHA: request.Git.SHA}}
 		return JobUpload{Identity: identity, Authority: authority, Key: blob.ResultRecordKey(attempt.Value, authority.Repo, authority.Ref.Scope, request.Pipeline, blob.KindOutput)}, nil
 	}}
 }

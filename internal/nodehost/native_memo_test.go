@@ -118,8 +118,13 @@ func TestNativeExecutorMemoRecipeHitUsesClaimAndReleasesAdmission(t *testing.T) 
 			t.Fatalf("run=%d row=%+v bodies=%d error=%v", run, row, bodies, err)
 		}
 		attempt := runspec.AttemptIdentity{Team: request.Team, RunID: f.Input.RunID, NodeID: job.ID, Attempt: int64(row.Attempt), Generation: int64(row.Generation)}
+		// The scope the claim's grant sealed: its runner is a long-lived host.
+		granted, err := outputs.Bind(ctx, input)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, record := range []*blob.RecordKey{row.OutputRecord, row.ManifestRecord} {
-			if *record != blob.ResultRecordKey(attempt, request.Git.Repository.Key, blob.ScopeFor(spec.Request.Provenance), request.Pipeline, record.Kind) {
+			if *record != blob.ResultRecordKey(attempt, request.Git.Repository.Key, granted.Authority.Ref.Scope, request.Pipeline, record.Kind) {
 				t.Fatalf("memo attached another attempt's record: %+v", record)
 			}
 		}
