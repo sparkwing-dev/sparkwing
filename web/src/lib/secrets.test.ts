@@ -193,12 +193,13 @@ describe("write bodies", () => {
       secrets.updateBody(row({ name: "B", shared: true, masked: false }), "n"),
       { name: "B", value: "n", masked: false, shared: true },
     );
+    // A page loaded before the pool changed must not send the old pool back.
     assert.deepEqual(
       secrets.updateBody(
-        row({ name: "D", shared: true, only_on: "prod" }),
+        row({ name: "D", shared: true, only_on: "staging" }),
         "n",
       ),
-      { name: "D", value: "n", masked: true, shared: true, only_on: "prod" },
+      { name: "D", value: "n", masked: true, shared: true },
     );
     assert.deepEqual(secrets.updateBody(row({ name: "C" }), "n"), {
       name: "C",

@@ -25,8 +25,8 @@ type Secrets struct {
 }
 
 // SecretSelector distinguishes pipeline-owned and unscoped rows of one name.
-// Repo and Pipeline are both set or both empty. Repo is GitHub owner/name, a
-// remote URL, or a repository key; the controller resolves it to the key.
+// Repo and Pipeline are both set or both empty. Repo is GitHub owner/name or a
+// gh:<id> key; the controller resolves it to the key.
 type SecretSelector struct {
 	Name     string `json:"name"`
 	Repo     string `json:"repo,omitempty"`

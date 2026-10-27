@@ -193,13 +193,17 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		if err := s.resolveChildRevisions(r.Context(), engine, a, &body.Request); err != nil {
 			return err
 		}
+		fetched, err := s.selectFetchedSource(r.Context(), &body.Request, s.appSourceSelector(store.Team(a.Target.Team)))
+		if err != nil {
+			return err
+		}
 		ctx := context.WithValue(r.Context(), verifiedIntakeSourceKey{}, verifiedIntakeSource{location: body.Request.Source.Location, repository: body.Request.Git.Repository})
 		request, err := IntakeForStore(a, body)
 		if err != nil {
 			return err
 		}
 		request.Intent = &intent.Request
-		request.FetchedRepositoryID = s.fetchedGitHubRepository(ctx, body.Request, s.appSourceSelector(store.Team(a.Target.Team)))
+		request.FetchedRepositoryID = fetched
 		response, err := admitWithFlood(ctx, s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.admitRun(ctx, a.Target.Team, request)
 		})

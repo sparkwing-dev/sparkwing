@@ -38,7 +38,8 @@ without `--only-on` keeps its pool.
 from `sparkwing secrets list -o json`. The controller resolves it to the
 repository's GitHub ID, so a repository keeps its secrets when it is renamed.
 
-A pipeline secret is released whatever branch or commit the run executes, so
+A pipeline secret is released to a run of any branch or tag head of its
+repository, the commit an App delivery names, or an unlocked schedule, so
 everyone who can push a branch or start a run of a connected repository can
 read its pipeline secrets.
 

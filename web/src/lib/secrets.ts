@@ -129,11 +129,11 @@ export function draftBody(draft: SecretDraft): SecretWriteBody {
   };
 }
 
-// An update rewrites one existing row's value and names its scope, sharing,
-// kind and pool again, so the replacement keeps every restriction the row had.
+// An update rewrites one existing row's value under its scope, sharing and
+// kind. It never names a pool: the controller keeps the row's current pool,
+// so a page loaded before a pool change cannot restore the old one.
 export function updateBody(row: StoredSecret, value: string): SecretWriteBody {
   const body: SecretWriteBody = { name: row.name, value, masked: row.masked };
-  if (row.only_on) body.only_on = row.only_on;
   if (row.pipeline) {
     body.repo = row.repo_key;
     body.pipeline = row.pipeline;
