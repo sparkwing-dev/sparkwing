@@ -31,13 +31,9 @@ func (f *nodeFault) Error() string {
 	return fmt.Sprintf("Cloud node %s: %s", f.node, f.cause)
 }
 
-// jobFault is one Job whose teardown failed. Its node keeps its reservation
-// until a later pass finishes, so claims for other work continue.
-type jobFault struct{ job, cause string }
-
-func (f *jobFault) Error() string {
-	return fmt.Sprintf("Cloud Job %s teardown: %s", f.job, f.cause)
-}
+// errJobTeardown marks one Job whose teardown failed. Its node keeps its
+// reservation until a later pass finishes, so claims for other work continue.
+var errJobTeardown = errors.New("Cloud Job teardown failed; retrying next pass")
 
 // safety: a kubelet can rewrite its own annotations. Placement must reject
 // damaged reservation bindings even when repeated conflicts prevent quarantine.
@@ -111,9 +107,12 @@ func quarantined(node corev1.Node) bool {
 // blocking removes node faults from err, keeping the faults that must stop claims.
 func blocking(err error) error {
 	switch e := err.(type) { //nolint:errorlint // a wrapped node fault must stay blocking, so only the fault itself is dropped
-	case *nodeFault, *jobFault:
+	case *nodeFault:
 		return nil
 	case interface{ Unwrap() []error }:
+		if slices.Contains(e.Unwrap(), errJobTeardown) {
+			return nil
+		}
 		var kept []error
 		for _, inner := range e.Unwrap() {
 			kept = append(kept, blocking(inner))

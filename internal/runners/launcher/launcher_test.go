@@ -301,7 +301,7 @@ func TestLauncherDeletesBootstrapWhenJobDeletionFails(t *testing.T) {
 		return true, nil, failure
 	})
 	control.remove = true
-	if err := l.Sync(t.Context()); err == nil || !strings.Contains(err.Error(), failure.Error()) || blocking(err) != nil {
+	if err := l.Sync(t.Context()); !errors.Is(err, failure) || blocking(err) != nil {
 		t.Fatalf("Job deletion failure = %v, want a non-blocking fault naming it", err)
 	}
 	name := jobName(control.award.Binding)

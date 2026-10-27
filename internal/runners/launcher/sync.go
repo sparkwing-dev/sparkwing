@@ -108,7 +108,7 @@ func teardownFault(job string, err error) error {
 	if err == nil || errors.Is(err, errContainersRunning) {
 		return nil
 	}
-	return &jobFault{job: job, cause: err.Error()}
+	return fmt.Errorf("%w: %s: %w", errJobTeardown, job, err)
 }
 
 func (l *Launcher) renewJobDeadline(ctx context.Context, job *batchv1.Job, binding CloudJobBinding, expires time.Time) error {
