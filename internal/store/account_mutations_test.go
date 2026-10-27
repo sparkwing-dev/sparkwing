@@ -204,11 +204,11 @@ func TestAccountInvitationCommitsMembershipAndSessionTogether(t *testing.T) {
 		t.Fatalf("invitation escaped session rollback: %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_invitation_session`)
-	rewriteSchemaExec(t, s.db, `UPDATE identities SET email_verified=0 WHERE account_id=?`, a.Principal.Capability.Subject.ID)
+	rewriteSchemaExec(t, s.db, `DELETE FROM email_owners WHERE account_id=?`, a.Principal.Capability.Subject.ID)
 	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrEmailMismatch) {
 		t.Fatalf("unverified acceptance: %v", err)
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE identities SET email_verified=1 WHERE account_id=?`, a.Principal.Capability.Subject.ID)
+	rewriteSchemaExec(t, s.db, `INSERT INTO email_owners(email,account_id,updated_at) VALUES ('member@example.test',?,1)`, a.Principal.Capability.Subject.ID)
 	accepted, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID)
 	if err != nil || accepted.Team != invitation.Team {
 		t.Fatalf("accepted=%+v: %v", accepted, err)

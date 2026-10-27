@@ -688,6 +688,13 @@ CREATE TABLE concurrency_waiters (
 );
 
 
+-- safety: the one account that owns each verified address; its primary key serializes concurrent assertions.
+CREATE TABLE email_owners (
+    email TEXT NOT NULL PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    updated_at BIGINT NOT NULL
+);
+
 CREATE TABLE identities (
     provider TEXT NOT NULL,
     subject TEXT NOT NULL,

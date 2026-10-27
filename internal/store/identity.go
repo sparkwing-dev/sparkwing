@@ -41,10 +41,22 @@ func claimEmailTx(ctx context.Context, tx *storeTx, accountID, email string, at 
 	return err
 }
 
-// releaseEmailTx withdraws every other account's verified claim on email. Sign-up,
-// sign-in through any identity and linking all call it when a provider newly
-// asserts the address, so no older holder keeps a cached claim; accounts are never merged.
+// releaseEmailTx makes keepID the owner of email and withdraws every other
+// account's cached claim on it. Sign-up, sign-in through any identity and
+// linking all call it when a provider newly asserts the address; accounts are
+// never merged. The email_owners upsert is the serialization point: concurrent
+// assertions queue on its row, so exactly one account ends as owner.
 func releaseEmailTx(ctx context.Context, tx *storeTx, email, keepID string, at int64) error {
+	owner := `DELETE FROM email_owners WHERE email=?`
+	args := []any{email}
+	if keepID != "" {
+		owner = `INSERT INTO email_owners(email,account_id,updated_at) VALUES (?,?,?)
+		ON CONFLICT(email) DO UPDATE SET account_id=excluded.account_id, updated_at=excluded.updated_at`
+		args = []any{email, keepID, at}
+	}
+	if _, err := tx.execContext(ctx, owner, args...); err != nil {
+		return err
+	}
 	if _, err := tx.execContext(ctx, `
 		UPDATE accounts SET email_verified = 0, updated_at = ?
 		WHERE email = ? AND email_verified = 1 AND id <> ?`, at, email, keepID); err != nil {
@@ -697,7 +709,7 @@ func (o *Operator) AccountMemberships(ctx context.Context, accountID string) (_ 
 }
 
 // OpenInvitationsForAccount lists the unaccepted, unexpired invitations, from
-// every team, to the addresses the account's current sign-ins verify.
+// every team, to the addresses the account currently owns.
 func (o *Operator) OpenInvitationsForAccount(ctx context.Context, accountID string) (out []Invitation, err error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
@@ -706,7 +718,7 @@ func (o *Operator) OpenInvitationsForAccount(ctx context.Context, accountID stri
 	defer rollbackOrLog(tx)
 
 	rows, err := tx.queryContext(ctx, invitationSelect+`
-		WHERE i.email IN (SELECT email FROM identities WHERE account_id = ? AND email_verified = 1)
+		WHERE i.email IN (SELECT email FROM email_owners WHERE account_id = ?)
 		  AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
 		ORDER BY i.created_at`, accountID, tx.now(ctx).UTC().UnixNano())
 	if err != nil {
@@ -767,12 +779,12 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 		return none, err
 	}
 	// safety: the address check runs before the expiry and use checks, so a
-	// holder of someone else's invitation learns nothing about its state. Only a
-	// current sign-in proves an address; the account row's copy outlives the
+	// holder of someone else's invitation learns nothing about its state. Only the
+	// address's one current owner may accept; the account row's copy outlives the
 	// identity that verified it.
 	var proves bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM identities
-		WHERE account_id = ? AND email = ? AND email_verified = 1)`, accountID, email).Scan(&proves); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM email_owners
+		WHERE account_id = ? AND email = ?)`, accountID, email).Scan(&proves); err != nil {
 		return none, err
 	}
 	if !proves {

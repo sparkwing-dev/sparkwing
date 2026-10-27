@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -770,5 +771,92 @@ func TestNewAddressOwnerWithdrawsALinkedIdentitysClaim(t *testing.T) {
 	}
 	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, successor.Account.ID), inv.ID); err != nil {
 		t.Fatalf("new holder accepting = %v", err)
+	}
+}
+
+// Two accounts linking sign-ins that assert the same address at the same
+// time leave exactly one owner, whom invitations to the address recognize.
+func TestConcurrentLinksLeaveOneAddressOwnerPostgres(t *testing.T) {
+	st := storetest.OpenPostgres(t)
+	ctx := context.Background()
+	first := signIn(t, st, "g-first", "first@example.com")
+	second := signIn(t, st, "g-second", "second@example.com")
+	if _, err := st.DB().Exec(`CREATE FUNCTION wait_identity_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+	BEGIN PERFORM pg_advisory_xact_lock_shared(74120914); RETURN NEW; END $$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`CREATE TRIGGER wait_identity_insert AFTER INSERT ON identities
+		FOR EACH ROW EXECUTE FUNCTION wait_identity_insert()`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	gate, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Rollback()
+	if _, err := gate.ExecContext(ctx, `SELECT pg_advisory_xact_lock(74120914)`); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i, account := range []store.SignInResult{first, second} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := st.LinkIdentity(ctx, account.Account.ID, gh(fmt.Sprint("gh-", i), "shared@corp.example"), time.Now())
+			results <- err
+		}()
+	}
+	for {
+		var waiting int
+		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%INSERT INTO identities%' AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting >= 2 {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("timed out waiting for concurrent links")
+		}
+	}
+	if err := gate.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatalf("concurrent link: %v", err)
+		}
+	}
+	owner := signIn(t, st, "g-owner", "owner@corp.example")
+	inv, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "shared@corp.example", store.RoleReader, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := 0
+	for _, account := range []store.SignInResult{first, second} {
+		got, err := st.AsOperator().OpenInvitationsForAccount(ctx, account.Account.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed += len(got)
+	}
+	if listed != 1 {
+		t.Fatalf("%d accounts list the shared address's invitation, want exactly one owner", listed)
+	}
+	accepted := 0
+	for _, account := range []store.SignInResult{first, second} {
+		if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, account.Account.ID), inv.ID); err == nil {
+			accepted++
+		} else if !errors.Is(err, store.ErrEmailMismatch) && !errors.Is(err, store.ErrInvitationClosed) {
+			t.Fatal(err)
+		}
+	}
+	if accepted != 1 {
+		t.Fatalf("%d accounts accepted, want exactly one", accepted)
 	}
 }

@@ -141,7 +141,7 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 		t.Fatalf("invitation timestamps: %+v", invitation)
 	}
 	s.SetTestClock(t, func() time.Time { return *now })
-	rewriteSchemaExec(t, s.db, `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('google','owner','owner','invited@example.test',1,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO email_owners(email,account_id,updated_at) VALUES ('invited@example.test','owner',1)`)
 	listed, err := s.AsOperator().OpenInvitationsForAccount(t.Context(), "owner")
 	if err != nil || len(listed) != 1 || !listed[0].CreatedAt.Equal(*now) || !listed[0].ExpiresAt.Equal(invitation.ExpiresAt) {
 		t.Fatalf("invitation read: %+v %v", listed, err)
@@ -162,6 +162,7 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('invited',?,1,1,1)`, invitation.Email)
 	rewriteSchemaExec(t, s.db, `INSERT INTO identities(provider,subject,account_id,email,email_verified,created_at) VALUES ('google','invited','invited',?,1,1)`, invitation.Email)
+	rewriteSchemaExec(t, s.db, `UPDATE email_owners SET account_id='invited' WHERE email=?`, invitation.Email)
 	raw, _, _, err := s.AsOperator().CreateIdentityAccountSession(t.Context(), Account{ID: "invited"}, "", ProviderGoogle, "invited", time.Hour)
 	if err != nil {
 		t.Fatal(err)
