@@ -299,7 +299,7 @@ func TestBlobRecordsReadSetEnforcesCacheFallbackProvenance(t *testing.T) {
 func TestVerifiedDefaultReaderRequiresDefaultEvidenceInItsOwnScope(t *testing.T) {
 	s, records, intent := blobRecordFixture(t)
 	intent.Authority.Ref = blob.RefFacts{}
-	app := runspec.AppFacts{Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: fixtureFeatureSHA, DeliveryKey: "main-delivery", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: time.Unix(1, 0).UTC()}
+	app := runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: fixtureFeatureSHA, DeliveryKey: "main-delivery", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: time.Unix(1, 0).UTC()}
 	verified, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "ci")
 	if err != nil || verified.Trust() != runspec.TrustVerifiedDefault {
 		t.Fatalf("fixture provenance %v: %v", verified.Trust(), err)

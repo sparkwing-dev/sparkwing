@@ -273,7 +273,7 @@ func TestBlobMaterializationReadSelectorsCannotBeAliasedProperty(t *testing.T) {
 func TestHostScopedRetryTreatsAnUncopyableSourceAsAMiss(t *testing.T) {
 	s, tenant, request := blobMaterializationFixture(t)
 	request.MaterializeOnly = true
-	app := runspec.AppFacts{Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: fixtureFeatureSHA, DeliveryKey: "main-delivery", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: time.Unix(1, 0).UTC()}
+	app := runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, Ref: "refs/heads/main", SHA: fixtureFeatureSHA, DeliveryKey: "main-delivery", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: time.Unix(1, 0).UTC()}
 	verified, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "ci")
 	if err != nil {
 		t.Fatal(err)

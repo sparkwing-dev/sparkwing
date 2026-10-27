@@ -799,8 +799,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`CloudJobBinding`](../../../internal/runners/launcher/job_types.go) | CloudJobBinding is derived from an awarded row, not the launcher's requested team or fence. |
 | [`CloudJobAward`](../../../internal/runners/launcher/job_types.go) | CloudJobAward carries only a single-use bootstrap, never the launcher's root credential. |
 | [`CloudNodeReservation`](../../../internal/runners/launcher/job_types.go) | CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped. |
-| [`CloudNetworkEvidence`](../../../internal/runners/launcher/job_types.go) | CloudNetworkEvidence comes from enforcement probes, not the presence of NetworkPolicy YAML. |
-| [`CloudBoundary`](../../../internal/runners/launcher/job_types.go) | CloudBoundary reserves one Job per team-dedicated node and verifies enforced network isolation. |
+| [`CloudBoundary`](../../../internal/runners/launcher/job_types.go) | CloudBoundary reserves one Job per team-dedicated node. Network isolation is the cluster's NetworkPolicy enforcement, which the operator verifies. |
 | [`CloudJobResources`](../../../internal/runners/launcher/job_types.go) | CloudJobResources couples Secret cleanup and node ownership with the Job it authorizes. |
 | [`BuildJob`](../../../internal/runners/launcher/job.go) | BuildJob is the sole builder for plan, eval and work, including run-host-dispatched work. |
 
