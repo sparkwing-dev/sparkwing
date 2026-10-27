@@ -164,4 +164,3 @@ func TestSourceBundleOverS3ReachesFetcher(t *testing.T) {
 		t.Fatalf("bundle HEAD=%s, want %s", entry.SHA, sha)
 	}
 }
-
