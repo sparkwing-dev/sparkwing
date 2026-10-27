@@ -80,7 +80,9 @@ func trustMatrixRows() []trustMatrixRow {
 	local.Origin = runspec.OriginLocal
 	actions := matrixGit(matrixRepo, "refs/heads/main", matrixMain)
 	actions.Origin = runspec.OriginActions
-	push := capability.Principal{Capability: capability.Capability{Team: matrixTeam, Subject: capability.Subject{Kind: capability.SubjectService, ID: "actions"}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: string(matrixRepo), Repository: "acme/repo", Ref: "refs/heads/main", SHA: matrixMain, WorkflowRunID: "1"}}}}
+	push := func(runnerEnvironment string) capability.Principal {
+		return capability.Principal{Capability: capability.Capability{Team: matrixTeam, Subject: capability.Subject{Kind: capability.SubjectService, ID: "actions"}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: string(matrixRepo), Repository: "acme/repo", Ref: "refs/heads/main", SHA: matrixMain, WorkflowRunID: "1", RunnerEnvironment: runnerEnvironment}}}}
+	}
 	child := func(parent string, repo runspec.RepoKey, sha string) IntakeRequest {
 		in := matrixGit(repo, "refs/heads/main", sha)
 		in.Origin = runspec.OriginChild
@@ -101,8 +103,8 @@ func trustMatrixRows() []trustMatrixRow {
 		{key: "console-branch-head", title: "Console or CLI run at a branch head the controller fetched", request: IntakeRequest{FetchedRepositoryID: 7, Request: upload}, principal: alice},
 		{key: "cli-upload", title: "CLI upload of a connected repository", request: IntakeRequest{Request: upload}, principal: alice},
 		{key: "local", title: "Local run or --runner here", request: IntakeRequest{Request: local}, principal: capability.Principal{Capability: capability.Capability{Team: matrixTeam, Subject: capability.Subject{Kind: capability.SubjectLocal, ID: "laptop"}}}},
-		{key: "actions-github-hosted", title: "GitHub Actions push binding, GitHub-hosted runner", request: IntakeRequest{Request: actions}, principal: push},
-		{key: "actions-self-hosted", title: "GitHub Actions push binding, self-hosted runner", request: IntakeRequest{Request: actions}, principal: push},
+		{key: "actions-github-hosted", title: "GitHub Actions push binding, GitHub-hosted runner", request: IntakeRequest{Request: actions}, principal: push(githubHostedRunner)},
+		{key: "actions-self-hosted", title: "GitHub Actions push binding, self-hosted runner", request: IntakeRequest{Request: actions}, principal: push("self-hosted")},
 		{key: "child-same-commit", title: "Child of the default-branch push at its parent's commit", request: child("run-app-push-default", matrixRepo, matrixMain), parent: "app-push-default"},
 		{key: "child-other-commit", title: "Child of the default-branch push at another commit", request: child("run-app-push-default", matrixRepo, matrixOther), parent: "app-push-default"},
 		{key: "child-other-repo", title: "Child of the default-branch push in another repository", request: child("run-app-push-default", "gh:8", matrixMain), parent: "app-push-default"},
@@ -128,19 +130,6 @@ var matrixHosts = []matrixHost{
 	{column: "pool_reserved_trust_any", pools: `["deploy"]`, trust: capability.TrustAny, launcher: true},
 	{column: "pool_verified_only", pools: `["main-only"]`, trust: capability.TrustVerifiedDefault, launcher: true},
 	{column: "pool_reserved_on_machine", pools: `["deploy"]`},
-}
-
-// sp3tCells names the cells the SP3T lane is changing; the lead refreshes them
-// after that merge. Host-scoped cache writes and high_trust land there, and so do
-// the Actions runner environment and the OIDC runner_environment claim.
-func sp3tCell(column string, p runspec.Provenance) bool {
-	switch column {
-	case "oidc_runner_environment":
-		return true
-	case "cache_write", "cache_write_default_branch":
-		return p.Verified() || p.Trust() == runspec.TrustActions
-	}
-	return false
 }
 
 func TestTrustMatrix(t *testing.T) {
@@ -187,13 +176,14 @@ func TestTrustMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", row.key, err)
 		}
+		hostCells, err := matrixHostCells(ctx, s, row, request)
+		if err != nil {
+			t.Fatalf("%s: hosts: %v", row.key, err)
+		}
+		cells = append(cells, hostCells...)
 		fmt.Fprintf(&out, "\n== %s: %s\n", row.key, row.title)
 		for _, cell := range cells {
-			line := fmt.Sprintf("%-28s %s", cell[0], cell[1])
-			if sp3tCell(cell[0], p) {
-				line += "  # SP3T"
-			}
-			out.WriteString(strings.TrimRight(line, " ") + "\n")
+			out.WriteString(strings.TrimRight(fmt.Sprintf("%-50s %s", cell[0], cell[1]), " ") + "\n")
 		}
 		var claim string
 		for _, dialect := range dialects {
@@ -252,15 +242,10 @@ func matrixCells(r runspec.SealedRequest) ([][2]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	scope, err := awardDataScope(awardRow{team: matrixTeam, run: r.RunID, node: "job", repo: string(r.Request.Git.Repository.Key), attempt: 1}, r, capability.Capability{Unit: capability.UnitNode})
+	scope, err := awardDataScope(awardRow{team: matrixTeam, run: r.RunID, node: "job", repo: string(r.Request.Git.Repository.Key), attempt: 1}, r, capability.Capability{Unit: capability.UnitNode}, "")
 	if err != nil {
 		return nil, err
 	}
-	facts, err := provenanceRefFacts(r)
-	if err != nil {
-		return nil, err
-	}
-	record := blob.Record{Key: blob.RecordKey{Scope: blob.Scope{Ref: facts.Scope}}, RefFacts: facts}
 	return [][2]string{
 		{"trust", string(p.Trust())},
 		{"pipeline_secrets", pipeline},
@@ -270,8 +255,6 @@ func matrixCells(r runspec.SealedRequest) ([][2]string, error) {
 		{"oidc_ref", matrixOr(oidc.Ref, 0)},
 		{"oidc_sha", matrixSHA(oidc.SHA)},
 		{"oidc_runner_environment", "(no such claim)"},
-		{"cache_write", scope.WriteRef},
-		{"cache_write_default_branch", yesNo(record.VerifiedDefault())},
 		{"cache_reads", strings.Join(scope.ReadRefs, " ")},
 		{"default_branch_work_go", yesNo(p.DefaultBranchWork())},
 	}, nil
@@ -426,9 +409,14 @@ const trustMatrixHeader = `# Within-team trust matrix: generated by TestTrustMat
 # oidc_*                       oidcIdentity, which reads Provenance.OIDC(); the subject's runner segment is the
 #                              claimant's kind (runner, actions, personal, user, service) and is not shown
 # oidc_runner_environment      no such claim exists in this code
-# cache_write / cache_reads    awardDataScope for a job claim (WriteRef, ReadRefs); not host-dependent here
-# cache_write_default_branch   blob.Record.VerifiedDefault over provenanceRefFacts: records others restore as main
+# cache_reads                  awardDataScope for a job claim (ReadRefs)
 # default_branch_work_go       Provenance.DefaultBranchWork()
+# actions_runner_fresh_host    claimantFactsTx FreshHost for the Actions binding's signed runner_environment
+# cache_write_<host>           awardDataScope WriteRef with awardCacheHostTx's writer for that host:
+#                              fresh_host (launcher pod, Cloud, GitHub-hosted Actions), long_lived (plain
+#                              machine, persistent or self-hosted runner) and long_lived_high_trust (the same
+#                              host on a team with high_trust on); host-<machine> stands for the host's hash
+# cache_write_default_branch_<host>  blob.Record.VerifiedDefault over runRefFacts: records others restore as main
 # host_* / pool_*              claim SQL freshPod AND poolTrust for that claimant (SQLite, and PostgreSQL when
 #                              SPARKWING_TEST_PG_URL is set, which must agree):
 #   host_fresh_pod             launcher pod, no pools, default trust
@@ -440,8 +428,57 @@ const trustMatrixHeader = `# Within-team trust matrix: generated by TestTrustMat
 #   pool_reserved_on_machine   plain machine in a reserved pool, default trust
 # default_branch_work_sql      claim SQL defaultBranchWork
 # fresh_host_required          freshPod refuses persistent Kubernetes runners exactly when default_branch_work_sql
-#
-# "# SP3T" marks cells the SP3T lane is changing (host-scoped cache writes, high_trust, Actions runner
-# environment, OIDC runner_environment); the lead refreshes them after that merge. high_trust does not
-# exist in this code, so no row varies by it.
 `
+
+// matrixHostCells renders the cells the claimant's host decides: whether an
+// Actions runner counts as fresh (claimantFactsTx), and on a fresh host, a
+// long-lived host and a long-lived host of a high-trust team, the cache scope
+// the award writes (awardCacheHostTx, awardDataScope) and whether that record is
+// one others restore as the default branch (runRefFacts).
+func matrixHostCells(ctx context.Context, s *Store, row trustMatrixRow, r runspec.SealedRequest) ([][2]string, error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var cells [][2]string
+	if row.principal.Capability.Binding.Kind == capability.BindingPush {
+		facts, err := claimantFactsTx(ctx, tx, []authorityNode{{principal: row.principal}}, r.Request)
+		if err != nil {
+			return nil, err
+		}
+		cells = append(cells, [2]string{"actions_runner_fresh_host", yesNo(facts.FreshHost)})
+	}
+	for _, host := range []struct {
+		name      string
+		facts     claimantFacts
+		highTrust bool
+	}{
+		{"fresh_host", claimantFacts{FreshHost: true}, false},
+		{"long_lived", claimantFacts{Host: matrixTeam + "/machine"}, false},
+		{"long_lived_high_trust", claimantFacts{Host: matrixTeam + "/machine"}, true},
+	} {
+		if _, err := tx.execContext(ctx, `UPDATE teams SET high_trust=? WHERE name=?`, boolInt(host.highTrust), matrixTeam); err != nil {
+			return nil, err
+		}
+		writer, err := awardCacheHostTx(ctx, tx, matrixTeam, host.facts)
+		if err != nil {
+			return nil, err
+		}
+		scope, err := awardDataScope(awardRow{team: matrixTeam, run: r.RunID, node: "job", repo: string(r.Request.Git.Repository.Key), attempt: 1}, r, capability.Capability{Unit: capability.UnitNode}, writer)
+		if err != nil {
+			return nil, err
+		}
+		facts, err := runRefFacts(r, writer)
+		if err != nil {
+			return nil, err
+		}
+		record := blob.Record{Key: blob.RecordKey{Scope: blob.Scope{Ref: facts.Scope}}, RefFacts: facts}
+		write := scope.WriteRef
+		if writer != "" {
+			write = strings.ReplaceAll(write, writer, hostWriterPrefix+"<machine>")
+		}
+		cells = append(cells, [2]string{"cache_write_" + host.name, write}, [2]string{"cache_write_default_branch_" + host.name, yesNo(record.VerifiedDefault())})
+	}
+	return cells, nil
+}
