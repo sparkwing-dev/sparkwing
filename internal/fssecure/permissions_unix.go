@@ -6,12 +6,27 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"slices"
 
 	"golang.org/x/sys/unix"
 )
 
 func tighten(path string, mode fs.FileMode) error {
 	return os.Chmod(path, mode)
+}
+
+// fsGroupMode keeps the setgid group access kubelet gives a pod volume under
+// the pod's fsGroup: removing it makes fsGroupChangePolicy OnRootMismatch
+// relabel the whole volume group-writable on every mount.
+func fsGroupMode(info fs.FileInfo) fs.FileMode {
+	if info.Mode()&fs.ModeSetgid == 0 {
+		return 0
+	}
+	gid, groups, err := fileGroup(info)
+	if err != nil || !slices.Contains(groups, int(gid)) {
+		return 0
+	}
+	return info.Mode() & (fs.ModeSetgid | 0o070)
 }
 
 func tightenOpen(file *os.File, mode fs.FileMode) error { return file.Chmod(mode) }

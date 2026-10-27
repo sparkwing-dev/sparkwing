@@ -354,7 +354,7 @@ func TestHereCredentialsRefuseWritableTargetsAndEscapingSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0o664); err != nil {
+	if err := os.Chmod(path, 0o662); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.load("https://one.example", "run"); err == nil {

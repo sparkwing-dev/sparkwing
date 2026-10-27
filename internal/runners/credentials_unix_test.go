@@ -16,7 +16,7 @@ func TestCredentialRefusesWritableTargetsAndAcceptsProjectedLinks(t *testing.T) 
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0o660); err != nil {
+	if err := os.Chmod(path, 0o662); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := FileBearer(directory); err == nil || strings.Contains(err.Error(), raw) {

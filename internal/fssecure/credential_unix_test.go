@@ -53,3 +53,54 @@ func TestOpenPrivateCredentialAcceptsGroupReadUnderTheProcessGroup(t *testing.T)
 		}
 	}
 }
+
+func TestCredentialGroupWriteOnlyForOwnGroups(t *testing.T) {
+	own := []int{100, 65534}
+	for _, tc := range []struct {
+		perm os.FileMode
+		gid  uint32
+		ok   bool
+	}{
+		{0o600, 1, true},
+		{0o660, 65534, true},
+		{0o660, 4242, false},
+		{0o662, 65534, false},
+		{0o602, 65534, false},
+	} {
+		if err := groupWritableOnlyByOwnGroup(tc.perm, tc.gid, own); (err == nil) != tc.ok {
+			t.Errorf("groupWritableOnlyByOwnGroup(%04o, gid %d) = %v, want ok=%v", tc.perm, tc.gid, err, tc.ok)
+		}
+	}
+}
+
+// Kubelet's fsGroupChangePolicy OnRootMismatch skips relabelling only when the
+// volume root keeps setgid group rwx; taking it away made every controller
+// restart re-add group write to the credential epoch.
+func TestEnsureDirKeepsTheFSGroupModeOfAPodVolume(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chown(dir, -1, os.Getegid()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, os.ModeSetgid|0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode() & (os.ModeSetgid | os.ModePerm); got != os.ModeSetgid|0o770 {
+		t.Fatalf("pod volume mode = %v, want setgid 0770", got)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("plain directory = %v %v, want 0700", info, err)
+	}
+}

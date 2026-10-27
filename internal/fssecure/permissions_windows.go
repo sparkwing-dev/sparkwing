@@ -12,6 +12,8 @@ import (
 
 func tighten(string, fs.FileMode) error { return nil }
 
+func fsGroupMode(fs.FileInfo) fs.FileMode { return 0 }
+
 func tightenOpen(file *os.File, _ fs.FileMode) error {
 	return tightenPrivateOpen(file, func(path string) (*os.File, error) {
 		native, err := privateFileNativePath(path)
