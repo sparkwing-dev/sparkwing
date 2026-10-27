@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -32,13 +33,13 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 				t.Fatal(err)
 			}
 			var conflict *apierr.Error
-			if err := tenant.DeleteAuthorizedRun(t.Context(), a); !errors.As(err, &conflict) || conflict.Code != apierr.Conflict {
+			if err := tenant.DeleteAuthorizedRun(t.Context(), a, nil); !errors.As(err, &conflict) || conflict.Code != apierr.Conflict {
 				t.Fatalf("active deletion: %v", err)
 			}
 			if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: finish.Transition.RunID, Actor: finish.Transition.Actor, Cause: runstate.RunFinish}); err != nil {
 				t.Fatal(err)
 			}
-			if err := tenant.DeleteAuthorizedRun(t.Context(), a); err == nil {
+			if err := tenant.DeleteAuthorizedRun(t.Context(), a, nil); err == nil {
 				t.Fatal("terminal run with an unsettled owner was deleted")
 			}
 			if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err != nil {
@@ -82,14 +83,14 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := tenant.DeleteAuthorizedRun(t.Context(), forbidden); err == nil {
+			if err := tenant.DeleteAuthorizedRun(t.Context(), forbidden, nil); err == nil {
 				t.Fatal("editor deleted another account's run")
 			}
 			if _, err := s.DB().Exec(`INSERT INTO audit_events(id,ts,team,kind,subject_id,run_id) VALUES ('secret-audit',1,?,'secret.released','secret-release',?),('git-audit',1,?,'git_credential.released','git-release',?)`, tenant.Team(), row.ID, tenant.Team(), row.ID); err != nil {
 				t.Fatal(err)
 			}
 			other := tenantFor(t, s, "other")
-			if err := other.DeleteAuthorizedRun(t.Context(), a); err == nil {
+			if err := other.DeleteAuthorizedRun(t.Context(), a, nil); err == nil {
 				t.Fatal("foreign handle deleted run")
 			}
 			if deletingRole == "owner-other" {
@@ -105,10 +106,35 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 					t.Fatal(err)
 				}
 			}
+			// Log objects go before the records: a failed delete keeps the run and its counted log slot.
+			if _, err := s.DB().Exec(`INSERT INTO log_streams(team,run_id,id,subject_kind,generation,unit_kind,prefix,retention_class,created_at,updated_at) VALUES (?,?,'stream','owner_unit',1,'plan','stream','r30',1,1)`, tenant.Team(), row.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.DB().Exec(`INSERT INTO log_slots(team,run_id,stream_id,generation,n,size,committed,object_key,created_at) VALUES (?,?,'stream',1,1,8,1,'key',1)`, tenant.Team(), row.ID); err != nil {
+				t.Fatal(err)
+			}
+			retained, err := tenant.StorageRetainedBytes(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			failing := func(context.Context) error { return errors.New("object store unavailable") }
+			if err := tenant.DeleteAuthorizedRun(t.Context(), a, failing); err == nil {
+				t.Fatal("run deleted although its log objects were not")
+			}
+			if after, err := tenant.StorageRetainedBytes(t.Context()); err != nil || after != retained {
+				t.Fatalf("retained after a failed log delete = %d, want %d: %v", after, retained, err)
+			}
+			if _, err := tenant.ReadRun(t.Context(), row.ID); err != nil {
+				t.Fatalf("run lost after a failed log delete: %v", err)
+			}
+			deletes := 0
 			for range 2 {
-				if err := tenant.DeleteAuthorizedRun(t.Context(), a); err != nil {
+				if err := tenant.DeleteAuthorizedRun(t.Context(), a, func(context.Context) error { deletes++; return nil }); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if deletes != 1 {
+				t.Fatalf("log objects deleted %d times; want once, before the records", deletes)
 			}
 			if _, err := tenant.ReadRun(t.Context(), row.ID); !errors.Is(err, store.ErrNotFound) {
 				t.Fatalf("deleted run: %v", err)
@@ -126,7 +152,7 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 			if err := tenant.RevokeAuthority(t.Context(), runstate.Actor{Authority: a.Principal.Authority}, a.Principal.Authority); err != nil {
 				t.Fatal(err)
 			}
-			if err := tenant.DeleteAuthorizedRun(t.Context(), a); err == nil {
+			if err := tenant.DeleteAuthorizedRun(t.Context(), a, nil); err == nil {
 				t.Fatal("revoked authority retried cleanup")
 			}
 		})
@@ -161,7 +187,7 @@ func assertReusedRunIDRetainsEveryDeletionAudit(t *testing.T, s *store.Store) {
 			t.Fatal(err)
 		}
 		for range 2 {
-			if err := tn.DeleteAuthorizedRun(t.Context(), a); err != nil {
+			if err := tn.DeleteAuthorizedRun(t.Context(), a, nil); err != nil {
 				t.Fatal(err)
 			}
 		}

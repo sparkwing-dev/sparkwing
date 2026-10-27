@@ -250,7 +250,7 @@ type browserRunDeleter struct {
 	seen capability.Authorized
 }
 
-func (d *browserRunDeleter) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized) error {
+func (d *browserRunDeleter) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized, _ func(context.Context) error) error {
 	d.seen = a
 	return nil
 }

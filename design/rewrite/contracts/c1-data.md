@@ -2420,10 +2420,10 @@ local publication transport and physical bytes remain integration obligations.
 | `match.Profile`, `match.Demand`, `match.Evaluate` | Match granted reservations against sealed requirements and authorized pools. |
 | `blob.LogSubjectKind`, `blob.LogUnitKind` | Select attempt versus unit logs and the persisted owner-unit kind. |
 | `blob.LogSubject`, `blob.LogUnit`, `blob.LogSource`, `blob.LogSubject.Validate` | Carry and validate one fenced log identity. |
-| `blob.LogSigningRequest`, `blob.LogUploadURL`, `blob.LogUploadBatch` | Request and return bounded segment PUT slots for that identity. |
-| `blob.LogUploadCheck`, `blob.LogTransport.VerifyUpload` | Verify the exact stored payload after an uncertain PUT under current writer authority. |
+| `blob.LogSigningRequest`, `blob.LogUploadURL`, `blob.LogUploadBatch` | Request and return bounded segment PUT slots for that identity, each with one upload deadline fixed at first signing under the [one log-slot rule](../../../internal/store/STORE-DATA.md#log-slot-accounting). |
+| `blob.LogUploadCheck`, `blob.LogTransport.VerifyUpload` | Verify the exact stored payload at commit after an uncertain PUT under current writer authority. |
 | `logseg.UploadVerifier` | Derive one authorized object's key and check its stored size and digest after successful close. |
-| `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads, verify uncertain writes and proxy authenticated reads through the controller. |
+| `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads within each slot's fixed deadline, verify uncertain writes and proxy authenticated reads through the controller. |
 | `SegmentCommit`, `runstate.LogSegments`, `Tenant.ReadLogSegments` | Commit and read persisted segments under the same subject fence. |
 | `Operator.SealAbandonedLogStreams` | Seal abandoned execution streams without changing execution results. |
 

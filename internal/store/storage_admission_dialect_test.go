@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -370,6 +371,40 @@ func TestExpiredLogObjectsStopCounting(t *testing.T) {
 		}
 		if grew := f.retained(t) - before; grew != 5 {
 			t.Fatalf("after expiry the slots count %d bytes; want the recent 5", grew)
+		}
+	})
+}
+
+// A slot's upload deadline is fixed at first signing: re-signing returns the same deadline, and once it has passed
+// an uncommitted slot cannot be signed again, so no live URL exists to upload late, even near the class age. A
+// committed slot still reports committed.
+func TestLogSlotUploadDeadlineIsFixedAtFirstSigning(t *testing.T) {
+	bothDialects(t, func(t *testing.T, target *storetest.Target) {
+		f := newGrowthFixture(t, target)
+		fundTeam(t, f.tenant, "pay-deadline")
+		first, err := f.tenant.OpenLogSlot(t.Context(), f.logSubject(), f.holder, 1, 3)
+		if err != nil || !first.UploadExpires.Equal(f.now.Add(limits.LogUploadURLTTL)) {
+			t.Fatalf("first signing = %+v, %v; want a deadline one URL lifetime away", first, err)
+		}
+		f.now = f.now.Add(time.Minute)
+		again, err := f.tenant.OpenLogSlot(t.Context(), f.logSubject(), f.holder, 1, 3)
+		if err != nil || !again.UploadExpires.Equal(first.UploadExpires) {
+			t.Fatalf("re-signing = %+v, %v; want the first deadline", again, err)
+		}
+		days, _ := blob.LogClassDays(f.retention)
+		age := f.now.Add(-time.Duration(days)*24*time.Hour + time.Hour).UnixNano()
+		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, "UPDATE log_slots SET created_at=? WHERE team=?"), age, f.tenant.Team()); err != nil {
+			t.Fatal(err)
+		}
+		var conflict *apierr.Error
+		if _, err := f.tenant.OpenLogSlot(t.Context(), f.logSubject(), f.holder, 1, 3); !errors.As(err, &conflict) || conflict.Code != apierr.Conflict {
+			t.Fatalf("re-signing near the class age = %v; want a conflict", err)
+		}
+		if err := f.recordSegment(t); err != nil {
+			t.Fatal(err)
+		}
+		if slot, err := f.tenant.OpenLogSlot(t.Context(), f.logSubject(), f.holder, 1, 3); err != nil || !slot.Committed {
+			t.Fatalf("re-signing a committed slot past its deadline = %+v, %v; want it reported committed", slot, err)
 		}
 	})
 }

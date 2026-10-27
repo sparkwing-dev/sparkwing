@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 type expiredLogObject struct {
@@ -43,12 +44,14 @@ func (o *Operator) DeleteExpiredLogObjects(ctx context.Context, limit int, objec
 			if !ok {
 				return fmt.Errorf("storage: invalid persisted log retention class %q", class)
 			}
+			// safety: a slot whose upload deadline has not passed is never retired, so no live URL can store an
+			// object after its slot stops counting.
 			cutoff, err := retentionBoundary(tx.now(ctx), int64(days))
 			if err != nil {
 				return err
 			}
 			rows, err := tx.queryContext(ctx, `SELECT l.team,l.run_id,l.stream_id,l.n,l.object_key FROM log_slots l JOIN log_streams s ON s.team=l.team AND s.run_id=l.run_id AND s.id=l.stream_id
-				WHERE s.retention_class=? AND l.created_at<=? ORDER BY l.created_at,l.team,l.run_id,l.stream_id,l.n LIMIT ?`, class, cutoff.UnixNano(), limit-len(expired))
+				WHERE s.retention_class=? AND l.created_at<=? AND l.created_at<=? ORDER BY l.created_at,l.team,l.run_id,l.stream_id,l.n LIMIT ?`, class, cutoff.UnixNano(), tx.now(ctx).Add(-limits.LogUploadURLTTL).UnixNano(), limit-len(expired))
 			if err != nil {
 				return err
 			}

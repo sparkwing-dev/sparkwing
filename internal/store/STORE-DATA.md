@@ -119,6 +119,17 @@ lifecycle rule is a backstop set longer than the class; Sparkwing never infers
 that one deleted an object. Overcounting happens only when a client signs for
 more bytes than it uploads.
 
+A slot's upload authority has one fixed lifetime: it ends at first signing plus
+`limits.LogUploadURLTTL` (fifteen minutes). Re-signing returns a URL with that
+same absolute expiry and is refused (`409`) after it unless the slot is
+committed, which still reports committed. No live URL can therefore store an
+object after expiry or deletion retires its slot, and the expiry query also
+requires the deadline to have passed. Explicit run deletion checks the run is
+deletable, deletes its log objects, then deletes the records, so the slots
+cascade only after their objects are gone; a failed object delete refuses the
+deletion and keeps the run, its slots and their counted bytes. Team deletion
+deletes the team's objects before its rows in the same way.
+
 Download accounting uses `Tenant.ChargeDownload`. The raw Store method is
 removed. The request accepts the existing cap policy, with no team or caller
 clock. The tenant owns the team and the store owns time.

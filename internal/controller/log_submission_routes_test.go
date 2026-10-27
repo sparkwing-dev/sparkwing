@@ -283,7 +283,7 @@ func TestLogSigningRefusesATeamAtItsStorageLimit(t *testing.T) {
 		}
 		return engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(encoded), status)
 	}
-	sign(1, 3, http.StatusOK)
+	firstURL := sign(1, 3, http.StatusOK)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -293,10 +293,19 @@ func TestLogSigningRefusesATeamAtItsStorageLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A signed slot keeps its first size: asking again for more bytes stores no more.
-	sign(1, 4, http.StatusOK)
+	againURL := sign(1, 4, http.StatusOK)
 	if after, err := tenant.StorageRetainedBytes(t.Context()); err != nil || after != before {
 		t.Fatalf("re-signing a 3-byte slot for 4 bytes changed retained storage from %d to %d: %v", before, after, err)
 	}
+	// The URL's deadline is fixed at first signing; once it passes, no new URL exists for the uncommitted slot.
+	var first, again blob.LogUploadURL
+	if json.Unmarshal(firstURL.Body.Bytes(), &first) != nil || json.Unmarshal(againURL.Body.Bytes(), &again) != nil || first.ExpiresAt.IsZero() || !again.ExpiresAt.Equal(first.ExpiresAt) {
+		t.Fatalf("re-signed deadline %v; want the first %v", again.ExpiresAt, first.ExpiresAt)
+	}
+	if _, err := teststore.SQL(t, e.Store).ExecContext(t.Context(), `UPDATE log_slots SET created_at=created_at-? WHERE team='a' AND n=1`, int64(limits.LogUploadURLTTL)); err != nil {
+		t.Fatal(err)
+	}
+	sign(1, 3, http.StatusConflict)
 	if err := tenant.SetStorageQuota(t.Context(), store.StorageQuota{MaxBytesPerRun: 4}); err != nil {
 		t.Fatal(err)
 	}

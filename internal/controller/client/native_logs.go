@@ -85,8 +85,9 @@ func (u *nativeLogUploader) signed(ctx context.Context, index int64, body []byte
 	return slot, err
 }
 
-// put uploads one slot's object. A create-only refusal (HTTP 412) follows a PUT whose response was lost; it proves
-// nothing about the bytes, so put reports success and the commit that follows verifies the stored object.
+// put uploads one slot's object before the slot's fixed upload deadline (STORE-DATA.md, log slot accounting). A
+// create-only refusal (HTTP 412) follows a PUT whose response was lost; it proves nothing about the bytes, so put
+// reports success and the commit that follows verifies the stored object.
 func (u *nativeLogUploader) put(ctx context.Context, target string, headers map[string]string, expiry time.Time, body []byte) error {
 	if err := validateDataTransfer(controllerwire.DataSignedTransfer{URL: target, Headers: headers, ExpiresAt: expiry}); err != nil {
 		return err
@@ -118,7 +119,8 @@ func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segme
 	if err != nil {
 		return err
 	}
-	// safety: a committed slot means an earlier commit succeeded and only its acknowledgement was lost.
+	// safety: a committed slot means an earlier commit succeeded and only its acknowledgement was lost. Re-signing
+	// keeps the slot's first deadline and is refused after it, so a retry never extends upload authority.
 	if !slot.Committed {
 		if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
 			return err

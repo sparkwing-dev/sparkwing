@@ -196,7 +196,9 @@ Filesystem reads remain subject to the client's EOF verification.
 
 Both backends expose `SignLogPut` for the separate tagged-log upload path.
 It returns the URL and its required signed headers. These PUT-only slots expire
-after fifteen minutes and grant no log download access. The filesystem path
+fifteen minutes after the slot's first signing, a deadline re-signing never
+extends (see [log slot accounting](../store/STORE-DATA.md#log-slot-accounting)),
+and grant no log download access. The filesystem path
 enforces the shared segment or manifest size bound and reuses the immutable
 writer. The first payload wins, an identical retry succeeds, and different bytes
 cannot replace it.

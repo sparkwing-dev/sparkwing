@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -46,18 +48,19 @@ func (t *Tenant) prepareLogWriteTx(ctx context.Context, tx *storeTx, subject blo
 	return class, nil
 }
 
-// LogSlot is what a signed log upload may store: its byte size, fixed when first signed, and whether its object is
-// already committed, in which case the uploader has nothing left to send.
+// LogSlot is what a signed log upload may store: its byte size and upload deadline, both fixed when first signed,
+// and whether its object is already committed, in which case the uploader has nothing left to send.
 type LogSlot struct {
 	RetentionClass string
 	Size           int64
+	UploadExpires  time.Time
 	Committed      bool
 }
 
 // OpenLogSlot checks the writer as PrepareLogWrite does and, before the caller signs an upload URL, admits a new
-// slot's bytes through the storage rule. They count as retained from then until Sparkwing deletes the object,
-// whether or not it is ever committed, so a refused team gets no URL and an abandoned upload still counts. Signing the slot
-// again returns its first size, never another.
+// slot's bytes through the storage rule (see STORE-DATA.md, log slot accounting). Signing the slot again returns
+// its first size and upload deadline, never others, and is refused once that deadline has passed unless the slot is
+// committed, so no URL for a slot outlives its first signing by more than limits.LogUploadURLTTL.
 func (t *Tenant) OpenLogSlot(ctx context.Context, subject blob.LogSubject, actor runstate.Actor, index, size int64) (LogSlot, error) {
 	if subject.Team != string(t.team) {
 		return LogSlot{}, authorityError(apierr.Forbidden, "log belongs to another team")
@@ -82,15 +85,20 @@ func (t *Tenant) OpenLogSlot(ctx context.Context, subject blob.LogSubject, actor
 		if err != nil {
 			return err
 		}
+		now := tx.now(ctx)
 		if slot.found {
 			out.Size, out.Committed = slot.size, slot.committed
+			out.UploadExpires = time.Unix(0, slot.created).Add(limits.LogUploadURLTTL)
+			if !slot.committed && !now.Before(out.UploadExpires) {
+				return authorityError(apierr.Conflict, "log upload slot expired before its object was committed")
+			}
 			return nil
 		}
 		key, err := blob.LogObjectKey(subject, out.RetentionClass, index)
 		if err != nil {
 			return err
 		}
-		out.Size = size
+		out.Size, out.UploadExpires = size, now.Add(limits.LogUploadURLTTL)
 		return openLogSlotTx(ctx, tx, t.team, subject.RunID, identity, index, size, key, false)
 	})
 	return out, err

@@ -182,8 +182,10 @@ func (op *Operator) accountHasOtherTeamTx(ctx context.Context, tx *storeTx, acco
 	return count > 0, err
 }
 
-// DeleteAuthorizedRun removes a finished run under current control authority.
-func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized) error {
+// DeleteAuthorizedRun removes a finished run under current control authority. Once the run is known deletable,
+// deleteLogs removes its log objects before the records go; if it fails, the run, its log slots and their counted
+// bytes stay. A nil deleteLogs means the deployment stores no log objects.
+func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized, deleteLogs func(context.Context) error) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
 		if a.Target.Team != string(t.team) || a.Target.RunID == "" || a.Target.NodeID != "" || a.ResultReplay || a.LogTailAttempt != 0 {
 			return bindingRefusal()
@@ -235,6 +237,11 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 		}
 		if _, err := tx.ResolveAuthority(ctx, a.Principal.Authority); err != nil {
 			return err
+		}
+		if deleteLogs != nil {
+			if err := deleteLogs(ctx); err != nil {
+				return &apierr.Error{Code: apierr.Unavailable, Message: "run logs could not be deleted; the run is kept, try again"}
+			}
 		}
 		if _, err := tx.execContext(ctx, `DELETE FROM pipeline_success_pins WHERE team=? AND run_id=?`, t.team, a.Target.RunID); err != nil {
 			return err

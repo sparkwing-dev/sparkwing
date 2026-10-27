@@ -160,12 +160,12 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 // logSlot is one object a log stream may store; index 0 is its final manifest.
 type logSlot struct {
 	found, committed bool
-	size             int64
+	size, created    int64
 }
 
 func logSlotTx(ctx context.Context, tx *storeTx, team Team, run, stream string, index int64) (logSlot, error) {
 	var slot logSlot
-	err := tx.QueryRowContext(ctx, `SELECT size,committed=1 FROM log_slots WHERE team=? AND run_id=? AND stream_id=? AND n=?`+tx.forUpdate(), team, run, stream, index).Scan(&slot.size, &slot.committed)
+	err := tx.QueryRowContext(ctx, `SELECT size,committed=1,created_at FROM log_slots WHERE team=? AND run_id=? AND stream_id=? AND n=?`+tx.forUpdate(), team, run, stream, index).Scan(&slot.size, &slot.committed, &slot.created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return logSlot{}, nil
 	}

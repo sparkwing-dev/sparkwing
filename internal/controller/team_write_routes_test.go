@@ -71,7 +71,7 @@ func (f *teamWriteFake) SetAuthorizedBuildTrust(_ context.Context, a capability.
 	return f.record(a, fmt.Sprint(trust))
 }
 
-func (f *teamWriteFake) DeleteAuthorizedRun(_ context.Context, a capability.Authorized) error {
+func (f *teamWriteFake) DeleteAuthorizedRun(_ context.Context, a capability.Authorized, _ func(context.Context) error) error {
 	return f.record(a, a.Target.RunID)
 }
 

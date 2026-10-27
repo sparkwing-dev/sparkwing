@@ -12,7 +12,8 @@ removed. `CommittedReader` checks the store-selected subject and object keys
 before opening bytes. Physical manifests and object listings grant no read
 authority. The object-side reader and abandoned-log sealer are removed.
 `Operator.SealAbandonedLogStreams` owns abandoned seals under the maintenance
-lease and preserves every committed segment. `AttemptPrefix` is removed.
+lease and preserves every committed segment. `AttemptPrefix` is removed. Slot
+sizes, upload deadlines and deletion follow [log slot accounting](../../store/STORE-DATA.md#log-slot-accounting).
 
 Dashboard completeness uses the selected attempt's persisted finish time and
 `RunSnapshot.StoreNow`. A later job finish or an unrelated attempt cannot extend
@@ -52,7 +53,8 @@ object backends; the controller's final log commit uses it for the manifest.
 `LogClassReady` is part of the controller's physical log binding. S3 validates
 the bucket lifecycle, which must expire the class no sooner than its days.
 Filesystem validates the class handled by its expiry pass.
-The controller runs filesystem expiry after renewing its maintenance lease.
+The controller runs filesystem expiry after renewing its maintenance lease. Both
+are backstops: Sparkwing deletes log objects itself under [log slot accounting](../../store/STORE-DATA.md#log-slot-accounting).
 
 `CommittedReader` calls `ReadLogSegments` before each segment. It checks the returned
 subject, keys and contiguous ranges before reading any object. Each segment must
