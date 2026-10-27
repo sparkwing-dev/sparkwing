@@ -12,6 +12,10 @@ describe("navTabs", () => {
     assert.equal(hrefs("loading").includes("/secrets"), false);
   });
 
+  it("links no team views for a waitlisted account", () => {
+    assert.deepEqual(hrefs("waitlisted"), []);
+  });
+
   it("keeps team secrets under the Team tab for a signed-in member", () => {
     assert.ok(hrefs("ready").includes("/team"));
     assert.equal(hrefs("single-team").includes("/team"), false);

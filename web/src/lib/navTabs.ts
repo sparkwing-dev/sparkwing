@@ -24,7 +24,9 @@ const cloudTabs: NavTab[] = [
 
 // A controller without teams, such as the one `sparkwing web` starts, has
 // no account to hang team pages on, so Secrets sits in the top nav there.
+// A waitlisted account belongs to no team, so every team view would refuse it.
 export function navTabs(status: TeamState["status"]): NavTab[] {
+  if (status === "waitlisted") return [];
   if (status === "single-team") return localTabs;
   if (status === "ready") return [...cloudTabs, teamTab];
   return cloudTabs;

@@ -144,25 +144,27 @@ export function InvitationsForMe({
 // invites someone admits them to that team.
 export function WaitlistNotice({ me }: { me: WaitlistedMe }) {
   return (
-    <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full">
-      <InvitationsForMe me={me} />
-      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
-        <h1 className="text-xl font-bold mb-3">You&apos;re on the list</h1>
-        <div className="space-y-3 text-sm text-[var(--muted)]">
-          <p>
-            We&apos;re letting new accounts in gradually, so we saved yours (
-            <span className="text-[var(--foreground)]">{me.user.email}</span>)
-            on a waitlist without a workspace for now. This also happens when
-            the GitHub account you signed in with is only a few days old.
-          </p>
-          <p>
-            Nothing else is needed from you. Once you&apos;re let in, your
-            workspace will be here the next time you open this page.
-          </p>
-          <p>
-            If a team invites you, you can join it right away; the invitation
-            shows above once it is sent to this address.
-          </p>
+    <div className="flex-1 overflow-y-auto w-full p-6">
+      <div className="max-w-2xl mx-auto">
+        <InvitationsForMe me={me} />
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
+          <h1 className="text-xl font-bold mb-3">You&apos;re on the list</h1>
+          <div className="space-y-3 text-sm text-[var(--muted)]">
+            <p>
+              We&apos;re letting new accounts in gradually, so we saved yours (
+              <span className="text-[var(--foreground)]">{me.user.email}</span>)
+              on a waitlist without a workspace for now. This also happens when
+              the GitHub account you signed in with is only a few days old.
+            </p>
+            <p>
+              Nothing else is needed from you. Once you&apos;re let in, your
+              workspace will be here the next time you open this page.
+            </p>
+            <p>
+              If a team invites you, you can join it right away; the invitation
+              shows above once it is sent to this address.
+            </p>
+          </div>
         </div>
       </div>
     </div>
