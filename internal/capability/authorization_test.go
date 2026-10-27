@@ -129,7 +129,7 @@ func TestDelegateCannotWiden(t *testing.T) {
 // cannot invent one.
 func TestOnlyAPushBoundCredentialDelegatesAPush(t *testing.T) {
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
-	push := Binding{Kind: BindingPush, Push: &PushScope{RepositoryKey: "gh:1", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "1", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/ci.yaml@refs/heads/main"}}
+	push := Binding{Kind: BindingPush, Push: &PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "1", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/ci.yaml@refs/heads/main"}}
 	parent := Principal{Class: CredentialBearer, Authority: AuthorityRef{Kind: AuthorityCapability, ID: "root"}, Capability: Capability{
 		Prefix: "root", Team: "team", Subject: Subject{Kind: SubjectMachine, ID: "machine"}, Audience: Controller, Issuance: Delegate,
 		Grants: []Grant{RunsWrite}, Binding: Binding{Kind: BindingNone},

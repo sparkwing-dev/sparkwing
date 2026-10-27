@@ -49,7 +49,7 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 	if err := lockClaimControllerTx(ctx, tx); err != nil {
 		return err
 	}
-	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, a.Principal.Authority, sameTeam)
 	if err != nil {
 		return err
 	}
@@ -60,9 +60,6 @@ func (t *Tenant) metricAuthorityTx(ctx context.Context, tx *storeTx, a capabilit
 		return err
 	}
 	c, b := p.Capability, p.Capability.Binding
-	if c.Team != string(t.team) {
-		return bindingRefusal()
-	}
 	route, ok := capability.LookupRoute("POST", "/api/v1/runs/{run}/jobs/{job}/"+kind)
 	if !ok {
 		return bindingRefusal()

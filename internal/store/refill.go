@@ -317,8 +317,8 @@ func authorizeRefillTx(ctx context.Context, tx *storeTx, team Team) (*Refill, er
 			}
 			closed = refillWithdrawn
 		}
-		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ? WHERE team = ? AND id = ?`,
-			now.UnixNano(), closed, string(team), r.ID); err != nil {
+		if _, err := tx.execContext(ctx, `UPDATE credit_checkouts SET closed_at = ?, failure = ? WHERE team = ? AND payment_mode = ? AND id = ?`,
+			now.UnixNano(), closed, string(team), mode, r.ID); err != nil {
 			return nil, err
 		}
 		if closed == refillWithdrawn {

@@ -191,7 +191,7 @@ func TestAdmissionRefusalsCommitNothing(t *testing.T) {
 			case "push_mismatch":
 				root := authorityRoot("push", "a")
 				root.Grants = []capability.Grant{capability.RunsWrite}
-				root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Ref: "main", SHA: "different", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
+				root.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:1", Repository: "acme/repo", Ref: "main", SHA: "different", WorkflowRunID: "workflow", WorkflowRunAttempt: "1", WorkflowRef: "acme/repo/.github/workflows/sparkwing.yaml@refs/heads/main"}}
 				authorityPersist(t, tenant.s, root)
 				request.Authority.ID = "push"
 			}
@@ -216,12 +216,12 @@ func TestAdmissionPoolTrustRequiresIndependentFacts(t *testing.T) {
 			facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}
 			if mode == "app" || mode == "fork_app" {
 				request.VerifiedDeliveryID = "delivery"
-				facts.Delivery = &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "refs/heads/main", SHA: fixtureOtherSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", RepositoryID: 1, DeliveryKey: "delivery", Ref: "refs/heads/main", SHA: fixtureOtherSHA, DefaultBranch: "main", VerifiedAt: *now}}}}
+				facts.Delivery = &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "refs/heads/main", SHA: fixtureOtherSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "delivery", Ref: "refs/heads/main", SHA: fixtureOtherSHA, DefaultBranch: "main", VerifiedAt: *now}}}}
 				if mode == "fork_app" {
 					facts.Delivery.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Fork: true}}
 				}
 			}
-			request.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DefaultBranchPush: true, Ref: "main", SHA: "typed"}}
+			request.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", DefaultBranchPush: true, Ref: "main", SHA: "typed"}}
 			tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 				return facts, nil
 			})
@@ -832,7 +832,7 @@ func TestAdmissionRetryKeepsVerifiedAppFactsAndDoesNotReplayDelivery(t *testing.
 	tenant, request, now := intakeFixture(t)
 	request.VerifiedDeliveryID = "delivery"
 	request.Request.Source.Ref = fixtureFeatureSHA
-	facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: "push", DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: fixtureFeatureSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}
+	facts := IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", Event: "push", DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: fixtureFeatureSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}
 	tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
 		return facts, nil
 	})
@@ -863,7 +863,7 @@ func TestAdmissionDeduplicatesVerifiedAppDeliveryWithoutClientKey(t *testing.T) 
 	tenant, request, now := intakeFixture(t)
 	request.VerifiedDeliveryID = "delivery"
 	tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
-		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: fixtureFeatureSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}, nil
+		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: fixtureFeatureSHA, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: fixtureFeatureSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}, nil
 	})
 	first, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {

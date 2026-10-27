@@ -175,7 +175,7 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 	f := newFloodServer(t, controller.FloodPolicy{})
 	property := func(noise string) bool {
 		body := computeIntake("demo")
-		body.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "forged-" + noise, RepositoryID: 701, InstallationID: 7, DefaultBranchPush: true, VerifiedAt: time.Now()}}
+		body.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", DeliveryKey: "forged-" + noise, RepositoryID: 701, InstallationID: 7, DefaultBranchPush: true, VerifiedAt: time.Now()}}
 		created := floodRun(t, f.intake(f.token, body), 201)
 		tenant := teststore.ForTeam(t, f.st, store.DefaultTeam)
 		run, err := tenant.ReadRun(t.Context(), created.RunID)

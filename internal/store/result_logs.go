@@ -203,7 +203,7 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 }
 
 func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.LogSubject, actor runstate.Actor, sealedReplay bool) error {
-	p, err := resolveActorTx(ctx, tx, actor)
+	p, err := resolveTeamActorTx(ctx, tx, team, actor, sameTeam)
 	if err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 	if c.Data != nil && c.Data.Use == capability.DataPublish {
 		return checkPublishedLogWriterTx(ctx, tx, team, subject, c)
 	}
-	if c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder {
+	if c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder {
 		return holderRefusal()
 	}
 	if subject.Kind == blob.LogJobAttempt {
@@ -292,7 +292,7 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 		now.UnixNano() >= finished.Int64 && now.UnixNano() < finished.Int64+int64(limits.LogSealGrace) {
 		// Retired rows clear the live writer; the immutable awarded credential retains its identity.
 		award, err := decodeAwardUnit(c.Unit, c.UnitID)
-		if err != nil || (c.Issuance != capability.Award && c.Issuance != capability.Exchange) || c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder || string(award.RunID) != subject.RunID {
+		if err != nil || (c.Issuance != capability.Award && c.Issuance != capability.Exchange) || c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder || string(award.RunID) != subject.RunID {
 			return holderRefusal()
 		}
 		if unit.Source != nil && (string(award.NodeID) != unit.Source.NodeID || award.SourceGeneration != unit.Source.Generation) {
@@ -321,12 +321,12 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor runstate.Actor, requ
 	}
 	// safety: authority rechecks take shared locks, which PostgreSQL forbids in read-only transactions.
 	return inTxResult(ctx, t.s, func(tx *storeTx) (runstate.LogSegments, error) {
-		principal, err := resolveActorTx(ctx, tx, actor)
+		principal, err := resolveTeamActorTx(ctx, tx, t.team, actor, sameTeam)
 		if err != nil {
 			return result, err
 		}
 		c := principal.Capability
-		if c.Team != string(t.team) || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) && !slices.Contains(c.Grants, capability.LogTail) && !slices.Contains(c.Grants, capability.ExpansionSubmit)) {
+		if !slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) && !slices.Contains(c.Grants, capability.LogTail) && !slices.Contains(c.Grants, capability.ExpansionSubmit) {
 			return result, authorityError(apierr.Forbidden, "log read grant is required")
 		}
 		if c.Binding.Kind != capability.BindingNone && c.Binding.RunID != request.Subject.RunID {

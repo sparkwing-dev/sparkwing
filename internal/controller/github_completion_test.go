@@ -127,7 +127,7 @@ func newGitHubCompletion(t *testing.T) *githubCompletionFixture {
 	clock.pin(func() time.Time { return f.now })
 	server, tenant, finish := preparedProfileRun(t, clock.option())
 	f.server, f.tenant, f.finish = server, tenant, finish
-	app := runspec.AppFacts{InstallationID: 7, RepositoryID: 42, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", DeliveryKey: "verified", Event: "push", VerifiedAt: f.now}
+	app := runspec.AppFacts{Repository: "acme/repo", InstallationID: 7, RepositoryID: 42, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", DeliveryKey: "verified", Event: "push", VerifiedAt: f.now}
 	f.changeRequest(func(input *runspec.Request) {
 		input.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "acme/app"}, SHA: app.SHA, Ref: app.Ref, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: app}}
 	})

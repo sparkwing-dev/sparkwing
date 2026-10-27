@@ -47,7 +47,7 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: remote}},
 	}}
 	if appID > 0 {
-		seal.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{RepositoryID: appID, InstallationID: 7, Ref: ref, SHA: sha, Event: "push", DeliveryKey: "delivery-" + run, VerifiedAt: now, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main"}}
+		seal.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", RepositoryID: appID, InstallationID: 7, Ref: ref, SHA: sha, Event: "push", DeliveryKey: "delivery-" + run, VerifiedAt: now, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main"}}
 		// The fixture keeps its run's origin, which decides placement, while sealing
 		// the verified identity its App facts describe.
 		provenance, err := runspec.AppProvenance(seal.Request.Git.App.Value, seal.Request.PullRequest, "build")

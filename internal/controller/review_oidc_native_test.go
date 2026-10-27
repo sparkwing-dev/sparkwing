@@ -122,7 +122,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 			request := run.Request
 			request.Request.Origin = tc.origin
 			request.Request.Git.Ref = tc.ref
-			request.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "verified-delivery", Event: tc.event, RepositoryID: 42, Ref: tc.ref, SHA: strings.Repeat("a", 40)}}
+			request.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo", DeliveryKey: "verified-delivery", Event: tc.event, RepositoryID: 42, Ref: tc.ref, SHA: strings.Repeat("a", 40)}}
 			if tc.verified {
 				request.Request.Git.App.Value.VerifiedAt = time.Now().UTC()
 			}

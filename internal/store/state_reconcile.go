@@ -97,7 +97,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (r
 				result.Kind = runstate.Dispatch
 				return nil
 			}
-			owner, err := tx.ResolveAuthority(ctx, request.Actor.Authority)
+			owner, err := resolveTeamAuthorityTx(ctx, tx, t.team, request.Actor.Authority, sameTeam)
 			if err != nil {
 				return err
 			}

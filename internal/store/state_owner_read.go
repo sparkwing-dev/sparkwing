@@ -42,7 +42,7 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 		return RunSnapshot{}, err
 	}
 	defer rollbackOrLog(tx)
-	p, err := tx.ResolveAuthority(ctx, authority)
+	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, authority, sameTeam)
 	if err != nil {
 		return RunSnapshot{}, err
 	}
@@ -54,7 +54,7 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 	case capability.UnitEval:
 		rule, grant = capability.BindSourceReport, capability.DataRead
 	}
-	if c.Team != string(t.team) || c.Audience != capability.Controller || !slices.Contains(c.Grants, grant) {
+	if c.Audience != capability.Controller || !slices.Contains(c.Grants, grant) {
 		return RunSnapshot{}, bindingRefusal()
 	}
 	if err := checkRelationTx(ctx, tx, p, rule, capability.Target{RunID: runID}); err != nil {

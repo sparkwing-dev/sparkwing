@@ -59,7 +59,7 @@ func (t *Tenant) checkGitHubAppScheduleTx(ctx context.Context, tx *storeTx, inst
 }
 
 func (t *Tenant) scheduleAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) (capability.Principal, error) {
-	p, err := tx.ResolveAuthority(ctx, ref)
+	p, err := resolveTeamAuthorityTx(ctx, tx, t.team, ref, sameTeam)
 	if err != nil {
 		return p, err
 	}

@@ -179,8 +179,8 @@ func (q *claimSQL) poolGrant(rule, provenance string) string {
 		glob = branch + ` LIKE replace(replace(replace(replace(replace(` + rule + `.branch,'\','\\'),'%','\%'),'_','\_'),'*','%'),'?','_') ESCAPE '\'`
 	}
 	slashes := func(v string) string { return `(length(` + v + `)-length(replace(` + v + `,'/','')))` }
-	return `(` + trust + ` IN ('verified','verified-default','schedule') AND ` + rule + `.repo_key='gh:'||CAST(` + q.at(provenance, "repository_id") + ` AS TEXT)` +
-		` AND (` + rule + `.source='' OR (` + rule + `.source='github_app' AND ` + trust + ` IN ('verified','verified-default')))` +
+	return `(` + trustIn(trust, runspec.AppRepositoryTrust) + ` AND ` + rule + `.repo_key='gh:'||CAST(` + q.at(provenance, "repository_id") + ` AS TEXT)` +
+		` AND (` + rule + `.source='' OR (` + rule + `.source='github_app' AND ` + trustIn(trust, runspec.AppDeliveryTrust) + `))` +
 		` AND (` + rule + `.branch='' OR (substr(` + ref + `,1,11)='refs/heads/' AND ` + slashes(rule+".branch") + `=` + slashes(branch) + ` AND ` + glob + `)))`
 }
 

@@ -136,8 +136,8 @@ func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paym
 	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 		return err
 	}
-	if held, err := rowPresentTx(ctx, tx, `SELECT 1 FROM credit_freezes WHERE team = ? AND dispute_id = ?`,
-		string(team), freezeID); err != nil || held {
+	if held, err := rowPresentTx(ctx, tx, `SELECT 1 FROM credit_freezes WHERE team = ? AND payment_mode = ? AND dispute_id = ?`,
+		string(team), mode, freezeID); err != nil || held {
 		return err
 	}
 	if _, err := tx.execContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at, payment_mode)
