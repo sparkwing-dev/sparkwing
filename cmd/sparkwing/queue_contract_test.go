@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -21,8 +22,6 @@ type queueManagerFake struct {
 	controllerwire.QueueManager
 	queue    wingwire.QueueState
 	group    controllerwire.QueueGroup
-	result   controllerwire.QueuePriorityResult
-	write    controllerwire.QueuePriorityWrite
 	selected string
 	calls    []string
 	err      error
@@ -37,12 +36,6 @@ func (f *queueManagerFake) ReadQueueGroup(_ context.Context, group string) (cont
 	f.calls = append(f.calls, "group")
 	f.selected = group
 	return f.group, f.err
-}
-
-func (f *queueManagerFake) SetGroupPriority(_ context.Context, group string, write controllerwire.QueuePriorityWrite) (controllerwire.QueuePriorityResult, error) {
-	f.calls = append(f.calls, "priority")
-	f.selected, f.write = group, write
-	return f.result, f.err
 }
 
 func queueDependenciesFor(t *testing.T, manager *queueManagerFake, profile string) queueDependencies {
@@ -183,27 +176,32 @@ func TestQueueResolverCancellationSkipsObservation(t *testing.T) {
 
 func TestQueuePriorityCommandKeepsExactAndRelativeValues(t *testing.T) {
 	for _, value := range []string{"0", "-3", "7", "front", "back"} {
-		manager := &queueManagerFake{result: controllerwire.QueuePriorityResult{RunID: "r1", Group: "deploy", SetPriorityAck: wingwire.SetPriorityAck{Found: true, Priority: 7, Previous: 3, Position: 1}, PreviousPosition: 2}}
+		var gotValue int
+		var gotMode string
+		deps := queueDependencies{priority: func(_ context.Context, run string, priority int, mode string) (queuePriorityResult, error) {
+			gotValue, gotMode = priority, mode
+			return queuePriorityResult{RunID: run, SetPriorityAck: wingwire.SetPriorityAck{Found: true, Priority: priority}}, nil
+		}}
 		var out bytes.Buffer
-		err := runQueueCommandArgs(t.Context(), []string{"priority", "--group", "deploy", "--profile", "prod", "--run", "r1", "--set", value, "-o", "json"}, &out, queueDependenciesFor(t, manager, "prod"))
-		if err != nil || manager.selected != "deploy" || manager.write.RunID != "r1" || manager.write.Validate() != nil || strings.Join(manager.calls, ",") != "priority,close" {
-			t.Fatalf("priority %s: %v %+v", value, err, manager)
+		if err := runQueueCommandArgs(t.Context(), []string{"priority", "--run", "r1", "--set", value, "-o", "json"}, &out, deps); err != nil {
+			t.Fatalf("priority %s: %v", value, err)
 		}
-		if value == "0" && (manager.write.Priority == nil || *manager.write.Priority != 0) {
-			t.Fatal("explicit zero lost")
-		}
-		if manager.write.Priority != nil && strconv.Itoa(*manager.write.Priority) != value {
-			t.Fatalf("integer priority changed: %s %+v", value, manager.write)
-		}
-		if value == "front" || value == "back" {
-			if manager.write.Priority != nil || manager.write.Mode != value {
-				t.Fatalf("relative mode lost: %+v", manager.write)
+		switch value {
+		case "front", "back":
+			if gotMode != value || gotValue != 0 {
+				t.Fatalf("relative mode lost: %d %q", gotValue, gotMode)
+			}
+		default:
+			if gotMode != "" || strconv.Itoa(gotValue) != value {
+				t.Fatalf("integer priority changed: %s %d %q", value, gotValue, gotMode)
 			}
 		}
-		var got controllerwire.QueuePriorityResult
-		if json.Unmarshal(out.Bytes(), &got) != nil || got.PreviousPosition != 2 || got.Group != "deploy" {
-			t.Fatalf("receipt lost: %s", &out)
-		}
+	}
+}
+
+func TestQueuePriorityRefusesAGroup(t *testing.T) {
+	if _, err := clisurface.Parse("sparkwing", []string{"queue", "priority", "--group", "deploy", "--run", "r1", "--set", "0"}); err == nil {
+		t.Fatal("queue priority accepted --group")
 	}
 }
 
@@ -233,8 +231,8 @@ func TestQueueCommandCancellationAndWriterErrors(t *testing.T) {
 	if err := runQueueCommandArgs(ctx, []string{"list"}, &out, queueDependencies{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation lost: %v", err)
 	}
-	for _, args := range [][]string{{"list", "-o", "plain"}, {"list", "--group", "deploy", "-o", "pretty"}, {"priority", "--group", "deploy", "--run", "r1", "--set", "3", "-o", "plain"}} {
-		manager := &queueManagerFake{queue: sampleQueueState(), group: controllerwire.QueueGroup{Group: "deploy"}, result: controllerwire.QueuePriorityResult{RunID: "r1", SetPriorityAck: wingwire.SetPriorityAck{Found: true}}}
+	for _, args := range [][]string{{"list", "-o", "plain"}, {"list", "--group", "deploy", "-o", "pretty"}} {
+		manager := &queueManagerFake{queue: sampleQueueState(), group: controllerwire.QueueGroup{Group: "deploy"}}
 		err := runQueueCommandArgs(t.Context(), args, doctorFailedWriter{}, queueDependenciesFor(t, manager, ""))
 		if !errors.Is(err, io.ErrClosedPipe) || manager.calls[len(manager.calls)-1] != "close" {
 			t.Fatalf("%v: writer/cleanup lost: %v %v", args, err, manager.calls)

@@ -316,7 +316,8 @@ rotation and revocation. Members enroll their own personal machines through
 session. The team setting `members_can_add_machines` defaults to true. When it
 is false, personal enrollment requires administration too. A personal runner
 records the membership epoch, grant and setting that authorized enrollment.
-Every use checks them again. Removing and re-adding the member cannot revive
+Every use checks them again, and turning the setting off ends members' personal
+runners for good: turning it back on does not revive them. Removing and re-adding the member cannot revive
 an old credential. Shared runners belong to the team and survive the
 registrar's demotion or removal. Revoke a departing registrar's shared runners if they still control the machines or bearer credentials.
 
@@ -327,10 +328,15 @@ Rejoining or promotion cannot revive them. `team.admin` requires
 `--allow-team-admin` (`allow_team_admin` in the API) and expires within 30 days.
 Omitted expiry uses the applicable ceiling. A requested expiry beyond that
 ceiling is refused, including during rotation.
-Invitation acceptance checks that the inviter still holds team administration.
+Invitation acceptance checks that the inviter still holds team administration,
+and that the account owns the invited address: the last sign-in to verify an
+address, through any account, makes that account its one owner. Unlinking the
+account's last sign-in that verifies an address, or that sign-in's provider
+reporting another address, stops the account seeing or accepting invitations
+to it.
 
-`GET /api/v1/team/settings` returns `members_can_add_machines` and
-`claim_ranking` under `runs.read`. `PUT /api/v1/team/settings` requires
+`GET /api/v1/team/settings` returns `members_can_add_machines`,
+`claim_ranking`, `max_children_per_root` and `high_trust` under `runs.read`. `PUT /api/v1/team/settings` requires
 `team.admin` and names at least one of them. `claim_ranking` takes distinct
 tiers from `here`, `personal`, `github-actions`, `self-hosted` and `cloud`, and
 an empty list means first come. A self-hosted controller has no Cloud launcher

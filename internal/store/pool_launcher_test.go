@@ -268,14 +268,14 @@ func TestRemovedPoolRuleCutsOffRetriesOfVerifiedRuns(t *testing.T) {
 		t.Fatalf("allowed pool withheld its secret: %v", err)
 	}
 	oidc := capability.Authorized{Principal: principal, Target: capability.Target{Team: "a", RunID: running}}
-	if _, err := f.tenant.ReadOIDCFacts(ctx, oidc); err != nil {
+	if _, err := mintTestOIDC(ctx, f.tenant, oidc); err != nil {
 		t.Fatalf("allowed pool withheld OIDC: %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `DELETE FROM pool_access_rules WHERE team='a' AND id='deploy'`)
 	if err := s.AsOperator().CheckBinding(ctx, principal, capability.BindDeclaredSecret, secret); err == nil {
 		t.Fatal("a removed pool rule still released the reserved secret")
 	}
-	if _, err := f.tenant.ReadOIDCFacts(ctx, oidc); err == nil {
+	if _, err := mintTestOIDC(ctx, f.tenant, oidc); err == nil {
 		t.Fatal("a removed pool rule still minted OIDC on the pool")
 	}
 	late := retry("after-removal")
@@ -299,11 +299,11 @@ func TestRemovedPoolRuleIsNotBypassedThroughAnotherPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	oidc := capability.Authorized{Principal: principal, Target: capability.Target{Team: "a", RunID: f.admitted.RunID}}
-	if _, err := f.tenant.ReadOIDCFacts(ctx, oidc); err != nil {
+	if _, err := mintTestOIDC(ctx, f.tenant, oidc); err != nil {
 		t.Fatalf("allowed pool withheld OIDC: %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `DELETE FROM pool_access_rules WHERE team='a' AND pool='deploy'`)
-	if _, err := f.tenant.ReadOIDCFacts(ctx, oidc); err == nil {
+	if _, err := mintTestOIDC(ctx, f.tenant, oidc); err == nil {
 		t.Fatal("OIDC minted through a pool the job does not require")
 	}
 	if err := s.AsOperator().CheckBinding(ctx, principal, capability.BindDeclaredSecret, capability.Target{Team: "a", SecretName: "DEPLOY"}); err == nil {
@@ -376,4 +376,10 @@ func TestKubernetesRunnerNeedsAKubernetesEnrollment(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mintTestOIDC(ctx context.Context, t *Tenant, a capability.Authorized) (OIDCMint, error) {
+	return t.MintOIDCToken(ctx, a, "sts.amazonaws.com", func(facts capability.OIDCFacts) (OIDCMint, error) {
+		return OIDCMint{Token: "token", ID: "id", Subject: "subject", ExpiresAt: facts.NotAfter}, nil
+	})
 }

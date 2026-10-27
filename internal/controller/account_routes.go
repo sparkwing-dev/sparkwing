@@ -13,7 +13,7 @@ import (
 type AccountReader interface {
 	Account(context.Context, string) (store.Account, error)
 	AccountMemberships(context.Context, string) ([]store.Membership, error)
-	OpenInvitationsForEmail(context.Context, string) ([]store.Invitation, error)
+	OpenInvitationsForAccount(context.Context, string) ([]store.Invitation, error)
 	AccountIdentities(context.Context, string) ([]store.Identity, error)
 	TeamDeletionsRequestedBy(context.Context, string) ([]store.TeamDeletion, error)
 }

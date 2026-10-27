@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const podENI corev1.ResourceName = "vpc.amazonaws.com/pod-eni"
@@ -83,14 +84,44 @@ func (l *Launcher) checkJob(ctx context.Context, job *batchv1.Job, binding Cloud
 			continue
 		}
 		owned++
+		if l.podChecked(job.UID, pod.UID) {
+			continue
+		}
 		if err := awardPod(template, &corev1.PodTemplateSpec{ObjectMeta: pod.ObjectMeta, Spec: pod.Spec}); err != nil {
 			return &podMismatch{message: fmt.Sprintf("Cloud Pod %s: %v", pod.Name, err)}
 		}
+		l.markPodChecked(job.UID, pod.UID)
 	}
 	if !current && owned == 0 && (job.Spec.Suspend == nil || !*job.Spec.Suspend) {
 		return &podMismatch{message: fmt.Sprintf("Cloud Job %s pins images admission no longer allows", job.Name), unadmittable: true}
 	}
 	return nil
+}
+
+// safety: admission keeps a Pod's spec immutable, so one comparison with its award
+// at the first pass that sees it holds for the Pod's lifetime.
+func (l *Launcher) podChecked(job, pod types.UID) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.checked[job][pod]
+}
+
+func (l *Launcher) markPodChecked(job, pod types.UID) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.checked == nil {
+		l.checked = map[types.UID]map[types.UID]bool{}
+	}
+	if l.checked[job] == nil {
+		l.checked[job] = map[types.UID]bool{}
+	}
+	l.checked[job][pod] = true
+}
+
+func (l *Launcher) forgetJobChecks(job types.UID) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.checked, job)
 }
 
 func templateImage(t *corev1.PodTemplateSpec, name string) string {

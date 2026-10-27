@@ -17,7 +17,7 @@ func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authoriz
 	var out GitHubRunnerBinding
 	err := t.mutateCredentials(ctx, a, "RegisterGitHubRunner", row.Repository, func(tx *storeTx, actor string) error {
 		repo, valid := ParseGitHubRepo(row.Repository)
-		if !valid || row.RepositoryID <= 0 || row.RepositoryOwnerID <= 0 {
+		if !valid || row.RepositoryID <= 0 || row.RepositoryOwnerID <= 0 || row.InstallationID < 0 {
 			return ErrInvalidInput
 		}
 		if row.Team != "" && row.Team != t.team || row.CreatedBy != "" && row.CreatedBy != actor {
@@ -33,8 +33,8 @@ func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authoriz
 		if holdsFreeAllowance(t.team) && count >= maxGitHubRunnerBindings {
 			return ErrBindingLimit
 		}
-		out = GitHubRunnerBinding{Team: t.team, RepositoryID: row.RepositoryID, RepositoryOwnerID: row.RepositoryOwnerID, Repository: repo.Slug(), CreatedBy: actor, CreatedAt: tx.now(ctx)}
-		_, err := tx.execContext(ctx, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_by,created_at,repo_key) VALUES (?,?,?,?,?,?,?)`, t.team, out.RepositoryID, out.RepositoryOwnerID, out.Repository, actor, out.CreatedAt.UnixNano(), githubRepositoryKey(out.RepositoryID))
+		out = GitHubRunnerBinding{Team: t.team, RepositoryID: row.RepositoryID, RepositoryOwnerID: row.RepositoryOwnerID, Repository: repo.Slug(), InstallationID: row.InstallationID, CreatedBy: actor, CreatedAt: tx.now(ctx)}
+		_, err := tx.execContext(ctx, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,installation_id,created_by,created_at,repo_key) VALUES (?,?,?,?,NULLIF(?,0),?,?,?)`, t.team, out.RepositoryID, out.RepositoryOwnerID, out.Repository, out.InstallationID, actor, out.CreatedAt.UnixNano(), githubRepositoryKey(out.RepositoryID))
 		return err
 	})
 	if err != nil {

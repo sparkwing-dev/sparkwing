@@ -59,7 +59,8 @@ The default is true. Personal enrollment requires an independent account session
 and members may use it while this setting permits it. Shared runner enrollment,
 token rotation and revocation always require administration. The console exposes
 the setting and personal/shared enrollment through the same routes. Disabling
-enrollment preserves existing machine authority and owner-only claim scope.
+enrollment ends the personal machines that members without administration
+enrolled, and re-enabling it does not revive them (decision 67).
 
 ## Amendment 1: environment, presence and managed units
 
@@ -798,8 +799,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`CloudJobBinding`](../../../internal/runners/launcher/job_types.go) | CloudJobBinding is derived from an awarded row, not the launcher's requested team or fence. |
 | [`CloudJobAward`](../../../internal/runners/launcher/job_types.go) | CloudJobAward carries only a single-use bootstrap, never the launcher's root credential. |
 | [`CloudNodeReservation`](../../../internal/runners/launcher/job_types.go) | CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped. |
-| [`CloudNetworkEvidence`](../../../internal/runners/launcher/job_types.go) | CloudNetworkEvidence comes from enforcement probes, not the presence of NetworkPolicy YAML. |
-| [`CloudBoundary`](../../../internal/runners/launcher/job_types.go) | CloudBoundary reserves one Job per team-dedicated node and verifies enforced network isolation. |
+| [`CloudBoundary`](../../../internal/runners/launcher/job_types.go) | CloudBoundary reserves one Job per team-dedicated node. Network isolation is the cluster's NetworkPolicy enforcement, which the operator verifies. |
 | [`CloudJobResources`](../../../internal/runners/launcher/job_types.go) | CloudJobResources couples Secret cleanup and node ownership with the Job it authorizes. |
 | [`BuildJob`](../../../internal/runners/launcher/job.go) | BuildJob is the sole builder for plan, eval and work, including run-host-dispatched work. |
 
@@ -870,7 +870,7 @@ a Pod outside the exact namespace, reservation and observed instance UID.
 `FuzzProductionBoundaryCleanupReservationFence` exercise these boundaries.
 
 `cluster.productionLauncher` loads the standard Kubernetes context and composes
-`launcher.NewLauncher` with `launcher.NewProductionBoundary`. Claim demand uses
+`launcher.NewLauncher` with a `launcher.KubernetesBoundary`; decision 71 removed the runtime network probes. Claim demand uses
 the linker version, plan/eval/node kinds and advertised labels. Physical pod
 ceilings are enforced when the selected catalog allocation is delivered.
 Launcher authority remains confined to the controller transport.
@@ -1040,7 +1040,7 @@ operator-supplied through `launcher.networkPolicy.egress`.
 
 BuildJob retains the exact TeamNodeValue label and adds a NoSchedule CPU-band
 Exists toleration, so the existing small-band nodes remain usable. Every Job Pod
-and production boundary probe carries `karpenter.sh/do-not-disrupt=true`.
+carries `karpenter.sh/do-not-disrupt=true`.
 Admission validation preserves the Job template annotations as well as placement.
 Each Ready node must carry its exact team's hashed label, and one reservation
 occupies the whole node. When no vacant Ready team node exists, the launcher holds
@@ -1312,7 +1312,7 @@ of its NodeClaim before reservation release. Retirement failures retain cleanup
 ownership. Malformed Job annotations trigger UID-fenced deletion, leaving orphan
 reservation cleanup subject to its current award and container vacancy.
 
-NewProductionBoundary requires the Karpenter dynamic client. LauncherFactory
+KubernetesBoundary requires the Karpenter dynamic client. LauncherFactory
 receives a bearer reader instead of a captured string. The installed launcher
 rereads its private credential file on every controller request. Charts grant
 NodeClaim get/delete, NodePool get and PriorityClass list. LimitRange list is

@@ -212,12 +212,14 @@ cannot mint. Missing/dead authority answers unauthenticated. Live authority
 without the grant or run binding answers forbidden. Minting has no legacy
 scope or claimed-run lookup fallback. Both old handlers are deleted.
 
-The local C2 `controller.OIDCReader` interface is Team() store.Team and
-ReadOIDCFacts(ctx, Authorized) (capability.OIDCFacts, error).
+The local C2 `controller.OIDCMinter` interface is Team() store.Team and
+MintOIDCToken(ctx, Authorized, audience, sign) (store.OIDCMint, error), which
+rechecks authority, calls sign with the facts and audits the token's id,
+subject and expiry in one transaction.
 WithOIDCReader supplies its resolver. The default requires Tenant to implement
 it and refuses missing adapters with policy_missing. No C1 signature changes.
 
-ReadOIDCFacts must use one store-clock transaction to recheck the complete
+MintOIDCToken must use one store-clock transaction to recheck the complete
 live ancestry, awarded/delegated claim, oidc.mint grant, exact team/run binding,
 current holder/generation, cancellation and unit liveness. Derive the pipeline,
 ref, exact SHA, repository identity and original trigger from immutable intake
@@ -543,7 +545,9 @@ Personal enrollment requires current `runs.write`. Shared enrollment always requ
 `team.admin`, as do shared-runner token rotation and revocation. The store
 rechecks the setting with current membership inside root issuance, under the
 same team lock as setting changes. Personal ownership and claim matching keep
-their existing persisted origin relation. Disabling enrollment revokes nothing.
+their existing persisted origin relation. Disabling enrollment bumps the team's
+member machine epoch, ending personal machines that members without
+administration enrolled; re-enabling it does not revive them (decision 67).
 
 GET `/api/v1/team/settings` requires `runs.read`. PUT requires `team.admin`
 and one explicit boolean `members_can_add_machines`; missing, null or unknown
@@ -1178,7 +1182,7 @@ All capability names below are in `internal/capability`.
 | `controller.SizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
 | `controller.CredentialInventoryReader` | Supply the existing tenant secret/git inventory reads with an authenticated-team check. |
 | `controller.CredentialRotator` | Supply one tenant's authority-bearing atomic secret/git rotation. |
-| `capability.OIDCFacts`, `controller.OIDCReader` | Supply authority-rechecked sealed OIDC identity and its complete ancestry expiry ceiling. |
+| `capability.OIDCFacts`, `controller.OIDCMinter` | Supply authority-rechecked sealed OIDC identity and its complete ancestry expiry ceiling. |
 | `controller.SourceAuditReader` | Supply one tenant's final committed source-release audit projection. |
 | `controller.CredentialWriter` | Supply tenant credential mutations with committing authority rechecks and actor attribution. Missing adapters refuse writes. |
 | `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. The default uses Tenant.ReadRunView. No C1 signature changes. |
@@ -2549,8 +2553,8 @@ capacity, cost, policy and lease bound from sealed acceptance. Box keys use only
 the award's sealed `ExecutionHost`. Launcher awards wait for authenticated
 activation to seal that identity.
 
-The public queue API exposes group reads at `GET /api/v1/queue/groups/{group}`
-and member priority changes at `PUT /api/v1/queue/groups/{group}/priority`.
+The public queue API exposes group reads at `GET /api/v1/queue/groups/{group}`.
+Group priority has no route; the store holds no group priority to change.
 The single-group acquire, heartbeat, release, waiter cancellation, holder
 observation, resolve and force-release endpoints are deleted. Their request and
 response types and authority-bearing mutation methods are deleted with them.
@@ -3111,17 +3115,9 @@ create that scope. Live jobs retain their holder and attempt while draining.
 Global account audit events use nullable team ownership from the final schema,
 with a deterministic primary key preserving kind/subject deduplication.
 
-PUT /api/v1/queue/groups/{group}/priority is registered under its existing policy.
-It validates controllerwire.QueuePriorityWrite, preserves explicit zero and
-passes the Idempotency-Key through controller.queuePriorityWriter. That local
-interface declares Team() and SetAuthorizedGroupPriority(context.Context,
-capability.Authorized, string, controllerwire.QueuePriorityWrite)
-(controllerwire.QueuePriorityResult, error). WithQueuePriorityWriter supplies a
-tenant resolver. A missing or foreign tenant writer returns policy_missing.
-The transaction owns current authority, stable run/number resolution, rank and
-position selection, exact retry identity and unchanged holder leases. C1 has
-not declared persisted integer priority or an ordering transaction. The HTTP
-property uses a fake for that boundary and claims no persisted ranking evidence.
+The group priority route is deleted: the store never persisted a group rank,
+so every production call failed. `queue priority` changes local machine
+admission through the admission wire and refuses `--profile`.
 
 ## Native data binding and persisted result proofs
 
@@ -3166,7 +3162,7 @@ route policy. Console management carries `ConsoleProof` naming its direct
 session. Native transactions resolve it again and check the configured account
 and session lifetime. Inventory, rotation and revocation share `OwnsToken`.
 The store owns origin admission in the issuing transaction. CapabilityManager
-and OIDCReader are composed by the production store and controller constructors.
+and OIDCMinter are composed by the production store and controller constructors.
 
 `Repositories == nil` is unrestricted. A nonnil empty list authorizes nothing.
 RepositoryPattern and RepositoryIdentity distinguish path patterns from canonical

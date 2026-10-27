@@ -108,7 +108,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).approveOneTx":              "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
 	"(*Operator).settleActiveTeamTx":        "picks the account's first team from all of its memberships when its sticky team is gone",
 	"(*Operator).AccountMemberships":        "lists the teams one account belongs to, which is a question across teams by definition",
-	"(*Operator).OpenInvitationsForEmail":   "lists the invitations addressed to one verified email from every team that sent one",
+	"(*Operator).OpenInvitationsForAccount": "lists the invitations addressed to the account's verified emails from every team that sent one",
 	"(*Operator).AcceptAccountInvitation":   "finds the invitation by its global id to lock its team before rechecking the account and committing the scoped acceptance",
 	"(*Operator).acceptAccountInvitationTx": "finds an invitation by its id before the team is known; the accepting write then names that team",
 	"(*Operator).deleteAccountTx": "removes one account from every team it belongs to and relabels the rows it " +

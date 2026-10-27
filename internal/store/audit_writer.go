@@ -211,6 +211,8 @@ type auditTeamSettings struct {
 	PreviousClaimRanking          []auditClaimTier `json:"previous_claim_ranking"`
 	MaxChildrenPerRoot            int64            `json:"max_children_per_root"`
 	PreviousMaxChildrenPerRoot    int64            `json:"previous_max_children_per_root"`
+	HighTrust                     bool             `json:"high_trust"`
+	PreviousHighTrust             bool             `json:"previous_high_trust"`
 }
 type (
 	auditClaimTier      string
@@ -242,10 +244,15 @@ type auditSecretRelease struct {
 
 // safety: audiences are relying-party identifiers a pipeline names, not people, so
 // the audience is kept plain while the job is a digest like other release events.
+// The token id, subject and expiry trace a leaked token to its mint; the subject
+// names the team, repository id, pipeline, trigger, runner kind and ref only.
 type auditOIDCMint struct {
-	RunID    string      `json:"-"`
-	Node     auditDigest `json:"node_digest"`
-	Audience string      `json:"audience"`
+	RunID     string      `json:"-"`
+	Node      auditDigest `json:"node_digest"`
+	Audience  string      `json:"audience"`
+	TokenID   string      `json:"token_id"`
+	Subject   string      `json:"subject"`
+	ExpiresAt int64       `json:"expires_at"`
 }
 type auditSourceRelease struct {
 	AccountID        string      `json:"-"`
@@ -399,7 +406,7 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "secret.released", p.Name.String(), p.RunID, true
 	case auditOIDCMint:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "oidc.minted", p.Node.String(), p.RunID, true
-		valid = p.Audience != "" && !strings.ContainsAny(p.Audience, "\r\n\t ")
+		valid = p.Audience != "" && !strings.ContainsAny(p.Audience, "\r\n\t ") && p.TokenID != "" && p.Subject != "" && p.ExpiresAt > 0
 	case auditSourceRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, ev.Account, repeat = "git_credential.released", p.CredentialID.String(), p.RunID, p.AccountID, true
 	default:

@@ -1,7 +1,6 @@
 package launcher
 
 import (
-	"context"
 	"crypto/rand"
 	"errors"
 	"testing"
@@ -36,20 +35,15 @@ type admissionFixture struct {
 	l         *Launcher
 	resources CloudJobResources
 	award     CloudJobAward
-	probes    *productionBoundary
-	probeCtx  context.Context
 }
 
 func newAdmissionFixture(t *testing.T) *admissionFixture {
 	t.Helper()
 	l, _, boundary, control := fixture()
 	l.Config.DockerImage = testDockerImage
-	f := &admissionFixture{l: l, award: *control.award, probes: &productionBoundary{cfg: l.Config}}
+	f := &admissionFixture{l: l, award: *control.award}
 	f.award.Binding.OwnerDeadline = time.Now().Add(time.Hour)
 	f.award.Binding.ParentCapabilityExpiry = time.Now().Add(2 * time.Hour)
-	var cancel context.CancelFunc
-	f.probeCtx, cancel = context.WithTimeout(t.Context(), time.Hour)
-	t.Cleanup(cancel)
 	var err error
 	if f.resources, err = BuildJob(t.Context(), time.Now(), l.Config, f.award, boundary); err != nil {
 		t.Fatal(err)
@@ -72,10 +66,6 @@ func (f *admissionFixture) capacity(t *testing.T) *corev1.Pod {
 	return pod
 }
 
-func (f *admissionFixture) measure() *corev1.Pod {
-	return f.probes.measure(f.probeCtx, f.resources.Reservation, []string{"10.0.0.1:443", "10.0.0.2:18888"}, "10.0.0.9:18888")
-}
-
 // hostUsers puts a Job Pod in the host user namespace, dropping the /proc
 // unmasking the API server allows only inside a Pod's own.
 func hostUsers(p *corev1.Pod) {
@@ -88,6 +78,13 @@ func jobPod(job *batchv1.Job) *corev1.Pod {
 	pod.GenerateName, pod.Namespace = job.Name+"-", job.Namespace
 	pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: ptr(true), BlockOwnerDeletion: ptr(true)}}
 	return pod
+}
+
+func nodeTopology(p *corev1.Pod) {
+	if p.Labels == nil {
+		p.Labels = map[string]string{}
+	}
+	p.Labels[corev1.LabelTopologyRegion], p.Labels[corev1.LabelTopologyZone] = "us-west-2", "us-west-2a"
 }
 
 // hack: an empty reason means the policies admit the request.
@@ -109,29 +106,13 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		mutate(p)
 		return p
 	}
-	measure := func(mutate func(*corev1.Pod)) *corev1.Pod {
-		p := f.measure()
-		mutate(p)
-		return p
-	}
-	r := f.resources.Reservation
 	cases := []admissionCase{
-		{name: "listener", user: testLauncher, object: f.probes.canary(f.probeCtx, r, "nonce")},
-		{name: "witness", user: testLauncher, object: f.probes.witness(f.probeCtx, r, "nonce", "10.0.0.9", "10.0.0.8")},
-		{name: "peer", user: testLauncher, object: f.probes.peer(f.probeCtx, r, "nonce")},
-		{name: "measure", user: testLauncher, object: f.measure()},
 		{name: "capacity", user: testLauncher, object: f.capacity(t)},
+		{name: "launcher_probe_pod", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Name = "sw-boundary-control-x" }), reason: "only Cloud Job and capacity Pods"},
 		{name: "job_pod", user: testJobController, object: jobPod(job)},
 		{name: "eks_mutated_job_pod", user: testJobController, object: pod(eksMutate)},
 		{name: "node_topology_job_pod", user: testJobController, object: pod(nodeTopology)},
-		{name: "node_topology_listener", user: testLauncher, object: func() *corev1.Pod {
-			p := f.probes.canary(f.probeCtx, r, "nonce")
-			nodeTopology(p)
-			return p
-		}()},
-		{name: "node_topology_measure", user: testLauncher, object: measure(nodeTopology)},
 		{name: "hostname_label", user: testJobController, object: pod(func(p *corev1.Pod) { nodeTopology(p); p.Labels[corev1.LabelHostname] = "node" }), reason: "launcher's labels"},
-		{name: "probe_hostname_label", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Labels[corev1.LabelHostname] = "node" }), reason: "launcher's labels"},
 		{name: "capacity_topology", user: testLauncher, object: capacity(nodeTopology), reason: "launcher's labels"},
 		{name: "extra_container", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "injected", Image: f.l.Config.RunnerImage})
@@ -186,8 +167,8 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 			p.Spec.SecurityContext.Sysctls = []corev1.Sysctl{{Name: "net.ipv4.ip_unprivileged_port_start", Value: "0"}}
 		}), reason: "exactly its shape's security context"},
 		{name: "pod_fs_group", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.SecurityContext.FSGroup = ptr(int64(1000)) }), reason: "exactly its shape's security context"},
-		{name: "probe_super_t", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.SecurityContext.SELinuxOptions = &corev1.SELinuxOptions{Type: "super_t"} }), reason: "exactly its shape's security context"},
-		{name: "probe_root", user: testLauncher, object: measure(func(p *corev1.Pod) {
+		{name: "capacity_super_t", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.SecurityContext.SELinuxOptions = &corev1.SELinuxOptions{Type: "super_t"} }), reason: "exactly its shape's security context"},
+		{name: "capacity_root", user: testLauncher, object: capacity(func(p *corev1.Pod) {
 			p.Spec.SecurityContext.RunAsUser = ptr(int64(0))
 			p.Spec.SecurityContext.RunAsNonRoot = nil
 		}), reason: "exactly its shape's security context"},
@@ -197,11 +178,9 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		{name: "probe_host", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Containers[0].ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Host: "169.254.169.254", Port: intstr.FromInt32(80)}}}
 		}), reason: "default runtime class"},
-		{name: "tcp_probe_host", user: testLauncher, object: func() *corev1.Pod {
-			p := f.probes.canary(f.probeCtx, r, "nonce")
-			p.Spec.Containers[0].ReadinessProbe.TCPSocket.Host = "10.0.0.1"
-			return p
-		}(), reason: "default runtime class"},
+		{name: "tcp_probe_host", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Containers[0].ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Host: "10.0.0.1", Port: intstr.FromInt32(80)}}}
+		}), reason: "default runtime class"},
 		{name: "dns_config", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.DNSConfig = &corev1.PodDNSConfig{Options: []corev1.PodDNSConfigOption{{Name: "ndots", Value: ptr("1")}}}
 		}), reason: "cluster DNS"},
@@ -218,10 +197,10 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		{name: "host_path", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "tun", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev/net/tun"}}})
 		}), reason: "scratch emptyDir"},
-		{name: "probe_privileged", user: testLauncher, object: measure(func(p *corev1.Pod) {
+		{name: "capacity_privileged", user: testLauncher, object: capacity(func(p *corev1.Pod) {
 			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: ptr(true)}
 		}), reason: "runs privileged"},
-		{name: "probe_host_pid", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.HostPID = true }), reason: "host namespaces"},
+		{name: "capacity_host_pid", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.HostPID = true }), reason: "host namespaces"},
 		{name: "missing_node_selector", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.NodeSelector = nil }), reason: "own team's nodes"},
 		{name: "extra_toleration", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Tolerations = append(p.Spec.Tolerations, corev1.Toleration{Operator: corev1.TolerationOpExists})
@@ -253,25 +232,18 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		{name: "docker_exec_probe", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.InitContainers[0].StartupProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"docker", "info"}}}}
 		}), reason: "hooks or exec probes"},
-		{name: "peer_readiness_changed", user: testLauncher, object: func() *corev1.Pod {
-			p := f.probes.peer(f.probeCtx, r, "nonce")
-			p.Spec.Containers[0].ReadinessProbe.Exec.Command = []string{"true"}
-			return p
-		}(), reason: "hooks or exec probes"},
 		{name: "capacity_hook", user: testLauncher, object: capacity(func(p *corev1.Pod) {
 			p.Spec.Containers[0].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{Exec: &corev1.ExecAction{Command: []string{"sh"}}}}
 		}), reason: "hooks or exec probes"},
-		{name: "probe_exec_readiness", user: testLauncher, object: func() *corev1.Pod {
-			p := f.probes.canary(f.probeCtx, r, "nonce")
+		{name: "capacity_exec_readiness", user: testLauncher, object: capacity(func(p *corev1.Pod) {
 			p.Spec.Containers[0].ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"sh"}}}}
-			return p
-		}(), reason: "hooks or exec probes"},
+		}), reason: "hooks or exec probes"},
 		{name: "launcher_creates_job_pod", user: testLauncher, object: jobPod(job), reason: "only the launcher and the Job controller"},
 		{name: "controller_manager_creates_job_pod", user: "system:kube-controller-manager", object: jobPod(job), reason: "only the launcher and the Job controller"},
 		{name: "other_creates_job_pod", user: testIntruder, object: jobPod(job), reason: "only the launcher and the Job controller"},
 		{name: "other_creates_capacity", user: testIntruder, object: f.capacity(t), reason: "only the launcher and the Job controller"},
 		{name: "job_controller_creates_capacity", user: testJobController, object: f.capacity(t), reason: "only the launcher and the Job controller"},
-		{name: "unowned_pod", user: testLauncher, object: pod(func(p *corev1.Pod) { p.OwnerReferences, p.GenerateName, p.Name = nil, "", "free-pod" }), reason: "only Cloud Job, capacity and boundary probe Pods"},
+		{name: "unowned_pod", user: testLauncher, object: pod(func(p *corev1.Pod) { p.OwnerReferences, p.GenerateName, p.Name = nil, "", "free-pod" }), reason: "only Cloud Job and capacity Pods"},
 		{name: "capacity_env", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}} }), reason: "never AWS credentials"},
 		{name: "capacity_volume", user: testLauncher, object: capacity(func(p *corev1.Pod) {
 			p.Spec.Volumes = []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
@@ -282,14 +254,7 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 			p.Spec.Containers[0].SecurityContext.Privileged = ptr(true)
 			p.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation = nil
 		}), reason: "runs privileged"},
-		{name: "probe_host_network", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.HostNetwork = true }), reason: "host namespaces"},
-		{name: "probe_command", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.Containers[0].Command = []string{"/bin/true"} }), reason: "measurement commands"},
-		{name: "probe_renamed", user: testLauncher, object: measure(func(p *corev1.Pod) { p.Spec.Containers[0].Name = "other" }), reason: "measurement commands"},
-		{name: "listener_host_pid", user: testLauncher, object: func() *corev1.Pod {
-			p := f.probes.canary(f.probeCtx, r, "nonce")
-			p.Spec.HostPID = true
-			return p
-		}(), reason: "host namespaces"},
+		{name: "capacity_host_network", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.HostNetwork = true }), reason: "host namespaces"},
 	}
 	for i := range cases {
 		cases[i].operation = string(admissionv1.Create)
@@ -440,7 +405,7 @@ func TestAdmissionPolicyNodeFailureTolerations(t *testing.T) {
 	f := newAdmissionFixture(t)
 	job := f.resources.Job.DeepCopy()
 	job.UID = "job-uid"
-	for name, pod := range map[string]*corev1.Pod{"job": jobPod(job), "capacity": f.capacity(t), "probe": f.measure()} {
+	for name, pod := range map[string]*corev1.Pod{"job": jobPod(job), "capacity": f.capacity(t)} {
 		for _, seconds := range []int64{0, 300, 600} {
 			t.Run(name+"/"+time.Duration(seconds*int64(time.Second)).String(), func(t *testing.T) {
 				p := pod.DeepCopy()

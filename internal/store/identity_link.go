@@ -213,6 +213,9 @@ func linkIdentityTx(ctx context.Context, tx *storeTx, accountID string, p SignIn
 		p.Provider, p.Subject, accountID); err != nil {
 		return Identity{}, err
 	}
+	if err := releaseEmailTx(ctx, tx, p.Email, accountID, at); err != nil {
+		return Identity{}, err
+	}
 	return Identity{
 		Provider: p.Provider, Subject: p.Subject, Email: p.Email, Linked: true,
 		CreatedAt: time.Unix(0, at).UTC(),
@@ -252,10 +255,18 @@ func (op *Operator) unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, ac
 			`INSERT INTO identity_unlinks (provider, subject, account_id, unlinked_at) VALUES (?, ?, ?, ?)`,
 			[]any{provider, subject, accountID, at},
 		},
+		{
+			`UPDATE accounts SET email_verified = 0, updated_at = ? WHERE id = ? AND NOT EXISTS (SELECT 1
+				FROM identities i WHERE i.account_id = accounts.id AND i.email = accounts.email AND i.email_verified = 1)`,
+			[]any{at, accountID},
+		},
 	} {
 		if _, err := tx.execContext(ctx, stmt.sql, stmt.args...); err != nil {
 			return IdentityUnlink{}, err
 		}
+	}
+	if err := dropUnprovenEmailOwnershipTx(ctx, tx, accountID); err != nil {
+		return IdentityUnlink{}, err
 	}
 	rows, err := tx.queryContext(ctx, `DELETE FROM sessions WHERE account_id = ? AND hash <> ? RETURNING hash,account_id,COALESCE(team,'')`, accountID, keepHash)
 	if err != nil {

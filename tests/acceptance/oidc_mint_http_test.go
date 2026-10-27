@@ -39,15 +39,17 @@ type oidcFacts struct {
 }
 
 func (*oidcFacts) Team() store.Team { return "team" }
-func (f *oidcFacts) ReadOIDCFacts(_ context.Context, a capability.Authorized) (capability.OIDCFacts, error) {
+func (f *oidcFacts) MintOIDCToken(_ context.Context, a capability.Authorized, _ string, sign func(capability.OIDCFacts) (store.OIDCMint, error)) (store.OIDCMint, error) {
 	f.calls++
 	f.actor = a
-	return f.facts, f.err
-}
-
-func (f *oidcFacts) RecordOIDCMint(context.Context, capability.Authorized, string) error {
-	f.minted++
-	return nil
+	if f.err != nil {
+		return store.OIDCMint{}, f.err
+	}
+	minted, err := sign(f.facts)
+	if err == nil {
+		f.minted++
+	}
+	return minted, err
 }
 
 func oidcBoundary() (*credentialBoundary, *oidcFacts) {
@@ -83,7 +85,7 @@ func oidcServer(t *testing.T, b *credentialBoundary, f *oidcFacts, private, publ
 		s.WithOIDCIssuer(issuer)
 	}
 	if f != nil {
-		bindTenantPort[controller.OIDCReader](s, func(context.Context, store.Team) (controller.OIDCReader, error) { return f, nil })
+		bindTenantPort[controller.OIDCMinter](s, func(context.Context, store.Team) (controller.OIDCMinter, error) { return f, nil })
 	}
 	return s
 }
@@ -287,11 +289,18 @@ func TestOIDCMintHTTPInputAndBudget(t *testing.T) {
 
 func TestOIDCMintHTTPKeyRotation(t *testing.T) {
 	b, f := oidcBoundary()
-	_, oldKey := oidcPrivate(t)
-	_, nextKey := oidcPrivate(t)
+	oldPrivate, oldKey := oidcPrivate(t)
+	nextPrivate, nextKey := oidcPrivate(t)
+	public := func(key *rsa.PrivateKey) []byte {
+		der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
+	}
 	servers := []http.Handler{
-		oidcServer(t, b, f, oldKey, nil).Handler(), oidcServer(t, b, f, oldKey, nextKey).Handler(),
-		oidcServer(t, b, f, nextKey, oldKey).Handler(), oidcServer(t, b, f, nextKey, nil).Handler(),
+		oidcServer(t, b, f, oldKey, nil).Handler(), oidcServer(t, b, f, oldKey, public(nextPrivate)).Handler(),
+		oidcServer(t, b, f, nextKey, public(oldPrivate)).Handler(), oidcServer(t, b, f, nextKey, nil).Handler(),
 	}
 	minted := make([]string, len(servers))
 	for i, h := range servers {

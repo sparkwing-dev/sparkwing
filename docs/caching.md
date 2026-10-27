@@ -134,8 +134,11 @@ Local pipeline binaries stay on the machine that builds them.
 
 Memo, dependency-cache, output and pipeline-reference records are written
 under the scope of the identity the run was sealed with at intake. A run
-started by a signed GitHub App delivery writes under its verified ref. Every
-other run writes under its own scope, `manual:<writer>:<ref>`:
+started by a signed GitHub App delivery writes under its verified ref when a
+launcher pod, Sparkwing Cloud or a GitHub-hosted Actions runner runs it; on a
+plain-machine, persistent or self-hosted Actions runner it writes under that host's scope, `manual:host-<id>:<ref>`,
+unless the team turned on `high_trust` ([security](security.md)). Every other
+run writes under its own scope, `manual:<writer>:<ref>`:
 
 | Run | Writer |
 | --- | --- |

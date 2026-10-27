@@ -778,9 +778,9 @@ persistence, timers or native execution.
 
 ### Queue observations and priority
 
-`QueueManager` uses `GET /api/v1/queue`,
-`GET /api/v1/queue/groups/{group}` and
-`PUT /api/v1/queue/groups/{group}/priority` from the existing C2 route table.
+`QueueManager` uses `GET /api/v1/queue` and
+`GET /api/v1/queue/groups/{group}` from the existing C2 route table. It has no
+priority method: `queue priority` changes local machine admission only.
 `ReadQueue` retains the unchanged `wingwire.QueueState` admission snapshot,
 including fractional capacity, connected holders, waiter estimates, pressure
 measurements and runner headroom. Both local HTTP and profiles use this client.

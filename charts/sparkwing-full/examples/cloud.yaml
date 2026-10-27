@@ -61,8 +61,7 @@ ingress:
 sparkwing-runner-bundle:
   enabled: true
   controller:
-    # Job Pods reach the controller through its public origin, the one
-    # destination the boundary probe requires.
+    # Job Pods reach the controller through its public origin.
     url: https://api.sparkwing.dev
   runner:
     enabled: false
@@ -94,8 +93,13 @@ sparkwing-runner-bundle:
               podSelector:
                 matchLabels: {k8s-app: kube-dns}
           ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+        # Outbound internet is open on every port, as on other CI providers.
+        # Private, carrier-grade NAT and link-local ranges stay closed, which
+        # covers instance metadata and the Pod Identity agent (169.254.170.23).
         - to:
             - ipBlock:
                 cidr: 0.0.0.0/0
-                except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
-          ports: [{protocol: TCP, port: 443}]
+                except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]
+            - ipBlock:
+                cidr: ::/0
+                except: ["fc00::/7", "fe80::/10"]

@@ -268,7 +268,7 @@ func TestReservationConsumesOnlyItsTeamsCapacityRequests(t *testing.T) {
 			if _, err := kube.CoreV1().Pods(test.pod.Namespace).Create(t.Context(), test.pod, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			_, _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job")
+			_, err := b.Reserve(t.Context(), boundaryBinding("team"), "job")
 			left, listErr := kube.CoreV1().Pods(test.pod.Namespace).List(t.Context(), metav1.ListOptions{})
 			if listErr != nil {
 				t.Fatal(listErr)

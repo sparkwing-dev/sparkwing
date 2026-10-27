@@ -21,14 +21,18 @@ type GitHubRunnerBinding struct {
 	RepositoryOwnerID int64
 	// Repository is "owner/name" as the owner entered it, for display.
 	Repository string
-	CreatedBy  string
-	CreatedAt  time.Time
+	// InstallationID is the team's GitHub App installation that covered the
+	// repository at enrollment; the binding ends with it. Zero on a
+	// controller without the App.
+	InstallationID int64
+	CreatedBy      string
+	CreatedAt      time.Time
 }
 
 // GitHubRunnerBindings lists t's bindings, oldest first.
 func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBinding, err error) {
 	rows, err := t.s.query(ctx, `
-		SELECT repository_id, repository_owner_id, repository, created_by, created_at
+		SELECT repository_id, repository_owner_id, repository, COALESCE(installation_id, 0), created_by, created_at
 		FROM github_runner_bindings WHERE team = ? ORDER BY created_at, repository_id`, string(t.team))
 	if err != nil {
 		return nil, err
@@ -38,7 +42,7 @@ func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBind
 	for rows.Next() {
 		b := GitHubRunnerBinding{Team: t.team}
 		var created int64
-		if err := rows.Scan(&b.RepositoryID, &b.RepositoryOwnerID, &b.Repository, &b.CreatedBy, &created); err != nil {
+		if err := rows.Scan(&b.RepositoryID, &b.RepositoryOwnerID, &b.Repository, &b.InstallationID, &b.CreatedBy, &created); err != nil {
 			return nil, err
 		}
 		b.CreatedAt = time.Unix(0, created).UTC()
@@ -52,9 +56,9 @@ func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (G
 	b := GitHubRunnerBinding{Team: t.team, RepositoryID: repositoryID}
 	var created int64
 	err := t.s.queryRow(ctx, `
-		SELECT repository_owner_id, repository, created_by, created_at
+		SELECT repository_owner_id, repository, COALESCE(installation_id, 0), created_by, created_at
 		FROM github_runner_bindings WHERE team = ? AND repository_id = ?`,
-		string(t.team), repositoryID).Scan(&b.RepositoryOwnerID, &b.Repository, &b.CreatedBy, &created)
+		string(t.team), repositoryID).Scan(&b.RepositoryOwnerID, &b.Repository, &b.InstallationID, &b.CreatedBy, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return GitHubRunnerBinding{}, ErrNotFound
 	}

@@ -486,8 +486,9 @@ administration to enroll, mint tokens for or revoke.
 Administrators change this setting in the console's team settings or with
 `sparkwing team settings set --profile work --members-can-add-machines false`.
 `sparkwing team settings show --profile work` reads it. Changes are audited.
-Turning the setting off preserves registered machines and their owner-only
-claim scope. An administrator can revoke a machine explicitly.
+Turning the setting off ends the personal machines that members without
+administration enrolled, and turning it back on does not revive them: those
+members enroll again. Administrators' own machines keep working.
 
 A personal machine takes your own runs that select no runner, ranked under the
 team's claim ranking. A run you trigger from this machine ranks it `here`. Runs

@@ -69,6 +69,30 @@ func TestFreshChildRefLookupCannotSelectAnotherRepositoryOrDirectoryProperty(t *
 	}
 }
 
+// A child in another repository names a branch the controller resolves there;
+// a caller-chosen commit could select any fetchable head, fork pulls included.
+func TestCrossRepositoryChildRefusesAnExplicitCommit(t *testing.T) {
+	e, _, _ := childIntakeFixture(t)
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := runspec.Repository{Key: "gh:77", Display: "github.com/acme/other"}
+	a := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Children: []nodeproto.ChildPipeline{{Pipeline: "deploy", Repository: string(other.Key)}}}}, Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
+	request := parent.Request.Request
+	request.Pipeline, request.Lineage = "deploy", runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}
+	request.Git = runspec.Git{Repository: other, Ref: "refs/heads/main", SHA: "9999999999999999999999999999999999999999"}
+	request.Source = runspec.Source{Ref: request.Git.SHA}
+	var refusal *apierr.Error
+	if err := e.Server.resolveChildRevisions(t.Context(), e.EngineController, a, &request); !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+		t.Fatalf("cross-repository child at a chosen commit = %v, want a refusal", err)
+	}
+}
+
 func (e childSourceEngine) Ensure(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (engine.Resolved, error) {
 	return e.Resolve(ctx, identity.Pin, target)
 }
@@ -158,6 +182,9 @@ func checkNativeFreshBranchChild(t *testing.T, explicit bool) {
 	request := child.Request.Request
 	if request.Git.SHA != selected || request.Source.Ref != selected || request.Source.WorkingTree || !request.Source.CommittedCheckout || request.Source.BundleDigest.Set {
 		t.Fatalf("child source was not resolved before sealing: %+v", request.Source)
+	}
+	if p := child.Request.Provenance; explicit && (p.Trust() != runspec.TrustAsserted || !p.SharedSecretsOnly()) {
+		t.Fatalf("cross-repository child inherited identity: %+v", p)
 	}
 	sourcetest.Git(t, repo, "branch", "-f", "deploy", original)
 	spec, err := source.ForRequest(child.Request)

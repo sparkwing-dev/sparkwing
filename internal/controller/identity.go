@@ -317,7 +317,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, a capability.A
 			resp.ActiveTeam = &active
 		}
 	}
-	invites, err := reader.OpenInvitationsForEmail(ctx, acct.Email)
+	invites, err := reader.OpenInvitationsForAccount(ctx, accountID)
 	if err != nil {
 		return engineLookupError(err)
 	}

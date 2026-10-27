@@ -8,9 +8,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
+const githubHostedRunner = "github-hosted"
+
 type claimantFacts struct {
 	Launcher, Personal, Shared, Cloud, Observable, PersistentKubernetes bool
 	OwnerAccount, Tier, OIDCKind, ExecutorClass                         string
+	// FreshHost is a host no earlier job touched: a launcher pod, a Cloud pod or
+	// a GitHub-hosted Actions runner. A self-hosted Actions runner is a
+	// long-lived host like any other. Host names any other host.
+	FreshHost bool
+	Host      string
 }
 
 func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, request runspec.Request) (claimantFacts, error) {
@@ -31,10 +38,14 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 	if root.Subject.Kind == capability.SubjectLocal {
 		facts.Tier, facts.ExecutorClass = tierSelfHosted, "local"
 	}
+	facts.Host = root.Team + "/" + root.Prefix
 	if root.Subject.Kind == capability.SubjectMachine && root.Parent == nil {
 		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, root.Prefix)
 		if err != nil {
 			return facts, err
+		}
+		if record.Origin != nil && record.Origin.RegistrationID != "" {
+			facts.Host = root.Team + "/" + record.Origin.RegistrationID
 		}
 		facts.PersistentKubernetes = record.Origin != nil && record.Origin.Platform == "kubernetes" && !capability.Launcher(root)
 		facts.Personal = record.Origin != nil && record.Origin.Personal
@@ -50,12 +61,14 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 			}
 		}
 	}
+	githubHosted := false
 	for _, ancestor := range chain {
 		c := ancestor.principal.Capability
 		facts.Cloud = facts.Cloud || capability.CloudLauncher(c)
 		if c.Binding.Kind == capability.BindingPush {
 			facts.PersistentKubernetes = false
 			facts.Tier, facts.OIDCKind = tierActions, tierActions
+			githubHosted = c.Binding.Push != nil && c.Binding.Push.RunnerEnvironment == githubHostedRunner
 		}
 	}
 	facts.Cloud = facts.Cloud || leaf.Billing != nil && leaf.Billing.ExecutorClass == string(match.ClassCloud)
@@ -67,5 +80,6 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 			facts.ExecutorClass = tierHere
 		}
 	}
+	facts.FreshHost = facts.Launcher || facts.Cloud || facts.Tier == tierActions && githubHosted
 	return facts, nil
 }

@@ -525,7 +525,7 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, rech
 			return errors.Join(fmt.Errorf("%w: %s", ErrDeletionLeaseLost, team), err)
 		}
 		if _, err := tx.execContext(ctx, `UPDATE teams SET display_name='', created_by='', members_can_add_machines=1,
-		    claim_ranking='', max_children_per_root=50, claim_award_ordinal=0,
+		    claim_ranking='', max_children_per_root=50, high_trust=0, claim_award_ordinal=0,
 		    billing_trust_at=0, billing_trust_reason='', billing_trust='', billing_trust_by='',
 		    card_customer='', card_added_at=0,
 		    refill_enabled=0, refill_threshold_cents=0, refill_amount_cents=0, refill_week_limit_cents=0, refill_month_limit_cents=0,

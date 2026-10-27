@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,11 +35,8 @@ func queuePriorityInput(inv clisurface.Invocation) (controllerwire.QueuePriority
 	if err := input.Validate(); err != nil {
 		return input, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
 	}
-	if inv.Value("group") == "" && inv.Value("profile") != "" {
-		return input, &apierr.Error{Code: apierr.PolicyMissing, Message: "remote run priority has no authorized controller route", Hint: "select a concurrency group with --group"}
-	}
-	if inv.Value("group") != "" {
-		input.IdempotencyKey = rand.Text()
+	if inv.Value("profile") != "" {
+		return input, &apierr.Error{Code: apierr.PolicyMissing, Message: "queue priority changes this machine's local admission only", Hint: "run it without --profile on the machine whose queue holds the run"}
 	}
 	return input, nil
 }
@@ -100,9 +96,6 @@ func renderQueuePriorityMissing(out io.Writer, format string, res queuePriorityR
 	runID, reason := res.RunID, res.Reason
 	if reason == "" {
 		reason = "not in local admission"
-		if res.Group != "" {
-			reason = "not in concurrency group " + res.Group
-		}
 	}
 	res.Reason = reason
 	switch format {

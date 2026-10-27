@@ -131,7 +131,6 @@ var routes = []RoutePolicy{
 	route("POST", "/api/v1/schedules/{schedule}/pause", OwnerTeam, RetrySafe, member(RunsControl)),
 	route("POST", "/api/v1/schedules/{schedule}/resume", OwnerTeam, RetrySafe, member(RunsControl)),
 	route("POST", "/api/v1/schedules/{schedule}/run", OwnerTeam, RetryIdempotencyKey, member(RunsControl)),
-	route("PUT", "/api/v1/queue/groups/{group}/priority", OwnerTeam, RetrySafe, member(RunsControl)),
 	route("GET", "/api/v1/tokens", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("POST", "/api/v1/tokens", OwnerTeam, RetryNever, member(RunsRead)),
 	route("GET", "/api/v1/tokens/{token}", OwnerTeam, RetrySafe, tokenOwner()),

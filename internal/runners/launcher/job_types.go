@@ -78,18 +78,10 @@ type CloudNodeReservation struct {
 	Award                                           capability.LeaseRef
 }
 
-// CloudNetworkEvidence comes from enforcement probes, not the presence of NetworkPolicy YAML.
-type CloudNetworkEvidence struct {
-	Namespace, NodeUID, PolicyRevision string
-	DefaultDenyEgressEnforced          bool
-	RequiredDestinationsAllowed        bool
-	DaemonSetPortsInventoried          bool
-	EscapeProbePassed                  bool
-}
-
-// CloudBoundary reserves one Job per team-dedicated node and verifies enforced network isolation.
+// CloudBoundary reserves one Job per team-dedicated node. Network isolation is
+// the cluster's NetworkPolicy enforcement, which the operator verifies.
 type CloudBoundary interface {
-	Reserve(context.Context, CloudJobBinding, string) (CloudNodeReservation, CloudNetworkEvidence, error)
+	Reserve(context.Context, CloudJobBinding, string) (CloudNodeReservation, error)
 	Release(context.Context, CloudNodeReservation) error
 	Retire(context.Context, CloudNodeReservation) error
 }
@@ -99,6 +91,5 @@ type CloudJobResources struct {
 	Job             *batchv1.Job
 	BootstrapSecret *corev1.Secret
 	Reservation     CloudNodeReservation
-	Network         CloudNetworkEvidence
 	JobDeadline     time.Time
 }

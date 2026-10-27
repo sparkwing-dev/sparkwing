@@ -11,8 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 
-	admissionv1 "k8s.io/api/admissionregistration/v1"
-
 	authenticationv1 "k8s.io/api/authentication/v1"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -41,12 +39,12 @@ type boundaryFake struct {
 	reserveErr   error
 }
 
-func (b *boundaryFake) Reserve(_ context.Context, a CloudJobBinding, name string) (CloudNodeReservation, CloudNetworkEvidence, error) {
+func (b *boundaryFake) Reserve(_ context.Context, a CloudJobBinding, name string) (CloudNodeReservation, error) {
 	b.reservations++
 	if b.reserveErr != nil {
-		return CloudNodeReservation{}, CloudNetworkEvidence{}, b.reserveErr
+		return CloudNodeReservation{}, b.reserveErr
 	}
-	return CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: a.Team, JobName: name, ReservationID: "reservation", Award: a.LeaseRef()}, CloudNetworkEvidence{Namespace: "cloud", NodeUID: "uid", PolicyRevision: "revision", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
+	return CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: a.Team, JobName: name, ReservationID: "reservation", Award: a.LeaseRef()}, nil
 }
 
 func (b *boundaryFake) Release(context.Context, CloudNodeReservation) error {
@@ -487,41 +485,6 @@ func TestLauncherWaitsOutAControllerRetryAfter(t *testing.T) {
 		}
 		if len(retrying.claimed) != 2 || retrying.claimed[1].Sub(retrying.claimed[0]) != 7*time.Second {
 			t.Fatalf("claims at %v, want the second after the controller's 7s", retrying.claimed)
-		}
-	})
-}
-
-func TestRunStopsClaimingWhenAdmissionDrifts(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		l, kube, _, control := fixture()
-		control.award = nil
-		l.Poll = time.Second
-		var logs strings.Builder
-		l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
-		syncs := 0
-		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
-			syncs++
-			return false, nil, nil
-		})
-		ctx, cancel := context.WithCancel(t.Context())
-		done := make(chan error, 1)
-		go func() { done <- l.Run(ctx) }()
-		synctest.Wait()
-		if control.claims != 1 {
-			t.Fatalf("claims before drift = %d", control.claims)
-		}
-		if err := kube.Tracker().Delete(admissionv1.SchemeGroupVersion.WithResource("validatingadmissionpolicybindings"), "", admissionPolicyName("pods", "cloud")); err != nil {
-			t.Fatal(err)
-		}
-		before := syncs
-		<-time.NewTimer(2500 * time.Millisecond).C
-		synctest.Wait()
-		cancel()
-		if err := <-done; err != nil {
-			t.Fatal(err)
-		}
-		if control.claims != 1 || syncs <= before || !strings.Contains(logs.String(), "do not match this launcher") {
-			t.Fatalf("drifted admission: claims=%d syncs=%d->%d logs=%s", control.claims, before, syncs, logs.String())
 		}
 	})
 }

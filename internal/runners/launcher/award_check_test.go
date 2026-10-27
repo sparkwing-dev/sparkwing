@@ -62,6 +62,7 @@ func TestAwardMismatchDeletesJobAndFailsAward(t *testing.T) {
 				t.Fatal(err)
 			}
 			mutate(p)
+			p.Name, p.UID = "replacement-pod", "replacement-pod-uid"
 			if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), p, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
@@ -87,6 +88,26 @@ func TestAwardMismatchDeletesJobAndFailsAward(t *testing.T) {
 				t.Fatal("Job survived")
 			}
 		})
+	}
+}
+
+// A Pod is compared with its award once, on the first pass that sees it;
+// admission keeps its spec immutable afterwards, so later passes skip it.
+func TestEachPodIsCheckedAgainstItsAwardOnce(t *testing.T) {
+	l, p := requestedPod(t)
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	p.Name = jobName(l.Control.(*controlFake).award.Binding) + "-pod"
+	p.Spec.Containers[0].Image = "registry/other@sha256:" + strings.Repeat("c", 64)
+	if _, err := l.Kube.CoreV1().Pods("cloud").Create(t.Context(), p, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(t.Context()); err != nil {
+		t.Fatalf("a checked Pod was compared again: %v", err)
 	}
 }
 

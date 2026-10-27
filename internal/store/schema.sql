@@ -9,8 +9,12 @@ CREATE TABLE teams (
     display_name TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL DEFAULT '',
     members_can_add_machines BIGINT NOT NULL DEFAULT 1 CHECK(members_can_add_machines IN (0,1)),
+    -- safety: counts the times members_can_add_machines was turned off, so turning it back on never revives a machine enrolled before.
+    member_machines_epoch BIGINT NOT NULL DEFAULT 0 CHECK(member_machines_epoch >= 0),
     claim_ranking TEXT NOT NULL DEFAULT '',
     max_children_per_root BIGINT NOT NULL DEFAULT 50 CHECK(max_children_per_root BETWEEN 1 AND 1000),
+    -- safety: off, verified runs on plain-machine and persistent runners write only their host's cache scope.
+    high_trust BIGINT NOT NULL DEFAULT 0 CHECK(high_trust IN (0,1)),
     claim_award_ordinal BIGINT NOT NULL DEFAULT 0 CHECK(claim_award_ordinal >= 0),
     billing_trust_at BIGINT NOT NULL DEFAULT 0,
     billing_trust_reason TEXT NOT NULL DEFAULT '',
@@ -690,6 +694,13 @@ CREATE TABLE concurrency_waiters (
 );
 
 
+-- safety: the one account that owns each verified address; its primary key serializes concurrent assertions.
+CREATE TABLE email_owners (
+    email TEXT NOT NULL PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    updated_at BIGINT NOT NULL
+);
+
 CREATE TABLE identities (
     provider TEXT NOT NULL,
     subject TEXT NOT NULL,
@@ -751,17 +762,6 @@ CREATE TABLE github_actions_exchanges (
     PRIMARY KEY (team, repository_key, run_id, run_attempt)
 );
 
-CREATE TABLE github_runner_bindings (
-    team TEXT NOT NULL REFERENCES teams(name),
-    repository_id BIGINT NOT NULL,
-    repository_owner_id BIGINT NOT NULL,
-    repository TEXT NOT NULL,
-    created_by TEXT NOT NULL DEFAULT '',
-    created_at BIGINT NOT NULL,
-    repo_key TEXT NOT NULL,
-    PRIMARY KEY (team, repository_id)
-);
-
 CREATE TABLE github_app_installations (
     connection_generation TEXT NOT NULL DEFAULT '',
     installation_id BIGINT NOT NULL PRIMARY KEY CHECK(installation_id > 0),
@@ -775,6 +775,20 @@ CREATE TABLE github_app_installations (
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
     UNIQUE(team,installation_id)
+);
+
+CREATE TABLE github_runner_bindings (
+    team TEXT NOT NULL REFERENCES teams(name),
+    repository_id BIGINT NOT NULL,
+    repository_owner_id BIGINT NOT NULL,
+    repository TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at BIGINT NOT NULL,
+    repo_key TEXT NOT NULL,
+    -- safety: consent given through an App installation ends with the team's hold on it; NULL only where the controller runs without the App.
+    installation_id BIGINT,
+    PRIMARY KEY (team, repository_id),
+    FOREIGN KEY(team,installation_id) REFERENCES github_app_installations(team,installation_id) ON DELETE CASCADE
 );
 
 CREATE TABLE github_app_triggers (
@@ -1719,6 +1733,7 @@ CREATE INDEX idx_payment_refunds_intent ON payment_refunds(payment_intent);
 CREATE INDEX idx_github_app_deliveries_received ON github_app_deliveries(received_at);
 
 CREATE INDEX idx_github_app_automation_installation ON github_app_automation(team,installation_id);
+CREATE INDEX idx_github_runner_bindings_installation ON github_runner_bindings(team,installation_id);
 
 CREATE INDEX idx_log_streams_unsealed ON log_streams(team,updated_at) WHERE sealed_at IS NULL;
 

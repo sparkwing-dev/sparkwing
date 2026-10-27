@@ -140,7 +140,7 @@ func observeProvenance(t *testing.T, tenant *Tenant, run string) provenanceObser
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope, err := awardDataScope(awardRow{run: run, repo: string(row.Request.Request.Git.Repository.Key)}, row.Request, capability.Capability{Unit: capability.UnitNode})
+	scope, err := awardDataScope(awardRow{run: run, repo: string(row.Request.Request.Git.Repository.Key)}, row.Request, capability.Capability{Unit: capability.UnitNode}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
