@@ -101,7 +101,8 @@ func refuseUnpaidStorageGrowthTx(ctx context.Context, tx *storeTx, team Team, by
 		ErrInsufficientCredits, team, retained, bytes, free, FormatCredits(balance))
 }
 
-// retainedStorageBytesTx is what a team stores now: run events, blobs, log segments and live upload holds.
+// retainedStorageBytesTx is what a team stores now: run events, blobs, every signed log slot until its object is
+// deleted, and live upload holds.
 func retainedStorageBytesTx(ctx context.Context, tx *storeTx, team Team) (int64, error) {
 	events, err := retainedEventBytesTx(ctx, tx, team)
 	if err != nil {
