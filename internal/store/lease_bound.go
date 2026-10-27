@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
@@ -58,14 +59,26 @@ func fundedBoundTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, ge
 	if err != nil {
 		return time.Time{}, err
 	}
-	horizon := now.Add(time.Duration(paid) * time.Second)
-	for _, interval := range intervals {
-		horizon = horizon.Add(-interval.End.Sub(interval.Start))
-	}
+	horizon := prepaidEnd(intervals, now, paid)
 	if a.drain.Valid && a.drain.Int64 < horizon.UnixNano() {
 		horizon = time.Unix(0, a.drain.Int64).UTC()
 	}
 	return horizon, nil
+}
+
+// prepaidEnd is when the paid seconds run out for work whose billed intervals through now are intervals.
+func prepaidEnd(intervals []capability.BillableInterval, now time.Time, paidSeconds int64) time.Time {
+	horizon := now.Add(time.Duration(paidSeconds) * time.Second)
+	for _, interval := range intervals {
+		horizon = horizon.Add(-interval.End.Sub(interval.Start))
+	}
+	return horizon
+}
+
+// prepaidEndTx is prepaidEnd for award a's persisted intervals.
+func prepaidEndTx(ctx context.Context, tx *storeTx, a billingAward, now time.Time, paidSeconds int64) (time.Time, error) {
+	intervals, err := readBillingIntervalsTx(ctx, tx, a, now, false)
+	return prepaidEnd(intervals, now, paidSeconds), err
 }
 
 func deref(t *time.Time) time.Time {

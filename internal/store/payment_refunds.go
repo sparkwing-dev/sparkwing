@@ -28,6 +28,8 @@ func recordPaymentConsequenceTx(ctx context.Context, tx *storeTx, e capability.P
 		return err
 	case payment != e.PaymentID || recorded != amount:
 		return authorityError(apierr.Conflict, "payment consequence changed its payment or amount")
+	// Stripe can fail a refund it reported succeeded; the failure is recorded so the operator lists it.
+	case kind == "refund" && status == cardRefundSucceeded && e.Status == "failed":
 	case status == cardRefundSucceeded || status == "failed" || status == "canceled":
 		if e.Status == cardRefundSucceeded || e.Status == "failed" || e.Status == "canceled" {
 			if status != e.Status {

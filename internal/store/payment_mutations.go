@@ -214,6 +214,6 @@ func applyCardRefundTx(ctx context.Context, tx *storeTx, team Team, paymentInten
 		status = cardRefundPending
 	}
 	_, err = tx.execContext(ctx, `UPDATE card_refunds SET status = ? WHERE payment_mode=? AND team = ? AND payment_intent = ?
-	    AND refund_id = ? AND status = 'pending'`, status, mode, string(team), paymentIntent, refundID)
+	    AND refund_id = ? AND (status = 'pending' OR status = ? AND ? = 'failed')`, status, mode, string(team), paymentIntent, refundID, cardRefundSucceeded, status)
 	return err
 }

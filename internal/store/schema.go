@@ -241,7 +241,6 @@ var schemaTables = []schemaTable{
 	{Name: "payment_warnings", Owner: schemaOperator},
 	{Name: "payment_refunds", Owner: schemaOperator},
 	{Name: "payment_setups", Owner: schemaOperator},
-	{Name: "payment_states", Owner: schemaOperator},
 	{Name: "pipeline_profiles", Owner: schemaTenant},
 	{Name: "pipeline_success_pins", Owner: schemaTenant},
 	{Name: "pool_access_rules", Owner: schemaTenant},

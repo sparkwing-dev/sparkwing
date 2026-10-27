@@ -69,7 +69,7 @@ func TestBillingAwardUniqueIdentitiesAreSchemaConstraints(t *testing.T) {
 
 func TestOnlyAFailedRefillCanBlockRefills(t *testing.T) {
 	s, _, _ := refillFixture(t, true)
-	r := openRefill(t, s, "a", 1_000, "payment")
+	r := openRefill(t, s, "a", 1_000)
 	for _, update := range []string{
 		`UPDATE credit_checkouts SET refill_blocked=2 WHERE id='` + r.ID + `'`,
 		`UPDATE credit_checkouts SET refill_blocked=1 WHERE id='` + r.ID + `'`,
@@ -79,4 +79,14 @@ func TestOnlyAFailedRefillCanBlockRefills(t *testing.T) {
 			t.Fatalf("invalid refill block accepted: %s", update)
 		}
 	}
+}
+
+func TestAStripeCustomerBelongsToOneTeam(t *testing.T) {
+	s, _, _ := refillFixture(t, true)
+	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('other',1,1),('third',1,1)`)
+	if _, err := s.db.ExecContext(t.Context(), `UPDATE teams SET card_customer='cus_1',card_added_at=1 WHERE name='other'`); err == nil {
+		t.Fatal("a second team took the first team's Stripe customer")
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='cus_other',card_added_at=1 WHERE name='other'`)
+	rewriteSchemaCount(t, s.db, "teams WHERE card_customer=''", 2)
 }

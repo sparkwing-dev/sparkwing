@@ -915,44 +915,43 @@ Assigned to an Opus implementer (env 1087).
 - Protected secrets (released only to verified default-branch runs, including decision 31 schedules) are a post-launch feature.
 
 
-## WS4 integration: explicit refill payment operations
+## WS4 integration: one refill payment call
 
-The controller requires these authenticated checkout-service operations before
-refills can resume. Each uses the refill request fields `team`, `deployment`,
-`refill_id`, `amount_cents`, `customer` and `payment_intent`, and responds with
-`payment_intent` and `status`. A bound response must name the requested payment.
-Under decision 65 the controller sends no card or email: the service charges the
-customer's default payment method, or its newest card when it has no default.
+Under decision 67 a refill takes one authenticated checkout-service call,
+`POST /internal/refill`, with the request fields `team`, `deployment`,
+`refill_id`, `amount_cents` and `customer`. It responds with `payment_intent`,
+the Stripe `status` and, when Stripe refused the charge, `failure`
+(`authentication_required` or the decline code). Under decision 65 the
+controller sends no card or email: the service charges the customer's default
+payment method, or its newest card when it has no default, and answers 409
+when the customer has no card. Both repositories test against a byte-for-byte
+copy of the example in `testdata/refill_contract.json`.
 
-- `POST /internal/refill` creates an unconfirmed intent only, requires an empty
-  `payment_intent`, and returns `status=created`. It answers 409 when the customer
-  has no card; the controller closes that refill as `no_card`, blocks refills
-  like a declined payment and notifies the owners. It never confirms a payment.
-- `POST /internal/refill/reconcile` retrieves the bound intent, validates its
-  refill ID and customer, and returns its raw
-  Stripe status. It never confirms or cancels a payment.
-- `POST /internal/refill/confirm` validates those same facts and confirms only a
-  `requires_confirmation` intent, under the refill's existing confirmation
-  idempotency key. Any processing or succeeded intent is returned unchanged.
-- `POST /internal/refill/cancel` validates those same facts, cancels an
-  unconfirmed intent at Stripe, and reports the resulting Stripe status. It
-  returns processing or succeeded payments unchanged; it never confirms them.
-  Cancellation is replayable after a lost response. Reconciliation and
-  cancellation accept legacy oversized reservations so they can be resolved;
-  creation and confirmation enforce the $1,000 maximum.
+- The controller checks eligibility and opens the refill in one transaction:
+  refills on, no failed refill blocking them, no hold, balance below the
+  threshold and every limit respected. No transaction stays open across the
+  provider call.
+- The service creates the PaymentIntent with `confirm=true` and
+  `off_session=true`, with the refill id as the idempotency key and as the
+  `refill_id` metadata. The service charges whatever it is asked, so every
+  controller pass rechecks eligibility, setting the open refill's own
+  reservation aside, immediately before repeating its same request. A crash or
+  lost answer never charges twice. A refill no longer eligible is withdrawn
+  without another call, and a payment an earlier call made still credits it.
+- The signed payment webhook finds the refill by the `refill_id` in its
+  metadata and settles it exactly like Add funds; a refill funds at most one
+  payment. A 409 closes the refill as `no_card`; a `failure` closes it with that
+  code. Both block refills like a declined payment and notify the owners, and
+  only a successful Add funds or a new card setup clears the block.
 - `POST /internal/portal` takes `team`, `deployment` and `customer` and returns the
   `url` of a Stripe customer portal session, where owners view, replace or remove
   the card. `POST /internal/card-setup` also receives the team owner's `email`,
-  which only Stripe keeps, for receipts.
-
-The controller rechecks the team's Stripe customer, refill opt-in, holds and
-limits immediately before asking for confirmation. An ineligible unconfirmed
-intent is canceled. A `canceled` response closes the reservation while retaining
-its payment binding; no credit moves. Processing and succeeded payments keep
-their slot for signed webhook settlement. Separate operation paths make an
-older checkout service fail closed instead of treating reconciliation as
-implicit authorization to charge. Eligibility commits and Stripe calls are
-separate operations; no database transaction stays open across a provider call.
+  which only Stripe keeps, for receipts. `POST /internal/refund` takes
+  `deployment`, `payment_intent`, `key` and `reason`.
+- The service answers 403 to portal, refill, card setup with an existing
+  customer and refund when the Stripe customer or payment intent is stamped
+  for another deployment. The controller follows payment and setup pages only
+  on `checkout.stripe.com` and the portal only on `billing.stripe.com`.
 
 ## 2026-10-20 Korey decision 35: wave 2 proceeds; growth is fine when it is healthy
 

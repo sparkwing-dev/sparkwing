@@ -145,7 +145,25 @@ func reapNodeUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 	} else if row.Status == runstate.StatusRunning && row.Disruptions+1 >= limits.MaxDisruptions {
 		to = runstate.NodeFailed
 	}
-	if _, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: actor, Cause: runstate.CauseLeaseLapse}); err != nil {
+	// A lease that ran out because its award was stopped, such as at the requester's overflow allowance, ends the job
+	// with that reason, the way a funding refusal does, rather than requeueing it as a generic lapse.
+	var stop string
+	err = tx.QueryRowContext(ctx, `SELECT stop_reason FROM billing_awards WHERE team=? AND run_id=? AND node_id=? AND unit_kind=? AND generation=?`,
+		target.team, target.ref.RunID, target.ref.NodeID, capability.UnitNode, int64(row.Generation)).Scan(&stop)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if stop != "" && to != runstate.NodeCancelled {
+		to = runstate.NodeCancelled
+		previous := tx.cancelingTeam
+		tx.cancelingTeam = target.team
+		_, err = transitionNodeStateTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: runstate.Actor{Kind: runstate.ActorOperator},
+			Cause: causeCancel, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: to, Reason: stop}}})
+		tx.cancelingTeam = previous
+	} else {
+		_, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: actor, Cause: runstate.CauseLeaseLapse})
+	}
+	if err != nil {
 		return nil, err
 	}
 	disruptions := row.Disruptions
