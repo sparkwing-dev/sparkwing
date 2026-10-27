@@ -4203,7 +4203,8 @@ caller-supplied schedule fields cannot replace persisted intent.
 It reads sealed declarations and actual job awards, grants complete job sets,
 and preserves reservation identity and queue arrival independently of owners.
 Store release transitions commit plan admission with release permission.
-The public queue API retains group reads and member priority control. Single-group
+The public queue API retains group reads only; priority changes are local
+machine admission through the admission wire. Single-group
 mutation and resolution routes are deleted. `ConcurrencyStore` is a tenant read
 port. Claim group reads preserve contention accounting while removing memo keys
 and leader references outside the declared read set.

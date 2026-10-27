@@ -81,16 +81,15 @@ snapshot. Plain output uses tab-separated records.
 
 `queue priority` changes local machine admission priority. It accepts an
 integer, including zero, or `front`/`back`, resolved against the other runs in
-the queue. Transport retries
-reuse the same mutation key. The result preserves prior and new
-priorities and positions. A holder keeps its existing lease. A missing run
+the queue. It runs on the machine whose admission queue holds the run and
+refuses `--profile`. The result preserves prior and new priorities and
+positions. A holder keeps its existing lease. A missing run
 returns a receipt and exits 1.
 
 <!-- design:begin -->
 The rewrite implements these CLI and client adapters against fakes. Native
-queue/group projections and priority transactions still need controller
-integration. Remote priority without `--group` needs an authorization route.
-Local admission priority uses the admission wire. Per-team run numbers resolve
+queue/group projections still need controller integration. Priority is local
+admission only and uses the admission wire. Per-team run numbers resolve
 through the controller before changing a rank. Native controller
 startup and queue ownership remain runtime integration work.
 <!-- design:end -->

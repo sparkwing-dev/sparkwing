@@ -541,8 +541,8 @@ All authored workload state uses container writable layers and emptyDir storage.
 Release waits for all non-DaemonSet Pods to disappear, then removes
 reservation-owned probe state before permitting reuse. Kubernetes owns the
 associated ephemeral-state reclamation. Job code holds no node root, so it cannot
-change host state outside its Pod; node reuse within a team keeps that
-assumption.
+change host state outside its Pod. A node is reused only by later jobs of the
+run that first used it, so even within a team no run reaches another's node.
 
 ## Preparation leases
 

@@ -2551,8 +2551,8 @@ capacity, cost, policy and lease bound from sealed acceptance. Box keys use only
 the award's sealed `ExecutionHost`. Launcher awards wait for authenticated
 activation to seal that identity.
 
-The public queue API exposes group reads at `GET /api/v1/queue/groups/{group}`
-and member priority changes at `PUT /api/v1/queue/groups/{group}/priority`.
+The public queue API exposes group reads at `GET /api/v1/queue/groups/{group}`.
+Group priority has no route; the store holds no group priority to change.
 The single-group acquire, heartbeat, release, waiter cancellation, holder
 observation, resolve and force-release endpoints are deleted. Their request and
 response types and authority-bearing mutation methods are deleted with them.
@@ -3131,17 +3131,9 @@ create that scope. Live jobs retain their holder and attempt while draining.
 Global account audit events use nullable team ownership from the final schema,
 with a deterministic primary key preserving kind/subject deduplication.
 
-PUT /api/v1/queue/groups/{group}/priority is registered under its existing policy.
-It validates controllerwire.QueuePriorityWrite, preserves explicit zero and
-passes the Idempotency-Key through controller.queuePriorityWriter. That local
-interface declares Team() and SetAuthorizedGroupPriority(context.Context,
-capability.Authorized, string, controllerwire.QueuePriorityWrite)
-(controllerwire.QueuePriorityResult, error). WithQueuePriorityWriter supplies a
-tenant resolver. A missing or foreign tenant writer returns policy_missing.
-The transaction owns current authority, stable run/number resolution, rank and
-position selection, exact retry identity and unchanged holder leases. C1 has
-not declared persisted integer priority or an ordering transaction. The HTTP
-property uses a fake for that boundary and claims no persisted ranking evidence.
+The group priority route is deleted: the store never persisted a group rank,
+so every production call failed. `queue priority` changes local machine
+admission through the admission wire and refuses `--profile`.
 
 ## Native data binding and persisted result proofs
 
