@@ -26,6 +26,8 @@ type StorageStanding struct {
 	BlobBytes         int64
 	ReservedBlobBytes int64
 	LogBytes          int64
+	// ReservedLogBytes are live holds for signed log uploads not yet committed.
+	ReservedLogBytes int64
 }
 
 // safety: the operator's team is the whole of a self-hosted install, which

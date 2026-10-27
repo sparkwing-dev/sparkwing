@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -50,9 +51,10 @@ func (t *Tenant) prepareLogWriteTx(ctx context.Context, tx *storeTx, subject blo
 }
 
 // ReserveLogUpload checks the writer as PrepareLogWrite does and admits the slot's bytes through the storage rule
-// before the caller signs an upload URL, so a refused team gets no URL. It returns the retention class and when the
-// slot's URL and hold expire; the segment commit, or the final commit for the manifest at index 0, settles the hold.
-// Signing a slot again reuses its live hold.
+// before the caller signs an upload URL, so a refused team gets no URL. The first admission binds the slot (stream
+// and index) to its size and expiry; signing it again while that hold lives returns the same expiry and refuses any
+// other size, so every signed byte stays covered for the URL's whole life. An expired slot is admitted again in
+// place. The segment commit, or the final commit for the manifest at index 0, settles the hold.
 func (t *Tenant) ReserveLogUpload(ctx context.Context, subject blob.LogSubject, actor runstate.Actor, index, size int64) (string, time.Time, error) {
 	if subject.Team != string(t.team) {
 		return "", time.Time{}, authorityError(apierr.Forbidden, "log belongs to another team")
@@ -74,12 +76,22 @@ func (t *Tenant) ReserveLogUpload(ctx context.Context, subject blob.LogSubject, 
 		if class, err = t.prepareLogWriteTx(ctx, tx, subject, actor); err != nil {
 			return err
 		}
-		expires = tx.now(ctx).Add(limits.LogUploadURLTTL)
 		id := logReservationID(identity.id, index)
-		var held bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM quota_reservations WHERE team=? AND id=? AND state='held' AND expires_at>?)`, t.team, id, tx.now(ctx).UnixNano()).Scan(&held); err != nil || held {
+		slot, err := logSlotTx(ctx, tx, t.team, id)
+		if err != nil {
 			return err
 		}
+		switch {
+		case slot.state == "committed":
+			return authorityError(apierr.Conflict, "log slot is already committed")
+		case slot.live(tx.now(ctx)):
+			if slot.amount != size {
+				return authorityError(apierr.Conflict, fmt.Sprintf("log slot was signed for %d bytes", slot.amount))
+			}
+			expires = slot.expires
+			return nil
+		}
+		expires = tx.now(ctx).Add(limits.LogUploadURLTTL)
 		return admitStorageGrowthTx(ctx, tx, t.team, storageGrowth{reservation: id, expires: expires, run: subject.RunID, bytes: size})
 	})
 	return class, expires, err

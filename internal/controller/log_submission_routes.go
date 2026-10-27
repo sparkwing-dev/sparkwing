@@ -221,8 +221,8 @@ var (
 	_ logSubmissionObjects = (*blob.S3)(nil)
 )
 
-// storageGrowthRefusal answers a write the storage rule refused with its limit or funding reason, which the
-// writer shows the user instead of retrying.
+// storageGrowthRefusal answers a write the storage rule refused with its limit or funding reason. The native
+// uploader keeps the segment and retries it, so the refusal clears once the team has room.
 func storageGrowthRefusal(err error) error {
 	var held *store.InsufficientCreditsError
 	switch {

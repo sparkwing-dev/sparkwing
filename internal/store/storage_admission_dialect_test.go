@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -248,6 +249,69 @@ func TestLogSlotPassesTheStorageRuleBeforeItIsSigned(t *testing.T) {
 		}
 		if grew := usage() - before; grew != 3 {
 			t.Fatalf("the commit recorded %d bytes of log usage; want the 3 committed bytes once", grew)
+		}
+	})
+}
+
+// A log slot is bound to the size and expiry it was first admitted with: signing it again for more bytes is refused,
+// signing it again later keeps the original expiry, and a slot whose hold expired is admitted again in place.
+func TestLogSlotKeepsItsAdmittedSizeAndExpiry(t *testing.T) {
+	bothDialects(t, func(t *testing.T, target *storetest.Target) {
+		f := newGrowthFixture(t, target)
+		fundTeam(t, f.tenant, "pay-slot")
+		subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: f.attempt.Team, RunID: f.attempt.RunID, Attempt: &f.attempt}
+		_, first, err := f.tenant.ReserveLogUpload(t.Context(), subject, f.holder, 1, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := f.tenant.ReserveLogUpload(t.Context(), subject, f.holder, 1, 8<<20); err == nil {
+			t.Fatal("a slot admitted for 3 bytes was signed again for 8 MiB")
+		}
+		f.now = f.now.Add(time.Minute)
+		if _, again, err := f.tenant.ReserveLogUpload(t.Context(), subject, f.holder, 1, 3); err != nil || !again.Equal(first) {
+			t.Fatalf("late re-sign expires %v, %v; want the original %v", again, err, first)
+		}
+		// The job's own lease is shorter than a slot's, so the hold is aged directly rather than by the clock.
+		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, "UPDATE quota_reservations SET expires_at=? WHERE team=? AND id LIKE '%log:%'"), f.now.Add(-time.Second).UnixNano(), f.tenant.Team()); err != nil {
+			t.Fatal(err)
+		}
+		if _, renewed, err := f.tenant.ReserveLogUpload(t.Context(), subject, f.holder, 1, 3); err != nil || !renewed.Equal(f.now.Add(limits.LogUploadURLTTL)) {
+			t.Fatalf("expired slot re-admission expires %v, %v; want a fresh hold to %v", renewed, err, f.now.Add(limits.LogUploadURLTTL))
+		}
+	})
+}
+
+// A finalized manifest counts toward the stream's retained bytes, so index-zero bodies cannot be stored for free:
+// once a team's manifest fills its free allowance, its next growth is refused.
+func TestFinalizedManifestCountsTowardRetainedStorage(t *testing.T) {
+	bothDialects(t, func(t *testing.T, target *storetest.Target) {
+		f := newGrowthFixture(t, target)
+		subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: f.attempt.Team, RunID: f.attempt.RunID, Attempt: &f.attempt}
+		retained := func() int64 {
+			t.Helper()
+			n, err := f.tenant.StorageRetainedBytes(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		standing, err := f.tenant.StorageStanding(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.storeBytes(t, "a", standing.AllowanceBytes-limits.LogManifestBytes-standing.EventBytes-1, f.now)
+		before := retained()
+		if _, _, err := f.tenant.ReserveLogUpload(t.Context(), subject, f.holder, 0, limits.LogManifestBytes); err != nil {
+			t.Fatalf("manifest within the free allowance: %v", err)
+		}
+		if err := f.tenant.RecordSegments(t.Context(), store.SegmentCommit{Subject: subject, Actor: f.holder, RetentionClass: f.retention, Final: true}); err != nil {
+			t.Fatal(err)
+		}
+		if grew := retained() - before; grew != limits.LogManifestBytes {
+			t.Fatalf("finalizing a %d-byte manifest grew retained storage by %d", limits.LogManifestBytes, grew)
+		}
+		if err := f.appendEvent(t); !errors.Is(err, store.ErrInsufficientCredits) {
+			t.Fatalf("growth past the allowance the manifest filled = %v; want a refusal", err)
 		}
 	})
 }

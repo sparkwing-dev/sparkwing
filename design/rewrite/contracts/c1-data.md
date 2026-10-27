@@ -2670,9 +2670,9 @@ crosses the cap finishes. Zero-byte checks add no usage row. Midnight resets
 admission while preserving earlier report rows. Overflow or a failed counter
 write rolls back both sides. Logs retain their download-cap exemption.
 
-`Operator.ChargeRetainedStorage(ctx, maintenanceLease)` bills unique `blobs`
-and committed `log_streams.stored_bytes`. Historical replica usage and reference
-counts cannot multiply the charge. The team's cache and log rows share their
+[`Operator.ChargeRetainedStorage`](../../../internal/store/retained_storage_billing.go) bills unique `blobs`
+and committed `log_streams.stored_bytes`, which include a sealed stream's final
+manifest. Historical usage and reference counts cannot multiply the charge. The team's cache and log rows share their
 existing `storage_charged_through` watermark because the free allowance applies
 once to the combined bytes. The tenant's retained allowance caps that total
 before the free allowance comes off. An absent quota row adds no ceiling.
@@ -2681,7 +2681,7 @@ the stored bytes' creation time. A zero price resets existing watermarks so
 resuming billing starts a new interval. Storage charges remain runless.
 
 The `billing-ledger-survives-retention/store-data-sqlite` acceptance proof
-checks a real storage debit and preserves every financial row across leased
+checks a real storage debit and preserves every financial row across
 retention and reopening. Tenant billing state, grant history and charge history
 exclude a neighboring team's ledger and survive the same retention and restart.
 Both history methods retain tenant attribution. Charge history reads the final
@@ -3561,7 +3561,7 @@ intervals open on the first renewal and remain open regardless of the holder's
 executing flag, as Cloud job intervals do.
 
 Upload tickets retain their run and job identifiers without cascading foreign
-keys. They survive run deletion because leased expiry still needs the digest to
+keys. They survive run deletion because upload expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
 
 ## Decision 112 billing cut

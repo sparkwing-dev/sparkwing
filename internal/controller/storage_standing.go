@@ -34,7 +34,7 @@ func (s *Server) teamStorageStanding(r *http.Request, team store.Team) (*teamSta
 		Team: string(team), Tier: got.Tier, AllowanceBytes: got.AllowanceBytes,
 		EventBytes: got.EventBytes,
 		CacheBytes: got.BlobBytes + got.ReservedBlobBytes,
-		LogBytes:   got.LogBytes,
+		LogBytes:   got.LogBytes + got.ReservedLogBytes,
 	}, nil
 }
 

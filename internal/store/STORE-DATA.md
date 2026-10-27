@@ -90,9 +90,13 @@ Every write that grows a team's stored data passes one storage rule,
 `admitStorageGrowthTx`, in the write's own transaction: run events
 (`appendEventTx`, so `Tenant.AppendEvent` and every state transition), blob and
 source upload reservations and tagged log segments. A log upload slot is held
-through the rule before its URL is signed (`ReserveLogUpload`); the segment
-commit settles the hold at the stored bytes, the final commit settles the
-manifest's, and an unused hold expires with its URL. It refuses a held team,
+through the rule before its URL is signed
+([`Tenant.ReserveLogUpload`](controller_reporting.go)). The first admission binds
+the slot to its size and expiry, and signing it again returns that same size and
+expiry. The segment commit settles the hold at the stored bytes, and the final
+commit moves the manifest's signed size into the stream's retained bytes,
+admitting it then if its hold expired. An expired slot is admitted again in
+place. It refuses a held team,
 growth past the free storage allowance on an empty balance while storage is
 priced, and growth past the team's tier quota (monthly bytes, per-run bytes and
 objects), then counts the growth so a refused write records nothing. A run's
@@ -617,7 +621,7 @@ The schema enforces one billing award per capability and per unit generation.
 Refill settlement scopes its checkout and grant to the same team. Every new job attempt clears its job summary and annotations.
 
 Upload tickets retain their run and job identifiers without cascading foreign
-keys. They survive run deletion because leased expiry still needs the digest to
+keys. They survive run deletion because upload expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
 
 ## Run-anywhere claim ranking

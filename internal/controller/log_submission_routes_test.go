@@ -254,6 +254,17 @@ func TestLogSigningRefusesATeamAtItsStorageLimit(t *testing.T) {
 	claim := award.Claim
 	engineAdmitBearer(t, e.Store, claim.Capability)
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Binding.Generation}}
+	sign := func(index, size int64, status int) *httptest.ResponseRecorder {
+		encoded, err := json.Marshal(blob.LogSigningRequest{Subject: subject, Index: index, Size: size, Digest: blob.Digest(strings.Repeat("a", 64))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(encoded), status)
+	}
+	sign(1, 3, http.StatusOK)
+	// A signed slot keeps its admitted size: asking again for more bytes gets no larger URL.
+	sign(1, 4, http.StatusConflict)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -261,12 +272,7 @@ func TestLogSigningRefusesATeamAtItsStorageLimit(t *testing.T) {
 	if err := tenant.SetStorageQuota(t.Context(), store.StorageQuota{MaxBytesPerRun: 4}); err != nil {
 		t.Fatal(err)
 	}
-	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Binding.Generation}}
-	encoded, err := json.Marshal(blob.LogSigningRequest{Subject: subject, Index: 1, Size: 1 << 20, Digest: blob.Digest(strings.Repeat("a", 64))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	refused := engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(encoded), http.StatusTooManyRequests)
+	refused := sign(2, 1<<20, http.StatusTooManyRequests)
 	if strings.Contains(refused.Body.String(), "url") || !strings.Contains(refused.Body.String(), "contact support to raise this limit") {
 		t.Fatalf("refused signing = %s; want a quota refusal naming the remedy and no URL", refused.Body.String())
 	}

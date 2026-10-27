@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"time"
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -142,17 +143,8 @@ func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 	var seal any
 	finalDigest = ""
 	if commit.Final {
-		// safety: the final manifest's slot was signed for its exact size, so its hold settles in full.
-		manifest := logReservationID(identity.id, 0)
-		var size int64
-		err := tx.QueryRowContext(ctx, `SELECT amount FROM quota_reservations WHERE team=? AND id=? AND quota='storage'`, t.team, manifest).Scan(&size)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err := settleLogManifestTx(ctx, tx, t.team, commit.Subject.RunID, identity.id); err != nil {
 			return err
-		}
-		if err == nil {
-			if _, err := settleLogSlotTx(ctx, tx, t.team, commit.Subject.RunID, manifest, size); err != nil {
-				return err
-			}
 		}
 		seal = tx.now(ctx).UnixNano()
 		completeness = "complete"
@@ -172,11 +164,32 @@ func logReservationID(stream string, index int64) string {
 	return fmt.Sprintf("log:%s:%d", stream, index)
 }
 
+// logSlot is a signed log slot's monthly storage hold: the size it was signed for, until when, and its state.
+type logSlot struct {
+	amount  int64
+	expires time.Time
+	state   string
+}
+
+func (s logSlot) live(now time.Time) bool { return s.state == "held" && s.expires.After(now) }
+
+// logSlotTx reads a log slot's monthly hold; a slot never signed has an empty state.
+func logSlotTx(ctx context.Context, tx *storeTx, team Team, id string) (logSlot, error) {
+	var slot logSlot
+	var expires int64
+	err := tx.QueryRowContext(ctx, `SELECT amount,expires_at,state FROM quota_reservations WHERE team=? AND id=? AND quota='storage'`+tx.forUpdate(), team, id).Scan(&slot.amount, &expires, &slot.state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return logSlot{}, nil
+	}
+	slot.expires = time.Unix(0, expires)
+	return slot, err
+}
+
 // settleLogSlotTx commits a signed slot's live hold at the bytes actually stored, and reports false when the slot
 // holds nothing to settle.
 func settleLogSlotTx(ctx context.Context, tx *storeTx, team Team, run, id string, used int64) (bool, error) {
-	var held bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM quota_reservations WHERE team=? AND id=? AND state='held' AND expires_at>?)`, team, id, tx.now(ctx).UnixNano()).Scan(&held); err != nil || !held {
+	slot, err := logSlotTx(ctx, tx, team, id)
+	if err != nil || !slot.live(tx.now(ctx)) {
 		return false, err
 	}
 	accounting := blobAccounting{ReservationID: id}
@@ -185,6 +198,27 @@ func settleLogSlotTx(ctx context.Context, tx *storeTx, team Team, run, id string
 		return false, err
 	}
 	return true, settleBlobQuotaTx(ctx, tx, team, run, accounting, quotas, used, 0)
+}
+
+// settleLogManifestTx moves a signed final manifest into the stream's retained bytes at the size its slot was signed
+// for, which the URL bound exactly. A live hold settles; a hold that expired first is admitted now, like a segment.
+func settleLogManifestTx(ctx context.Context, tx *storeTx, team Team, run, stream string) error {
+	id := logReservationID(stream, 0)
+	slot, err := logSlotTx(ctx, tx, team, id)
+	if err != nil || slot.state == "" || slot.state == "committed" {
+		return err
+	}
+	settled, err := settleLogSlotTx(ctx, tx, team, run, id, slot.amount)
+	if err != nil {
+		return err
+	}
+	if !settled {
+		if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: run, bytes: slot.amount}); err != nil {
+			return err
+		}
+	}
+	_, err = tx.execContext(ctx, `UPDATE log_streams SET stored_bytes=stored_bytes+? WHERE team=? AND run_id=? AND id=?`, slot.amount, team, run, stream)
+	return err
 }
 
 func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segments []runstate.Segment) error {
