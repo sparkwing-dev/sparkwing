@@ -253,7 +253,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	if validationErr != nil {
 		return true, errors.Join(validationErr, l.teardown(ctx, created, r.Reservation))
 	}
-	// safety: reservation probes and publication may outlive the award's execution authority.
+	// safety: publication may outlive the award's execution authority, so the award is checked again before activation.
 	retirements, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobNamespace: created.Namespace, JobName: created.Name, JobUID: string(created.UID), NodeUID: r.Reservation.NodeUID, Activation: &r.Reservation}})
 	if err == nil && (retirements[created.Name].Delete || retirements[created.Name].Deferred) {
 		err = errors.New("Cloud award ended before Job activation")

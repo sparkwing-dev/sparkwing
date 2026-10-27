@@ -173,10 +173,10 @@ func logSlotTx(ctx context.Context, tx *storeTx, team Team, run, stream string, 
 	return slot, err
 }
 
-// openLogSlotTx admits a new slot's bytes through the storage rule and counts them retained from now until the
-// object is deleted.
+// openLogSlotTx admits a new slot as one object of its run and its bytes through the storage rule, and counts them
+// retained from now until the object is deleted.
 func openLogSlotTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, index, size int64, key string, committed bool) error {
-	if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: run, bytes: size}); err != nil {
+	if err := admitStorageGrowthTx(ctx, tx, team, storageGrowth{run: run, bytes: size, objects: 1}); err != nil {
 		return err
 	}
 	_, err := tx.execContext(ctx, `INSERT INTO log_slots(team,run_id,stream_id,generation,n,size,committed,object_key,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,

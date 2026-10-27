@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -38,7 +39,11 @@ func TestRetriedCacheAndMemoStayInSourceWritersScope(t *testing.T) {
 			if _, err := commitTestBlob(t, tenant, intent); err != nil {
 				t.Fatal(err)
 			}
-			wantRef := blob.RefScope{Ref: "refs/heads/main", Writer: string(runspec.PrincipalWriter("account", "alice"))}
+			// The runner is a long-lived host, so the source writer's scope is keyed under that host.
+			wantRef := grantedScope(t, s, intent.Authority.CapabilityRef)
+			if !strings.HasSuffix(wantRef.Writer, "/"+string(runspec.PrincipalWriter("account", "alice"))) || wantRef.Ref != "refs/heads/main" {
+				t.Fatalf("retry was granted %+v; want the source writer's scope", wantRef)
+			}
 			output := blob.CommitRecordRequest{Authority: intent.Authority, Source: intent.Identity, Key: blob.ResultRecordKey(intent.Identity.Attempt.Value, "gh:701", wantRef, "ci", blob.KindOutput), Digest: intent.Digest}
 			if _, err := tenant.CommitRecord(t.Context(), output); err != nil {
 				t.Fatalf("retry cannot write the source writer's output scope: %v", err)
@@ -66,7 +71,7 @@ func TestRetriedCacheAndMemoStayInSourceWritersScope(t *testing.T) {
 				}
 				reader := startWriterCacheJob(t, tenant, next)
 				found := account == "alice"
-				ref := blob.ScopeFor(next.Request.Provenance)
+				ref := grantedScope(t, s, reader.Authority.CapabilityRef)
 				cache, err := tenant.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: reader.Authority, Key: blob.DepcacheKey{Repo: "gh:701", Ref: ref, Name: "modules", Key: "v1"}})
 				if err != nil || cache.Found != found {
 					t.Fatalf("%s cache hit=%v, want %v: %v", account, cache.Found, found, err)
@@ -78,6 +83,16 @@ func TestRetriedCacheAndMemoStayInSourceWritersScope(t *testing.T) {
 			}
 		})
 	}
+}
+
+// grantedScope is the data scope the store sealed into a capability's grant.
+func grantedScope(t *testing.T, s *Store, prefix string) blob.RefScope {
+	t.Helper()
+	var granted string
+	if err := s.db.QueryRow(`SELECT ref_scope FROM capabilities WHERE prefix=?`, prefix).Scan(&granted); err != nil {
+		t.Fatal(err)
+	}
+	return blob.ParseCapabilityScope(granted)
 }
 
 func startWriterCacheJob(t *testing.T, tenant *Tenant, admitted AdmissionResult) blob.UploadIntent {

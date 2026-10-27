@@ -23,9 +23,8 @@ import (
 // that actually run.
 const cronTickOffer = 20 * time.Second
 
-// safety: long enough that a tick which dies mid-flight does not hand the next
-// minute a claim it will never release, short enough that the minute after that
-// still runs.
+// safety: bounds one tick's synchronous execution, so a stuck tick ends and
+// the minute after the next still runs.
 const cronTickTimeout = 90 * time.Second
 
 const cronDetailFires = 200

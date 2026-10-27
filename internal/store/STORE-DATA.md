@@ -105,8 +105,8 @@ the per-store free shares are removed.
 
 This is the one rule for counting tagged log bytes. A log slot (stream and
 index; index 0 is the final manifest) passes the storage rule when it is first
-signed ([`Tenant.OpenLogSlot`](controller_reporting.go)), and its signed size is
-fixed then. That size counts as retained, committed or not, until Sparkwing
+signed ([`Tenant.OpenLogSlot`](controller_reporting.go)) as one object of its
+run's object limit, and its signed size is fixed then. That size counts as retained, committed or not, until Sparkwing
 itself deletes the object. Commit never lowers it: a segment larger than its
 slot is refused, the final commit only marks the manifest slot committed, and
 signing a committed slot again reports it committed. Accounting is retired

@@ -8,7 +8,8 @@ import (
 	"time"
 )
 
-// ChargeRetainedStorage bills unique committed blobs and persisted log bytes.
+// ChargeRetainedStorage bills unique committed blobs and the signed size of every
+// log slot, uploaded or not, until Sparkwing deletes its object.
 // Each team's watermarks commit with its ledger debit.
 // The initial sample starts billing without charging for earlier storage.
 func (o *Operator) ChargeRetainedStorage(ctx context.Context) (StorageChargeSweep, error) {

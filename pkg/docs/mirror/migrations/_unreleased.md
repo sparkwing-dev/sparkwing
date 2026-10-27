@@ -30,6 +30,25 @@ it unchanged. It never deletes or rewrites it.
 Releases after v0.68.0 ship schema changes as forward migrations. See
 [Schema compatibility](../backup-restore.md#schema-compatibility).
 
+## OIDC runner environment and triggers
+
+Every OIDC subject gains a `runner_environment` segment between `runner` and
+`ref`, so a trust policy that names a whole subject no longer matches. Insert
+`runner_environment:fresh` to accept only launcher pods, Sparkwing Cloud pods
+and GitHub-hosted Actions runners, or `runner_environment:*` to keep accepting
+every host:
+
+```
+team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:runner_environment:fresh:ref:refs/heads/main
+```
+
+Runs from a GitHub Actions binding now mint `trigger:actions`; replace
+`trigger:manual` in policies written for them. A run whose code Sparkwing
+fetched from a GitHub repository now carries that `repository_id` with
+`trigger:manual` and an empty `ref`, so a policy that names the repository
+and accepts `trigger:*` now also admits those runs. See
+[OIDC tokens](../oidc.md#what-each-value-proves).
+
 ## An ephemeral controller home needs PostgreSQL and S3
 
 The `sparkwing-full` chart refuses `controller.storage.type=emptyDir` unless

@@ -17,6 +17,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
+// FetchedRepository is a GitHub repository id and the owner/name the App
+// lookup that proved it reported; Name may be empty. Ref and SHA are the
+// qualified branch or tag head the App resolved and the run's code ran at, or
+// both empty when its code ran at another commit or no single ref was resolved.
+type FetchedRepository struct {
+	ID   int64
+	Name string
+	Ref  string
+	SHA  string
+}
+
 // IntakeRequest carries client input and server-derived tagged authority, re-resolved
 // by C2 in the intake transaction. CapabilityPrefix is only a claim fence and
 // cannot replace a session parent. Verified App facts come from the delivery ID.
@@ -31,11 +42,11 @@ type IntakeRequest struct {
 	CapabilityPrefix   string
 	LocalSecrets       map[string]string `json:"-"`
 	VerifiedDeliveryID string
-	// FetchedRepositoryID is the GitHub repository the controller fetches this
+	// FetchedRepository is the GitHub repository the controller fetches this
 	// run's code from through the team's App installation; only the controller
 	// sets it, never a request body.
-	FetchedRepositoryID int64 `json:"-"`
-	RetryMode           string
+	FetchedRepository FetchedRepository `json:"-"`
+	RetryMode         string
 	// OriginMachine is a short-lived proof of the submitting machine's runner credential; intake verifies it and seals
 	// only the machine's name.
 	OriginMachine string `json:"-"`

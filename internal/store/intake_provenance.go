@@ -24,8 +24,12 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 	if err != nil {
 		return sealed, err
 	}
-	if id := fetchedRepositoryTx(tx, request, input); id > 0 && sealed.Trust() == runspec.TrustAsserted && !sealed.SharedSecretsOnly() && input.Lineage.ParentRunID == "" && input.Git.Repository.Key == runspec.RepoKey("gh:"+strconv.FormatInt(id, 10)) {
-		if sealed, err = refused(sealed.FetchedFrom(id)); err != nil {
+	if fetched := fetchedRepositoryTx(tx, request, input); fetched.ID > 0 && sealed.Trust() == runspec.TrustAsserted && !sealed.SharedSecretsOnly() && input.Lineage.ParentRunID == "" && input.Git.Repository.Key == runspec.RepoKey("gh:"+strconv.FormatInt(fetched.ID, 10)) {
+		// safety: a head the App resolved names the commit the run executes, or none.
+		if !strings.EqualFold(fetched.SHA, input.Git.SHA) {
+			fetched.Ref, fetched.SHA = "", ""
+		}
+		if sealed, err = refused(sealed.FetchedFrom(fetched.ID, fetched.Name, fetched.Ref, fetched.SHA)); err != nil {
 			return sealed, err
 		}
 	}
@@ -49,19 +53,29 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 // repository, an unlocked App-bound schedule's (fires, overrides and run-now),
 // or a remote branch run the controller checked. Zero when the submitter
 // supplies the code, the repository claim or an arbitrary commit.
-func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Request) int64 {
+func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Request) FetchedRepository {
+	// safety: the ref is a delivery's verified ref or a schedule's server-resolved
+	// branch, claimed only when the run's code ran at that head.
+	head := func(id int64, name string) FetchedRepository {
+		fetched := FetchedRepository{ID: id, Name: name}
+		if strings.EqualFold(input.Source.Ref, input.Git.SHA) && (strings.HasPrefix(input.Git.Ref, "refs/heads/") || strings.HasPrefix(input.Git.Ref, "refs/tags/")) {
+			fetched.Ref, fetched.SHA = input.Git.Ref, input.Git.SHA
+		}
+		return fetched
+	}
 	switch {
 	case input.Origin == runspec.OriginApp && request.VerifiedDeliveryID != "" && input.Git.App.Set:
-		return input.Git.App.Value.RepositoryID
+		return head(input.Git.App.Value.RepositoryID, input.Git.App.Value.Repository)
 	case input.Origin == runspec.OriginSchedule && tx.scheduleAdmission != nil && tx.scheduleAdmission.authority() == request.Authority:
 		// safety: a schedule locked to a commit runs a SHA GitHub may serve from a
 		// fork, not a branch head the App resolved.
 		if s := tx.scheduleAdmission.schedule; s.GitHubInstallationID > 0 && s.LockedRef == "" {
-			return s.GitHubRepositoryID
+			// safety: the fire-time App lookup that proved the id reported the name, as for a verified fire.
+			return head(s.GitHubRepositoryID, request.Request.Git.RepositoryName.Value)
 		}
-		return 0
+		return FetchedRepository{}
 	}
-	return request.FetchedRepositoryID
+	return request.FetchedRepository
 }
 
 func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal, input runspec.Request, run string) (runspec.Provenance, error) {

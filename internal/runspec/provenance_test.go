@@ -32,6 +32,9 @@ func TestProvenanceRoundTripsAndRefusesForgedSeals(t *testing.T) {
 		`{"trust":"asserted","pipeline":"deploy","writer":"a:b"}`,
 		`{"trust":"root","pipeline":"deploy","writer":"a"}`,
 		`{"trust":"actions","pipeline":"deploy","writer":"actions","ref":"refs/heads/main","sha":"short"}`,
+		`{"trust":"asserted","pipeline":"deploy","writer":"a","fetched_ref":"refs/heads/main","fetched_sha":"0123456789abcdef0123456789abcdef01234567"}`,
+		`{"trust":"asserted","pipeline":"deploy","writer":"a","fetched_repository_id":7,"repository":"acme/app","fetched_ref":"refs/heads/main"}`,
+		`{"trust":"asserted","pipeline":"deploy","writer":"a","fetched_repository_id":7,"repository":"acme/app","fetched_ref":"refs/pull/7/head","fetched_sha":"0123456789abcdef0123456789abcdef01234567"}`,
 	} {
 		if err := json.Unmarshal([]byte(forged), &back); err == nil {
 			t.Fatalf("decoded a seal no constructor produces: %s", forged)
@@ -46,6 +49,17 @@ func TestProvenanceRoundTripsAndRefusesForgedSeals(t *testing.T) {
 	}
 	if trigger, id, ref, sha := asserted.OIDC(); trigger != "manual" || id != 0 || ref != "" || sha != "" {
 		t.Fatalf("asserted run claims %s %d %q %q", trigger, id, ref, sha)
+	}
+	// Decision 72: a fetched run claims the head the App resolved, and only that.
+	fetched, err := asserted.FetchedFrom(7, "acme/app", "refs/heads/main", provenanceSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trigger, id, ref, sha := fetched.OIDC(); trigger != "manual" || id != 7 || ref != "refs/heads/main" || sha != provenanceSHA || fetched.Ref() != asserted.Ref() {
+		t.Fatalf("fetched run claims %s %d %q %q", trigger, id, ref, sha)
+	}
+	if _, err := asserted.FetchedFrom(7, "acme/app", "main", provenanceSHA); err == nil {
+		t.Fatal("a fetched run claimed an unqualified ref")
 	}
 	app.DefaultBranchPush, app.Ref = false, "refs/heads/feature"
 	feature, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "deploy")

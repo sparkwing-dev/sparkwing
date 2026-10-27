@@ -117,14 +117,17 @@ func (p Provenance) SharedSecretsOnly() bool { return p.identity.SharedOnly }
 
 // FetchedFrom records that the controller itself fetched an asserted run's code
 // from this GitHub repository through the team's App installation. It proves
-// the repository for pipeline secrets only; the trust class, OIDC claims, pools
-// and data scopes stay asserted, so the run still seals no repository id or
-// name; the fetched id is read only by secret selection.
-func (p Provenance) FetchedFrom(repositoryID int64) (Provenance, error) {
+// the repository for pipeline secrets and the OIDC repository claims, and
+// repository, the owner/name GitHub reported, may be empty when no lookup
+// reported one. ref and sha are the branch or tag head the App resolved and
+// the run's code ran at, or both empty when the code ran elsewhere (decision
+// 72); they are claimed in OIDC only. The trust class, pools and data scopes
+// stay asserted.
+func (p Provenance) FetchedFrom(repositoryID int64, repository, ref, sha string) (Provenance, error) {
 	if p.identity.Trust != TrustAsserted || p.identity.SharedOnly || repositoryID <= 0 {
 		return Provenance{}, errors.New("only an asserted run the controller fetched names a fetched repository")
 	}
-	p.identity.Fetched = repositoryID
+	p.identity.Fetched, p.identity.Repository, p.identity.FetchedRef, p.identity.FetchedSHA = repositoryID, repository, ref, strings.ToLower(sha)
 	return p, p.validate()
 }
 
@@ -181,11 +184,14 @@ func (p Provenance) validate() error {
 	if p.identity.Fetched < 0 || p.identity.Fetched > 0 && (p.identity.Trust != TrustAsserted || p.identity.SharedOnly) {
 		return errors.New("only an asserted run the controller fetched names a fetched repository")
 	}
+	if (p.identity.FetchedRef == "") != (p.identity.FetchedSHA == "") || p.identity.FetchedRef != "" && (p.identity.Fetched == 0 || !strings.HasPrefix(p.identity.FetchedRef, "refs/heads/") && !strings.HasPrefix(p.identity.FetchedRef, "refs/tags/") || !IsCommitID(p.identity.FetchedSHA)) {
+		return errors.New("a fetched run names the branch or tag head it ran together with its commit")
+	}
 	if p.identity.SHA != "" && !IsCommitID(p.identity.SHA) {
 		return errors.New("provenance commit must be a full commit ID")
 	}
-	if (p.identity.Repository != "") != (p.identity.Trust != TrustAsserted) {
-		return errors.New("a GitHub-proven run seals its repository id and name together, and an asserted run neither")
+	if p.identity.Repository == "" && p.identity.Trust != TrustAsserted || p.identity.Repository != "" && p.identity.Trust == TrustAsserted && p.identity.Fetched == 0 {
+		return errors.New("a GitHub-proven run seals its repository id and name together, and an asserted run names only a repository the controller fetched")
 	}
 	switch p.identity.Trust {
 	case TrustVerified, TrustVerifiedDefault:
@@ -239,7 +245,8 @@ func (p Provenance) DefaultBranchWork() bool {
 }
 
 // Repository is the owner/name GitHub reported for RepositoryID when intake sealed
-// the run, and empty for a run a principal chose.
+// the run, or for the repository the controller fetched an asserted run's code from,
+// and empty for any other run a principal chose.
 func (p Provenance) Repository() string { return p.identity.Repository }
 
 // RepositoryID is the GitHub repository a signed delivery, an Actions push binding
@@ -272,7 +279,9 @@ func (p Provenance) Delivery() string { return p.identity.Delivery }
 func (p Provenance) Writer() Writer { return Writer(p.identity.Writer) }
 
 // OIDC returns the trigger, repository ID, ref and commit an ID token may claim.
-// An asserted run proves none of its ref, commit or repository, so it claims none.
+// An asserted run proves neither its ref nor its commit, so it claims neither,
+// unless the controller fetched its code from a repository: it then claims that
+// repository, and the branch or tag head it ran when the App resolved one.
 func (p Provenance) OIDC() (trigger string, repositoryID int64, ref, sha string) {
 	switch p.identity.Trust {
 	case TrustVerified, TrustVerifiedDefault:
@@ -280,9 +289,9 @@ func (p Provenance) OIDC() (trigger string, repositoryID int64, ref, sha string)
 	case TrustSchedule:
 		return "cron", p.identity.RepositoryID, p.identity.Ref, p.identity.SHA
 	case TrustActions:
-		return "manual", p.identity.RepositoryID, p.identity.Ref, p.identity.SHA
+		return "actions", p.identity.RepositoryID, p.identity.Ref, p.identity.SHA
 	}
-	return "manual", 0, "", ""
+	return "manual", p.identity.Fetched, p.identity.FetchedRef, p.identity.FetchedSHA
 }
 
 type provenanceJSON struct {
@@ -299,6 +308,8 @@ type provenanceJSON struct {
 	Writer        string     `json:"writer,omitempty"`
 	SharedOnly    bool       `json:"shared_secrets_only,omitempty"`
 	Fetched       int64      `json:"fetched_repository_id,omitempty"`
+	FetchedRef    string     `json:"fetched_ref,omitempty"`
+	FetchedSHA    string     `json:"fetched_sha,omitempty"`
 }
 
 // MarshalJSON persists the sealed fields inside the request seal.

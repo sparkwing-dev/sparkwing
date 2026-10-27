@@ -10,8 +10,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
-// LogClassReady checks that the bucket expires every object in the requested
-// class no sooner than the class. Sparkwing's maintenance pass deletes each log
+// LogClassReady checks that one enabled prefix rule expires the requested class
+// no sooner than the class. It does not look for other rules that could expire
+// some of its objects sooner. Sparkwing's maintenance pass deletes each log
 // object at its class age and only then stops counting it, so the rule is a
 // backstop and should be set longer than the class. Use it as the batch
 // signer's lifecycle check. It never changes bucket rules, which may also

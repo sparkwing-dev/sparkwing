@@ -89,7 +89,17 @@ func (t *Tenant) oidcFactsTx(ctx context.Context, tx *storeTx, supplied capabili
 	if err != nil {
 		return capability.OIDCFacts{}, err
 	}
-	facts.Now, facts.RunnerKind = snapshot.Now, factsClass.OIDCKind
+	// The host is the one award issuance classified: the claimant that received
+	// the run-bound unit capability, not the unit capability itself.
+	claimant := chain
+	for len(claimant) > 1 && claimant[0].principal.Capability.Unit != "" {
+		claimant = claimant[1:]
+	}
+	host, err := claimantFactsTx(ctx, tx, claimant, runspec.Request{})
+	if err != nil {
+		return capability.OIDCFacts{}, err
+	}
+	facts.Now, facts.RunnerKind, facts.FreshHost = snapshot.Now, factsClass.OIDCKind, host.FreshHost
 	facts.NotAfter = state.LeaseExpiresAt
 	if state.Expansion != nil {
 		facts.NotAfter = state.Expansion.ExpiresAt

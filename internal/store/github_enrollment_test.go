@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -427,11 +430,16 @@ func TestInstallationUnbindEndsActionsConsentAndAutomation(t *testing.T) {
 }
 
 // Only a GitHub-hosted Actions runner is a fresh host. A self-hosted runner,
-// or a token without the claim, is a long-lived host whose verified work
-// writes only its host's cache scope.
+// or a token without the claim, is a long-lived host whose work writes only its
+// host's cache scope, so a GitHub-hosted job of the same ref never restores it.
 func TestActionsRunnerEnvironmentDecidesFreshness(t *testing.T) {
 	tenant, _, _ := actionsEnrollment(t)
 	s := tenant.s
+	p, err := runspec.ActionsProvenance(42, "acme/repo", "refs/heads/main", strings.Repeat("a", 40), "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := map[string]blob.RefFacts{}
 	for i, tc := range []struct {
 		environment string
 		fresh       bool
@@ -443,12 +451,16 @@ func TestActionsRunnerEnvironmentDecidesFreshness(t *testing.T) {
 			t.Fatal(err)
 		}
 		var facts claimantFacts
+		var host string
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
 			chain, err := authorityChainTx(t.Context(), tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, false)
 			if err != nil {
 				return err
 			}
-			facts, err = claimantFactsTx(t.Context(), tx, chain, runspec.Request{})
+			if facts, err = claimantFactsTx(t.Context(), tx, chain, runspec.Request{}); err != nil {
+				return err
+			}
+			host, err = awardCacheHostTx(t.Context(), tx, tenant.team, facts)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -456,5 +468,20 @@ func TestActionsRunnerEnvironmentDecidesFreshness(t *testing.T) {
 		if facts.FreshHost != tc.fresh || facts.Tier != tierActions {
 			t.Fatalf("runner_environment %q: fresh=%v tier=%s, want fresh=%v", tc.environment, facts.FreshHost, facts.Tier, tc.fresh)
 		}
+		ref, err := runRefFacts(runspec.SealedRequest{Version: 1, Provenance: p}, host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := grantHost(ref.Scope.CapabilityScope()); got != host {
+			t.Fatalf("runner_environment %q: grant host %q, issued %q", tc.environment, got, host)
+		}
+		scopes[tc.environment] = ref
+	}
+	fresh, persistent := scopes["github-hosted"], scopes["self-hosted"]
+	if slices.Contains(readScopes(fresh), persistent.Scope.CapabilityScope()) || scopeAcceptsCopy(fresh.Scope, persistent.Scope) {
+		t.Fatalf("a GitHub-hosted job (reads %v) can restore the self-hosted write scope %v", readScopes(fresh), persistent.Scope)
+	}
+	if !scopeAcceptsCopy(persistent.Scope, fresh.Scope) {
+		t.Fatalf("a self-hosted job cannot copy down the fresh scope %v into %v", fresh.Scope, persistent.Scope)
 	}
 }
