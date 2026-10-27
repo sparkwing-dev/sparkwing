@@ -39,6 +39,12 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 
 func newStoreRecoveryFixtureForAt(t *testing.T, started bool, target *storetest.Target, identity string, edits ...func(*nodeproto.PlanDoc)) *storeRecoveryFixture {
 	t.Helper()
+	return newStoreRecoveryFixtureSetup(t, started, target, identity, nil, edits...)
+}
+
+// newStoreRecoveryFixtureSetup runs setup on the team before its runner claims the job.
+func newStoreRecoveryFixtureSetup(t *testing.T, started bool, target *storetest.Target, identity string, setup func(*store.Store, store.Team), edits ...func(*nodeproto.PlanDoc)) *storeRecoveryFixture {
+	t.Helper()
 	ctx := t.Context()
 	f := &storeRecoveryFixture{target: target}
 	var err error
@@ -67,6 +73,9 @@ func newStoreRecoveryFixtureForAt(t *testing.T, started bool, target *storetest.
 		t.Fatal(err)
 	}
 	f.plan = plan
+	if setup != nil {
+		setup(f.s, f.tenant.Team())
+	}
 	f.owner, f.ref = plan.Actor, runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "job"}
 	if _, err := f.tenant.TransitionNode(ctx, store.ReadyNode{Ref: f.ref, Actor: f.owner}); err != nil {
 		t.Fatal(err)

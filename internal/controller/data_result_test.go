@@ -58,12 +58,7 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 			return false
 		}
 		stored := dataResultUpload(t, tenant, objects, authority, identity, "manifest", raw)
-		run, err := tenant.ReadRun(t.Context(), "run")
-		if err != nil {
-			t.Log(err)
-			return false
-		}
-		scope := blob.ScopeFor(run.Request.Provenance)
+		scope := blob.ParseCapabilityScope(c.Data.WriteRef)
 		outputKey := blob.ResultRecordKey(identity.Attempt.Value, "gh:1", scope, "ci", blob.KindOutput)
 		manifestKey := blob.ResultRecordKey(identity.Attempt.Value, "gh:1", scope, "ci", blob.KindManifest)
 		for _, request := range []blob.CommitRecordRequest{

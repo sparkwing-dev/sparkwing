@@ -21,7 +21,14 @@ func TestMemoPublicationCommitsWithProducerOutcome(t *testing.T) {
 		t.Run(dialect.name, func(t *testing.T) {
 			for _, outcome := range []runstate.NodeState{runstate.NodeSuccess, runstate.NodeCancelled} {
 				t.Run(string(outcome), func(t *testing.T) {
-					f := newStoreRecoveryFixtureAt(t, true, dialect.target(t), func(doc *nodeproto.PlanDoc) {
+					// A high-trust team shares one scope across its long-lived hosts, so the
+					// reader, awarded on another host, sees the producer's memo.
+					highTrust := func(s *store.Store, team store.Team) {
+						if _, err := s.DB().ExecContext(t.Context(), storetest.Rebind(s, `UPDATE teams SET high_trust=1 WHERE name=?`), team); err != nil {
+							t.Fatal(err)
+						}
+					}
+					f := newStoreRecoveryFixtureSetup(t, true, dialect.target(t), string(acceptanceTeam), highTrust, func(doc *nodeproto.PlanDoc) {
 						doc.Jobs[0].Memo = &nodeproto.MemoSpec{}
 						doc.Jobs[0].Closures.MemoKey = "memo"
 					})
@@ -70,3 +77,4 @@ func TestMemoPublicationCommitsWithProducerOutcome(t *testing.T) {
 		})
 	}
 }
+
