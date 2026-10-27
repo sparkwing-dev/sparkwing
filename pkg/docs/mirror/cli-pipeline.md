@@ -304,9 +304,9 @@ Flags including --profile may precede the verb; unknown engine flags before -- a
 
 --resume reattaches only a here run; --runner must be absent or here. The existing sealed spec is authoritative; reject new args, reason, source flags and detach on resume.
 
-Without --resume, one pipeline positional is required. Runner accepts here, a runner name, or label=<label>.
+Without --resume, one pipeline positional is required. Runner accepts here, cloud, a runner name, or label=<label>.
 
-Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repository pool route rule requires a pool, which keeps it on that pool's self-hosted runners. A runner name or label=<label> keeps it on matching self-hosted runners, and here hosts it in this CLI.
+Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repository pool route rule requires a pool, which keeps it on that pool's self-hosted runners. cloud keeps it on Cloud, a runner name or label=<label> keeps it on matching self-hosted runners, and here hosts it in this CLI.
 
 ### Arguments
 

@@ -196,12 +196,13 @@ The controller writes `credential-epoch` beside `secrets-key`, or beside
 read-only, set `--credential-epoch-dir` to a separate persistent writable
 directory. Use the same flag for startup and every restore command. The
 controller restricts that directory to its owner and applies the credential
-file checks above to the epoch. The Helm chart always mounts a dedicated,
+file checks above to the epoch. On a pod volume whose root is setgid under one
+of the controller's own groups (the pod's `fsGroup`), it keeps that group's
+access, and the epoch file may be group-writable by that group. The Helm chart always mounts a dedicated,
 retained PVC at `/var/lib/sparkwing/credential-epoch` and selects it with this
-flag, including when `/data` uses `emptyDir`. The chart sets the pod's
-`fsGroupChangePolicy` to `OnRootMismatch`. Without it the kubelet adds group
-write to the 0600 epoch file on every mount, and the controller refuses to
-start after its first restart. A pod spec of your own needs the same setting.
+flag, including when `/data` uses `emptyDir`, and sets the pod's
+`fsGroupChangePolicy` to `OnRootMismatch` so the kubelet does not relabel the
+volume on every mount.
 Preserve the latest epoch when
 restoring a database. Retain its volume independently of database backups.
 Declared restore preparation holds schedules until operator acknowledgment and

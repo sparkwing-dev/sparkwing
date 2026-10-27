@@ -52,7 +52,7 @@ func TestEpochSurvivesRestartAndRotates(t *testing.T) {
 }
 
 func TestEpochRejectsUntrustedFiles(t *testing.T) {
-	for _, kind := range []string{"group-writable", "escaping-symlink"} {
+	for _, kind := range []string{"world-writable", "escaping-symlink"} {
 		t.Run(kind, func(t *testing.T) {
 			if runtime.GOOS == "windows" {
 				t.Skip("Unix file modes and symlink creation")
@@ -71,7 +71,7 @@ func TestEpochRejectsUntrustedFiles(t *testing.T) {
 				if err := os.WriteFile(path, []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Chmod(path, 0o660); err != nil {
+				if err := os.Chmod(path, 0o662); err != nil {
 					t.Fatal(err)
 				}
 			}

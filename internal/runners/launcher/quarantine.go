@@ -31,6 +31,10 @@ func (f *nodeFault) Error() string {
 	return fmt.Sprintf("Cloud node %s: %s", f.node, f.cause)
 }
 
+// errJobTeardown marks one Job whose teardown failed. Its node keeps its
+// reservation until a later pass finishes, so claims for other work continue.
+var errJobTeardown = errors.New("Cloud Job teardown failed; retrying next pass")
+
 // safety: a kubelet can rewrite its own annotations. Placement must reject
 // damaged reservation bindings even when repeated conflicts prevent quarantine.
 func quarantineNode(ctx context.Context, kube kubernetes.Interface, node *corev1.Node, namespace, cause string) error {
@@ -106,6 +110,9 @@ func blocking(err error) error {
 	case *nodeFault:
 		return nil
 	case interface{ Unwrap() []error }:
+		if slices.Contains(e.Unwrap(), errJobTeardown) {
+			return nil
+		}
 		var kept []error
 		for _, inner := range e.Unwrap() {
 			kept = append(kept, blocking(inner))

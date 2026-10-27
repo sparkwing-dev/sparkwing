@@ -61,3 +61,30 @@ func TestCredentialTargetPermissionsAndConfinement(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A pod volume under fsGroup: kubelet leaves the root setgid 0770 and the epoch
+// group-writable under the pod's own group.
+func TestEpochLoadsFromAnFSGroupPodVolume(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chown(dir, -1, os.Getegid()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, os.ModeSetgid|0o770); err != nil {
+		t.Fatal(err)
+	}
+	first, err := credentials.LoadOrCreateEpoch(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, "credential-epoch"), 0o660); err != nil {
+		t.Fatal(err)
+	}
+	again, err := credentials.LoadOrCreateEpoch(dir)
+	if err != nil || again != first {
+		t.Fatalf("restart on a pod volume = %q %v, want %q", again, err, first)
+	}
+	info, err := os.Stat(dir)
+	if err != nil || info.Mode()&(os.ModeSetgid|os.ModePerm) != os.ModeSetgid|0o770 {
+		t.Fatalf("epoch directory = %v %v, want setgid 0770 left for kubelet", info, err)
+	}
+}

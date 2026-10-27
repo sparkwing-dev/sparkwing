@@ -19,7 +19,7 @@ func EnsureDir(path string) error {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("refuse to prepare private directory through symlink %q", path)
 		}
-		target = info.Mode().Perm() & dirMode
+		target = info.Mode().Perm()&dirMode | fsGroupMode(info)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

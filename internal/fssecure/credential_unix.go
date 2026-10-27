@@ -16,15 +16,24 @@ func openCredentialFile(root *os.Root, name string) (*os.File, error) {
 }
 
 func verifyOwnerOnly(_ *os.File, info os.FileInfo) error {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return errors.New("credential group is unavailable")
-	}
-	groups, err := os.Getgroups()
+	gid, groups, err := fileGroup(info)
 	if err != nil {
 		return err
 	}
-	return ownerOnly(info.Mode().Perm(), stat.Gid, append(groups, os.Getegid()))
+	return ownerOnly(info.Mode().Perm(), gid, groups)
+}
+
+// fileGroup returns the file's group and the groups this process belongs to.
+func fileGroup(info os.FileInfo) (uint32, []int, error) {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, nil, errors.New("credential group is unavailable")
+	}
+	groups, err := os.Getgroups()
+	if err != nil {
+		return 0, nil, err
+	}
+	return stat.Gid, append(groups, os.Getegid()), nil
 }
 
 // ownerOnly admits group read only for a group this process belongs to, which
@@ -38,17 +47,30 @@ func ownerOnly(perm os.FileMode, gid uint32, groups []int) error {
 	return nil
 }
 
-func verifyCredentialFile(_ *os.File, info os.FileInfo) error {
-	if info.Mode().Perm()&0o022 != 0 {
-		return errors.New("credential target is writable by group or others; make it mode 0600, and on Kubernetes " +
-			"set the pod's fsGroupChangePolicy to OnRootMismatch so a remount does not add group write again")
+func verifyCredentialFile(_ *os.File, info os.FileInfo, ownGroupWrite bool) error {
+	gid, groups, err := fileGroup(info)
+	if err != nil {
+		return err
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return errors.New("credential owner is unavailable")
+	if !ownGroupWrite {
+		groups = nil
 	}
+	if err := groupWritableOnlyByOwnGroup(info.Mode().Perm(), gid, groups); err != nil {
+		return err
+	}
+	stat := info.Sys().(*syscall.Stat_t)
 	if stat.Uid != 0 && stat.Uid != uint32(os.Geteuid()) {
 		return errors.New("credential owner is neither the current user nor root")
+	}
+	return nil
+}
+
+// groupWritableOnlyByOwnGroup admits group write only for one of groups:
+// kubelet makes every file on a pod volume group-writable under the pod's
+// fsGroup. Callers pass no groups for credentials others provision.
+func groupWritableOnlyByOwnGroup(perm os.FileMode, gid uint32, groups []int) error {
+	if perm&0o002 != 0 || perm&0o020 != 0 && !slices.Contains(groups, int(gid)) {
+		return errors.New("credential target is writable by group or others; make it mode 0600")
 	}
 	return nil
 }

@@ -13,7 +13,7 @@ import (
 
 func openCredentialFile(root *os.Root, name string) (*os.File, error) { return root.Open(name) }
 
-func verifyCredentialFile(file *os.File, _ os.FileInfo) error {
+func verifyCredentialFile(file *os.File, _ os.FileInfo, _ bool) error {
 	const writeAccess = windows.GENERIC_ALL | windows.GENERIC_WRITE | windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA | windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER
 	return foreignAccess(file, writeAccess, "writable")
 }
