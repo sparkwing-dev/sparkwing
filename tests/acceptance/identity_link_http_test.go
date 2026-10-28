@@ -275,6 +275,9 @@ func TestIdentityLinkHTTPStartLimitsAndExistingProvider(t *testing.T) {
 		}
 		if i == 10 {
 			assertRefusedFlow(t, w, "/account/sign-ins?refused=rate_limited")
+			if w.Header().Get("Retry-After") != "60" {
+				t.Fatal("missing retry delay")
+			}
 		}
 	}
 	other, csrf := otherLinkAccount(t, &f)

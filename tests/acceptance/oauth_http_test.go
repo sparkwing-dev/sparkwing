@@ -410,8 +410,8 @@ func TestOAuthHTTPRateLimit(t *testing.T) {
 	w := httptest.NewRecorder()
 	f.handler.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/github/start", nil))
 	assertRefusedFlow(t, w, "/login?refused=rate_limited")
-	if f.provider.calls != 0 {
-		t.Fatal("a limited start reached the provider")
+	if w.Header().Get("Retry-After") != "60" || f.provider.calls != 0 {
+		t.Fatal("invalid rate-limit response")
 	}
 }
 

@@ -54,7 +54,11 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request, a 
 	qs := wingwire.QueueState{}
 	if s.localAdmission != nil {
 		if qs, err = s.localAdmission(r.Context()); err != nil {
-			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the local admission daemon did not answer"}, err)
+			// safety: the policy writer replaces a 5xx message with "request failed", so this fixed public message is
+			// written here and the cause goes only to the request log.
+			apierr.NoteResponseError(w, err)
+			return apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: "The local admission daemon did not answer.",
+				Hint: "Restart it with `sparkwing daemon restart`, then try again."})
 		}
 	}
 	now := time.Now()

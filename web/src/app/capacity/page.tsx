@@ -250,7 +250,8 @@ function HostSection({
       >
         <Empty>
           <div className="text-sm text-[var(--foreground)]">
-            Daemon not running; nothing is being admitted or charged.
+            {qs?.daemon_error ??
+              "Daemon not running; nothing is being admitted or charged."}
           </div>
           <div className="text-xs text-[var(--muted)] mt-1">
             The daemon starts with your next run and arbitrates local capacity

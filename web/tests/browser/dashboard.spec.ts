@@ -1889,6 +1889,21 @@ test("says plainly when the local admission daemon is not running", async ({
   ).toBeVisible();
 });
 
+test("says how to fix an admission daemon that does not answer", async ({ page }) => {
+  await installMockAPI(page);
+  await page.route("**/api/v1/queue", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: { code: "unavailable", message: "The local admission daemon did not answer.", hint: "Restart it with `sparkwing daemon restart`, then try again." } },
+    }),
+  );
+  const said = "The local admission daemon did not answer. Restart it with `sparkwing daemon restart`, then try again.";
+  await page.goto("/queue");
+  await expect(page.getByText(said)).toBeVisible();
+  await page.goto("/capacity");
+  await expect(page.getByText(said)).toBeVisible();
+});
+
 test("a signed-in controller without teams hides the machine-local panels", async ({
   page,
 }) => {

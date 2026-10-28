@@ -100,7 +100,7 @@ export default function QueuePage() {
       {!loaded ? (
         <Skeleton />
       ) : !qs || !hasDaemon(qs) ? (
-        <EmptyState />
+        <EmptyState error={qs?.daemon_error} />
       ) : (
         <QueueBody qs={qs} pressureHistory={pressureHistory} />
       )}
@@ -691,7 +691,14 @@ function Skeleton() {
   );
 }
 
-function EmptyState() {
+function EmptyState({ error }: { error?: string }) {
+  if (error) {
+    return (
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-[var(--foreground)]">
+        {error}
+      </div>
+    );
+  }
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6 flex items-start gap-3">
       <span className="w-2.5 h-2.5 rounded-full bg-[var(--muted)] shrink-0 mt-1.5" />

@@ -32,7 +32,7 @@ export function showsLocalAdmission(status: TeamState["status"]): boolean {
 
 const localAdmissionTabs = new Set(["/queue", "/capacity"]);
 
-// A controller without teams, such as the one `sparkwing web` starts, has
+// A controller without teams, such as the one `sparkwing dashboard start` runs, has
 // no account to hang team pages on, so Secrets sits in the top nav there.
 // A waitlisted account belongs to no team, so every team view would refuse it.
 export function navTabs(status: TeamState["status"]): NavTab[] {

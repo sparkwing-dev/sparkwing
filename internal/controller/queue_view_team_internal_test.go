@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,7 +99,9 @@ func TestQueueStateCarriesTheLocalAdmissionDaemon(t *testing.T) {
 	srv.WithLocalAdmission(func(context.Context) (wingwire.QueueState, error) {
 		return wingwire.QueueState{}, errors.New("daemon wedged")
 	})
-	if rec := view(); rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("an unanswering daemon gave HTTP %d, want 503: %s", rec.Code, rec.Body)
+	rec = view()
+	if body := rec.Body.String(); rec.Code != http.StatusServiceUnavailable || !strings.Contains(body, "The local admission daemon did not answer.") ||
+		!strings.Contains(body, "sparkwing daemon restart") || strings.Contains(body, "wedged") {
+		t.Fatalf("an unanswering daemon gave HTTP %d %s, want 503 saying how to restart it and no internal detail", rec.Code, body)
 	}
 }

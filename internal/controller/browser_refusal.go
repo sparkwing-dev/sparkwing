@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -108,6 +110,9 @@ func (s *Server) returnRefusals(e controllerwire.Endpoint, landing func(*http.Re
 		if refusalStatus(err) >= http.StatusInternalServerError {
 			slog.New(CredentialSafeLogHandler(s.logger.Handler())).ErrorContext(r.Context(), "browser flow failed",
 				"route", e.Pattern, "err", requestMasker(r.Context()).Mask(err.Error()))
+		}
+		if delay, ok := apierr.RetryDelay(err); ok {
+			w.Header().Set("Retry-After", strconv.FormatInt(int64(delay/time.Second), 10))
 		}
 		http.Redirect(w, r, landing(r, refusalReason(err)), http.StatusSeeOther)
 		return nil

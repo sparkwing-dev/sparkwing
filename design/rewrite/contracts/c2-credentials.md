@@ -1029,8 +1029,10 @@ State is MAC-bound to the selected account, session, provider, nonce, expiry
 and PKCE verifier digest. Completion checks the flow and state before entering
 the writer or provider. It consumes the nonce before redeeming the provider
 code, then commits only that provider's verified profile to the selected account.
-Success clears the flow and redirects to the sign-in settings page. Refusals
-return the canonical envelope. Provider diagnostics and private flow values
+Success clears the flow and redirects to the sign-in settings page. A refusal
+redirects (303) to `/account/sign-ins?refused=<reason>`, and a refused sign-in
+to `/login?refused=<reason>`, with one fixed reason code instead of the
+canonical envelope; a rate-limit refusal keeps its Retry-After header. Provider diagnostics and private flow values
 enter neither responses nor logs.
 
 C2 declares capability.IdentityLink with Authority, AccountID, Provider, Nonce
