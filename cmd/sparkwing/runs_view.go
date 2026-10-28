@@ -139,6 +139,20 @@ type runFailure struct {
 }
 
 func writeRunErrors(out io.Writer, detail controllerwire.RunDetail, format string) error {
+	if detail.Failure != "" {
+		failure := runFailure{RunID: detail.ID, Outcome: detail.Status, Reason: detail.Failure}
+		var err error
+		if format == "json" {
+			err = json.NewEncoder(out).Encode(failure)
+		} else if format == "plain" {
+			_, err = fmt.Fprintln(out, failure.RunID)
+		} else {
+			_, err = fmt.Fprintf(out, "%s\trun\t%s\n", failure.RunID, failure.Reason)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	for _, job := range detail.Jobs {
 		if job.Outcome != "failed" && job.Status != "failed" {
 			continue
@@ -190,8 +204,20 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 			fmt.Fprintf(&text, "%s error:\n%s\n", job.ID, strings.TrimRight(job.Error, "\n"))
 		}
 	}
+	writeRunError(&text, detail)
 	_, err := io.WriteString(out, text.String())
 	return err
+}
+
+// writeRunError prints the run's own error, the only account of a pipeline that failed before planning any job.
+func writeRunError(text *strings.Builder, detail controllerwire.RunDetail) {
+	if detail.Failure == "" {
+		return
+	}
+	fmt.Fprintf(text, "run error:\n%s\n", strings.TrimRight(detail.Failure, "\n"))
+	if detail.Status == "failed" && len(detail.Jobs) == 0 {
+		fmt.Fprintf(text, "hint: the pipeline failed to plan, so no job ran; fix the error above, check it from the repository with `sparkwing pipeline plan --pipeline %s`, and trigger the run again\n", detail.Inputs.Pipeline)
+	}
 }
 
 // jobFailureText prefers the job's recorded error, the only account of a failure reported before any attempt started.

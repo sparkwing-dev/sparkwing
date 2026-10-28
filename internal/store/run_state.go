@@ -133,7 +133,13 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 			if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, change.Reason, now); err != nil {
 				return runstate.Applied{}, err
 			}
-			change.Reason, change.MaskedError = string(apierr.PlanFailed), "run preparation failed"
+			if int64(len(change.MaskedError)) > limits.ErrorBytes {
+				return runstate.Applied{}, errors.New("run error exceeds limit")
+			}
+			change.Reason = string(apierr.PlanFailed)
+			if change.MaskedError == "" {
+				change.MaskedError = "run preparation failed"
+			}
 			if row.CancelRequestedAt != nil {
 				change.Reason, change.MaskedError = string(apierr.ReasonCancelled), "cancellation requested"
 			}

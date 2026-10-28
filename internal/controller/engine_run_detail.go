@@ -18,7 +18,8 @@ import (
 
 // RunStatusFacts combines one committed run/job snapshot with complete attempt
 // history and validated log subjects from that read. Failures carry the masked
-// job errors, including those reported before any attempt started. Notices carry
+// run and job errors, including a job's reported before any attempt started and
+// the run's when its pipeline failed to plan. Notices carry
 // engine version policy and unclaimed-work observations. Private fields stay here
 // until the public display projection.
 type RunStatusFacts struct {
@@ -84,7 +85,9 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 	}
 	errorsByJob := make(map[string]string, len(facts.Failures))
 	for _, failure := range facts.Failures {
-		if failure.JobID != "" {
+		if failure.JobID == "" {
+			detail.Failure = failure.Error
+		} else {
 			errorsByJob[failure.JobID] = failure.Error
 		}
 	}

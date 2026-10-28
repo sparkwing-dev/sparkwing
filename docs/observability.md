@@ -281,6 +281,16 @@ including `--view errors`) and in the console. `sparkwing runs logs` prints
 it after the run's logs with a note that the job failed before it started
 (a `job_failed_before_start` record with `-o json`).
 
+A run whose pipeline fails to plan -- it does not compile on the host, or
+its `Plan` returns an error -- has no jobs, so it has no job logs either.
+The plan host records the same masked, bounded error on the run: it is the
+run detail's `failure`, which `sparkwing runs status` prints as `run error`
+(and `--view errors` as a `run` row), and `sparkwing runs logs` prints after
+the logs (a `run_error` record with `-o json`). Both add a hint to check the
+pipeline locally with `sparkwing pipeline plan --pipeline <name>`, though a
+failure that depends on the host, such as one behind a build tag, may not
+reproduce there.
+
 Excerpts travel as a `node_failure_excerpt` run event, so they read back
 identically from a local run store and from a controller.
 

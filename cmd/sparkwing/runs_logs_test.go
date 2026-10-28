@@ -245,3 +245,31 @@ func TestRunLogsShowsTheErrorOfAJobThatFailedBeforeStarting(t *testing.T) {
 		}
 	}
 }
+
+func TestRunLogsShowsTheErrorOfARunThatFailedToPlan(t *testing.T) {
+	compiler := "install source entry: # pipeline\njobs/broken.go:6:9: undefined: qaDeliberateUndefined"
+	reader := fakeLogReader{read: func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
+		return controllerwire.LogPage{Complete: true}, nil
+	}}
+	detail := controllerwire.RunDetail{ID: "r1", Status: "failed", Failure: compiler, Jobs: []controllerwire.JobDetail{}}
+	detail.Inputs.Pipeline = "hello"
+	runs := &statusReader{details: []controllerwire.RunDetail{detail}}
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"-o", "plain"}, []string{"run error:\n" + compiler, "sparkwing pipeline plan --pipeline hello"}},
+		{[]string{"--events-only", "-o", "plain"}, []string{compiler}},
+		{[]string{"-o", "json"}, []string{`"event":"run_error"`, "undefined: qaDeliberateUndefined"}},
+	} {
+		var out bytes.Buffer
+		if err := observeRunLogs(t.Context(), logInvocation(t, append([]string{"logs", "--run", "r1"}, tc.args...)...), reader, runs, &out, &out, nil); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("%v: missing %q in:\n%s", tc.args, want, &out)
+			}
+		}
+	}
+}
