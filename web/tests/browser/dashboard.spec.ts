@@ -178,6 +178,40 @@ test("keeps a long node name visible beside its location icon", async ({ page })
   await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
 });
 
+test("shows the run's notices, job summaries and earlier attempts' steps", async ({ page }) => {
+  const detail = {
+    ...finishedDetail,
+    notices: [{ kind: "support_ending", version: "v1.2.3", reason: "Engine v1.2.3 support ends soon.", hint: "Upgrade the pipeline's sparkwing module." }],
+    nodes: finishedDetail.nodes.map((node) => ({
+      ...node,
+      summary: "## Deployed to staging",
+      attempt: 2,
+      step_history: [{ attempt: 1, steps: [{ id: "flaky", status: "failed" }] }],
+      execution_attempts: [
+        { attempt: 1, executor_kind: "runner", executor_name: "a", location: "local", outcome: "failed" },
+        { attempt: 2, executor_kind: "runner", executor_name: "b", location: "local", outcome: "success" },
+      ],
+    })),
+  };
+  await installMockAPI(page, { runs: [finishedRun], details: { [finishedRun.id]: detail } });
+  await page.goto(`/runs?run=${finishedRun.id}&node=verify`);
+  await expect(page.getByText("Engine v1.2.3 support ends soon.")).toBeVisible();
+  await expect(page.getByText("Deployed to staging")).toBeVisible();
+  await expect(page.getByTestId("attempt-1-steps")).toHaveText("Attempt 1 steps: flaky failed");
+  await expect(page.locator('[data-step-id="flaky"]')).toHaveCount(0);
+});
+
+test("says when a run's steps could not be read", async ({ page }) => {
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+    stepsStatus: 503,
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  await expect(page.getByText(/Steps unavailable/)).toBeVisible();
+  await expect(page.locator('[data-node-id="verify"]').first()).toBeVisible();
+});
+
 function isoFromNow(ms: number): string {
   return new Date(Date.now() + ms).toISOString();
 }
@@ -415,7 +449,8 @@ function wireDetail(detail: Record<string, unknown>): Record<string, unknown> {
       outcome: node.outcome || (terminal.includes(node.status ?? "") ? node.status : undefined),
       status_detail: node.status_detail,
       error: node.error,
-      attempt: node.execution_attempts?.length ?? 0,
+      attempt: currentAttempt(node),
+      summary: node.summary,
       started_at: node.started_at,
       finished_at: node.finished_at,
     })),
@@ -436,27 +471,37 @@ function wireDetail(detail: Record<string, unknown>): Record<string, unknown> {
     started_at: run.started_at,
     finished_at: run.finished_at,
     retry: undefined,
+    notices: detail.notices ?? [],
   };
   return JSON.parse(JSON.stringify(out));
 }
 
-// wireSteps encodes a test's node steps as GET /api/v1/runs/{run}/steps does.
+function currentAttempt(node: ViewNode): number {
+  return (node.attempt as number | undefined) ?? (node.execution_attempts?.length || 1);
+}
+
+// wireSteps encodes a test's node steps as GET /api/v1/runs/{run}/steps does:
+// the current attempt's work, then any earlier attempts' steps.
 function wireSteps(detail: Record<string, unknown> | undefined): Record<string, unknown> {
   const nodes = (detail?.nodes ?? []) as ViewNode[];
+  const attempts = (node: ViewNode) => [
+    ...((node.step_history as { attempt: number; steps: WireRecord[] }[] | undefined) ?? []),
+    { attempt: currentAttempt(node), steps: (node.work as { steps?: WireRecord[] } | undefined)?.steps ?? [] },
+  ];
   return {
     steps: nodes.flatMap((node) =>
-      ((node.work as { steps?: WireRecord[] } | undefined)?.steps ?? []).map((step) => ({
+      attempts(node).flatMap(({ attempt, steps }) => steps.map((step) => ({
         job_id: node.id,
         id: step.id,
         label: "",
-        attempt: 1,
+        attempt,
         status: step.status ?? "running",
         outcome: step.status === "passed" ? "success" : step.status === "running" ? undefined : step.status,
         annotations: (step.annotations as string[] | undefined)?.map((message) => ({ level: "", message })),
         summary: step.summary,
         started_at: step.started_at,
         finished_at: step.finished_at,
-      })),
+      }))),
     ),
   };
 }
@@ -468,6 +513,7 @@ type MockAPIOptions = {
   unauthorized?: boolean;
   failPath?: string;
   onDetail?: (route: Route, runID: string) => Promise<boolean>;
+  stepsStatus?: number;
   onNodeMetrics?: (
     route: Route,
     runID: string,
@@ -628,6 +674,10 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
     }
     const stepsMatch = path.match(/^\/api\/v1\/runs\/([^/]+)\/steps$/);
     if (request.method() === "GET" && stepsMatch) {
+      if (options.stepsStatus) {
+        await route.fulfill({ status: options.stepsStatus, json: { error: { code: "unavailable", message: "steps unavailable" } } });
+        return;
+      }
       await route.fulfill({ json: wireSteps(options.details?.[stepsMatch[1]]) });
       return;
     }

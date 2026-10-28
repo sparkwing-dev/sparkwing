@@ -83,6 +83,16 @@ export function ExecutionAttributionPanel({ node }: { node: RunNode }) {
                 {attempt.finished_at && <span className="text-[10px] opacity-80">ended {fmtDateTime(attempt.finished_at)}</span>}
                 {attempt.outcome && <span className="text-[10px]">outcome {attempt.outcome}</span>}
                 {attempt.failure_reason && <span className="text-[10px]">failure {attempt.failure_reason}</span>}
+                {(() => {
+                  const earlier = node.step_history?.find((h) => h.attempt === ordinal);
+                  if (!earlier) return null;
+                  return (
+                    <span className="w-full text-[10px] opacity-80" data-testid={`attempt-${ordinal}-steps`}>
+                      Attempt {ordinal} steps:{" "}
+                      {earlier.steps.map((step) => `${step.id} ${step.status ?? "unknown"}`).join(", ")}
+                    </span>
+                  );
+                })()}
               </li>
             );
           })}

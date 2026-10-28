@@ -32,8 +32,7 @@ export default function TriggerForm({
   }, []);
 
   const args = parseRunArgs(argText);
-  // A team's list arrives most recently run first, which is the order worth
-  // suggesting; the local list arrives sorted by name.
+  // The controller lists pipelines most recently run first, the order worth suggesting.
   const pipelineNames = Object.keys(pipelines);
   const source = namesSource ? triggerGit(repository, branch) : null;
   const sourceProblem =

@@ -34,6 +34,7 @@ import {
 import {
   type Node as RunNode,
   type NodeWorkStep,
+  type Notice,
   type RunLogMatch,
   type RunsGrepMatch,
   type RunsGrepResponse,
@@ -1416,6 +1417,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               onConsumePendingLogFocus={consumePendingLogFocus}
               reusedNodeIDs={reusedNodeIDs ?? undefined}
               reusedPriorRunID={reusedPriorRunID}
+              notices={activeDetail?.notices ?? EMPTY_NOTICES}
+              stepsUnavailable={activeDetail?.stepsUnavailable ?? false}
             />
           </div>
         )}
@@ -2747,6 +2750,8 @@ function RunDetailPane({
   onConsumePendingLogFocus,
   reusedNodeIDs,
   reusedPriorRunID,
+  notices,
+  stepsUnavailable,
 }: {
   run: Run;
   nodes: RunNode[];
@@ -2771,6 +2776,8 @@ function RunDetailPane({
   onConsumePendingLogFocus?: () => void;
   reusedNodeIDs?: Set<string>;
   reusedPriorRunID?: string | null;
+  notices: Notice[];
+  stepsUnavailable: boolean;
 }) {
   const selected = node;
   const runIsActive = run.status === "running";
@@ -3206,6 +3213,7 @@ function RunDetailPane({
           </span>
         </div>
 
+        <RunNotices notices={notices} stepsUnavailable={stepsUnavailable} />
         <div className="px-4 pb-2">
           <ReuseSummary
             run={run}
@@ -3685,6 +3693,9 @@ function RunSummariesList({
       };
   const cards: Card[] = [];
   for (const n of nodes) {
+    if (n.summary && n.summary.trim() !== "") {
+      cards.push({ kind: "node", node: n, md: n.summary, key: n.id });
+    }
     for (const s of n.work?.steps ?? []) {
       if (s.summary && s.summary.trim() !== "") {
         cards.push({
@@ -6380,6 +6391,47 @@ function useReusedNodeIDs(run: Run | null): {
 function rerunMode(run: Run): "full" | "failed" | null {
   if (!run.retry_of || !run.retry_mode) return null;
   return run.retry_mode === "all" ? "full" : "failed";
+}
+
+const EMPTY_NOTICES: Notice[] = [];
+
+// RunNotices shows the controller's notices for this run, such as an engine
+// version whose support is ending, and says when the steps could not be read.
+function RunNotices({
+  notices,
+  stepsUnavailable,
+}: {
+  notices: Notice[];
+  stepsUnavailable: boolean;
+}) {
+  if (notices.length === 0 && !stepsUnavailable) return null;
+  return (
+    <div className="px-4 pb-2 space-y-1" data-testid="run-notices">
+      {notices.map((notice, i) => (
+        <div
+          key={`${notice.kind}:${i}`}
+          role="status"
+          className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200"
+        >
+          <span>{notice.reason}</span>
+          {notice.hint ? <span className="ml-1 text-amber-200/80">{notice.hint}</span> : null}
+          {notice.support_until ? (
+            <span className="ml-1 text-amber-200/80">
+              Supported until {fmtDateTime(notice.support_until)}.
+            </span>
+          ) : null}
+        </div>
+      ))}
+      {stepsUnavailable ? (
+        <div
+          role="status"
+          className="rounded border border-slate-500/40 bg-slate-500/10 px-2 py-1 text-xs text-slate-300"
+        >
+          Steps unavailable: the controller did not answer for this run&apos;s steps, so jobs show without them.
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function ReuseSummary({

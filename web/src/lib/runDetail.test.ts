@@ -92,6 +92,63 @@ describe("runDetailView", () => {
     );
   });
 
+  it("keeps a job's work to its current attempt and earlier steps in labelled history", () => {
+    const wire = fixture("run-detail-jobs.json");
+    const job = { ...wire.jobs[0], id: "retried", attempt: 2, status: "running", outcome: undefined };
+    const step = (attempt: number, id: string, status: string, summary = "") => ({
+      job_id: "retried", id, label: "", attempt, status, summary,
+      annotations: [{ level: "warning", message: `${id} ${attempt}`, file: "a.go", line: 3 }],
+    });
+    const { nodes } = api.runDetailView({ ...wire, jobs: [job] }, [
+      step(1, "unit", "passed", "OLD PASS"),
+      step(1, "setup", "passed"),
+      step(2, "setup", "running"),
+    ]);
+    const [retried] = nodes;
+    assert.deepEqual(retried.work?.steps?.map((s) => [s.id, s.status, s.summary]), [["setup", "running", undefined]]);
+    assert.deepEqual(retried.work?.steps?.[0].annotations, ["warning: a.go:3: setup 2"]);
+    assert.deepEqual(
+      retried.step_history?.map((h) => [h.attempt, h.steps.map((s) => s.id)]),
+      [[1, ["unit", "setup"]]],
+    );
+  });
+
+  it("marks steps unavailable instead of showing empty work", () => {
+    const detail = api.runDetailView(fixture("run-detail-jobs.json"), null);
+    assert.equal(detail.stepsUnavailable, true);
+    assert.ok(detail.nodes.every((node) => node.work === undefined));
+    assert.equal(api.runDetailView(fixture("run-detail-jobs.json"), []).stepsUnavailable, false);
+  });
+
+  it("keeps the run's notices and the job's summary", () => {
+    const wire = fixture("run-detail-jobs.json");
+    const notice = { kind: "support_ending", version: "v1.2.3", reason: "v1.2.3 support ends soon", hint: "upgrade" };
+    const detail = api.runDetailView(
+      { ...wire, notices: [notice], jobs: [{ ...wire.jobs[0], summary: "## Deployed" }] },
+      [],
+    );
+    assert.deepEqual(detail.notices, [notice]);
+    assert.equal(detail.nodes[0].summary, "## Deployed");
+  });
+
+  it("reads a failed or malformed steps answer as unavailable", async () => {
+    const runtime = globalThis as unknown as { fetch: typeof fetch };
+    const previousFetch = runtime.fetch;
+    for (const steps of [new Response("down", { status: 503 }), new Response("{", { status: 200 })]) {
+      runtime.fetch = async (input) =>
+        String(input).endsWith("/steps")
+          ? steps
+          : new Response(readFileSync(join(__dirname, "testdata", "run-detail-jobs.json")), { status: 200 });
+      try {
+        const detail = await api.getRun("run-jobs");
+        assert.equal(detail?.stepsUnavailable, true);
+        assert.ok((detail?.nodes.length ?? 0) > 0);
+      } finally {
+        runtime.fetch = previousFetch;
+      }
+    }
+  });
+
   it("reads the run detail route without the removed include parameter", async () => {
     const runtime = globalThis as unknown as { fetch: typeof fetch };
     const previousFetch = runtime.fetch;
