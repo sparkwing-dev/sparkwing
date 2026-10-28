@@ -146,7 +146,7 @@ func TestIdentityLinkHTTPCommitsVerifiedIdentityOnce(t *testing.T) {
 	}
 	calls := f.provider.calls
 	w = f.complete(cookie)
-	assertEngineError(t, w, 403, apierr.Forbidden)
+	assertRefusedFlow(t, w, "/account/sign-ins?refused=expired")
 	if consumed, committed := f.links(t); f.provider.calls != calls || consumed != 1 || committed != 1 {
 		t.Fatal("replay reached provider or committed again")
 	}
@@ -217,7 +217,7 @@ func TestIdentityLinkHTTPProofProperty(t *testing.T) {
 		w := httptest.NewRecorder()
 		f.handler.ServeHTTP(w, r)
 		consumed, _ := f.links(t)
-		return w.Code >= 400 && w.Code < 500 && consumed == 0 && f.linkedSubject(t) == "" && f.provider.calls == 0 && oauthCookie(w, "__Host-sw_oauth") == nil
+		return w.Code == 303 && strings.HasPrefix(w.Header().Get("Location"), "/account/sign-ins?refused=") && consumed == 0 && f.linkedSubject(t) == "" && f.provider.calls == 0 && oauthCookie(w, "__Host-sw_oauth") == nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 130}); err != nil {
 		t.Fatal(err)
@@ -251,7 +251,7 @@ func TestIdentityLinkHTTPStartProofProperty(t *testing.T) {
 		w := httptest.NewRecorder()
 		f.handler.ServeHTTP(w, r)
 		after, renewed := f.state(t)
-		return w.Code >= 400 && w.Code < 500 && oauthCookie(w, "__Host-sw_oauth") == nil && f.provider.calls == 0 && before == after && expires == renewed
+		return w.Code == 303 && strings.HasPrefix(w.Header().Get("Location"), "/account/sign-ins?refused=") && oauthCookie(w, "__Host-sw_oauth") == nil && f.provider.calls == 0 && before == after && expires == renewed
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 80}); err != nil {
 		t.Fatal(err)
@@ -274,10 +274,7 @@ func TestIdentityLinkHTTPStartLimitsAndExistingProvider(t *testing.T) {
 			t.Fatalf("start %d HTTP %d %s", i, w.Code, w.Body.String())
 		}
 		if i == 10 {
-			assertEngineError(t, w, 429, apierr.RateLimited)
-			if w.Header().Get("Retry-After") != "60" {
-				t.Fatal("missing retry delay")
-			}
+			assertRefusedFlow(t, w, "/account/sign-ins?refused=rate_limited")
 		}
 	}
 	other, csrf := otherLinkAccount(t, &f)
@@ -296,7 +293,7 @@ func TestIdentityLinkHTTPStartLimitsAndExistingProvider(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	g.handler.ServeHTTP(w, g.startRequest())
-	assertEngineError(t, w, 409, apierr.Conflict)
+	assertRefusedFlow(t, w, "/account/sign-ins?refused=provider_already_linked")
 	if consumed, _ := g.links(t); oauthCookie(w, "__Host-sw_oauth") != nil || consumed != 0 {
 		t.Fatal("already-linked provider started a flow")
 	}
@@ -307,42 +304,42 @@ func TestIdentityLinkHTTPRefusals(t *testing.T) {
 		t.Run(failure, func(t *testing.T) {
 			f := newIdentityLinkHTTP(t)
 			cookie := f.ready(t)
-			code, status := apierr.Forbidden, 403
+			reason := "reauth_required"
 			switch failure {
 			case "backend":
 				f.exec(t, `DROP TABLE flow_nonces`)
-				code, status = apierr.Unavailable, 503
+				reason = "unavailable"
 			case "revoked":
 				f.exec(t, `DELETE FROM sessions`)
-				code, status = apierr.Unauthenticated, 401
 			case "old":
 				f.exec(t, `UPDATE sessions SET created_at=?`, time.Now().Add(-time.Hour).UnixNano())
 			case "parent":
 				f.exec(t, `UPDATE sessions SET capability_prefix='missing'`)
-				code, status = apierr.Unauthenticated, 401
 			case "revoked-during-exchange":
 				f.provider.onToken = func() { f.exec(t, `DELETE FROM sessions`) }
-				code, status = apierr.Unauthenticated, 401
 			case "stale-during-exchange":
 				f.provider.onToken = func() {
 					f.exec(t, `UPDATE sessions SET created_at=?`, time.Now().Add(-time.Hour).UnixNano())
 				}
 			case "completed-during-exchange":
 				f.provider.onToken = func() { f.exec(t, `UPDATE flow_nonces SET completed_at=1`) }
+				reason = "expired"
 			case "rebound-during-exchange":
 				f.provider.onToken = func() { f.exec(t, `UPDATE flow_nonces SET binding='other'`) }
+				reason = "expired"
 			case "provider-rejected":
 				f.provider.failure = "rejected"
-				code, status = apierr.Unauthenticated, 401
+				reason = "expired"
 			case "provider-unverified":
 				f.provider.failure = "unverified"
+				reason = "email_unverified"
 			case "provider-unavailable":
 				f.provider.failure = "unavailable"
-				code, status = apierr.Unavailable, 503
+				reason = "unavailable"
 			}
 			f.handler = f.server.Handler()
 			w := f.complete(cookie)
-			assertEngineError(t, w, status, code)
+			assertRefusedFlow(t, w, "/account/sign-ins?refused="+reason)
 			if f.linkedSubject(t) != "" || strings.Contains(w.Body.String(), "private-") || strings.Contains(w.Body.String(), "flow_nonces") || strings.Contains(f.logs.String(), "private-provider-diagnostic") {
 				t.Fatal("refused link committed or leaked diagnostics")
 			}
@@ -365,8 +362,7 @@ func TestIdentityLinkHTTPProviderDiagnosticProperty(t *testing.T) {
 			f.provider.transportError = errors.Join(errors.New(secret), failure)
 		}
 		w := f.complete(cookie)
-		var envelope apierr.Envelope
-		return w.Code == 503 && json.Unmarshal(w.Body.Bytes(), &envelope) == nil && envelope.Error != nil && envelope.Error.Code == apierr.Unavailable &&
+		return w.Code == 303 && w.Header().Get("Location") == "/account/sign-ins?refused=unavailable" &&
 			!strings.Contains(w.Body.String(), secret) && !strings.Contains(f.logs.String(), secret) && f.linkedSubject(t) == ""
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {

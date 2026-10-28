@@ -107,11 +107,11 @@ func TestGoogleOAuthHTTPSubjectAndProofProperty(t *testing.T) {
 		h.ServeHTTP(w, r)
 		if mode%4 >= 2 {
 			after, expires := f.state(t)
-			status := 403
+			reason := "email_unverified"
 			if mode%4 == 3 {
-				status = 401
+				reason = "expired"
 			}
-			return w.Code == status && oauthCookie(w, "__Host-sw_session") == nil && before == after && expiry == expires
+			return w.Code == 303 && w.Header().Get("Location") == "/login?refused="+reason && oauthCookie(w, "__Host-sw_session") == nil && before == after && expiry == expires
 		}
 		session := oauthCookie(w, "__Host-sw_session")
 		if w.Code != 200 || session == nil || session.Value == f.raw {

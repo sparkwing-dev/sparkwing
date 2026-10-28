@@ -37,8 +37,8 @@ type identityLinkProof struct{ grant oauthGrant }
 
 func (s *Server) identityLinkEndpoints() []controllerwire.Endpoint {
 	return []controllerwire.Endpoint{
-		returnRefusals(controllerwire.Endpoint{Method: "POST", Pattern: "/auth/{provider}/link", Authentication: capability.AuthBrowserFlow, Verify: s.verifyIdentityLinkStart, Handle: s.handleIdentityLinkStart}, linkRefusalLanding),
-		returnRefusals(controllerwire.Endpoint{Method: "GET", Pattern: "/auth/{provider}/link/complete", Authentication: capability.AuthBrowserFlow, Verify: s.verifyIdentityLinkComplete, Handle: s.handleIdentityLinkComplete}, linkRefusalLanding),
+		s.returnRefusals(controllerwire.Endpoint{Method: "POST", Pattern: "/auth/{provider}/link", Authentication: capability.AuthBrowserFlow, Verify: s.verifyIdentityLinkStart, Handle: s.handleIdentityLinkStart}, linkRefusalLanding),
+		s.returnRefusals(controllerwire.Endpoint{Method: "GET", Pattern: "/auth/{provider}/link/complete", Authentication: capability.AuthBrowserFlow, Verify: s.verifyIdentityLinkComplete, Handle: s.handleIdentityLinkComplete}, linkRefusalLanding),
 	}
 }
 

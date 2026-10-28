@@ -69,11 +69,7 @@ func TestOAuthHTTPLicenseControlsPublicProviders(t *testing.T) {
 			for _, provider := range []string{"google", "github"} {
 				w = httptest.NewRecorder()
 				h.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/"+provider+"/start", nil))
-				status := 404
-				if name == "valid" {
-					status = 303
-				}
-				if w.Code != status || p.calls != 0 {
+				if w.Code != 303 || p.calls != 0 || name != "valid" && w.Header().Get("Location") != "/login?refused=unavailable" {
 					t.Fatalf("%s start HTTP %d %s", provider, w.Code, w.Body)
 				}
 			}

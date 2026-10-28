@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 
@@ -88,8 +89,8 @@ func refusalReason(err error) string {
 type refusedFlowKey struct{}
 
 // safety: a refused browser flow returns the person to a page that says what happened, so a refusal never ends
-// on an error body; the request log still records the error.
-func returnRefusals(e controllerwire.Endpoint, landing func(*http.Request, string) string) controllerwire.Endpoint {
+// on an error body. A server fault is logged here, masked, because the request log records only a 303.
+func (s *Server) returnRefusals(e controllerwire.Endpoint, landing func(*http.Request, string) string) controllerwire.Endpoint {
 	verify, handle := e.Verify, e.Handle
 	e.Verify = func(r *http.Request) error {
 		if err := verify(r); err != nil {
@@ -104,11 +105,25 @@ func returnRefusals(e controllerwire.Endpoint, landing func(*http.Request, strin
 				return nil
 			}
 		}
-		apierr.NoteResponseError(w, err)
+		if refusalStatus(err) >= http.StatusInternalServerError {
+			slog.New(CredentialSafeLogHandler(s.logger.Handler())).ErrorContext(r.Context(), "browser flow failed",
+				"route", e.Pattern, "err", requestMasker(r.Context()).Mask(err.Error()))
+		}
 		http.Redirect(w, r, landing(r, refusalReason(err)), http.StatusSeeOther)
 		return nil
 	}
 	return e
+}
+
+func refusalStatus(err error) int {
+	if refused, ok := refusalOf(err); ok {
+		return refused.status
+	}
+	var failure *apierr.Error
+	if errors.As(err, &failure) {
+		return apierr.Status(failure.Code)
+	}
+	return http.StatusInternalServerError
 }
 
 func refusedPath(path, reason, next string) string {

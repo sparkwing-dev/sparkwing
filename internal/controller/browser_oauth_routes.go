@@ -24,8 +24,8 @@ type oauthProof struct {
 
 func (s *Server) oauthEndpoints() []controllerwire.Endpoint {
 	return []controllerwire.Endpoint{
-		returnRefusals(controllerwire.Endpoint{Method: "GET", Pattern: "/auth/{provider}/start", Authentication: capability.AuthBrowserFlow, Verify: s.verifyOAuthStart, Handle: s.handleOAuthStart}, signInStartRefusalLanding),
-		returnRefusals(controllerwire.Endpoint{Method: "GET", Pattern: "/auth/{provider}/callback", Authentication: capability.AuthBrowserFlow, Verify: s.verifyOAuthCallback, Handle: s.handleOAuthCallback}, s.signInCallbackRefusalLanding),
+		s.returnRefusals(controllerwire.Endpoint{Method: "GET", Pattern: "/auth/{provider}/start", Authentication: capability.AuthBrowserFlow, Verify: s.verifyOAuthStart, Handle: s.handleOAuthStart}, signInStartRefusalLanding),
+		s.returnRefusals(controllerwire.Endpoint{Method: "GET", Pattern: "/auth/{provider}/callback", Authentication: capability.AuthBrowserFlow, Verify: s.verifyOAuthCallback, Handle: s.handleOAuthCallback}, s.signInCallbackRefusalLanding),
 	}
 }
 
