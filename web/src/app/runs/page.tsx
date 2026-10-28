@@ -37,7 +37,6 @@ import {
   type RunLogMatch,
   type RunsGrepMatch,
   type RunsGrepResponse,
-  type PipelineMeta,
   type Run,
   type RunDetail,
   cancelRun,
@@ -45,7 +44,6 @@ import {
   getNodeLogCompleteness,
   getNodeLogs,
   getNodeStreamUrl,
-  getPipelines,
   getRun,
   listRuns,
   planFailureHint,
@@ -268,9 +266,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [runs, setRuns] = useState<Run[]>([]);
-  const [pipelineMeta, setPipelineMeta] = useState<
-    Record<string, PipelineMeta>
-  >({});
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const initialRun = searchParams.get("run");
   const [selectedRun, setSelectedRun] = useState<string | null>(initialRun);
@@ -451,10 +446,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     let fetched: Run[] = [];
     let page: ReturnType<typeof pageFromResponse> | null = null;
     try {
-      const meta = await getPipelines();
-      if (runsRequest.current.viewKey === key) setPipelineMeta(meta);
-      const query = runListQuery(filters, meta, ref);
-      if (query) fetched = await listRuns(query);
+      fetched = await listRuns(runListQuery(filters, ref));
       page = pageFromResponse(fetched, ref);
     } catch (e) {
       if (runsRequest.current.viewKey === key && seq > runsSeq.current.applied) {
@@ -609,7 +601,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     },
   });
 
-  const options = computeOptions(runs, pipelineMeta);
+  const options = computeOptions(runs);
   const groups = buildGroupsFromState(filterState, options);
   const dateGroup = {
     startedAfter: filterState.startedAfter,

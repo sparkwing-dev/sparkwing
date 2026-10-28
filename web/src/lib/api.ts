@@ -737,42 +737,45 @@ export async function getRunners(): Promise<Runner[]> {
   return data.runners ?? [];
 }
 
-export interface PipelineArg {
-  name: string;
-  type: string;
-  required: boolean;
-  desc: string;
-  default?: string;
-}
-
+// PipelineMeta is what GET /api/v1/pipelines says of a pipeline: its latest run.
 export interface PipelineMeta {
-  args: PipelineArg[];
-  tags?: string[];
   last_status?: string;
   last_run_at?: string;
 }
 
-// A team's list comes from the controller, newest activity first; the local
-// dashboard answers with a name-keyed map of the working directory's pipelines.
-interface TeamPipeline {
+interface PipelineSummary {
   name: string;
   last_status?: string;
   last_run_at?: string;
 }
 
+// pipelinesByName keys the controller's list, newest activity first, by name.
 export function pipelinesByName(
-  raw: Record<string, PipelineMeta> | TeamPipeline[] | undefined,
+  raw: PipelineSummary[] | undefined,
 ): Record<string, PipelineMeta> {
-  if (!Array.isArray(raw)) return raw || {};
   const out: Record<string, PipelineMeta> = {};
-  for (const p of raw) {
-    out[p.name] = {
-      args: [],
-      last_status: p.last_status,
-      last_run_at: p.last_run_at,
-    };
+  for (const p of raw ?? []) {
+    out[p.name] = { last_status: p.last_status, last_run_at: p.last_run_at };
   }
   return out;
+}
+
+// parseRunArgs reads the trigger form's name=value lines; the controller checks
+// the names against the pipeline when it plans the run.
+export function parseRunArgs(
+  text: string,
+): { ok: true; values: Record<string, string> } | { ok: false; problem: string } {
+  const values: Record<string, string> = {};
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line === "") continue;
+    const eq = line.indexOf("=");
+    const name = eq < 0 ? "" : line.slice(0, eq).trim();
+    if (name === "") return { ok: false, problem: `"${line}" is not name=value` };
+    if (name in values) return { ok: false, problem: `${name} is given twice` };
+    values[name] = line.slice(eq + 1).trim();
+  }
+  return { ok: true, values };
 }
 
 let _pipelinesUnavailable = false;

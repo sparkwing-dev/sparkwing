@@ -1,4 +1,4 @@
-import type { PipelineMeta, Run } from "@/lib/api";
+import type { Run } from "@/lib/api";
 import { parseLooseDate, type RunFilterState } from "@/components/RunFilters";
 
 export const RUNS_PAGE_SIZE = 50;
@@ -86,37 +86,18 @@ function isoBound(raw: string): string | null {
 }
 
 // runListQuery turns the dashboard's filters into the controller's run-list query, so
-// they select across every run rather than the page on screen. Tags belong to pipelines,
-// so a tag filter becomes the pipelines carrying it. It answers null when the filters
-// can match no run, which no query expresses.
+// they select across every run rather than the page on screen.
 export function runListQuery(
   s: FilterValues,
-  pipelineMeta: Record<string, PipelineMeta>,
   ref: RunsPageRef,
   limit = RUNS_PAGE_SIZE,
-): URLSearchParams | null {
+): URLSearchParams {
   const params = new URLSearchParams();
   const list = (key: string, values: string[]) => {
     if (values.length) params.set(key, values.join(","));
   };
-  const tagged = (tags: string[]) =>
-    Object.entries(pipelineMeta)
-      .filter(([, m]) => (m.tags ?? []).some((t) => tags.includes(t)))
-      .map(([name]) => name);
-
-  let pipelines = s.filterPipeline;
-  if (s.filterTag.length) {
-    const withTag = tagged(s.filterTag);
-    pipelines = pipelines.length
-      ? pipelines.filter((p) => withTag.includes(p))
-      : withTag;
-    if (pipelines.length === 0) return null;
-  }
-  const excludePipelines = [
-    ...new Set([...s.excludePipeline, ...tagged(s.excludeTag)]),
-  ];
-  list("pipeline", pipelines);
-  list("exclude_pipeline", excludePipelines);
+  list("pipeline", s.filterPipeline);
+  list("exclude_pipeline", s.excludePipeline);
   list("status", s.filterStatus);
   list("exclude_status", s.excludeStatus);
   list("trigger_source", s.filterTrigger);

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { before, describe, it } from "node:test";
 
 type RuntimeWindow = {
@@ -12,6 +14,7 @@ let getNodeLogs!: typeof import("./api").getNodeLogs;
 let getConnectionStatus!: typeof import("./api").getConnectionStatus;
 let triggerRun!: typeof import("./api").triggerRun;
 let pipelinesByName!: typeof import("./api").pipelinesByName;
+let parseRunArgs!: typeof import("./api").parseRunArgs;
 let getNodeMetrics!: typeof import("./api").getNodeMetrics;
 let getPaused!: typeof import("./api").getPaused;
 let releaseNode!: typeof import("./api").releaseNode;
@@ -30,6 +33,7 @@ before(async () => {
       getConnectionStatus,
       triggerRun,
       pipelinesByName,
+      parseRunArgs,
       getNodeMetrics,
       getPaused,
       releaseNode,
@@ -355,17 +359,25 @@ describe("session expiry", () => {
 });
 
 describe("pipelinesByName", () => {
-  it("keeps a team list's newest-first order and its last run", () => {
-    const got = pipelinesByName([
-      { name: "deploy", last_status: "failed", last_run_at: "2026-09-23T10:00:00Z" },
-      { name: "build" },
-    ]);
-    assert.deepEqual(Object.keys(got), ["deploy", "build"]);
-    assert.equal(got.deploy.last_status, "failed");
-    assert.deepEqual(got.build.args, []);
+  it("keeps the controller's newest-first order and its last run", () => {
+    const got = pipelinesByName(
+      JSON.parse(readFileSync(join(__dirname, "testdata", "pipelines.json"), "utf8")).pipelines,
+    );
+    assert.deepEqual(Object.keys(got), ["hello"]);
+    assert.deepEqual(got.hello, { last_status: "failed", last_run_at: "2026-10-28T05:01:19Z" });
+  });
+});
+
+describe("parseRunArgs", () => {
+  it("reads one name=value per line and keeps an empty value", () => {
+    assert.deepEqual(parseRunArgs("target = prod\n\nverbose=\nlabel=a=b"), {
+      ok: true,
+      values: { target: "prod", verbose: "", label: "a=b" },
+    });
   });
 
-  it("passes the local name-keyed map through", () => {
-    assert.deepEqual(pipelinesByName({ lint: { args: [] } }), { lint: { args: [] } });
+  it("names a line that is not name=value and a repeated name", () => {
+    assert.deepEqual(parseRunArgs("prod"), { ok: false, problem: '"prod" is not name=value' });
+    assert.deepEqual(parseRunArgs("a=1\na=2"), { ok: false, problem: "a is given twice" });
   });
 });

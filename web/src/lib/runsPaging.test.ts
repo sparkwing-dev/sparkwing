@@ -28,8 +28,6 @@ function filters(overrides: Partial<FilterValues> = {}): FilterValues {
     excludeBranch: [],
     filterCommit: [],
     excludeCommit: [],
-    filterTag: [],
-    excludeTag: [],
     startedAfter: "",
     startedBefore: "",
     finishedAfter: "",
@@ -126,9 +124,7 @@ describe("runListQuery", () => {
         excludeCommit: ["def5678"],
         startedAfter: "2026-10-01T00:00:00Z",
         filterText: " deploy -flaky ",
-      }),
-      {},
-      { kind: "latest" },
+      }), { kind: "latest" },
     );
     assert.ok(q);
     assert.deepEqual(Object.fromEntries(q), {
@@ -156,9 +152,7 @@ describe("runListQuery", () => {
         startedBefore: "2026-10-08T17:00:50.123456789Z",
         finishedAfter: " 2026-10-08T11:00:50.5-06:00 ",
         finishedBefore: "2026-10-08",
-      }),
-      {},
-      { kind: "latest" },
+      }), { kind: "latest" },
     );
     assert.equal(q?.get("started_before"), "2026-10-08T17:00:50.123456789Z");
     assert.equal(q?.get("finished_after"), "2026-10-08T11:00:50.5-06:00");
@@ -170,55 +164,25 @@ describe("runListQuery", () => {
       ["2026-10-08T24:00:00Z", "2026-10-09T00:00:00.000Z"],
       ["2026-02-30T00:00:00Z", "2026-03-02T00:00:00.000Z"],
     ]) {
-      const q = runListQuery(filters({ startedBefore: raw }), {}, { kind: "latest" });
+      const q = runListQuery(filters({ startedBefore: raw }), { kind: "latest" });
       assert.equal(q?.get("started_before"), want, raw);
     }
     for (const raw of ["2024-02-29T23:59:59.999999999Z", "2026-12-31T00:00:00+23:59"]) {
-      const q = runListQuery(filters({ startedBefore: raw }), {}, { kind: "latest" });
+      const q = runListQuery(filters({ startedBefore: raw }), { kind: "latest" });
       assert.equal(q?.get("started_before"), raw);
     }
     for (const raw of ["2026-13-01T00:00:00Z", "2026-10-08T12:60:00Z"]) {
-      const q = runListQuery(filters({ startedBefore: raw }), {}, { kind: "latest" });
+      const q = runListQuery(filters({ startedBefore: raw }), { kind: "latest" });
       assert.equal(q?.get("started_before"), null, raw);
     }
   });
 
-  it("turns tags into the pipelines that carry them", () => {
-    const meta = {
-      build: { tags: ["ci"] },
-      deploy: { tags: ["release"] },
-      lint: { tags: ["ci", "fast"] },
-    } as never;
-    assert.equal(
-      runListQuery(filters({ filterTag: ["ci"], excludeTag: ["fast"] }), meta, {
-        kind: "latest",
-      })?.toString(),
-      "pipeline=build%2Clint&exclude_pipeline=lint&limit=51",
-    );
-    assert.equal(
-      runListQuery(
-        filters({ filterTag: ["ci"], filterPipeline: ["deploy", "lint"] }),
-        meta,
-        { kind: "latest" },
-      )?.get("pipeline"),
-      "lint",
-    );
-    assert.equal(
-      runListQuery(
-        filters({ filterTag: ["ci"], filterPipeline: ["deploy"] }),
-        meta,
-        { kind: "latest" },
-      ),
-      null,
-    );
-  });
-
   it("pages by cursor in either direction", () => {
     const cursor = { startedAt: "1791478850123456789", id: "run-7" };
-    const older = runListQuery(filters(), {}, { kind: "older", cursor });
+    const older = runListQuery(filters(), { kind: "older", cursor });
     assert.equal(older?.get("after_started_at"), cursor.startedAt);
     assert.equal(older?.get("after_id"), "run-7");
-    const newer = runListQuery(filters(), {}, { kind: "newer", cursor });
+    const newer = runListQuery(filters(), { kind: "newer", cursor });
     assert.equal(newer?.get("before_started_at"), cursor.startedAt);
     assert.equal(newer?.get("before_id"), "run-7");
   });
