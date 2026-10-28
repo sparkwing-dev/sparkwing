@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -38,6 +39,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
@@ -470,3 +472,93 @@ func (cloudDispatchBoundary) Release(context.Context, launcher.CloudNodeReservat
 }
 
 func (cloudDispatchBoundary) Retire(context.Context, launcher.CloudNodeReservation) error { return nil }
+
+func TestCloudJobReportsThroughTheNodeHostRoute(t *testing.T) {
+	f := cloudDispatchTrigger(t)
+	created, err := f.member.CreateRun(t.Context(), f.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloud := newCloudDispatchLauncher(t, f)
+	planned := cloud.launch(t, capability.UnitPlan, "")
+	engineID := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, ManifestDigest: strings.Repeat("b", 64)}
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "greet", Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
+	request := cloudDispatchRequest(t, f, created.RunID)
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: request, Declarations: declarations, Plan: doc, Context: settings.Context{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolution := runspec.Resolved{Entrypoint: "Deploy", Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}, Engine: engineID, Env: request.Request.Env}
+	if _, err := f.open(planned.Capability, false).AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: resolution}); err != nil {
+		t.Fatalf("plan pod acceptance: %v", err)
+	}
+	cloud.finish(t)
+	unit := cloud.launch(t, capability.UnitNode, "greet")
+	host, err := client.NewNodeHostClient(client.EngineOptions{URL: f.endpoint, Bearer: func(context.Context) (string, error) { return unit.Capability, nil }}, unit.RunID, unit.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+	principal, err := host.Principal(t.Context())
+	if err != nil {
+		t.Fatalf("Cloud job principal: %v", err)
+	}
+	if result, err := host.MayStart(t.Context(), runstate.CapacityBinding{RunID: unit.RunID, NodeID: unit.JobID, Generation: unit.Binding.Generation}, runstate.Actor{}); err != nil || result.Kind != runstate.AcquireGranted {
+		t.Fatalf("Cloud job admission: %+v: %v", result, err)
+	}
+	ref := runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix}
+	source := runspec.AttemptOrdinal(unit.Binding.Attempt)
+	started, err := host.TransitionNode(t.Context(), ref, actor, runstate.NodeCommandPayload{To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: &source})
+	if err != nil {
+		t.Fatalf("Cloud job start through the node host route: %v", err)
+	}
+	attempted, err := host.Principal(t.Context())
+	if err != nil {
+		t.Fatalf("Cloud job attempt principal: %v", err)
+	}
+	if _, err := host.BindStorage(t.Context(), attempted); err != nil {
+		t.Fatalf("Cloud job storage: %v", err)
+	}
+	b := attempted.Capability.Binding
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: attempted.Capability.Team, RunID: unit.RunID, Attempt: &runspec.AttemptIdentity{Team: attempted.Capability.Team, RunID: unit.RunID, NodeID: unit.JobID, Generation: b.Generation, Attempt: b.Attempt}}
+	uploader, err := host.LogUploader(t.Context(), attempted, subject)
+	if err != nil {
+		t.Fatalf("Cloud job log uploader: %v", err)
+	}
+	sink, err := logseg.NewSink(t.Context(), uploader, logseg.Options{Subject: subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Append([]byte(`{"msg":"hello from the Cloud step"}`+"\n"), "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Close(t.Context(), logseg.End{}); err != nil {
+		t.Fatalf("Cloud job log commit: %v", err)
+	}
+	attempt := started.Attempt
+	if _, err := host.TransitionNode(t.Context(), ref, actor, runstate.NodeCommandPayload{To: runstate.NodeFailed, Cause: runstate.CauseReport, SourceAttempt: &attempt, Extra: runstate.NodeCommandExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, MaskedError: "step failed"}}}); err != nil {
+		t.Fatalf("Cloud job report through the node host route: %v", err)
+	}
+	cloud.finish(t)
+	detail, err := f.member.ReadRun(t.Context(), created.RunID)
+	if err != nil || detail.Status != string(runstate.RunFailed) {
+		t.Fatalf("Cloud job outcome: %+v %v", detail, err)
+	}
+	page, err := f.member.(controllerwire.LogReader).ReadLogs(t.Context(), created.RunID, controllerwire.LogQuery{Job: "greet"})
+	if err != nil {
+		t.Fatalf("failed Cloud job logs: %v", err)
+	}
+	var lines []string
+	for _, record := range page.Records {
+		lines = append(lines, record.Line)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "hello from the Cloud step") {
+		t.Fatalf("failed Cloud job step output is missing from its run logs: %+v", page.Records)
+	}
+}

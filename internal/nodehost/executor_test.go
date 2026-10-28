@@ -31,6 +31,7 @@ type executorStore struct {
 	row        runstate.NodeRow
 	changes    []capturedNodeCommand
 	fail       runstate.TransitionCause
+	failErr    error
 	expansions []runstate.AcceptedExpansionRow
 	nodes      map[string]runstate.NodeRow
 }
@@ -69,6 +70,9 @@ func (s *executorStore) TransitionNode(_ context.Context, command store.NodeComm
 		return runstate.Applied{}, executorError(apierr.LockHeld, "source attempt differs from current attempt")
 	}
 	if c.Cause == s.fail {
+		if s.failErr != nil {
+			return runstate.Applied{}, s.failErr
+		}
 		return runstate.Applied{}, errors.New("transition refused")
 	}
 	if c.Cause == runstate.CauseRetry || c.Cause == runstate.CauseStart {
@@ -429,6 +433,24 @@ func TestNodeExecutorTransitionRefusalStopsExecution(t *testing.T) {
 				t.Fatalf("transitions = %+v", s.changes)
 			}
 		})
+	}
+}
+
+func TestNodeExecutorForbiddenStartFailsTheJob(t *testing.T) {
+	input, s, deps, processes := executorFixture(t)
+	s.fail, s.failErr = runstate.CauseStart, &apierr.Error{Code: apierr.Forbidden, Message: "resource is outside the authorized binding"}
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = host.Execute(t.Context(), input); err == nil {
+		t.Fatal("forbidden start was ignored")
+	}
+	if len(*processes) != 0 || len(s.changes) != 2 || s.changes[1].Cause != runstate.CauseReport || s.changes[1].To != runstate.NodeFailed {
+		t.Fatalf("a forbidden start must report the held job failed instead of leaving it to requeue: %+v", s.changes)
+	}
+	if result := s.changes[1].Extra.Result; result == nil || !strings.Contains(result.MaskedError, "outside the authorized binding") {
+		t.Fatalf("failure report hides the refusal: %+v", result)
 	}
 }
 

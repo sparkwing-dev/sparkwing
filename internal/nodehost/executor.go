@@ -139,6 +139,12 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 		return h.report(ctx, input, runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(apierr.ReasonCancelled)}, nil)
 	}
 	input, err = h.startExecution(ctx, input, spec)
+	var denied *apierr.Error
+	if errors.As(err, &denied) && denied.Code == apierr.Forbidden {
+		// A refused start leaves the claim held, and an unstarted lease lapse requeues for free, so only a failure
+		// report stops the same refusal recurring on every award.
+		err = denied
+	}
 	if err != nil {
 		return h.report(ctx, input, h.failure(err), err)
 	}
