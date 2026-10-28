@@ -218,8 +218,8 @@ func eventText(record controllerwire.LogRecord, detail string) string {
 	return words + ": " + detail
 }
 
-// safety: event payloads are JSON objects; plain and pretty output show their values,
-// and anything that is not an object stays verbatim so no detail is lost.
+// safety: event payloads are JSON objects shown as their values; a null or empty payload
+// shows nothing, and any other non-object stays verbatim so no detail is lost.
 func eventDetail(payload string) string {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal([]byte(payload), &fields) != nil || fields == nil {
