@@ -313,6 +313,7 @@ type JobDetail struct {
 	Status            string       `json:"status"`
 	Outcome           string       `json:"outcome,omitempty"`
 	StatusDetail      string       `json:"status_detail,omitempty"`
+	Error             string       `json:"error,omitempty"`
 	Generation        int64        `json:"generation"`
 	Attempt           int64        `json:"attempt"`
 	StateSeq          int64        `json:"state_seq"`

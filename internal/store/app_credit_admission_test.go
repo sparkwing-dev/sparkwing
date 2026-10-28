@@ -34,11 +34,11 @@ func testUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T, requireme
 		t.Fatal(err)
 	}
 	view, err := tenant.ReadRunView(t.Context(), result.RunID)
-	if err != nil || view.Snapshot.Run.State != runstate.RunFailed || view.Snapshot.Run.StartedAt != nil || view.Snapshot.Run.FinishedAt == nil || (len(view.Failures) != 1 || !strings.HasPrefix(view.Failures[0], "run did not start: out of credits:")) || result.OwnerUnit != nil {
+	if err != nil || view.Snapshot.Run.State != runstate.RunFailed || view.Snapshot.Run.StartedAt != nil || view.Snapshot.Run.FinishedAt == nil || (len(view.Failures) != 1 || !strings.HasPrefix(view.Failures[0].Error, "run did not start: out of credits:")) || result.OwnerUnit != nil {
 		t.Fatalf("unfunded push must be terminal history: result=%+v view=%+v err=%v", result, view, err)
 	}
 	rows, err := tenant.ListRuns(t.Context(), RunFilter{Limit: 10})
-	if err != nil || len(rows) != 1 || rows[0].ID != result.RunID || rows[0].Status != "failed" || rows[0].Error != view.Failures[0] {
+	if err != nil || len(rows) != 1 || rows[0].ID != result.RunID || rows[0].Status != "failed" || rows[0].Error != view.Failures[0].Error {
 		t.Fatalf("run list lost unfunded push: %+v, %v", rows, err)
 	}
 	rewriteSchemaCount(t, s.db, "events WHERE kind='run_failed'", 1)

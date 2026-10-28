@@ -58,3 +58,21 @@ func TestRunStatusShowsOptionalFailureWithoutFailingSuccessfulRun(t *testing.T) 
 		}
 	}
 }
+
+func TestRunStatusShowsAnUnstartedJobsError(t *testing.T) {
+	compiler := "install source entry: # pipeline\n./pipeline.go:91:26: cannot use *** as int value"
+	for _, args := range [][]string{{"-o", "plain"}, {"-o", "pretty"}, {"-o", "json"}, {"--view", "errors", "-o", "pretty"}} {
+		reader := &statusReader{details: []controllerwire.RunDetail{{ID: "r1", Status: "failed", Jobs: []controllerwire.JobDetail{{ID: "build", Status: "done", Outcome: "failed", Error: compiler}}}}}
+		var out bytes.Buffer
+		if err := observeRunStatus(t.Context(), statusInvocation(t, args...), reader, &out, nil); exitCodeFor(err) != 1 {
+			t.Fatalf("%v status exit: %v", args, err)
+		}
+		want := compiler
+		if args[1] == "json" {
+			want = "cannot use *** as int value"
+		}
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("%v: missing the job's error in:\n%s", args, &out)
+		}
+	}
+}

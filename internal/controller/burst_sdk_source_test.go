@@ -38,7 +38,7 @@ func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("GOPROXY", "off")
 	t.Setenv("TOKEN", "ambient-requester-value-never-forward")
-	repo, sha, engines, selected := burstSDKSourceFixture(t)
+	repo, sha, engines, selected := burstSDKSourceFixture(t, "")
 	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodeproto.RunContext{Pipeline: burstSDKPipelineName})
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,8 @@ func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
 	}
 }
 
-func burstSDKSourceFixture(t *testing.T) (string, string, *engine.Resolver, engine.Resolved) {
+// burstSDKSourceFixture commits the burst SDK pipeline, followed by appended source when it is not empty.
+func burstSDKSourceFixture(t *testing.T, appended string) (string, string, *engine.Resolver, engine.Resolved) {
 	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
 	root := burstSDKModule(t, filepath.Clean(filepath.Join(filepath.Dir(file), "../..")))
@@ -80,7 +81,7 @@ func burstSDKSourceFixture(t *testing.T) (string, string, *engine.Resolver, engi
 	if err != nil {
 		t.Fatal(err)
 	}
-	sourcetest.Write(t, filepath.Join(directory, "pipeline.go"), string(body))
+	sourcetest.Write(t, filepath.Join(directory, "pipeline.go"), string(body)+appended)
 	sourcetest.Write(t, filepath.Join(repo, "source-marker.txt"), "uploaded edited source\n")
 	sourcetest.Git(t, repo, "add", ".")
 	sourcetest.Git(t, repo, "commit", "-qm", "execution snapshot")

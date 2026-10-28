@@ -143,7 +143,7 @@ func writeRunErrors(out io.Writer, detail controllerwire.RunDetail, format strin
 		if job.Outcome != "failed" && job.Status != "failed" {
 			continue
 		}
-		failure := runFailure{RunID: detail.ID, JobID: job.ID, Attempt: job.Attempt, Outcome: job.Outcome, Reason: job.StatusDetail}
+		failure := runFailure{RunID: detail.ID, JobID: job.ID, Attempt: job.Attempt, Outcome: job.Outcome, Reason: jobFailureText(job)}
 		var err error
 		if format == "json" {
 			err = json.NewEncoder(out).Encode(failure)
@@ -185,8 +185,21 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 	for _, step := range detail.Steps {
 		fmt.Fprintf(&text, "%s/%s\t%s\t%s\tattempt=%d\t%s\n", step.JobID, step.ID, step.Status, step.Outcome, step.Attempt, step.Reason)
 	}
+	for _, job := range detail.Jobs {
+		if job.Error != "" {
+			fmt.Fprintf(&text, "%s error:\n%s\n", job.ID, strings.TrimRight(job.Error, "\n"))
+		}
+	}
 	_, err := io.WriteString(out, text.String())
 	return err
+}
+
+// jobFailureText prefers the job's recorded error, the only account of a failure reported before any attempt started.
+func jobFailureText(job controllerwire.JobDetail) string {
+	if job.Error != "" {
+		return job.Error
+	}
+	return job.StatusDetail
 }
 
 func writeRunTimeline(text *strings.Builder, detail controllerwire.RunDetail, width int) {

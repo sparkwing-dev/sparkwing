@@ -53,7 +53,7 @@ func TestRunViewPagesKeepNumberBoundsOrderAndTenant(t *testing.T) {
 		var ids []string
 		for _, view := range views {
 			ids = append(ids, view.Snapshot.Run.ID)
-			if view.Snapshot.Run.ID == "run" && (!reflect.DeepEqual(view.Failures, []string{"masked failure"}) || len(view.Attempts) != 1) {
+			if view.Snapshot.Run.ID == "run" && (!reflect.DeepEqual(view.Failures, []RunFailure{{Error: "masked failure"}}) || len(view.Attempts) != 1) {
 				t.Fatalf("incomplete page view: %+v", view)
 			}
 		}

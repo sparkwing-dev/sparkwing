@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -31,7 +32,11 @@ func runRunsLogs(ctx context.Context, inv clisurface.Invocation) error {
 	if err != nil {
 		return exitError(3, err)
 	}
-	return observeRunLogs(ctx, inv, reader, os.Stdout, os.Stderr, waitStatusPoll)
+	runs, err := client.NewRunReader(options)
+	if err != nil {
+		return exitError(3, err)
+	}
+	return observeRunLogs(ctx, inv, reader, runs, os.Stdout, os.Stderr, waitStatusPoll)
 }
 
 func followControllerRunLogs(ctx context.Context, options client.EngineOptions, run, format string, out io.Writer) error {
@@ -40,7 +45,7 @@ func followControllerRunLogs(ctx context.Context, options client.EngineOptions, 
 	if err != nil {
 		return err
 	}
-	return observeRunLogs(ctx, inv, reader, out, io.Discard, waitStatusPoll)
+	return observeRunLogs(ctx, inv, reader, nil, out, io.Discard, waitStatusPoll)
 }
 
 func parseRunLogs(inv clisurface.Invocation) (controllerwire.LogQuery, error) {
@@ -78,7 +83,9 @@ func parseRunLogs(inv clisurface.Invocation) (controllerwire.LogQuery, error) {
 	return q, nil
 }
 
-func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader controllerwire.LogReader, out, diagnostics io.Writer, wait func(context.Context, time.Duration) error) error {
+// observeRunLogs prints the run's logs, then, when runs is set, the recorded error of each selected job that failed
+// before it started, since such a job has no attempt and so no logs.
+func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader controllerwire.LogReader, runs controllerwire.RunReader, out, diagnostics io.Writer, wait func(context.Context, time.Duration) error) error {
 	query, err := parseRunLogs(inv)
 	if err != nil {
 		return err
@@ -107,7 +114,7 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 			}
 		}
 		if !page.Truncated && (!inv.Bool("follow") || page.Complete) {
-			return nil
+			return writePreStartFailures(ctx, inv, runs, query.Job, out)
 		}
 		query.Cursor = page.NextCursor
 		seen[query.Cursor] = true
@@ -117,6 +124,34 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 			}
 		}
 	}
+}
+
+func writePreStartFailures(ctx context.Context, inv clisurface.Invocation, runs controllerwire.RunReader, job string, out io.Writer) error {
+	if runs == nil {
+		return nil
+	}
+	detail, err := runs.ReadRun(ctx, inv.Value("run"))
+	if err != nil {
+		return exitError(3, err)
+	}
+	started := map[string]bool{}
+	for _, attempt := range detail.Attempts {
+		started[attempt.JobID] = true
+	}
+	for _, failed := range detail.Jobs {
+		if failed.Error == "" || started[failed.ID] || job != "" && failed.ID != job {
+			continue
+		}
+		if runLogOutput(inv) == "json" {
+			err = json.NewEncoder(out).Encode(controllerwire.LogRecord{RunID: detail.ID, Event: "job_failed_before_start", JobID: failed.ID, Line: failed.Error})
+		} else {
+			_, err = fmt.Fprintf(out, "%s failed before it started, so it has no logs; its error:\n%s\n", failed.ID, strings.TrimRight(failed.Error, "\n"))
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format string, search bool) error {

@@ -1608,6 +1608,8 @@ components:
           type: string
         disruptions:
           type: integer
+        error:
+          type: string
         execution:
           $ref: '#/components/schemas/internal.runspec.JobExecutionSettings'
         expansion:
@@ -1843,6 +1845,8 @@ components:
             - format: date-time
               type: string
             - type: "null"
+        error:
+          type: string
         expansion:
           type: string
         finished_at:
@@ -3346,6 +3350,8 @@ components:
           type: boolean
         declaration:
           $ref: '#/components/schemas/internal.nodeproto.JobSpec'
+        error:
+          type: string
         expansion:
           type: string
         finished_at:

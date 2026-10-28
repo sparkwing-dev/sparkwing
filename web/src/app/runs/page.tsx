@@ -3569,6 +3569,7 @@ function SingleNodeLogs({
         steps={steps}
         findLineSet={findLineSet}
         findCurrentLine={findCurrentLine}
+        failedBeforeStart={!!node.error && !node.execution_attempts?.length}
       />
     );
   return (
@@ -4400,6 +4401,7 @@ function StoredLogs({
   steps,
   findLineSet,
   findCurrentLine,
+  failedBeforeStart,
 }: {
   runID: string;
   nodeID: string;
@@ -4408,6 +4410,7 @@ function StoredLogs({
   steps?: NodeWorkStep[];
   findLineSet?: Set<number>;
   findCurrentLine?: number | null;
+  failedBeforeStart?: boolean;
 }) {
   const [text, setText] = useState<string | null>(null);
   const [completeness, setCompleteness] = useState<LogCompleteness | null>(
@@ -4457,7 +4460,9 @@ function StoredLogs({
     return (
       <>
         <div className="text-sm text-[var(--muted)]">
-          No logs captured for this node.
+          {failedBeforeStart
+            ? "This job failed before it started, so it has no logs; its error is shown above."
+            : "No logs captured for this node."}
         </div>
         <LogCompletenessLine completeness={completeness} />
       </>

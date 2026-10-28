@@ -68,7 +68,7 @@ func TestRunLogsPagesAndFollowsUntilPersistedCompletion(t *testing.T) {
 			return controllerwire.LogPage{Records: []controllerwire.LogRecord{{RunID: "child", Subject: &blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "t1", RunID: "child", Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: 1}}, LineNo: 1, Line: "planned"}}, Complete: true}, nil
 		}
 	}}
-	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "412", "--tree", "--tail", "0", "--follow", "-o", "json"), reader, &output, &diagnostics, func(context.Context, time.Duration) error { waits++; return nil })
+	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "412", "--tree", "--tail", "0", "--follow", "-o", "json"), reader, nil, &output, &diagnostics, func(context.Context, time.Duration) error { waits++; return nil })
 	if err != nil || calls != 3 || waits != 1 || !strings.Contains(output.String(), `"kind":"owner_unit"`) || !strings.Contains(output.String(), `"job_id":"build"`) || strings.Contains(output.String(), "node_id") {
 		t.Fatalf("calls=%d waits=%d output=%s err=%v", calls, waits, &output, err)
 	}
@@ -85,7 +85,7 @@ func TestRunLogSearchPreservesFiltersMatchesAndContinuation(t *testing.T) {
 				return controllerwire.LogSearchPage{Matches: []controllerwire.LogRecord{jobLogRecord("r1", "fatal error"), jobLogRecord("r1", "fatal again"), jobLogRecord("r2", "fatal")}, Truncated: true, NextCursor: "next"}, nil
 			}}
 			inv := logInvocation(t, verb, "--grep", "fatal", "--job", "build", "--max-matches", "0", "--limit", "7", "--cursor", "old", "--pipeline", "test", "--status", "failed", "--sha", "abc", "--branch", "main,!release", "--started-after", "2026-10-01", "-q", "-o", "plain")
-			if err := observeRunLogs(t.Context(), inv, reader, &output, &diagnostics, nil); err != nil {
+			if err := observeRunLogs(t.Context(), inv, reader, nil, &output, &diagnostics, nil); err != nil {
 				t.Fatal(err)
 			}
 			if output.String() != "r1\nr2\n" || !strings.Contains(diagnostics.String(), "next") {
@@ -111,21 +111,21 @@ func TestRunLogsPropagatesFailuresAndIncompleteFollow(t *testing.T) {
 	reader := fakeLogReader{read: func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
 		return controllerwire.LogPage{}, failure
 	}}
-	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1"), reader, &out, &out, nil)
+	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1"), reader, nil, &out, &out, nil)
 	if !errors.Is(err, failure) || exitCodeFor(err) != 3 {
 		t.Fatalf("error = %v", err)
 	}
 	reader.read = func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
 		return controllerwire.LogPage{NextCursor: "live"}, nil
 	}
-	err = observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1", "--follow"), reader, &out, &out, func(context.Context, time.Duration) error { return context.Canceled })
+	err = observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1", "--follow"), reader, nil, &out, &out, func(context.Context, time.Duration) error { return context.Canceled })
 	if !errors.Is(err, context.Canceled) || exitCodeFor(err) != 3 {
 		t.Fatalf("error = %v", err)
 	}
 	reader.read = func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
 		return controllerwire.LogPage{Records: []controllerwire.LogRecord{jobLogRecord("r1", "hello")}, NextCursor: "same", Truncated: true}, nil
 	}
-	err = observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1", "--cursor", "same"), reader, &out, &out, nil)
+	err = observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1", "--cursor", "same"), reader, nil, &out, &out, nil)
 	if exitCodeFor(err) != 3 {
 		t.Fatalf("repeated cursor error = %v", err)
 	}
@@ -142,7 +142,7 @@ func TestRunLogSearchLookbackAndEmptyPageRemainExplicit(t *testing.T) {
 		return controllerwire.LogSearchPage{Truncated: true, NextCursor: "older-runs"}, nil
 	}}
 	var out, diagnostics bytes.Buffer
-	if err := observeRunLogs(t.Context(), inv, reader, &out, &diagnostics, nil); err != nil {
+	if err := observeRunLogs(t.Context(), inv, reader, nil, &out, &diagnostics, nil); err != nil {
 		t.Fatal(err)
 	}
 	if out.Len() != 0 || !strings.Contains(diagnostics.String(), `"next_cursor":"older-runs"`) {
@@ -159,7 +159,7 @@ func TestRunLogsRetainsSelectionAndPlainOutput(t *testing.T) {
 		return controllerwire.LogPage{Records: []controllerwire.LogRecord{jobLogRecord("r1", "fatal error")}, Complete: true}, nil
 	}}
 	var output bytes.Buffer
-	if err := observeRunLogs(t.Context(), inv, reader, &output, &output, nil); err != nil || output.String() != "fatal error\n" {
+	if err := observeRunLogs(t.Context(), inv, reader, nil, &output, &output, nil); err != nil || output.String() != "fatal error\n" {
 		t.Fatalf("output=%q err=%v", output.String(), err)
 	}
 }
@@ -172,10 +172,10 @@ func TestRunLogsDistinguishesMissingRunFromEmptyLogs(t *testing.T) {
 		return controllerwire.LogPage{Complete: true}, nil
 	}}
 	var output bytes.Buffer
-	if err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "present"), reader, &output, &output, nil); err != nil {
+	if err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "present"), reader, nil, &output, &output, nil); err != nil {
 		t.Fatalf("empty logs: %v", err)
 	}
-	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "missing"), reader, &output, &output, nil)
+	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "missing"), reader, nil, &output, &output, nil)
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.NotFound || exitCodeFor(err) != 3 {
 		t.Fatalf("missing logs: %v", err)
@@ -187,7 +187,7 @@ func TestRunLogSearchQuietJSONUsesObjects(t *testing.T) {
 		return controllerwire.LogSearchPage{Matches: []controllerwire.LogRecord{jobLogRecord("r1", "fatal"), jobLogRecord("r1", "fatal again")}}, nil
 	}}
 	var out, diagnostics bytes.Buffer
-	if err := observeRunLogs(t.Context(), logInvocation(t, "grep", "--grep", "fatal", "-q", "-o", "json"), reader, &out, &diagnostics, nil); err != nil {
+	if err := observeRunLogs(t.Context(), logInvocation(t, "grep", "--grep", "fatal", "-q", "-o", "json"), reader, nil, &out, &diagnostics, nil); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]string
@@ -210,5 +210,38 @@ func TestRunLogsTriggerFollowPreservesTransportAndBearer(t *testing.T) {
 	})}}
 	if err := followControllerRunLogs(t.Context(), options, "r1", "plain", &out); err != nil || out.Len() != 0 {
 		t.Fatalf("follow=%q err=%v", out.String(), err)
+	}
+}
+
+func TestRunLogsShowsTheErrorOfAJobThatFailedBeforeStarting(t *testing.T) {
+	compiler := "install source entry: # pipeline\n./pipeline.go:91:26: cannot use *** as int value"
+	reader := fakeLogReader{read: func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
+		return controllerwire.LogPage{Records: []controllerwire.LogRecord{jobLogRecord("r1", "ran")}, Complete: true}, nil
+	}}
+	runs := &statusReader{details: []controllerwire.RunDetail{{ID: "r1", Status: "failed", Jobs: []controllerwire.JobDetail{
+		{ID: "build", Status: "done", Outcome: "failed", Error: compiler},
+		{ID: "test", Status: "done", Outcome: "failed", Error: "step failed"},
+	}, Attempts: []controllerwire.AttemptDetail{{JobID: "test", Attempt: 1, Generation: 1}}}}}
+	for _, tc := range []struct {
+		args []string
+		want []string
+		not  string
+	}{
+		{[]string{"-o", "plain"}, []string{"ran\n", "build failed before it started", compiler}, "step failed"},
+		{[]string{"--job", "test", "-o", "plain"}, []string{"ran\n"}, "before it started"},
+		{[]string{"-o", "json"}, []string{`"event":"job_failed_before_start"`, `"job_id":"build"`, "cannot use *** as int value"}, "step failed"},
+	} {
+		var out bytes.Buffer
+		if err := observeRunLogs(t.Context(), logInvocation(t, append([]string{"logs", "--run", "r1"}, tc.args...)...), reader, runs, &out, &out, nil); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("%v: missing %q in:\n%s", tc.args, want, &out)
+			}
+		}
+		if strings.Contains(out.String(), tc.not) {
+			t.Errorf("%v: unexpected %q in:\n%s", tc.args, tc.not, &out)
+		}
 	}
 }

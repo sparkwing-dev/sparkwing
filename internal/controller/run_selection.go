@@ -74,7 +74,10 @@ func runSelectionMatches(view store.RunView, q controllerwire.RunQuery) bool {
 		!selectionTime(run.StartedAt, q.StartedAfter, q.StartedBefore) || !selectionTime(run.FinishedAt, q.FinishedAfter, q.FinishedBefore) {
 		return false
 	}
-	failures := append([]string{}, view.Failures...)
+	failures := []string{}
+	for _, failure := range view.Failures {
+		failures = append(failures, failure.Error)
+	}
 	for _, node := range view.Snapshot.Nodes {
 		failures = append(failures, node.StatusDetail)
 	}
