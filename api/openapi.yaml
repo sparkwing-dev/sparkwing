@@ -1681,6 +1681,8 @@ components:
           type: string
         status_detail:
           type: string
+        summary:
+          type: string
       required:
         - id
         - status
@@ -1906,6 +1908,8 @@ components:
         status:
           type: string
         status_detail:
+          type: string
+        summary:
           type: string
       required:
         - id
@@ -3451,6 +3455,8 @@ components:
         status:
           type: string
         status_detail:
+          type: string
+        summary:
           type: string
       required:
         - id

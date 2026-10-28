@@ -2,11 +2,13 @@
   "id": "run-jobs",
   "number": 15,
   "team": "acme",
-  "status": "failed",
-  "state_seq": 9,
+  "status": "running",
+  "state_seq": 0,
   "inputs": {
     "pipeline": "hello",
-    "requested_args": {},
+    "requested_args": {
+      "target": "prod"
+    },
     "args": {
       "target": "prod"
     },
@@ -77,7 +79,13 @@
       }
     },
     "env_names": null,
-    "reproducer": null
+    "reproducer": [
+      "sparkwing",
+      "run",
+      "hello",
+      "--",
+      "--target=prod"
+    ]
   },
   "jobs": [
     {
@@ -85,10 +93,11 @@
       "status": "done",
       "outcome": "success",
       "generation": 1,
-      "attempt": 0,
-      "state_seq": 0,
-      "expansion": "none",
-      "finished_at": "2026-10-28T05:01:52Z"
+      "attempt": 1,
+      "state_seq": 3,
+      "expansion": "",
+      "started_at": "2026-10-28T05:01:25Z",
+      "finished_at": "2026-10-28T05:01:28Z"
     },
     {
       "id": "build",
@@ -96,23 +105,51 @@
       "outcome": "failed",
       "error": "install source entry: ./pipeline.go:3:9: cannot use *** as int value",
       "generation": 1,
-      "attempt": 0,
-      "state_seq": 0,
-      "expansion": "none",
-      "finished_at": "2026-10-28T05:01:52Z",
+      "attempt": 1,
+      "state_seq": 3,
+      "expansion": "",
+      "started_at": "2026-10-28T05:01:31Z",
+      "finished_at": "2026-10-28T05:01:34Z",
       "needs": [
         "lint"
       ]
+    },
+    {
+      "annotations": [
+        {
+          "level": "warning",
+          "message": "coverage fell 2%",
+          "file": "coverage.out",
+          "line": 1
+        }
+      ],
+      "id": "test",
+      "status": "done",
+      "outcome": "success",
+      "generation": 1,
+      "attempt": 2,
+      "state_seq": 4,
+      "expansion": "",
+      "started_at": "2026-10-28T05:01:52Z",
+      "finished_at": "2026-10-28T05:02:07Z",
+      "needs": [
+        "lint"
+      ],
+      "groups": [
+        "checks"
+      ],
+      "summary": "## Test report\n42 passed on the second attempt"
     },
     {
       "id": "notify",
       "status": "done",
       "outcome": "success",
       "generation": 1,
-      "attempt": 0,
-      "state_seq": 0,
-      "expansion": "none",
-      "finished_at": "2026-10-28T05:01:52Z",
+      "attempt": 1,
+      "state_seq": 3,
+      "expansion": "",
+      "started_at": "2026-10-28T05:01:37Z",
+      "finished_at": "2026-10-28T05:01:40Z",
       "on_failure_of": "build"
     },
     {
@@ -121,7 +158,7 @@
       "generation": 0,
       "attempt": 0,
       "state_seq": 0,
-      "expansion": "none",
+      "expansion": "",
       "needs": [
         "test"
       ],
@@ -129,48 +166,150 @@
         "release"
       ],
       "approval": true
-    },
-    {
-      "annotations": [
-        {
-          "level": "notice",
-          "message": "42 tests"
-        }
-      ],
-      "id": "test",
-      "status": "done",
-      "outcome": "success",
-      "generation": 1,
-      "attempt": 1,
-      "state_seq": 4,
-      "expansion": "none",
-      "started_at": "2026-10-28T05:01:19Z",
-      "finished_at": "2026-10-28T05:01:52Z",
-      "needs": [
-        "lint"
-      ],
-      "groups": [
-        "checks"
-      ]
     }
   ],
   "attempts": [
     {
-      "job_id": "test",
+      "job_id": "build",
+      "attempt": 1,
+      "generation": 1,
+      "outcome": "failed",
+      "executor": "agent",
+      "started_at": "2026-10-28T05:01:31Z",
+      "finished_at": "2026-10-28T05:01:34Z",
+      "executor_name": "moonborn",
+      "location": "local"
+    },
+    {
+      "job_id": "lint",
       "attempt": 1,
       "generation": 1,
       "outcome": "success",
-      "executor": "runner",
-      "started_at": "2026-10-28T05:01:19Z",
+      "executor": "agent",
+      "started_at": "2026-10-28T05:01:25Z",
+      "finished_at": "2026-10-28T05:01:28Z",
+      "executor_name": "moonborn",
+      "location": "local"
+    },
+    {
+      "job_id": "notify",
+      "attempt": 1,
+      "generation": 1,
+      "outcome": "success",
+      "executor": "agent",
+      "started_at": "2026-10-28T05:01:37Z",
+      "finished_at": "2026-10-28T05:01:40Z",
+      "executor_name": "moonborn",
+      "location": "local"
+    },
+    {
+      "job_id": "test",
+      "attempt": 1,
+      "generation": 1,
+      "outcome": "failed",
+      "reason": "step_failed",
+      "executor": "agent",
+      "started_at": "2026-10-28T05:01:43Z",
       "finished_at": "2026-10-28T05:01:52Z",
+      "executor_name": "moonborn",
+      "location": "local"
+    },
+    {
+      "job_id": "test",
+      "attempt": 2,
+      "generation": 1,
+      "outcome": "success",
+      "executor": "agent",
+      "started_at": "2026-10-28T05:01:52Z",
+      "finished_at": "2026-10-28T05:02:07Z",
       "executor_name": "moonborn",
       "location": "local"
     }
   ],
-  "logs": null,
+  "logs": [
+    {
+      "kind": "job_attempt",
+      "team": "acme",
+      "run_id": "run-jobs",
+      "attempt": {
+        "team": "acme",
+        "run_id": "run-jobs",
+        "job_id": "lint",
+        "attempt": 1,
+        "generation": 1
+      }
+    },
+    {
+      "kind": "job_attempt",
+      "team": "acme",
+      "run_id": "run-jobs",
+      "attempt": {
+        "team": "acme",
+        "run_id": "run-jobs",
+        "job_id": "build",
+        "attempt": 1,
+        "generation": 1
+      }
+    },
+    {
+      "kind": "job_attempt",
+      "team": "acme",
+      "run_id": "run-jobs",
+      "attempt": {
+        "team": "acme",
+        "run_id": "run-jobs",
+        "job_id": "notify",
+        "attempt": 1,
+        "generation": 1
+      }
+    },
+    {
+      "kind": "job_attempt",
+      "team": "acme",
+      "run_id": "run-jobs",
+      "attempt": {
+        "team": "acme",
+        "run_id": "run-jobs",
+        "job_id": "test",
+        "attempt": 1,
+        "generation": 1
+      }
+    },
+    {
+      "kind": "job_attempt",
+      "team": "acme",
+      "run_id": "run-jobs",
+      "attempt": {
+        "team": "acme",
+        "run_id": "run-jobs",
+        "job_id": "test",
+        "attempt": 2,
+        "generation": 1
+      }
+    }
+  ],
   "started_at": "2026-10-28T05:01:19Z",
-  "finished_at": "2026-10-28T05:01:52Z",
-  "notices": [],
+  "engine": {
+    "pin": {
+      "sdk": "",
+      "version": "",
+      "manifest": "",
+      "inputs_digest": ""
+    },
+    "version": "v1.2.3",
+    "manifest_digest": ""
+  },
+  "notices": [
+    {
+      "kind": "support_ending",
+      "version": "v1.2.3",
+      "reason": "v1.2.3 leaves support on 2027-01-31; upgrade the engine"
+    },
+    {
+      "kind": "unclaimed_work",
+      "reason": "no runner or launcher has claimed the run's trigger yet; check that a matching runner (or the Cloud launcher) is online"
+    }
+  ],
   "retry": {
     "mode": "failed",
     "reused": [

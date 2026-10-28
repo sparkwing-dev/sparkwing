@@ -4,14 +4,14 @@
   "team": "acme",
   "status": "failed",
   "failure": "install source entry: # pipeline\njobs/broken.go:6:9: undefined: qaDeliberateUndefined",
-  "state_seq": 3,
+  "state_seq": 1,
   "inputs": {
     "pipeline": "hello",
-    "requested_args": {},
-    "args": {
-      "target": "prod"
+    "requested_args": {
+      "target": "***"
     },
-    "secret_args": [],
+    "args": null,
+    "secret_args": null,
     "git": {
       "repository": {
         "key": "git:gitlab.com/acme/app",
@@ -67,7 +67,7 @@
     "lineage": {
       "parent_run_id": "",
       "parent_job_id": "",
-      "retry_of": "run-earlier",
+      "retry_of": "",
       "retrier": {
         "set": false,
         "value": {
@@ -82,7 +82,18 @@
   },
   "jobs": [],
   "attempts": [],
-  "logs": null,
-  "finished_at": "2026-10-28T05:01:52Z",
+  "logs": [
+    {
+      "kind": "owner_unit",
+      "team": "acme",
+      "run_id": "run-plan",
+      "unit": {
+        "kind": "trigger",
+        "generation": 1
+      }
+    }
+  ],
+  "started_at": "2026-10-28T05:01:19Z",
+  "finished_at": "2026-10-28T05:01:22Z",
   "notices": []
 }

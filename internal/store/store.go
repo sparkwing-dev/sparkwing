@@ -744,7 +744,7 @@ type Node struct {
 	FailureReason string `json:"failure_reason,omitempty"`
 	ExitCode      *int   `json:"exit_code,omitempty"`
 
-	Annotations []string `json:"annotations,omitempty"`
+	Annotations []Annotation `json:"annotations,omitempty"`
 
 	Summary string `json:"summary,omitempty"`
 
@@ -883,15 +883,15 @@ const (
 // state for the inner-Work DAG. Status moves from running to passed, failed, or
 // cancelled once; skipped is terminal at insert.
 type NodeStep struct {
-	RunID       string     `json:"run_id,omitempty"`
-	NodeID      string     `json:"node_id"`
-	StepID      string     `json:"step_id"`
-	Attempt     int64      `json:"attempt"`
-	Status      string     `json:"status"`
-	Error       string     `json:"error,omitempty"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
-	Annotations []string   `json:"annotations,omitempty"`
+	RunID       string       `json:"run_id,omitempty"`
+	NodeID      string       `json:"node_id"`
+	StepID      string       `json:"step_id"`
+	Attempt     int64        `json:"attempt"`
+	Status      string       `json:"status"`
+	Error       string       `json:"error,omitempty"`
+	StartedAt   *time.Time   `json:"started_at,omitempty"`
+	FinishedAt  *time.Time   `json:"finished_at,omitempty"`
+	Annotations []Annotation `json:"annotations,omitempty"`
 	// Summary is the latest markdown run summary emitted by
 	// sparkwing.Summary inside this step's body. Overwrite-on-write:
 	// only the last value is kept.
@@ -917,16 +917,11 @@ ORDER BY node_id, attempt, started_at, step_id`, string(t.team), runID)
 		if err := rows.Scan(&ns.NodeID, &ns.StepID, &ns.Attempt, &ns.Status, &ns.Error, &started, &finished, &annotations, &ns.Summary); err != nil {
 			return nil, err
 		}
-		if started.Valid {
-			t := time.Unix(0, started.Int64)
-			ns.StartedAt = &t
-		}
-		if finished.Valid {
-			t := time.Unix(0, finished.Int64)
-			ns.FinishedAt = &t
-		}
+		ns.StartedAt, ns.FinishedAt = stateTime(started), stateTime(finished)
 		if len(annotations) > 0 {
-			_ = json.Unmarshal(annotations, &ns.Annotations)
+			if err := json.Unmarshal(annotations, &ns.Annotations); err != nil {
+				return nil, fmt.Errorf("decode step %s/%s annotations: %w", ns.NodeID, ns.StepID, err)
+			}
 		}
 		out = append(out, ns)
 	}

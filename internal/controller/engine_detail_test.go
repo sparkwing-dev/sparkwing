@@ -95,9 +95,11 @@ func TestEngineRunDetailCarriesJobDeclarations(t *testing.T) {
 	if !reflect.DeepEqual(deploy.Groups, []string{"release"}) || !deploy.Approval || deploy.OnFailureOf != "test" || notify.OnFailureOf != "" || notify.Approval {
 		t.Fatalf("job declarations: %+v %+v", deploy, notify)
 	}
-	view.Snapshot.Nodes[0].Spec = json.RawMessage(`{`)
-	if _, err := runDetailResponse(capability.Target{Team: "a", RunID: "run"}, RunStatusFacts{Snapshot: view.Snapshot}); err == nil {
-		t.Fatal("projected a corrupt job declaration")
+	view.Snapshot.Nodes[2].Spec = json.RawMessage(`{"id":"deploy","deps":["test"],"env":{"TOKEN":"private-secret"}}`)
+	view.Snapshot.Nodes[3].Spec = json.RawMessage(`{`)
+	got, err = runDetailResponse(capability.Target{Team: "a", RunID: "run"}, RunStatusFacts{Snapshot: view.Snapshot})
+	if err != nil || !reflect.DeepEqual(got.Jobs[2].Needs, []string{"test"}) || got.Jobs[3].ID != "notify" || bytes.Contains(must(json.Marshal(got)), []byte("private-secret")) {
+		t.Fatalf("a declaration the projection does not read failed or leaked into run detail: %+v %v", got.Jobs, err)
 	}
 }
 
@@ -172,4 +174,11 @@ func TestEngineRunDetailReadsPersistedHistoryAndTaggedLogs(t *testing.T) {
 	if _, err := server.RunDetail(t.Context(), owner); err == nil {
 		t.Fatal("read a missing run")
 	}
+}
+
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }

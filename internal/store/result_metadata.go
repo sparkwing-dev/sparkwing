@@ -155,7 +155,8 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeR
 	return nil
 }
 
-type storedAnnotation struct {
+// Annotation is one persisted masked annotation of a job or one of its steps.
+type Annotation struct {
 	Level   string `json:"level"`
 	Message string `json:"message"`
 	File    string `json:"file,omitempty"`
@@ -170,7 +171,7 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 	if !utf8.ValidString(annotation.File) || (annotation.Line != nil && *annotation.Line <= 0) {
 		return authorityError(apierr.BadRequest, "invalid annotation location")
 	}
-	entry := storedAnnotation{Level: annotation.Level, Message: annotation.Message, File: annotation.File, Line: annotation.Line}
+	entry := Annotation{Level: annotation.Level, Message: annotation.Message, File: annotation.File, Line: annotation.Line}
 	encoded, err := json.Marshal(entry)
 	if err != nil {
 		return err
@@ -197,7 +198,7 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 		if err := tx.QueryRowContext(ctx, "SELECT annotations_json FROM "+query, args...).Scan(&existing); err != nil {
 			return err
 		}
-		var entries []storedAnnotation
+		var entries []Annotation
 		if len(existing) > 0 {
 			if err := json.Unmarshal(existing, &entries); err != nil {
 				return err

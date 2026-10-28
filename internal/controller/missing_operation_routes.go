@@ -80,7 +80,10 @@ func (s *Server) handleJobSteps(w http.ResponseWriter, r *http.Request, a capabi
 	steps := make([]controllerwire.StepObservation, 0)
 	for _, step := range all {
 		if step.NodeID == a.Target.NodeID {
-			steps = append(steps, controllerwire.StepObservation(*step))
+			steps = append(steps, controllerwire.StepObservation{
+				RunID: step.RunID, NodeID: step.NodeID, StepID: step.StepID, Attempt: step.Attempt, Status: step.Status, Error: step.Error,
+				StartedAt: step.StartedAt, FinishedAt: step.FinishedAt, Annotations: publicAnnotations(step.Annotations), Summary: step.Summary,
+			})
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})

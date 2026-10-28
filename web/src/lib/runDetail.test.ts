@@ -31,6 +31,10 @@ function fixture<T = import("./api").RunDetailWire>(name: string): T {
   return JSON.parse(readFileSync(join(__dirname, "testdata", name), "utf8"));
 }
 
+function notices(wire: import("./api").RunDetailWire): string[] {
+  return api.runDetailView(wire, []).notices.map((notice) => notice.kind);
+}
+
 describe("runDetailView", () => {
   it("shows a run that failed to plan with its error and the CLI's hint", () => {
     const { run, nodes } = api.runDetailView(
@@ -41,8 +45,8 @@ describe("runDetailView", () => {
     assert.equal(run.status, "failed");
     assert.equal(run.repo, "gitlab.com/acme/app");
     assert.equal(run.git_branch, "main");
-    assert.equal(run.retry_of, "run-earlier");
-    assert.deepEqual(run.args, { target: "prod" });
+    assert.equal(run.retry_of, undefined);
+    assert.deepEqual(run.args, { target: "***" });
     assert.match(run.error ?? "", /undefined: qaDeliberateUndefined/);
     assert.deepEqual(nodes, []);
     assert.match(
@@ -60,35 +64,39 @@ describe("runDetailView", () => {
     assert.equal(run.retry_mode, "failed");
     assert.deepEqual(run.reused_jobs, ["lint"]);
     assert.equal("trigger_source" in run, false);
-    const [lint, build, notify, deploy, test] = nodes;
+    assert.deepEqual(run.retry_of, "run-earlier");
+    const byID = Object.fromEntries(nodes.map((node) => [node.id, node]));
+    const { lint, build, notify, deploy, test } = byID;
     assert.equal(notify.on_failure_of, "build");
-    assert.deepEqual([deploy.groups, deploy.approval, deploy.status], [["release"], true, "pending"]);
-    assert.deepEqual(test.groups, ["checks"]);
+    assert.deepEqual([deploy.groups, deploy.approval, deploy.status, deploy.deps], [["release"], true, "pending", ["test"]]);
     assert.deepEqual(lint.deps, []);
-    assert.equal(build.id, "build");
     assert.deepEqual(build.deps, ["lint"]);
     assert.equal(build.status, "failed");
     assert.match(build.error ?? "", /cannot use \*\*\* as int value/);
-    assert.equal(build.execution_attempts, undefined);
-    assert.equal(build.work, undefined);
     assert.equal(test.status, "success");
-    assert.equal(test.duration_ms, 33_000);
-    assert.deepEqual(test.annotations, ["42 tests"]);
-    assert.deepEqual(test.execution_attempts?.[0], {
-      run_id: "run-jobs",
-      node_id: "test",
-      attempt: 1,
-      executor_kind: "runner",
-      executor_name: "moonborn",
-      location: "local",
-      started_at: "2026-10-28T05:01:19Z",
-      finished_at: "2026-10-28T05:01:52Z",
-      outcome: "success",
-      failure_reason: undefined,
-    });
+    assert.deepEqual(test.groups, ["checks"]);
+    assert.equal(test.duration_ms, 15_000);
+    assert.equal(test.summary, "## Test report\n42 passed on the second attempt");
+    assert.deepEqual(test.annotations, ["warning: coverage.out:1: coverage fell 2%"]);
     assert.deepEqual(
-      test.work?.steps?.map((step) => [step.id, step.status, step.duration_ms, step.annotations, step.summary]),
-      [["unit", "passed", 33_000, ["42 tests"], "## Coverage\n91%"]],
+      test.execution_attempts?.map((a) => [a.attempt, a.executor_kind, a.executor_name, a.location, a.outcome, a.failure_reason]),
+      [[1, "agent", "moonborn", "local", "failed", "step_failed"], [2, "agent", "moonborn", "local", "success", undefined]],
+    );
+    assert.equal(test.failure_reason, undefined);
+    assert.deepEqual(
+      test.work?.steps?.map((step) => [step.id, step.status, step.annotations, step.summary]),
+      [
+        ["setup", "passed", undefined, undefined],
+        ["unit", "passed", ["checkout_test.go:7: 42 tests"], "## Coverage\n91%"],
+      ],
+    );
+    assert.deepEqual(
+      test.step_history?.map((h) => [h.attempt, h.steps.map((step) => [step.id, step.status, step.annotations])]),
+      [[1, [["unit", "failed", ["error: checkout_test.go:41: TestCheckout timed out"]]]]],
+    );
+    assert.deepEqual(
+      [run.status, notices(fixture("run-detail-jobs.json"))],
+      ["running", ["support_ending", "unclaimed_work"]],
     );
   });
 

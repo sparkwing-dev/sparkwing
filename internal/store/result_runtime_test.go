@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,46 @@ func TestResultAnnotationsSummariesAndStaleWrites(t *testing.T) {
 	}
 	if err := tenant.WriteSummary(t.Context(), SummaryWrite{Ref: annotation.Ref, Actor: actor, Markdown: "late"}); err == nil {
 		t.Fatal("stale summary accepted")
+	}
+}
+
+func TestResultAnnotationsReadBackWithTheirShape(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	now := s.now()
+	if err := tenant.RecordStep(t.Context(), StepReport{Attempt: attempt, Actor: actor, StepID: "compile", State: "running", StartedAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+	line := 12
+	ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
+	for _, step := range []string{"compile", ""} {
+		if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: ref, Actor: actor, StepID: step, Level: "warning", Message: "masked " + step, File: "src/main.go", Line: &line}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tenant.WriteSummary(t.Context(), SummaryWrite{Ref: ref, Actor: actor, Markdown: "job result"}); err != nil {
+		t.Fatal(err)
+	}
+	want := func(step string) []Annotation {
+		return []Annotation{{Level: "warning", Message: "masked " + step, File: "src/main.go", Line: &line}}
+	}
+	steps, err := tenant.ListNodeSteps(t.Context(), "run")
+	if err != nil || len(steps) != 1 || !reflect.DeepEqual(steps[0].Annotations, want("compile")) {
+		t.Fatalf("step annotations: %+v, %v", steps, err)
+	}
+	node, err := tenant.GetNode(t.Context(), "run", "job")
+	if err != nil || !reflect.DeepEqual(node.Annotations, want("")) || node.Summary != "job result" {
+		t.Fatalf("job annotations: %+v, %v", node, err)
+	}
+	if _, err := tenant.ListNodes(t.Context(), "run"); err != nil {
+		t.Fatalf("jobs with annotations: %v", err)
+	}
+	view, err := tenant.ReadRunView(t.Context(), "run")
+	if err != nil || !reflect.DeepEqual(view.JobResults, []JobResult{{JobID: "job", Summary: "job result", Annotations: want("")}}) {
+		t.Fatalf("run view job results: %+v, %v", view.JobResults, err)
+	}
+	rewriteSchemaExec(t, s.db, "UPDATE node_steps SET annotations_json = ?", []byte(`["legacy"]`))
+	if _, err := tenant.ListNodeSteps(t.Context(), "run"); err == nil {
+		t.Fatal("undecodable step annotations read as empty")
 	}
 }
 

@@ -326,6 +326,8 @@ type JobDetail struct {
 	Groups      []string `json:"groups,omitempty"`
 	OnFailureOf string   `json:"on_failure_of,omitempty"`
 	Approval    bool     `json:"approval,omitempty"`
+	// Summary is the masked markdown the job's current attempt wrote outside any step; only run detail fills it.
+	Summary string `json:"summary,omitempty"`
 }
 
 type AttemptDetail struct {
