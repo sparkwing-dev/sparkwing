@@ -58,7 +58,7 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request, a 
 				continue
 			}
 			qs.Holders = append(qs.Holders, wingwire.Holder{
-				RunID:      runNode(h.RunID, h.NodeID),
+				RunID: h.RunID, ParticipantID: runNode(h.RunID, h.NodeID), DisplayRunID: runNode(h.RunID, h.NodeID),
 				Semaphores: []string{st.Key},
 				ElapsedMS:  sinceMS(h.ClaimedAt, now),
 				Origin:     wingwire.OriginController,
@@ -66,7 +66,7 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request, a 
 		}
 		for _, wt := range st.Waiters {
 			qs.Waiters = append(qs.Waiters, wingwire.Waiter{
-				RunID:          runNode(wt.RunID, wt.NodeID),
+				RunID: wt.RunID, ParticipantID: runNode(wt.RunID, wt.NodeID), DisplayRunID: runNode(wt.RunID, wt.NodeID),
 				Position:       wt.Position + 1,
 				WaitingOn:      []string{st.Key},
 				BlockingReason: wt.BlockingReason,

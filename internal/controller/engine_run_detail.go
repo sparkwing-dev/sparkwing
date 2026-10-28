@@ -2,8 +2,11 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -19,15 +22,16 @@ import (
 // RunStatusFacts combines one committed run/job snapshot with complete attempt
 // history and validated log subjects from that read. Failures carry the masked
 // run and job errors, including a job's reported before any attempt started and
-// the run's when its pipeline failed to plan. Notices carry
-// engine version policy and unclaimed-work observations. Private fields stay here
-// until the public display projection.
+// the run's when its pipeline failed to plan. JobResults carry each job's masked
+// summary and annotations. Notices carry engine version policy and unclaimed-work
+// observations. Private fields stay here until the public display projection.
 type RunStatusFacts struct {
-	Snapshot store.RunSnapshot
-	Attempts []runstate.NodeAttempt
-	Logs     []blob.LogSubject
-	Failures []store.RunFailure
-	Notices  []engineid.Notice
+	Snapshot   store.RunSnapshot
+	Attempts   []runstate.NodeAttempt
+	Logs       []blob.LogSubject
+	Failures   []store.RunFailure
+	JobResults []store.JobResult
+	Notices    []engineid.Notice
 }
 
 func (s *EngineController) handleRunDetail(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -91,6 +95,10 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 			errorsByJob[failure.JobID] = failure.Error
 		}
 	}
+	results := make(map[string]store.JobResult, len(facts.JobResults))
+	for _, result := range facts.JobResults {
+		results[result.JobID] = result
+	}
 	nodes := make(map[string]runstate.NodeRow, len(facts.Snapshot.Nodes))
 	for _, row := range facts.Snapshot.Nodes {
 		if row.Ref.RunID != runspec.RunID(run.ID) || row.Ref.NodeID == "" {
@@ -102,7 +110,11 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		nodes[string(row.Ref.NodeID)] = row
 		job := snapshotJob(row)
 		job.Error = errorsByJob[job.ID]
+		job.Summary, job.Annotations = results[job.ID].Summary, publicAnnotations(results[job.ID].Annotations)
 		detail.Jobs = append(detail.Jobs, job)
+	}
+	if err := fillJobDeclarations(detail.Jobs, nodes); err != nil {
+		return controllerwire.RunDetail{}, err
 	}
 	attempts, err := statusAttempts(target, nodes, facts.Attempts)
 	if err != nil {
@@ -127,7 +139,47 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		}
 	}
 	detail.Inputs.Lineage = run.Lineage
+	if run.Retry != nil {
+		detail.Retry = &controllerwire.RetryDetail{Mode: run.Retry.Mode, Reused: slices.Sorted(maps.Keys(run.Retry.Results))}
+		if detail.Retry.Reused == nil {
+			detail.Retry.Reused = []string{}
+		}
+	}
 	return detail, nil
+}
+
+// safety: a need on a job this run never planned would draw an edge to nothing, so only planned jobs pass.
+func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runstate.NodeRow) error {
+	for i := range jobs {
+		spec := nodes[jobs[i].ID].Spec
+		if len(spec) == 0 {
+			continue
+		}
+		// safety: only the display facts are decoded, so a declaration this projection does not read (env values,
+		// closures) can neither fail the run page nor reach it; an undecodable one shows the job without them.
+		var declaration jobDisplayDeclaration
+		if json.Unmarshal(spec, &declaration) != nil {
+			continue
+		}
+		for _, need := range append(declaration.Needs, declaration.NeedsIfPresent...) {
+			if _, exists := nodes[need]; exists && !slices.Contains(jobs[i].Needs, need) {
+				jobs[i].Needs = append(jobs[i].Needs, need)
+			}
+		}
+		if _, exists := nodes[declaration.OnFailureOf]; exists {
+			jobs[i].OnFailureOf = declaration.OnFailureOf
+		}
+		jobs[i].Groups, jobs[i].Approval = declaration.Groups, len(declaration.Approval) > 0 && string(declaration.Approval) != "null"
+	}
+	return nil
+}
+
+type jobDisplayDeclaration struct {
+	Needs          []string        `json:"deps"`
+	NeedsIfPresent []string        `json:"deps_if_present"`
+	Groups         []string        `json:"groups"`
+	OnFailureOf    string          `json:"on_failure_of"`
+	Approval       json.RawMessage `json:"approval"`
 }
 
 func statusAttempts(target capability.Target, nodes map[string]runstate.NodeRow, rows []runstate.NodeAttempt) ([]controllerwire.AttemptDetail, error) {
@@ -150,6 +202,7 @@ func statusAttempts(target capability.Target, nodes map[string]runstate.NodeRow,
 		result = append(result, controllerwire.AttemptDetail{
 			JobID: id.NodeID, Attempt: id.Attempt, Generation: id.Generation,
 			Outcome: string(row.Outcome), Reason: row.FailureReason, Executor: row.ExecutorKind,
+			ExecutorName: row.ExecutorName, Location: row.ExecutorLocation,
 			StartedAt: &started, FinishedAt: row.FinishedAt,
 		})
 	}
@@ -169,7 +222,7 @@ func (s *EngineController) readStoredRunStatus(ctx context.Context, team store.T
 }
 
 func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView) (RunStatusFacts, error) {
-	facts := RunStatusFacts{Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures}
+	facts := RunStatusFacts{Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures, JobResults: view.JobResults}
 	if view.Snapshot.Run.Spec != nil {
 		if s.VersionPolicy == nil {
 			return RunStatusFacts{}, versionPolicyUnavailable()

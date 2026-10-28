@@ -1,0 +1,53 @@
+{
+  "steps": [
+    {
+      "annotations": [
+        {
+          "level": "error",
+          "message": "TestCheckout timed out",
+          "file": "checkout_test.go",
+          "line": 41
+        }
+      ],
+      "job_id": "test",
+      "id": "unit",
+      "label": "",
+      "attempt": 1,
+      "status": "failed",
+      "outcome": "failed",
+      "reason": "exit status 1",
+      "started_at": "2026-10-28T05:01:46Z",
+      "finished_at": "2026-10-28T05:01:49Z",
+      "summary": "## Attempt 1\n41 passed, 1 failed"
+    },
+    {
+      "job_id": "test",
+      "id": "setup",
+      "label": "",
+      "attempt": 2,
+      "status": "passed",
+      "outcome": "success",
+      "started_at": "2026-10-28T05:01:55Z",
+      "finished_at": "2026-10-28T05:01:58Z"
+    },
+    {
+      "annotations": [
+        {
+          "level": "notice",
+          "message": "42 tests",
+          "file": "checkout_test.go",
+          "line": 7
+        }
+      ],
+      "job_id": "test",
+      "id": "unit",
+      "label": "",
+      "attempt": 2,
+      "status": "passed",
+      "outcome": "success",
+      "started_at": "2026-10-28T05:02:01Z",
+      "finished_at": "2026-10-28T05:02:04Z",
+      "summary": "## Coverage\n91%"
+    }
+  ]
+}

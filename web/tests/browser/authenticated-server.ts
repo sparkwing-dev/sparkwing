@@ -10,7 +10,8 @@ const prebuiltFixtureEnvironment = "AUTHENTICATED_DASHBOARD_FIXTURE";
 type StartedFixture = {
   origin: string;
   control_origin: string;
-  admin_token: string;
+  team: string;
+  token: string;
 };
 
 export type AuthenticatedDashboard = StartedFixture & {

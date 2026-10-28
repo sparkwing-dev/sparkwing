@@ -38,6 +38,12 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
   });
 
   try {
+    const seeded = await fetch(`${dashboard.control_origin}/__fixture/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ count: 1, id: "auth-run", pipeline: "auth" }),
+    });
+    expect(seeded.status).toBe(200);
     await page.goto(`${dashboard.origin}/runs?run=auth-run&tab=logs`);
     await expect(page).toHaveURL(/\/login\?next=/);
     expect(new URL(page.url()).searchParams.get("next")).toBe(
@@ -64,7 +70,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     const forgedLogin = await page.request.post(`${dashboard.origin}/login`, {
       failOnStatusCode: false,
       form: {
-        token: dashboard.admin_token,
+        token: dashboard.token,
         next: "/runs",
         csrf_token: "forged-token",
       },
@@ -79,7 +85,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     );
     expect(unauthenticatedAPI.status()).toBe(401);
 
-    await login.locator('input[name="token"]').fill(dashboard.admin_token);
+    await login.locator('input[name="token"]').fill(dashboard.token);
     await login.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(
       `${dashboard.origin}/runs?run=auth-run&tab=logs`,
@@ -97,7 +103,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
 
     const indexResponse = await page.request.get(`${dashboard.origin}/`);
     const html = await indexResponse.text();
-    expect(html).not.toContain(dashboard.admin_token);
+    expect(html).not.toContain(dashboard.token);
     expect(html).not.toContain("__SPARKWING_TOKEN__");
     const headers = indexResponse.headers();
     expect(headers["content-security-policy"]).toContain("default-src 'self'");
@@ -170,7 +176,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     );
 
     const crossOriginMutation = await page.request.post(
-      `${dashboard.origin}/api/v1/runs/cancel-me/cancel`,
+      `${dashboard.origin}/api/v1/runs/auth-run/cancel`,
       {
         failOnStatusCode: false,
         data: "{}",
@@ -183,7 +189,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     );
     expect(crossOriginMutation.status()).toBe(403);
     const mismatchedMutation = await page.request.post(
-      `${dashboard.origin}/api/v1/runs/cancel-me/cancel`,
+      `${dashboard.origin}/api/v1/runs/auth-run/cancel`,
       {
         failOnStatusCode: false,
         data: "{}",
@@ -203,7 +209,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
         .find((value) => value.startsWith("sw_csrf="))
         ?.slice("sw_csrf=".length);
       return (
-        await fetch("/api/v1/runs/cancel-me/cancel", {
+        await fetch("/api/v1/runs/auth-run/cancel", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -213,7 +219,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
         })
       ).status;
     });
-    expect(legitimateMutation).toBe(404);
+    expect(legitimateMutation).toBe(409);
 
     const logout = page.locator('form[action="/logout"]');
     await expect(logout).toHaveAttribute("method", /post/i);
@@ -289,7 +295,7 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
     await expect(again.locator('input[name="csrf_token"]')).toHaveValue(
       loginCSRF?.value ?? "missing",
     );
-    await again.locator('input[name="token"]').fill(dashboard.admin_token);
+    await again.locator('input[name="token"]').fill(dashboard.token);
     await again.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(
       `${dashboard.origin}/cluster?view=services&tab=nodes`,

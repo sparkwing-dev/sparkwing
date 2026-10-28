@@ -1,12 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  type PipelineArg,
-  type PipelineMeta,
-  getPipelines,
-  triggerRun,
-} from "@/lib/api";
+import { type PipelineMeta, getPipelines, parseRunArgs, triggerRun } from "@/lib/api";
 import { repositoryExample, triggerGit } from "@/lib/triggerSource";
 import { useTeamState } from "@/lib/useTeam";
 
@@ -23,7 +18,7 @@ export default function TriggerForm({
 }: TriggerFormProps) {
   const [pipelines, setPipelines] = useState<Record<string, PipelineMeta>>({});
   const [selectedPipeline, setSelectedPipeline] = useState(pipeline || "");
-  const [argValues, setArgValues] = useState<Record<string, string>>({});
+  const [argText, setArgText] = useState("");
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [repository, setRepository] = useState("");
@@ -36,23 +31,8 @@ export default function TriggerForm({
     getPipelines().then(setPipelines);
   }, []);
 
-  useEffect(() => {
-    const meta = pipelines[selectedPipeline];
-    if (!meta?.args) {
-      setArgValues({});
-      return;
-    }
-    const defaults: Record<string, string> = {};
-    for (const arg of meta.args) {
-      if (arg.default) defaults[arg.name] = arg.default;
-    }
-    setArgValues(defaults);
-  }, [selectedPipeline, pipelines]);
-
-  const meta = pipelines[selectedPipeline];
-  const args = meta?.args || [];
-  // A team's list arrives most recently run first, which is the order worth
-  // suggesting; the local list arrives sorted by name.
+  const args = parseRunArgs(argText);
+  // The controller lists pipelines most recently run first, the order worth suggesting.
   const pipelineNames = Object.keys(pipelines);
   const source = namesSource ? triggerGit(repository, branch) : null;
   const sourceProblem =
@@ -64,19 +44,17 @@ export default function TriggerForm({
       setError(source.problem);
       return;
     }
+    if (!args.ok) {
+      setError(args.problem);
+      return;
+    }
     setTriggering(true);
     setError(null);
-
-    const argsToSend: Record<string, string> = {};
-    for (const arg of args) {
-      const val = argValues[arg.name] || "";
-      if (val) argsToSend[arg.name] = val;
-    }
 
     try {
       await triggerRun(
         selectedPipeline,
-        argsToSend,
+        args.values,
         source?.ok ? source.value : undefined,
       );
       onTriggered?.();
@@ -87,8 +65,6 @@ export default function TriggerForm({
       setTriggering(false);
     }
   };
-
-  const missingRequired = args.some((a) => a.required && !argValues[a.name]);
 
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 space-y-3">
@@ -179,29 +155,25 @@ export default function TriggerForm({
         </div>
       )}
 
-      {args.length > 0 && (
-        <div className="space-y-2">
-          {args.map((arg) => (
-            <ArgInput
-              key={arg.name}
-              arg={arg}
-              value={argValues[arg.name] || ""}
-              onChange={(val) =>
-                setArgValues((prev) => ({ ...prev, [arg.name]: val }))
-              }
-            />
-          ))}
-        </div>
-      )}
-
-      {                     }
-      {selectedPipeline && args.length === 0 && (
-        <p className="text-xs text-[var(--muted)]">
-          {Object.keys(pipelines).length === 0
-            ? "No pipeline metadata available yet -- run a pipeline first to discover its args."
-            : "This pipeline takes no arguments."}
-        </p>
-      )}
+      <div>
+        <label
+          htmlFor="trigger-args"
+          className="text-xs text-[var(--muted)] block mb-1"
+        >
+          Arguments, one name=value per line
+        </label>
+        <textarea
+          id="trigger-args"
+          rows={3}
+          spellCheck={false}
+          className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm font-mono"
+          value={argText}
+          onChange={(e) => setArgText(e.target.value)}
+        />
+        {!args.ok && argText.trim() !== "" && (
+          <p className="text-xs text-yellow-400">{args.problem}</p>
+        )}
+      </div>
 
       {           }
       {error && <p className="text-xs text-red-400">{error}</p>}
@@ -213,59 +185,14 @@ export default function TriggerForm({
           disabled={
             !selectedPipeline ||
             triggering ||
-            missingRequired ||
+            !args.ok ||
             (source !== null && !source.ok)
           }
           className="bg-[var(--accent)] hover:bg-indigo-500 disabled:opacity-50 px-4 py-1.5 rounded text-sm font-medium transition-colors"
         >
           {triggering ? "Triggering..." : "Run"}
         </button>
-        {missingRequired && (
-          <span className="text-xs text-yellow-400">Fill required args</span>
-        )}
       </div>
-    </div>
-  );
-}
-
-function ArgInput({
-  arg,
-  value,
-  onChange,
-}: {
-  arg: PipelineArg;
-  value: string;
-  onChange: (val: string) => void;
-}) {
-  if (arg.type === "bool") {
-    return (
-      <label className="flex items-center gap-2 text-xs cursor-pointer">
-        <input
-          type="checkbox"
-          checked={value === "true"}
-          onChange={(e) => onChange(e.target.checked ? "true" : "")}
-          className="rounded border-[var(--border)] bg-[var(--background)]"
-        />
-        <span className="font-mono text-[#c9d1d9]">{arg.name}</span>
-        {arg.desc && <span className="text-[var(--muted)]">-- {arg.desc}</span>}
-      </label>
-    );
-  }
-
-  return (
-    <div>
-      <label className="text-xs text-[var(--muted)] block mb-1">
-        <span className="font-mono">{arg.name}</span>
-        {arg.required && <span className="text-red-400 ml-1">*</span>}
-        {arg.desc && <span className="ml-2">{arg.desc}</span>}
-      </label>
-      <input
-        type={arg.type === "int" ? "number" : "text"}
-        placeholder={arg.default || arg.desc || arg.name}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm font-mono placeholder:text-[var(--muted)]"
-      />
     </div>
   );
 }

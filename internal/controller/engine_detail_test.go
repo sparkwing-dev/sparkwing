@@ -58,10 +58,48 @@ func TestEngineRunDetailHidesPrivateInputs(t *testing.T) {
 func TestEngineRunDetailUsesCurrentInvocationLineage(t *testing.T) {
 	request := runspec.SealedRequest{RunID: "original", Request: runspec.Request{Team: "a", Lineage: runspec.Lineage{RetryOf: "earlier"}}}
 	lineage := runspec.Lineage{RetryOf: "original", Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: runspec.Actor{Kind: "account", ID: "retrier"}}}
-	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{Team: "a", Execution: runstate.Execution{ID: "retry", Request: request, Lineage: lineage, Spec: &runspec.Spec{Request: request}}}}}
+	retry := &runstate.RetrySelection{Mode: "failed", Results: map[string]runstate.MaterializedResultSource{"test": {}, "build": {}}}
+	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{Team: "a", Execution: runstate.Execution{ID: "retry", Request: request, Lineage: lineage, Retry: retry, Spec: &runspec.Spec{Request: request}}}}}
 	got, err := runDetailResponse(capability.Target{Team: "a", RunID: "retry"}, RunStatusFacts{Snapshot: view.Snapshot})
 	if err != nil || got.ID != "retry" || !reflect.DeepEqual(got.Inputs.Lineage, lineage) || request.RunID != "original" || request.Request.Lineage.RetryOf != "earlier" {
 		t.Fatalf("retry lineage: %+v", got)
+	}
+	if !reflect.DeepEqual(got.Retry, &controllerwire.RetryDetail{Mode: "failed", Reused: []string{"build", "test"}}) {
+		t.Fatalf("retry reuse: %+v", got.Retry)
+	}
+}
+
+func TestEngineRunDetailCarriesJobDeclarations(t *testing.T) {
+	request := runspec.SealedRequest{RunID: "run", Request: runspec.Request{Team: "a"}}
+	node := func(id, spec string) runstate.NodeRow {
+		return runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Spec: json.RawMessage(spec)}
+	}
+	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{Team: "a", Execution: runstate.Execution{ID: "run", Request: request}}, Nodes: []runstate.NodeRow{
+		node("build", `{"id":"build"}`),
+		node("test", `{"id":"test","deps":["build"],"deps_if_present":["lint","build"]}`),
+		node("deploy", `{"id":"deploy","deps":["test","build"],"groups":["release"],"approval":{},"on_failure_of":"test"}`),
+		node("notify", `{"id":"notify","on_failure_of":"absent"}`),
+	}}}
+	got, err := runDetailResponse(capability.Target{Team: "a", RunID: "run"}, RunStatusFacts{Snapshot: view.Snapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	needs := map[string][]string{}
+	for _, job := range got.Jobs {
+		needs[job.ID] = job.Needs
+	}
+	if want := map[string][]string{"build": nil, "test": {"build"}, "deploy": {"test", "build"}, "notify": nil}; !reflect.DeepEqual(needs, want) {
+		t.Fatalf("job needs: %v, want %v", needs, want)
+	}
+	deploy, notify := got.Jobs[2], got.Jobs[3]
+	if !reflect.DeepEqual(deploy.Groups, []string{"release"}) || !deploy.Approval || deploy.OnFailureOf != "test" || notify.OnFailureOf != "" || notify.Approval {
+		t.Fatalf("job declarations: %+v %+v", deploy, notify)
+	}
+	view.Snapshot.Nodes[2].Spec = json.RawMessage(`{"id":"deploy","deps":["test"],"env":{"TOKEN":"private-secret"}}`)
+	view.Snapshot.Nodes[3].Spec = json.RawMessage(`{`)
+	got, err = runDetailResponse(capability.Target{Team: "a", RunID: "run"}, RunStatusFacts{Snapshot: view.Snapshot})
+	if err != nil || !reflect.DeepEqual(got.Jobs[2].Needs, []string{"test"}) || got.Jobs[3].ID != "notify" || bytes.Contains(must(json.Marshal(got)), []byte("private-secret")) {
+		t.Fatalf("a declaration the projection does not read failed or leaked into run detail: %+v %v", got.Jobs, err)
 	}
 }
 
@@ -101,7 +139,7 @@ func TestEngineRunDetailReadsPersistedHistoryAndTaggedLogs(t *testing.T) {
 	if got.ID != "run" || got.Team != "a" || got.Number != 1 || got.StateSeq != 7 || got.Engine == nil || *got.Engine != identity || got.StartedAt == nil || !got.StartedAt.Equal(now) || got.FinishedAt == nil || got.CancelRequestedAt == nil || len(got.Jobs) != 1 || len(got.Attempts) != 2 || len(got.Logs) != 3 {
 		t.Fatalf("run detail: %+v", got)
 	}
-	if got.Attempts[0].Attempt != 1 || got.Attempts[0].Generation != 1 || got.Attempts[0].Outcome != "failed" || got.Attempts[0].Reason != "agent_lost" || got.Attempts[0].Executor != "runner" || got.Attempts[0].FinishedAt == nil || got.Attempts[1].Attempt != 2 || got.Attempts[1].FinishedAt != nil {
+	if got.Attempts[0].Attempt != 1 || got.Attempts[0].Generation != 1 || got.Attempts[0].Outcome != "failed" || got.Attempts[0].Reason != "agent_lost" || got.Attempts[0].Executor != "runner" || got.Attempts[0].ExecutorName != "runner" || got.Attempts[0].Location != "remote" || got.Attempts[0].FinishedAt == nil || got.Attempts[1].Attempt != 2 || got.Attempts[1].FinishedAt != nil {
 		t.Fatalf("attempt history: %+v", got.Attempts)
 	}
 	wantLogs := []blob.LogSubject{
@@ -136,4 +174,11 @@ func TestEngineRunDetailReadsPersistedHistoryAndTaggedLogs(t *testing.T) {
 	if _, err := server.RunDetail(t.Context(), owner); err == nil {
 		t.Fatal("read a missing run")
 	}
+}
+
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }

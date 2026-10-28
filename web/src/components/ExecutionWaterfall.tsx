@@ -29,7 +29,7 @@ function outcomeColor(outcome: string, running: boolean): string {
       return "bg-red-400/70";
     case "cancelled":
       return "bg-amber-400/70";
-    case "cached":
+    case "memoized":
       return "bg-violet-400/70";
     case "satisfied":
       return "bg-cyan-400/70";

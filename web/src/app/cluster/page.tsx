@@ -2,18 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  type Agent,
-  type ControllerQueueState,
-  getAgents,
-  getControllerQueueState,
-} from "@/lib/api";
+import { type Runner, getRunners } from "@/lib/api";
 import { HeartbeatLabel } from "@/components/HeartbeatDot";
 import {
   fleetHeadroomState,
   fleetLocation,
   formatFleetResources,
-  sortFleetAgents,
+  sortFleetRunners,
 } from "@/lib/fleet";
 
 const POLL_MS = 5000;
@@ -28,12 +23,12 @@ function relativeTime(iso: string): string {
   return `${Math.round(age / 86400)}d ago`;
 }
 
-function typeBadge(kind: string): { label: string; cls: string } {
+function classBadge(kind: string): { label: string; cls: string } {
   switch (kind) {
-    case "agent":
-      return { label: "agent", cls: "bg-indigo-400/15 text-indigo-300" };
-    case "pool":
-      return { label: "pool", cls: "bg-emerald-400/15 text-emerald-300" };
+    case "runner":
+      return { label: "runner", cls: "bg-indigo-400/15 text-indigo-300" };
+    case "cloud":
+      return { label: "cloud", cls: "bg-sky-400/15 text-sky-300" };
     case "local":
       return { label: "local", cls: "bg-slate-400/15 text-slate-300" };
     default:
@@ -42,17 +37,14 @@ function typeBadge(kind: string): { label: string; cls: string } {
 }
 
 export default function ClusterPage() {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [queue, setQueue] = useState<ControllerQueueState | null>(null);
+  const [agents, setAgents] = useState<Runner[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [expandedAgent, setExpandedAgent] = useState<Record<string, boolean>>(
     {},
   );
 
   const refresh = useCallback(async () => {
-    const [ag, qs] = await Promise.all([getAgents(), getControllerQueueState()]);
-    setAgents(ag);
-    setQueue(qs);
+    setAgents(await getRunners());
     setLoaded(true);
   }, []);
 
@@ -71,18 +63,20 @@ export default function ClusterPage() {
   }, [refresh]);
 
   const sortedAgents = useMemo(
-    () => [...agents].sort(sortFleetAgents),
+    () => [...agents].sort(sortFleetRunners),
     [agents],
   );
 
   const fleetTotals = useMemo(() => {
     const byType: Record<string, number> = {};
     let busy = 0;
+    let running = 0;
     for (const a of agents) {
-      byType[a.type] = (byType[a.type] || 0) + 1;
+      byType[a.class] = (byType[a.class] || 0) + 1;
       if (a.status === "busy") busy++;
+      running += a.active_jobs.length;
     }
-    return { total: agents.length, byType, busy };
+    return { total: agents.length, byType, busy, running };
   }, [agents]);
 
   return (
@@ -95,12 +89,11 @@ export default function ClusterPage() {
       </div>
 
       <div className="mb-4 flex flex-wrap gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
-        <span>Queued nodes <strong>{queue ? queue.waiters?.length ?? 0 : "-"}</strong></span>
-        <span>Running nodes <strong>{queue ? queue.holders?.length ?? 0 : "-"}</strong></span>
+        <span>Running jobs <strong>{loaded ? fleetTotals.running : "-"}</strong></span>
         <Link href="/runs" className="text-[var(--accent)] hover:underline">View runs</Link>
       </div>
 
-      <SectionHeader title="Machines" hint="/api/v1/agents" />
+      <SectionHeader title="Machines" hint="/api/v1/runners" />
       <FleetCards totals={fleetTotals} />
       <div className="space-y-2 mb-6">
         {!loaded ? (
@@ -111,7 +104,7 @@ export default function ClusterPage() {
           <FleetEmpty />
         ) : (
           sortedAgents.map((a) => {
-            const key = `${a.type}:${a.name}`;
+            const key = `${a.class}:${a.name}`;
             return (
               <AgentRow
                 key={key}
@@ -147,15 +140,15 @@ function FleetCards({
     total: number;
     byType: Record<string, number>;
     busy: number;
+    running: number;
   };
 }) {
   const cards: Array<{ label: string; value: number | null }> = [
     { label: "total", value: totals.total },
     { label: "busy", value: totals.busy },
   ];
-  const typeOrder = ["agent", "pool", "local"];
-  for (const k of typeOrder) {
-    if (totals.byType[k]) cards.push({ label: k, value: totals.byType[k] });
+  for (const k of Object.keys(totals.byType).sort()) {
+    cards.push({ label: k, value: totals.byType[k] });
   }
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 mb-3">
@@ -202,14 +195,14 @@ function AgentRow({
   expanded,
   onToggle,
 }: {
-  agent: Agent;
+  agent: Runner;
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const badge = typeBadge(agent.type);
-  const activeRuns = agent.active_jobs?.length || 0;
+  const badge = classBadge(agent.class);
+  const activeRuns = agent.active_jobs.length;
   const headroomState = fleetHeadroomState(agent);
-  const labels = Object.entries(agent.labels || {});
+  const labels = agent.labels;
 
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -244,7 +237,7 @@ function AgentRow({
           </span>
           <span>
             {agent.max_concurrent > 0 ? agent.max_concurrent : "-"} slots ·{" "}
-            {activeRuns} runs
+            {activeRuns} jobs
           </span>
         </span>
         <span className="hidden 2xl:inline">
@@ -256,7 +249,7 @@ function AgentRow({
         <div className="border-t border-[var(--border)] px-3 py-3 grid gap-3 lg:grid-cols-3 text-xs">
           <FleetDetailSection title="Executor">
             <div className="grid grid-cols-2 gap-3">
-              <KV label="type" value={agent.type || "unknown"} />
+              <KV label="class" value={agent.class || "unknown"} />
               <KV label="location" value={fleetLocation(agent)} />
               <KV
                 label="slot limit"
@@ -265,18 +258,18 @@ function AgentRow({
             </div>
             <div>
               <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
-                capabilities
+                labels
               </div>
               {labels.length === 0 ? (
                 <span className="text-[var(--muted)]">None advertised</span>
               ) : (
                 <div className="flex flex-wrap gap-1">
-                  {labels.map(([k, v]) => (
+                  {labels.map((label) => (
                     <span
-                      key={k}
+                      key={label}
                       className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--background)] border border-[var(--border)] rounded"
                     >
-                      {v ? `${k}=${v}` : k}
+                      {label}
                     </span>
                   ))}
                 </div>
@@ -329,22 +322,22 @@ function AgentRow({
                 label="slot capacity"
                 value={agent.max_concurrent > 0 ? agent.max_concurrent : "unknown"}
               />
-              <KV label="active runs" value={activeRuns} />
+              <KV label="active jobs" value={activeRuns} />
             </div>
             {activeRuns > 0 ? (
               <div className="space-y-1">
-                {agent.active_jobs!.map((runID) => (
+                {agent.active_jobs.map((job) => (
                   <Link
-                    key={runID}
-                    href={`/runs?run=${encodeURIComponent(runID)}`}
+                    key={`${job.run_id}/${job.job_id ?? ""}`}
+                    href={`/runs?run=${encodeURIComponent(job.run_id)}${job.job_id ? `&node=${encodeURIComponent(job.job_id)}` : ""}`}
                     className="block font-mono text-xs text-[var(--accent)] hover:underline"
                   >
-                    {runID}
+                    {job.job_id ? `${job.run_id} / ${job.job_id}` : job.run_id}
                   </Link>
                 ))}
               </div>
             ) : (
-              <p className="text-[var(--muted)]">No active runs.</p>
+              <p className="text-[var(--muted)]">No active jobs.</p>
             )}
           </FleetDetailSection>
         </div>

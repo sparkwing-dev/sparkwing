@@ -1,0 +1,26 @@
+{
+  "runs": [
+    {
+      "id": "run-jobs",
+      "number": 15,
+      "pipeline": "hello",
+      "status": "failed",
+      "trigger_source": "github",
+      "git_branch": "main",
+      "git_sha": "1b8e292f29420af1ae8e113e53faf3c05fb17249",
+      "args": {
+        "target": "prod"
+      },
+      "error": "build failed",
+      "created_at": "2026-10-28T05:01:19Z",
+      "started_at": "2026-10-28T05:01:19Z",
+      "finished_at": "2026-10-28T05:01:52Z",
+      "repo": "acme/app",
+      "repo_url": "https://github.com/acme/app",
+      "github_owner": "acme",
+      "github_repo": "app",
+      "retry_of": "run-earlier",
+      "trigger_user": "octocat"
+    }
+  ]
+}

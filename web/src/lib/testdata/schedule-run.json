@@ -1,0 +1,54 @@
+{
+  "run_id": "run-scheduled",
+  "schedule": {
+    "id": "sched-nightly",
+    "name": "app/nightly",
+    "schedule_name": "",
+    "repo_path": "/src/app",
+    "pipeline": "nightly",
+    "where": "controller",
+    "cron": "0 3 * * *",
+    "tz": "UTC",
+    "overlap": "skip",
+    "catch_up_ns": 0,
+    "args": {
+      "target": "***"
+    },
+    "lock": {
+      "ref": "",
+      "binary": "",
+      "digest": "",
+      "state": "follows"
+    },
+    "override": {
+      "fields": [],
+      "stale": false,
+      "set_at": "",
+      "cron": "",
+      "tz": "",
+      "overlap": "",
+      "catch_up_ns": 0,
+      "args": {}
+    },
+    "effective": {
+      "cron": "0 3 * * *",
+      "tz": "UTC",
+      "overlap": "skip",
+      "catch_up_ns": 0,
+      "args": {
+        "target": "***"
+      }
+    },
+    "paused": false,
+    "declared": true,
+    "state": "armed",
+    "state_detail": "",
+    "armed_at": "2026-10-27T03:00:00Z",
+    "updated_at": "2026-10-27T03:00:00Z",
+    "last_fired_at": "2026-10-28T03:00:00Z",
+    "last_run_id": "run-jobs",
+    "last_outcome": "fired",
+    "next_due_at": "2026-10-29T03:00:00Z"
+  },
+  "replayed": false
+}

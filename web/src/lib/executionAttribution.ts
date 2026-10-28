@@ -6,42 +6,13 @@ export interface ExecutionDisplay {
   location: ExecutionLocation;
   locationLabel: string;
   executorLabel: string;
-  platformLabel: string | null;
   className: string;
   icon: "machine" | "cloud" | "github" | "cluster" | null;
   tooltip: string | null;
 }
 
 export function executionAttempts(node: Node): ExecutionAttempt[] {
-  let attempts = (node.execution_attempts ?? []).filter(
-    (attempt): attempt is ExecutionAttempt =>
-      typeof attempt === "object" && attempt !== null && !Array.isArray(attempt),
-  );
-  if (attempts.length === 0) {
-    if (
-      !node.executor_kind &&
-      !node.executor_name &&
-      !node.executor_location &&
-      !node.execution_started_at
-    ) {
-      return [];
-    }
-    attempts = [
-      {
-        run_id: node.run_id,
-        node_id: node.id,
-        executor_kind: node.executor_kind,
-        executor_name: node.executor_name,
-        execution_site: node.execution_site,
-        execution_site_name: node.execution_site_name,
-        location: node.executor_location ?? "unknown",
-        started_at: node.execution_started_at,
-        finished_at: node.finished_at,
-        outcome: node.outcome,
-      },
-    ];
-  }
-  return attempts
+  return (node.execution_attempts ?? [])
     .map((attempt, index) => ({
       attempt,
       index,
@@ -71,41 +42,18 @@ export function executionAttemptOrdinal(
     : null;
 }
 
-// A node nobody expressed a preference for has no placement story, and an
-// unclaimed one has no runner to name yet.
-export function placementLabel(node: Node): string | null {
-  const holder = node.claimed_by?.trim();
-  if (!holder) return null;
-  switch (node.placement_reason) {
-    case "preference":
-      return `${holder} (preferred)`;
-    case "fallback":
-      return `${holder} (fallback after the local-first hold)`;
-    default:
-      return null;
-  }
-}
-
 export function executionDisplay(attempt?: ExecutionAttempt): ExecutionDisplay {
-  const location = normalizeLocation(attempt?.location, attempt?.execution_site);
+  const location = normalizeLocation(attempt?.location);
   const locationLabel =
     location === "local"
       ? "Local"
       : location === "cloud"
         ? "Cloud"
         : "Location unknown";
-  const executorKind = attempt?.executor_kind?.trim();
-  const executorName = attempt?.executor_name?.trim();
-  const kind = attempt?.execution_site?.trim() || executorKind;
-  const name = attempt?.execution_site_name?.trim() || executorName;
-  const displayKind = executorKind || kind;
-  const displayName = executorName || name;
+  const kind = attempt?.executor_kind?.trim();
+  const name = attempt?.executor_name?.trim();
   const executorLabel =
-    displayKind && displayName
-      ? `${displayKind} ${displayName}`
-      : displayName || displayKind || "Executor unknown";
-  const platform = attempt?.platform?.trim();
-  const platformLabel = platform || null;
+    kind && name ? `${kind} ${name}` : name || kind || "Executor unknown";
   const className =
     location === "local"
       ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
@@ -131,7 +79,6 @@ export function executionDisplay(attempt?: ExecutionAttempt): ExecutionDisplay {
     location,
     locationLabel,
     executorLabel,
-    platformLabel,
     className,
     icon,
     tooltip,
@@ -140,18 +87,10 @@ export function executionDisplay(attempt?: ExecutionAttempt): ExecutionDisplay {
 
 // A missing execution site tells the reader nothing in a compact surface.
 export function compactExecutionDisplay(node: Node): ExecutionDisplay | null {
-  const latest = executionAttempts(node).at(-1);
-  const display = executionDisplay(latest ? {
-    ...latest,
-    execution_site: latest.execution_site || node.execution_site,
-    execution_site_name: latest.execution_site_name || node.execution_site_name,
-  } : undefined);
+  const display = executionDisplay(executionAttempts(node).at(-1));
   return display.icon ? display : null;
 }
 
-function normalizeLocation(location?: string, site?: string): ExecutionLocation {
-  if (location === "local" || location === "cloud") return location;
-  if (site === "machine") return "local";
-  if (site === "cluster" || site === "kubernetes" || site === "github-actions" || site === "cloud") return "cloud";
-  return "unknown";
+function normalizeLocation(location?: string): ExecutionLocation {
+  return location === "local" || location === "cloud" ? location : "unknown";
 }

@@ -95,12 +95,11 @@ function LinkedSignIns({ me }: { me: Me }) {
     try {
       const res = await unlinkSignIn(provider);
       if (res.kind === "reauth") {
-        setNotice({ tone: "error", message: reauthMessage, explain: false });
+        setNotice({ tone: "error", message: reauthMessage });
       } else if (res.kind === "last") {
         setNotice({
           tone: "error",
           message: `${label} is your only way to sign in. Link another before unlinking it.`,
-          explain: false,
         });
       } else {
         setNotice(null);

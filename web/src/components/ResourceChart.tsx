@@ -15,7 +15,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ReferenceLine,
 } from "recharts";
 
 function formatBytes(bytes: number): string {
@@ -64,7 +63,7 @@ export default function ResourceChart({
   isRunning?: boolean;
 }) {
   const identity = `${runID}\n${node.id}`;
-  const cacheHit = node.outcome === "cached";
+  const cacheHit = node.outcome === "memoized";
   const [snapshot, setSnapshot] = useState<{
     identity: string;
     metrics: NodeMetrics;
@@ -110,10 +109,6 @@ export default function ResourceChart({
     mem: point.memory_bytes,
   }));
   const hasSummary =
-    summary.requestedCPUMillicores > 0 ||
-    summary.requestedMemoryBytes > 0 ||
-    summary.exactCPUTimeNanos > 0 ||
-    summary.exactMaxRSSBytes > 0 ||
     summary.commandCPUTimeNanos > 0 ||
     summary.samplerCount > 0 ||
     summary.commandCount > 0;
@@ -134,14 +129,6 @@ export default function ResourceChart({
         <span className="font-bold uppercase tracking-wider text-[var(--foreground)]">
           Resource evidence
         </span>
-        {summary.requestedCPUMillicores > 0 && (
-          <span>
-            Reserved CPU:{" "}
-            <span className="font-mono text-[var(--chart-cpu-reserved)]">
-              {formatCPU(summary.requestedCPUMillicores)}
-            </span>
-          </span>
-        )}
         {summary.sampledPeakCPUMillicores > 0 && (
           <span>
             Interval peak CPU:{" "}
@@ -158,22 +145,6 @@ export default function ResourceChart({
             </span>
           </span>
         )}
-        {summary.exactMeanCPUMillicores > 0 && (
-          <span>
-            Process mean CPU:{" "}
-            <span className="font-mono text-[var(--chart-cpu)]">
-              {formatCPU(summary.exactMeanCPUMillicores)}
-            </span>
-          </span>
-        )}
-        {summary.exactCPUTimeNanos > 0 && (
-          <span>
-            Process CPU time:{" "}
-            <span className="font-mono text-[var(--chart-cpu)]">
-              {formatDurationNanos(summary.exactCPUTimeNanos)}
-            </span>
-          </span>
-        )}
         {summary.commandCPUTimeNanos > 0 && (
           <span>
             Command CPU time:{" "}
@@ -182,27 +153,11 @@ export default function ResourceChart({
             </span>
           </span>
         )}
-        {summary.requestedMemoryBytes > 0 && (
-          <span>
-            Reserved memory:{" "}
-            <span className="font-mono text-[var(--chart-memory-reserved)]">
-              {formatBytes(summary.requestedMemoryBytes)}
-            </span>
-          </span>
-        )}
         {summary.sampledPeakMemoryBytes > 0 && (
           <span>
             Interval peak memory:{" "}
             <span className="font-mono text-[var(--chart-memory)]">
               {formatBytes(summary.sampledPeakMemoryBytes)}
-            </span>
-          </span>
-        )}
-        {summary.exactMaxRSSBytes > 0 && (
-          <span>
-            Process max RSS:{" "}
-            <span className="font-mono text-[var(--chart-memory)]">
-              {formatBytes(summary.exactMaxRSSBytes)}
             </span>
           </span>
         )}
@@ -235,8 +190,6 @@ export default function ResourceChart({
             dataKey="cpu"
             color="var(--chart-cpu)"
             formatter={formatCPU}
-            reserved={summary.requestedCPUMillicores}
-            reservedColor="var(--chart-cpu-reserved)"
           />
           <ResourceArea
             title="Memory"
@@ -244,15 +197,12 @@ export default function ResourceChart({
             dataKey="mem"
             color="var(--chart-memory)"
             formatter={formatBytes}
-            reserved={summary.requestedMemoryBytes}
-            reservedColor="var(--chart-memory-reserved)"
           />
         </div>
       )}
       {summary.samplerCount === 1 && (
         <div className="text-[10px] text-[var(--muted)]">
-          One interval reading was retained. The exact process totals above
-          remain usable when the node finishes inside one sampling interval.
+          One interval reading was retained.
         </div>
       )}
     </div>
@@ -265,16 +215,12 @@ function ResourceArea({
   dataKey,
   color,
   formatter,
-  reserved,
-  reservedColor,
 }: {
   title: string;
   data: { elapsed: number; cpu: number; mem: number }[];
   dataKey: "cpu" | "mem";
   color: string;
   formatter: (value: number) => string;
-  reserved: number;
-  reservedColor: string;
 }) {
   return (
     <div>
@@ -303,14 +249,6 @@ function ResourceArea({
               labelFormatter={(value) => fmtElapsed(value as number)}
               formatter={(value) => formatter(Number(value))}
             />
-            {reserved > 0 && (
-              <ReferenceLine
-                y={reserved}
-                stroke={reservedColor}
-                strokeDasharray="4 3"
-                label={{ value: "reserved", fill: reservedColor, fontSize: 9 }}
-              />
-            )}
             <Area
               type="monotone"
               dataKey={dataKey}

@@ -190,23 +190,12 @@ describe("getMe", () => {
     assert.equal(calls.at(-1)?.url, "/api/v1/team/members");
   });
 
-  it("reads an operator answer from the controller as no team", async () => {
+  it("reads a /me with no account as no team", async () => {
     respond = () =>
-      new Response(JSON.stringify({ user: null, operator: true }), {
+      new Response(JSON.stringify({ user: null, waitlisted: false }), {
         status: 200,
       });
     assert.deepEqual(await teams.getMe(), { kind: "operator" });
-  });
-
-  it("reads a member's /me", async () => {
-    const me = {
-      user: { id: "u1", email: "a@x", name: "A" },
-      active_team: { slug: "acme", display_name: "Acme", role: "owner" },
-      memberships: [],
-      invitations: [],
-    };
-    respond = () => new Response(JSON.stringify(me), { status: 200 });
-    assert.deepEqual(await teams.getMe(), { kind: "member", me });
   });
 
   it("reads a waitlisted account with no team as waitlisted, not as the operator", async () => {

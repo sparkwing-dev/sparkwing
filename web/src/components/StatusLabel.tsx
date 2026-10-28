@@ -22,7 +22,7 @@ export default function StatusLabel({ status }: { status: string }) {
       label: "success",
     },
     failed: { bg: "bg-red-500/15", text: "text-red-400", label: "failed" },
-    cached: { bg: "bg-cyan-500/15", text: "text-cyan-400", label: "cached" },
+    memoized: { bg: "bg-cyan-500/15", text: "text-cyan-400", label: "memoized" },
     paused: {
       bg: "bg-yellow-500/15",
       text: "text-yellow-400",

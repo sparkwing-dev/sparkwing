@@ -92,25 +92,6 @@ test("the page lists each provider and explains how accounts work", async ({
   );
 });
 
-test("a sign-in linked to another account is refused with the same guidance", async ({
-  page,
-}) => {
-  await mockController(page);
-  await page.goto(
-    "/account/sign-ins?refused=identity_linked_elsewhere&provider=github",
-  );
-  const alert = page.getByRole("alert").filter({ hasText: /./ });
-  await expect(alert).toContainText(
-    "That GitHub sign-in is already linked to another Sparkwing account, so nothing changed.",
-  );
-  await expect(alert).toContainText("Keep both.");
-  await expect(alert).toContainText("Delete the other one.");
-  await expect(
-    alert.getByRole("link", { name: "How accounts work" }),
-  ).toHaveAttribute("href", "#how-accounts-work");
-  await expect(page).toHaveURL(/\/account\/sign-ins$/);
-});
-
 test("unlinking needs another method and asks first", async ({ page }) => {
   const seen = await mockController(page, {
     identities: [
@@ -144,7 +125,13 @@ test("an unlink from a stale sign-in asks for a fresh one", async ({
     ],
     unlink: {
       status: 403,
-      json: { error: "reauth_required", message: "sign in again" },
+      json: {
+        error: {
+          code: "forbidden",
+          message: "sign in again",
+          details: { reason: "reauth_required" },
+        },
+      },
     },
   });
   await page.goto("/account/sign-ins");

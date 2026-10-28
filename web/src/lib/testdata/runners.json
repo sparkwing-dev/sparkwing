@@ -1,0 +1,35 @@
+{
+  "runners": [
+    {
+      "name": "moonborn",
+      "class": "runner",
+      "location": "local",
+      "labels": [
+        "os=linux",
+        "arch=amd64"
+      ],
+      "reserved_pools": [],
+      "repos": [],
+      "last_seen": "2026-10-28T05:01:19Z",
+      "status": "busy",
+      "active_jobs": [
+        {
+          "run_id": "run-jobs",
+          "job_id": "test"
+        }
+      ],
+      "max_concurrent": 2,
+      "metered": false,
+      "capacity": {
+        "cores": 8,
+        "memory_bytes": 17179869184
+      },
+      "headroom": {
+        "cores": 6,
+        "memory_bytes": 12884901888,
+        "queue_depth": 0,
+        "observed_at": "2026-10-28T05:01:19Z"
+      }
+    }
+  ]
+}

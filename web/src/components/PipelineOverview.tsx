@@ -203,8 +203,8 @@ export default function PipelineOverview({
   }, [refresh]);
 
   const filteredRuns = useMemo(
-    () => runs.filter((r) => runMatchesFilter(r, filterState, registry)),
-    [runs, filterState, registry],
+    () => runs.filter((r) => runMatchesFilter(r, filterState)),
+    [runs, filterState],
   );
 
   const rows = useMemo(
@@ -249,8 +249,8 @@ export default function PipelineOverview({
   }, [selectedRun, expanded, rows]);
 
   const options = useMemo(
-    () => computeOptions(runs, registry),
-    [runs, registry],
+    () => computeOptions(runs),
+    [runs],
   );
   const groups = buildGroupsFromState(filterState, options);
   const dateGroup = {
@@ -447,7 +447,6 @@ function PipelineCard({
       ? null
       : Math.round((stats.passed / Math.max(1, stats.total)) * 100);
   const recent = row.runs.slice(0, SPARK_SIZE);
-  const tags = row.meta?.tags || [];
 
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -481,26 +480,6 @@ function PipelineCard({
             <span className="text-violet-300">{row.pipeline}</span>
           </FilterableValue>
         </span>
-        {!row.meta && (
-          <Tooltip content="Run history exists but pipeline is not in the local pipelines.yaml registry">
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300">
-              runs-only
-            </span>
-          </Tooltip>
-        )}
-        {tags.map((t) => (
-          <FilterableValue
-            key={t}
-            facet="tag"
-            value={t}
-            ctx={ctx}
-            tooltip={`Tag: ${t}`}
-          >
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--background)] text-[var(--muted)]">
-              {t}
-            </span>
-          </FilterableValue>
-        ))}
         <Sparkline runs={recent} />
         <Tooltip
           content={

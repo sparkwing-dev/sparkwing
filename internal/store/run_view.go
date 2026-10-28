@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -20,7 +21,16 @@ type RunView struct {
 	Attempts []runstate.NodeAttempt
 	Logs     []blob.LogSubject
 	Failures []RunFailure
-	Waiting  *UnclaimedUnit
+	// JobResults holds each job's masked summary and annotations from its current attempt.
+	JobResults []JobResult
+	Waiting    *UnclaimedUnit
+}
+
+// JobResult is a job's persisted masked summary and annotations written outside any step.
+type JobResult struct {
+	JobID       string
+	Summary     string
+	Annotations []Annotation
 }
 
 // RunFailure is a persisted masked error of the run (JobID empty) or one of its jobs.
@@ -55,6 +65,9 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 	if view.Failures, err = readRunFailuresTx(ctx, tx, team, runID); err != nil {
 		return RunView{}, err
 	}
+	if view.JobResults, err = readJobResultsTx(ctx, tx, team, runID); err != nil {
+		return RunView{}, err
+	}
 	if view.Attempts, err = readRunAttemptsTx(ctx, tx, team, runID); err != nil {
 		return RunView{}, err
 	}
@@ -82,6 +95,29 @@ func readRunFailuresTx(ctx context.Context, tx *storeTx, team Team, runID string
 		failures = append(failures, failure)
 	}
 	return failures, errors.Join(rows.Err(), rows.Close())
+}
+
+func readJobResultsTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]JobResult, error) {
+	rows, err := tx.queryContext(ctx, `SELECT node_id,summary,annotations_json FROM nodes WHERE team=? AND run_id=? AND (summary<>'' OR annotations_json IS NOT NULL) ORDER BY node_id`, team, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	results := []JobResult{}
+	for rows.Next() {
+		var result JobResult
+		var annotations []byte
+		if err := rows.Scan(&result.JobID, &result.Summary, &annotations); err != nil {
+			return nil, err
+		}
+		if len(annotations) > 0 {
+			if err := json.Unmarshal(annotations, &result.Annotations); err != nil {
+				return nil, fmt.Errorf("decode job %s annotations: %w", result.JobID, err)
+			}
+		}
+		results = append(results, result)
+	}
+	return results, errors.Join(rows.Err(), rows.Close())
 }
 
 // ListRunViews reads a bounded tenant page in descending number order within exclusive lower and inclusive upper bounds.

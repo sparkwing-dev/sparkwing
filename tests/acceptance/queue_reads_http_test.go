@@ -87,10 +87,10 @@ func TestQueueReadProjectsTenantGroups(t *testing.T) {
 	if len(got.Resources) != 2 || got.Resources[0].Key != "deploy-prod" || got.Resources[0].Capacity != 3 || got.Resources[0].Held != 2 || got.Resources[1].Capacity != 1 {
 		t.Fatalf("resources=%+v", got.Resources)
 	}
-	if len(got.Holders) != 2 || got.Holders[0].RunID != "run-a/job-a" || got.Holders[1].RunID != "run-c" || got.Holders[0].Origin != wingwire.OriginController || got.Holders[0].ElapsedMS != 0 {
+	if len(got.Holders) != 2 || got.Holders[0].RunID != "run-a" || got.Holders[0].ParticipantID != "run-a/job-a" || got.Holders[0].DisplayRunID != "run-a/job-a" || got.Holders[1].RunID != "run-c" || got.Holders[1].ParticipantID != "run-c" || got.Holders[0].Origin != wingwire.OriginController || got.Holders[0].ElapsedMS != 0 {
 		t.Fatalf("holders=%+v", got.Holders)
 	}
-	if len(got.Waiters) != 1 || got.Waiters[0].RunID != "run-b/job-b" || got.Waiters[0].Position != 1 || got.Waiters[0].Origin != wingwire.OriginController || len(got.Waiters[0].WaitingOn) != 1 || got.Waiters[0].WaitingOn[0] != "deploy-prod" {
+	if len(got.Waiters) != 1 || got.Waiters[0].RunID != "run-b" || got.Waiters[0].ParticipantID != "run-b/job-b" || got.Waiters[0].Position != 1 || got.Waiters[0].Origin != wingwire.OriginController || len(got.Waiters[0].WaitingOn) != 1 || got.Waiters[0].WaitingOn[0] != "deploy-prod" {
 		t.Fatalf("waiters=%+v", got.Waiters)
 	}
 	if f.resolves != 1 || f.reads != 1 || b.bindingTarget.Team != "team" {

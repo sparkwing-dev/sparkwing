@@ -34,20 +34,17 @@ import {
 import {
   type Node as RunNode,
   type NodeWorkStep,
+  type Notice,
   type RunLogMatch,
   type RunsGrepMatch,
   type RunsGrepResponse,
-  type SpawnedPipelineRef,
-  type PipelineMeta,
   type Run,
   type RunDetail,
   cancelRun,
   deleteRun,
   getNodeLogCompleteness,
   getNodeLogs,
-  listRunEvents,
   getNodeStreamUrl,
-  getPipelines,
   getRun,
   listRuns,
   planFailureHint,
@@ -270,9 +267,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [runs, setRuns] = useState<Run[]>([]);
-  const [pipelineMeta, setPipelineMeta] = useState<
-    Record<string, PipelineMeta>
-  >({});
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const initialRun = searchParams.get("run");
   const [selectedRun, setSelectedRun] = useState<string | null>(initialRun);
@@ -453,10 +447,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     let fetched: Run[] = [];
     let page: ReturnType<typeof pageFromResponse> | null = null;
     try {
-      const meta = await getPipelines();
-      if (runsRequest.current.viewKey === key) setPipelineMeta(meta);
-      const query = runListQuery(filters, meta, ref);
-      if (query) fetched = await listRuns(query);
+      fetched = await listRuns(runListQuery(filters, ref));
       page = pageFromResponse(fetched, ref);
     } catch (e) {
       if (runsRequest.current.viewKey === key && seq > runsSeq.current.applied) {
@@ -534,7 +525,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           if (!d) return null;
           const total = d.nodes.length;
           const done = d.nodes.filter((n) =>
-            ["success", "complete", "failed", "cancelled"].includes(n.status),
+            ["success", "memoized", "failed", "cancelled", "skipped", "superseded"].includes(n.status),
           ).length;
           return [r.id, { done, total }] as const;
         }),
@@ -611,7 +602,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     },
   });
 
-  const options = computeOptions(runs, pipelineMeta);
+  const options = computeOptions(runs);
   const groups = buildGroupsFromState(filterState, options);
   const dateGroup = {
     startedAfter: filterState.startedAfter,
@@ -655,7 +646,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     el.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [selectedRun, topLevel, runs.length]);
 
-  const run = activeDetail?.run || null;
+  const detailRunRow = activeDetail?.run ?? null;
+  const listedRun = detailRunRow ? runs.find((r) => r.id === detailRunRow.id) : undefined;
+  const run = useMemo(
+    () => (detailRunRow ? { ...listedRun, ...detailRunRow } : null),
+    [detailRunRow, listedRun],
+  );
   const paneOpen = !!selectedRun;
   const [columnsPreference, setColumnsPreference] = useState<ColumnsMode | null>(null);
   const [narrowViewport, setNarrowViewport] = useState(false);
@@ -1020,9 +1016,9 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                       const fresh = await retryRun(id, {
                         full: false,
                       }).catch(() => null);
-                      if (fresh?.id) {
+                      if (fresh?.run_id) {
                         toast(
-                          `Rerun (from failed) queued as ${fresh.id}`,
+                          `Rerun (from failed) queued as ${fresh.run_id}`,
                           "success",
                         );
                         window.dispatchEvent(
@@ -1046,9 +1042,9 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                       const fresh = await retryRun(id, { full: true }).catch(
                         () => null,
                       );
-                      if (fresh?.id) {
+                      if (fresh?.run_id) {
                         toast(
-                          `Rerun (all nodes) queued as ${fresh.id}`,
+                          `Rerun (all nodes) queued as ${fresh.run_id}`,
                           "success",
                         );
                         window.dispatchEvent(
@@ -1421,6 +1417,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               onConsumePendingLogFocus={consumePendingLogFocus}
               reusedNodeIDs={reusedNodeIDs ?? undefined}
               reusedPriorRunID={reusedPriorRunID}
+              notices={activeDetail?.notices ?? EMPTY_NOTICES}
+              stepsUnavailable={activeDetail?.stepsUnavailable ?? false}
             />
           </div>
         )}
@@ -2752,6 +2750,8 @@ function RunDetailPane({
   onConsumePendingLogFocus,
   reusedNodeIDs,
   reusedPriorRunID,
+  notices,
+  stepsUnavailable,
 }: {
   run: Run;
   nodes: RunNode[];
@@ -2776,6 +2776,8 @@ function RunDetailPane({
   onConsumePendingLogFocus?: () => void;
   reusedNodeIDs?: Set<string>;
   reusedPriorRunID?: string | null;
+  notices: Notice[];
+  stepsUnavailable: boolean;
 }) {
   const selected = node;
   const runIsActive = run.status === "running";
@@ -3211,6 +3213,7 @@ function RunDetailPane({
           </span>
         </div>
 
+        <RunNotices notices={notices} stepsUnavailable={stepsUnavailable} />
         <div className="px-4 pb-2">
           <ReuseSummary
             run={run}
@@ -3622,11 +3625,6 @@ function NodeLogSummary({ node }: { node: RunNode }) {
         {node.failure_reason && (
           <span className="font-mono text-[10px] text-red-300/80">
             {node.failure_reason}
-          </span>
-        )}
-        {typeof node.exit_code === "number" && node.exit_code !== 0 && (
-          <span className="font-mono text-[10px] text-[var(--muted)]">
-            exit {node.exit_code}
           </span>
         )}
         {node.duration_ms > 0 && (
@@ -4510,7 +4508,6 @@ function DAG({
   findMatchedSteps?: Set<string>;
   reusedNodeIDs?: Set<string>;
 }) {
-  const dagRouter = useRouter();
   const dagRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!selected) return;
@@ -5092,33 +5089,18 @@ function DAG({
                 })()}
                 {(() => {
                   type TopPill =
-                    | { kind: "dynamic"; w: number }
                     | { kind: "approval"; w: number }
                     | { kind: "reused"; w: number }
-                    | { kind: "cached"; w: number }
-                    | { kind: "inline"; w: number }
-                    | { kind: "spawned"; w: number };
+                    | { kind: "cached"; w: number };
                   const pills: TopPill[] = [];
-                  if (n.dynamic) {
-                    pills.push({ kind: "dynamic", w: DYNAMIC_PILL_W });
-                  }
                   if (n.approval) {
                     pills.push({ kind: "approval", w: approvalPillWidth(n) });
                   }
                   if (reusedNodeIDs?.has(n.id)) {
                     pills.push({ kind: "reused", w: REUSED_PILL_W });
                   }
-                  if (n.outcome === "cached") {
+                  if (n.outcome === "memoized") {
                     pills.push({ kind: "cached", w: CACHED_PILL_W });
-                  }
-                  if (n.modifiers?.inline) {
-                    pills.push({ kind: "inline", w: INLINE_PILL_W });
-                  }
-                  if ((n.spawned_pipelines?.length ?? 0) > 0) {
-                    pills.push({
-                      kind: "spawned",
-                      w: crossPipelinePillWidth(n.spawned_pipelines!),
-                    });
                   }
                   if (pills.length === 0) return null;
                   const gap = 4;
@@ -5131,11 +5113,6 @@ function DAG({
                     const x = cursor;
                     cursor += pl.w + gap;
                     switch (pl.kind) {
-                      case "dynamic":
-                        out.push(
-                          <DynamicPill key="dynamic" nodeW={p.w} x={x} />,
-                        );
-                        break;
                       case "approval":
                         out.push(
                           <ApprovalPill
@@ -5151,24 +5128,6 @@ function DAG({
                         break;
                       case "cached":
                         out.push(<CachedPill key="cached" nodeW={p.w} x={x} />);
-                        break;
-                      case "inline":
-                        out.push(<InlinePill key="inline" nodeW={p.w} x={x} />);
-                        break;
-                      case "spawned":
-                        out.push(
-                          <CrossPipelinePill
-                            key="spawned"
-                            nodeW={p.w}
-                            x={x}
-                            pipelines={n.spawned_pipelines!}
-                            onOpen={(runID) =>
-                              dagRouter.push(
-                                `?run=${encodeURIComponent(runID)}`,
-                              )
-                            }
-                          />,
-                        );
                         break;
                     }
                   }
@@ -5197,10 +5156,7 @@ function DAG({
                 })()}
                 {(() => {
                   const stepCount = n.work?.steps?.length ?? 0;
-                  const hasError =
-                    !!n.error ||
-                    !!n.failure_reason ||
-                    (typeof n.exit_code === "number" && n.exit_code !== 0);
+                  const hasError = !!n.error || !!n.failure_reason;
                   if (stepCount === 0 && !hasError) return null;
                   let cursor = p.w - 6;
                   const elems: React.ReactElement[] = [];
@@ -5244,10 +5200,7 @@ function DAG({
                   if (hasError) {
                     const w = 18;
                     cursor -= w;
-                    const text =
-                      stripAnsi(n.error ?? "") ||
-                      n.failure_reason ||
-                      `exit ${n.exit_code}`;
+                    const text = stripAnsi(n.error ?? "") || n.failure_reason || "";
                     elems.push(
                       <NodeBadge
                         key="error"
@@ -6011,11 +5964,6 @@ function DagNodeTooltip({
     pointerEvents: "none",
   };
   const badges: { label: string; cls: string }[] = [];
-  if (node.dynamic)
-    badges.push({
-      label: "dynamic",
-      cls: "bg-fuchsia-500/20 text-fuchsia-300",
-    });
   if (node.approval)
     badges.push({
       label: "approval gate",
@@ -6070,18 +6018,6 @@ function DagNodeTooltip({
               <span className="text-[var(--muted)]">Fail reason:</span>
               <span className="font-mono text-red-300">
                 {node.failure_reason}
-              </span>
-            </>
-          )}
-          {(node.spawned_pipelines?.length ?? 0) > 0 && (
-            <>
-              <span className="text-[var(--muted)]">Spawns:</span>
-              <span className="font-mono text-sky-300 whitespace-pre-wrap">
-                {node
-                  .spawned_pipelines!.map(
-                    (p) => `↗ ${p.pipeline} (${p.child_run_id.slice(-8)})`,
-                  )
-                  .join("\n")}
               </span>
             </>
           )}
@@ -6165,41 +6101,6 @@ function NodeBadge({
   );
 }
 
-const DYNAMIC_PILL_W = 56;
-function DynamicPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
-  const pillW = DYNAMIC_PILL_W;
-  const pillH = 15;
-  const x = xOverride ?? (nodeW - pillW) / 2;
-  const y = -6;
-  return (
-    <g style={{ pointerEvents: "none" }}>
-      <rect
-        x={x}
-        y={y}
-        width={pillW}
-        height={pillH}
-        rx={pillH / 2}
-        ry={pillH / 2}
-        fill="url(#dynamic-pill-grad)"
-      />
-      <text
-        x={x + pillW / 2}
-        y={y + pillH / 2 + 3.5}
-        textAnchor="middle"
-        fill="white"
-        fontSize={10}
-        fontWeight={700}
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        style={{
-          letterSpacing: "0.5px",
-          filter: "drop-shadow(0 0 1px rgba(0,0,0,0.6))",
-        }}
-      >
-        DYNAMIC
-      </text>
-    </g>
-  );
-}
 
 function approvalPillWidth(n: RunNode): number {
   const { label } = approvalPillVisuals(n);
@@ -6258,7 +6159,7 @@ function approvalPillVisuals(n: RunNode): {
   if (n.outcome) {
     switch (n.outcome) {
       case "success":
-      case "cached":
+      case "memoized":
         return {
           label: "APPROVED",
           fill: "rgba(74,222,128,0.95)",
@@ -6277,38 +6178,6 @@ function approvalPillVisuals(n: RunNode): {
   return { label: "APPROVAL", fill: "rgba(148,163,184,0.75)", pulse: false };
 }
 
-const INLINE_PILL_W = 48;
-function InlinePill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
-  const pillW = INLINE_PILL_W;
-  const pillH = 15;
-  const x = xOverride ?? (nodeW - pillW) / 2;
-  const y = -6;
-  return (
-    <g style={{ pointerEvents: "none" }}>
-      <rect
-        x={x}
-        y={y}
-        width={pillW}
-        height={pillH}
-        rx={pillH / 2}
-        ry={pillH / 2}
-        fill="rgba(148,163,184,0.95)"
-      />
-      <text
-        x={x + pillW / 2}
-        y={y + pillH / 2 + 3.5}
-        textAnchor="middle"
-        fill="rgba(15,15,15,0.95)"
-        fontSize={10}
-        fontWeight={700}
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        style={{ letterSpacing: "0.5px" }}
-      >
-        INLINE
-      </text>
-    </g>
-  );
-}
 
 const REUSED_PILL_W = 52;
 function ReusedPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
@@ -6376,66 +6245,6 @@ function CachedPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
   );
 }
 
-function crossPipelinePillWidth(pipelines: SpawnedPipelineRef[]): number {
-  const label =
-    pipelines.length === 1 ? "↗ SPAWNS" : `↗ SPAWNS ×${pipelines.length}`;
-  return Math.max(48, 12 + label.length * 6);
-}
-function CrossPipelinePill({
-  nodeW,
-  pipelines,
-  onOpen,
-  x: xOverride,
-}: {
-  nodeW: number;
-  pipelines: SpawnedPipelineRef[];
-  onOpen?: (runID: string) => void;
-  x?: number;
-}) {
-  const label =
-    pipelines.length === 1 ? "↗ SPAWNS" : `↗ SPAWNS ×${pipelines.length}`;
-  const pillH = 15;
-  const pillW = crossPipelinePillWidth(pipelines);
-  const x = xOverride ?? (nodeW - pillW) / 2;
-  const y = -6;
-  const first = pipelines[0];
-  const tip = pipelines
-    .map((p) => `↗ ${p.pipeline} (run ${p.child_run_id})`)
-    .join("\n");
-  return (
-    <g
-      style={{ cursor: first ? "pointer" : undefined }}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!first) return;
-        onOpen?.(first.child_run_id);
-      }}
-    >
-      <title>{tip}</title>
-      <rect
-        x={x}
-        y={y}
-        width={pillW}
-        height={pillH}
-        rx={pillH / 2}
-        ry={pillH / 2}
-        fill="rgba(56,189,248,0.95)"
-      />
-      <text
-        x={x + pillW / 2}
-        y={y + pillH / 2 + 3.5}
-        textAnchor="middle"
-        fill="rgba(8,15,30,0.95)"
-        fontSize={10}
-        fontWeight={700}
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        style={{ letterSpacing: "0.3px" }}
-      >
-        {label}
-      </text>
-    </g>
-  );
-}
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
@@ -6513,7 +6322,7 @@ function dagNodeColors(
       fill = "rgba(30,41,59,0.45)";
       border = "rgba(71,85,105,0.75)";
       break;
-    case "cached":
+    case "memoized":
       fill = "rgba(139,92,246,0.12)";
       border = "rgba(167,139,250,0.55)";
       break;
@@ -6551,7 +6360,7 @@ function dagStatusClass(n: RunNode, reused = false): string {
       return "fill-indigo-400";
     case "cancelled":
       return "fill-slate-300";
-    case "cached":
+    case "memoized":
       return "fill-violet-400";
     case "skipped":
       return "fill-slate-400";
@@ -6566,53 +6375,63 @@ function dagStatusClass(n: RunNode, reused = false): string {
   }
 }
 
+// A retry's run detail names the source jobs it reuses instead of running.
 function useReusedNodeIDs(run: Run | null): {
   ids: Set<string> | null;
   priorRunID: string | null;
 } {
-  const [ids, setIds] = useState<Set<string> | null>(null);
-  const [priorRunID, setPriorRunID] = useState<string | null>(null);
-  const runID = run?.id ?? null;
-  const retryOf = run?.retry_of ?? null;
-  useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled) return;
-      setIds(runID && !retryOf ? new Set() : null);
-      setPriorRunID(null);
-    });
-    if (!runID || !retryOf) {
-      return () => {
-        cancelled = true;
-      };
-    }
-    listRunEvents(runID, { limit: 1000 }).then((events) => {
-      if (cancelled) return;
-      const next = new Set<string>();
-      let prior: string | null = null;
-      for (const e of events) {
-        if (e.kind !== "node_skipped_from_retry") continue;
-        if (e.node_id) next.add(e.node_id);
-        if (!prior && e.payload && typeof e.payload === "object") {
-          const p = e.payload as { prior_run_id?: string };
-          if (p.prior_run_id) prior = p.prior_run_id;
-        }
-      }
-      setIds(next);
-      setPriorRunID(prior ?? retryOf ?? null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [runID, retryOf]);
-  return { ids, priorRunID };
+  const reused = run?.reused_jobs;
+  const ids = useMemo(
+    () => (run ? new Set(reused ?? []) : null),
+    [run, reused],
+  );
+  return { ids, priorRunID: run?.retry_of ?? null };
 }
 
 function rerunMode(run: Run): "full" | "failed" | null {
-  if (!run.retry_of) return null;
-  const flags = run.invocation?.flags;
-  if (!flags) return null;
-  return flags.full === true ? "full" : "failed";
+  if (!run.retry_of || !run.retry_mode) return null;
+  return run.retry_mode === "all" ? "full" : "failed";
+}
+
+const EMPTY_NOTICES: Notice[] = [];
+
+// RunNotices shows the controller's notices for this run, such as an engine
+// version whose support is ending, and says when the steps could not be read.
+function RunNotices({
+  notices,
+  stepsUnavailable,
+}: {
+  notices: Notice[];
+  stepsUnavailable: boolean;
+}) {
+  if (notices.length === 0 && !stepsUnavailable) return null;
+  return (
+    <div className="px-4 pb-2 space-y-1" data-testid="run-notices">
+      {notices.map((notice, i) => (
+        <div
+          key={`${notice.kind}:${i}`}
+          role="status"
+          className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200"
+        >
+          <span>{notice.reason}</span>
+          {notice.hint ? <span className="ml-1 text-amber-200/80">{notice.hint}</span> : null}
+          {notice.support_until ? (
+            <span className="ml-1 text-amber-200/80">
+              Supported until {fmtDateTime(notice.support_until)}.
+            </span>
+          ) : null}
+        </div>
+      ))}
+      {stepsUnavailable ? (
+        <div
+          role="status"
+          className="rounded border border-slate-500/40 bg-slate-500/10 px-2 py-1 text-xs text-slate-300"
+        >
+          Steps unavailable: the controller did not answer for this run&apos;s steps, so jobs show without them.
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function ReuseSummary({
@@ -6782,11 +6601,11 @@ function RetryButton({ runId, onDone, runNow = false }: {
   const submit = async (full: boolean) => {
     setLoading(true);
     const fresh = await retryRun(runId, { full }).catch(() => null);
-    if (fresh?.id) {
+    if (fresh?.run_id) {
       toast(
         full
-          ? `Rerun (all nodes) queued as ${fresh.id}`
-          : `Rerun (from failed) queued as ${fresh.id}`,
+          ? `Rerun (all nodes) queued as ${fresh.run_id}`
+          : `Rerun (from failed) queued as ${fresh.run_id}`,
         "success",
       );
       window.dispatchEvent(new CustomEvent("sparkwing:runs-changed"));

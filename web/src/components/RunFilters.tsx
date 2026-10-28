@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type { Run, PipelineMeta } from "@/lib/api";
+import type { Run } from "@/lib/api";
 import Tooltip from "@/components/Tooltip";
 
 
@@ -21,8 +21,6 @@ export const FILTER_URL_KEYS = [
   "nbranch",
   "commit",
   "ncommit",
-  "tag",
-  "ntag",
   "startedAfter",
   "startedBefore",
   "finishedAfter",
@@ -143,11 +141,6 @@ export function useUrlFilterState() {
       setFilterCommit: (value: string[]) => setParams({ commit: value }),
       excludeCommit: getList("ncommit"),
       setExcludeCommit: (value: string[]) => setParams({ ncommit: value }),
-
-      filterTag: getList("tag"),
-      setFilterTag: (value: string[]) => setParams({ tag: value }),
-      excludeTag: getList("ntag"),
-      setExcludeTag: (value: string[]) => setParams({ ntag: value }),
 
       startedAfter: getString("startedAfter"),
       setStartedAfter: (value: string) => setParams({ startedAfter: value }),
@@ -294,12 +287,10 @@ export function serializeSearch(terms: SearchTerm[]): string {
 export function runMatchesFilter(
   r: Run,
   s: RunFilterState,
-  pipelineMeta: Record<string, PipelineMeta>,
 ): boolean {
   const repo = repoLabel(r);
   const branch = r.git_branch || "";
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
-  const tags = pipelineMeta[r.pipeline]?.tags || [];
 
   if (s.excludeTrigger.includes(r.trigger_source || "")) return false;
   if (s.filterTrigger.length && !s.filterTrigger.includes(r.trigger_source || ""))
@@ -309,7 +300,6 @@ export function runMatchesFilter(
   if (s.excludePipeline.includes(r.pipeline)) return false;
   if (s.excludeBranch.includes(branch)) return false;
   if (sha7 && s.excludeCommit.includes(sha7)) return false;
-  if (s.excludeTag.some((t) => tags.includes(t))) return false;
 
   if (s.filterStatus.length && !s.filterStatus.includes(r.status)) return false;
   if (s.filterRepo.length && !s.filterRepo.includes(repo)) return false;
@@ -317,8 +307,6 @@ export function runMatchesFilter(
     return false;
   if (s.filterBranch.length && !s.filterBranch.includes(branch)) return false;
   if (s.filterCommit.length && !s.filterCommit.includes(sha7)) return false;
-  if (s.filterTag.length && !s.filterTag.some((t) => tags.includes(t)))
-    return false;
 
   const startedTs = new Date(r.started_at).getTime();
   const sa = parseLooseDate(s.startedAfter);
@@ -380,13 +368,11 @@ export function activeFilterCount(s: RunFilterState): number {
     s.filterPipeline.length +
     s.filterBranch.length +
     s.filterCommit.length +
-    s.filterTag.length +
     s.excludeStatus.length +
     s.excludeRepo.length +
     s.excludePipeline.length +
     s.excludeBranch.length +
     s.excludeCommit.length +
-    s.excludeTag.length +
     (s.startedAfter || s.startedBefore ? 1 : 0) +
     (s.finishedAfter || s.finishedBefore ? 1 : 0) +
     (s.filterText.trim() ? 1 : 0)
@@ -400,7 +386,6 @@ export function clearAllFilters(s: RunFilterState) {
   s.setFilterPipeline([]);
   s.setFilterBranch([]);
   s.setFilterStatus([]);
-  s.setFilterTag([]);
   s.setFilterCommit([]);
   s.setStartedAfter("");
   s.setStartedBefore("");
@@ -412,7 +397,6 @@ export function clearAllFilters(s: RunFilterState) {
   s.setExcludePipeline([]);
   s.setExcludeBranch([]);
   s.setExcludeCommit([]);
-  s.setExcludeTag([]);
 }
 
 
@@ -449,7 +433,6 @@ export function buildGroupsFromState(
     pipelines: string[];
     branches: string[];
     commits: string[];
-    tags: string[];
   },
 ): FilterGroup[] {
   return [
@@ -525,25 +508,10 @@ export function buildGroupsFromState(
       activeBg: "bg-sky-500/15",
       activeText: "text-sky-300",
     },
-    {
-      key: "tag",
-      label: "TAG",
-      values: s.filterTag,
-      set: s.setFilterTag,
-      excludeValues: s.excludeTag,
-      setExclude: s.setExcludeTag,
-      options: options.tags,
-      color: "text-pink-400",
-      activeBg: "bg-pink-500/15",
-      activeText: "text-pink-300",
-    },
   ];
 }
 
-export function computeOptions(
-  runs: Run[],
-  pipelineMeta: Record<string, PipelineMeta>,
-) {
+export function computeOptions(runs: Run[]) {
   return {
     statuses: ["success", "failed", "running", "cancelled"],
     triggers: [...new Set(runs.map((r) => r.trigger_source || "").filter(Boolean))].sort(),
@@ -558,9 +526,6 @@ export function computeOptions(
           .map((r) => (r.git_sha ? r.git_sha.slice(0, 7) : ""))
           .filter(Boolean),
       ),
-    ].sort(),
-    tags: [
-      ...new Set(Object.values(pipelineMeta).flatMap((m) => m.tags || [])),
     ].sort(),
   };
 }
@@ -1185,8 +1150,7 @@ export type FilterFacet =
   | "repo"
   | "pipeline"
   | "branch"
-  | "commit"
-  | "tag";
+  | "commit";
 
 export interface FilterCtx {
   isIncluded: (facet: FilterFacet, value: string) => boolean;
@@ -1248,13 +1212,6 @@ export function createFilterCtx(filterState: RunFilterState): FilterCtx {
           s.setFilterCommit,
           s.excludeCommit,
           s.setExcludeCommit,
-        ] as const;
-      case "tag":
-        return [
-          s.filterTag,
-          s.setFilterTag,
-          s.excludeTag,
-          s.setExcludeTag,
         ] as const;
     }
   };

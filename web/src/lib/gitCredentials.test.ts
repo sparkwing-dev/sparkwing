@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { afterEach, before, beforeEach, describe, it } from "node:test";
 
@@ -336,15 +338,9 @@ describe("API helpers", () => {
   });
 
   it("lists releases", async () => {
-    const release = {
-      repository: "",
-  host_wide: true,
-  host: "gitlab.com",
-      run_id: "r1",
-      runner: "cloud",
-      token_prefix: "",
-      released_at: 3,
-    };
+    const release = JSON.parse(
+      readFileSync(join(__dirname, "testdata", "git-credential-releases.json"), "utf8"),
+    ).releases[0];
     respond = () =>
       new Response(JSON.stringify({ releases: [release] }), { status: 200 });
     assert.deepEqual(await lib.listGitCredentialReleases(), [release]);

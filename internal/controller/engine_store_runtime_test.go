@@ -279,6 +279,18 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 
 func engineAcceptedFixturePlan(t *testing.T, e *engineFixture, team store.Team, runID string, jobs ...string) {
 	t.Helper()
+	if len(jobs) == 0 {
+		jobs = []string{"job"}
+	}
+	plan := nodeproto.PlanDoc{Jobs: make([]nodeproto.JobSpec, 0, len(jobs))}
+	for _, id := range jobs {
+		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: id})
+	}
+	engineAcceptedFixturePlanDoc(t, e, team, runID, plan)
+}
+
+func engineAcceptedFixturePlanDoc(t *testing.T, e *engineFixture, team store.Team, runID string, plan nodeproto.PlanDoc) {
+	t.Helper()
 	tenant, err := e.Store.ForTeam(t.Context(), team)
 	if err != nil {
 		t.Fatal(err)
@@ -286,13 +298,6 @@ func engineAcceptedFixturePlan(t *testing.T, e *engineFixture, team store.Team, 
 	run, err := tenant.ReadRun(t.Context(), runID)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(jobs) == 0 {
-		jobs = []string{"job"}
-	}
-	plan := nodeproto.PlanDoc{Jobs: make([]nodeproto.JobSpec, 0, len(jobs))}
-	for _, id := range jobs {
-		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: id})
 	}
 	rawPlan, err := json.Marshal(plan)
 	if err != nil {

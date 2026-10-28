@@ -1,21 +1,27 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Agent } from "./api";
+import type { Runner } from "./api";
 import {
   fleetHeadroomState,
   fleetLocation,
   formatFleetResources,
-  sortFleetAgents,
+  sortFleetRunners,
 } from "./fleet";
 
-function agent(fields: Partial<Agent>): Agent {
+function agent(fields: Partial<Runner>): Runner {
   return {
     name: "runner",
-    type: "agent",
-    labels: {},
+    class: "runner",
+    location: "",
+    labels: [],
+    reserved_pools: [],
+    repos: [],
     last_seen: "2026-09-02T20:00:00Z",
     status: "idle",
+    active_jobs: [],
     max_concurrent: 2,
+    metered: false,
+    capacity: { cores: 0, memory_bytes: 0 },
     ...fields,
   };
 }
@@ -48,7 +54,7 @@ describe("fleet presentation", () => {
       agent({ name: "offline", status: "offline" }),
       agent({ name: "idle", status: "idle" }),
       agent({ name: "busy", status: "busy" }),
-    ].sort(sortFleetAgents);
+    ].sort(sortFleetRunners);
     assert.deepEqual(
       rows.map((row) => row.name),
       ["busy", "idle", "offline"],

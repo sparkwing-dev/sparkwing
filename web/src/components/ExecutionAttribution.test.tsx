@@ -12,9 +12,7 @@ describe("node row execution mark", () => {
         outcome: "success",
         deps: [],
         duration_ms: 100,
-        executor_kind: "agent",
-        executor_name: "moonborn",
-        executor_location: "local",
+        execution_attempts: [{ attempt: 1, executor_kind: "runner", executor_name: "moonborn", location: "local" }],
       }} />,
     );
     assert.match(html, /tabindex="0"/i);
@@ -28,9 +26,9 @@ describe("execution history", () => {
   it("shows an executor supplied for a historical attempt", () => {
     const html = renderToStaticMarkup(<ExecutionAttributionPanel node={{
       id: "build", status: "done", outcome: "success", deps: [], duration_ms: 10,
-      execution_attempts: [{ run_id: "run-1", attempt: 1, started_at: "2026-09-23T00:00:00Z", location: "local", execution_site: "machine", execution_site_name: "moonborn" }],
+      execution_attempts: [{ run_id: "run-1", attempt: 1, started_at: "2026-09-23T00:00:00Z", location: "local", executor_kind: "runner", executor_name: "moonborn" }],
     }} />);
-    assert.match(html, /agent moonborn|machine moonborn/);
+    assert.match(html, /runner moonborn/);
     assert.doesNotMatch(html, /Executor unknown/);
   });
 });

@@ -3,20 +3,32 @@ import { useEffect, useRef } from "react";
 import { getRunEventsStreamUrl, type RunEvent } from "./api";
 import { openEventStream } from "./eventStream";
 
-export type RunEventKind =
-  | "node_started"
-  | "node_succeeded"
-  | "node_failed"
-  | "node_cancelled"
-  | "node_skipped"
-  | "node_paused"
-  | "node_resumed"
-  | "cache_hit"
-  | "attempt_retry"
-  | "approval_requested"
-  | "approval_resolved"
-  | "expansion_generated"
-  | "stream_end";
+// RUN_EVENT_KINDS are the named events the controller's run stream sends; the
+// store's TestConsoleListensForEveryRunEventKind fails when it emits one not listed.
+export const RUN_EVENT_KINDS = [
+  "run_started",
+  "run_cancel_requested",
+  "run_success",
+  "run_failed",
+  "run_cancelled",
+  "job_attempt_imported",
+  "job_ready",
+  "job_requeued",
+  "job_revoked",
+  "job_claimed",
+  "job_approval_pending",
+  "job_approval_ready",
+  "job_expansion_ready",
+  "job_started",
+  "job_retrying",
+  "job_cancel_requested",
+  "job_succeeded",
+  "job_failed",
+  "job_cancelled",
+  "job_skipped",
+  "job_superseded",
+  "job_memoized",
+] as const;
 
 export interface UseRunEventsOptions {
   onEvent?: (event: RunEvent) => void;
@@ -53,21 +65,7 @@ export function useRunEvents(
       onEventRef.current?.(parsed);
     };
 
-    const kinds: RunEventKind[] = [
-      "node_started",
-      "node_succeeded",
-      "node_failed",
-      "node_cancelled",
-      "node_skipped",
-      "node_paused",
-      "node_resumed",
-      "cache_hit",
-      "attempt_retry",
-      "approval_requested",
-      "approval_resolved",
-      "expansion_generated",
-    ];
-    for (const k of kinds) {
+    for (const k of RUN_EVENT_KINDS) {
       es.addEventListener(k, handle as EventListener);
     }
     es.addEventListener("stream_end", () => {

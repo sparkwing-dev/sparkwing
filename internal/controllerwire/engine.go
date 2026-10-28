@@ -321,6 +321,13 @@ type JobDetail struct {
 	StartedAt         *time.Time   `json:"started_at,omitempty"`
 	FinishedAt        *time.Time   `json:"finished_at,omitempty"`
 	CancelRequestedAt *time.Time   `json:"cancel_requested_at,omitempty"`
+	// Needs, Groups, OnFailureOf and Approval come from the job's declaration; only run detail fills them.
+	Needs       []string `json:"needs,omitempty"`
+	Groups      []string `json:"groups,omitempty"`
+	OnFailureOf string   `json:"on_failure_of,omitempty"`
+	Approval    bool     `json:"approval,omitempty"`
+	// Summary is the masked markdown the job's current attempt wrote outside any step; only run detail fills it.
+	Summary string `json:"summary,omitempty"`
 }
 
 type AttemptDetail struct {
@@ -332,6 +339,9 @@ type AttemptDetail struct {
 	Executor   string     `json:"executor"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	// ExecutorName and Location identify the runner that took the attempt.
+	ExecutorName string `json:"executor_name,omitempty"`
+	Location     string `json:"location,omitempty"`
 }
 
 // RunDetail carries safe dashboard, local and remote status projections.
@@ -352,6 +362,14 @@ type RunDetail struct {
 	CancelRequestedAt *time.Time         `json:"cancel_requested_at,omitempty"`
 	Engine            *engineid.Identity `json:"engine,omitempty"`
 	Notices           []engineid.Notice  `json:"notices"`
+	// Retry says how a retry run treats its source's jobs; a first run has none.
+	Retry *RetryDetail `json:"retry,omitempty"`
+}
+
+// RetryDetail names a retry's mode and the source jobs whose results it reuses.
+type RetryDetail struct {
+	Mode   string   `json:"mode"`
+	Reused []string `json:"reused"`
 }
 
 // ScheduleSnapshot carries a consistent scheduling projection for the remote owner.

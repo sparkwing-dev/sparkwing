@@ -42,10 +42,6 @@ function filterState(
     setFilterCommit: setList,
     excludeCommit: [],
     setExcludeCommit: setList,
-    filterTag: [],
-    setFilterTag: setList,
-    excludeTag: [],
-    setExcludeTag: setList,
     startedAfter: "",
     setStartedAfter: setText,
     startedBefore: "",
@@ -90,21 +86,21 @@ describe("trigger filters", () => {
     const state = filterState([], () => {});
     state.filterTrigger = ["cron", "manual"];
     state.excludeTrigger = ["manual"];
-    assert.equal(runMatchesFilter(run("cron"), state, {}), true);
-    assert.equal(runMatchesFilter(run("manual"), state, {}), false);
-    assert.equal(runMatchesFilter(run("push"), state, {}), false);
-    assert.equal(runMatchesFilter(run(), state, {}), false);
+    assert.equal(runMatchesFilter(run("cron"), state), true);
+    assert.equal(runMatchesFilter(run("manual"), state), false);
+    assert.equal(runMatchesFilter(run("push"), state), false);
+    assert.equal(runMatchesFilter(run(), state), false);
     state.filterStatus = ["failed"];
-    assert.equal(runMatchesFilter(run("cron"), state, {}), false);
+    assert.equal(runMatchesFilter(run("cron"), state), false);
     state.filterStatus = [];
     state.filterTrigger = [];
-    assert.equal(runMatchesFilter(run(), state, {}), true);
-    assert.equal(runMatchesFilter(run("manual"), state, {}), false);
+    assert.equal(runMatchesFilter(run(), state), true);
+    assert.equal(runMatchesFilter(run("manual"), state), false);
   });
 
   it("offers sorted distinct observed trigger sources in the filter bar", () => {
     const state = filterState([], () => {});
-    const options = computeOptions([run("push"), run(), run("cron"), run("cron")], {});
+    const options = computeOptions([run("push"), run(), run("cron"), run("cron")]);
     const group = buildGroupsFromState(state, options).find((g) => g.key === "trigger");
     assert.ok(group);
     assert.deepEqual(group.options, ["cron", "push"]);

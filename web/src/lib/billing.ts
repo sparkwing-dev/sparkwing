@@ -484,10 +484,10 @@ export function checkoutErrorMessage(
   if (status === 403) {
     return "Only a team owner can buy credits.";
   }
-  if (status === 503) {
+  if (status === 503 && body.code === "checkout_unavailable") {
     return "Buying credits is not available on this controller right now.";
   }
-  if (status === 502) {
+  if (status === 503) {
     return "The payment service did not start a checkout. Nothing was charged; try again in a moment.";
   }
   return detail ? `Checkout failed: ${detail}` : `Checkout failed (${status}).`;
