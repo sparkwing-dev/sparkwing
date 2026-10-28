@@ -344,7 +344,7 @@ func TestOIDCMintHTTPCommittedSubjects(t *testing.T) {
 		{"release", "refs/tags/v1", "runner", "persistent", 42},
 		{"create", "refs/heads/topic", "runner", "persistent", 42},
 		{"delete", "refs/heads/topic", "runner", "persistent", 42},
-		{"cron", "refs/heads/main", "service", "fresh", 0},
+		{"cron", "refs/heads/main", "runner", "fresh", 0},
 		{"manual", "", "user", "persistent", 0},
 		{"manual", "", "personal", "persistent", 42},
 		{"actions", "refs/heads/main", "github-actions", "fresh", 42},

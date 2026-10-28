@@ -74,6 +74,12 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 	facts.Cloud = facts.Cloud || leaf.Billing != nil && leaf.Billing.ExecutorClass == string(match.ClassCloud)
 	if facts.Cloud {
 		facts.Tier, facts.ExecutorClass = TierCloud, string(match.ClassCloud)
+		// A Cloud pod claims with the deployment's launcher service credential,
+		// which no team can mint; to a trust policy it is a runner pod like one
+		// a team's own launcher starts.
+		if facts.OIDCKind == "service" {
+			facts.OIDCKind = "runner"
+		}
 	}
 	for _, ancestor := range chain {
 		if ancestor.principal.Capability.Purpose == capability.PurposeHere {
