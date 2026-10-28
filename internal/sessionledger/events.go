@@ -3,12 +3,13 @@ package sessionledger
 import (
 	"context"
 	"encoding/json"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"time"
 )
 
 // eventKind is the node event a sweep appends for every session it ended
 // or could not end, so `runs status` shows what happened to the work.
-const eventKind = "stray_session_reaped"
+const eventKind = runstate.EventStraySessionReaped
 
 // EventAppender is the store method a sweep needs to record its outcomes.
 type EventAppender interface {

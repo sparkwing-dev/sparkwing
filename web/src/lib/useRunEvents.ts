@@ -1,34 +1,21 @@
 
 import { useEffect, useRef } from "react";
 import { getRunEventsStreamUrl, type RunEvent } from "./api";
-import { openEventStream } from "./eventStream";
+import { type EventStream, openEventStream } from "./eventStream";
+import runEventKinds from "./runEventKinds.json";
 
-// RUN_EVENT_KINDS are the named events the controller's run stream sends; the
-// store's TestConsoleListensForEveryRunEventKind fails when it emits one not listed.
-export const RUN_EVENT_KINDS = [
-  "run_started",
-  "run_cancel_requested",
-  "run_success",
-  "run_failed",
-  "run_cancelled",
-  "job_attempt_imported",
-  "job_ready",
-  "job_requeued",
-  "job_revoked",
-  "job_claimed",
-  "job_approval_pending",
-  "job_approval_ready",
-  "job_expansion_ready",
-  "job_started",
-  "job_retrying",
-  "job_cancel_requested",
-  "job_succeeded",
-  "job_failed",
-  "job_cancelled",
-  "job_skipped",
-  "job_superseded",
-  "job_memoized",
-] as const;
+// RUN_EVENT_KINDS is every kind the controller's run stream sends
+// (runstate.RunEventKinds), written to runEventKinds.json by internal/controller's
+// TestConsoleFixturesMatchTheWireTypes, so the stream is heard for each of them.
+export const RUN_EVENT_KINDS: readonly string[] = runEventKinds;
+
+// listenForRunEvents hears every run event kind on a stream.
+export function listenForRunEvents(
+  es: Pick<EventStream, "addEventListener">,
+  handle: (e: MessageEvent) => void,
+): void {
+  for (const kind of RUN_EVENT_KINDS) es.addEventListener(kind, handle);
+}
 
 export interface UseRunEventsOptions {
   onEvent?: (event: RunEvent) => void;
@@ -65,9 +52,7 @@ export function useRunEvents(
       onEventRef.current?.(parsed);
     };
 
-    for (const k of RUN_EVENT_KINDS) {
-      es.addEventListener(k, handle as EventListener);
-    }
+    listenForRunEvents(es, handle);
     es.addEventListener("stream_end", () => {
       onEndRef.current?.();
       es.close();

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -46,7 +47,7 @@ func TestPlanSecretPreflightNamesUnreadableScopes(t *testing.T) {
 		t.Fatalf("repeated preflight: %v", err)
 	}
 	events, err := tenant.ReadStateEvents(t.Context(), request.RunID, 0, 10)
-	if err != nil || len(events) != 1 || events[0].Kind != eventKindSecretPreflightRefused {
+	if err != nil || len(events) != 1 || events[0].Kind != runstate.EventSecretPreflightRefused {
 		t.Fatalf("preflight diagnostic did not persist once: %+v, %v", events, err)
 	}
 	if !events[0].At.Equal(*now) {
@@ -151,7 +152,7 @@ func TestPreflightDiagnosticCannotOutlivePlanOwnerProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, event := range events {
-			if event.Kind != eventKindSecretPreflightRefused || !event.At.Before(deadline) || !now.Before(deadline) {
+			if event.Kind != runstate.EventSecretPreflightRefused || !event.At.Before(deadline) || !now.Before(deadline) {
 				t.Fatalf("expired owner wrote a diagnostic: at=%s deadline=%s now=%s", event.At, deadline, *now)
 			}
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"math"
 	"net/http"
 	"time"
@@ -154,8 +155,8 @@ func (s *Server) emitNodeDrift(ctx context.Context, t *store.Tenant, run *store.
 	if err != nil {
 		return
 	}
-	if err := t.AppendEvent(ctx, run.ID, nodeID, "resource_pin_drift", payload); err != nil {
-		s.logger.Warn("append run event", "kind", "resource_pin_drift", "run_id", run.ID, "node_id", nodeID, "err", err)
+	if err := t.AppendEvent(ctx, run.ID, nodeID, runstate.EventResourcePinDrift, payload); err != nil {
+		s.logger.Warn("append run event", "kind", runstate.EventResourcePinDrift, "run_id", run.ID, "node_id", nodeID, "err", err)
 	}
 }
 
