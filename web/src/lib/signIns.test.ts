@@ -68,46 +68,8 @@ describe("linkNotice", () => {
     });
   });
 
-  it("explains a sign-in already on another account and points at the guidance", () => {
-    const notice = lib.linkNotice(
-      "?refused=identity_linked_elsewhere&provider=github",
-    );
-    assert.equal(notice?.tone, "error");
-    assert.equal(notice?.explain, true);
-    assert.match(
-      notice?.message ?? "",
-      /That GitHub sign-in is already linked to another Sparkwing account, so nothing changed\./,
-    );
-  });
-
-  it("words every refusal itself and never echoes the URL", () => {
-    for (const code of [
-      "identity_already_linked",
-      "provider_already_linked",
-      "reauth_required",
-      "rate_limited",
-      "link_state_invalid",
-      "provider_unverified",
-      "provider_rejected",
-      "provider_unreachable",
-      "<script>",
-    ]) {
-      const notice = lib.linkNotice(
-        `?refused=${encodeURIComponent(code)}&provider=google`,
-      );
-      assert.equal(notice?.tone, "error", code);
-      assert.equal(notice?.explain, false, code);
-      assert.doesNotMatch(notice?.message ?? "", /<script>/, code);
-    }
-    assert.equal(
-      lib.linkNotice("?linked=%3Cb%3Eevil%3C%2Fb%3E"),
-      null,
-      "an unknown provider is not confirmed",
-    );
-    assert.equal(
-      lib.linkNotice("?refused=link_failed&provider=%3Cb%3E")?.message,
-      "That sign-in wasn't linked. Try again.",
-    );
+  it("never confirms an unknown provider", () => {
+    assert.equal(lib.linkNotice("?linked=%3Cb%3Eevil%3C%2Fb%3E"), null);
   });
 });
 
@@ -142,9 +104,10 @@ describe("unlinkSignIn", () => {
 
   it("reports the last method and a stale sign-in as answers", async () => {
     respond = () =>
-      json(409, { error: "last_sign_in_method", message: "only one" });
+      json(409, { error: { code: "conflict", message: "only one", details: { reason: "last_sign_in_method" } } });
     assert.deepEqual(await lib.unlinkSignIn("google"), { kind: "last" });
-    respond = () => json(403, { error: "reauth_required", message: "old" });
+    respond = () =>
+      json(403, { error: { code: "forbidden", message: "old", details: { reason: "reauth_required" } } });
     assert.deepEqual(await lib.unlinkSignIn("google"), { kind: "reauth" });
   });
 

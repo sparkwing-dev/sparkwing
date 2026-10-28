@@ -67,16 +67,6 @@ export function LinkNoticeBox({ notice }: { notice: LinkNotice }) {
       className={`rounded-[var(--radius-control)] border p-3 text-sm space-y-2 ${tone}`}
     >
       <p>{notice.message}</p>
-      {notice.explain ? (
-        <>
-          <SecondAccountOptions />
-          <p>
-            <a href={`#${howAccountsWorkId}`} className="underline">
-              How accounts work
-            </a>
-          </p>
-        </>
-      ) : null}
     </div>
   );
 }

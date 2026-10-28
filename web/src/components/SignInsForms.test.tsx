@@ -43,7 +43,7 @@ describe("HowAccountsWork", () => {
     assert.match(page, /We don't currently offer combining accounts\./);
   });
 
-  it("is the anchor a refusal links to", () => {
+  it("is the anchor the page links to", () => {
     assert.match(
       renderToStaticMarkup(<HowAccountsWork />),
       /<section id="how-accounts-work"/,
@@ -52,30 +52,11 @@ describe("HowAccountsWork", () => {
 });
 
 describe("LinkNoticeBox", () => {
-  it("gives a refusal about another account the same guidance and a link", () => {
-    const html = renderToStaticMarkup(
-      <LinkNoticeBox
-        notice={{
-          tone: "error",
-          message: "That GitHub sign-in is already linked to another Sparkwing account, so nothing changed.",
-          explain: true,
-        }}
-      />,
-    );
-    const said = text(html);
-    assert.match(html, /role="alert"/);
-    assert.match(said, /already linked to another Sparkwing account/);
-    assert.match(said, /Keep both\./);
-    assert.match(said, /Delete the other one\./);
-    assert.match(said, /We don't currently offer combining accounts\./);
-    assert.match(html, /<a href="#how-accounts-work"[^>]*>How accounts work<\/a>/);
-  });
-
   it("shows other results without the guidance", () => {
     const said = text(
       renderToStaticMarkup(
         <LinkNoticeBox
-          notice={{ tone: "success", message: "GitHub is now a way to sign in to this account.", explain: false }}
+          notice={{ tone: "success", message: "GitHub is now a way to sign in to this account." }}
         />,
       ),
     );

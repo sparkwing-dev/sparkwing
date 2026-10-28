@@ -73,9 +73,10 @@ export async function unlinkSignIn(provider: string): Promise<UnlinkResult> {
     const body = (await res
       .clone()
       .json()
-      .catch(() => ({}))) as { error?: string };
-    if (body.error === "last_sign_in_method") return { kind: "last" };
-    if (body.error === "reauth_required") return { kind: "reauth" };
+      .catch(() => ({}))) as { error?: { details?: { reason?: string } } };
+    const reason = body.error?.details?.reason;
+    if (reason === "last_sign_in_method") return { kind: "last" };
+    if (reason === "reauth_required") return { kind: "reauth" };
   }
   if (!res.ok) throw await failure(res, `Unlink ${providerLabel(provider)}`);
   return { kind: "unlinked" };
@@ -84,64 +85,20 @@ export async function unlinkSignIn(provider: string): Promise<UnlinkResult> {
 export interface LinkNotice {
   tone: "success" | "error";
   message: string;
-  // True when the page should point at the explanation of how accounts
-  // work, because the refusal is about another account.
-  explain: boolean;
 }
 
 export const reauthMessage =
   "Linking and unlinking need a recent sign-in. Sign out, sign in again, then try within 10 minutes.";
 
-// The dashboard server hands a link's result back as a fixed code, and the
-// page words it here, so nothing a URL carries is shown as text.
+// The controller sends a completed link back with the provider's fixed code,
+// and the page words it here, so nothing a URL carries is shown as text. A
+// refused link ends on the controller's own error answer.
 export function linkNotice(search: string): LinkNotice | null {
   const query = new URLSearchParams(search);
   const linked = providerLabels[query.get("linked") ?? ""];
-  if (linked) {
-    return {
-      tone: "success",
-      message: `${linked} is now a way to sign in to this account.`,
-      explain: false,
-    };
-  }
-  const refused = query.get("refused");
-  if (!refused) return null;
-  const error = (message: string, explain = false): LinkNotice => ({
-    tone: "error",
-    message,
-    explain,
-  });
-  const label = providerLabels[query.get("provider") ?? ""];
-  if (!label) return error("That sign-in wasn't linked. Try again.");
-  switch (refused) {
-    case "identity_linked_elsewhere":
-      return error(
-        `That ${label} sign-in is already linked to another Sparkwing account, so nothing changed. Linking can't move it or anything else from that account to this one.`,
-        true,
-      );
-    case "identity_already_linked":
-      return error(`That ${label} sign-in is already linked to this account.`);
-    case "provider_already_linked":
-      return error(
-        `This account already has a ${label} sign-in. Unlink it before linking a different one.`,
-      );
-    case "reauth_required":
-      return error(reauthMessage);
-    case "rate_limited":
-      return error("Too many link attempts. Wait a minute and try again.");
-    case "link_state_invalid":
-      return error(
-        "The link expired or was started in another tab or session. Start again.",
-      );
-    case "provider_unverified":
-      return error(
-        `${label} hasn't verified the email address on that account. Verify it with ${label}, then try again.`,
-      );
-    case "provider_rejected":
-      return error(`${label} didn't confirm the sign-in. Start again.`);
-    case "provider_unreachable":
-      return error(`${label} couldn't be reached. Try again.`);
-    default:
-      return error(`${label} wasn't linked. Try again.`);
-  }
+  if (!linked) return null;
+  return {
+    tone: "success",
+    message: `${linked} is now a way to sign in to this account.`,
+  };
 }
