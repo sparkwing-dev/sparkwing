@@ -3,6 +3,7 @@
 Sparkwing is standalone. Do not assume any other local service or machine-specific agent harness exists.
 
 - Start with `sparkwing info --for-agent`; its output is current context for this wake, not documentation to copy.
+- Read [design/rewrite/ORIENTATION.md](design/rewrite/ORIENTATION.md) for the owner and guard test of each core rule, the test workflow, known gotchas and the decision index.
 - Search the command index with `sparkwing commands --search status`; narrow it with `--path "sparkwing pipeline"`. Read a named command with `<command> --help`. `-o json` emits index records (`path`, `synopsis`, `subcommand_count`) followed by a page record. Commands default to 40 matches; use a positive `--limit` and continue with `--cursor <next_cursor>` using the same filters. Search documentation with `sparkwing docs search --search <topic>` and read a hit with `sparkwing docs read --topic <slug> --section <start_line>`. Discovery JSON is NDJSON, one complete record per line.
 - Use `sparkwing pipeline list -o json` to discover repository pipelines.
 - Treat the README, embedded docs, CLI help, and tests as product truth. Run the relevant pipeline with `sparkwing run <name>`.

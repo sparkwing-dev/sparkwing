@@ -1,0 +1,216 @@
+# Orientation
+
+Read this first. It names the one owner of each important rule and the test
+that guards it, so a lane can go straight to the code. Paths are relative to
+the repository root. Store paths are under `internal/store/` unless written
+out. When a rule changes, update its row here in the same commit.
+
+Longer contracts: `internal/store/STORE-DATA.md` (schema, log slots, claim
+ranking, lock order, admission), `internal/secrets/MASKING.md`,
+`internal/runners/launcher/CLOUD-JOBS.md`, `internal/runners/HOSTING.md`,
+`design/rewrite/ADMISSION.md`, `design/rewrite/RUN-ANYWHERE.md`,
+`design/credential-model.md`, and the decision log
+`design/rewrite/contracts/handoffs.md` (index below).
+
+## Owners and guards
+
+### Tenancy
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Team handle | `tenant.go`: `Store.ForTeam` returns `*Tenant`; `NormalizeTeam` is the one spelling | `tenant_test.go`: `TestForTeamRefusesTheEmptyTeam`, `TestTenantRunsAreInvisibleToAnotherTeam` |
+| Foreign-team refusal for an authority | `capabilities_contract.go`: `resolveTeamAuthorityTx`, `resolveTeamActorTx` (`sameTeam` / `sameTeamOrCloudLauncher`) | `team_authority_guard_test.go`: `TestTeamScopedFunctionsResolveThroughTeam` |
+| Every tenant-table statement carries `team` | the SQL in each tenant method | `tenant_sql_scope_guard_test.go`: `TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey`; `tenant_writer_guard_test.go` |
+
+### Trust and provenance
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Trust classes and named sets | `internal/runspec/provenance.go`: `TrustClass`, `TrustSet` (`DefaultBranchWorkTrust`, `AppRepositoryTrust`, `AppDeliveryTrust`, `GitHubEventTrust`, `AllTrust`); SQL renders them via `trustIn` in `claim_query.go` | `trust_matrix_test.go`: `TestTrustMatrix` |
+| Verified default-branch work | `Provenance.DefaultBranchWork` (Go) and its SQL twin `claimSQL.defaultBranchWork` (`claim_query.go`) | `trust_sql_test.go`: `TestDefaultBranchWorkSQLAgreesWithGo` |
+| Sealed provenance | `internal/runspec/seal.go`: `SealRequest`; store side `intake_provenance.go`: `sealProvenanceTx`, `identityTx` | `internal/runspec/provenance_test.go`: `TestProvenanceRoundTripsAndRefusesForgedSeals`; `internal/runspec/spec_test.go`: `TestSealRefusals` |
+| Fetched repository (run-now, console, unlocked schedules) | `internal/controller/intake_source.go`: `selectFetchedSource`; `run_spec.go`: `FetchedRepository`; `intake_provenance.go`: `fetchedRepositoryTx`; `Provenance.FetchedFrom` | `internal/controller/intake_source_test.go`: `TestFetchedGitHubRepositoryFollowsSourceSelection` |
+| OIDC claims | `Provenance.OIDC`; `internal/oidcissuer/issuer.go`: `Claims`, `runnerEnvironment`; `authority_oidc.go`: `Tenant.MintOIDCToken` | `oidc_repository_test.go`: `TestOIDCRepositoryClaimReadsSealedProvenance`; `pool_launcher_test.go`: `TestLauncherPodOIDCIsFresh` |
+
+### Claims and placement
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| One claim predicate (decision 44) | `claim_query.go`: `claimSQL.predicate`, `claimSQL.query`, `claimQueryTx` | `claim_predicate_regression_test.go`; `claim_search_bound_test.go`: `TestClaimSearchPreservesTeamFairShareBeforeArrival` |
+| Fresh vs persistent host | `claimant_facts.go`: `claimantFactsTx` sets `FreshHost`; SQL `claimSQL.freshPod` | `claim_trust_test.go`: `TestVerifiedWorkOnAPersistentHostWritesItsHostScope`; `claimant_facts_test.go` |
+| Pools and reserved secrets | `controller_pools.go`: `claimSQL.poolSatisfies`; `claimSQL.poolTrust` | `claim_trust_test.go`: `TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork`; `pool_launcher_test.go` |
+| Ranking and preference holds (decision 52) | `claim_query.go`: `rankingHold`, `firstPreferenceHold`, `placementCTEs` | `claim_ranking_test.go` |
+| Team holds (operator, fraud) | `credit_reversals.go`: `teamHoldTx`, `Tenant.HoldByOperator` | `hold_stop_test.go` |
+| Concurrency admission (decision 45) | `capacity_admission.go`: `Tenant.MayStart`, `admitWorkTx` | `admission_concurrent_test.go` |
+
+### Secrets
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Which secrets a run receives (decisions 66, 68, 70) | `binding_secret.go`: `runSecretSelection` | `secret_selection_test.go`; `internal/controller/secrets_encryption_test.go`: `TestSecrets_AssertedRunReadsOnlySharedSecrets` |
+| Masking algorithm | `internal/secrets/mask.go`: `Masker`, `Maskable`, `Stream` | `internal/secrets/mask_property_test.go`: `TestMaskLeavesNoSecretVisibleProperty` |
+| Host masker registration | `internal/nodehost/mask_registry.go`: `MaskRegistry` | `internal/nodehost/accepted_masks_test.go`: `TestSealedSecretInputsNeverEscapeHostBoundaries` |
+
+### Billing
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Ledger writer | `ledger.go`: `ledgerTx` (`lockLedgerTx`, `insertGrant`, `insertCharge`, `debitFunded`) | `ledger_guard_test.go`: `TestLedgerTablesAreWrittenOnlyThroughTheLedger` |
+| `payment_mode` on money statements (decision 63) | every money query filters `payment_mode` | `ledger_guard_test.go`: `TestMoneyStatementsCarryPaymentMode`; `payment_mode_test.go` |
+| Refill eligibility | `refill.go`: `SpendStanding.refillEligible` | `refill_model_test.go`: `TestRefillModel`; `refill_test.go` |
+| Storage admission | `storage_admission.go`: `admitStorageGrowthTx` | `storage_admission_dialect_test.go` |
+| Log slots | `result_logs.go`: `openLogSlotTx`, `commitLogSlotTx`; `controller_reporting.go`: `Tenant.OpenLogSlot` | `storage_admission_dialect_test.go`: `TestLogSlotsCountAgainstTheRunObjectLimit` |
+| Metering and lease renewal | `metered_accounting.go`: `renewBillingAwardTx`, `settleBillingChargesTx`; `state_renewal.go`: `Tenant.RenewNodeClaim` | `metered_accounting_test.go`; `refill_test.go`: `TestRenewalPaysTheNextSliceAndSettlementReturnsTheRest` |
+
+### Lock order
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Declared order and row locks | `lock_order.go` (`acquireLockSet`, `lockFinancialTeamsTx`, `lockClaimQueueTx`); prose in `STORE-DATA.md` "Lock order" | `lock_order_guard_test.go`: `TestRowLockClausesLiveInLockOrder`; `financial_lock_order_test.go`; `*_lock_order_postgres_test.go` |
+
+### Identity
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Email address ownership | `identity.go`: `claimEmailTx`, `releaseEmailTx`, `dropUnprovenEmailOwnershipTx` | `identity_test.go`: `TestIdentitySignInRefusesAnUnverifiedEmail`, `TestIdentityRecycledEmailNeverLinksIntoTheOldAccount` |
+| Invitations | `identity.go`: `Tenant.createInvitationTx`, `Operator.acceptAccountInvitationTx` | `identity_test.go`: `TestIdentityInvitationNeedsTheInvitedVerifiedEmail`; `team_mutations_test.go` |
+| Sessions | `auth.go`: `Operator.LookupSession`, `CreateCapabilitySession`; `identity.go`: `createAccountSession` | `session_runtime_test.go`; `internal/controller/session_store_runtime_test.go`: `TestMemberTokenHTTPSessionTimeoutAndLogout` |
+| Tokens and capability issuance | `authority_issue.go`: `Store.issueTx`, `awardCapabilityTx` | `security_audit_test.go`: `TestDelegatedTokenRequiresAudit` |
+
+### GitHub App
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Durable webhook inbox (decision 41) | `github_delivery_inbox.go`: `EnqueueGitHubDelivery`, `ClaimGitHubDelivery`, `githubDeliveryResultTx` (effect receipts) | `github_delivery_inbox_test.go`: `TestGitHubDeliveryFailuresNeverRetry` |
+| Installations | `github_app.go`: `Tenant.bindGitHubInstallationTx`, `GitHubAppInstallations` | `github_app_test.go`: `TestGitHubAppInstallationBelongsToOneTeam` |
+| Teardown on uninstall | `github_app.go`: `Tenant.unbindGitHubAppInstallationTx`, `Operator.UnbindGitHubAppInstallation` | `github_enrollment_test.go`: `TestInstallationUnbindEndsActionsConsentAndAutomation`; `github_app_test.go` |
+
+### Launcher and Cloud
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Job lifecycle | `internal/runners/launcher/job.go`: `BuildJob`; `internal/runners/launcher/sync.go`: `Launcher.Sync` | `internal/runners/launcher/launcher_test.go`: `TestSyncAdoptsLiveJobWithoutCreatingAnother`; `internal/runners/launcher/sync_batch_test.go` |
+| Node reuse labels (one run per node) | `internal/runners/launcher/node_team.go`: `usedTeamLabel`, `usedRunLabel`, `runNodeValue`; `internal/runners/launcher/boundary.go`: `KubernetesBoundary.Reserve` | `internal/runners/launcher/boundary_test.go`: `TestBoundaryReusesAWarmNodeOnlyWithinItsRun` |
+| Pod admission policy | `internal/runners/launcher/admission_policy.go` | `internal/runners/launcher/admission_policy_test.go`: `TestAdmissionPolicyOnAPIServer` (skips without `KUBEBUILDER_ASSETS`) |
+| NetworkPolicy (decision 71) | `charts/sparkwing-runner-bundle/templates/launcher-networkpolicy.yaml` | `charts/cloud_test.go`: `TestCloudExampleRendersCompleteInstall` |
+
+### CLI and API surface
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Command registry | `internal/clisurface/registry.go`: `Registry` | `internal/clisurface/contract_test.go` |
+| Route table | `internal/capability/tables.go`: `Routes`; dispatch in `internal/routepolicy` | `internal/capability/policy_test.go` |
+| OpenAPI | `internal/apispec` writes `api/openapi.yaml`; regenerate with `bin/gen-api-docs.sh` | `bin/check-api-spec.sh`; `internal/apispec/final_contract_test.go` |
+| Docs mirror and drift | `docs/` is the source; `bin/sync-docs.sh` copies it to `pkg/docs/mirror/`; `bin/regen-all.sh` reruns every generator | `bin/sync-docs.sh --check`; `internal/doccheck/cliverbs_test.go`, `internal/doccheck/apiroutes_test.go` |
+
+## Test and gate workflow
+
+A lane test script exports its environment once and runs every command with
+`-C`:
+
+```bash
+export GOWORK=off GOFLAGS=-buildvcs=false TMPDIR=/var/tmp/sw-lead-tmp \
+  SPARKWING_GUARD_BASE=bw-3095-rewrite \
+  KUBEBUILDER_ASSETS=/var/tmp/sw-lead-tmp/vapreview/envtest/k8s/1.37.0-linux-amd64
+W=/home/bombuntu/.xwing/envs/<env>/sparkwing
+go -C $W build ./... && go -C $W vet ./...
+go -C $W test -count=1 ./internal/store/ -run 'TestRefill'
+SPARKWING_TEST_STORE=postgres \
+  SPARKWING_TEST_PG_URL='postgres://sw:sw@127.0.0.1:55432/sw_<env>?sslmode=disable' \
+  go -C $W test -count=1 ./internal/store/ -run 'TestRefill'
+go -C $W run ./internal/guardcheck .
+go -C $W run ./internal/commentcheck -base origin/main .
+```
+
+- PostgreSQL: `SPARKWING_TEST_STORE=postgres` switches every test that opens
+  through `internal/store/internal/storetest` to PostgreSQL;
+  `SPARKWING_TEST_PG_URL` names the server, and each test gets its own schema.
+  Without the first variable the suite runs on SQLite.
+- Isolated HOME: tests call `testhome.Set` (`internal/testhome`). Run any `sparkwing`
+  binary with a private `HOME` and `SPARKWING_HOME`, never the real ones.
+- `internal/guardcheck` checks SDK dependency closure, process spawning and
+  the `.guards/` allow-lists; `SPARKWING_GUARD_BASE` names the ref whose
+  allow-lists bound growth (default `origin/main`).
+- Comment-tag gate: `internal/commentcheck` allows GoDoc on exported API and
+  body comments tagged `hack:`, `safety:`, `bug:` or `perf:` (at most 4 lines
+  of 120 characters), and refuses ticket ids in comments. The gate job runs
+  it with `-staged` or `-base`.
+- `KUBEBUILDER_ASSETS` points at envtest binaries; without it the API-server
+  admission tests skip rather than fail.
+- Check tiers, budgets and what must not be skipped: `DELIVERY.md`.
+
+## Known gotchas
+
+- zsh: quote every glob meant for the tool. `grep --include=*.go` fails with
+  "no matches found" before grep runs; write `--include='*.go'` or
+  `rg -g '*.go'`. In `rg`, `-h` is `--help`; use `--no-filename`.
+- `GOWORK=off` travels with every `go` command in a worktree; `go -C` alone
+  still reads the parent checkout's `go.work`.
+- A private `HOME` hides asdf installs, so `go`, `helm` and `node` shims fail
+  ("unknown command: helm. Perhaps you have to reshim?"). Export
+  `ASDF_DATA_DIR=/home/bombuntu/.asdf` and `ASDF_DIR` with the private HOME.
+- deadcode offline: `@version` fetches fail with `GOPROXY=off`. Run the cached
+  module through a scratch modfile that requires
+  `golang.org/x/tools v0.49.0`:
+  `GOPROXY=off go -C $W run -mod=mod -modfile=<scratch>/go.mod golang.org/x/tools/cmd/deadcode ./...`.
+- Lint without `origin/main`: `.golangci.yml` judges only code new since
+  `origin/main`, so a checkout that cannot resolve it reports the whole tree.
+  Fetch the ref or ignore findings outside your diff.
+- Codex sandboxes create empty `.git` mount points in writable roots, which
+  breaks Go VCS stamping; keep `GOFLAGS=-buildvcs=false` and
+  `TMPDIR=/var/tmp/sw-lead-tmp`.
+- `go build ./cmd/sparkwing` collides with the `sparkwing/` SDK directory; use
+  `go build -o /dev/null ./cmd/...`.
+
+## Decision index (handoffs.md, decisions 26-72)
+
+Earlier numbers and lead rulings sit above these in the same file. A later
+decision amends an earlier one where noted.
+
+- 26: Cloud billing is prepaid credits with optional automatic refill; usage is metered slice by slice at lease renewal and hard-stops at zero.
+- 27: Auto-refill is opt-in; the team sets threshold, amount (minimum $10) and weekly/monthly limits; standing tiers cap refill size and frequency.
+- 28: Structural simplification plan approved; feature freeze until its stop rule.
+- 29: One active controller per database, held by a PostgreSQL advisory lock (fail-stop).
+- 30: Kubernetes pools holding reserved secrets run one fresh pod per claim.
+- 31: Admin-armed, unmodified default-branch schedules seal as verified.
+- 32: $1,000 maximum per payment.
+- 33: An early fraud warning on a 3-D Secure liability-shifted payment holds and freezes instead of refunding.
+- 34: Children inherit verified identity and secrets only at the parent's exact commit; branch-pinned `source:` gets pipeline secrets.
+- 35: Wave 2 proceeds; healthy growth is fine; a repeated review finding builds a single owner.
+- 36: Member tokens keep their own expiry (90-day ceiling) independent of session timeout.
+- 37: Run-level and job-level concurrency groups are separate namespaces; no run-level box scope; raw group API deleted.
+- 38: A run that loses its run-level group waits to reacquire it.
+- 39: Audit rows carry no personal data; retention by age.
+- 40: Audit append-only guards against application code, not credential theft.
+- 41: Webhook deliveries are never retried automatically; admins can process a failed one again.
+- 42: A job's predicate runs inside its concurrency slot on the executing host.
+- 43: One host-side masker (refusal rules amended by 49 and 57).
+- 44: Runner sizes are labels; one SQL claim predicate by fair share then arrival; receipts for every delivery effect.
+- 45: One durable admission owner in the store.
+- 46: A restore may lose usage, never a payment (amended by 47).
+- 47: Restore payment recovery is a manual runbook.
+- 48: Masking is a host feature; code run without a host gets none.
+- 49: Only the length rule refuses a secret; `***` is accepted.
+- 50: Overbuilt mechanisms cut; argument, plan, secret and label validation moved from the SDKs to the host.
+- 51: Approvals hold no concurrency slots.
+- 52: Claim ranking and preferences are holds on the job, with a 5-second window.
+- 53: SDK support packages stay internal, behind an explicit depguard list.
+- 54: A restore signs no one out unless `--sign-out-everyone` is passed.
+- 55: The `sparkwing-` label prefix belongs to Sparkwing Cloud.
+- 56: Harsh defaults narrowed (App misconfiguration, storage brake, log persistence, node faults, repository pagination, child limit).
+- 57: Secrets shorter than 4 characters are accepted but not masked, with a one-time warning.
+- 58: Child-run limit defaults to 50, team-settable up to 1,000.
+- 59: Child-run limit errors explain the fix (plan-time refusal dropped by 61).
+- 60: Verified default-branch work runs only on fresh pods.
+- 61: No plan-time child fan-out preflight.
+- 62: Financial records outlive team deletion.
+- 63: One one-way switch from test to live payments.
+- 64: One deletion-only lane; growth is judged by reason; new internal packages over 500 lines need a paying deletion.
+- 65: Stripe holds all card data.
+- 66: Pipeline secrets are scoped to repository and pipeline.
+- 67: Pre-release cleanups and a list of ratified lead calls.
+- 68: Pipeline secrets go only to proven-repository runs; non-fresh hosts write only their own cache scope unless the team turns on high trust; a Cloud node serves one run; storage tiers apply automatically.
+- 69: A Cloud pod may reach its own node's kubelet (deleted by 71).
+- 70: OIDC carries `runner_environment` (fresh or persistent), the repository for fetched runs, and `trigger:actions`.
+- 71: No runtime network probes; enforcing NetworkPolicy is the operator's job.
+- 72: Fetched runs carry their ref and sha in OIDC.
