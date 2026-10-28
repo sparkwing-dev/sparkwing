@@ -105,6 +105,32 @@
       "finished_at": "2026-10-28T05:01:52Z"
     },
     {
+      "id": "notify",
+      "on_failure_of": "build",
+      "status": "done",
+      "outcome": "success",
+      "generation": 1,
+      "attempt": 0,
+      "state_seq": 0,
+      "expansion": "none",
+      "finished_at": "2026-10-28T05:01:52Z"
+    },
+    {
+      "id": "deploy",
+      "needs": [
+        "test"
+      ],
+      "groups": [
+        "release"
+      ],
+      "approval": true,
+      "status": "pending",
+      "generation": 0,
+      "attempt": 0,
+      "state_seq": 0,
+      "expansion": "none"
+    },
+    {
       "annotations": [
         {
           "level": "notice",
@@ -114,6 +140,9 @@
       "id": "test",
       "needs": [
         "lint"
+      ],
+      "groups": [
+        "checks"
       ],
       "status": "done",
       "outcome": "success",

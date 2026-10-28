@@ -310,8 +310,11 @@ func (r RetryRequest) Validate() error {
 type JobDetail struct {
 	Annotations []Annotation `json:"annotations,omitempty"`
 	ID          string       `json:"id"`
-	// Needs lists the jobs this one waits for; only run detail fills it.
+	// Needs, Groups, OnFailureOf and Approval come from the job's declaration; only run detail fills them.
 	Needs             []string   `json:"needs,omitempty"`
+	Groups            []string   `json:"groups,omitempty"`
+	OnFailureOf       string     `json:"on_failure_of,omitempty"`
+	Approval          bool       `json:"approval,omitempty"`
 	Status            string     `json:"status"`
 	Outcome           string     `json:"outcome,omitempty"`
 	StatusDetail      string     `json:"status_detail,omitempty"`

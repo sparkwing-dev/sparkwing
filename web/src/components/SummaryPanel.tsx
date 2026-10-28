@@ -100,22 +100,9 @@ interface Tally {
   other: number;
 }
 
-function fmtDurMs(ms: number): string {
-  const s = Math.round(ms / 1000);
-  if (s >= 86400) return `${Math.round(s / 86400)}d`;
-  if (s >= 3600) return `${Math.round(s / 3600)}h`;
-  if (s >= 60) return `${Math.round(s / 60)}m`;
-  return `${s}s`;
-}
 
 export function NodeAttrChips({ n }: { n: RunNode }) {
   const chips: { label: string; cls: string; key: string }[] = [];
-  if (n.dynamic)
-    chips.push({
-      key: "dynamic",
-      label: "dynamic",
-      cls: "bg-fuchsia-500/15 text-fuchsia-300",
-    });
   if (n.approval)
     chips.push({
       key: "approval",
@@ -127,24 +114,6 @@ export function NodeAttrChips({ n }: { n: RunNode }) {
       key: "memoized",
       label: "memoized",
       cls: "bg-violet-500/15 text-violet-300",
-    });
-  if (n.modifiers?.inline)
-    chips.push({
-      key: "inline",
-      label: "inline",
-      cls: "bg-slate-500/15 text-slate-300",
-    });
-  if (n.modifiers?.timeout_ms)
-    chips.push({
-      key: "timeout",
-      label: `timeout ${fmtDurMs(n.modifiers.timeout_ms)}`,
-      cls: "bg-orange-500/15 text-orange-300",
-    });
-  if (n.modifiers?.no_progress_timeout_ms)
-    chips.push({
-      key: "no-progress-timeout",
-      label: `no progress ${fmtDurMs(n.modifiers.no_progress_timeout_ms)}`,
-      cls: "bg-orange-500/15 text-orange-300",
     });
   if (n.on_failure_of)
     chips.push({
@@ -158,29 +127,6 @@ export function NodeAttrChips({ n }: { n: RunNode }) {
       label: `group: ${n.groups.join(", ")}`,
       cls: "bg-cyan-500/15 text-cyan-300",
     });
-  if (n.modifiers?.cache)
-    chips.push({
-      key: "cache",
-      label: n.modifiers.cache_ttl_ms
-        ? `cache (ttl ${fmtDurMs(n.modifiers.cache_ttl_ms)})`
-        : "cache",
-      cls: "bg-violet-500/15 text-violet-300",
-    });
-  if (n.modifiers?.conc_group) {
-    const m = n.modifiers;
-    const parts: string[] = [`group ${m.conc_group}`];
-    if (m.conc_capacity) parts.push(`cap ${m.conc_capacity}`);
-    if (m.conc_cost && m.conc_cost > 1) parts.push(`cost ${m.conc_cost}`);
-    if (m.conc_scope && m.conc_scope !== "global")
-      parts.push(`scope ${m.conc_scope}`);
-    if (m.conc_on_limit && m.conc_on_limit !== "queue")
-      parts.push(m.conc_on_limit);
-    chips.push({
-      key: "concurrency",
-      label: `concurrency: ${parts.join(", ")}`,
-      cls: "bg-teal-500/15 text-teal-300",
-    });
-  }
   return (
     <span className="flex items-center gap-1 flex-wrap">
       {chips.map((c) => (
@@ -191,16 +137,6 @@ export function NodeAttrChips({ n }: { n: RunNode }) {
         >
           {c.label}
         </span>
-      ))}
-      {(n.spawned_pipelines ?? []).map((p) => (
-        <Link
-          key={p.child_run_id}
-          href={`?run=${encodeURIComponent(p.child_run_id)}`}
-          className="px-1.5 rounded text-[10px] bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 transition-colors"
-          title={`open spawned run for ${p.pipeline}`}
-        >
-          ↗ {p.pipeline}
-        </Link>
       ))}
     </span>
   );

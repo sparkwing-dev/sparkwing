@@ -43,6 +43,8 @@ type StepDetail struct {
 	Reason      string       `json:"reason,omitempty"`
 	StartedAt   *time.Time   `json:"started_at,omitempty"`
 	FinishedAt  *time.Time   `json:"finished_at,omitempty"`
+	// Summary is the step's latest masked markdown summary.
+	Summary string `json:"summary,omitempty"`
 }
 
 type RunSteps struct {

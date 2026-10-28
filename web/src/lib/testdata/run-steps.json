@@ -3,7 +3,7 @@
     {
       "annotations": [
         {
-          "level": "notice",
+          "level": "",
           "message": "42 tests"
         }
       ],
@@ -14,7 +14,8 @@
       "status": "passed",
       "outcome": "success",
       "started_at": "2026-10-28T05:01:19Z",
-      "finished_at": "2026-10-28T05:01:52Z"
+      "finished_at": "2026-10-28T05:01:52Z",
+      "summary": "## Coverage\n91%"
     }
   ]
 }

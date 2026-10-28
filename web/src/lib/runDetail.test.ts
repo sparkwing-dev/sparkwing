@@ -60,7 +60,10 @@ describe("runDetailView", () => {
     assert.equal(run.retry_mode, "failed");
     assert.deepEqual(run.reused_jobs, ["lint"]);
     assert.equal("trigger_source" in run, false);
-    const [lint, build, test] = nodes;
+    const [lint, build, notify, deploy, test] = nodes;
+    assert.equal(notify.on_failure_of, "build");
+    assert.deepEqual([deploy.groups, deploy.approval, deploy.status], [["release"], true, "pending"]);
+    assert.deepEqual(test.groups, ["checks"]);
     assert.deepEqual(lint.deps, []);
     assert.equal(build.id, "build");
     assert.deepEqual(build.deps, ["lint"]);
@@ -83,7 +86,10 @@ describe("runDetailView", () => {
       outcome: "success",
       failure_reason: undefined,
     });
-    assert.deepEqual(test.work?.steps?.map((step) => [step.id, step.status, step.duration_ms]), [["unit", "passed", 33_000]]);
+    assert.deepEqual(
+      test.work?.steps?.map((step) => [step.id, step.status, step.duration_ms, step.annotations, step.summary]),
+      [["unit", "passed", 33_000, ["42 tests"], "## Coverage\n91%"]],
+    );
   });
 
   it("reads the run detail route without the removed include parameter", async () => {

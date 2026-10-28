@@ -150,18 +150,13 @@ test("serial polling retries after a rejected response", async () => {
   assert.equal(attempts, 2);
 });
 
-test("node summary separates reservations, exact totals, and command samples", () => {
+test("node summary separates interval and command samples", () => {
   const node: Node = {
     id: "build",
     status: "done",
     outcome: "success",
     deps: [],
     duration_ms: 2000,
-    requested_cores: 2.5,
-    requested_memory_bytes: 4 * 2 ** 30,
-    cpu_nanos: 3_000_000_000,
-    process_wall_nanos: 2_000_000_000,
-    max_rss_bytes: 900 << 20,
   };
   const summary = summarizeNodeResources(node, {
     points: [
@@ -186,11 +181,6 @@ test("node summary separates reservations, exact totals, and command samples", (
     sampledPeakMemoryBytes: 500 << 20,
     commandPeakCPUMillicores: 2200,
     commandPeakMemoryBytes: 800 << 20,
-    requestedCPUMillicores: 2500,
-    requestedMemoryBytes: 4 * 2 ** 30,
-    exactCPUTimeNanos: 3_000_000_000,
-    exactMeanCPUMillicores: 1500,
-    exactMaxRSSBytes: 900 << 20,
     commandCPUTimeNanos: 1_250_000_000,
   });
 });

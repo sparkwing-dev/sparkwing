@@ -50,7 +50,9 @@ func consoleFixtures() map[string]any {
 			Jobs: []controllerwire.JobDetail{
 				{ID: "lint", Status: "done", Outcome: "success", Generation: 1, Expansion: "none", FinishedAt: &finished},
 				{ID: "build", Needs: []string{"lint"}, Status: "done", Outcome: "failed", Error: "install source entry: ./pipeline.go:3:9: cannot use *** as int value", Generation: 1, Expansion: "none", FinishedAt: &finished},
-				{ID: "test", Needs: []string{"lint"}, Status: "done", Outcome: "success", Generation: 1, Attempt: 1, StateSeq: 4, Expansion: "none", StartedAt: &started, FinishedAt: &finished, Annotations: []controllerwire.Annotation{{Level: "notice", Message: "42 tests"}}},
+				{ID: "notify", OnFailureOf: "build", Status: "done", Outcome: "success", Generation: 1, Expansion: "none", FinishedAt: &finished},
+				{ID: "deploy", Needs: []string{"test"}, Groups: []string{"release"}, Approval: true, Status: "pending", Expansion: "none"},
+				{ID: "test", Needs: []string{"lint"}, Groups: []string{"checks"}, Status: "done", Outcome: "success", Generation: 1, Attempt: 1, StateSeq: 4, Expansion: "none", StartedAt: &started, FinishedAt: &finished, Annotations: []controllerwire.Annotation{{Level: "notice", Message: "42 tests"}}},
 			},
 			Attempts:  []controllerwire.AttemptDetail{{JobID: "test", Attempt: 1, Generation: 1, Outcome: "success", Executor: "runner", ExecutorName: "moonborn", Location: "local", StartedAt: &started, FinishedAt: &finished}},
 			Notices:   []engineid.Notice{},
@@ -58,7 +60,7 @@ func consoleFixtures() map[string]any {
 			Retry: &controllerwire.RetryDetail{Mode: "failed", Reused: []string{"lint"}},
 		},
 		"run-steps.json": controllerwire.RunSteps{Steps: []controllerwire.StepDetail{
-			{JobID: "test", ID: "unit", Attempt: 1, Status: "passed", Outcome: "success", StartedAt: &started, FinishedAt: &finished, Annotations: []controllerwire.Annotation{{Level: "notice", Message: "42 tests"}}},
+			{JobID: "test", ID: "unit", Attempt: 1, Status: "passed", Outcome: "success", StartedAt: &started, FinishedAt: &finished, Annotations: []controllerwire.Annotation{{Message: "42 tests"}}, Summary: "## Coverage\n91%"},
 		}},
 		"runs-list.json":   map[string]any{"runs": []runstate.RunSummary{summary}},
 		"run-created.json": controllerwire.CreateRunResponse{RunID: "run-retry", Number: 16, Inputs: inputs, WriteScope: "team"},
@@ -83,6 +85,10 @@ func consoleFixtures() map[string]any {
 			Upcoming: []string{"2026-10-29T03:00:00Z"},
 		},
 		"schedule-run.json": controllerwire.ScheduleRun{RunID: "run-scheduled", Schedule: schedule},
+		"git-credential-releases.json": map[string]any{"releases": []gitCredentialReleaseJSON{{
+			Host: "gitlab.com", Repository: "git:gitlab.com/acme/app", RunID: "run-jobs", JobID: "build", Generation: 1,
+			Runner: "moonborn", CapabilityPrefix: "swk_abc123", ReleasedAt: 1793250079,
+		}}},
 	}
 }
 

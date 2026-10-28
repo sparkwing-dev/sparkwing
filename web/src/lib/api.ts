@@ -193,45 +193,26 @@ export function runDurationMs(run: Run): number {
   );
 }
 
+// Node is the run page's view of one job, projected from run detail by runDetailView.
 export interface Node {
   run_id?: string;
   id: string;
   status: string;
   outcome: string;
   deps: string[];
+  groups?: string[];
+  on_failure_of?: string;
+  approval?: boolean;
   error?: string;
-  output?: unknown;
   started_at?: string;
   finished_at?: string;
   duration_ms: number;
-  claimed?: boolean;
-  executor_kind?: string;
-  executor_name?: string;
-  executor_location?: "local" | "cloud" | "unknown";
-  execution_site?: "machine" | "cloud" | "github-actions" | "cluster";
-  execution_site_name?: string;
-  execution_started_at?: string;
   execution_attempts?: ExecutionAttempt[];
   status_detail?: string;
-  placement_reason?: string;
-  claimed_by?: string;
-  last_heartbeat?: string;
+  // failure_reason is the latest attempt's failure reason.
   failure_reason?: string;
-  exit_code?: number;
   annotations?: string[];
-  summary?: string;
-  groups?: string[];
-  dynamic?: boolean;
-  approval?: boolean;
-  on_failure_of?: string;
-  modifiers?: NodeModifiers;
   work?: NodeWork;
-  spawned_pipelines?: SpawnedPipelineRef[];
-  requested_cores?: number;
-  requested_memory_bytes?: number;
-  cpu_nanos?: number;
-  max_rss_bytes?: number;
-  process_wall_nanos?: number;
 }
 
 export interface ExecutionAttempt {
@@ -241,43 +222,10 @@ export interface ExecutionAttempt {
   executor_kind?: string;
   executor_name?: string;
   location?: "local" | "cloud" | "unknown";
-  execution_site?: "machine" | "cloud" | "github-actions" | "cluster";
-  execution_site_name?: string;
-  platform?: string;
   started_at?: string;
   finished_at?: string;
   outcome?: string;
   failure_reason?: string;
-  retry_run_id?: string;
-}
-
-export interface SpawnedPipelineRef {
-  pipeline: string;
-  child_run_id: string;
-}
-
-export interface NodeModifiers {
-  retry?: number;
-  retry_backoff_ms?: number;
-  retry_auto?: boolean;
-  timeout_ms?: number;
-  no_progress_timeout_ms?: number;
-  runs_on?: string[];
-  cache?: boolean;
-  cache_ttl_ms?: number;
-  conc_group?: string;
-  conc_capacity?: number;
-  conc_cost?: number;
-  conc_scope?: string;
-  conc_on_limit?: string;
-  conc_queue_timeout_ms?: number;
-  inline?: boolean;
-  optional?: boolean;
-  continue_on_error?: boolean;
-  on_failure?: string;
-  has_before_run?: boolean;
-  has_after_run?: boolean;
-  has_skip_if?: boolean;
 }
 
 export interface NodeWork {
@@ -343,6 +291,9 @@ export interface RunDetailWire {
 export interface JobDetailWire {
   id: string;
   needs?: string[];
+  groups?: string[];
+  on_failure_of?: string;
+  approval?: boolean;
   status: string;
   outcome?: string;
   status_detail?: string;
@@ -379,6 +330,7 @@ export interface StepDetailWire {
   annotations?: { message?: string }[];
   started_at?: string;
   finished_at?: string;
+  summary?: string;
 }
 
 function durationMs(started?: string, finished?: string): number {
@@ -427,6 +379,7 @@ function jobSteps(jobID: string, steps: StepDetailWire[]): NodeWork | undefined 
       finished_at: step.finished_at,
       duration_ms: durationMs(step.started_at, step.finished_at) || undefined,
       annotations: messages(step.annotations),
+      summary: step.summary || undefined,
     })),
   };
 }
@@ -480,12 +433,16 @@ export function runDetailView(
       status: job.status === "done" ? job.outcome || "done" : job.status,
       outcome: job.outcome ?? "",
       deps: job.needs ?? [],
+      groups: job.groups,
+      on_failure_of: job.on_failure_of,
+      approval: job.approval,
       error: job.error || undefined,
       status_detail: job.status_detail || undefined,
       started_at: job.started_at,
       finished_at: job.finished_at,
       duration_ms: durationMs(job.started_at, job.finished_at),
       execution_attempts: attempts.length ? attempts : undefined,
+      failure_reason: attempts.at(-1)?.failure_reason || undefined,
       annotations: messages(job.annotations),
       work: jobSteps(job.id, steps),
     };

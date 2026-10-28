@@ -26,11 +26,6 @@ export interface NodeResourceSummary {
   sampledPeakMemoryBytes: number;
   commandPeakCPUMillicores: number;
   commandPeakMemoryBytes: number;
-  requestedCPUMillicores: number;
-  requestedMemoryBytes: number;
-  exactCPUTimeNanos: number;
-  exactMeanCPUMillicores: number;
-  exactMaxRSSBytes: number;
   commandCPUTimeNanos: number;
 }
 
@@ -134,8 +129,6 @@ export function summarizeNodeResources(
   const points = metrics?.points ?? [];
   const samplerPoints = points.filter((point) => !isCommandMetricPoint(point));
   const commandPoints = points.filter(isCommandMetricPoint);
-  const exactWall = Math.max(node.process_wall_nanos ?? 0, 0);
-  const exactCPU = Math.max(node.cpu_nanos ?? 0, 0);
   return {
     samplerCount: samplerPoints.length,
     commandCount: commandPoints.length,
@@ -155,15 +148,6 @@ export function summarizeNodeResources(
       0,
       ...commandPoints.map((point) => point.memory_bytes),
     ),
-    requestedCPUMillicores: Math.max(
-      Math.round((node.requested_cores ?? 0) * 1000),
-      0,
-    ),
-    requestedMemoryBytes: Math.max(node.requested_memory_bytes ?? 0, 0),
-    exactCPUTimeNanos: exactCPU,
-    exactMeanCPUMillicores:
-      exactWall > 0 ? Math.round((exactCPU / exactWall) * 1000) : 0,
-    exactMaxRSSBytes: Math.max(node.max_rss_bytes ?? 0, 0),
     commandCPUTimeNanos: commandPoints.reduce(
       (total, point) => total + Math.max(point.cpu_time_nanos ?? 0, 0),
       0,

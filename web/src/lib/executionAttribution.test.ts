@@ -7,7 +7,6 @@ import {
   executionAttempts,
   executionAttemptsNewestFirst,
   executionDisplay,
-  placementLabel,
 } from "./executionAttribution";
 
 function node(fields: Partial<Node>): Node {
@@ -22,24 +21,8 @@ function node(fields: Partial<Node>): Node {
 }
 
 describe("executionAttempts", () => {
-  it("does not turn a claim flag into execution attribution", () => {
-    assert.deepEqual(executionAttempts(node({ claimed: true })), []);
-  });
-
-  it("adapts the explicit single-attempt fields without guessing location", () => {
-    const attempts = executionAttempts(
-      node({
-        run_id: "run-one",
-        executor_kind: "agent",
-        executor_name: "desktop",
-        execution_started_at: "2026-09-02T20:00:00Z",
-      }),
-    );
-    assert.equal(attempts.length, 1);
-    assert.equal(attempts[0].location, "unknown");
-    assert.equal(attempts[0].executor_name, "desktop");
-    assert.equal(attempts[0].run_id, "run-one");
-    assert.equal(attempts[0].node_id, "build");
+  it("has nothing to attribute before an attempt starts", () => {
+    assert.deepEqual(executionAttempts(node({})), []);
   });
 
   it("sorts durable attempts by numeric ordinal", () => {
@@ -61,7 +44,6 @@ describe("executionAttempts", () => {
         executor_name: "desktop",
         location: "local" as const,
         outcome: "agent_lost",
-        retry_run_id: "run-two",
       },
     ];
     const n = node({ execution_attempts: attempts });
@@ -102,11 +84,6 @@ describe("executionAttempts", () => {
 });
 
 describe("executionDisplay", () => {
-  it("derives placement from a known historical execution site", () => {
-    const display = executionDisplay({ execution_site: "cluster", execution_site_name: "job-a" });
-    assert.equal(display.locationLabel, "Cloud");
-    assert.equal(display.executorLabel, "cluster job-a");
-  });
   it("maps known execution origins to a compact icon and specific tooltip", () => {
     assert.deepEqual(
       [
@@ -124,17 +101,14 @@ describe("executionDisplay", () => {
     );
     assert.equal(executionDisplay({ location: "unknown" }).icon, null);
     assert.equal(executionDisplay({
-      executor_kind: "agent",
+      executor_kind: "runner",
       executor_name: "runner-1",
-      execution_site: "machine",
-      execution_site_name: "moonborn",
-    }).executorLabel, "agent runner-1");
+    }).executorLabel, "runner runner-1");
   });
   it("uses text and a separate style for every location", () => {
     const local = executionDisplay({
       location: "local",
       executor_name: "box",
-      platform: "darwin/arm64",
     });
     const cloud = executionDisplay({
       location: "cloud",
@@ -143,9 +117,7 @@ describe("executionDisplay", () => {
     const unknown = executionDisplay({ executor_name: "legacy" });
 
     assert.equal(local.locationLabel, "Local");
-    assert.equal(local.platformLabel, "darwin/arm64");
     assert.equal(cloud.locationLabel, "Cloud");
-    assert.equal(cloud.platformLabel, null);
     assert.equal(unknown.locationLabel, "Location unknown");
     assert.notEqual(local.className, cloud.className);
     assert.notEqual(cloud.className, unknown.className);
@@ -166,8 +138,8 @@ describe("compactExecutionDisplay", () => {
     );
   });
 
-  it("shows nothing for a claimed node with no attempt", () => {
-    assert.equal(compactExecutionDisplay(node({ claimed: true })), null);
+  it("shows nothing for a node with no attempt", () => {
+    assert.equal(compactExecutionDisplay(node({})), null);
   });
 
   it("shows the latest known location", () => {
@@ -180,38 +152,5 @@ describe("compactExecutionDisplay", () => {
       }),
     );
     assert.equal(display?.location, "local");
-  });
-});
-
-describe("placementLabel", () => {
-  it("names the runner a preference chose", () => {
-    assert.equal(
-      placementLabel(
-        node({ claimed_by: "runner:laptop:1", placement_reason: "preference" }),
-      ),
-      "runner:laptop:1 (preferred)",
-    );
-  });
-
-  it("says a fallback followed the hold", () => {
-    assert.equal(
-      placementLabel(
-        node({ claimed_by: "runner:cloudpod:1", placement_reason: "fallback" }),
-      ),
-      "runner:cloudpod:1 (fallback after the local-first hold)",
-    );
-  });
-
-  it("says nothing about a node nobody preferred", () => {
-    assert.equal(
-      placementLabel(
-        node({ claimed_by: "runner:cloudpod:1", placement_reason: "none" }),
-      ),
-      null,
-    );
-  });
-
-  it("says nothing about an unclaimed node", () => {
-    assert.equal(placementLabel(node({ placement_reason: "preference" })), null);
   });
 });

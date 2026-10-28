@@ -108,7 +108,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		job.Error = errorsByJob[job.ID]
 		detail.Jobs = append(detail.Jobs, job)
 	}
-	if err := fillJobNeeds(detail.Jobs, nodes); err != nil {
+	if err := fillJobDeclarations(detail.Jobs, nodes); err != nil {
 		return controllerwire.RunDetail{}, err
 	}
 	attempts, err := statusAttempts(target, nodes, facts.Attempts)
@@ -144,7 +144,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 }
 
 // safety: a need on a job this run never planned would draw an edge to nothing, so only planned jobs pass.
-func fillJobNeeds(jobs []controllerwire.JobDetail, nodes map[string]runstate.NodeRow) error {
+func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runstate.NodeRow) error {
 	for i := range jobs {
 		spec := nodes[jobs[i].ID].Spec
 		if len(spec) == 0 {
@@ -159,6 +159,10 @@ func fillJobNeeds(jobs []controllerwire.JobDetail, nodes map[string]runstate.Nod
 				jobs[i].Needs = append(jobs[i].Needs, need)
 			}
 		}
+		if _, exists := nodes[declaration.OnFailureOf]; exists {
+			jobs[i].OnFailureOf = declaration.OnFailureOf
+		}
+		jobs[i].Groups, jobs[i].Approval = declaration.Groups, declaration.Approval != nil
 	}
 	return nil
 }

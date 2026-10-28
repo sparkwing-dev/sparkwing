@@ -1599,6 +1599,8 @@ components:
             - type: "null"
         application_retries:
           type: integer
+        approval:
+          type: boolean
         attempt:
           type: integer
         cancel_requested_at:
@@ -1627,6 +1629,12 @@ components:
             - type: "null"
         generation:
           type: integer
+        groups:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         id:
           type: string
         lease_expires_at:
@@ -1644,6 +1652,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        on_failure_of:
+          type: string
         outcome:
           type: string
         output_record:
@@ -1848,6 +1858,8 @@ components:
                 $ref: '#/components/schemas/internal.controllerwire.Annotation'
               type: array
             - type: "null"
+        approval:
+          type: boolean
         attempt:
           type: integer
         cancel_requested_at:
@@ -1866,6 +1878,12 @@ components:
             - type: "null"
         generation:
           type: integer
+        groups:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         id:
           type: string
         needs:
@@ -1874,6 +1892,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        on_failure_of:
+          type: string
         outcome:
           type: string
         started_at:
@@ -3377,6 +3397,8 @@ components:
                 $ref: '#/components/schemas/internal.controllerwire.Annotation'
               type: array
             - type: "null"
+        approval:
+          type: boolean
         attempt:
           type: integer
         cancel_requested_at:
@@ -3399,6 +3421,12 @@ components:
             - type: "null"
         generation:
           type: integer
+        groups:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         id:
           type: string
         needs:
@@ -3407,6 +3435,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        on_failure_of:
+          type: string
         outcome:
           type: string
         ready:
@@ -4071,6 +4101,8 @@ components:
               type: string
             - type: "null"
         status:
+          type: string
+        summary:
           type: string
       required:
         - job_id

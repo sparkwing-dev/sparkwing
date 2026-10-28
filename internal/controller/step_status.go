@@ -10,7 +10,10 @@ func publicRunSteps(rows []*store.NodeStep) controllerwire.RunSteps {
 	for _, row := range rows {
 		step := controllerwire.StepDetail{
 			JobID: row.NodeID, ID: row.StepID, Attempt: row.Attempt, Status: row.Status,
-			Reason: row.Error, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt,
+			Reason: row.Error, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt, Summary: row.Summary,
+		}
+		for _, message := range row.Annotations {
+			step.Annotations = append(step.Annotations, controllerwire.Annotation{Message: message})
 		}
 		if row.Status != "running" {
 			step.Outcome = row.Status

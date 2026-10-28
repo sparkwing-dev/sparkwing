@@ -69,7 +69,7 @@ func TestEngineRunDetailUsesCurrentInvocationLineage(t *testing.T) {
 	}
 }
 
-func TestEngineRunDetailCarriesDeclaredJobNeeds(t *testing.T) {
+func TestEngineRunDetailCarriesJobDeclarations(t *testing.T) {
 	request := runspec.SealedRequest{RunID: "run", Request: runspec.Request{Team: "a"}}
 	node := func(id, spec string) runstate.NodeRow {
 		return runstate.NodeRow{Ref: runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, Spec: json.RawMessage(spec)}
@@ -77,7 +77,8 @@ func TestEngineRunDetailCarriesDeclaredJobNeeds(t *testing.T) {
 	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{Team: "a", Execution: runstate.Execution{ID: "run", Request: request}}, Nodes: []runstate.NodeRow{
 		node("build", `{"id":"build"}`),
 		node("test", `{"id":"test","deps":["build"],"deps_if_present":["lint","build"]}`),
-		node("deploy", `{"id":"deploy","deps":["test","build"]}`),
+		node("deploy", `{"id":"deploy","deps":["test","build"],"groups":["release"],"approval":{},"on_failure_of":"test"}`),
+		node("notify", `{"id":"notify","on_failure_of":"absent"}`),
 	}}}
 	got, err := runDetailResponse(capability.Target{Team: "a", RunID: "run"}, RunStatusFacts{Snapshot: view.Snapshot})
 	if err != nil {
@@ -87,8 +88,12 @@ func TestEngineRunDetailCarriesDeclaredJobNeeds(t *testing.T) {
 	for _, job := range got.Jobs {
 		needs[job.ID] = job.Needs
 	}
-	if want := map[string][]string{"build": nil, "test": {"build"}, "deploy": {"test", "build"}}; !reflect.DeepEqual(needs, want) {
+	if want := map[string][]string{"build": nil, "test": {"build"}, "deploy": {"test", "build"}, "notify": nil}; !reflect.DeepEqual(needs, want) {
 		t.Fatalf("job needs: %v, want %v", needs, want)
+	}
+	deploy, notify := got.Jobs[2], got.Jobs[3]
+	if !reflect.DeepEqual(deploy.Groups, []string{"release"}) || !deploy.Approval || deploy.OnFailureOf != "test" || notify.OnFailureOf != "" || notify.Approval {
+		t.Fatalf("job declarations: %+v %+v", deploy, notify)
 	}
 	view.Snapshot.Nodes[0].Spec = json.RawMessage(`{`)
 	if _, err := runDetailResponse(capability.Target{Team: "a", RunID: "run"}, RunStatusFacts{Snapshot: view.Snapshot}); err == nil {

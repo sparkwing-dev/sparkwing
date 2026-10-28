@@ -37,7 +37,6 @@ import {
   type RunLogMatch,
   type RunsGrepMatch,
   type RunsGrepResponse,
-  type SpawnedPipelineRef,
   type PipelineMeta,
   type Run,
   type RunDetail,
@@ -3628,11 +3627,6 @@ function NodeLogSummary({ node }: { node: RunNode }) {
             {node.failure_reason}
           </span>
         )}
-        {typeof node.exit_code === "number" && node.exit_code !== 0 && (
-          <span className="font-mono text-[10px] text-[var(--muted)]">
-            exit {node.exit_code}
-          </span>
-        )}
         {node.duration_ms > 0 && (
           <span className="font-mono text-[10px] text-[var(--muted)] ml-auto">
             {fmtMs(node.duration_ms)}
@@ -3699,9 +3693,6 @@ function RunSummariesList({
       };
   const cards: Card[] = [];
   for (const n of nodes) {
-    if (n.summary && n.summary.trim() !== "") {
-      cards.push({ kind: "node", node: n, md: n.summary, key: n.id });
-    }
     for (const s of n.work?.steps ?? []) {
       if (s.summary && s.summary.trim() !== "") {
         cards.push({
@@ -4514,7 +4505,6 @@ function DAG({
   findMatchedSteps?: Set<string>;
   reusedNodeIDs?: Set<string>;
 }) {
-  const dagRouter = useRouter();
   const dagRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!selected) return;
@@ -5096,16 +5086,10 @@ function DAG({
                 })()}
                 {(() => {
                   type TopPill =
-                    | { kind: "dynamic"; w: number }
                     | { kind: "approval"; w: number }
                     | { kind: "reused"; w: number }
-                    | { kind: "cached"; w: number }
-                    | { kind: "inline"; w: number }
-                    | { kind: "spawned"; w: number };
+                    | { kind: "cached"; w: number };
                   const pills: TopPill[] = [];
-                  if (n.dynamic) {
-                    pills.push({ kind: "dynamic", w: DYNAMIC_PILL_W });
-                  }
                   if (n.approval) {
                     pills.push({ kind: "approval", w: approvalPillWidth(n) });
                   }
@@ -5114,15 +5098,6 @@ function DAG({
                   }
                   if (n.outcome === "memoized") {
                     pills.push({ kind: "cached", w: CACHED_PILL_W });
-                  }
-                  if (n.modifiers?.inline) {
-                    pills.push({ kind: "inline", w: INLINE_PILL_W });
-                  }
-                  if ((n.spawned_pipelines?.length ?? 0) > 0) {
-                    pills.push({
-                      kind: "spawned",
-                      w: crossPipelinePillWidth(n.spawned_pipelines!),
-                    });
                   }
                   if (pills.length === 0) return null;
                   const gap = 4;
@@ -5135,11 +5110,6 @@ function DAG({
                     const x = cursor;
                     cursor += pl.w + gap;
                     switch (pl.kind) {
-                      case "dynamic":
-                        out.push(
-                          <DynamicPill key="dynamic" nodeW={p.w} x={x} />,
-                        );
-                        break;
                       case "approval":
                         out.push(
                           <ApprovalPill
@@ -5155,24 +5125,6 @@ function DAG({
                         break;
                       case "cached":
                         out.push(<CachedPill key="cached" nodeW={p.w} x={x} />);
-                        break;
-                      case "inline":
-                        out.push(<InlinePill key="inline" nodeW={p.w} x={x} />);
-                        break;
-                      case "spawned":
-                        out.push(
-                          <CrossPipelinePill
-                            key="spawned"
-                            nodeW={p.w}
-                            x={x}
-                            pipelines={n.spawned_pipelines!}
-                            onOpen={(runID) =>
-                              dagRouter.push(
-                                `?run=${encodeURIComponent(runID)}`,
-                              )
-                            }
-                          />,
-                        );
                         break;
                     }
                   }
@@ -5201,10 +5153,7 @@ function DAG({
                 })()}
                 {(() => {
                   const stepCount = n.work?.steps?.length ?? 0;
-                  const hasError =
-                    !!n.error ||
-                    !!n.failure_reason ||
-                    (typeof n.exit_code === "number" && n.exit_code !== 0);
+                  const hasError = !!n.error || !!n.failure_reason;
                   if (stepCount === 0 && !hasError) return null;
                   let cursor = p.w - 6;
                   const elems: React.ReactElement[] = [];
@@ -5248,10 +5197,7 @@ function DAG({
                   if (hasError) {
                     const w = 18;
                     cursor -= w;
-                    const text =
-                      stripAnsi(n.error ?? "") ||
-                      n.failure_reason ||
-                      `exit ${n.exit_code}`;
+                    const text = stripAnsi(n.error ?? "") || n.failure_reason || "";
                     elems.push(
                       <NodeBadge
                         key="error"
@@ -6015,11 +5961,6 @@ function DagNodeTooltip({
     pointerEvents: "none",
   };
   const badges: { label: string; cls: string }[] = [];
-  if (node.dynamic)
-    badges.push({
-      label: "dynamic",
-      cls: "bg-fuchsia-500/20 text-fuchsia-300",
-    });
   if (node.approval)
     badges.push({
       label: "approval gate",
@@ -6074,18 +6015,6 @@ function DagNodeTooltip({
               <span className="text-[var(--muted)]">Fail reason:</span>
               <span className="font-mono text-red-300">
                 {node.failure_reason}
-              </span>
-            </>
-          )}
-          {(node.spawned_pipelines?.length ?? 0) > 0 && (
-            <>
-              <span className="text-[var(--muted)]">Spawns:</span>
-              <span className="font-mono text-sky-300 whitespace-pre-wrap">
-                {node
-                  .spawned_pipelines!.map(
-                    (p) => `↗ ${p.pipeline} (${p.child_run_id.slice(-8)})`,
-                  )
-                  .join("\n")}
               </span>
             </>
           )}
@@ -6169,41 +6098,6 @@ function NodeBadge({
   );
 }
 
-const DYNAMIC_PILL_W = 56;
-function DynamicPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
-  const pillW = DYNAMIC_PILL_W;
-  const pillH = 15;
-  const x = xOverride ?? (nodeW - pillW) / 2;
-  const y = -6;
-  return (
-    <g style={{ pointerEvents: "none" }}>
-      <rect
-        x={x}
-        y={y}
-        width={pillW}
-        height={pillH}
-        rx={pillH / 2}
-        ry={pillH / 2}
-        fill="url(#dynamic-pill-grad)"
-      />
-      <text
-        x={x + pillW / 2}
-        y={y + pillH / 2 + 3.5}
-        textAnchor="middle"
-        fill="white"
-        fontSize={10}
-        fontWeight={700}
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        style={{
-          letterSpacing: "0.5px",
-          filter: "drop-shadow(0 0 1px rgba(0,0,0,0.6))",
-        }}
-      >
-        DYNAMIC
-      </text>
-    </g>
-  );
-}
 
 function approvalPillWidth(n: RunNode): number {
   const { label } = approvalPillVisuals(n);
@@ -6281,38 +6175,6 @@ function approvalPillVisuals(n: RunNode): {
   return { label: "APPROVAL", fill: "rgba(148,163,184,0.75)", pulse: false };
 }
 
-const INLINE_PILL_W = 48;
-function InlinePill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
-  const pillW = INLINE_PILL_W;
-  const pillH = 15;
-  const x = xOverride ?? (nodeW - pillW) / 2;
-  const y = -6;
-  return (
-    <g style={{ pointerEvents: "none" }}>
-      <rect
-        x={x}
-        y={y}
-        width={pillW}
-        height={pillH}
-        rx={pillH / 2}
-        ry={pillH / 2}
-        fill="rgba(148,163,184,0.95)"
-      />
-      <text
-        x={x + pillW / 2}
-        y={y + pillH / 2 + 3.5}
-        textAnchor="middle"
-        fill="rgba(15,15,15,0.95)"
-        fontSize={10}
-        fontWeight={700}
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        style={{ letterSpacing: "0.5px" }}
-      >
-        INLINE
-      </text>
-    </g>
-  );
-}
 
 const REUSED_PILL_W = 52;
 function ReusedPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
@@ -6380,66 +6242,6 @@ function CachedPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
   );
 }
 
-function crossPipelinePillWidth(pipelines: SpawnedPipelineRef[]): number {
-  const label =
-    pipelines.length === 1 ? "↗ SPAWNS" : `↗ SPAWNS ×${pipelines.length}`;
-  return Math.max(48, 12 + label.length * 6);
-}
-function CrossPipelinePill({
-  nodeW,
-  pipelines,
-  onOpen,
-  x: xOverride,
-}: {
-  nodeW: number;
-  pipelines: SpawnedPipelineRef[];
-  onOpen?: (runID: string) => void;
-  x?: number;
-}) {
-  const label =
-    pipelines.length === 1 ? "↗ SPAWNS" : `↗ SPAWNS ×${pipelines.length}`;
-  const pillH = 15;
-  const pillW = crossPipelinePillWidth(pipelines);
-  const x = xOverride ?? (nodeW - pillW) / 2;
-  const y = -6;
-  const first = pipelines[0];
-  const tip = pipelines
-    .map((p) => `↗ ${p.pipeline} (run ${p.child_run_id})`)
-    .join("\n");
-  return (
-    <g
-      style={{ cursor: first ? "pointer" : undefined }}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!first) return;
-        onOpen?.(first.child_run_id);
-      }}
-    >
-      <title>{tip}</title>
-      <rect
-        x={x}
-        y={y}
-        width={pillW}
-        height={pillH}
-        rx={pillH / 2}
-        ry={pillH / 2}
-        fill="rgba(56,189,248,0.95)"
-      />
-      <text
-        x={x + pillW / 2}
-        y={y + pillH / 2 + 3.5}
-        textAnchor="middle"
-        fill="rgba(8,15,30,0.95)"
-        fontSize={10}
-        fontWeight={700}
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        style={{ letterSpacing: "0.3px" }}
-      >
-        {label}
-      </text>
-    </g>
-  );
-}
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
