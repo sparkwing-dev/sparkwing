@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +64,10 @@ type BurstExecutionProof struct {
 	ClaimCloud    func(client.EngineOptions) controllerwire.ClaimedUnit
 	ExchangeCloud func(client.EngineOptions, controllerwire.ClaimedUnit) controllerwire.ClaimedUnit
 	FinishCloud   func()
+	// SecretArgs are requested as secret arguments, so the host masks their values.
+	SecretArgs map[string]string
+	// Failed, when set, expects the job to fail and receives the requester's run detail.
+	Failed func(controllerwire.RunDetail)
 }
 
 // BurstExecutionAcceptance runs the shared burst path through the supplied executor.
@@ -80,7 +86,7 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 	now := time.Now().UTC()
 	clock.pin(func() time.Time { return now })
 	s.engine.claimProfiles = billingCloudProfile{}
-	e := newEngineFixture(s.store, EngineController{RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })})
+	e := newEngineFixture(s.store, EngineController{RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil }), VersionPolicy: engineVersionPolicy(&engineVersionFake{})})
 	s.WithEngineController(e.EngineController)
 	options.HTTP = &http.Client{Transport: inventoryRoundTrip{s.Handler()}}
 	newClient := func(raw string, launcher bool) controllerwire.Controller {
@@ -128,6 +134,10 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 	if proof != nil {
 		input.Pipeline = proof.Pipeline
 		input.Source.Entrypoint = proof.Pipeline
+		if len(proof.SecretArgs) > 0 {
+			input.RequestedArgs = proof.SecretArgs
+			input.SecretArgs = runspec.Optional[[]string]{Set: true, Value: slices.Sorted(maps.Keys(proof.SecretArgs))}
+		}
 	}
 	localSecret := "requesting-machine-only-secret"
 	if proof != nil && proof.Secret != "" {
@@ -166,6 +176,9 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 	resolution := runspec.Resolved{Entrypoint: input.Source.Entrypoint, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}
 	if proof != nil {
 		resolution.Engine = proof.Engine
+		if len(proof.SecretArgs) > 0 {
+			resolution.Args, resolution.SecretArgs = proof.SecretArgs, input.SecretArgs.Value
+		}
 	}
 	accepted, err := owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: resolution})
 	if err != nil || accepted.Spec.Hash == "" || accepted.Spec.Request.Request.Source.BundleDigest.Value != digest {
@@ -318,8 +331,19 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 	if proof != nil {
 		proof.Execute(workerOptions, *awarded.Claim, owner)
 		completed, err := owner.ReadSnapshot(t.Context(), created.RunID)
-		if err != nil || len(completed.Jobs) != 1 || completed.Jobs[0].Outcome != string(runstate.NodeSuccess) {
-			t.Fatalf("owner did not observe successful SDK execution: %+v %v", completed, err)
+		want := runstate.NodeSuccess
+		if proof.Failed != nil {
+			want = runstate.NodeFailed
+		}
+		if err != nil || len(completed.Jobs) != 1 || completed.Jobs[0].Outcome != string(want) {
+			t.Fatalf("owner did not observe %s SDK execution: %+v %v", want, completed, err)
+		}
+		if proof.Failed != nil {
+			detail, err := member.ReadRun(t.Context(), created.RunID)
+			if err != nil {
+				t.Fatalf("requester run detail: %v", err)
+			}
+			proof.Failed(detail)
 		}
 	}
 	if proof == nil && placement != "cloud-retry" {

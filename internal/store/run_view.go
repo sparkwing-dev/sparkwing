@@ -19,8 +19,14 @@ type RunView struct {
 	Snapshot RunSnapshot
 	Attempts []runstate.NodeAttempt
 	Logs     []blob.LogSubject
-	Failures []string
+	Failures []RunFailure
 	Waiting  *UnclaimedUnit
+}
+
+// RunFailure is a persisted masked error of the run (JobID empty) or one of its jobs.
+type RunFailure struct {
+	JobID string
+	Error string
 }
 
 // ReadRunView reads only this tenant's run, without exposing log storage locations.
@@ -61,16 +67,16 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 	return view, nil
 }
 
-func readRunFailuresTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]string, error) {
-	rows, err := tx.queryContext(ctx, `SELECT error FROM runs WHERE team=? AND id=? AND error<>'' UNION ALL SELECT error FROM nodes WHERE team=? AND run_id=? AND error<>''`, team, runID, team, runID)
+func readRunFailuresTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]RunFailure, error) {
+	rows, err := tx.queryContext(ctx, `SELECT '',error FROM runs WHERE team=? AND id=? AND error<>'' UNION ALL SELECT node_id,error FROM nodes WHERE team=? AND run_id=? AND error<>''`, team, runID, team, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	failures := []string{}
+	failures := []RunFailure{}
 	for rows.Next() {
-		var failure string
-		if err := rows.Scan(&failure); err != nil {
+		var failure RunFailure
+		if err := rows.Scan(&failure.JobID, &failure.Error); err != nil {
 			return nil, err
 		}
 		failures = append(failures, failure)

@@ -17,13 +17,15 @@ import (
 )
 
 // RunStatusFacts combines one committed run/job snapshot with complete attempt
-// history and validated log subjects from that read. Notices carry engine
-// version policy and unclaimed-work observations. Private fields stay here until
-// the public display projection.
+// history and validated log subjects from that read. Failures carry the masked
+// job errors, including those reported before any attempt started. Notices carry
+// engine version policy and unclaimed-work observations. Private fields stay here
+// until the public display projection.
 type RunStatusFacts struct {
 	Snapshot store.RunSnapshot
 	Attempts []runstate.NodeAttempt
 	Logs     []blob.LogSubject
+	Failures []store.RunFailure
 	Notices  []engineid.Notice
 }
 
@@ -80,6 +82,12 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		identity := run.Spec.Resolved.Engine
 		detail.Engine = &identity
 	}
+	errorsByJob := make(map[string]string, len(facts.Failures))
+	for _, failure := range facts.Failures {
+		if failure.JobID != "" {
+			errorsByJob[failure.JobID] = failure.Error
+		}
+	}
 	nodes := make(map[string]runstate.NodeRow, len(facts.Snapshot.Nodes))
 	for _, row := range facts.Snapshot.Nodes {
 		if row.Ref.RunID != runspec.RunID(run.ID) || row.Ref.NodeID == "" {
@@ -89,7 +97,9 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 			return controllerwire.RunDetail{}, errors.New("duplicate persisted status job")
 		}
 		nodes[string(row.Ref.NodeID)] = row
-		detail.Jobs = append(detail.Jobs, snapshotJob(row))
+		job := snapshotJob(row)
+		job.Error = errorsByJob[job.ID]
+		detail.Jobs = append(detail.Jobs, job)
 	}
 	attempts, err := statusAttempts(target, nodes, facts.Attempts)
 	if err != nil {
@@ -156,7 +166,7 @@ func (s *EngineController) readStoredRunStatus(ctx context.Context, team store.T
 }
 
 func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView) (RunStatusFacts, error) {
-	facts := RunStatusFacts{Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs}
+	facts := RunStatusFacts{Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures}
 	if view.Snapshot.Run.Spec != nil {
 		if s.VersionPolicy == nil {
 			return RunStatusFacts{}, versionPolicyUnavailable()
