@@ -30,8 +30,8 @@ func init() {
 	docs.Version = installedVersion()
 }
 
-// safety: main prints the upgrade notice after the command's output and any
-// failure, so the first line a reader or script sees is the command's answer.
+// safety: main prints the upgrade notice after the command's output and any failure, so the
+// first line a reader sees is the answer; a run that hands off to a pinned engine skips it.
 var noticeVerb string
 
 func main() {

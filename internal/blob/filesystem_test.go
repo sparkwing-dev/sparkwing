@@ -1,6 +1,8 @@
 package blob
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -117,7 +119,28 @@ func TestFilesystemRefusesInvalidTransfers(t *testing.T) {
 	}{
 		{"method", func(r *http.Request) { r.Method = http.MethodGet }},
 		{"path", func(r *http.Request) { r.URL.Path = "/elsewhere" }},
-		{"signature", func(r *http.Request) { r.URL.RawQuery += "x" }},
+		{"signature", func(r *http.Request) {
+			q := r.URL.Query()
+			q.Set("signature", strings.Repeat("A", len(q.Get("signature"))))
+			r.URL.RawQuery = q.Encode()
+		}},
+		{"expiry", func(r *http.Request) {
+			q := r.URL.Query()
+			raw, err := base64.RawURLEncoding.DecodeString(q.Get("token"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var object capability.ObjectToSign
+			if err := json.Unmarshal(raw, &object); err != nil {
+				t.Fatal(err)
+			}
+			object.ExpiresAt = object.ExpiresAt.Add(time.Hour)
+			if raw, err = json.Marshal(object); err != nil {
+				t.Fatal(err)
+			}
+			q.Set("token", base64.RawURLEncoding.EncodeToString(raw))
+			r.URL.RawQuery = q.Encode()
+		}},
 		{"duplicate", func(r *http.Request) { r.URL.RawQuery += "&token=extra" }},
 		{"tamper", func(r *http.Request) {
 			q := r.URL.Query()
