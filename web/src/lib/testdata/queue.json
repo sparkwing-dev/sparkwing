@@ -1,0 +1,71 @@
+{
+  "resources": [
+    {
+      "key": "cores",
+      "capacity": 8,
+      "held": 4,
+      "reserved": 1,
+      "external": 1.5,
+      "external_source": "measured",
+      "available": 1.5
+    },
+    {
+      "key": "memory",
+      "capacity": 17179869184,
+      "held": 4294967296,
+      "reserved": 1073741824,
+      "external_source": "unmeasured",
+      "available": 11811160064
+    }
+  ],
+  "holders": [
+    {
+      "run_id": "run-jobs",
+      "participant_id": "run-jobs/node-host/dGVzdA",
+      "display_run_id": "run-jobs/test",
+      "pipeline": "hello",
+      "repo": "app",
+      "elapsed_ms": 12000,
+      "resources": {
+        "cores": 4,
+        "memory_bytes": 4294967296
+      },
+      "cost_source": "measured",
+      "cost_rationale": "measured sustained p95 over 12 runs",
+      "expected_duration_ms": 60000,
+      "origin": "local"
+    }
+  ],
+  "waiters": [
+    {
+      "run_id": "run-plan",
+      "display_run_id": "run-plan",
+      "pipeline": "hello",
+      "repo": "app",
+      "position": 1,
+      "resources": {
+        "cores": 3,
+        "memory_bytes": 2147483648
+      },
+      "waiting_on": [
+        "cores"
+      ],
+      "blocking_reason": "needs 3.0 cores; 1.5 available (external load 1.5)",
+      "waiting_ms": 4000,
+      "cost_source": "default",
+      "cost_rationale": "first run, conservative default until measured",
+      "expected_start_ms": 48000
+    }
+  ],
+  "admission_mode": "auto",
+  "expected_clear_ms": 108000,
+  "daemon_version": "v1.2.3",
+  "daemon_uptime_ms": 3600000,
+  "events": {
+    "window_ms": 3600000,
+    "runs": 6,
+    "median_wait_ms": 2000
+  },
+  "external_sample_age_ms": 1000,
+  "external_measurement_age_ms": 1000
+}

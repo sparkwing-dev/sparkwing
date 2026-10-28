@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { QueueHolder, QueueResource, QueueState } from "./api";
 import {
   availabilityResidual,
@@ -479,12 +481,25 @@ describe("hasDaemon", () => {
     assert.equal(hasDaemon({}), false);
     assert.equal(hasDaemon({ holders: [], waiters: [], resources: [] }), false);
   });
-  it("is true once a version, uptime, or any row is present", () => {
-    assert.equal(hasDaemon({ daemon_version: "v0.16.0" }), true);
-    assert.equal(hasDaemon({ daemon_uptime_ms: 1000 }), true);
+  it("is false for the controller's own concurrency groups alone", () => {
     assert.equal(
-      hasDaemon({ resources: [{ key: "cores", capacity: 8, held: 0 }] }),
-      true,
+      hasDaemon({ resources: [{ key: "deploy", capacity: 1, held: 1 }] }),
+      false,
+    );
+  });
+  it("is true for the local controller's report of a running daemon", () => {
+    const qs = JSON.parse(
+      readFileSync(join(__dirname, "testdata", "queue.json"), "utf8"),
+    ) as QueueState;
+    assert.equal(hasDaemon(qs), true);
+    assert.equal(daemonUptimeLabel(qs), "up 1h");
+    assert.deepEqual(
+      (qs.resources ?? []).map((r) => [r.key, resourceAvailable(r)]),
+      [["cores", 1.5], ["memory", 11 * 2 ** 30]],
+    );
+    assert.equal(
+      externalUnmeasuredNote(qs),
+      "External load is unmeasured on memory (host sensor unavailable); none was subtracted from available.",
     );
   });
 });

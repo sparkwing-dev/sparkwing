@@ -128,7 +128,12 @@ claim's binding. Members may read only unmasked values in their own team.
 `GET /api/v1/queue` uses the shared capability policy. A member or verified
 local peer needs `runs.read` for its active team. Queue groups and advertised
 runner headroom belong to that team. Machine roots and work claims cannot read
-the team queue. The former `/api/v1/queue/state` path is removed.
+the team queue. The former `/api/v1/queue/state` path is removed. The local
+controller that `sparkwing dashboard start` runs also reports its machine's
+admission daemon: `daemon_version`, `daemon_uptime_ms`, the `cores` and
+`memory` rows and the daemon's holders and waiters. Without a running daemon
+those fields are absent, and a daemon that does not answer returns
+`unavailable`. A team or Cloud controller has no daemon to report.
 
 Run intake, plan acceptance, job status reads, job transitions, finish,
 cancellation, retry and run/job renewal use the shared capability policy. The

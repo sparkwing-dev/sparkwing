@@ -60,9 +60,14 @@ func (c policyConnection) PeerIdentity() localhostwire.LocalPeerIdentity { retur
 
 func productionLocalPolicyClient(t *testing.T) client.EngineOptions {
 	t.Helper()
+	return productionLocalPolicyClientAt(t, t.TempDir())
+}
+
+func productionLocalPolicyClientAt(t *testing.T, home string) client.EngineOptions {
+	t.Helper()
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
-	owner, err := openLocalController(t.Context(), t.TempDir())
+	owner, err := openLocalController(t.Context(), home)
 	if err != nil {
 		t.Fatal(err)
 	}

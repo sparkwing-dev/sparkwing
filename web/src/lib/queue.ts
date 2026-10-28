@@ -231,13 +231,10 @@ export function daemonUptimeLabel(qs: QueueState): string {
   return `up ${fmtDuration(up)}`;
 }
 
+// The local controller adds its own concurrency groups to the queue view, so
+// only the daemon's own fields say a daemon answered.
 export function hasDaemon(qs: QueueState): boolean {
-  if (qs.daemon_version) return true;
-  if ((qs.daemon_uptime_ms ?? 0) > 0) return true;
-  if ((qs.holders?.length ?? 0) > 0) return true;
-  if ((qs.waiters?.length ?? 0) > 0) return true;
-  if ((qs.resources?.length ?? 0) > 0) return true;
-  return false;
+  return !!qs.daemon_version || (qs.daemon_uptime_ms ?? 0) > 0;
 }
 
 function totalEvictions(events: QueueEvents): number {

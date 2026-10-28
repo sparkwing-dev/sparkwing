@@ -20,4 +20,19 @@ describe("navTabs", () => {
     assert.ok(hrefs("ready").includes("/team"));
     assert.equal(hrefs("single-team").includes("/team"), false);
   });
+
+  it("links Queue and Capacity only on the local dashboard", () => {
+    assert.ok(hrefs("single-team").includes("/queue"));
+    assert.ok(hrefs("single-team").includes("/capacity"));
+    assert.equal(hrefs("ready").includes("/queue"), false);
+    const runtime = globalThis as { window?: unknown };
+    runtime.window = { __SPARKWING_REQUIRE_LOGIN__: "true" };
+    try {
+      assert.equal(hrefs("single-team").includes("/queue"), false);
+      assert.equal(hrefs("single-team").includes("/capacity"), false);
+      assert.ok(hrefs("single-team").includes("/secrets"));
+    } finally {
+      delete runtime.window;
+    }
+  });
 });

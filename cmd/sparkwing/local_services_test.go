@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -314,4 +315,54 @@ func FuzzLocalServicesKeepOneCapturedHome(f *testing.F) {
 			t.Fatal("bound runtime accepted a different start home")
 		}
 	})
+}
+
+// The console's Queue and Capacity panels read these daemon fields through the local controller.
+func TestProductionLocalQueueReportsTheMachineAdmissionDaemon(t *testing.T) {
+	home := t.TempDir()
+	queue, err := client.NewQueueManager(productionLocalPolicyClientAt(t, home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	absent, err := queue.ReadQueue(t.Context())
+	if err != nil {
+		t.Fatalf("queue without a daemon: %v", err)
+	}
+	if absent.DaemonVersion != "" || absent.DaemonUptimeMS != 0 || len(absent.Resources) != 0 {
+		t.Fatalf("queue without a daemon reported host state: %+v", absent)
+	}
+
+	daemon, err := wingd.New(wingd.Config{Home: home, Version: "v1.2.3", Stay: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, stop := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- daemon.Run(ctx) }()
+	select {
+	case err := <-done:
+		stop()
+		t.Fatal(err)
+	case <-daemon.Ready():
+	}
+	t.Cleanup(func() {
+		stop()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+	live, err := queue.ReadQueue(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.DaemonVersion != "v1.2.3" {
+		t.Errorf("daemon version = %q, want the running daemon's v1.2.3", live.DaemonVersion)
+	}
+	keys := map[string]bool{}
+	for _, r := range live.Resources {
+		keys[r.Key] = r.Capacity > 0
+	}
+	if !keys["cores"] || !keys["memory"] {
+		t.Errorf("host resources = %+v, want the daemon's cores and memory capacity", live.Resources)
+	}
 }
