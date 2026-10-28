@@ -93,7 +93,11 @@ func TestOwnerHostPreparationFailureFinishesRunAndUnit(t *testing.T) {
 	for _, stage := range []string{"acquire", "prepare", "plan"} {
 		t.Run(stage, func(t *testing.T) {
 			f, h, in := newOwnerFixture(t, false)
-			failure := errors.New("private source credential")
+			const credential = "private-source-credential-91d2"
+			if err := h.Masker.Register(credential); err != nil {
+				t.Fatal(err)
+			}
+			failure := errors.New("fetch failed with " + credential)
 			switch stage {
 			case "acquire":
 				h.Acquire = func(context.Context, RunInput) (*source.Entry, error) { return nil, failure }
@@ -114,8 +118,8 @@ func TestOwnerHostPreparationFailureFinishesRunAndUnit(t *testing.T) {
 			if f.finished.Unit != in.Owner.Owner || f.finished.Transition.Cause != runstate.RunFinish {
 				t.Fatalf("unfinished preparation failure: %+v", f.finished)
 			}
-			if f.finished.Transition.MaskedError == failure.Error() {
-				t.Fatal("persisted unmasked setup error")
+			if text := f.finished.Transition.MaskedError; text != "fetch failed with ***" {
+				t.Fatalf("persisted setup error %q, want the masked failure", text)
 			}
 			if f.accepted.RunID != "" {
 				t.Fatal("accepted a failed preparation")
