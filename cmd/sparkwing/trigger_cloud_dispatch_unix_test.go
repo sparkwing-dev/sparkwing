@@ -541,7 +541,7 @@ func TestCloudJobReportsThroughTheNodeHostRoute(t *testing.T) {
 	if _, err := sink.Close(t.Context(), logseg.End{}); err != nil {
 		t.Fatalf("Cloud job log commit: %v", err)
 	}
-	attempt := runspec.AttemptOrdinal(started.Attempt)
+	attempt := started.Attempt
 	if _, err := host.TransitionNode(t.Context(), ref, actor, runstate.NodeCommandPayload{To: runstate.NodeFailed, Cause: runstate.CauseReport, SourceAttempt: &attempt, Extra: runstate.NodeCommandExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, MaskedError: "step failed"}}}); err != nil {
 		t.Fatalf("Cloud job report through the node host route: %v", err)
 	}
