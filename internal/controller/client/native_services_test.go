@@ -15,7 +15,7 @@ import (
 func TestNativeAnnotationPreservesLocationAndStep(t *testing.T) {
 	for _, step := range []string{"", "compile"} {
 		t.Run(step, func(t *testing.T) {
-			input := nodeproto.AnnotationRequest{Step: step, Annotation: nodeproto.Annotation{Level: "warning", Message: "masked note", File: "source.go", Line: 7, EndLine: 9, Column: 3}}
+			input := nodeproto.AnnotationRequest{Step: step, Annotation: nodeproto.Annotation{Level: "warn", Message: "masked note", File: "source.go", Line: 7, EndLine: 9, Column: 3}}
 			transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
 				var body controllerwire.AnnotationWrite
 				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {

@@ -16,8 +16,10 @@
         },
         "level": {
           "enum": [
-            "notice",
-            "warning",
+            "",
+            "debug",
+            "info",
+            "warn",
             "error"
           ],
           "type": "string"

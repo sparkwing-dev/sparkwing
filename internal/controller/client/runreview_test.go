@@ -28,7 +28,7 @@ func TestRunReviewRoutesAndAuthority(t *testing.T) {
 		{"annotate", "POST", "/api/v1/runs/412/jobs/build/annotations", `{"level":"info","message":"note"}`, ``, func(c controllerwire.RunReview) (any, error) {
 			return nil, c.AppendAnnotation(t.Context(), "412", "build", controllerwire.AnnotationWrite{Annotation: nodeproto.Annotation{Level: "info", Message: "note"}})
 		}},
-		{"step", "POST", "/api/v1/runs/412/jobs/build/steps/annotations", `{"level":"warn","message":"note","file":"source.go","line":7,"column":3,"end_line":8,"step_id":"compile"}`, ``, func(c controllerwire.RunReview) (any, error) {
+		{"step", "POST", "/api/v1/runs/412/jobs/build/steps/annotations", `{"level":"warn","message":"note","file":"source.go","line":7,"end_line":8,"column":3,"step_id":"compile"}`, ``, func(c controllerwire.RunReview) (any, error) {
 			return nil, c.AppendAnnotation(t.Context(), "412", "build", controllerwire.AnnotationWrite{StepID: "compile", Annotation: nodeproto.Annotation{Level: "warn", Message: "note", File: "source.go", Line: 7, Column: 3, EndLine: 8}})
 		}},
 	} {
