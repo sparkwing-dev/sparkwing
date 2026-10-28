@@ -74,7 +74,7 @@ func TestRunReviewValidatesBeforeTransport(t *testing.T) {
 			t.Fatalf("accepted %+v", input)
 		}
 	}
-	for _, input := range []controllerwire.AnnotationWrite{{Annotation: nodeproto.Annotation{Level: "", Message: "x"}}, {StepID: "..", Annotation: nodeproto.Annotation{Level: "info", Message: "x"}}} {
+	for _, input := range []controllerwire.AnnotationWrite{{Annotation: nodeproto.Annotation{Level: "warning", Message: "x"}}, {Annotation: nodeproto.Annotation{Message: "x", Line: 5, EndLine: 4}}, {StepID: "..", Annotation: nodeproto.Annotation{Level: "info", Message: "x"}}} {
 		if err := c.AppendAnnotation(t.Context(), "r", "j", input); err == nil {
 			t.Fatalf("accepted %+v", input)
 		}

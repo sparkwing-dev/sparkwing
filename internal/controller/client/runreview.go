@@ -50,8 +50,14 @@ func (c *engineClient) ResolveApproval(ctx context.Context, run, job string, inp
 }
 
 func (c *engineClient) AppendAnnotation(ctx context.Context, run, job string, input controllerwire.AnnotationWrite) error {
-	if !validSelector(run) || !validSelector(job) || input.StepID != "" && !validSelector(input.StepID) || input.Level == "" {
-		return &apierr.Error{Code: apierr.BadRequest, Message: "annotation requires valid run and job selectors and a level"}
+	if !validSelector(run) || !validSelector(job) || input.StepID != "" && !validSelector(input.StepID) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "annotation requires valid run, job and step selectors"}
+	}
+	if input.Level == "" {
+		input.Level = "info"
+	}
+	if err := input.Validate(); err != nil {
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
 	suffix := "/annotations"
 	if input.StepID != "" {

@@ -4,12 +4,13 @@ import { getRunEventsStreamUrl, type RunEvent } from "./api";
 import { type EventStream, openEventStream } from "./eventStream";
 import runEventKinds from "./runEventKinds.json";
 
-// RUN_EVENT_KINDS is every kind the controller's run stream sends
+// RUN_EVENT_KINDS are the run stream's registered state and control event kinds
 // (runstate.RunEventKinds), written to runEventKinds.json by internal/controller's
-// TestConsoleFixturesMatchTheWireTypes, so the stream is heard for each of them.
+// TestConsoleFixturesMatchTheWireTypes. Generic kinds such as a note are not
+// registered, so the page does not refresh on them.
 export const RUN_EVENT_KINDS: readonly string[] = runEventKinds;
 
-// listenForRunEvents hears every run event kind on a stream.
+// listenForRunEvents hears every registered state and control event kind on a stream.
 export function listenForRunEvents(
   es: Pick<EventStream, "addEventListener">,
   handle: (e: MessageEvent) => void,
