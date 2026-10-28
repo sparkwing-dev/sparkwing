@@ -46,8 +46,7 @@ test("Cloud routes explain local admission without polling unsupported APIs", as
 
   await page.goto("/cluster");
   await expect(page.getByRole("heading", { name: "Fleet", exact: true, level: 1 })).toBeVisible();
-  await expect(page.getByText("Queued nodes 0")).toBeVisible();
-  await expect(page.getByText("Running nodes 0")).toBeVisible();
+  await expect(page.getByText("Running jobs 0")).toBeVisible();
   await expect(page.getByRole("link", { name: "Fleet", exact: true })).toBeVisible();
   expect(unsupported).toEqual([]);
 });

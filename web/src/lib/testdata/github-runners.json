@@ -1,0 +1,12 @@
+{
+  "bindings": [
+    {
+      "repository": "acme/app",
+      "repository_id": 9,
+      "repository_owner_id": 8,
+      "created_by": "account:owner",
+      "created_at": 1793250079
+    }
+  ],
+  "workflow": "name: sparkwing\n# --team acme\n"
+}

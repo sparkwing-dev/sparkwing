@@ -85,6 +85,10 @@ func consoleFixtures() map[string]any {
 			Upcoming: []string{"2026-10-29T03:00:00Z"},
 		},
 		"schedule-run.json": controllerwire.ScheduleRun{RunID: "run-scheduled", Schedule: schedule},
+		"github-runners.json": githubBindingsResp{
+			Bindings: []githubBindingJSON{{Repository: "acme/app", RepositoryID: 9, RepositoryOwnerID: 8, CreatedBy: "account:owner", CreatedAt: 1793250079}},
+			Workflow: "name: sparkwing\n# --team acme\n",
+		},
 		"git-credential-releases.json": map[string]any{"releases": []gitCredentialReleaseJSON{{
 			Host: "gitlab.com", Repository: "git:gitlab.com/acme/app", RunID: "run-jobs", JobID: "build", Generation: 1,
 			Runner: "moonborn", CapabilityPrefix: "swk_abc123", ReleasedAt: 1793250079,

@@ -1,7 +1,25 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Page, type Route } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "./fixtures";
 import { startStaticDashboard } from "./static-server";
+
+// wire reads a response the Go controller encodes, generated into
+// web/src/lib/testdata by internal/controller's TestConsoleFixturesMatchTheWireTypes,
+// so the mocks below speak the controller's real shapes.
+function wire<T = Record<string, unknown>>(name: string): T {
+  return JSON.parse(
+    readFileSync(join(__dirname, "..", "..", "src", "lib", "testdata", name), "utf8"),
+  ) as T;
+}
+type WireRecord = Record<string, unknown>;
+const runDetailFixture = wire("run-detail-jobs.json");
+const jobTemplate = (runDetailFixture.jobs as WireRecord[])[0];
+const attemptTemplate = (runDetailFixture.attempts as WireRecord[])[0];
+const runnerTemplate = wire<{ runners: WireRecord[] }>("runners.json").runners[0];
+const pipelinesFixture = wire("pipelines.json");
+const runCreatedFixture = wire("run-created.json");
 
 
 
@@ -91,18 +109,16 @@ const finishedDetail = {
       started_at: "2026-08-27T18:00:00Z",
       finished_at: "2026-08-27T18:01:30Z",
       duration_ms: 90_000,
-      decorations: {
-        work: {
-          steps: [
-            {
-              id: "tests",
-              status: "passed",
-              started_at: "2026-08-27T18:00:00Z",
-              finished_at: "2026-08-27T18:01:30Z",
-              duration_ms: 90_000,
-            },
-          ],
-        },
+      work: {
+        steps: [
+          {
+            id: "tests",
+            status: "passed",
+            started_at: "2026-08-27T18:00:00Z",
+            finished_at: "2026-08-27T18:01:30Z",
+            duration_ms: 90_000,
+          },
+        ],
       },
     },
   ],
@@ -115,9 +131,15 @@ test("keeps a long node name visible beside its location icon", async ({ page })
     nodes: [{
       ...finishedDetail.nodes[0],
       id: longName,
-      executor_kind: "agent",
-      executor_name: "moonborn",
-      executor_location: "local",
+      execution_attempts: [{
+        attempt: 1,
+        executor_kind: "runner",
+        executor_name: "moonborn",
+        location: "local",
+        started_at: "2026-08-27T18:00:00Z",
+        finished_at: "2026-08-27T18:01:30Z",
+        outcome: "success",
+      }],
     }],
   };
   await installMockAPI(page, {
@@ -359,24 +381,22 @@ type ViewNode = Record<string, unknown> & {
   execution_attempts?: Record<string, unknown>[];
 };
 
-// wireDetail encodes a test's run and nodes as GET /api/v1/runs/{run} does
-// (controllerwire.RunDetail), so the page only sees what the controller sends.
+// wireDetail encodes a test's run and nodes as GET /api/v1/runs/{run} does,
+// starting from the controller's own encoding of a run detail, job and attempt.
 function wireDetail(detail: Record<string, unknown>): Record<string, unknown> {
   const run = detail.run as Record<string, unknown>;
   const nodes = (detail.nodes ?? []) as ViewNode[];
   const terminal = ["success", "failed", "cancelled", "skipped", "superseded", "memoized"];
-  return {
+  const inputs = runDetailFixture.inputs as WireRecord;
+  const out: WireRecord = {
+    ...runDetailFixture,
     id: run.id,
-    number: 1,
-    team: "default",
     status: run.status,
-    ...(run.error ? { failure: run.error } : {}),
-    state_seq: 1,
+    failure: run.error,
     inputs: {
+      ...inputs,
       pipeline: run.pipeline,
-      requested_args: {},
       args: run.args ?? {},
-      secret_args: [],
       git: {
         repository: { key: "", display: run.repo ?? "" },
         ref: run.git_branch ?? "",
@@ -385,41 +405,66 @@ function wireDetail(detail: Record<string, unknown>): Record<string, unknown> {
       lineage: { parent_run_id: run.parent_run_id ?? "", parent_job_id: "", retry_of: run.retry_of ?? "" },
     },
     jobs: nodes.map((node) => ({
+      ...jobTemplate,
       id: node.id,
+      needs: (node.deps as string[] | undefined)?.length ? node.deps : undefined,
+      groups: node.groups,
+      on_failure_of: node.on_failure_of,
+      approval: node.approval,
       status: terminal.includes(node.status ?? "") ? "done" : node.status,
       outcome: node.outcome || (terminal.includes(node.status ?? "") ? node.status : undefined),
       status_detail: node.status_detail,
       error: node.error,
-      generation: 1,
       attempt: node.execution_attempts?.length ?? 0,
-      state_seq: 1,
-      expansion: "none",
       started_at: node.started_at,
       finished_at: node.finished_at,
     })),
     attempts: nodes.flatMap((node) =>
       (node.execution_attempts ?? []).map((attempt) => ({
+        ...attemptTemplate,
         job_id: node.id,
         attempt: attempt.attempt ?? 1,
-        generation: 1,
         outcome: attempt.outcome,
         reason: attempt.failure_reason,
-        executor: attempt.executor_name ?? "",
+        executor: attempt.executor_kind ?? "",
+        executor_name: attempt.executor_name,
+        location: attempt.location,
         started_at: attempt.started_at,
         finished_at: attempt.finished_at,
       })),
     ),
-    logs: [],
     started_at: run.started_at,
     finished_at: run.finished_at,
-    notices: [],
+    retry: undefined,
+  };
+  return JSON.parse(JSON.stringify(out));
+}
+
+// wireSteps encodes a test's node steps as GET /api/v1/runs/{run}/steps does.
+function wireSteps(detail: Record<string, unknown> | undefined): Record<string, unknown> {
+  const nodes = (detail?.nodes ?? []) as ViewNode[];
+  return {
+    steps: nodes.flatMap((node) =>
+      ((node.work as { steps?: WireRecord[] } | undefined)?.steps ?? []).map((step) => ({
+        job_id: node.id,
+        id: step.id,
+        label: "",
+        attempt: 1,
+        status: step.status ?? "running",
+        outcome: step.status === "passed" ? "success" : step.status === "running" ? undefined : step.status,
+        annotations: (step.annotations as string[] | undefined)?.map((message) => ({ level: "", message })),
+        summary: step.summary,
+        started_at: step.started_at,
+        finished_at: step.finished_at,
+      })),
+    ),
   };
 }
 
 type MockAPIOptions = {
   runs?: Record<string, unknown>[];
   details?: Record<string, Record<string, unknown>>;
-  agents?: Record<string, unknown>[];
+  runners?: Record<string, unknown>[];
   unauthorized?: boolean;
   failPath?: string;
   onDetail?: (route: Route, runID: string) => Promise<boolean>;
@@ -455,7 +500,10 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
     const request = route.request();
     options.onRequest?.(route);
     if (options.unauthorized) {
-      await route.fulfill({ status: 401, json: { error: "unauthorized" } });
+      await route.fulfill({
+        status: 401,
+        json: { error: { code: "unauthenticated", message: "authentication required" } },
+      });
       return;
     }
 
@@ -481,7 +529,7 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       return;
     }
     const logStreamMatch = path.match(
-      /^\/api\/v1\/runs\/([^/]+)\/logs\/([^/]+)\/stream$/,
+      /^\/api\/v1\/runs\/([^/]+)\/jobs\/([^/]+)\/logs\/stream$/,
     );
     if (request.method() === "GET" && logStreamMatch) {
       if (options.onLogStream) {
@@ -502,12 +550,14 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       await route.fulfill({ json: { approvals: [] } });
       return;
     }
-    if (request.method() === "GET" && path === "/api/v1/agents") {
-      await route.fulfill({ json: { agents: options.agents ?? [] } });
+    if (request.method() === "GET" && path === "/api/v1/runners") {
+      await route.fulfill({
+        json: { runners: (options.runners ?? []).map((runner) => ({ ...runnerTemplate, ...runner })) },
+      });
       return;
     }
     if (request.method() === "GET" && path === "/api/v1/pipelines") {
-      await route.fulfill({ json: { pipelines: {} } });
+      await route.fulfill({ json: { ...pipelinesFixture, pipelines: [] } });
       return;
     }
     if (request.method() === "GET" && path === "/api/v1/queue") {
@@ -522,7 +572,7 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       return;
     }
     const cronActionMatch = path.match(
-      /^\/api\/v1\/crons\/([^/]+)\/(pause|resume|run)$/,
+      /^\/api\/v1\/schedules\/([^/]+)\/(pause|resume|run)$/,
     );
     if (request.method() === "POST" && cronActionMatch) {
       const [, scheduleID, action] = cronActionMatch;
@@ -534,12 +584,12 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       await route.fulfill({
         json:
           action === "run"
-            ? { run_id: "run_now", schedule }
+            ? { run_id: "run_now", schedule, replayed: false }
             : { schedule },
       });
       return;
     }
-    const cronDetailMatch = path.match(/^\/api\/v1\/crons\/([^/]+)$/);
+    const cronDetailMatch = path.match(/^\/api\/v1\/schedules\/([^/]+)$/);
     if (request.method() === "GET" && cronDetailMatch) {
       await route.fulfill(
         options.cronDetail
@@ -556,12 +606,12 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       await route.fulfill({ json: [] });
       return;
     }
-    if (request.method() === "GET" && path.endsWith("/paused")) {
+    if (request.method() === "GET" && path.endsWith("/debug-pauses")) {
       await route.fulfill({ json: [] });
       return;
     }
     const metricsMatch = path.match(
-      /^\/api\/v1\/runs\/([^/]+)\/nodes\/([^/]+)\/metrics$/,
+      /^\/api\/v1\/runs\/([^/]+)\/jobs\/([^/]+)\/metrics$/,
     );
     if (request.method() === "GET" && metricsMatch) {
       const [, runID, nodeID] = metricsMatch;
@@ -576,6 +626,11 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       });
       return;
     }
+    const stepsMatch = path.match(/^\/api\/v1\/runs\/([^/]+)\/steps$/);
+    if (request.method() === "GET" && stepsMatch) {
+      await route.fulfill({ json: wireSteps(options.details?.[stepsMatch[1]]) });
+      return;
+    }
     const detailMatch = path.match(/^\/api\/v1\/runs\/([^/]+)$/);
     if (request.method() === "GET" && detailMatch) {
       if (options.onDetail && (await options.onDetail(route, detailMatch[1]))) {
@@ -585,7 +640,7 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       await route.fulfill(detail ? { json: wireDetail(detail) } : { status: 404, json: {} });
       return;
     }
-    const logMatch = path.match(/^\/api\/v1\/runs\/([^/]+)\/logs\/([^/]+)$/);
+    const logMatch = path.match(/^\/api\/v1\/runs\/([^/]+)\/jobs\/([^/]+)\/logs$/);
     if (request.method() === "GET" && logMatch) {
       await route.fulfill({
         contentType: "application/x-ndjson",
@@ -638,11 +693,11 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       return;
     }
     if (request.method() === "POST" && path.endsWith("/cancel")) {
-      await route.fulfill({ status: 204, body: "" });
+      await route.fulfill({ json: {} });
       return;
     }
     if (request.method() === "POST" && path.endsWith("/retry")) {
-      await route.fulfill({ json: { ...finishedRun, id: "run-retry" } });
+      await route.fulfill({ json: { ...runCreatedFixture, run_id: "run-retry" } });
       return;
     }
     await route.fulfill({ status: 404, json: {} });
@@ -802,8 +857,9 @@ test("surfaces controller authentication failures", async ({ page }) => {
   await installMockAPI(page, { unauthorized: true });
   await page.goto("/");
 
-  await expect(page.getByText("Authentication failed", { exact: true })).toBeVisible();
-  await expect(page.getByText(/API token is missing or invalid/)).toBeVisible();
+  await expect(page.getByText("You are not signed in", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Your sign-in is missing or has expired/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sign in again" })).toHaveAttribute("href", "/login");
 });
 
 test("opens a completed run and renders stored node logs", async ({ page }) => {
@@ -922,23 +978,12 @@ test("keeps run panes the same size while switching selected runs", async ({ pag
   }
 });
 
-test("keeps interval, command, and process resource evidence distinct", async ({
+test("keeps interval and command resource evidence distinct", async ({
   page,
 }) => {
-  const detail = {
-    ...finishedDetail,
-    nodes: finishedDetail.nodes.map((node) => ({
-      ...node,
-      requested_cores: 2.5,
-      requested_memory_bytes: 4 * 2 ** 30,
-      cpu_nanos: 3_000_000_000,
-      process_wall_nanos: 2_000_000_000,
-      max_rss_bytes: 900 * 2 ** 20,
-    })),
-  };
   await installMockAPI(page, {
     runs: [finishedRun],
-    details: { [finishedRun.id]: detail },
+    details: { [finishedRun.id]: finishedDetail },
     nodeMetrics: {
       [finishedRun.id]: {
         verify: {
@@ -969,10 +1014,8 @@ test("keeps interval, command, and process resource evidence distinct", async ({
   await expect(
     page.getByText(/Command peak average CPU:\s*2\.2 CPU/),
   ).toBeVisible();
-  await expect(page.getByText(/Process CPU time:\s*3\.00s/)).toBeVisible();
   await expect(page.getByText(/Command CPU time:\s*1\.25s/)).toBeVisible();
   await expect(page.getByText(/Interval peak memory:\s*500Mi/)).toBeVisible();
-  await expect(page.getByText(/Process max RSS:\s*900Mi/)).toBeVisible();
   await expect(page.getByText(/Command max RSS:\s*800Mi/)).toBeVisible();
   await expect(page.getByText("1 interval reading", { exact: true })).toBeVisible();
   await expect(page.getByText("1 command report", { exact: true })).toBeVisible();
@@ -984,7 +1027,8 @@ test("names a cache hit without requesting execution metrics", async ({ page }) 
     ...finishedDetail,
     nodes: finishedDetail.nodes.map((node) => ({
       ...node,
-      outcome: "cached",
+      status: "memoized",
+      outcome: "memoized",
       duration_ms: 0,
     })),
   };
@@ -1604,7 +1648,7 @@ test("resumes the run event stream after a disconnect", async ({ page }) => {
       return true;
     }
     if (url.pathname === "/api/v1/pipelines") {
-      sendJSON({ pipelines: {} });
+      sendJSON({ ...pipelinesFixture, pipelines: [] });
       return true;
     }
     if (url.pathname === "/api/v1/approvals") {
@@ -1619,7 +1663,7 @@ test("resumes the run event stream after a disconnect", async ({ page }) => {
       sendJSON([]);
       return true;
     }
-    if (url.pathname.endsWith("/paused")) {
+    if (url.pathname.endsWith("/debug-pauses")) {
       sendJSON([]);
       return true;
     }
@@ -1649,12 +1693,12 @@ test("resumes the run event stream after a disconnect", async ({ page }) => {
           [
             "retry: 100",
             "id: 41",
-            "event: node_started",
+            "event: job_started",
             `data: ${JSON.stringify({
               run_id: runningRun.id,
               seq: 41,
               node_id: "verify",
-              kind: "node_started",
+              kind: "job_started",
               ts: "2026-08-27T18:05:00Z",
             })}`,
             "",
@@ -1675,12 +1719,12 @@ test("resumes the run event stream after a disconnect", async ({ page }) => {
       response.end(
         [
           "id: 42",
-          "event: node_succeeded",
+          "event: job_succeeded",
           `data: ${JSON.stringify({
             run_id: runningRun.id,
             seq: 42,
             node_id: "verify",
-            kind: "node_succeeded",
+            kind: "job_succeeded",
             ts: "2026-08-27T18:05:01Z",
           })}`,
           "",
@@ -1773,38 +1817,25 @@ test("surfaces a general controller connection failure", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("shows retry lineage from privacy-safe execution attempts", async ({
-  page,
-}) => {
+test("shows every execution attempt of a job", async ({ page }) => {
   const retriedDetail = {
     ...finishedDetail,
     nodes: finishedDetail.nodes.map((node) => ({
       ...node,
-      run_id: finishedRun.id,
-      claimed: true,
-      executor_kind: "agent",
-      executor_name: "cloud-helper",
-      executor_location: "cloud",
       execution_attempts: [
         {
-          run_id: "run-original",
-          node_id: node.id,
           attempt: 1,
-          executor_kind: "agent",
+          executor_kind: "runner",
           executor_name: "design-mac",
           location: "local",
-          platform: "darwin/arm64",
           started_at: "2026-08-27T17:59:00Z",
           finished_at: "2026-08-27T17:59:20Z",
           outcome: "failed",
           failure_reason: "agent_lost",
-          retry_run_id: finishedRun.id,
         },
         {
-          run_id: finishedRun.id,
-          node_id: node.id,
           attempt: 2,
-          executor_kind: "agent",
+          executor_kind: "cloud",
           executor_name: "cloud-helper",
           location: "cloud",
           started_at: "2026-08-27T18:00:00Z",
@@ -1826,19 +1857,13 @@ test("shows retry lineage from privacy-safe execution attempts", async ({
   ).toBeVisible();
   await expect(page.getByText("Attempt 2", { exact: true })).toBeVisible();
   await expect(page.getByText("Attempt 1", { exact: true })).toBeVisible();
-  await expect(page.getByText("Platform darwin/arm64")).toBeVisible();
+  await expect(page.getByText("runner design-mac")).toBeVisible();
   await expect(page.getByText("failure agent_lost")).toBeVisible();
   await expect(
     page.getByRole("link", {
       name: `Open execution run ${finishedRun.id}`,
       exact: true,
-    }),
-  ).toHaveAttribute("href", `/runs?run=${finishedRun.id}`);
-  await expect(
-    page.getByRole("link", {
-      name: `Open retry run ${finishedRun.id}`,
-      exact: true,
-    }),
+    }).first(),
   ).toHaveAttribute("href", `/runs?run=${finishedRun.id}`);
 });
 
@@ -1847,15 +1872,9 @@ test("keeps run tabs fixed when selecting a node with execution history", async 
     ...finishedDetail,
     nodes: finishedDetail.nodes.map((node) => ({
       ...node,
-      run_id: finishedRun.id,
-      executor_kind: "agent",
-      executor_name: "design-mac",
-      executor_location: "local",
       execution_attempts: [{
-        run_id: finishedRun.id,
-        node_id: node.id,
         attempt: 1,
-        executor_kind: "agent",
+        executor_kind: "runner",
         executor_name: "design-mac",
         location: "local",
         started_at: node.started_at,
@@ -1886,16 +1905,15 @@ test("separates fleet executors, observations, and current activity", async ({
   page,
 }) => {
   await installMockAPI(page, {
-    agents: [
+    runners: [
       {
         name: "design-mac",
-        type: "agent",
+        class: "runner",
         location: "local",
-        labels: { os: "darwin", arch: "arm64" },
-        capabilities: ["arch=arm64", "os=darwin"],
+        labels: ["arch=arm64", "os=darwin"],
         last_seen: new Date().toISOString(),
         status: "busy",
-        active_jobs: [finishedRun.id],
+        active_jobs: [{ run_id: finishedRun.id, job_id: "verify" }],
         max_concurrent: 4,
         headroom: {
           cores: 3,
@@ -1906,13 +1924,14 @@ test("separates fleet executors, observations, and current activity", async ({
       },
       {
         name: "old-pool",
-        type: "pool",
-        location: "unknown",
-        labels: {},
+        class: "cloud",
+        location: "",
+        labels: [],
         last_seen: new Date().toISOString(),
         status: "idle",
         active_jobs: [],
         max_concurrent: 2,
+        headroom: undefined,
       },
     ],
   });
@@ -1934,8 +1953,8 @@ test("separates fleet executors, observations, and current activity", async ({
   await expect(observed.getByText(/controller accepted this headroom/)).toBeVisible();
   await expect(activity.getByText("4", { exact: true })).toBeVisible();
   await expect(
-    activity.getByRole("link", { name: finishedRun.id, exact: true }),
-  ).toBeVisible();
+    activity.getByRole("link", { name: `${finishedRun.id} / verify`, exact: true }),
+  ).toHaveAttribute("href", `/runs?run=${finishedRun.id}&node=verify`);
 
   await page.getByRole("button", { name: /old-pool/ }).click();
   const poolExecutor = page

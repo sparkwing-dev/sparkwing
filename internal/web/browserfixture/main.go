@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
@@ -27,6 +28,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -303,12 +305,20 @@ func main() {
 			log.Printf("browser fixture objects close: %v", err)
 		}
 	}()
+	appKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		log.Fatal(err)
+	}
 	var srv *controller.Server
 	st, err := store.Open(home.StateDB(), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		srv = controller.NewDeployment(st, cfg, nil).WithEngineController(controller.NewEngineController(st, controller.EngineController{
 			RunnerPolicy:  &controller.SignedRunnerAdmission{Resolver: engines},
 			VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: engines},
-		})).WithSecretsCipher(cipher).WithDataObjects(objects)
+		})).WithSecretsCipher(cipher).WithDataObjects(objects).WithGitHubApp(githubapp.Config{
+			// safety: the App's GitHub endpoints are a closed loopback port, so a fixture flow never reaches GitHub.
+			AppID: 1, Slug: "sparkwing-test", PrivateKey: appKey, WebhookSecret: "fixture-hook",
+			WebURL: "http://127.0.0.1:1", APIURL: "http://127.0.0.1:1",
+		})
 		// safety: the fixture serves plain HTTP on loopback, so its cookies drop Secure, which the controller
 		// command refuses for a multi-team deployment.
 		srv.WithDashboard(controller.Dashboard{Bundle: os.DirFS(config.webOut), Version: "auth-browser-fixture", Paths: home, InsecureCookies: true})
@@ -324,12 +334,6 @@ func main() {
 	}()
 	teststore.RegisterSQLite(st, home.StateDB())
 	ctx := context.Background()
-	operatorToken := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(randomBytes(32))
-	if _, err := st.AsOperator().EnsureBootstrapCapability(ctx, capability.ProvisionSpec{
-		Kind: capability.ProvisionBootstrap, Seed: operatorToken, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore},
-	}); err != nil {
-		log.Fatal(err)
-	}
 	token, err := memberToken(ctx, st)
 	if err != nil {
 		log.Fatal(err)
@@ -360,7 +364,6 @@ func main() {
 		"control_origin": "http://" + controlListener.Addr().String(),
 		"team":           string(fixtureTeam),
 		"token":          token,
-		"admin_token":    operatorToken,
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(started); err != nil {
 		log.Fatal(err)

@@ -12,7 +12,6 @@ type StartedFixture = {
   control_origin: string;
   team: string;
   token: string;
-  admin_token: string;
 };
 
 export type AuthenticatedDashboard = StartedFixture & {
