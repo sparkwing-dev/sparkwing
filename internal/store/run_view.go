@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -30,7 +31,7 @@ type RunView struct {
 type JobResult struct {
 	JobID       string
 	Summary     string
-	Annotations []Annotation
+	Annotations []nodeproto.Annotation
 }
 
 // RunFailure is a persisted masked error of the run (JobID empty) or one of its jobs.

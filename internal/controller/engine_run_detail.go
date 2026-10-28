@@ -110,7 +110,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		nodes[string(row.Ref.NodeID)] = row
 		job := snapshotJob(row)
 		job.Error = errorsByJob[job.ID]
-		job.Summary, job.Annotations = results[job.ID].Summary, publicAnnotations(results[job.ID].Annotations)
+		job.Summary, job.Annotations = results[job.ID].Summary, results[job.ID].Annotations
 		detail.Jobs = append(detail.Jobs, job)
 	}
 	if err := fillJobDeclarations(detail.Jobs, nodes); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"io"
 	"strings"
 	"text/tabwriter"
@@ -17,7 +18,7 @@ type annotationEntry struct {
 	RunID  string `json:"run_id"`
 	JobID  string `json:"job_id"`
 	StepID string `json:"step_id,omitempty"`
-	controllerwire.Annotation
+	nodeproto.Annotation
 }
 
 func listAnnotations(ctx context.Context, review controllerwire.RunReview, inv clisurface.Invocation) ([]annotationEntry, error) {
@@ -87,7 +88,7 @@ func writeAnnotationList(ctx context.Context, review controllerwire.RunReview, i
 }
 
 func writeAnnotation(ctx context.Context, review controllerwire.RunReview, inv clisurface.Invocation, out io.Writer, format string) error {
-	input := controllerwire.AnnotationWrite{Annotation: controllerwire.Annotation{Level: "info", Message: inv.Value("message")}, StepID: inv.Value("step")}
+	input := controllerwire.AnnotationWrite{Annotation: nodeproto.Annotation{Level: "info", Message: inv.Value("message")}, StepID: inv.Value("step")}
 	if err := review.AppendAnnotation(ctx, inv.Value("run"), inv.Value("job"), input); err != nil {
 		return err
 	}

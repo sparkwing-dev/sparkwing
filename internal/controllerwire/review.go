@@ -3,21 +3,13 @@ package controllerwire
 import (
 	"context"
 	"time"
-)
 
-// Annotation retains severity and source location. Controller reads return masked text.
-type Annotation struct {
-	Level   string `json:"level"`
-	Message string `json:"message"`
-	File    string `json:"file,omitempty"`
-	Line    int    `json:"line,omitempty"`
-	Column  int    `json:"column,omitempty"`
-	EndLine int    `json:"end_line,omitempty"`
-}
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+)
 
 // AnnotationWrite addresses a job or one of its steps; authority comes from C2.
 type AnnotationWrite struct {
-	Annotation
+	nodeproto.Annotation
 	StepID string `json:"step_id,omitempty"`
 }
 

@@ -233,7 +233,7 @@ func TestHostAnnotationRulesAgreeForBothSDKs(t *testing.T) {
 	if err := json.Unmarshal(raw, &tsBodies); err != nil {
 		t.Fatal(err)
 	}
-	annotations := []nodeproto.AnnotationRequest{{Message: "range", Line: 5, EndLine: 4}, {Message: "level", Level: "warning"}, {Message: "negative", Line: -1}}
+	annotations := []nodeproto.AnnotationRequest{{Annotation: nodeproto.Annotation{Message: "range", Line: 5, EndLine: 4}}, {Annotation: nodeproto.Annotation{Message: "level", Level: "warning"}}, {Annotation: nodeproto.Annotation{Message: "negative", Line: -1}}}
 	if len(tsBodies) != len(annotations) {
 		t.Fatalf("TypeScript rejected invalid annotations before host: %s", raw)
 	}

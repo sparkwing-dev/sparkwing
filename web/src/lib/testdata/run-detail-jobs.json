@@ -117,10 +117,12 @@
     {
       "annotations": [
         {
-          "level": "warning",
+          "level": "warn",
           "message": "coverage fell 2%",
           "file": "coverage.out",
-          "line": 1
+          "line": 1,
+          "end_line": 3,
+          "column": 2
         }
       ],
       "id": "test",

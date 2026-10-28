@@ -3,6 +3,8 @@ package controllerwire
 import (
 	"context"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // RunQuery selects a page of public run details. ParentRunID is an exact parent
@@ -33,16 +35,16 @@ type RunPage struct {
 // StepDetail contains display state only. Step inputs and execution credentials
 // cannot enter the public observation boundary.
 type StepDetail struct {
-	Annotations []Annotation `json:"annotations,omitempty"`
-	JobID       string       `json:"job_id"`
-	ID          string       `json:"id"`
-	Label       string       `json:"label"`
-	Attempt     int64        `json:"attempt"`
-	Status      string       `json:"status"`
-	Outcome     string       `json:"outcome,omitempty"`
-	Reason      string       `json:"reason,omitempty"`
-	StartedAt   *time.Time   `json:"started_at,omitempty"`
-	FinishedAt  *time.Time   `json:"finished_at,omitempty"`
+	Annotations []nodeproto.Annotation `json:"annotations,omitempty"`
+	JobID       string                 `json:"job_id"`
+	ID          string                 `json:"id"`
+	Label       string                 `json:"label"`
+	Attempt     int64                  `json:"attempt"`
+	Status      string                 `json:"status"`
+	Outcome     string                 `json:"outcome,omitempty"`
+	Reason      string                 `json:"reason,omitempty"`
+	StartedAt   *time.Time             `json:"started_at,omitempty"`
+	FinishedAt  *time.Time             `json:"finished_at,omitempty"`
 	// Summary is the step's latest masked markdown summary.
 	Summary string `json:"summary,omitempty"`
 }

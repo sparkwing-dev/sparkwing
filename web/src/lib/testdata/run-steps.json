@@ -33,7 +33,7 @@
     {
       "annotations": [
         {
-          "level": "notice",
+          "level": "info",
           "message": "42 tests",
           "file": "checkout_test.go",
           "line": 7

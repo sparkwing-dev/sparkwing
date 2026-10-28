@@ -40,7 +40,7 @@ func (c *LocalHostClient) ProcessClient(ctx context.Context, principal capabilit
 // Annotation commits a masked annotation through the common reporting transaction.
 func (c *NativeProcessClient) Annotation(ctx context.Context, input nodeproto.AnnotationRequest) error {
 	return c.transport.AppendAnnotation(ctx, c.run, c.job, controllerwire.AnnotationWrite{
-		Annotation: controllerwire.Annotation{Level: input.Level, Message: input.Message, File: input.File, Line: input.Line, Column: input.Column, EndLine: input.EndLine},
+		Annotation: input.Annotation,
 		StepID:     input.Step,
 	})
 }

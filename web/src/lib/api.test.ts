@@ -369,15 +369,19 @@ describe("pipelinesByName", () => {
 });
 
 describe("parseRunArgs", () => {
-  it("reads one name=value per line and keeps an empty value", () => {
-    assert.deepEqual(parseRunArgs("target = prod\n\nverbose=\nlabel=a=b"), {
+  it("keeps each value exactly as typed after the first =", () => {
+    assert.deepEqual(parseRunArgs("target=prod\n\nverbose=\nlabel=a=b\nmessage=  padded text  "), {
       ok: true,
-      values: { target: "prod", verbose: "", label: "a=b" },
+      values: { target: "prod", verbose: "", label: "a=b", message: "  padded text  " },
     });
   });
 
-  it("names a line that is not name=value and a repeated name", () => {
+  it("names a line that is not name=value and a repeated name, never an inherited one", () => {
     assert.deepEqual(parseRunArgs("prod"), { ok: false, problem: '"prod" is not name=value' });
     assert.deepEqual(parseRunArgs("a=1\na=2"), { ok: false, problem: "a is given twice" });
+    assert.deepEqual(parseRunArgs("constructor=prod\ntoString=x"), {
+      ok: true,
+      values: { constructor: "prod", toString: "x" },
+    });
   });
 });

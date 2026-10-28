@@ -3,6 +3,8 @@ package controllerwire
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // PauseHistory contains the fields exposed by the controller.
@@ -93,14 +95,14 @@ type RunEvent struct {
 
 // StepObservation contains the fields exposed by the controller.
 type StepObservation struct {
-	RunID       string       `json:"run_id,omitempty"`
-	NodeID      string       `json:"node_id"`
-	StepID      string       `json:"step_id"`
-	Attempt     int64        `json:"attempt"`
-	Status      string       `json:"status"`
-	Error       string       `json:"error,omitempty"`
-	StartedAt   *time.Time   `json:"started_at,omitempty"`
-	FinishedAt  *time.Time   `json:"finished_at,omitempty"`
-	Annotations []Annotation `json:"annotations,omitempty"`
-	Summary     string       `json:"summary,omitempty"`
+	RunID       string                 `json:"run_id,omitempty"`
+	NodeID      string                 `json:"node_id"`
+	StepID      string                 `json:"step_id"`
+	Attempt     int64                  `json:"attempt"`
+	Status      string                 `json:"status"`
+	Error       string                 `json:"error,omitempty"`
+	StartedAt   *time.Time             `json:"started_at,omitempty"`
+	FinishedAt  *time.Time             `json:"finished_at,omitempty"`
+	Annotations []nodeproto.Annotation `json:"annotations,omitempty"`
+	Summary     string                 `json:"summary,omitempty"`
 }

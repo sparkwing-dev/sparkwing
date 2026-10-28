@@ -53,6 +53,7 @@ type consoleRun struct {
 	clock   *consoleClock
 	handler http.Handler
 	reader  string
+	bearers map[string]string
 }
 
 func consoleRunFixture(t *testing.T) *consoleRun {
@@ -73,6 +74,7 @@ func consoleRunFixture(t *testing.T) *consoleRun {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.handler = e.Server.WithEngineController(e.EngineController).Handler()
 	c.seedRun(t, "run-plan", 14, "")
 	c.seedRun(t, "run-jobs", 15, "run-earlier")
 
@@ -89,7 +91,6 @@ func consoleRunFixture(t *testing.T) *consoleRun {
 	c.execute(t, "test", c.retriedTest, controllerwire.JobResult{Outcome: "success"})
 	// hack: only retry intake writes a retry selection, and it needs a whole source run to read from.
 	engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='acme' AND id='run-jobs'`, []byte(`{"retry_of":"run-earlier","retry":{"mode":"failed","results":{"lint":{"Ref":{"run_id":"run-earlier","node_id":"lint"},"StateSeq":3}}},"admission_key":"capability:fixture","admission_subject":{"kind":"account","id":"account"}}`))
-	c.handler = e.Server.WithEngineController(e.EngineController).Handler()
 	return c
 }
 
@@ -158,6 +159,10 @@ func (c *consoleRun) claim(t *testing.T, kind capability.UnitKind, run, job stri
 	if err != nil {
 		t.Fatal(err)
 	}
+	if c.bearers == nil {
+		c.bearers = map[string]string{}
+	}
+	c.bearers[run+"/"+job] = string(award.Bearer)
 	return capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "acme", RunID: run, NodeID: job}}
 }
 
@@ -195,12 +200,18 @@ func (c *consoleRun) step(t *testing.T, a capability.Authorized, attempt control
 	}
 }
 
-func (c *consoleRun) annotate(t *testing.T, a capability.Authorized, step, level, message, file string, line int) {
+func (c *consoleRun) annotate(t *testing.T, a capability.Authorized, step string, annotation nodeproto.Annotation) {
 	t.Helper()
-	ref := runspec.NodeRef{RunID: "run-jobs", NodeID: runspec.NodeID(a.Target.NodeID)}
-	if err := c.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: ref, Actor: engineActor(a), StepID: step, Level: level, Message: message, File: file, Line: &line}); err != nil {
+	body, err := json.Marshal(controllerwire.AnnotationWrite{Annotation: annotation, StepID: step})
+	if err != nil {
 		t.Fatal(err)
 	}
+	path := "/api/v1/runs/run-jobs/jobs/" + a.Target.NodeID + "/annotations"
+	if step != "" {
+		path = "/api/v1/runs/run-jobs/jobs/" + a.Target.NodeID + "/steps/annotations"
+	}
+	// safety: fixtures annotate through the reporting route a host uses, so its level and range checks apply.
+	engineClaimHTTP(t, c.handler, c.bearers["run-jobs/"+a.Target.NodeID], http.MethodPost, path, string(body), http.StatusNoContent)
 }
 
 func (c *consoleRun) summarize(t *testing.T, a capability.Authorized, step, markdown string) {
@@ -213,7 +224,7 @@ func (c *consoleRun) summarize(t *testing.T, a capability.Authorized, step, mark
 
 func (c *consoleRun) retriedTest(t *testing.T, a capability.Authorized, first controllerwire.Applied) controllerwire.Applied {
 	c.step(t, a, first, "unit", "running", "")
-	c.annotate(t, a, "unit", "error", "TestCheckout timed out", "checkout_test.go", 41)
+	c.annotate(t, a, "unit", nodeproto.Annotation{Level: "error", Message: "TestCheckout timed out", File: "checkout_test.go", Line: 41})
 	c.summarize(t, a, "unit", "## Attempt 1\n41 passed, 1 failed")
 	c.step(t, a, first, "unit", "failed", "exit status 1")
 	c.clock.tick()
@@ -224,10 +235,10 @@ func (c *consoleRun) retriedTest(t *testing.T, a capability.Authorized, first co
 	c.step(t, a, second, "setup", "running", "")
 	c.step(t, a, second, "setup", "passed", "")
 	c.step(t, a, second, "unit", "running", "")
-	c.annotate(t, a, "unit", "notice", "42 tests", "checkout_test.go", 7)
+	c.annotate(t, a, "unit", nodeproto.Annotation{Level: "info", Message: "42 tests", File: "checkout_test.go", Line: 7})
 	c.summarize(t, a, "unit", "## Coverage\n91%")
 	c.step(t, a, second, "unit", "passed", "")
-	c.annotate(t, a, "", "warning", "coverage fell 2%", "coverage.out", 1)
+	c.annotate(t, a, "", nodeproto.Annotation{Level: "warn", Message: "coverage fell 2%", File: "coverage.out", Line: 1, EndLine: 3, Column: 2})
 	c.summarize(t, a, "", "## Test report\n42 passed on the second attempt")
 	return second
 }
@@ -324,6 +335,11 @@ func TestConsoleFixturesMatchTheWireTypes(t *testing.T) {
 		}
 		fixtures[name] = append(body, '\n')
 	}
+	kinds, err := json.MarshalIndent(runstate.RunEventKinds, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtures["../runEventKinds.json"] = append(kinds, '\n')
 	for name, want := range fixtures {
 		path := filepath.Join("..", "..", "web", "src", "lib", "testdata", name)
 		if *updateConsoleFixtures {

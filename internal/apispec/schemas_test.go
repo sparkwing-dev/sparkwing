@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"reflect"
 	"slices"
 	"strings"
@@ -22,7 +23,7 @@ func schemaDefinition(t *testing.T, b *schemaBuilder, value schema) schema {
 
 func TestSchemasDescribeSharedJSONInsteadOfStoreRows(t *testing.T) {
 	for _, example := range []any{
-		wire.AnnotationWrite{Annotation: wire.Annotation{Level: "error", Message: "failed"}, StepID: "test"},
+		wire.AnnotationWrite{Annotation: nodeproto.Annotation{Level: "error", Message: "failed"}, StepID: "test"},
 		wire.QueuePriorityResult{RunID: "run"},
 		wire.RunDetail{},
 		wire.ScheduleJob{},

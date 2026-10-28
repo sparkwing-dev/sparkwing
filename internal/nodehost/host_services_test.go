@@ -87,7 +87,7 @@ func TestHostServices(t *testing.T) {
 	if masker.Mask("j") != "j" {
 		t.Fatal("short value was masked")
 	}
-	if err := call("/node/v1/annotations", nodeproto.AnnotationRequest{Level: "warn", Message: "private-secret", File: "private-secret.go", Line: 2, EndLine: 4, Column: 1, Step: "step"}); err != nil {
+	if err := call("/node/v1/annotations", nodeproto.AnnotationRequest{Step: "step", Annotation: nodeproto.Annotation{Level: "warn", Message: "private-secret", File: "private-secret.go", Line: 2, EndLine: 4, Column: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	if annotation.Message != "***" || annotation.File != "***.go" || annotation.EndLine != 4 || annotation.Step != "step" {
