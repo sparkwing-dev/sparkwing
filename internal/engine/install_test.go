@@ -31,6 +31,7 @@ func main(){
  if os.Getenv("SPARKWING_TOKEN")!="" || os.Getenv("AMBIENT_INSTALL_TEST")!="" { os.Exit(22) }
  if err:=os.WriteFile(os.Getenv("INSTALL_MARKER"),[]byte(req.SDK),0600);err!=nil { os.Exit(23) }
  if os.Getenv("INSTALL_FAILURE")!="" { fmt.Fprintln(os.Stderr,os.Getenv("HTTPS_PROXY"));fmt.Fprintln(os.Stderr,strings.Repeat("a",(1<<20)-5)+os.Getenv("REGISTRY_NOTE"));os.Exit(24) }
+ if os.Getenv("INSTALL_ENVELOPE")!="" { fmt.Fprintln(os.Stderr,"jobs/broken.go:6:9: undefined: missing");fmt.Fprintln(os.Stderr,"{\"error\":{\"code\":\"internal\",\"message\":\"compile .sparkwing/: exit status 1\",\"hint\":\"fix the error above\"}}");os.Exit(1) }
  if reply:=os.Getenv("INSTALL_REPLY");reply!="" { fmt.Print(reply);return }
  dir:=filepath.Join(req.Directory,req.PipelineDir)
  path:=filepath.Join(dir,"pipeline")
@@ -103,6 +104,12 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 			bad.Environment = append(append([]string{}, request.Environment...), "HTTPS_PROXY=https://user:"+secret+"@proxy.example", "INSTALL_FAILURE=1")
 			if _, err := resolved.InstallSDK(t.Context(), bad); err == nil || strings.Contains(err.Error(), secret) {
 				t.Fatalf("installer failure was hidden or exposed proxy credentials: %v", err)
+			}
+			bad = request
+			bad.Environment = append(append([]string{}, request.Environment...), "INSTALL_ENVELOPE=1")
+			_, err = resolved.InstallSDK(t.Context(), bad)
+			if err == nil || strings.Contains(err.Error(), `{"error"`) || !strings.HasSuffix(err.Error(), "undefined: missing\ncompile .sparkwing/: exit status 1\nhint: fix the error above") {
+				t.Fatalf("installer failure kept its JSON envelope instead of a plain line: %v", err)
 			}
 			if err := os.Remove(marker); err != nil {
 				t.Fatal(err)

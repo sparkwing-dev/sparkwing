@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -116,11 +117,10 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 	command.Dir, command.Stdin = dir, bytes.NewReader(body)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
-	err = runSDKInstaller(ctx, command, sdkInstallTimeout)
-	diagnostic := masker.Mask(stderr.String())
-	if err != nil {
-		return SDKCommand{}, errors.Join(ctx.Err(), fmt.Errorf("selected engine SDK installation: %w: %s", err, strings.TrimSpace(diagnostic)))
+	if err := runSDKInstaller(ctx, command, sdkInstallTimeout); err != nil {
+		return SDKCommand{}, errors.Join(ctx.Err(), fmt.Errorf("selected engine SDK installation: %w: %s", err, masker.Mask(installerDiagnostic(stderr.String()))))
 	}
+	diagnostic := masker.Mask(stderr.String())
 	if _, err := fmt.Fprint(os.Stderr, diagnostic); err != nil {
 		return SDKCommand{}, err
 	}
@@ -154,6 +154,28 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 	}
 	result.ownedDirectory = ownedDirectory
 	return result, nil
+}
+
+// safety: the installer CLI ends a failure with a JSON envelope because its stdout
+// is not a terminal; the run's failure text shows that envelope as a plain line.
+func installerDiagnostic(stderr string) string {
+	text := strings.TrimSpace(stderr)
+	start := strings.LastIndexByte(text, '\n') + 1
+	var envelope struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal([]byte(text[start:]), &envelope) != nil || envelope.Error == nil {
+		return text
+	}
+	failure, err := apierr.DecodeInner(envelope.Error)
+	if err != nil {
+		return text
+	}
+	line := failure.Message
+	if failure.Hint != "" {
+		line += "\nhint: " + failure.Hint
+	}
+	return text[:start] + line
 }
 
 func runSDKInstaller(ctx context.Context, command *exec.Cmd, timeout time.Duration) error {
