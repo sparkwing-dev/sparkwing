@@ -1,31 +1,25 @@
-import type { Agent } from "./api";
+import type { Runner } from "./api";
 
 export type FleetHeadroomState = "reported" | "stale" | "not-reported";
 
 const statusOrder: Record<string, number> = { busy: 0, idle: 1, offline: 2 };
-const kindOrder: Record<string, number> = {
-  agent: 0,
-  pool: 1,
-  local: 2,
-};
-
-export function sortFleetAgents(a: Agent, b: Agent): number {
+export function sortFleetRunners(a: Runner, b: Runner): number {
   const statusDiff =
     (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
   if (statusDiff !== 0) return statusDiff;
-  const kindDiff = (kindOrder[a.type] ?? 99) - (kindOrder[b.type] ?? 99);
-  if (kindDiff !== 0) return kindDiff;
+  const classDiff = a.class.localeCompare(b.class);
+  if (classDiff !== 0) return classDiff;
   return a.name.localeCompare(b.name);
 }
 
-export function fleetLocation(agent: Agent): "local" | "cloud" | "unknown" {
+export function fleetLocation(agent: Runner): "local" | "cloud" | "unknown" {
   if (agent.location === "local" || agent.location === "cloud") {
     return agent.location;
   }
   return "unknown";
 }
 
-export function fleetHeadroomState(agent: Agent): FleetHeadroomState {
+export function fleetHeadroomState(agent: Runner): FleetHeadroomState {
   if (agent.headroom) return "reported";
   if (agent.status === "offline") return "stale";
   return "not-reported";

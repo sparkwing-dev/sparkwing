@@ -308,30 +308,35 @@ func (r RetryRequest) Validate() error {
 
 // JobDetail is a safe status view, not execution authority or a raw job declaration.
 type JobDetail struct {
-	Annotations       []Annotation `json:"annotations,omitempty"`
-	ID                string       `json:"id"`
-	Status            string       `json:"status"`
-	Outcome           string       `json:"outcome,omitempty"`
-	StatusDetail      string       `json:"status_detail,omitempty"`
-	Error             string       `json:"error,omitempty"`
-	Generation        int64        `json:"generation"`
-	Attempt           int64        `json:"attempt"`
-	StateSeq          int64        `json:"state_seq"`
-	Expansion         string       `json:"expansion"`
-	StartedAt         *time.Time   `json:"started_at,omitempty"`
-	FinishedAt        *time.Time   `json:"finished_at,omitempty"`
-	CancelRequestedAt *time.Time   `json:"cancel_requested_at,omitempty"`
+	Annotations []Annotation `json:"annotations,omitempty"`
+	ID          string       `json:"id"`
+	// Needs lists the jobs this one waits for; only run detail fills it.
+	Needs             []string   `json:"needs,omitempty"`
+	Status            string     `json:"status"`
+	Outcome           string     `json:"outcome,omitempty"`
+	StatusDetail      string     `json:"status_detail,omitempty"`
+	Error             string     `json:"error,omitempty"`
+	Generation        int64      `json:"generation"`
+	Attempt           int64      `json:"attempt"`
+	StateSeq          int64      `json:"state_seq"`
+	Expansion         string     `json:"expansion"`
+	StartedAt         *time.Time `json:"started_at,omitempty"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty"`
+	CancelRequestedAt *time.Time `json:"cancel_requested_at,omitempty"`
 }
 
 type AttemptDetail struct {
-	JobID      string     `json:"job_id"`
-	Attempt    int64      `json:"attempt"`
-	Generation int64      `json:"generation"`
-	Outcome    string     `json:"outcome,omitempty"`
-	Reason     string     `json:"reason,omitempty"`
-	Executor   string     `json:"executor"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	JobID      string `json:"job_id"`
+	Attempt    int64  `json:"attempt"`
+	Generation int64  `json:"generation"`
+	Outcome    string `json:"outcome,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	Executor   string `json:"executor"`
+	// ExecutorName and Location identify the runner that took the attempt.
+	ExecutorName string     `json:"executor_name,omitempty"`
+	Location     string     `json:"location,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 }
 
 // RunDetail carries safe dashboard, local and remote status projections.
@@ -352,6 +357,14 @@ type RunDetail struct {
 	CancelRequestedAt *time.Time         `json:"cancel_requested_at,omitempty"`
 	Engine            *engineid.Identity `json:"engine,omitempty"`
 	Notices           []engineid.Notice  `json:"notices"`
+	// Retry says how a retry run treats its source's jobs; a first run has none.
+	Retry *RetryDetail `json:"retry,omitempty"`
+}
+
+// RetryDetail names a retry's mode and the source jobs whose results it reuses.
+type RetryDetail struct {
+	Mode   string   `json:"mode"`
+	Reused []string `json:"reused"`
 }
 
 // ScheduleSnapshot carries a consistent scheduling projection for the remote owner.

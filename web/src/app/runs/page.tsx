@@ -45,7 +45,6 @@ import {
   deleteRun,
   getNodeLogCompleteness,
   getNodeLogs,
-  listRunEvents,
   getNodeStreamUrl,
   getPipelines,
   getRun,
@@ -534,7 +533,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           if (!d) return null;
           const total = d.nodes.length;
           const done = d.nodes.filter((n) =>
-            ["success", "complete", "failed", "cancelled"].includes(n.status),
+            ["success", "memoized", "failed", "cancelled", "skipped", "superseded"].includes(n.status),
           ).length;
           return [r.id, { done, total }] as const;
         }),
@@ -655,7 +654,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     el.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [selectedRun, topLevel, runs.length]);
 
-  const run = activeDetail?.run || null;
+  const detailRunRow = activeDetail?.run ?? null;
+  const listedRun = detailRunRow ? runs.find((r) => r.id === detailRunRow.id) : undefined;
+  const run = useMemo(
+    () => (detailRunRow ? { ...listedRun, ...detailRunRow } : null),
+    [detailRunRow, listedRun],
+  );
   const paneOpen = !!selectedRun;
   const [columnsPreference, setColumnsPreference] = useState<ColumnsMode | null>(null);
   const [narrowViewport, setNarrowViewport] = useState(false);
@@ -1020,9 +1024,9 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                       const fresh = await retryRun(id, {
                         full: false,
                       }).catch(() => null);
-                      if (fresh?.id) {
+                      if (fresh?.run_id) {
                         toast(
-                          `Rerun (from failed) queued as ${fresh.id}`,
+                          `Rerun (from failed) queued as ${fresh.run_id}`,
                           "success",
                         );
                         window.dispatchEvent(
@@ -1046,9 +1050,9 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                       const fresh = await retryRun(id, { full: true }).catch(
                         () => null,
                       );
-                      if (fresh?.id) {
+                      if (fresh?.run_id) {
                         toast(
-                          `Rerun (all nodes) queued as ${fresh.id}`,
+                          `Rerun (all nodes) queued as ${fresh.run_id}`,
                           "success",
                         );
                         window.dispatchEvent(
@@ -5108,7 +5112,7 @@ function DAG({
                   if (reusedNodeIDs?.has(n.id)) {
                     pills.push({ kind: "reused", w: REUSED_PILL_W });
                   }
-                  if (n.outcome === "cached") {
+                  if (n.outcome === "memoized") {
                     pills.push({ kind: "cached", w: CACHED_PILL_W });
                   }
                   if (n.modifiers?.inline) {
@@ -6258,7 +6262,7 @@ function approvalPillVisuals(n: RunNode): {
   if (n.outcome) {
     switch (n.outcome) {
       case "success":
-      case "cached":
+      case "memoized":
         return {
           label: "APPROVED",
           fill: "rgba(74,222,128,0.95)",
@@ -6513,7 +6517,7 @@ function dagNodeColors(
       fill = "rgba(30,41,59,0.45)";
       border = "rgba(71,85,105,0.75)";
       break;
-    case "cached":
+    case "memoized":
       fill = "rgba(139,92,246,0.12)";
       border = "rgba(167,139,250,0.55)";
       break;
@@ -6551,7 +6555,7 @@ function dagStatusClass(n: RunNode, reused = false): string {
       return "fill-indigo-400";
     case "cancelled":
       return "fill-slate-300";
-    case "cached":
+    case "memoized":
       return "fill-violet-400";
     case "skipped":
       return "fill-slate-400";
@@ -6566,53 +6570,22 @@ function dagStatusClass(n: RunNode, reused = false): string {
   }
 }
 
+// A retry's run detail names the source jobs it reuses instead of running.
 function useReusedNodeIDs(run: Run | null): {
   ids: Set<string> | null;
   priorRunID: string | null;
 } {
-  const [ids, setIds] = useState<Set<string> | null>(null);
-  const [priorRunID, setPriorRunID] = useState<string | null>(null);
-  const runID = run?.id ?? null;
-  const retryOf = run?.retry_of ?? null;
-  useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled) return;
-      setIds(runID && !retryOf ? new Set() : null);
-      setPriorRunID(null);
-    });
-    if (!runID || !retryOf) {
-      return () => {
-        cancelled = true;
-      };
-    }
-    listRunEvents(runID, { limit: 1000 }).then((events) => {
-      if (cancelled) return;
-      const next = new Set<string>();
-      let prior: string | null = null;
-      for (const e of events) {
-        if (e.kind !== "node_skipped_from_retry") continue;
-        if (e.node_id) next.add(e.node_id);
-        if (!prior && e.payload && typeof e.payload === "object") {
-          const p = e.payload as { prior_run_id?: string };
-          if (p.prior_run_id) prior = p.prior_run_id;
-        }
-      }
-      setIds(next);
-      setPriorRunID(prior ?? retryOf ?? null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [runID, retryOf]);
-  return { ids, priorRunID };
+  const reused = run?.reused_jobs;
+  const ids = useMemo(
+    () => (run ? new Set(reused ?? []) : null),
+    [run, reused],
+  );
+  return { ids, priorRunID: run?.retry_of ?? null };
 }
 
 function rerunMode(run: Run): "full" | "failed" | null {
-  if (!run.retry_of) return null;
-  const flags = run.invocation?.flags;
-  if (!flags) return null;
-  return flags.full === true ? "full" : "failed";
+  if (!run.retry_of || !run.retry_mode) return null;
+  return run.retry_mode === "all" ? "full" : "failed";
 }
 
 function ReuseSummary({
@@ -6782,11 +6755,11 @@ function RetryButton({ runId, onDone, runNow = false }: {
   const submit = async (full: boolean) => {
     setLoading(true);
     const fresh = await retryRun(runId, { full }).catch(() => null);
-    if (fresh?.id) {
+    if (fresh?.run_id) {
       toast(
         full
-          ? `Rerun (all nodes) queued as ${fresh.id}`
-          : `Rerun (from failed) queued as ${fresh.id}`,
+          ? `Rerun (all nodes) queued as ${fresh.run_id}`
+          : `Rerun (from failed) queued as ${fresh.run_id}`,
         "success",
       );
       window.dispatchEvent(new CustomEvent("sparkwing:runs-changed"));

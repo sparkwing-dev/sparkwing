@@ -25,9 +25,9 @@ before(async () => {
   }
 });
 
-// The fixtures are what the controller encodes for GET /api/v1/runs/{run};
-// internal/controllerwire's TestConsoleRunDetailFixturesMatchTheWireType keeps them exact.
-function fixture(name: string): import("./api").RunDetailWire {
+// The fixtures are what the controller encodes for GET /api/v1/runs/{run} and
+// /steps; internal/controller's TestConsoleFixturesMatchTheWireTypes keeps them exact.
+function fixture<T = import("./api").RunDetailWire>(name: string): T {
   return JSON.parse(readFileSync(join(__dirname, "testdata", name), "utf8"));
 }
 
@@ -51,19 +51,39 @@ describe("runDetailView", () => {
     );
   });
 
-  it("maps jobs, their errors and attempts onto the page's nodes", () => {
-    const { run, nodes } = api.runDetailView(fixture("run-detail-jobs.json"));
+  it("maps jobs, their needs, errors, attempts and steps onto the page's nodes", () => {
+    const { run, nodes } = api.runDetailView(
+      fixture("run-detail-jobs.json"),
+      fixture<{ steps: import("./api").StepDetailWire[] }>("run-steps.json").steps,
+    );
     assert.equal(api.planFailureHint(run, nodes), null);
-    const [build, test] = nodes;
+    assert.equal(run.retry_mode, "failed");
+    assert.deepEqual(run.reused_jobs, ["lint"]);
+    assert.equal("trigger_source" in run, false);
+    const [lint, build, test] = nodes;
+    assert.deepEqual(lint.deps, []);
     assert.equal(build.id, "build");
+    assert.deepEqual(build.deps, ["lint"]);
     assert.equal(build.status, "failed");
     assert.match(build.error ?? "", /cannot use \*\*\* as int value/);
     assert.equal(build.execution_attempts, undefined);
+    assert.equal(build.work, undefined);
     assert.equal(test.status, "success");
     assert.equal(test.duration_ms, 33_000);
     assert.deepEqual(test.annotations, ["42 tests"]);
-    assert.equal(test.execution_attempts?.length, 1);
-    assert.equal(test.execution_attempts?.[0].executor_name, "cloud");
+    assert.deepEqual(test.execution_attempts?.[0], {
+      run_id: "run-jobs",
+      node_id: "test",
+      attempt: 1,
+      executor_kind: "runner",
+      executor_name: "moonborn",
+      location: "local",
+      started_at: "2026-10-28T05:01:19Z",
+      finished_at: "2026-10-28T05:01:52Z",
+      outcome: "success",
+      failure_reason: undefined,
+    });
+    assert.deepEqual(test.work?.steps?.map((step) => [step.id, step.status, step.duration_ms]), [["unit", "passed", 33_000]]);
   });
 
   it("reads the run detail route without the removed include parameter", async () => {
@@ -72,12 +92,12 @@ describe("runDetailView", () => {
     const requested: string[] = [];
     runtime.fetch = async (input) => {
       requested.push(String(input));
-      return new Response(
-        readFileSync(
-          join(__dirname, "testdata", "run-detail-plan-failure.json"),
-        ),
-        { status: 200 },
-      );
+      const name = String(input).endsWith("/steps")
+        ? "run-steps.json"
+        : "run-detail-plan-failure.json";
+      return new Response(readFileSync(join(__dirname, "testdata", name)), {
+        status: 200,
+      });
     };
     try {
       const detail = await api.getRun("run-plan");
@@ -85,6 +105,9 @@ describe("runDetailView", () => {
     } finally {
       runtime.fetch = previousFetch;
     }
-    assert.equal(new URL(requested[0], "https://dashboard.example").search, "");
+    assert.deepEqual(
+      requested.map((url) => new URL(url, "https://dashboard.example").pathname + new URL(url, "https://dashboard.example").search),
+      ["/api/v1/runs/run-plan", "/api/v1/runs/run-plan/steps"],
+    );
   });
 });

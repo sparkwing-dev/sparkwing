@@ -64,7 +64,7 @@ export default function ResourceChart({
   isRunning?: boolean;
 }) {
   const identity = `${runID}\n${node.id}`;
-  const cacheHit = node.outcome === "cached";
+  const cacheHit = node.outcome === "memoized";
   const [snapshot, setSnapshot] = useState<{
     identity: string;
     metrics: NodeMetrics;

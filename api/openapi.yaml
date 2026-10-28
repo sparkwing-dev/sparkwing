@@ -755,6 +755,8 @@ components:
           type: integer
         executor:
           type: string
+        executor_name:
+          type: string
         finished_at:
           anyOf:
             - format: date-time
@@ -763,6 +765,8 @@ components:
         generation:
           type: integer
         job_id:
+          type: string
+        location:
           type: string
         outcome:
           type: string
@@ -1634,6 +1638,12 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.blob.RecordKey'
             - type: "null"
+        needs:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         outcome:
           type: string
         output_record:
@@ -1858,6 +1868,12 @@ components:
           type: integer
         id:
           type: string
+        needs:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         outcome:
           type: string
         started_at:
@@ -3015,6 +3031,22 @@ components:
         - watched_jobs
       type: object
       x-sparkwing-go-type: controllerwire.RenewalResponse
+    internal.controllerwire.RetryDetail:
+      additionalProperties: true
+      properties:
+        mode:
+          type: string
+        reused:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+      required:
+        - mode
+        - reused
+      type: object
+      x-sparkwing-go-type: controllerwire.RetryDetail
     internal.controllerwire.RetryRequest:
       additionalProperties: true
       properties:
@@ -3111,6 +3143,10 @@ components:
             - type: "null"
         number:
           type: integer
+        retry:
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.RetryDetail'
+            - type: "null"
         started_at:
           anyOf:
             - format: date-time
@@ -3365,6 +3401,12 @@ components:
           type: integer
         id:
           type: string
+        needs:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         outcome:
           type: string
         ready:

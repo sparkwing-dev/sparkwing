@@ -151,6 +151,10 @@ export interface Run {
   github_owner?: string;
   github_repo?: string;
   retry_of?: string;
+  // retry_mode and reused_jobs come from run detail: how a retry treats its
+  // source run, and which source jobs it reuses instead of running.
+  retry_mode?: "failed" | "all";
+  reused_jobs?: string[];
   retried_as?: string;
   retry_source?: string;
   parent_run_id?: string;
@@ -333,10 +337,12 @@ export interface RunDetailWire {
   started_at?: string;
   finished_at?: string;
   cancel_requested_at?: string;
+  retry?: { mode: string; reused: string[] };
 }
 
 export interface JobDetailWire {
   id: string;
+  needs?: string[];
   status: string;
   outcome?: string;
   status_detail?: string;
@@ -355,6 +361,22 @@ export interface AttemptDetailWire {
   outcome?: string;
   reason?: string;
   executor: string;
+  executor_name?: string;
+  location?: string;
+  started_at?: string;
+  finished_at?: string;
+}
+
+// StepDetailWire is one entry of GET /api/v1/runs/{run}/steps (controllerwire.RunSteps).
+export interface StepDetailWire {
+  job_id: string;
+  id: string;
+  label: string;
+  attempt: number;
+  status: string;
+  outcome?: string;
+  reason?: string;
+  annotations?: { message?: string }[];
   started_at?: string;
   finished_at?: string;
 }
@@ -364,9 +386,57 @@ function durationMs(started?: string, finished?: string): number {
   return Math.max(0, new Date(finished).getTime() - new Date(started).getTime());
 }
 
-// runDetailView projects the controller's run detail onto the run page's view.
-// The wire carries no job dependencies, so the page lays jobs out without edges.
-export function runDetailView(wire: RunDetailWire): RunDetail {
+function attemptLocation(location?: string): ExecutionAttempt["location"] {
+  return location === "local" || location === "cloud" ? location : undefined;
+}
+
+function messages(annotations?: { message?: string }[]): string[] | undefined {
+  const out = (annotations ?? [])
+    .map((annotation) => annotation.message ?? "")
+    .filter((message) => message !== "");
+  return out.length ? out : undefined;
+}
+
+function stepStatus(status: string): NodeWorkStep["status"] {
+  switch (status) {
+    case "running":
+    case "passed":
+    case "failed":
+    case "cancelled":
+    case "skipped":
+      return status;
+    default:
+      return undefined;
+  }
+}
+
+// jobSteps keeps each step's latest attempt, in the order the controller lists them.
+function jobSteps(jobID: string, steps: StepDetailWire[]): NodeWork | undefined {
+  const latest = new Map<string, StepDetailWire>();
+  for (const step of steps) {
+    if (step.job_id !== jobID) continue;
+    const seen = latest.get(step.id);
+    if (!seen || step.attempt >= seen.attempt) latest.set(step.id, step);
+  }
+  if (latest.size === 0) return undefined;
+  return {
+    steps: [...latest.values()].map((step) => ({
+      id: step.id,
+      status: stepStatus(step.status),
+      started_at: step.started_at,
+      finished_at: step.finished_at,
+      duration_ms: durationMs(step.started_at, step.finished_at) || undefined,
+      annotations: messages(step.annotations),
+    })),
+  };
+}
+
+// runDetailView projects the controller's run detail, and the run's steps when
+// read, onto the run page's view.
+export function runDetailView(
+  wire: RunDetailWire,
+  steps: StepDetailWire[] = [],
+): RunDetail {
   const inputs = wire.inputs;
   const run: Run = {
     id: wire.id,
@@ -381,7 +451,14 @@ export function runDetailView(wire: RunDetailWire): RunDetail {
     error: wire.failure || undefined,
     started_at: wire.started_at ?? "",
     finished_at: wire.finished_at,
+    retry_mode: wire.retry?.mode === "all" ? "all" : wire.retry ? "failed" : undefined,
+    reused_jobs: wire.retry?.reused,
   };
+  // Unset keys are dropped so the page can lay this run over its list row,
+  // which carries the trigger and repository links run detail does not.
+  for (const key of Object.keys(run) as (keyof Run)[]) {
+    if (run[key] === undefined) delete run[key];
+  }
   const nodes = wire.jobs.map((job): Node => {
     const attempts = wire.attempts
       .filter((attempt) => attempt.job_id === job.id)
@@ -389,28 +466,28 @@ export function runDetailView(wire: RunDetailWire): RunDetail {
         run_id: wire.id,
         node_id: job.id,
         attempt: attempt.attempt,
-        executor_name: attempt.executor || undefined,
+        executor_kind: attempt.executor || undefined,
+        executor_name: attempt.executor_name || undefined,
+        location: attemptLocation(attempt.location),
         started_at: attempt.started_at,
         finished_at: attempt.finished_at,
         outcome: attempt.outcome,
         failure_reason: attempt.reason,
       }));
-    const annotations = (job.annotations ?? [])
-      .map((annotation) => annotation.message ?? "")
-      .filter((message) => message !== "");
     return {
       run_id: wire.id,
       id: job.id,
       status: job.status === "done" ? job.outcome || "done" : job.status,
       outcome: job.outcome ?? "",
-      deps: [],
+      deps: job.needs ?? [],
       error: job.error || undefined,
       status_detail: job.status_detail || undefined,
       started_at: job.started_at,
       finished_at: job.finished_at,
       duration_ms: durationMs(job.started_at, job.finished_at),
       execution_attempts: attempts.length ? attempts : undefined,
-      annotations: annotations.length ? annotations : undefined,
+      annotations: messages(job.annotations),
+      work: jobSteps(job.id, steps),
     };
   });
   return { run, nodes };
@@ -456,17 +533,6 @@ export async function listRuns(params: URLSearchParams): Promise<Run[]> {
   return body.runs || [];
 }
 
-export interface ControllerQueueState {
-  resources?: Array<{ key: string; capacity: number; held: number }>;
-  holders?: Array<{ run_id: string }>;
-  waiters?: Array<{ run_id: string; position: number }>;
-}
-
-export async function getControllerQueueState(): Promise<ControllerQueueState | null> {
-  const res = await authFetch(`${API_URL}/api/v1/queue`, { cache: "no-store" }).catch(() => null);
-  return res?.ok ? res.json() : null;
-}
-
 export interface RunHistoryEntry {
   id: string;
   status: string;
@@ -484,12 +550,18 @@ export async function getRunAttempts(runID: string): Promise<RunHistoryEntry[]> 
   return body.runs || [];
 }
 
+// getRun reads the run and its steps together; a run whose steps cannot be read
+// still shows its jobs.
 export async function getRun(runID: string): Promise<RunDetail | null> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}`, {
-    cache: "no-store",
-  });
+  const run = pathSegment(runID);
+  const [res, stepsRes] = await Promise.all([
+    authFetch(`${API_URL}/api/v1/runs/${run}`, { cache: "no-store" }),
+    authFetch(`${API_URL}/api/v1/runs/${run}/steps`, { cache: "no-store" }).catch(() => null),
+  ]);
   if (!res.ok) return null;
-  return runDetailView((await res.json()) as RunDetailWire);
+  const steps: { steps?: StepDetailWire[] } =
+    stepsRes?.ok ? await stepsRes.json().catch(() => ({})) : {};
+  return runDetailView((await res.json()) as RunDetailWire, steps.steps ?? []);
 }
 
 export async function getNodeLogs(
@@ -614,22 +686,6 @@ export function getRunEventsStreamUrl(runID: string): string {
   return `${API_URL}/api/v1/runs/${pathSegment(runID)}/events/stream`;
 }
 
-export async function listRunEvents(
-  runID: string,
-  opts?: { after?: number; limit?: number },
-): Promise<RunEvent[]> {
-  const params = new URLSearchParams();
-  if (opts?.after) params.set("after", String(opts.after));
-  if (opts?.limit) params.set("limit", String(opts.limit));
-  const url = `${API_URL}/api/v1/runs/${pathSegment(runID)}/events${
-    params.toString() ? `?${params}` : ""
-  }`;
-  const res = await authFetch(url, { cache: "no-store" }).catch(() => null);
-  if (!res || !res.ok) return [];
-  const body = await res.json();
-  return Array.isArray(body) ? (body as RunEvent[]) : [];
-}
-
 export interface RunEvent {
   run_id: string;
   seq: number;
@@ -643,7 +699,7 @@ export async function triggerRun(
   pipeline: string,
   args?: Record<string, string>,
   git?: TriggerGit,
-): Promise<{ run_id: string } | null> {
+): Promise<CreateRunResponse> {
   const res = await authFetch(`${API_URL}/api/v1/runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -693,16 +749,20 @@ export async function deleteRun(runID: string): Promise<void> {
   }
 }
 
-export interface Agent {
+// Runner is one entry of GET /api/v1/runners (controllerwire.RunnerDetail).
+export interface Runner {
   name: string;
-  type: string;
-  location?: "local" | "cloud" | "unknown";
-  labels: Record<string, string>;
-  capabilities?: string[];
+  class: string;
+  location: string;
+  labels: string[];
+  reserved_pools: string[];
+  repos: string[];
   last_seen: string;
   status: string;
-  active_jobs?: string[];
+  active_jobs: { run_id: string; job_id?: string }[];
   max_concurrent: number;
+  metered: boolean;
+  capacity: { cores: number; memory_bytes: number };
   headroom?: {
     cores: number;
     memory_bytes: number;
@@ -711,13 +771,13 @@ export interface Agent {
   };
 }
 
-export async function getAgents(): Promise<Agent[]> {
+export async function getRunners(): Promise<Runner[]> {
   const res = await authFetch(`${API_URL}/api/v1/runners`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return [];
-  const data = await res.json();
-  return data.agents || [];
+  const data: { runners?: Runner[] } = await res.json();
+  return data.runners ?? [];
 }
 
 export interface PipelineArg {
@@ -839,10 +899,17 @@ export async function getNodeMetrics(
   }
 }
 
+// CreateRunResponse is what POST /api/v1/runs and its retry route answer
+// (controllerwire.CreateRunResponse); the console reads only the new run's id.
+export interface CreateRunResponse {
+  run_id: string;
+  number: number;
+}
+
 export async function retryRun(
   runID: string,
   opts?: { full?: boolean },
-): Promise<Run | null> {
+): Promise<CreateRunResponse> {
   const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/retry`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

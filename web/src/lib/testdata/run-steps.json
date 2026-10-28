@@ -1,0 +1,20 @@
+{
+  "steps": [
+    {
+      "annotations": [
+        {
+          "level": "notice",
+          "message": "42 tests"
+        }
+      ],
+      "job_id": "test",
+      "id": "unit",
+      "label": "",
+      "attempt": 1,
+      "status": "passed",
+      "outcome": "success",
+      "started_at": "2026-10-28T05:01:19Z",
+      "finished_at": "2026-10-28T05:01:52Z"
+    }
+  ]
+}

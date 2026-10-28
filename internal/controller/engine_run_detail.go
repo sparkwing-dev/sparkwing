@@ -2,14 +2,18 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -104,6 +108,9 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		job.Error = errorsByJob[job.ID]
 		detail.Jobs = append(detail.Jobs, job)
 	}
+	if err := fillJobNeeds(detail.Jobs, nodes); err != nil {
+		return controllerwire.RunDetail{}, err
+	}
 	attempts, err := statusAttempts(target, nodes, facts.Attempts)
 	if err != nil {
 		return controllerwire.RunDetail{}, err
@@ -127,7 +134,33 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		}
 	}
 	detail.Inputs.Lineage = run.Lineage
+	if run.Retry != nil {
+		detail.Retry = &controllerwire.RetryDetail{Mode: run.Retry.Mode, Reused: slices.Sorted(maps.Keys(run.Retry.Results))}
+		if detail.Retry.Reused == nil {
+			detail.Retry.Reused = []string{}
+		}
+	}
 	return detail, nil
+}
+
+// safety: a need on a job this run never planned would draw an edge to nothing, so only planned jobs pass.
+func fillJobNeeds(jobs []controllerwire.JobDetail, nodes map[string]runstate.NodeRow) error {
+	for i := range jobs {
+		spec := nodes[jobs[i].ID].Spec
+		if len(spec) == 0 {
+			continue
+		}
+		var declaration nodeproto.JobSpec
+		if err := json.Unmarshal(spec, &declaration); err != nil {
+			return errors.New("invalid persisted status job declaration")
+		}
+		for _, need := range append(declaration.Needs, declaration.NeedsIfPresent...) {
+			if _, exists := nodes[need]; exists && !slices.Contains(jobs[i].Needs, need) {
+				jobs[i].Needs = append(jobs[i].Needs, need)
+			}
+		}
+	}
+	return nil
 }
 
 func statusAttempts(target capability.Target, nodes map[string]runstate.NodeRow, rows []runstate.NodeAttempt) ([]controllerwire.AttemptDetail, error) {
@@ -150,6 +183,7 @@ func statusAttempts(target capability.Target, nodes map[string]runstate.NodeRow,
 		result = append(result, controllerwire.AttemptDetail{
 			JobID: id.NodeID, Attempt: id.Attempt, Generation: id.Generation,
 			Outcome: string(row.Outcome), Reason: row.FailureReason, Executor: row.ExecutorKind,
+			ExecutorName: row.ExecutorName, Location: row.ExecutorLocation,
 			StartedAt: &started, FinishedAt: row.FinishedAt,
 		})
 	}

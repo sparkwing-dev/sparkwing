@@ -39,7 +39,7 @@ function outcomeGlyph(outcome: string): { glyph: string; cls: string } {
   switch (outcome) {
     case "success":
       return { glyph: "✓", cls: "text-green-400" };
-    case "cached":
+    case "memoized":
       return { glyph: "◈", cls: "text-cyan-400" };
     case "failed":
       return { glyph: "✗", cls: "text-red-400" };
@@ -122,10 +122,10 @@ export function NodeAttrChips({ n }: { n: RunNode }) {
       label: "approval",
       cls: "bg-yellow-500/15 text-yellow-300",
     });
-  if (n.outcome === "cached")
+  if (n.outcome === "memoized")
     chips.push({
-      key: "cached",
-      label: "cached",
+      key: "memoized",
+      label: "memoized",
       cls: "bg-violet-500/15 text-violet-300",
     });
   if (n.modifiers?.inline)
@@ -212,7 +212,7 @@ function buildTally(nodes: RunNode[]): Tally {
     t.total++;
     switch (n.outcome) {
       case "success":
-      case "cached":
+      case "memoized":
         t.passed++;
         break;
       case "failed":

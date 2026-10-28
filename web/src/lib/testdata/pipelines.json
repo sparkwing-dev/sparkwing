@@ -1,0 +1,12 @@
+{
+  "pipelines": [
+    {
+      "name": "hello",
+      "last_activity_at": "2026-10-28T05:01:52Z",
+      "last_run_id": "run-jobs",
+      "last_status": "failed",
+      "last_run_at": "2026-10-28T05:01:19Z",
+      "last_finished_at": "2026-10-28T05:01:52Z"
+    }
+  ]
+}

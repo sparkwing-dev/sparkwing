@@ -81,7 +81,20 @@
   },
   "jobs": [
     {
+      "id": "lint",
+      "status": "done",
+      "outcome": "success",
+      "generation": 1,
+      "attempt": 0,
+      "state_seq": 0,
+      "expansion": "none",
+      "finished_at": "2026-10-28T05:01:52Z"
+    },
+    {
       "id": "build",
+      "needs": [
+        "lint"
+      ],
       "status": "done",
       "outcome": "failed",
       "error": "install source entry: ./pipeline.go:3:9: cannot use *** as int value",
@@ -99,6 +112,9 @@
         }
       ],
       "id": "test",
+      "needs": [
+        "lint"
+      ],
       "status": "done",
       "outcome": "success",
       "generation": 1,
@@ -115,7 +131,9 @@
       "attempt": 1,
       "generation": 1,
       "outcome": "success",
-      "executor": "cloud",
+      "executor": "runner",
+      "executor_name": "moonborn",
+      "location": "local",
       "started_at": "2026-10-28T05:01:19Z",
       "finished_at": "2026-10-28T05:01:52Z"
     }
@@ -123,5 +141,11 @@
   "logs": null,
   "started_at": "2026-10-28T05:01:19Z",
   "finished_at": "2026-10-28T05:01:52Z",
-  "notices": []
+  "notices": [],
+  "retry": {
+    "mode": "failed",
+    "reused": [
+      "lint"
+    ]
+  }
 }
