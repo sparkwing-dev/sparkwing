@@ -290,7 +290,9 @@ the logs (a `run_error` record with `-o json`). The console's run page shows
 it under "No DAG for this run". All three add a hint to check the
 pipeline locally with `sparkwing pipeline plan --pipeline <name>`, though a
 failure that depends on the host, such as one behind a build tag, may not
-reproduce there.
+reproduce there. With `-o json` the hint is the `hint` field beside the
+failure: on the run detail, the `--view errors` run row and the `run_error`
+record.
 
 Excerpts travel as a `node_failure_excerpt` run event, so they read back
 identically from a local run store and from a controller.

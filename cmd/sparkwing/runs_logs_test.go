@@ -260,7 +260,7 @@ func TestRunLogsShowsTheErrorOfARunThatFailedToPlan(t *testing.T) {
 	}{
 		{[]string{"-o", "plain"}, []string{"run error:\n" + compiler, "sparkwing pipeline plan --pipeline hello"}},
 		{[]string{"--events-only", "-o", "plain"}, []string{compiler}},
-		{[]string{"-o", "json"}, []string{`"event":"run_error"`, "undefined: qaDeliberateUndefined"}},
+		{[]string{"-o", "json"}, []string{`"event":"run_error"`, "undefined: qaDeliberateUndefined", `"hint":"the pipeline failed to plan`, "sparkwing pipeline plan --pipeline hello"}},
 	} {
 		var out bytes.Buffer
 		if err := observeRunLogs(t.Context(), logInvocation(t, append([]string{"logs", "--run", "r1"}, tc.args...)...), reader, runs, &out, &out, nil); err != nil {

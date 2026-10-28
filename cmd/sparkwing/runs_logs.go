@@ -134,7 +134,10 @@ func writeUnloggedFailures(ctx context.Context, inv clisurface.Invocation, runs 
 	}
 	if detail.Failure != "" && job == "" {
 		if runLogOutput(inv) == "json" {
-			err = json.NewEncoder(out).Encode(controllerwire.LogRecord{RunID: detail.ID, Event: "run_error", Line: detail.Failure})
+			err = json.NewEncoder(out).Encode(struct {
+				controllerwire.LogRecord
+				Hint string `json:"hint,omitempty"`
+			}{controllerwire.LogRecord{RunID: detail.ID, Event: "run_error", Line: detail.Failure}, planFailureHint(detail)})
 		} else {
 			var text strings.Builder
 			writeRunError(&text, detail)
