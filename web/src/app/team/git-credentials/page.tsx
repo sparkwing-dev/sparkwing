@@ -634,9 +634,9 @@ function Releases() {
                 </td>
                 <td className={`${tdClass} truncate max-w-[14rem]`}>
                   {r.runner}
-                  {r.token_prefix ? (
+                  {r.capability_prefix ? (
                     <span className="ml-1 text-xs font-mono text-[var(--muted)]">
-                      {r.token_prefix}
+                      {r.capability_prefix}
                     </span>
                   ) : null}
                 </td>

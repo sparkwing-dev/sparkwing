@@ -22,13 +22,15 @@ export interface StoredGitCredential extends GitCredential {
   public_key?: string;
 }
 
+// GitCredentialRelease is one entry of GET /api/v1/team/git-credentials/releases.
 export interface GitCredentialRelease {
   host: string;
   repository: string;
-  host_wide: boolean;
   run_id: string;
+  job_id: string;
+  generation: number;
   runner: string;
-  token_prefix: string;
+  capability_prefix: string;
   released_at: number;
 }
 

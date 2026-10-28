@@ -294,7 +294,7 @@ describe("startCheckout", () => {
       /refused this amount: amount out of range/,
     ],
     [403, {error: {code: "forbidden", message:"forbidden"}}, /Only a team owner/],
-    [502, "bad gateway", /Nothing was charged/],
+    [503, {error: {code: "unavailable", message: "the payment page could not be opened; try again"}}, /Nothing was charged/],
     [
       503,
       {error: {code: "unavailable", message: "no service", details: {reason: "checkout_unavailable"}}},

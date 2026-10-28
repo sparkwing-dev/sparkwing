@@ -36,6 +36,7 @@ import {
   setTeamSettings,
   removeMember,
   revokeInvitation,
+  unixSecondsISO,
 } from "@/lib/teams";
 import { fmtDateTime } from "@/lib/timeFormat";
 import { refreshTeamState } from "@/lib/useTeam";
@@ -285,7 +286,7 @@ function Members({ me }: { me: Me }) {
                       <div className="text-sm truncate">{inv.email}</div>
                       {inv.expires_at ? (
                         <div className="text-xs text-[var(--muted)]">
-                          expires {fmtDateTime(inv.expires_at)}
+                          expires {fmtDateTime(unixSecondsISO(inv.expires_at))}
                         </div>
                       ) : null}
                     </div>

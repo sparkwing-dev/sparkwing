@@ -64,7 +64,6 @@ describe("linkNotice", () => {
     assert.deepEqual(lib.linkNotice("?linked=github"), {
       tone: "success",
       message: "GitHub is now a way to sign in to this account.",
-      explain: false,
     });
   });
 

@@ -172,8 +172,8 @@ export async function getMe(): Promise<MeResult> {
     const res = await authFetch("/api/v1/me", {}, { speaksForSession: false });
     if ([401, 403, 404].includes(res.status)) return { kind: "operator" };
     if (!res.ok) return { kind: "unavailable" };
-    const body = (await res.json()) as Partial<Me> & { operator?: boolean };
-    if (body.user && body.waitlisted && !body.active_team && !body.operator) {
+    const body = (await res.json()) as Partial<Me>;
+    if (body.user && body.waitlisted && !body.active_team) {
       return {
         kind: "waitlisted",
         me: {
@@ -184,7 +184,7 @@ export async function getMe(): Promise<MeResult> {
         },
       };
     }
-    if (!body.user || !body.active_team || body.operator) {
+    if (!body.user || !body.active_team) {
       return { kind: "operator" };
     }
     return {
@@ -220,7 +220,8 @@ export interface TeamInvitation {
   id: string;
   email: string;
   role: Role;
-  expires_at?: string;
+  // Unix seconds.
+  expires_at?: number;
   accept_url?: string;
 }
 
