@@ -308,38 +308,38 @@ func (r RetryRequest) Validate() error {
 
 // JobDetail is a safe status view, not execution authority or a raw job declaration.
 type JobDetail struct {
-	Annotations []Annotation `json:"annotations,omitempty"`
-	ID          string       `json:"id"`
+	Annotations       []Annotation `json:"annotations,omitempty"`
+	ID                string       `json:"id"`
+	Status            string       `json:"status"`
+	Outcome           string       `json:"outcome,omitempty"`
+	StatusDetail      string       `json:"status_detail,omitempty"`
+	Error             string       `json:"error,omitempty"`
+	Generation        int64        `json:"generation"`
+	Attempt           int64        `json:"attempt"`
+	StateSeq          int64        `json:"state_seq"`
+	Expansion         string       `json:"expansion"`
+	StartedAt         *time.Time   `json:"started_at,omitempty"`
+	FinishedAt        *time.Time   `json:"finished_at,omitempty"`
+	CancelRequestedAt *time.Time   `json:"cancel_requested_at,omitempty"`
 	// Needs, Groups, OnFailureOf and Approval come from the job's declaration; only run detail fills them.
-	Needs             []string   `json:"needs,omitempty"`
-	Groups            []string   `json:"groups,omitempty"`
-	OnFailureOf       string     `json:"on_failure_of,omitempty"`
-	Approval          bool       `json:"approval,omitempty"`
-	Status            string     `json:"status"`
-	Outcome           string     `json:"outcome,omitempty"`
-	StatusDetail      string     `json:"status_detail,omitempty"`
-	Error             string     `json:"error,omitempty"`
-	Generation        int64      `json:"generation"`
-	Attempt           int64      `json:"attempt"`
-	StateSeq          int64      `json:"state_seq"`
-	Expansion         string     `json:"expansion"`
-	StartedAt         *time.Time `json:"started_at,omitempty"`
-	FinishedAt        *time.Time `json:"finished_at,omitempty"`
-	CancelRequestedAt *time.Time `json:"cancel_requested_at,omitempty"`
+	Needs       []string `json:"needs,omitempty"`
+	Groups      []string `json:"groups,omitempty"`
+	OnFailureOf string   `json:"on_failure_of,omitempty"`
+	Approval    bool     `json:"approval,omitempty"`
 }
 
 type AttemptDetail struct {
-	JobID      string `json:"job_id"`
-	Attempt    int64  `json:"attempt"`
-	Generation int64  `json:"generation"`
-	Outcome    string `json:"outcome,omitempty"`
-	Reason     string `json:"reason,omitempty"`
-	Executor   string `json:"executor"`
+	JobID      string     `json:"job_id"`
+	Attempt    int64      `json:"attempt"`
+	Generation int64      `json:"generation"`
+	Outcome    string     `json:"outcome,omitempty"`
+	Reason     string     `json:"reason,omitempty"`
+	Executor   string     `json:"executor"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	// ExecutorName and Location identify the runner that took the attempt.
-	ExecutorName string     `json:"executor_name,omitempty"`
-	Location     string     `json:"location,omitempty"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	ExecutorName string `json:"executor_name,omitempty"`
+	Location     string `json:"location,omitempty"`
 }
 
 // RunDetail carries safe dashboard, local and remote status projections.

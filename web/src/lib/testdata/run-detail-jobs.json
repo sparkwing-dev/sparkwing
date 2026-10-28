@@ -92,9 +92,6 @@
     },
     {
       "id": "build",
-      "needs": [
-        "lint"
-      ],
       "status": "done",
       "outcome": "failed",
       "error": "install source entry: ./pipeline.go:3:9: cannot use *** as int value",
@@ -102,33 +99,36 @@
       "attempt": 0,
       "state_seq": 0,
       "expansion": "none",
-      "finished_at": "2026-10-28T05:01:52Z"
+      "finished_at": "2026-10-28T05:01:52Z",
+      "needs": [
+        "lint"
+      ]
     },
     {
       "id": "notify",
-      "on_failure_of": "build",
       "status": "done",
       "outcome": "success",
       "generation": 1,
       "attempt": 0,
       "state_seq": 0,
       "expansion": "none",
-      "finished_at": "2026-10-28T05:01:52Z"
+      "finished_at": "2026-10-28T05:01:52Z",
+      "on_failure_of": "build"
     },
     {
       "id": "deploy",
+      "status": "pending",
+      "generation": 0,
+      "attempt": 0,
+      "state_seq": 0,
+      "expansion": "none",
       "needs": [
         "test"
       ],
       "groups": [
         "release"
       ],
-      "approval": true,
-      "status": "pending",
-      "generation": 0,
-      "attempt": 0,
-      "state_seq": 0,
-      "expansion": "none"
+      "approval": true
     },
     {
       "annotations": [
@@ -138,12 +138,6 @@
         }
       ],
       "id": "test",
-      "needs": [
-        "lint"
-      ],
-      "groups": [
-        "checks"
-      ],
       "status": "done",
       "outcome": "success",
       "generation": 1,
@@ -151,7 +145,13 @@
       "state_seq": 4,
       "expansion": "none",
       "started_at": "2026-10-28T05:01:19Z",
-      "finished_at": "2026-10-28T05:01:52Z"
+      "finished_at": "2026-10-28T05:01:52Z",
+      "needs": [
+        "lint"
+      ],
+      "groups": [
+        "checks"
+      ]
     }
   ],
   "attempts": [
@@ -161,10 +161,10 @@
       "generation": 1,
       "outcome": "success",
       "executor": "runner",
-      "executor_name": "moonborn",
-      "location": "local",
       "started_at": "2026-10-28T05:01:19Z",
-      "finished_at": "2026-10-28T05:01:52Z"
+      "finished_at": "2026-10-28T05:01:52Z",
+      "executor_name": "moonborn",
+      "location": "local"
     }
   ],
   "logs": null,
