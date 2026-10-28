@@ -118,10 +118,10 @@ func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader con
 			if opts.exitZero {
 				return nil
 			}
-			return statusExitCode(detail.Status)
+			return reportedExit(statusExitCode(detail.Status))
 		}
 		if !opts.follow {
-			return exitErrorf(3, "run %s is %s", detail.ID, detail.Status)
+			return reportedExit(exitErrorf(3, "run %s is %s", detail.ID, detail.Status))
 		}
 		if err := wait(ctx, opts.poll); err != nil {
 			return exitError(3, fmt.Errorf("observation incomplete: %w", err))

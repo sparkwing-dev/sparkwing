@@ -250,3 +250,24 @@ func TestRunStatusPlainValuesAndTerminalExits(t *testing.T) {
 		}
 	}
 }
+
+func TestRunStatusJSONIsTheOnlyDocumentForAnUnsuccessfulRun(t *testing.T) {
+	for _, status := range []string{"failed", "running"} {
+		r := &statusReader{details: []controllerwire.RunDetail{{ID: "r1", Status: status}}}
+		var out bytes.Buffer
+		err := observeRunStatus(t.Context(), statusInvocation(t), r, &out, nil)
+		writeFailure(&out, &invocationError{inv: statusInvocation(t), cause: err})
+		decoder := json.NewDecoder(&out)
+		documents := 0
+		for decoder.More() {
+			var document map[string]any
+			if err := decoder.Decode(&document); err != nil {
+				t.Fatal(err)
+			}
+			documents++
+		}
+		if documents != 1 || exitCodeFor(err) == 0 {
+			t.Fatalf("%s: %d documents on stdout and stderr, exit %d", status, documents, exitCodeFor(err))
+		}
+	}
+}

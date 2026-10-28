@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,16 +32,27 @@ func init() {
 
 func main() {
 	if err := runSparkwing(os.Args[1:]); err != nil {
-		if writeErr := writeInvocationError(os.Stderr, err, apierr.WriteJSON); writeErr != nil {
-			fmt.Fprintln(os.Stderr, "sparkwing: write diagnostic:", writeErr)
-		}
+		writeFailure(os.Stderr, err)
 		os.Exit(exitCodeFor(err))
+	}
+}
+
+func writeFailure(w io.Writer, err error) {
+	var reported *cliError
+	if errors.As(err, &reported) && reported.reported {
+		return
+	}
+	if writeErr := writeInvocationError(w, err, apierr.WriteJSON); writeErr != nil {
+		fmt.Fprintln(w, "sparkwing: write diagnostic:", writeErr)
 	}
 }
 
 type cliError struct {
 	code int
 	err  error
+	// reported marks an exit whose output already stated the outcome, so no
+	// diagnostic follows the command's document.
+	reported bool
 }
 
 func (e *cliError) Error() string {
@@ -61,6 +73,13 @@ func exitError(code int, err error) error {
 		return nil
 	}
 	return &cliError{code: code, err: err}
+}
+
+func reportedExit(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &cliError{code: exitCodeFor(err), err: err, reported: true}
 }
 
 func setEnv(env []string, key, value string) []string {
