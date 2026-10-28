@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"math/rand/v2"
 	"reflect"
 	"strings"
@@ -97,7 +98,7 @@ func checkConcurrentMetadata(t *testing.T, f *storeRecoveryFixture) {
 			wg.Go(func() {
 				for n := range each {
 					msg := fmt.Sprintf("%d/%d", worker, n)
-					if err := f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Level: "info", Message: msg}); err != nil {
+					if err := f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Annotation: nodeproto.Annotation{Level: "info", Message: msg}}); err != nil {
 						t.Error(err)
 						return
 					}
@@ -137,7 +138,7 @@ func TestMetadataBoundsRefuseWithoutWriting(t *testing.T) {
 		t.Run(step, func(t *testing.T) {
 			f := newStoreRecoveryFixture(t, true)
 			metadataStep(t, f, "body", "running")
-			write := store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Message: strings.Repeat("x", int(limits.AnnotationBytes)+1)}
+			write := store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Annotation: nodeproto.Annotation{Message: strings.Repeat("x", int(limits.AnnotationBytes)+1)}}
 			if err := f.tenant.WriteAnnotation(t.Context(), write); err == nil {
 				t.Fatal("oversized annotation accepted")
 			}
@@ -190,7 +191,7 @@ func TestMetadataWritesCannotCrossClaimFencesProperty(t *testing.T) {
 			actor.Authority.ID = fmt.Sprintf("foreign-%x", random.Uint64())
 		}
 		for _, step := range []string{"", "body"} {
-			if err := f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: ref, Actor: actor, StepID: step, Message: "forged"}); err == nil {
+			if err := f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: ref, Actor: actor, StepID: step, Annotation: nodeproto.Annotation{Message: "forged"}}); err == nil {
 				t.Fatal("forged annotation accepted")
 			}
 			if err := f.tenant.WriteSummary(t.Context(), store.SummaryWrite{Ref: ref, Actor: actor, StepID: step, Markdown: "forged"}); err == nil {
@@ -266,7 +267,7 @@ func TestMetadataMissingStepDoesNotCreatePlaceholder(t *testing.T) {
 	f := newStoreRecoveryFixture(t, true)
 	for _, write := range []func() error{
 		func() error {
-			return f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: "missing", Message: "early"})
+			return f.tenant.WriteAnnotation(t.Context(), store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: "missing", Annotation: nodeproto.Annotation{Message: "early"}})
 		},
 		func() error {
 			return f.tenant.WriteSummary(t.Context(), store.SummaryWrite{Ref: f.ref, Actor: f.holder, StepID: "missing", Markdown: "early"})
@@ -334,7 +335,7 @@ func TestMetadataAnnotationByteCapacityRollsBackTheRejectedAppend(t *testing.T) 
 		t.Run(step, func(t *testing.T) {
 			f := newStoreRecoveryFixture(t, true)
 			metadataStep(t, f, "body", "running")
-			write := store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Message: strings.Repeat("x", int(limits.AnnotationBytes)-len(`{"level":"","message":""}`))}
+			write := store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Annotation: nodeproto.Annotation{Message: strings.Repeat("x", int(limits.AnnotationBytes)-len(`{"level":"","message":""}`))}}
 			accepted := 0
 			for {
 				err := f.tenant.WriteAnnotation(t.Context(), write)

@@ -308,19 +308,19 @@ func (r RetryRequest) Validate() error {
 
 // JobDetail is a safe status view, not execution authority or a raw job declaration.
 type JobDetail struct {
-	Annotations       []Annotation `json:"annotations,omitempty"`
-	ID                string       `json:"id"`
-	Status            string       `json:"status"`
-	Outcome           string       `json:"outcome,omitempty"`
-	StatusDetail      string       `json:"status_detail,omitempty"`
-	Error             string       `json:"error,omitempty"`
-	Generation        int64        `json:"generation"`
-	Attempt           int64        `json:"attempt"`
-	StateSeq          int64        `json:"state_seq"`
-	Expansion         string       `json:"expansion"`
-	StartedAt         *time.Time   `json:"started_at,omitempty"`
-	FinishedAt        *time.Time   `json:"finished_at,omitempty"`
-	CancelRequestedAt *time.Time   `json:"cancel_requested_at,omitempty"`
+	Annotations       []nodeproto.Annotation `json:"annotations,omitempty"`
+	ID                string                 `json:"id"`
+	Status            string                 `json:"status"`
+	Outcome           string                 `json:"outcome,omitempty"`
+	StatusDetail      string                 `json:"status_detail,omitempty"`
+	Error             string                 `json:"error,omitempty"`
+	Generation        int64                  `json:"generation"`
+	Attempt           int64                  `json:"attempt"`
+	StateSeq          int64                  `json:"state_seq"`
+	Expansion         string                 `json:"expansion"`
+	StartedAt         *time.Time             `json:"started_at,omitempty"`
+	FinishedAt        *time.Time             `json:"finished_at,omitempty"`
+	CancelRequestedAt *time.Time             `json:"cancel_requested_at,omitempty"`
 	// Needs, Groups, OnFailureOf and Approval come from the job's declaration; only run detail fills them.
 	Needs       []string `json:"needs,omitempty"`
 	Groups      []string `json:"groups,omitempty"`

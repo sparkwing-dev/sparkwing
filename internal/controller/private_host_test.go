@@ -49,7 +49,7 @@ func FuzzLocalHostCloseRetiresProcessClients(f *testing.F) {
 		}
 		switch operation % 8 {
 		case 0:
-			err = process.Annotation(t.Context(), nodeproto.AnnotationRequest{Level: "info", Message: value})
+			err = process.Annotation(t.Context(), nodeproto.AnnotationRequest{Annotation: nodeproto.Annotation{Level: "info", Message: value}})
 		case 1:
 			err = process.Summary(t.Context(), nodeproto.SummaryRequest{Markdown: value})
 		case 2:

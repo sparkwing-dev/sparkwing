@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"log/slog"
 	"net/url"
 	"os"
@@ -744,7 +745,7 @@ type Node struct {
 	FailureReason string `json:"failure_reason,omitempty"`
 	ExitCode      *int   `json:"exit_code,omitempty"`
 
-	Annotations []Annotation `json:"annotations,omitempty"`
+	Annotations []nodeproto.Annotation `json:"annotations,omitempty"`
 
 	Summary string `json:"summary,omitempty"`
 
@@ -883,15 +884,15 @@ const (
 // state for the inner-Work DAG. Status moves from running to passed, failed, or
 // cancelled once; skipped is terminal at insert.
 type NodeStep struct {
-	RunID       string       `json:"run_id,omitempty"`
-	NodeID      string       `json:"node_id"`
-	StepID      string       `json:"step_id"`
-	Attempt     int64        `json:"attempt"`
-	Status      string       `json:"status"`
-	Error       string       `json:"error,omitempty"`
-	StartedAt   *time.Time   `json:"started_at,omitempty"`
-	FinishedAt  *time.Time   `json:"finished_at,omitempty"`
-	Annotations []Annotation `json:"annotations,omitempty"`
+	RunID       string                 `json:"run_id,omitempty"`
+	NodeID      string                 `json:"node_id"`
+	StepID      string                 `json:"step_id"`
+	Attempt     int64                  `json:"attempt"`
+	Status      string                 `json:"status"`
+	Error       string                 `json:"error,omitempty"`
+	StartedAt   *time.Time             `json:"started_at,omitempty"`
+	FinishedAt  *time.Time             `json:"finished_at,omitempty"`
+	Annotations []nodeproto.Annotation `json:"annotations,omitempty"`
 	// Summary is the latest markdown run summary emitted by
 	// sparkwing.Summary inside this step's body. Overwrite-on-write:
 	// only the last value is kept.

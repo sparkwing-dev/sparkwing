@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"reflect"
 	"strings"
 	"testing"
@@ -101,7 +102,7 @@ func TestResultAnnotationsSummariesAndStaleWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := 12
-	annotation := AnnotationWrite{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, StepID: "compile", Level: "warning", Message: "masked", File: "src/main.go", Line: &line}
+	annotation := AnnotationWrite{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, StepID: "compile", Annotation: nodeproto.Annotation{Level: "warn", Message: "masked", File: "src/main.go", Line: line}}
 	if err := tenant.WriteAnnotation(t.Context(), annotation); err != nil {
 		t.Fatal(err)
 	}
@@ -139,15 +140,15 @@ func TestResultAnnotationsReadBackWithTheirShape(t *testing.T) {
 	line := 12
 	ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
 	for _, step := range []string{"compile", ""} {
-		if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: ref, Actor: actor, StepID: step, Level: "warning", Message: "masked " + step, File: "src/main.go", Line: &line}); err != nil {
+		if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: ref, Actor: actor, StepID: step, Annotation: nodeproto.Annotation{Level: "warn", Message: "masked " + step, File: "src/main.go", Line: line}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := tenant.WriteSummary(t.Context(), SummaryWrite{Ref: ref, Actor: actor, Markdown: "job result"}); err != nil {
 		t.Fatal(err)
 	}
-	want := func(step string) []Annotation {
-		return []Annotation{{Level: "warning", Message: "masked " + step, File: "src/main.go", Line: &line}}
+	want := func(step string) []nodeproto.Annotation {
+		return []nodeproto.Annotation{{Level: "warn", Message: "masked " + step, File: "src/main.go", Line: line}}
 	}
 	steps, err := tenant.ListNodeSteps(t.Context(), "run")
 	if err != nil || len(steps) != 1 || !reflect.DeepEqual(steps[0].Annotations, want("compile")) {
@@ -266,7 +267,7 @@ func TestResultJobMetadataStartsEmptyOnEveryAttempt(t *testing.T) {
 		if err := tenant.WriteSummary(t.Context(), SummaryWrite{Ref: ref, Actor: actor, Markdown: "old result"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: ref, Actor: actor, Level: "warning", Message: "old annotation"}); err != nil {
+		if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: ref, Actor: actor, Annotation: nodeproto.Annotation{Level: "warn", Message: "old annotation"}}); err != nil {
 			t.Fatal(err)
 		}
 		applied, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: ref, Actor: actor, To: runstate.NodeRunning, Cause: runstate.CauseRetry, SourceAttempt: sourceAttempt(attempt.Attempt + int64(retry)), Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: "verify"}}})

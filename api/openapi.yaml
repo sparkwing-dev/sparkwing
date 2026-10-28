@@ -609,26 +609,6 @@ components:
         - body_hash
       type: object
       x-sparkwing-go-type: controllerwire.AcceptedExpansion
-    internal.controllerwire.Annotation:
-      additionalProperties: true
-      properties:
-        column:
-          type: integer
-        end_line:
-          type: integer
-        file:
-          type: string
-        level:
-          type: string
-        line:
-          type: integer
-        message:
-          type: string
-      required:
-        - level
-        - message
-      type: object
-      x-sparkwing-go-type: controllerwire.Annotation
     internal.controllerwire.AnnotationWrite:
       additionalProperties: true
       properties:
@@ -1594,7 +1574,7 @@ components:
         annotations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.Annotation'
+                $ref: '#/components/schemas/internal.nodeproto.Annotation'
               type: array
             - type: "null"
         application_retries:
@@ -1857,7 +1837,7 @@ components:
         annotations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.Annotation'
+                $ref: '#/components/schemas/internal.nodeproto.Annotation'
               type: array
             - type: "null"
         approval:
@@ -3398,7 +3378,7 @@ components:
         annotations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.Annotation'
+                $ref: '#/components/schemas/internal.nodeproto.Annotation'
               type: array
             - type: "null"
         approval:
@@ -4081,7 +4061,7 @@ components:
         annotations:
           anyOf:
             - items:
-                $ref: '#/components/schemas/internal.controllerwire.Annotation'
+                $ref: '#/components/schemas/internal.nodeproto.Annotation'
               type: array
             - type: "null"
         attempt:
@@ -4393,6 +4373,26 @@ components:
         - StoreNow
       type: object
       x-sparkwing-go-type: localhostwire.LocalNodeSnapshot
+    internal.nodeproto.Annotation:
+      additionalProperties: true
+      properties:
+        column:
+          type: integer
+        end_line:
+          type: integer
+        file:
+          type: string
+        level:
+          type: string
+        line:
+          type: integer
+        message:
+          type: string
+      required:
+        - level
+        - message
+      type: object
+      x-sparkwing-go-type: nodeproto.Annotation
     internal.nodeproto.AnnotationRequest:
       additionalProperties: true
       properties:

@@ -199,7 +199,7 @@ func (s *routeServices) Emit(r nodeproto.FrameLog) {
 	var err error
 	switch r.Event {
 	case "annotation":
-		request := nodeproto.AnnotationRequest{Level: r.Level, Message: r.Message, Step: r.Step}
+		request := nodeproto.AnnotationRequest{Annotation: nodeproto.Annotation{Level: r.Level, Message: r.Message}, Step: r.Step}
 		if len(r.Attrs) != 0 {
 			err = json.Unmarshal(r.Attrs, &request)
 		}

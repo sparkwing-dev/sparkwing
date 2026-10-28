@@ -223,7 +223,7 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 		if body.Level == "" {
 			body.Level = "info"
 		}
-		if err := nodeproto.ValidateAnnotation(body.Level, body.Line, body.EndLine, body.Column); err != nil {
+		if err := body.Validate(); err != nil {
 			return executorError(apierr.BadRequest, err.Error())
 		}
 		if err := s.step(body.Step); err != nil {

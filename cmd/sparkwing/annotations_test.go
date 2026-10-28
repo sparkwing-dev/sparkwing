@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"strings"
 	"testing"
 	"time"
@@ -54,9 +55,9 @@ func (f *fakeRunReview) ResolveApproval(_ context.Context, run, job string, inpu
 
 func reviewFixture() *fakeRunReview {
 	return &fakeRunReview{run: controllerwire.RunDetail{ID: "run-stable", Jobs: []controllerwire.JobDetail{
-		{ID: "build", Annotations: []controllerwire.Annotation{{Level: "info", Message: "first"}, {Level: "warn", Message: "second", File: "main.go", Line: 7, Column: 3, EndLine: 8}}},
+		{ID: "build", Annotations: []nodeproto.Annotation{{Level: "info", Message: "first"}, {Level: "warn", Message: "second", File: "main.go", Line: 7, Column: 3, EndLine: 8}}},
 		{ID: "deploy"},
-	}}, steps: controllerwire.RunSteps{Steps: []controllerwire.StepDetail{{JobID: "deploy", ID: "canary", Annotations: []controllerwire.Annotation{{Level: "error", Message: "third", File: "deploy.ts", Line: 5}}}}}}
+	}}, steps: controllerwire.RunSteps{Steps: []controllerwire.StepDetail{{JobID: "deploy", ID: "canary", Annotations: []nodeproto.Annotation{{Level: "error", Message: "third", File: "deploy.ts", Line: 5}}}}}}
 }
 
 func runReviewFake(t *testing.T, f *fakeRunReview, args []string) (string, error) {
@@ -166,7 +167,7 @@ func TestReviewGrammarBeforeController(t *testing.T) {
 
 func TestReviewAnnotationsPlainIsOneValuePerLine(t *testing.T) {
 	f := reviewFixture()
-	f.run.Jobs[0].Annotations = []controllerwire.Annotation{{Level: "info", Message: "first\nsecond\rline"}}
+	f.run.Jobs[0].Annotations = []nodeproto.Annotation{{Level: "info", Message: "first\nsecond\rline"}}
 	out, err := runReviewFake(t, f, []string{"runs", "annotations", "list", "--run", "412", "-o", "plain"})
 	if err != nil || out != "first second line\n" {
 		t.Fatalf("plain annotation=%q err=%v", out, err)

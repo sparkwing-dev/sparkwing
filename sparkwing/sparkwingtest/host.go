@@ -609,7 +609,8 @@ func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
 				panic(err)
 			}
 		}
-		if err := nodeproto.ValidateAnnotation(frame.Level, location.Line, location.EndLine, location.Column); err != nil {
+		location.Level = frame.Level
+		if err := location.Validate(); err != nil {
 			panic(err)
 		}
 		if frame.Level == "" {

@@ -56,7 +56,7 @@ func (b *protocolSchemaBuilder) value(t reflect.Type) protocolSchema {
 			b.defs[name] = protocolSchema{}
 			props := protocolSchema{}
 			required := []string{}
-			for field := range t.Fields() {
+			for _, field := range protocolFields(t) {
 				tag := strings.Split(field.Tag.Get("json"), ",")
 				if tag[0] == "" || tag[0] == "-" {
 					continue
@@ -77,6 +77,19 @@ func (b *protocolSchemaBuilder) value(t reflect.Type) protocolSchema {
 	default:
 		panic(fmt.Sprintf("unsupported protocol schema type %s", t))
 	}
+}
+
+// safety: an embedded struct's fields are inlined as encoding/json inlines them, so the schema matches the wire.
+func protocolFields(t reflect.Type) []reflect.StructField {
+	var out []reflect.StructField
+	for field := range t.Fields() {
+		if field.Anonymous && field.Tag.Get("json") == "" && field.Type.Kind() == reflect.Struct {
+			out = append(out, protocolFields(field.Type)...)
+			continue
+		}
+		out = append(out, field)
+	}
+	return out
 }
 
 func protocolSchemaName(t reflect.Type) string {
@@ -134,7 +147,7 @@ func constrainProtocolSchema(name string, def protocolSchema) {
 	case "runResult":
 		enum("outcome", "success", "failed")
 	case "annotationRequest":
-		enum("level", "notice", "warning", "error")
+		enum("level", append([]string{""}, nodeproto.AnnotationLevels...)...)
 		for _, f := range []string{"line", "end_line", "column"} {
 			minimum(f, 1)
 		}

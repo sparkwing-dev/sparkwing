@@ -14,14 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-type annotationRequest struct {
-	StepID  string `json:"step_id,omitempty"`
-	Level   string `json:"level,omitempty"`
-	Message string `json:"message"`
-	File    string `json:"file,omitempty"`
-	Line    *int   `json:"line,omitempty"`
-}
-
 func (s *EngineController) handleSummary(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var body struct {
 		StepID   string `json:"step_id,omitempty"`
@@ -106,9 +98,12 @@ func reportingAttempt(ctx context.Context, tenant RunTransactions, a capability.
 }
 
 func (s *EngineController) handleAnnotation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var body annotationRequest
+	var body controllerwire.AnnotationWrite
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
+	}
+	if err := body.Validate(); err != nil {
+		return invalidEngineBody(err.Error())
 	}
 	if err := reportingStep(r, body.StepID); err != nil {
 		return err
@@ -122,7 +117,7 @@ func (s *EngineController) handleAnnotation(w http.ResponseWriter, r *http.Reque
 	}
 	if err := tenant.WriteAnnotation(r.Context(), store.AnnotationWrite{
 		Ref: runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, Actor: engineActor(a),
-		StepID: body.StepID, Level: body.Level, Message: body.Message, File: body.File, Line: body.Line,
+		StepID: body.StepID, Annotation: body.Annotation,
 	}); err != nil {
 		return engineLookupError(err)
 	}

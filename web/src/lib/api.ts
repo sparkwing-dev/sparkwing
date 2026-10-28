@@ -281,13 +281,16 @@ export interface Notice {
   enforce_at?: string;
 }
 
-// AnnotationWire is a persisted annotation as the controller projects it
-// (controllerwire.Annotation).
+// AnnotationWire is an annotation as the controller stores and returns it
+// (nodeproto.Annotation); level is one of debug, info, warn or error, and an
+// empty level reads as info.
 export interface AnnotationWire {
   level: string;
   message: string;
   file?: string;
   line?: number;
+  end_line?: number;
+  column?: number;
 }
 
 // RunDetailWire is GET /api/v1/runs/{run}: controllerwire.RunDetail, the
@@ -377,11 +380,17 @@ function attemptLocation(location?: string): ExecutionAttempt["location"] {
   return location === "local" || location === "cloud" ? location : undefined;
 }
 
-// annotationText words an annotation with its location, and its level when it
-// is louder than a notice.
+// annotationText words an annotation with its source location, and with its
+// level when that is warn or error.
 export function annotationText(a: AnnotationWire): string {
-  const where = a.file ? `${a.file}${a.line ? `:${a.line}` : ""}: ` : "";
-  const level = a.level === "warning" || a.level === "error" ? `${a.level}: ` : "";
+  let where = "";
+  if (a.file) {
+    where = a.file;
+    if (a.line) where += `:${a.line}${a.column ? `:${a.column}` : ""}`;
+    if (a.line && a.end_line && a.end_line > a.line) where += ` (to line ${a.end_line})`;
+    where += ": ";
+  }
+  const level = a.level === "warn" || a.level === "error" ? `${a.level}: ` : "";
   return `${level}${where}${a.message}`;
 }
 
@@ -830,22 +839,22 @@ export function pipelinesByName(
   return out;
 }
 
-// parseRunArgs reads the trigger form's name=value lines; the controller checks
-// the names against the pipeline when it plans the run.
+// parseRunArgs reads the trigger form's name=value lines, keeping each value
+// exactly as typed after the first "="; the controller checks the names
+// against the pipeline when it plans the run.
 export function parseRunArgs(
   text: string,
 ): { ok: true; values: Record<string, string> } | { ok: false; problem: string } {
-  const values: Record<string, string> = {};
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (line === "") continue;
+  const values = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
     const eq = line.indexOf("=");
     const name = eq < 0 ? "" : line.slice(0, eq).trim();
-    if (name === "") return { ok: false, problem: `"${line}" is not name=value` };
-    if (name in values) return { ok: false, problem: `${name} is given twice` };
-    values[name] = line.slice(eq + 1).trim();
+    if (name === "") return { ok: false, problem: `"${line.trim()}" is not name=value` };
+    if (values.has(name)) return { ok: false, problem: `${name} is given twice` };
+    values.set(name, line.slice(eq + 1));
   }
-  return { ok: true, values };
+  return { ok: true, values: Object.fromEntries(values) };
 }
 
 let _pipelinesUnavailable = false;

@@ -14,13 +14,8 @@ type ServiceAcknowledged struct{}
 // AnnotationRequest preserves source location and optional step attribution.
 // The host validates Step against the bound job, masks text, and applies limits.Record.
 type AnnotationRequest struct {
-	Level   string `json:"level"`
-	Message string `json:"message"`
-	File    string `json:"file,omitempty"`
-	Line    int    `json:"line,omitempty"`
-	EndLine int    `json:"end_line,omitempty"`
-	Column  int    `json:"column,omitempty"`
-	Step    string `json:"step,omitempty"`
+	Annotation
+	Step string `json:"step,omitempty"`
 }
 
 // SummaryRequest replaces the bound job's or step's summary after masking and bounding.

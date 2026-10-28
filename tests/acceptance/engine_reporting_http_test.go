@@ -292,14 +292,14 @@ func TestEngineReportingBodyRace(t *testing.T) {
 
 func TestEngineAnnotationHTTP(t *testing.T) {
 	b, f := newCredentialBoundary(), &engineTransactions{}
-	w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/annotations", `{"message":"masked annotation","level":"warning","file":"build.go","line":12}`)
+	w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/annotations", `{"message":"masked annotation","level":"warn","file":"build.go","line":12,"end_line":14,"column":3}`)
 	if w.Code != http.StatusNoContent || f.writes != 1 {
 		t.Fatalf("HTTP %d %s, writes %d", w.Code, w.Body.String(), f.writes)
 	}
 	a := f.annotation
 	if a.Ref != (runspec.NodeRef{RunID: "run", NodeID: "job"}) || a.Actor.Authority != b.snapshot.Authorities[0].Principal.Authority ||
 		a.Actor.Kind != runstate.ActorHolder || a.Actor.Holder != "runner" || a.Actor.Generation != 4 || a.Actor.CapabilityPrefix != "claim" ||
-		a.StepID != "" || a.Message != "masked annotation" || a.Level != "warning" || a.File != "build.go" || a.Line == nil || *a.Line != 12 {
+		a.StepID != "" || a.Message != "masked annotation" || a.Level != "warn" || a.File != "build.go" || a.Line != 12 || a.EndLine != 14 || a.Column != 3 {
 		t.Fatalf("annotation = %+v", a)
 	}
 }

@@ -317,7 +317,15 @@ func (w *Work) FailurePolicy(policy ParallelFailurePolicy) *Work {
 	return w
 }
 
-// Annotation carries source location and the same severity vocabulary as log records.
+// Annotation levels; an empty Level is LevelInfo, and the host refuses any other value.
+const (
+	LevelDebug = "debug"
+	LevelInfo  = "info"
+	LevelWarn  = "warn"
+	LevelError = "error"
+)
+
+// Annotation carries source location and a severity: LevelDebug, LevelInfo, LevelWarn or LevelError.
 type Annotation struct {
 	Level   string
 	Message string
@@ -331,7 +339,7 @@ type Annotation struct {
 func Annotate(ctx context.Context, annotation Annotation) {
 	sdkserve.RequireExecution(ctx, "sparkwing.Annotate")
 	if annotation.Level == "" {
-		annotation.Level = "info"
+		annotation.Level = LevelInfo
 	}
 	attrs := map[string]any{}
 	if annotation.File != "" {

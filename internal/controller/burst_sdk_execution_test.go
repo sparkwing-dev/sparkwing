@@ -373,7 +373,7 @@ func (s *burstSDKServices) Secret(ctx context.Context, name string) (string, boo
 }
 
 func (s *burstSDKServices) Emit(frame nodeproto.FrameLog) {
-	body, err := json.Marshal(nodeproto.AnnotationRequest{Message: frame.Message, Step: frame.Step})
+	body, err := json.Marshal(nodeproto.AnnotationRequest{Annotation: nodeproto.Annotation{Message: frame.Message}, Step: frame.Step})
 	if err != nil {
 		panic(err)
 	}

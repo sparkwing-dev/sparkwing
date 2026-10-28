@@ -77,7 +77,7 @@ describe("runDetailView", () => {
     assert.deepEqual(test.groups, ["checks"]);
     assert.equal(test.duration_ms, 15_000);
     assert.equal(test.summary, "## Test report\n42 passed on the second attempt");
-    assert.deepEqual(test.annotations, ["warning: coverage.out:1: coverage fell 2%"]);
+    assert.deepEqual(test.annotations, ["warn: coverage.out:1:2 (to line 3): coverage fell 2%"]);
     assert.deepEqual(
       test.execution_attempts?.map((a) => [a.attempt, a.executor_kind, a.executor_name, a.location, a.outcome, a.failure_reason]),
       [[1, "agent", "moonborn", "local", "failed", "step_failed"], [2, "agent", "moonborn", "local", "success", undefined]],
@@ -105,7 +105,7 @@ describe("runDetailView", () => {
     const job = { ...wire.jobs[0], id: "retried", attempt: 2, status: "running", outcome: undefined };
     const step = (attempt: number, id: string, status: string, summary = "") => ({
       job_id: "retried", id, label: "", attempt, status, summary,
-      annotations: [{ level: "warning", message: `${id} ${attempt}`, file: "a.go", line: 3 }],
+      annotations: [{ level: "warn", message: `${id} ${attempt}`, file: "a.go", line: 3 }],
     });
     const { nodes } = api.runDetailView({ ...wire, jobs: [job] }, [
       step(1, "unit", "passed", "OLD PASS"),
@@ -114,7 +114,7 @@ describe("runDetailView", () => {
     ]);
     const [retried] = nodes;
     assert.deepEqual(retried.work?.steps?.map((s) => [s.id, s.status, s.summary]), [["setup", "running", undefined]]);
-    assert.deepEqual(retried.work?.steps?.[0].annotations, ["warning: a.go:3: setup 2"]);
+    assert.deepEqual(retried.work?.steps?.[0].annotations, ["warn: a.go:3: setup 2"]);
     assert.deepEqual(
       retried.step_history?.map((h) => [h.attempt, h.steps.map((s) => s.id)]),
       [[1, ["unit", "setup"]]],

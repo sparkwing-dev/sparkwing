@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
@@ -37,7 +38,7 @@ func (t *Tenant) ResumeAuthorizedDebugPause(ctx context.Context, authorized capa
 				return err
 			}
 		}
-		_, err = appendEventTx(ctx, tx, t.team, target.RunID, target.NodeID, "debug.resumed", map[string]string{"released_by": current.Capability.Subject.ID}, tx.now(ctx), true)
+		_, err = appendEventTx(ctx, tx, t.team, target.RunID, target.NodeID, runstate.EventDebugResumed, map[string]string{"released_by": current.Capability.Subject.ID}, tx.now(ctx), true)
 		return err
 	})
 }

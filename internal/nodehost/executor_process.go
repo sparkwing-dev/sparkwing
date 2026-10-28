@@ -251,7 +251,7 @@ func (h *nodeExecutor) withholdOutput(ctx context.Context, input NodeInput) erro
 	attrs := map[string]any{}
 	if h.deps.Annotate == nil {
 		attrs["annotation_error"] = "annotation persistence is unavailable"
-	} else if err := h.deps.Annotate(ctx, input, nodeproto.AnnotationRequest{Level: "warn", Message: outputWithheld}); err != nil {
+	} else if err := h.deps.Annotate(ctx, input, nodeproto.AnnotationRequest{Annotation: nodeproto.Annotation{Level: "warn", Message: outputWithheld}}); err != nil {
 		attrs["annotation_error"] = err.Error()
 	}
 	return h.diagnostic(ctx, input, "warn", "output_withheld", "", outputWithheld, attrs)

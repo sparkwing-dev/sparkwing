@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"slices"
 	"strings"
 	"time"
@@ -30,13 +31,10 @@ type StepReport struct {
 
 // AnnotationWrite carries already masked text; the store rechecks the shared annotation byte limit without truncation.
 type AnnotationWrite struct {
-	Ref     runspec.NodeRef
-	Actor   runstate.Actor
-	StepID  string
-	Level   string
-	Message string
-	File    string
-	Line    *int
+	Ref    runspec.NodeRef
+	Actor  runstate.Actor
+	StepID string
+	nodeproto.Annotation
 }
 
 // SummaryWrite carries masked job or step markdown under the writer's live binding.
@@ -155,24 +153,18 @@ func writeStepTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeR
 	return nil
 }
 
-// Annotation is one persisted masked annotation of a job or one of its steps.
-type Annotation struct {
-	Level   string `json:"level"`
-	Message string `json:"message"`
-	File    string `json:"file,omitempty"`
-	Line    *int   `json:"line,omitempty"`
-}
-
 // WriteAnnotation stores bounded masked text under the current writer binding.
 func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite) error {
 	if err := boundedResultText(annotation.Message); err != nil {
 		return err
 	}
-	if !utf8.ValidString(annotation.File) || (annotation.Line != nil && *annotation.Line <= 0) {
-		return authorityError(apierr.BadRequest, "invalid annotation location")
+	if !utf8.ValidString(annotation.File) {
+		return authorityError(apierr.BadRequest, "annotation file is not valid UTF-8")
 	}
-	entry := Annotation{Level: annotation.Level, Message: annotation.Message, File: annotation.File, Line: annotation.Line}
-	encoded, err := json.Marshal(entry)
+	if err := annotation.Validate(); err != nil {
+		return authorityError(apierr.BadRequest, err.Error())
+	}
+	encoded, err := json.Marshal(annotation.Annotation)
 	if err != nil {
 		return err
 	}
@@ -198,13 +190,13 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 		if err := tx.QueryRowContext(ctx, "SELECT annotations_json FROM "+query, args...).Scan(&existing); err != nil {
 			return err
 		}
-		var entries []Annotation
+		var entries []nodeproto.Annotation
 		if len(existing) > 0 {
 			if err := json.Unmarshal(existing, &entries); err != nil {
 				return err
 			}
 		}
-		entries = append(entries, entry)
+		entries = append(entries, annotation.Annotation)
 		body, err := json.Marshal(entries)
 		if err != nil {
 			return err
