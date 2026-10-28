@@ -220,7 +220,12 @@ func runSparkwing(args []string) (result error) {
 	toolchainReplayArgs = append([]string(nil), args...)
 	toolchainReplayDirectory = replayDirectory
 	defer func() { toolchainReplayArgs, toolchainReplayDirectory = previousArgs, previousDirectory }()
-	noteVersionTransition(os.Stderr, strings.Fields(inv.Command.Path)[1])
+	// Scripts often merge stderr into the JSON they parse, so a JSON
+	// invocation leaves the stamp for the next human-facing one; info carries
+	// the notice inside its own document.
+	if verb := strings.Fields(inv.Command.Path)[1]; verb == "info" || inv.Output(color.IsInteractiveStdout()) != "json" {
+		noteVersionTransition(os.Stderr, verb)
+	}
 	switch {
 	case strings.HasPrefix(inv.Command.Path, "sparkwing tokens "), strings.HasPrefix(inv.Command.Path, "sparkwing operator tokens "):
 		return runTokenCommand(context.Background(), inv)
