@@ -3080,6 +3080,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.engineid.Identity'
             - type: "null"
+        failure:
+          type: string
         finished_at:
           anyOf:
             - format: date-time

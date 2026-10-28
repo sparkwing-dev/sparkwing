@@ -50,6 +50,7 @@ import {
   getPipelines,
   getRun,
   listRuns,
+  planFailureHint,
   retryRun,
   searchRunLogs,
   searchRunsGrep,
@@ -3382,6 +3383,11 @@ function RunDetailPane({
                 <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-xs text-red-300">
                   {run.error}
                 </pre>
+              ) : null}
+              {planFailureHint(run, nodes) ? (
+                <div className="mt-2 text-[var(--muted)]" data-testid="plan-failure-hint">
+                  {planFailureHint(run, nodes)}
+                </div>
               ) : null}
             </div>
           </div>

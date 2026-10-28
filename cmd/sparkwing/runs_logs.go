@@ -83,8 +83,6 @@ func parseRunLogs(inv clisurface.Invocation) (controllerwire.LogQuery, error) {
 	return q, nil
 }
 
-// observeRunLogs prints the run's logs, then, when runs is set, the recorded error of each selected job that failed
-// before it started, since such a job has no attempt and so no logs.
 func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader controllerwire.LogReader, runs controllerwire.RunReader, out, diagnostics io.Writer, wait func(context.Context, time.Duration) error) error {
 	query, err := parseRunLogs(inv)
 	if err != nil {
@@ -114,7 +112,7 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 			}
 		}
 		if !page.Truncated && (!inv.Bool("follow") || page.Complete) {
-			return writePreStartFailures(ctx, inv, runs, query.Job, out)
+			return writeUnloggedFailures(ctx, inv, runs, query.Job, out)
 		}
 		query.Cursor = page.NextCursor
 		seen[query.Cursor] = true
@@ -126,13 +124,25 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 	}
 }
 
-func writePreStartFailures(ctx context.Context, inv clisurface.Invocation, runs controllerwire.RunReader, job string, out io.Writer) error {
+func writeUnloggedFailures(ctx context.Context, inv clisurface.Invocation, runs controllerwire.RunReader, job string, out io.Writer) error {
 	if runs == nil {
 		return nil
 	}
 	detail, err := runs.ReadRun(ctx, inv.Value("run"))
 	if err != nil {
 		return exitError(3, err)
+	}
+	if detail.Failure != "" && job == "" {
+		if runLogOutput(inv) == "json" {
+			err = json.NewEncoder(out).Encode(controllerwire.LogRecord{RunID: detail.ID, Event: "run_error", Line: detail.Failure})
+		} else {
+			var text strings.Builder
+			writeRunError(&text, detail)
+			_, err = io.WriteString(out, text.String())
+		}
+		if err != nil {
+			return err
+		}
 	}
 	started := map[string]bool{}
 	for _, attempt := range detail.Attempts {

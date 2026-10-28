@@ -76,3 +76,27 @@ func TestRunStatusShowsAnUnstartedJobsError(t *testing.T) {
 		}
 	}
 }
+
+func TestRunStatusShowsTheErrorOfARunThatFailedToPlan(t *testing.T) {
+	compiler := "install source entry: # pipeline\njobs/broken.go:6:9: undefined: qaDeliberateUndefined"
+	for _, args := range [][]string{{"-o", "plain"}, {"-o", "pretty"}, {"-o", "json"}, {"--view", "errors", "-o", "pretty"}, {"--view", "errors", "-o", "json"}} {
+		detail := controllerwire.RunDetail{ID: "r1", Status: "failed", Failure: compiler, Jobs: []controllerwire.JobDetail{}}
+		detail.Inputs.Pipeline = "hello"
+		reader := &statusReader{details: []controllerwire.RunDetail{detail}}
+		var out bytes.Buffer
+		if err := observeRunStatus(t.Context(), statusInvocation(t, args...), reader, &out, nil); exitCodeFor(err) != 1 {
+			t.Fatalf("%v status exit: %v", args, err)
+		}
+		want := []string{compiler}
+		if args[len(args)-1] == "json" {
+			want = []string{"undefined: qaDeliberateUndefined"}
+		} else if args[0] != "--view" {
+			want = append(want, "sparkwing pipeline plan --pipeline hello")
+		}
+		for _, text := range want {
+			if !strings.Contains(out.String(), text) {
+				t.Errorf("%v: missing %q in:\n%s", args, text, &out)
+			}
+		}
+	}
+}

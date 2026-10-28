@@ -305,6 +305,123 @@ export interface RunDetail {
   nodes: Node[];
 }
 
+// RunDetailWire is GET /api/v1/runs/{run}: controllerwire.RunDetail, the
+// RunDetail schema in api/openapi.yaml. testdata/run-detail-*.json are decoded
+// strictly into the Go type by internal/controllerwire, so a field rename
+// breaks that test as well as this adapter's.
+export interface RunDetailWire {
+  id: string;
+  number: number;
+  team: string;
+  status: string;
+  failure?: string;
+  state_seq: number;
+  inputs: {
+    pipeline: string;
+    requested_args: Record<string, string> | null;
+    args: Record<string, string> | null;
+    secret_args: string[] | null;
+    git: {
+      repository: { key: string; display: string };
+      ref: string;
+      sha: string;
+    };
+    lineage: { parent_run_id: string; parent_job_id: string; retry_of: string };
+  };
+  jobs: JobDetailWire[];
+  attempts: AttemptDetailWire[];
+  started_at?: string;
+  finished_at?: string;
+  cancel_requested_at?: string;
+}
+
+export interface JobDetailWire {
+  id: string;
+  status: string;
+  outcome?: string;
+  status_detail?: string;
+  error?: string;
+  generation: number;
+  attempt: number;
+  annotations?: { message?: string }[];
+  started_at?: string;
+  finished_at?: string;
+}
+
+export interface AttemptDetailWire {
+  job_id: string;
+  attempt: number;
+  generation: number;
+  outcome?: string;
+  reason?: string;
+  executor: string;
+  started_at?: string;
+  finished_at?: string;
+}
+
+function durationMs(started?: string, finished?: string): number {
+  if (!started || !finished) return 0;
+  return Math.max(0, new Date(finished).getTime() - new Date(started).getTime());
+}
+
+// runDetailView projects the controller's run detail onto the run page's view.
+// The wire carries no job dependencies, so the page lays jobs out without edges.
+export function runDetailView(wire: RunDetailWire): RunDetail {
+  const inputs = wire.inputs;
+  const run: Run = {
+    id: wire.id,
+    pipeline: inputs.pipeline,
+    status: wire.status,
+    git_branch: inputs.git.ref || undefined,
+    git_sha: inputs.git.sha || undefined,
+    repo: inputs.git.repository.display || undefined,
+    retry_of: inputs.lineage.retry_of || undefined,
+    parent_run_id: inputs.lineage.parent_run_id || undefined,
+    args: inputs.args ?? inputs.requested_args ?? undefined,
+    error: wire.failure || undefined,
+    started_at: wire.started_at ?? "",
+    finished_at: wire.finished_at,
+  };
+  const nodes = wire.jobs.map((job): Node => {
+    const attempts = wire.attempts
+      .filter((attempt) => attempt.job_id === job.id)
+      .map((attempt): ExecutionAttempt => ({
+        run_id: wire.id,
+        node_id: job.id,
+        attempt: attempt.attempt,
+        executor_name: attempt.executor || undefined,
+        started_at: attempt.started_at,
+        finished_at: attempt.finished_at,
+        outcome: attempt.outcome,
+        failure_reason: attempt.reason,
+      }));
+    const annotations = (job.annotations ?? [])
+      .map((annotation) => annotation.message ?? "")
+      .filter((message) => message !== "");
+    return {
+      run_id: wire.id,
+      id: job.id,
+      status: job.status === "done" ? job.outcome || "done" : job.status,
+      outcome: job.outcome ?? "",
+      deps: [],
+      error: job.error || undefined,
+      status_detail: job.status_detail || undefined,
+      started_at: job.started_at,
+      finished_at: job.finished_at,
+      duration_ms: durationMs(job.started_at, job.finished_at),
+      execution_attempts: attempts.length ? attempts : undefined,
+      annotations: annotations.length ? annotations : undefined,
+    };
+  });
+  return { run, nodes };
+}
+
+// planFailureHint is the CLI's hint for a run that failed before planning any job.
+export function planFailureHint(run: Run, nodes: Node[]): string | null {
+  if (!run.error || run.status !== "failed" || nodes.length > 0) return null;
+  return `The pipeline failed to plan, so no job ran. Fix the error above, check it from the repository with \`sparkwing pipeline plan --pipeline ${run.pipeline}\`, and trigger the run again.`;
+}
+
 export interface RunFilter {
   limit?: number;
   pipeline?: string;
@@ -368,27 +485,11 @@ export async function getRunAttempts(runID: string): Promise<RunHistoryEntry[]> 
 }
 
 export async function getRun(runID: string): Promise<RunDetail | null> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}?include=nodes`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}`, {
     cache: "no-store",
   });
   if (!res.ok) return null;
-  const body = (await res.json()) as RunDetail;
-  if (body && Array.isArray(body.nodes)) {
-    for (const n of body.nodes) {
-      const dec = (n as Node & { decorations?: Partial<Node> }).decorations;
-      if (!dec) continue;
-      if (dec.work && !n.work) n.work = dec.work;
-      if (dec.modifiers && !n.modifiers) n.modifiers = dec.modifiers;
-      if (dec.groups && !n.groups) n.groups = dec.groups;
-      if (dec.dynamic && n.dynamic == null) n.dynamic = dec.dynamic;
-      if (dec.approval && n.approval == null) n.approval = dec.approval;
-      if (dec.on_failure_of && !n.on_failure_of)
-        n.on_failure_of = dec.on_failure_of;
-      if (dec.spawned_pipelines && !n.spawned_pipelines)
-        n.spawned_pipelines = dec.spawned_pipelines;
-    }
-  }
-  return body;
+  return runDetailView((await res.json()) as RunDetailWire);
 }
 
 export async function getNodeLogs(

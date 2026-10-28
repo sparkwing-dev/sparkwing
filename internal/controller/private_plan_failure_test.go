@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -27,20 +28,32 @@ func privatePlanFailureFixture(t *testing.T) (*engineFixture, *store.Tenant, str
 	return e, tenant, LauncherFixtureClaim(t, e.Store, "run", store.PlanNodeID)
 }
 
-func TestPrivatePlanFailureClosesPlanAndRunWithBoundedStage(t *testing.T) {
+func TestPrivatePlanFailureClosesPlanAndRunWithItsMaskedError(t *testing.T) {
+	const compiler = "install source entry: ./pipeline.go:3:9: cannot use *** as int value"
 	for _, outcome := range []runstate.RunState{runstate.RunFailed, runstate.RunCancelled} {
 		t.Run(string(outcome), func(t *testing.T) {
 			e, tenant, raw := privatePlanFailureFixture(t)
-			message, reason := "run preparation failed", string(apierr.PlanFailed)
+			message, reason := compiler, string(apierr.PlanFailed)
 			if outcome == runstate.RunCancelled {
 				message, reason = "cancellation requested", string(apierr.ReasonCancelled)
 				engineSQL(t, e.Store, `UPDATE runs SET cancel_requested_at=created_at,cancel_reason='cancel_requested' WHERE team='a' AND id='run'`)
 			}
-			body, err := json.Marshal(localhostwire.LocalRunCompletion{Cause: runstate.RunFinish, Reason: "untrusted-stage", MaskedError: "unmasked-secret"})
+			oversized, err := json.Marshal(localhostwire.LocalRunCompletion{Cause: runstate.RunFinish, MaskedError: strings.Repeat("x", int(limits.ErrorBytes)+1)})
 			if err != nil {
 				t.Fatal(err)
 			}
 			h := New(e.Store, nil).Handler()
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run/local-host/finish", strings.NewReader(string(oversized)))
+			request.Header.Set("Authorization", "Bearer "+raw)
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			if h.ServeHTTP(response, request); response.Code < 400 {
+				t.Fatalf("oversized plan error accepted: %d", response.Code)
+			}
+			body, err := json.Marshal(localhostwire.LocalRunCompletion{Cause: runstate.RunFinish, Reason: "untrusted-stage", MaskedError: compiler})
+			if err != nil {
+				t.Fatal(err)
+			}
 			for range 2 {
 				engineClaimHTTP(t, h, raw, http.MethodPost, "/api/v1/runs/run/local-host/finish", string(body), http.StatusOK)
 			}

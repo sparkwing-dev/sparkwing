@@ -340,6 +340,7 @@ type RunDetail struct {
 	Number            int64              `json:"number"`
 	Team              string             `json:"team"`
 	Status            string             `json:"status"`
+	Failure           string             `json:"failure,omitempty"`
 	StateSeq          int64              `json:"state_seq"`
 	Inputs            runspec.Display    `json:"inputs"`
 	Jobs              []JobDetail        `json:"jobs"`

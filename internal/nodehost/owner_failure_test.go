@@ -2,16 +2,20 @@ package nodehost
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -93,7 +97,11 @@ func TestOwnerHostPreparationFailureFinishesRunAndUnit(t *testing.T) {
 	for _, stage := range []string{"acquire", "prepare", "plan"} {
 		t.Run(stage, func(t *testing.T) {
 			f, h, in := newOwnerFixture(t, false)
-			failure := errors.New("private source credential")
+			const credential = "private-source-credential-91d2"
+			if err := h.Masker.Register(credential); err != nil {
+				t.Fatal(err)
+			}
+			failure := errors.New("fetch failed with " + credential)
 			switch stage {
 			case "acquire":
 				h.Acquire = func(context.Context, RunInput) (*source.Entry, error) { return nil, failure }
@@ -114,8 +122,8 @@ func TestOwnerHostPreparationFailureFinishesRunAndUnit(t *testing.T) {
 			if f.finished.Unit != in.Owner.Owner || f.finished.Transition.Cause != runstate.RunFinish {
 				t.Fatalf("unfinished preparation failure: %+v", f.finished)
 			}
-			if f.finished.Transition.MaskedError == failure.Error() {
-				t.Fatal("persisted unmasked setup error")
+			if text := f.finished.Transition.MaskedError; text != "fetch failed with ***" {
+				t.Fatalf("persisted setup error %q, want the masked failure", text)
 			}
 			if f.accepted.RunID != "" {
 				t.Fatal("accepted a failed preparation")
@@ -194,5 +202,43 @@ func TestOwnerHostPolicyFailureCannotHideBehindTerminalNode(t *testing.T) {
 	_, err := h.Run(t.Context(), in)
 	if !errors.Is(err, failure) || f.finished.Transition.RunID != "" {
 		t.Fatalf("error = %v finish = %+v", err, f.finished)
+	}
+}
+
+type echoingSourceAccess struct{ credential source.Credential }
+
+func (a echoingSourceAccess) GitCredential(context.Context, source.Spec) (source.Credential, error) {
+	return a.credential, nil
+}
+
+func (echoingSourceAccess) BundleURL(context.Context, string) (string, error) {
+	return "", errors.New("no bundle")
+}
+
+// The plan host stores its preparation failure, so a fetch failure that echoes the source credential, raw or as
+// the Basic header git sends, must reach the run masked.
+func TestOwnerHostPreparationFailureMasksTheSourceCredential(t *testing.T) {
+	f, h, in := newOwnerFixture(t, false)
+	directory, _ := sourcetest.Repository(t)
+	sourcetest.Remote(t, map[string]string{sourceRemote: directory})
+	credential := source.Credential{Kind: "https", Host: "8.8.8.8", Username: "x-access-token", Secret: "ghs_private-installation-token"}
+	header := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + credential.Secret))
+	h.Acquire = func(ctx context.Context, _ RunInput) (*source.Entry, error) {
+		entry, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: sourceRemote, SHA: strings.Repeat("b", 40)}, source.Options{
+			Base: procenv.Base{Ambient: sourcetest.Environment(t), Masker: h.Masker}, BuildEnvironment: sourcetest.BuildEnvironment,
+			Workspace: t.TempDir(), Access: echoingSourceAccess{credential: credential},
+		})
+		if err == nil {
+			_ = entry.Close()
+			return nil, errors.New("fetched a commit the remote does not have")
+		}
+		return nil, fmt.Errorf("%w; remote replied to Authorization: Basic %s (token %s)", err, header, credential.Secret)
+	}
+	if _, err := h.Run(t.Context(), in); err == nil {
+		t.Fatal("source fetch failure did not fail the run")
+	}
+	text := f.finished.Transition.MaskedError
+	if !strings.Contains(text, "source git") || strings.Contains(text, credential.Secret) || strings.Contains(text, header) || !strings.Contains(text, "***") {
+		t.Fatalf("stored failure does not mask the source credential: %q", text)
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/gitcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -20,6 +21,7 @@ type gitClient struct {
 	combined        bool
 	env             []string
 	credential      Credential
+	masker          *secrets.Masker
 	workspace       string
 	bundleTransport http.RoundTripper
 }

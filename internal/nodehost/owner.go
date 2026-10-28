@@ -336,7 +336,9 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 		return failure
 	}
 	reason := string(apierr.PlanFailed)
-	message := "run preparation failed"
+	// safety: the masker already holds the intake secret arguments and, once the source fetch authenticated, its git
+	// credential and Basic header; source and bundle errors also drop git output and signed URLs before they get here.
+	message := boundedNodeErrText(h.Masker.Mask(failure.Error()))
 	if cause := context.Cause(ctx); cause != nil {
 		var cancelled *lease.CancelError
 		if !errors.As(cause, &cancelled) {
@@ -345,7 +347,6 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 		reason = string(apierr.ReasonCancelled)
 		message = "cancellation requested"
 	}
-	// safety: setup errors can contain credentials before describe establishes masking; persist only the stage.
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
 	_, err := h.Store.FinishRunAndUnit(finishCtx, runstate.FinishRunRequest{
