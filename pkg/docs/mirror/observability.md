@@ -277,7 +277,9 @@ A job that fails before it starts -- a pipeline that does not compile, or
 source that cannot be fetched -- has no attempt and so no logs. Its masked
 error, which carries the compiler output bounded to 8 KiB (its first line
 and its end), is the job's `error` in `sparkwing runs status` (every format,
-including `--view errors`) and in the console.
+including `--view errors`) and in the console. `sparkwing runs logs` prints
+it after the run's logs with a note that the job failed before it started
+(a `job_failed_before_start` record with `-o json`).
 
 Excerpts travel as a `node_failure_excerpt` run event, so they read back
 identically from a local run store and from a controller.
