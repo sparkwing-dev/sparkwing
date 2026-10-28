@@ -260,7 +260,7 @@ func TestRunLogsShowsTheErrorOfARunThatFailedToPlan(t *testing.T) {
 	}{
 		{[]string{"-o", "plain"}, []string{"run error:\n" + compiler, "sparkwing pipeline plan --pipeline hello"}},
 		{[]string{"--events-only", "-o", "plain"}, []string{compiler}},
-		{[]string{"-o", "json"}, []string{`"event":"run_error"`, "undefined: qaDeliberateUndefined"}},
+		{[]string{"-o", "json"}, []string{`"event":"run_error"`, "undefined: qaDeliberateUndefined", `"hint":"the pipeline failed to plan`, "sparkwing pipeline plan --pipeline hello"}},
 	} {
 		var out bytes.Buffer
 		if err := observeRunLogs(t.Context(), logInvocation(t, append([]string{"logs", "--run", "r1"}, tc.args...)...), reader, runs, &out, &out, nil); err != nil {
@@ -270,6 +270,37 @@ func TestRunLogsShowsTheErrorOfARunThatFailedToPlan(t *testing.T) {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("%v: missing %q in:\n%s", tc.args, want, &out)
 			}
+		}
+	}
+}
+
+func TestRunLogsRendersEventPayloadsAsText(t *testing.T) {
+	reader := fakeLogReader{read: func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
+		return controllerwire.LogPage{Complete: true, Records: []controllerwire.LogRecord{
+			{RunID: "r1", Event: "run_failed", LineNo: 1, Line: `{"reason":"plan_failed"}`},
+			{RunID: "r1", Event: "job_started", JobID: "build", LineNo: 2, Line: `{}`},
+			{RunID: "r1", Event: "job_retrying", JobID: "build", LineNo: 3, Line: `{"attempt":2,"reason":"exit 1"}`},
+		}}, nil
+	}}
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"-o", "plain"}, []string{"run failed: plan_failed\n", "job build started\n", "job build retrying: attempt=2 reason=exit 1\n"}},
+		{[]string{"-o", "pretty"}, []string{"r1/run_failed:1: plan_failed\n", "r1/build job_started:2\n", "r1/build job_retrying:3: attempt=2 reason=exit 1\n"}},
+		{[]string{"-o", "json"}, []string{`"line":"{\"reason\":\"plan_failed\"}"`}},
+	} {
+		var out bytes.Buffer
+		if err := observeRunLogs(t.Context(), logInvocation(t, append([]string{"logs", "--run", "r1"}, tc.args...)...), reader, nil, &out, &out, nil); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("%v: missing %q in:\n%s", tc.args, want, &out)
+			}
+		}
+		if tc.args[1] != "json" && strings.Contains(out.String(), "{") {
+			t.Errorf("%v: raw event payload in:\n%s", tc.args, &out)
 		}
 	}
 }

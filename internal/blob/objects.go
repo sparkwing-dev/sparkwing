@@ -39,15 +39,24 @@ func validateObject(o capability.ObjectToSign, now time.Time) error {
 	switch o.Method {
 	case http.MethodGet:
 		if o.Key == final {
-			if lifetime := o.ExpiresAt.Sub(now); lifetime > limits.DataDownloadURLTTL {
-				return fmt.Errorf("data download lifetime %s exceeds %s", lifetime, limits.DataDownloadURLTTL)
-			}
 			return nil
 		}
 	case http.MethodPut:
 		return validatePending(o.Key, parts[1])
 	}
 	return fmt.Errorf("invalid signed object method or key")
+}
+
+// safety: only signing checks the lifetime ceiling; a wall clock stepped back
+// after signing makes a fresh URL look too long-lived to a verifier.
+func validateSigning(o capability.ObjectToSign, now time.Time) error {
+	if err := validateObject(o, now); err != nil {
+		return err
+	}
+	if lifetime := o.ExpiresAt.Sub(now); o.Method == http.MethodGet && lifetime > limits.DataDownloadURLTTL {
+		return fmt.Errorf("data download lifetime %s exceeds %s", lifetime, limits.DataDownloadURLTTL)
+	}
+	return nil
 }
 
 func validatePending(key, team string) error {

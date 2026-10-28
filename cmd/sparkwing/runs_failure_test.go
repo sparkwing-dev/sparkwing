@@ -89,7 +89,7 @@ func TestRunStatusShowsTheErrorOfARunThatFailedToPlan(t *testing.T) {
 		}
 		want := []string{compiler}
 		if args[len(args)-1] == "json" {
-			want = []string{"undefined: qaDeliberateUndefined"}
+			want = []string{"undefined: qaDeliberateUndefined", `"hint":"the pipeline failed to plan`, "sparkwing pipeline plan --pipeline hello"}
 		} else if args[0] != "--view" {
 			want = append(want, "sparkwing pipeline plan --pipeline hello")
 		}

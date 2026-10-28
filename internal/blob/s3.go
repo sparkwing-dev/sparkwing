@@ -57,7 +57,7 @@ func (s *S3) PhysicalKey(key string) string { return s.prefix + key }
 // Sign binds size and checksum to PUT and names one immutable object for GET.
 func (s *S3) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error) {
 	now := time.Now()
-	if err := validateObject(object, now); err != nil {
+	if err := validateSigning(object, now); err != nil {
 		return capability.SignedObject{}, err
 	}
 	options := func(o *s3.PresignOptions) { o.Expires = object.ExpiresAt.Sub(now) }

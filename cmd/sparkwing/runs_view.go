@@ -42,7 +42,7 @@ func renderObservedRun(ctx context.Context, reader controllerwire.RunReader, out
 		return writeRunErrors(out, detail, opts.format)
 	}
 	if opts.format == "json" {
-		return json.NewEncoder(out).Encode(detail)
+		return json.NewEncoder(out).Encode(hintedRunDetail{RunDetail: detail, Hint: planFailureHint(detail)})
 	}
 	return writeRunDetail(out, detail, opts)
 }
@@ -130,17 +130,23 @@ func writeRunReceipt(out io.Writer, receipt controllerwire.Receipt, format strin
 	return err
 }
 
+type hintedRunDetail struct {
+	controllerwire.RunDetail
+	Hint string `json:"hint,omitempty"`
+}
+
 type runFailure struct {
 	RunID   string `json:"run_id"`
 	JobID   string `json:"job_id"`
 	Attempt int64  `json:"attempt"`
 	Outcome string `json:"outcome"`
 	Reason  string `json:"reason"`
+	Hint    string `json:"hint,omitempty"`
 }
 
 func writeRunErrors(out io.Writer, detail controllerwire.RunDetail, format string) error {
 	if detail.Failure != "" {
-		failure := runFailure{RunID: detail.ID, Outcome: detail.Status, Reason: detail.Failure}
+		failure := runFailure{RunID: detail.ID, Outcome: detail.Status, Reason: detail.Failure, Hint: planFailureHint(detail)}
 		var err error
 		if format == "json" {
 			err = json.NewEncoder(out).Encode(failure)
@@ -214,9 +220,16 @@ func writeRunError(text *strings.Builder, detail controllerwire.RunDetail) {
 		return
 	}
 	fmt.Fprintf(text, "run error:\n%s\n", strings.TrimRight(detail.Failure, "\n"))
-	if detail.Status == "failed" && len(detail.Jobs) == 0 {
-		fmt.Fprintf(text, "hint: the pipeline failed to plan, so no job ran; fix the error above, check it from the repository with `sparkwing pipeline plan --pipeline %s`, and trigger the run again\n", detail.Inputs.Pipeline)
+	if hint := planFailureHint(detail); hint != "" {
+		fmt.Fprintf(text, "hint: %s\n", hint)
 	}
+}
+
+func planFailureHint(detail controllerwire.RunDetail) string {
+	if detail.Failure == "" || detail.Status != "failed" || len(detail.Jobs) != 0 {
+		return ""
+	}
+	return fmt.Sprintf("the pipeline failed to plan, so no job ran; fix the error above, check it from the repository with `sparkwing pipeline plan --pipeline %s`, and trigger the run again", detail.Inputs.Pipeline)
 }
 
 // jobFailureText prefers the job's recorded error, the only account of a failure reported before any attempt started.

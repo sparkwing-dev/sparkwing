@@ -65,7 +65,7 @@ func (f *Filesystem) Sign(ctx context.Context, object capability.ObjectToSign) (
 	if err := ctx.Err(); err != nil {
 		return capability.SignedObject{}, err
 	}
-	if err := validateObject(object, f.now()); err != nil {
+	if err := validateSigning(object, f.now()); err != nil {
 		return capability.SignedObject{}, err
 	}
 	return f.signObject(object)

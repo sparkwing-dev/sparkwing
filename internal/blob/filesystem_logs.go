@@ -23,8 +23,12 @@ func (f *Filesystem) SignLogPut(ctx context.Context, key string, size int64, dig
 		return "", nil, err
 	}
 	object := capability.ObjectToSign{Method: http.MethodPut, Key: key, Size: size, SHA256: string(digest), ExpiresAt: expiry}
-	if err := validateFilesystemLog(object, f.now()); err != nil {
+	now := f.now()
+	if err := validateFilesystemLog(object, now); err != nil {
 		return "", nil, err
+	}
+	if object.ExpiresAt.Sub(now) > limits.LogUploadURLTTL {
+		return "", nil, fmt.Errorf("log upload lifetime exceeds %s", limits.LogUploadURLTTL)
 	}
 	signed, err := f.signObject(object)
 	return signed.URL, signed.Headers, err
@@ -68,7 +72,7 @@ func validateFilesystemLog(object capability.ObjectToSign, now time.Time) error 
 	if err := validLogPayload(object.Key, object.Size, Digest(object.SHA256)); err != nil {
 		return err
 	}
-	if object.Method != http.MethodPut || !object.ExpiresAt.After(now) || object.ExpiresAt.Sub(now) > limits.LogUploadURLTTL {
+	if object.Method != http.MethodPut || !object.ExpiresAt.After(now) {
 		return fmt.Errorf("invalid signed log PUT")
 	}
 	return nil
