@@ -5,32 +5,33 @@ const SEEDED = 230;
 const base = Date.parse("2026-09-01T00:00:00Z");
 
 function runID(i: number): string {
-  return `paged-${String(i).padStart(3, "0")}`;
+  return `paged-${String(i).padStart(4, "0")}`;
 }
 
-async function createRun(
-  origin: string,
-  token: string,
-  i: number,
+// The fixture's control origin records finished runs straight into the store,
+// because a real run finishes only by executing on a runner.
+async function seedRuns(
+  controlOrigin: string,
+  firstIndex: number,
+  count: number,
   branch = "main",
 ): Promise<void> {
-  const res = await fetch(`${origin}/api/v1/runs`, {
+  const res = await fetch(`${controlOrigin}/__fixture/runs`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      id: runID(i),
+      count,
+      first_index: firstIndex,
+      id_prefix: "paged-",
       pipeline: "paging",
-      status: "success",
-      git_branch: branch,
+      branch,
       // A sub-millisecond part, so a cursor rounded to a JavaScript number would miss.
-      started_at: new Date(base + i * 60_000).toISOString().replace(".000Z", ".000123456Z"),
+      start: new Date(base).toISOString().replace(".000Z", ".000123456Z"),
+      step_seconds: 60,
     }),
   });
-  if (res.status !== 201) {
-    throw new Error(`seeding ${runID(i)}: ${res.status} ${await res.text()}`);
+  if (res.status !== 200) {
+    throw new Error(`seeding ${runID(firstIndex)}: ${res.status} ${await res.text()}`);
   }
 }
 
@@ -49,14 +50,9 @@ test("the runs page pages past 200 runs by cursor and polls only the newest page
   test.setTimeout(180_000);
   const dashboard = await startAuthenticatedDashboard();
   try {
-    for (let i = 0; i < SEEDED; i++) {
-      await createRun(
-        dashboard.origin,
-        dashboard.admin_token,
-        i,
-        i === 3 ? "rare" : "main",
-      );
-    }
+    await seedRuns(dashboard.control_origin, 0, 3);
+    await seedRuns(dashboard.control_origin, 3, 1, "rare");
+    await seedRuns(dashboard.control_origin, 4, SEEDED - 4);
     const lists: URL[] = [];
     page.on("request", (request) => {
       const url = new URL(request.url());
@@ -66,8 +62,7 @@ test("the runs page pages past 200 runs by cursor and polls only the newest page
 
     await page.goto(`${dashboard.origin}/runs`);
     const login = page.locator('form[action="/login"]');
-    await login.locator('input[name="username"]').fill("admin");
-    await login.locator('input[name="password"]').fill("correct-horse");
+    await login.locator('input[name="token"]').fill(dashboard.token);
     await login.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(`${dashboard.origin}/runs`);
 
@@ -87,7 +82,7 @@ test("the runs page pages past 200 runs by cursor and polls only the newest page
     );
     await expect(older).toBeDisabled();
     expect(new URL(page.url()).searchParams.get("older")).toMatch(
-      /^\d+:paged-030$/,
+      /^\d+:paged-0030$/,
     );
 
     // A deep link reopens the same page.
@@ -124,7 +119,7 @@ test("the runs page pages past 200 runs by cursor and polls only the newest page
     const anchorTop = async () =>
       anchor.evaluate((row) => row.getBoundingClientRect().top);
     const before = await anchorTop();
-    await createRun(dashboard.origin, dashboard.admin_token, SEEDED);
+    await seedRuns(dashboard.control_origin, SEEDED, 1);
     await expect
       .poll(async () => (await shownRunIDs(page))[0])
       .toBe(runID(SEEDED));

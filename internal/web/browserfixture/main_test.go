@@ -103,3 +103,28 @@ func TestParseFixtureConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestSeedRequestNormalize(t *testing.T) {
+	t.Parallel()
+	defaulted := seedRequest{Count: 2}
+	if err := defaulted.normalize(); err != nil {
+		t.Fatalf("normalize defaults: %v", err)
+	}
+	if defaulted.Pipeline != "fixture" || defaulted.Branch != "main" || defaulted.Status != "success" || defaulted.StepSeconds != 60 || defaulted.IDPrefix != "seeded-" || defaulted.Start.IsZero() {
+		t.Fatalf("normalize defaults = %#v", defaulted)
+	}
+	for _, test := range []struct {
+		name    string
+		request seedRequest
+		wantErr string
+	}{
+		{name: "no runs", request: seedRequest{}, wantErr: "count must be between"},
+		{name: "unknown status", request: seedRequest{Count: 1, Status: "running"}, wantErr: "status must be success or failed"},
+		{name: "negative step", request: seedRequest{Count: 1, StepSeconds: -1}, wantErr: "step_seconds must be positive"},
+		{name: "named id for many runs", request: seedRequest{Count: 2, ID: "one"}, wantErr: "count must be 1"},
+	} {
+		if err := test.request.normalize(); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+			t.Errorf("%s: normalize error = %v, want %q", test.name, err, test.wantErr)
+		}
+	}
+}
