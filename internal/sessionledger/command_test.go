@@ -181,7 +181,7 @@ func TestARecordIsPrivateToItsOwner(t *testing.T) {
 	}
 }
 
-func TestStraySessionEventKindIsARunEventKind(t *testing.T) {
+func TestStraySessionEventKindIsRegistered(t *testing.T) {
 	if !slices.Contains(runstate.RunEventKinds, eventKind) {
 		t.Fatalf("%q is not in runstate.RunEventKinds, so the console never hears it", eventKind)
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func TestRunEventKindsNameEveryStateEvent(t *testing.T) {
+func TestRunEventKindsRegisterEveryStateEvent(t *testing.T) {
 	for _, rule := range nodeEvents() {
 		if !slices.Contains(runstate.RunEventKinds, rule.Kind) {
 			t.Errorf("job event %q is not in runstate.RunEventKinds", rule.Kind)

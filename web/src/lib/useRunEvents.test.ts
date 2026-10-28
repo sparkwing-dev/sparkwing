@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { listenForRunEvents } from "./useRunEvents";
 
 describe("listenForRunEvents", () => {
-  it("hears every kind the controller's run stream sends", () => {
+  it("hears every registered state and control event kind", () => {
     const produced: string[] = JSON.parse(readFileSync(join(__dirname, "runEventKinds.json"), "utf8"));
     const heard: string[] = [];
     listenForRunEvents({ addEventListener: (kind) => heard.push(kind) }, () => {});
