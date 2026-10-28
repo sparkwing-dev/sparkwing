@@ -206,16 +206,14 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
-// safety: the address check runs first in the store, so the wrong-account reason says nothing about the state of
-// someone else's invitation.
+// safety: the store finds an invitation only through an address the caller owns, so a missing one and one sent
+// elsewhere give the same answer and the expiry and use reasons describe only the caller's own invitations.
 func invitationRefusal(err error) error {
 	switch {
-	case errors.Is(err, store.ErrEmailMismatch):
-		return reasonedRefusal(apierr.Forbidden, invitationWrongAccount, "this invitation was sent to another email address")
+	case errors.Is(err, store.ErrNotFound):
+		return reasonedRefusal(apierr.NotFound, invitationNotFound, "this invitation is not for the signed-in account or no longer exists")
 	case errors.Is(err, store.ErrInvitationClosed):
 		return reasonedRefusal(apierr.Conflict, invitationClosed, "this invitation has expired or was already used")
-	case errors.Is(err, store.ErrNotFound):
-		return reasonedRefusal(apierr.NotFound, invitationNotFound, "this invitation does not exist")
 	case errors.Is(err, store.ErrTeamFull):
 		return reasonedRefusal(apierr.Forbidden, invitationTeamFull, "this team has as many members as a team without purchased credits may")
 	}
@@ -223,10 +221,9 @@ func invitationRefusal(err error) error {
 }
 
 const (
-	invitationWrongAccount = "invitation_wrong_account"
-	invitationClosed       = "invitation_closed"
-	invitationNotFound     = "invitation_not_found"
-	invitationTeamFull     = "team_full"
+	invitationClosed   = "invitation_closed"
+	invitationNotFound = "invitation_not_found"
+	invitationTeamFull = "team_full"
 )
 
 const maxRunnerRepos = 32

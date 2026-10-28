@@ -869,8 +869,11 @@ account or provider detail: `expired`, `cancelled`, `email_unverified`,
 `account_exists`, `no_team`, `reauth_required`, `direct_sign_in_required`,
 `identity_linked_elsewhere`, `identity_already_linked`,
 `provider_already_linked`, `rate_limited`, `unavailable` or `failed`. A refused
-invitation acceptance carries `invitation_wrong_account`, `invitation_closed`,
-`invitation_not_found` or `team_full` in `error.details.reason`. Linking a provider does not grant repository
+invitation acceptance carries `invitation_not_found`, `invitation_closed` or
+`team_full` in `error.details.reason`. The store finds an invitation only through
+an address the account owns, so a missing invitation and one sent elsewhere get
+the same `invitation_not_found` answer; expiry and use are reported only for the
+caller's own invitation. Linking a provider does not grant repository
 trust. GitHub App intake separately verifies its webhook and clones its exact
 SHA. A subsequent branch-head lookup cannot replace that proof.
 

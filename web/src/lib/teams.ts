@@ -361,9 +361,7 @@ export const invitationRefusalText: Record<string, string> = {
   invitation_closed:
     "This invitation has expired or was already used. Ask a team owner to send a new one.",
   invitation_not_found:
-    "This invitation no longer exists. Ask a team owner to send a new one.",
-  invitation_wrong_account:
-    "This invitation was sent to another email address. Sign in with that address to accept it.",
+    "This invitation isn't for the account you're signed in with, or no longer exists. Sign in with the invited email, or ask a team owner for a new one.",
   team_full:
     "This team is full until a team owner buys credits or removes a member.",
 };

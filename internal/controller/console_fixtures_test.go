@@ -311,7 +311,7 @@ func handBuiltConsoleFixtures() map[string]any {
 	return map[string]any{
 		"refusal-reasons.json": map[string][]string{
 			"flow":       slices.Sorted(maps.Keys(signInRefusalText)),
-			"invitation": {invitationClosed, invitationNotFound, invitationTeamFull, invitationWrongAccount},
+			"invitation": {invitationClosed, invitationNotFound, invitationTeamFull},
 		},
 		"runs-list.json":   map[string]any{"runs": []runstate.RunSummary{summary}},
 		"run-created.json": controllerwire.CreateRunResponse{RunID: "run-retry", Number: 16, Inputs: inputs, WriteScope: "team"},

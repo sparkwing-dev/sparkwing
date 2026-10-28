@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"encoding/json"
 	"html"
 	"net/http"
 	"net/url"
@@ -64,10 +65,22 @@ func TestRefusedInvitationNamesItsReason(t *testing.T) {
 			} `json:"details"`
 		} `json:"error"`
 	}
-	if code := f.call("POST", "/api/v1/invitations/"+id+"/accept", other.auth, nil, &refusal); code != http.StatusForbidden || refusal.Error.Details.Reason != "invitation_wrong_account" {
-		t.Fatalf("accept by another address = %d %+v, want 403 invitation_wrong_account", code, refusal)
+	accept := func(id string) (int, string) {
+		t.Helper()
+		var body json.RawMessage
+		code := f.call("POST", "/api/v1/invitations/"+id+"/accept", other.auth, nil, &body)
+		return code, string(body)
+	}
+	foreignCode, foreign := accept(id)
+	missingCode, missing := accept("inv-that-never-existed")
+	if foreignCode != http.StatusNotFound || foreignCode != missingCode || foreign != missing || !strings.Contains(foreign, `"reason":"invitation_not_found"`) {
+		t.Fatalf("another address's invitation = %d %s, a missing one = %d %s; want one identical invitation_not_found answer", foreignCode, foreign, missingCode, missing)
 	}
 	f.advance(8 * 24 * time.Hour)
+	other = f.user("m", "mallory@example.com")
+	if code, expired := accept(id); code != missingCode || expired != missing {
+		t.Fatalf("another address's expired invitation = %d %s, want the missing answer %s", code, expired, missing)
+	}
 	eddie := f.user("e", "eddie@example.com")
 	if code := f.call("POST", "/api/v1/invitations/"+id+"/accept", eddie.auth, nil, &refusal); code != http.StatusConflict || refusal.Error.Details.Reason != "invitation_closed" {
 		t.Fatalf("accept after expiry = %d %+v, want 409 invitation_closed", code, refusal)

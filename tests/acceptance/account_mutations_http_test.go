@@ -263,7 +263,6 @@ func TestAccountMutationHTTPTransactionRefusals(t *testing.T) {
 		{store.ErrNotMember, apierr.NotFound},
 		{store.ErrNotFound, apierr.NotFound},
 		{store.ErrSlugTaken, apierr.Conflict},
-		{store.ErrEmailMismatch, apierr.Forbidden},
 		{store.ErrInvitationClosed, apierr.Conflict},
 		{store.ErrLastSignInMethod, apierr.Conflict},
 		{&apierr.Error{Code: apierr.Forbidden, Message: "sign in again", Details: map[string]any{"reason": apierr.ReasonReauthRequired}}, apierr.Forbidden},
