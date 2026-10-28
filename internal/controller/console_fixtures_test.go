@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -256,8 +258,7 @@ func (c *consoleRun) get(t *testing.T, path string) []byte {
 
 func ptr[T any](v T) *T { return &v }
 
-// consoleDaemonState is what a local admission daemon reports for a busy machine: one holder, one waiter
-// blocked on cores, and the host headroom arithmetic the Queue and Capacity panels render.
+// hack: a daemon's report is marshaled as given, so the fixture pins the daemon fields the local queue view passes on.
 func consoleDaemonState() wingwire.QueueState {
 	return wingwire.QueueState{
 		Resources: []wingwire.ResourceState{
@@ -308,6 +309,10 @@ func handBuiltConsoleFixtures() map[string]any {
 		LastFiredAt: ptr("2026-10-28T03:00:00Z"), LastRunID: "run-jobs", LastOutcome: "fired", NextDueAt: ptr("2026-10-29T03:00:00Z"),
 	}
 	return map[string]any{
+		"refusal-reasons.json": map[string][]string{
+			"flow":       slices.Sorted(maps.Keys(signInRefusalText)),
+			"invitation": {invitationClosed, invitationNotFound, invitationTeamFull, invitationWrongAccount},
+		},
 		"runs-list.json":   map[string]any{"runs": []runstate.RunSummary{summary}},
 		"run-created.json": controllerwire.CreateRunResponse{RunID: "run-retry", Number: 16, Inputs: inputs, WriteScope: "team"},
 		"runners.json": controllerwire.Runners{Runners: []controllerwire.RunnerDetail{{

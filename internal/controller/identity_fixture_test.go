@@ -44,6 +44,7 @@ type identityFixture struct {
 	admin    string
 	srv      *controller.Server
 	lastPage string
+	lastNext string
 	clock    *atomic.Int64
 }
 
@@ -255,7 +256,7 @@ func (f *identityFixture) oauthSignIn(provider string, code func(verifier string
 		"code": {code(flowVerifier(f.t, flow))}, "state": {authorize.Query().Get("state")},
 	}.Encode(), flow)
 	if callback.StatusCode != http.StatusOK {
-		f.lastPage = responseBody(f.t, callback)
+		f.lastPage, f.lastNext = responseBody(f.t, callback), callback.Header.Get("Location")
 		return callback.StatusCode
 	}
 	session := responseCookie(callback, "__Host-sw_session")

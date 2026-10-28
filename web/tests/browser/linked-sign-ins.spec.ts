@@ -144,3 +144,53 @@ test("an unlink from a stale sign-in asks for a fresh one", async ({
     "Linking and unlinking need a recent sign-in.",
   );
 });
+
+test("a refused link says what happened and what to do", async ({ page }) => {
+  await mockController(page);
+  await page.goto("/account/sign-ins?refused=identity_linked_elsewhere");
+  await expect(
+    page.getByText(
+      "That sign-in belongs to another Sparkwing account, and accounts cannot be combined. Link a different sign-in.",
+    ),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/account\/sign-ins$/);
+
+  await page.goto("/account/sign-ins?refused=%3Cb%3Emade-up%3C%2Fb%3E");
+  await expect(
+    page.getByText(
+      "Linking failed on this server. Try again, and if it keeps failing, contact your Sparkwing administrator.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("made-up")).toHaveCount(0);
+});
+
+test("a refused invitation says what happened and what to do", async ({ page }) => {
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/v1/capabilities") {
+      await route.fulfill({ json: { mode: "cluster", teams: { enabled: true } } });
+    } else if (path === "/api/v1/me") {
+      const team = { slug: "ada", display_name: "Ada's space", role: "owner" };
+      await route.fulfill({
+        json: {
+          user: { id: "u1", email: "ada@example.com", name: "Ada" },
+          active_team: team,
+          memberships: [team],
+          invitations: [{ id: "inv-1", team_slug: "acme", team_display_name: "Acme", role: "editor" }],
+        },
+      });
+    } else if (path === "/api/v1/invitations/inv-1/accept") {
+      await route.fulfill({
+        status: 409,
+        json: { error: { code: "conflict", message: "this invitation has expired or was already used", details: { reason: "invitation_closed" } } },
+      });
+    } else {
+      await route.fulfill({ json: {} });
+    }
+  });
+  await page.goto("/invitations?id=inv-1");
+  await page.getByRole("button", { name: "Accept" }).click();
+  await expect(
+    page.getByText("This invitation has expired or was already used. Ask a team owner to send a new one."),
+  ).toBeVisible();
+});

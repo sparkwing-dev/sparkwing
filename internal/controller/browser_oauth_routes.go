@@ -24,8 +24,8 @@ type oauthProof struct {
 
 func (s *Server) oauthEndpoints() []controllerwire.Endpoint {
 	return []controllerwire.Endpoint{
-		{Method: "GET", Pattern: "/auth/{provider}/start", Authentication: capability.AuthBrowserFlow, Verify: s.verifyOAuthStart, Handle: s.handleOAuthStart},
-		{Method: "GET", Pattern: "/auth/{provider}/callback", Authentication: capability.AuthBrowserFlow, Verify: s.verifyOAuthCallback, Handle: s.handleOAuthCallback},
+		returnRefusals(controllerwire.Endpoint{Method: "GET", Pattern: "/auth/{provider}/start", Authentication: capability.AuthBrowserFlow, Verify: s.verifyOAuthStart, Handle: s.handleOAuthStart}, signInStartRefusalLanding),
+		returnRefusals(controllerwire.Endpoint{Method: "GET", Pattern: "/auth/{provider}/callback", Authentication: capability.AuthBrowserFlow, Verify: s.verifyOAuthCallback, Handle: s.handleOAuthCallback}, s.signInCallbackRefusalLanding),
 	}
 }
 
@@ -63,13 +63,13 @@ func (s *Server) verifyOAuthCallback(r *http.Request) error {
 	flow, started := s.readOAuthFlow(r)
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if !started || err != nil || flow.Provider != name || flow.Code != "" || len(query["state"]) != 1 || !constantTimeEqual(query.Get("state"), flow.State) {
-		return invalidEngineBody("this sign-in could not be verified; start again")
+		return reasonedRefusal(apierr.BadRequest, refusedExpired, "this sign-in could not be verified; start again")
 	}
 	if values, declined := query["error"]; declined {
 		if len(values) != 1 || values[0] == "" || len(query["code"]) != 0 {
 			return invalidEngineBody("invalid sign-in callback")
 		}
-		return &apierr.Error{Code: apierr.Unauthenticated, Message: "sign-in was not completed"}
+		return reasonedRefusal(apierr.Unauthenticated, refusedCancelled, "sign-in was not completed")
 	}
 	if len(query["code"]) != 1 || query.Get("code") == "" {
 		return invalidEngineBody("sign-in code is required")
@@ -100,7 +100,11 @@ func oauthFlowError(err error) error {
 	if refused, ok := refusalOf(err); ok {
 		codes := map[int]apierr.Code{400: apierr.BadRequest, 401: apierr.Unauthenticated, 403: apierr.Forbidden, 404: apierr.NotFound, 409: apierr.Conflict}
 		if code, ok := codes[refused.status]; ok {
-			return &apierr.Error{Code: code, Message: refused.message}
+			failure := &apierr.Error{Code: code, Message: refused.message}
+			if refused.code != "" {
+				failure.Details = map[string]any{"reason": refused.code}
+			}
+			return failure
 		}
 	}
 	return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "sign-in service unavailable; start again"}, err)

@@ -19,7 +19,9 @@ export default function InvitationsPage() {
       {me.invitations.length === 0 ? (
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-5 text-sm text-[var(--muted)]">
           Nothing is waiting for {me.user.email}. An invitation shows here only
-          when you are signed in with the address it was sent to.{" "}
+          while it is open and you are signed in with the address it was sent
+          to; if it expired or was already used, ask a team owner to send a new
+          one.{" "}
           <Link href="/team" className="text-[var(--accent)] hover:underline">
             Go to {me.active_team.display_name}
           </Link>

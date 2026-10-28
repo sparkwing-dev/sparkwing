@@ -37,8 +37,8 @@ type identityLinkProof struct{ grant oauthGrant }
 
 func (s *Server) identityLinkEndpoints() []controllerwire.Endpoint {
 	return []controllerwire.Endpoint{
-		{Method: "POST", Pattern: "/auth/{provider}/link", Authentication: capability.AuthBrowserFlow, Verify: s.verifyIdentityLinkStart, Handle: s.handleIdentityLinkStart},
-		{Method: "GET", Pattern: "/auth/{provider}/link/complete", Authentication: capability.AuthBrowserFlow, Verify: s.verifyIdentityLinkComplete, Handle: s.handleIdentityLinkComplete},
+		returnRefusals(controllerwire.Endpoint{Method: "POST", Pattern: "/auth/{provider}/link", Authentication: capability.AuthBrowserFlow, Verify: s.verifyIdentityLinkStart, Handle: s.handleIdentityLinkStart}, linkRefusalLanding),
+		returnRefusals(controllerwire.Endpoint{Method: "GET", Pattern: "/auth/{provider}/link/complete", Authentication: capability.AuthBrowserFlow, Verify: s.verifyIdentityLinkComplete, Handle: s.handleIdentityLinkComplete}, linkRefusalLanding),
 	}
 }
 
@@ -51,7 +51,7 @@ func (s *Server) identityLinkSession(r *http.Request) (*store.Session, signInPro
 		return nil, nil, err
 	}
 	if session.CapabilityPrefix != "" {
-		return nil, nil, identityLinkRefusal(apierr.Forbidden, "direct_sign_in_required", "linking requires the account's own provider sign-in")
+		return nil, nil, reasonedRefusal(apierr.Forbidden, "direct_sign_in_required", "linking requires the account's own provider sign-in")
 	}
 	name := r.PathValue("provider")
 	if _, known := providerLabels[name]; !known {
@@ -65,7 +65,7 @@ func (s *Server) identityLinkSession(r *http.Request) (*store.Session, signInPro
 		return nil, nil, invalidEngineBody("redirect_uri is not on this controller's allowlist")
 	}
 	if !recentSignIn(session.CreatedAt, session.Now) {
-		return nil, nil, identityLinkRefusal(apierr.Forbidden, "reauth_required", "linking needs a sign-in from the last 10 minutes; sign out, sign in again and retry")
+		return nil, nil, reasonedRefusal(apierr.Forbidden, "reauth_required", "linking needs a sign-in from the last 10 minutes; sign out, sign in again and retry")
 	}
 	notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{
 		Team: string(session.Team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: session.AccountID},
@@ -177,7 +177,7 @@ func (s *Server) verifyIdentityLinkComplete(r *http.Request) error {
 		return identityLinkProviderError(err)
 	}
 	if profile.Provider != claim.Provider || profile.Subject == "" || !profile.EmailVerified {
-		return identityLinkRefusal(apierr.Forbidden, "provider_unverified", "the provider did not verify this sign-in")
+		return reasonedRefusal(apierr.Forbidden, "provider_unverified", "the provider did not verify this sign-in")
 	}
 	if _, err := writer.LinkAccountIdentity(r.Context(), claim, profile); err != nil {
 		return identityLinkError(err)
@@ -186,12 +186,8 @@ func (s *Server) verifyIdentityLinkComplete(r *http.Request) error {
 	return nil
 }
 
-func identityLinkRefusal(code apierr.Code, reason, message string) error {
-	return &apierr.Error{Code: code, Message: message, Details: map[string]any{"reason": reason}}
-}
-
 func invalidIdentityLink() error {
-	return identityLinkRefusal(apierr.Forbidden, "link_state_invalid", "this link could not be verified; start linking again")
+	return reasonedRefusal(apierr.Forbidden, "link_state_invalid", "this link could not be verified; start linking again")
 }
 
 func identityLinkError(err error) error {
@@ -201,11 +197,11 @@ func identityLinkError(err error) error {
 	}
 	switch {
 	case errors.Is(err, store.ErrIdentityLinkedElsewhere):
-		return identityLinkRefusal(apierr.Conflict, "identity_linked_elsewhere", "this sign-in belongs to another account; accounts cannot be combined")
+		return reasonedRefusal(apierr.Conflict, "identity_linked_elsewhere", "this sign-in belongs to another account; accounts cannot be combined")
 	case errors.Is(err, store.ErrIdentityAlreadyLinked):
-		return identityLinkRefusal(apierr.Conflict, "identity_already_linked", "this sign-in already belongs to this account")
+		return reasonedRefusal(apierr.Conflict, "identity_already_linked", "this sign-in already belongs to this account")
 	case errors.Is(err, store.ErrProviderAlreadyLinked):
-		return identityLinkRefusal(apierr.Conflict, "provider_already_linked", "this account already has a sign-in from this provider; unlink it before linking another")
+		return reasonedRefusal(apierr.Conflict, "provider_already_linked", "this account already has a sign-in from this provider; unlink it before linking another")
 	default:
 		return &apierr.Error{Code: apierr.Unavailable, Message: "linking service unavailable; start linking again"}
 	}
@@ -214,9 +210,9 @@ func identityLinkError(err error) error {
 func identityLinkProviderError(err error) error {
 	switch {
 	case errors.Is(err, errSignInRejected):
-		return identityLinkRefusal(apierr.Unauthenticated, "provider_rejected", "the provider did not confirm the sign-in; start linking again")
+		return reasonedRefusal(apierr.Unauthenticated, "provider_rejected", "the provider did not confirm the sign-in; start linking again")
 	case errors.Is(err, errSignInUnverified):
-		return identityLinkRefusal(apierr.Forbidden, "provider_unverified", "the provider has not verified this account's email address")
+		return reasonedRefusal(apierr.Forbidden, "provider_unverified", "the provider has not verified this account's email address")
 	default:
 		return &apierr.Error{Code: apierr.Unavailable, Message: "linking service unavailable; start linking again"}
 	}

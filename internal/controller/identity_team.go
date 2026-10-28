@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -191,7 +192,7 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request, 
 	}
 	acc, err := writer.AcceptAccountInvitation(r.Context(), a, r.PathValue("invitation"))
 	if err != nil {
-		return accountMutationError(err)
+		return invitationRefusal(err)
 	}
 	if acc.Admitted {
 		observeSignUpOutcome("admitted", "invitation")
@@ -204,6 +205,29 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
+
+// safety: the address check runs first in the store, so the wrong-account reason says nothing about the state of
+// someone else's invitation.
+func invitationRefusal(err error) error {
+	switch {
+	case errors.Is(err, store.ErrEmailMismatch):
+		return reasonedRefusal(apierr.Forbidden, invitationWrongAccount, "this invitation was sent to another email address")
+	case errors.Is(err, store.ErrInvitationClosed):
+		return reasonedRefusal(apierr.Conflict, invitationClosed, "this invitation has expired or was already used")
+	case errors.Is(err, store.ErrNotFound):
+		return reasonedRefusal(apierr.NotFound, invitationNotFound, "this invitation does not exist")
+	case errors.Is(err, store.ErrTeamFull):
+		return reasonedRefusal(apierr.Forbidden, invitationTeamFull, "this team has as many members as a team without purchased credits may")
+	}
+	return accountMutationError(err)
+}
+
+const (
+	invitationWrongAccount = "invitation_wrong_account"
+	invitationClosed       = "invitation_closed"
+	invitationNotFound     = "invitation_not_found"
+	invitationTeamFull     = "team_full"
+)
 
 const maxRunnerRepos = 32
 

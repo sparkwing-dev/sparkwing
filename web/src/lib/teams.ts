@@ -101,6 +101,7 @@ export class TeamApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly reason = "",
   ) {
     super(message);
   }
@@ -111,11 +112,16 @@ export async function failure(
   action: string,
 ): Promise<TeamApiError> {
   let detail = "";
+  let reason = "";
   try {
     const text = (await res.text()).trim();
     try {
-      const body = JSON.parse(text) as { error?: { message?: string } };
+      const body = JSON.parse(text) as {
+        error?: { message?: string; details?: { reason?: unknown } };
+      };
       detail = body.error?.message || text;
+      const given = body.error?.details?.reason;
+      reason = typeof given === "string" ? given : "";
     } catch {
       detail = text;
     }
@@ -126,6 +132,7 @@ export async function failure(
   return new TeamApiError(
     res.status,
     detail ? `${action}: ${detail}` : `${action} failed (${res.status})`,
+    reason,
   );
 }
 
@@ -349,12 +356,31 @@ export async function revokeInvitation(id: string): Promise<void> {
   );
 }
 
+// One sentence per reason the controller refuses an invitation with.
+export const invitationRefusalText: Record<string, string> = {
+  invitation_closed:
+    "This invitation has expired or was already used. Ask a team owner to send a new one.",
+  invitation_not_found:
+    "This invitation no longer exists. Ask a team owner to send a new one.",
+  invitation_wrong_account:
+    "This invitation was sent to another email address. Sign in with that address to accept it.",
+  team_full:
+    "This team is full until a team owner buys credits or removes a member.",
+};
+
 export async function acceptInvitation(id: string): Promise<void> {
-  await send(
-    "POST",
-    `/api/v1/invitations/${seg(id)}/accept`,
-    "Accept invitation",
-  );
+  try {
+    await send(
+      "POST",
+      `/api/v1/invitations/${seg(id)}/accept`,
+      "Accept invitation",
+    );
+  } catch (err) {
+    if (err instanceof TeamApiError && Object.hasOwn(invitationRefusalText, err.reason)) {
+      throw new TeamApiError(err.status, invitationRefusalText[err.reason], err.reason);
+    }
+    throw err;
+  }
 }
 
 export async function listTeamTokens(): Promise<TeamToken[]> {
