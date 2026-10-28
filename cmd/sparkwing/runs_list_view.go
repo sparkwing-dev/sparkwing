@@ -96,7 +96,7 @@ func runFailures(ctx context.Context, reader controllerwire.RunReader, run contr
 			}
 			row := base
 			row.JobID = job.ID
-			row.Message = job.StatusDetail
+			row.Message = jobFailureText(job)
 			rows = append(rows, row)
 			if group == "run" {
 				break
