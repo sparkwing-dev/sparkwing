@@ -47,8 +47,8 @@ func validateObject(o capability.ObjectToSign, now time.Time) error {
 	return fmt.Errorf("invalid signed object method or key")
 }
 
-// validateSigning adds the lifetime ceiling a verifier cannot recheck: a wall
-// clock stepped back after signing would make a fresh URL look too long-lived.
+// safety: only signing checks the lifetime ceiling; a wall clock stepped back
+// after signing makes a fresh URL look too long-lived to a verifier.
 func validateSigning(o capability.ObjectToSign, now time.Time) error {
 	if err := validateObject(o, now); err != nil {
 		return err
