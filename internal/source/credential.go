@@ -69,6 +69,18 @@ func (g *gitClient) authentication(ctx context.Context, remote string) (args, en
 		env = []string{"GIT_SSH_COMMAND=" + command}
 		return nil, env, cleanup, nil
 	}
+	username := credential.Username
+	if credential.Kind == "github_app" {
+		username = "x-access-token"
+	}
+	encoded := base64.StdEncoding.EncodeToString([]byte(username + ":" + credential.Secret))
+	// safety: a failure here can end up in a run's stored error, so the host masker learns the credential and its
+	// Basic header form before git sees either.
+	if g.masker != nil {
+		if err := errors.Join(g.masker.Register(credential.Secret), g.masker.Register(encoded)); err != nil {
+			return nil, nil, cleanup, err
+		}
+	}
 	directory, err := fssecure.MkdirPrivateTemp(g.workspace, "credential-")
 	if err != nil {
 		return nil, nil, cleanup, err
@@ -90,11 +102,7 @@ func (g *gitClient) authentication(ctx context.Context, remote string) (args, en
 		command := "ssh -F " + shellQuote(os.DevNull) + " -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes -o GlobalKnownHostsFile=" + shellQuote(os.DevNull) + " -o UserKnownHostsFile=" + shellQuote(known) + " -i " + shellQuote(key)
 		return nil, []string{"GIT_SSH_COMMAND=" + command, "HOME=" + directory}, cleanup, nil
 	}
-	username := credential.Username
-	if credential.Kind == "github_app" {
-		username = "x-access-token"
-	}
-	header := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+credential.Secret))
+	header := "Authorization: Basic " + encoded
 	config := filepath.Join(directory, "gitconfig")
 	body := "[http " + strconv.Quote(strings.TrimRight(remote, "/")) + "]\n\textraHeader = " + strconv.Quote(header) + "\n"
 	if err := fssecure.WriteFile(config, []byte(body)); err != nil {

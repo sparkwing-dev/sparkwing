@@ -22,7 +22,7 @@ func ResolveRef(ctx context.Context, spec Spec, ref string, options Options) (st
 	if spec.RemoteURL, err = tenantRemote(spec.RemoteURL, options); err != nil {
 		return "", err
 	}
-	client := &gitClient{owner: options.ownerGit(), env: gitEnvironment(env), workspace: options.Workspace}
+	client := &gitClient{owner: options.ownerGit(), env: gitEnvironment(env), workspace: options.Workspace, masker: options.Base.Masker}
 	if spec.LocalCheckout != "" {
 		return resolveReference(ref, true, func(refs []string) (map[string]string, error) {
 			commits := make(map[string]string)

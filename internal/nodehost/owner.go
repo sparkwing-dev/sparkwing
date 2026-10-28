@@ -336,8 +336,8 @@ func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row 
 		return failure
 	}
 	reason := string(apierr.PlanFailed)
-	// safety: before describe the masker already holds the intake secret arguments; a job's pre-start failure is
-	// recorded through the same masking and bound.
+	// safety: the masker already holds the intake secret arguments and, once the source fetch authenticated, its git
+	// credential and Basic header; source and bundle errors also drop git output and signed URLs before they get here.
 	message := boundedNodeErrText(h.Masker.Mask(failure.Error()))
 	if cause := context.Cause(ctx); cause != nil {
 		var cancelled *lease.CancelError
