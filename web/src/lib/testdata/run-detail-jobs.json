@@ -1,0 +1,127 @@
+{
+  "id": "run-jobs",
+  "number": 15,
+  "team": "acme",
+  "status": "failed",
+  "state_seq": 9,
+  "inputs": {
+    "pipeline": "hello",
+    "requested_args": {},
+    "args": {
+      "target": "prod"
+    },
+    "secret_args": [],
+    "git": {
+      "repository": {
+        "key": "git:gitlab.com/acme/app",
+        "display": "gitlab.com/acme/app"
+      },
+      "ref": "main",
+      "sha": "1b8e292f29420af1ae8e113e53faf3c05fb17249",
+      "default_branch": {
+        "set": false,
+        "value": ""
+      },
+      "repository_name": {
+        "set": false,
+        "value": ""
+      },
+      "app": {
+        "set": false,
+        "value": {
+          "delivery_key": "",
+          "installation_id": 0,
+          "repository_id": 0,
+          "ref": "",
+          "sha": "",
+          "default_branch": "",
+          "default_branch_push": false,
+          "verified_at": "0001-01-01T00:00:00Z"
+        }
+      }
+    },
+    "actor": {
+      "kind": "",
+      "id": "",
+      "display": ""
+    },
+    "pull_request": {
+      "set": false,
+      "value": {
+        "merged": {
+          "set": false,
+          "value": false
+        },
+        "number": 0,
+        "action": "",
+        "base_repo": "",
+        "head_repo": "",
+        "base_ref": "",
+        "head_ref": "",
+        "base_sha": "",
+        "head_sha": "",
+        "fork": false
+      }
+    },
+    "lineage": {
+      "parent_run_id": "",
+      "parent_job_id": "",
+      "retry_of": "run-earlier",
+      "retrier": {
+        "set": false,
+        "value": {
+          "kind": "",
+          "id": "",
+          "display": ""
+        }
+      }
+    },
+    "env_names": null,
+    "reproducer": null
+  },
+  "jobs": [
+    {
+      "id": "build",
+      "status": "done",
+      "outcome": "failed",
+      "error": "install source entry: ./pipeline.go:3:9: cannot use *** as int value",
+      "generation": 1,
+      "attempt": 0,
+      "state_seq": 0,
+      "expansion": "none",
+      "finished_at": "2026-10-28T05:01:52Z"
+    },
+    {
+      "annotations": [
+        {
+          "level": "notice",
+          "message": "42 tests"
+        }
+      ],
+      "id": "test",
+      "status": "done",
+      "outcome": "success",
+      "generation": 1,
+      "attempt": 1,
+      "state_seq": 4,
+      "expansion": "none",
+      "started_at": "2026-10-28T05:01:19Z",
+      "finished_at": "2026-10-28T05:01:52Z"
+    }
+  ],
+  "attempts": [
+    {
+      "job_id": "test",
+      "attempt": 1,
+      "generation": 1,
+      "outcome": "success",
+      "executor": "cloud",
+      "started_at": "2026-10-28T05:01:19Z",
+      "finished_at": "2026-10-28T05:01:52Z"
+    }
+  ],
+  "logs": null,
+  "started_at": "2026-10-28T05:01:19Z",
+  "finished_at": "2026-10-28T05:01:52Z",
+  "notices": []
+}

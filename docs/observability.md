@@ -286,7 +286,8 @@ its `Plan` returns an error -- has no jobs, so it has no job logs either.
 The plan host records the same masked, bounded error on the run: it is the
 run detail's `failure`, which `sparkwing runs status` prints as `run error`
 (and `--view errors` as a `run` row), and `sparkwing runs logs` prints after
-the logs (a `run_error` record with `-o json`). Both add a hint to check the
+the logs (a `run_error` record with `-o json`). The console's run page shows
+it under "No DAG for this run". All three add a hint to check the
 pipeline locally with `sparkwing pipeline plan --pipeline <name>`, though a
 failure that depends on the host, such as one behind a build tag, may not
 reproduce there.

@@ -348,6 +348,74 @@ const cronDetail = {
   upcoming: [isoFromNow(4 * 3_600_000), isoFromNow(28 * 3_600_000)],
 };
 
+type ViewNode = Record<string, unknown> & {
+  id: string;
+  status?: string;
+  outcome?: string;
+  error?: string;
+  status_detail?: string;
+  started_at?: string;
+  finished_at?: string;
+  execution_attempts?: Record<string, unknown>[];
+};
+
+// wireDetail encodes a test's run and nodes as GET /api/v1/runs/{run} does
+// (controllerwire.RunDetail), so the page only sees what the controller sends.
+function wireDetail(detail: Record<string, unknown>): Record<string, unknown> {
+  const run = detail.run as Record<string, unknown>;
+  const nodes = (detail.nodes ?? []) as ViewNode[];
+  const terminal = ["success", "failed", "cancelled", "skipped", "superseded", "memoized"];
+  return {
+    id: run.id,
+    number: 1,
+    team: "default",
+    status: run.status,
+    ...(run.error ? { failure: run.error } : {}),
+    state_seq: 1,
+    inputs: {
+      pipeline: run.pipeline,
+      requested_args: {},
+      args: run.args ?? {},
+      secret_args: [],
+      git: {
+        repository: { key: "", display: run.repo ?? "" },
+        ref: run.git_branch ?? "",
+        sha: run.git_sha ?? "",
+      },
+      lineage: { parent_run_id: run.parent_run_id ?? "", parent_job_id: "", retry_of: run.retry_of ?? "" },
+    },
+    jobs: nodes.map((node) => ({
+      id: node.id,
+      status: terminal.includes(node.status ?? "") ? "done" : node.status,
+      outcome: node.outcome || (terminal.includes(node.status ?? "") ? node.status : undefined),
+      status_detail: node.status_detail,
+      error: node.error,
+      generation: 1,
+      attempt: node.execution_attempts?.length ?? 0,
+      state_seq: 1,
+      expansion: "none",
+      started_at: node.started_at,
+      finished_at: node.finished_at,
+    })),
+    attempts: nodes.flatMap((node) =>
+      (node.execution_attempts ?? []).map((attempt) => ({
+        job_id: node.id,
+        attempt: attempt.attempt ?? 1,
+        generation: 1,
+        outcome: attempt.outcome,
+        reason: attempt.failure_reason,
+        executor: attempt.executor_name ?? "",
+        started_at: attempt.started_at,
+        finished_at: attempt.finished_at,
+      })),
+    ),
+    logs: [],
+    started_at: run.started_at,
+    finished_at: run.finished_at,
+    notices: [],
+  };
+}
+
 type MockAPIOptions = {
   runs?: Record<string, unknown>[];
   details?: Record<string, Record<string, unknown>>;
@@ -514,7 +582,7 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
         return;
       }
       const detail = options.details?.[detailMatch[1]];
-      await route.fulfill(detail ? { json: detail } : { status: 404, json: {} });
+      await route.fulfill(detail ? { json: wireDetail(detail) } : { status: 404, json: {} });
       return;
     }
     const logMatch = path.match(/^\/api\/v1\/runs\/([^/]+)\/logs\/([^/]+)$/);
@@ -675,7 +743,7 @@ async function selectRunWhileOlderDetailIsPending(
       olderStarted.resolve();
       await olderRelease.promise;
       try {
-        await route.fulfill({ json: finishedDetail });
+        await route.fulfill({ json: wireDetail(finishedDetail) });
       } catch (error) {
         olderFailure = String(error);
       }
@@ -789,7 +857,7 @@ test("keeps run panes the same size while switching selected runs", async ({ pag
       if (runID !== nextRun.id) return false;
       nextStarted.resolve();
       await releaseNext.promise;
-      await route.fulfill({ json: nextDetail });
+      await route.fulfill({ json: wireDetail(nextDetail) });
       return true;
     },
   });
@@ -1031,6 +1099,9 @@ test("shows an empty DAG canvas with the error for a run that never planned", as
   await expect(empty).toContainText("No DAG for this run");
   await expect(empty).toContainText("ended before its pipeline planned any nodes");
   await expect(empty).toContainText("daemon build differs from this client");
+  await expect(page.getByTestId("plan-failure-hint")).toContainText(
+    "sparkwing pipeline plan --pipeline heartbeat",
+  );
 });
 
 test("explains a historical trigger that ended before dispatch", async ({ page }) => {
@@ -1241,8 +1312,8 @@ test("runs and nodes collapse into selectable rails and remember the viewer's ch
       [runningRun.id]: {
         run: runningRun,
         nodes: [
-          { id: "compile", status: "success", outcome: "success", duration_ms: 1200 },
-          { id: "publish", status: "running", outcome: "", duration_ms: 2300 },
+          { id: "compile", status: "success", outcome: "success", started_at: "2026-08-27T18:00:00Z", finished_at: "2026-08-27T18:00:01.200Z" },
+          { id: "publish", status: "running", outcome: "" },
         ],
       },
       [finishedRun.id]: finishedDetail,
@@ -1260,8 +1331,8 @@ test("runs and nodes collapse into selectable rails and remember the viewer's ch
   await expect(runsRail.locator("[data-rail-id]").first()).toHaveAttribute("aria-label", /sparkwing-dev\/sparkwing.*pre-commit.*main.*2026/);
   await runsRail.locator('[data-rail-id="run-20260827-001"]').hover();
   await expect(page.getByRole("tooltip")).toContainText("deploy-production");
-  await nodesRail.locator('[data-rail-id="publish"]').hover();
-  await expect(page.getByRole("tooltip")).toContainText("publish · 2.3s");
+  await nodesRail.locator('[data-rail-id="compile"]').hover();
+  await expect(page.getByRole("tooltip")).toContainText("compile · 1.2s");
   await runsRail.locator('[data-rail-id="run-20260827-001"]').click();
   await expect(page).toHaveURL(/run=run-20260827-001/);
   await nodesRail.locator('[data-rail-id="verify"]').click();
@@ -1558,7 +1629,7 @@ test("resumes the run event stream after a disconnect", async ({ page }) => {
       if (observed.resumed && observed.resumedDetailAt === 0) {
         observed.resumedDetailAt = Date.now();
       }
-      sendJSON(observed.resumed ? completedDetail : runningDetail);
+      sendJSON(wireDetail(observed.resumed ? completedDetail : runningDetail));
       return true;
     }
     if (
