@@ -158,8 +158,11 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 	if err := boundedResultText(annotation.Message); err != nil {
 		return err
 	}
-	if !utf8.ValidString(annotation.File) || annotation.Validate() != nil {
-		return authorityError(apierr.BadRequest, "invalid annotation level or location")
+	if !utf8.ValidString(annotation.File) {
+		return authorityError(apierr.BadRequest, "annotation file is not valid UTF-8")
+	}
+	if err := annotation.Validate(); err != nil {
+		return authorityError(apierr.BadRequest, err.Error())
 	}
 	encoded, err := json.Marshal(annotation.Annotation)
 	if err != nil {

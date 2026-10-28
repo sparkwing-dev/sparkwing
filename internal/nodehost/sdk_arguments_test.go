@@ -243,6 +243,7 @@ func TestHostAnnotationRulesAgreeForBothSDKs(t *testing.T) {
 		calls++
 		return nil
 	}
+	wants := []string{"annotation end_line 4 is before line 5", `annotation level "warning" is not one of debug, info, warn, error`, "annotation line -1 is negative"}
 	for index, annotation := range annotations {
 		goBody, err := sdkserve.EncodeServiceRequest(annotation)
 		if err != nil {
@@ -251,7 +252,7 @@ func TestHostAnnotationRulesAgreeForBothSDKs(t *testing.T) {
 		for sdk, body := range map[string][]byte{"go": goBody, "typescript": tsBodies[index]} {
 			_, err := callService(t, routes, auth, "/node/v1/annotations", string(body))
 			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.BadRequest || failure.Message != "invalid annotation level or location" {
+			if !errors.As(err, &failure) || failure.Code != apierr.BadRequest || failure.Message != wants[index] {
 				t.Fatalf("%s host annotation error = %v", sdk, err)
 			}
 		}
