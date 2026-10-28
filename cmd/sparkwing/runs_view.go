@@ -209,7 +209,6 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 	return err
 }
 
-// writeRunError prints the run's own error, the only account of a pipeline that failed before planning any job.
 func writeRunError(text *strings.Builder, detail controllerwire.RunDetail) {
 	if detail.Failure == "" {
 		return

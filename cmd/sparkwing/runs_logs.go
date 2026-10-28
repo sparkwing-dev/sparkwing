@@ -83,8 +83,6 @@ func parseRunLogs(inv clisurface.Invocation) (controllerwire.LogQuery, error) {
 	return q, nil
 }
 
-// observeRunLogs prints the run's logs, then, when runs is set, the run's own error and the recorded error of each
-// selected job that failed before it started, since a run that failed to plan or such a job has no logs of it.
 func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader controllerwire.LogReader, runs controllerwire.RunReader, out, diagnostics io.Writer, wait func(context.Context, time.Duration) error) error {
 	query, err := parseRunLogs(inv)
 	if err != nil {
