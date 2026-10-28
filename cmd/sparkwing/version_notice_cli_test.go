@@ -41,3 +41,20 @@ func TestJSONOutputCarriesNoUpgradeNotice(t *testing.T) {
 		t.Fatalf("the next human-facing invocation did not show the notice on stderr: %v %q", err, stderr.String())
 	}
 }
+
+func TestUpgradeNoticeFollowsTheCommandOutput(t *testing.T) {
+	cli := buildSubmitCLI(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SPARKWING_HOME", filepath.Join(home, ".sparkwing"))
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))
+	stamp := paths.PathsAt(filepath.Join(home, ".sparkwing")).VersionStampFile(installsite.PathKey(cli))
+	for _, args := range [][]string{{"docs", "list", "-o", "plain"}, {"runs", "status", "--run", "run-missing", "-o", "plain"}} {
+		seedStamp(t, stamp, cli, "v0.0.1")
+		combined, _ := exec.CommandContext(t.Context(), cli, args...).CombinedOutput()
+		lines := strings.Split(strings.TrimRight(string(combined), "\n"), "\n")
+		if len(lines) < 2 || !strings.HasPrefix(lines[len(lines)-1], "sparkwing changed v0.0.1 -> ") {
+			t.Fatalf("%v: the upgrade notice is not the last line after the output:\n%s", args, combined)
+		}
+	}
+}

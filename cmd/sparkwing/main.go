@@ -30,9 +30,19 @@ func init() {
 	docs.Version = installedVersion()
 }
 
+// safety: main prints the upgrade notice after the command's output and any
+// failure, so the first line a reader or script sees is the command's answer.
+var noticeVerb string
+
 func main() {
-	if err := runSparkwing(os.Args[1:]); err != nil {
+	err := runSparkwing(os.Args[1:])
+	if err != nil {
 		writeFailure(os.Stderr, err)
+	}
+	if noticeVerb != "" {
+		noteVersionTransition(os.Stderr, noticeVerb)
+	}
+	if err != nil {
 		os.Exit(exitCodeFor(err))
 	}
 }
@@ -242,8 +252,10 @@ func runSparkwing(args []string) (result error) {
 	// Scripts often merge stderr into the JSON they parse, so a JSON
 	// invocation leaves the stamp for the next human-facing one; info carries
 	// the notice inside its own document.
-	if verb := strings.Fields(inv.Command.Path)[1]; verb == "info" || inv.Output(color.IsInteractiveStdout()) != "json" {
+	if verb := strings.Fields(inv.Command.Path)[1]; verb == "info" {
 		noteVersionTransition(os.Stderr, verb)
+	} else if inv.Output(color.IsInteractiveStdout()) != "json" {
+		noticeVerb = verb
 	}
 	switch {
 	case strings.HasPrefix(inv.Command.Path, "sparkwing tokens "), strings.HasPrefix(inv.Command.Path, "sparkwing operator tokens "):
