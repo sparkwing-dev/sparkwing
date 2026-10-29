@@ -1,4 +1,5 @@
-// Package streamhttp bounds individual HTTP stream writes without limiting stream lifetime.
+// Package streamhttp bounds individual HTTP stream writes, where the response
+// writer supports write deadlines, without limiting stream lifetime.
 package streamhttp
 
 import (
@@ -14,7 +15,9 @@ type writer struct {
 }
 
 // NewWriter clears the response deadline while idle and bounds each Write and
-// Flush operation. Flush through this writer so buffered output is also bounded.
+// Flush operation when the response writer supports write deadlines; one that
+// does not is written unbounded. Flush through this writer so buffered output
+// is also bounded.
 func NewWriter(w http.ResponseWriter, timeout time.Duration) (*writer, error) {
 	out := &writer{response: w, controller: http.NewResponseController(w), timeout: timeout}
 	if err := out.setDeadline(time.Time{}); err != nil {

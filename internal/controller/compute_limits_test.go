@@ -214,7 +214,7 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 		t.Fatalf("second intake = %d, want 429: %s", status, second)
 	}
 
-	runs, err := f.store.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 10})
+	runs, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListRuns(ctx, store.RunFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("list schedules = %d rows, %v", len(rows), err)
 	}
-	if _, err := f.store.AsOperator().SetComputeLimits(ctx, map[string]int64{store.ComputeLimitRunsPerHour: 1}); err != nil {
+	if _, err := f.store.AsOperator().WriteComputeLimits(ctx, teststore.OperatorAuthorized(t, f.store, ""), map[string]int64{store.ComputeLimitRunsPerHour: 1}); err != nil {
 		t.Fatalf("set the guard: %v", err)
 	}
 	f.call(http.MethodPost, "/api/v1/schedules/"+rows[1].ID+"/run", f.writer, nil, http.StatusOK, nil)
@@ -294,7 +294,7 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 		refusal.Error.Details.Limit != store.ComputeLimitRunsPerHour {
 		t.Fatalf("refusal = %+v, want the hourly guard named", refusal)
 	}
-	triggers, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Limit: 10})
+	triggers, err := teststore.Triggers(ctx, teststore.ForTeam(t, f.store, store.DefaultTeam))
 	if err != nil {
 		t.Fatalf("list triggers: %v", err)
 	}

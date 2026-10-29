@@ -39,7 +39,7 @@ func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := tenant.GetNode(t.Context(), seed.RunID, seed.NodeID)
+	row, err := teststore.Node(t.Context(), tenant, seed.RunID, seed.NodeID)
 	if err != nil || row.Status != seed.Status || row.StartedAt == nil || !row.StartedAt.Equal(started) || !reflect.DeepEqual(row.Deps, seed.Deps) || row.AttemptsConsumed != 2 {
 		t.Fatalf("reporting fixture: %+v %v", row, err)
 	}

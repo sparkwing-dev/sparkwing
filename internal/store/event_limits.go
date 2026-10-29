@@ -33,8 +33,8 @@ func defaultEventLimits() eventLimits {
 // eventLimits caps what a run stores as events. An event's bytes are its
 // kind plus its payload. The caps hold whether or not a storage quota tier is
 // configured, because an unconfigured controller is exactly the one with
-// nothing else between a runner token and the database's disk. A value of
-// zero or less lifts that cap.
+// nothing else between a runner token and the database's disk. Zero lifts
+// that cap; a negative value is invalid and fails event admission.
 type eventLimits struct {
 	MaxBytesPerEvent int64
 	MaxBytesPerRun   int64
@@ -67,30 +67,6 @@ func validateEventKind(kind string) error {
 
 func eventBytes(kind string, payload []byte) int64 {
 	return int64(len(kind) + len(payload))
-}
-
-// eventLimits returns the caps in force, the defaults where the operator
-// set none.
-func (s *Store) eventLimits(ctx context.Context) (eventLimits, error) {
-	return inTxResult(ctx, s, func(tx *storeTx) (eventLimits, error) {
-		return eventLimitsTx(ctx, tx)
-	})
-}
-
-// setEventLimits replaces every cap; zero or less lifts one.
-func (s *Store) setEventLimits(ctx context.Context, limits eventLimits) error {
-	return s.inTxOnce(ctx, func(tx *storeTx) error {
-		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxBytes, formatCreditSetting(limits.MaxBytesPerEvent)); err != nil {
-			return err
-		}
-		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxBytesPerRun, formatCreditSetting(limits.MaxBytesPerRun)); err != nil {
-			return err
-		}
-		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxEventsPerRun, formatCreditSetting(limits.MaxEventsPerRun)); err != nil {
-			return err
-		}
-		return nil
-	})
 }
 
 func eventLimitsTx(ctx context.Context, tx *storeTx) (eventLimits, error) {

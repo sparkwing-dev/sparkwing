@@ -134,7 +134,7 @@ type Git struct {
 	SHA           string           `json:"sha"`
 	DefaultBranch Optional[string] `json:"default_branch"`
 	// RepositoryName is GitHub's owner/name for the repository, in GitHub's case, from
-	// the same fire-time App lookup that proved its id; only schedule intake sets it.
+	// the App lookup that proved its id when a schedule fired or a source was fetched.
 	RepositoryName Optional[string]   `json:"repository_name"`
 	App            Optional[AppFacts] `json:"app"`
 }

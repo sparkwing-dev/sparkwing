@@ -20,20 +20,6 @@ func (o *Operator) CreditSettings(ctx context.Context) (_ CreditSettings, err er
 	return out, tx.Commit()
 }
 
-// SetCreditSettings atomically updates billing policy while preserving an installed rate table.
-func (o *Operator) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error) {
-	tx, err := o.s.beginCreditSettingsTx(ctx)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out, err := setOperatorCreditSettingsTx(ctx, tx, up)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	return out, tx.Commit()
-}
-
 func setOperatorCreditSettingsTx(ctx context.Context, tx *storeTx, up CreditSettingsUpdate) (_ CreditSettings, err error) {
 	writes, err := creditSettingsWrites(up)
 	if err != nil {
@@ -56,15 +42,4 @@ func setOperatorCreditSettingsTx(ctx context.Context, tx *storeTx, up CreditSett
 		return CreditSettings{}, err
 	}
 	return out, nil
-}
-
-// WarmCPUClassCores returns the configured warm runner CPU class.
-func (o *Operator) WarmCPUClassCores(ctx context.Context) (int64, error) {
-	return o.s.creditSetting(ctx, metaKeyWarmCPUClass, DefaultWarmCPUClassCores)
-}
-
-// CreditRateTable returns the deployment price ladder.
-func (o *Operator) CreditRateTable(ctx context.Context) (CreditRateTable, error) {
-	settings, err := o.CreditSettings(ctx)
-	return settings.RateTable, err
 }

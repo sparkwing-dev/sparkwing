@@ -19,20 +19,4 @@ const (
 	triggerStatusDone    = "done"
 )
 
-const (
-	runStatusPending   = "pending"
-	runStatusRunning   = "running"
-	runStatusFailed    = "failed"
-	runStatusCancelled = "cancelled"
-	runStatusSuccess   = "success"
-)
-
 const runTerminalIn = `status IN ('success','failed','cancelled')`
-
-const (
-	outcomeSuccess    = "success"
-	outcomeFailed     = "failed"
-	outcomeSkipped    = "skipped"
-	outcomeCancelled  = "cancelled"
-	outcomeSuperseded = "superseded"
-)

@@ -655,7 +655,7 @@ has no `card_charges`, `card_attempts` or `team_spend_days`, and keeps the
 refill settings on `teams` and the immutable
 `credit_checkouts.liability_shift` payment snapshot. Saved cards, card pins, fraud warnings
 and refunds carry over in schema terms. Automatic refill starts off for every
-team. An early fraud warning holds the team and blocks its card. Only payments
+team. An early fraud warning holds the team its payment funded. Only payments
 whose verified 3-D Secure result was `authenticated` keep their remaining credit
 frozen without a refund. Other results, including `attempt_acknowledged` and
 missing protection, are refunded and their credit reversed. The controller
@@ -2050,21 +2050,17 @@ and C1's tenant snapshot/node reads. No old path or credential fallback remains.
 ## Pipeline sizing
 
 Replace `/api/v1/pipelines/{name}/profile` with
-`/api/v1/pipelines/{name}/sizing` for the read and its `pin`, `observations`,
-`contention` and `waits` operations. Replace the `node` query with `job`.
-The old paths are removed. The Go controller client uses the new paths.
+`/api/v1/pipelines/{name}/sizing` for the read. Replace the `node` query with
+`job`. The `pin`, `observations`, `contention` and `waits` write operations are
+removed without replacement; sizing records come from measured job usage. The
+old paths are removed. The Go controller client uses the new path.
 
 Reads require member `runs.read` or an executable claim with `source.read`
 and authority for the sealed repository and pipeline. A bare runner or
 Actions credential no longer reads arbitrary sizing records. Bootstrap
-credentials cannot read sizing. Writes require `node.report` on the bound
-pipeline. Admin grants cannot bypass the claim check.
+credentials cannot read sizing.
 
 Controllers must configure the shared authentication and binding adapters.
-Sizing writes also require an authority-bearing transaction adapter through
-`WithSizingStore`. An absent adapter returns `policy_missing`. Implementations
-must recheck revocation, membership and the claim fence under the write lock,
-and avoid duplicating a measurement on an exact retry.
 
 ## Credential discovery
 
@@ -2163,7 +2159,7 @@ setting is gone (see [Cloud billing is prepaid](#cloud-billing-is-prepaid)).
 
 `Store.AbandonedNodeLogs` and the controller's old periodic node-log sweep are
 removed. `Operator.SealAbandonedLogStreams` closes existing execution streams as
-incomplete under the maintenance lease. Job attempts keep their 60-second final
+incomplete. Job attempts keep their 60-second final
 tail grace. Trigger, plan and eval streams use their own persisted unit fences.
 Sealing preserves committed segments and job outcomes. Published logs still
 require the publisher's final commit because they have no execution lease.
@@ -2174,7 +2170,7 @@ require the publisher's final commit because they have no execution lease.
 `Store.PruneExpiredUploads`, `store.DirectCacheMaxAge` and
 `controller.CacheObjectMaxAge` are removed. Cache listings no longer expire bytes
 by object age. Keep source bytes through blob records. Run
-`Operator.MaintainRetention` under the maintenance lease to expire records and
+`Operator.MaintainRetention` to expire records and
 release upload-ticket quota holds. Use `Operator.MarkBlobTombstones` and
 `Operator.CollectBlobTombstones` with the verified object backend for physical
 collection after the 24-hour grace.
@@ -3220,10 +3216,10 @@ can hold work. No new flag, deadline or customer limit is added.
 ## Egress accounting uses tenant and replica counters
 
 `Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`
-are removed. Write additive bytes with `Tenant.AddUsage` using `egress_bytes`,
-a UTC day and the controller's trusted replica ID. Read day or month totals with
+are removed. Write additive bytes with `Tenant.AddUsage` using `egress_bytes`
+and a UTC day. Read day or month totals with
 `Tenant.EgressUsage`. Deployment reports use `Operator.EgressUsageAcrossTeams`.
-Pruning uses `Operator.PruneEgressUsage` with the maintenance lease.
+Pruning uses `Operator.PruneEgressUsage`.
 
 The controller records delivered successful-response bytes at request completion,
 including partial transfers and reads served without an in-memory meter. Logs
@@ -3239,7 +3235,7 @@ then call `Tenant.AppendEvent(ctx, runID, nodeID, kind, payload)`. The caller
 no longer selects a charged principal. The tenant supplies the team and the
 store owns time.
 
-Event writes, retained run counters, shared storage quotas and replica usage
+Event writes, retained run counters, shared storage quotas and usage
 commit together. Pending uploads and events share monthly and run byte capacity.
 Events consume no object capacity. Usage is recorded without a configured quota.
 The existing event limits and free-tier policy keep their meaning. The HTTP
@@ -3248,14 +3244,13 @@ request and response shapes stay the same.
 ## Download charges use tenant handles and replica identity
 
 `Store.ChargeDownload` is removed. Obtain a tenant with `Store.ForTeam`, then
-call `Tenant.ChargeDownload`. `DownloadCharge.ReplicaID` identifies the trusted
-controller replica. The request no longer accepts `Team` or `Now`. The store
+call `Tenant.ChargeDownload`. The request no longer accepts `Team` or `Now`. The store
 selects the current UTC day under its shared quota lock.
 
-Admission and replica usage commit together. Free and funded caps keep their
+Admission and usage commit together. Free and funded caps keep their
 existing behavior, including finishing the download that crosses the cap and
 recording already delivered bytes. Logs stay exempt. Controller integrations
-use their existing lease-holder identity and require no new configuration.
+require no new configuration.
 
 ## Paid credit requires verified checkout settlement
 
@@ -3278,7 +3273,7 @@ callers no longer supply refund-attempt keys.
 Checkout integrations must supply C2's verified provider event to
 `Store.SettlePayment`. The committed checkout supplies the team and credit
 amount. The event must match its session, payment, amount, currency and test/live
-mode. An actionable fraud warning holds the team and blocks the card. A
+mode. An actionable fraud warning holds the team its payment funded. A
 protected payment grants frozen credit without a refund; an unprotected payment
 is refused and refunded. Replayed events grant once. The controller verifies
 and settles signed provider events.
@@ -3302,15 +3297,14 @@ Its slot count and signup behavior keep their existing meaning.
 ## Storage maintenance uses committed inventory
 
 Remove `Server.WithStoragePass` and `Server.RunStoragePass` calls. The controller's
-existing maintenance timer runs leased retention, tagged-log sealing and storage
+existing maintenance timer runs retention, tagged-log sealing and storage
 billing. An embedding that serves `Handler` directly calls `Server.MaintainStorage`.
 `StoragePassEvery` is removed. `StorageMaintenanceInterval` names the timer period.
 
 `Store.StorageMarks`, `ReconcileStorage`, `TeamsOverFreeLogShare`,
 `PrunableNodeLogs`, `PruneStorageCommitReceipts` and `PruneDownloadDays` are removed.
 Use `Tenant.StorageRetainedBytes` for retained inventory and `Tenant.StorageUsageFor`
-for summed replica usage. `Operator.ChargeRetainedStorage` and `MaintainRetention`
-require the current maintenance lease. Bucket listings no longer replace usage
+for summed usage. Bucket listings no longer replace usage
 counters. Log retention follows the run's persisted class. Allowance-driven
 physical eviction still requires the final storage adapter.
 
@@ -3438,8 +3432,7 @@ subject. Pauses and decisions cannot be created for terminal or cancelling work.
 ## Shared lease fences and sealed credential writes
 
 Ordinary claim, renewal, release, reaper, secret, source and metric transactions
-share the controller-owner fence with PostgreSQL `FOR KEY SHARE`. Acquiring,
-renewing and releasing singleton leases take `FOR UPDATE`. Lease checks read
+share the controller-owner fence with PostgreSQL `FOR KEY SHARE`. Lease checks read
 database time after lock waits. A database clock read failure refuses commit.
 Reaping commits each target independently, continues after a target fails, and
 returns committed recoveries alongside the joined errors. Run admission refuses

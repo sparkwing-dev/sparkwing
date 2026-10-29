@@ -450,8 +450,9 @@ func replace(path string, body []byte) (retErr error) {
 	return syncDir(dir)
 }
 
-// safety: the rename is durable only once the directory entry is, so a crash
-// after a write reports success cannot bring the old file back.
+// safety: the rename is durable only once the directory entry is, so where the
+// platform syncs directories a crash after a write reports success cannot bring
+// the old file back; Windows skips the sync.
 func syncDir(dir string) error {
 	if runtime.GOOS == "windows" {
 		return nil

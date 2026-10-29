@@ -48,6 +48,8 @@ func main() {
 	fmt.Println()
 	ok = checkBannedTokens(contentDir, repoRoot) && ok
 	fmt.Println()
+	ok = checkRetiredNames(repoRoot) && ok
+	fmt.Println()
 	ok = checkFailureReasons(contentDir, repoRoot) && ok
 	fmt.Println()
 	ok = checkFrozenCounts(contentDir) && ok

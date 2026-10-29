@@ -55,8 +55,8 @@ runner identity and the delegated node-host bearer travel through private
 protocol channels. Credentials and protocol handles do not travel in environment
 variables. Process environments come from the shared process policy.
 
-Cloud Jobs use root and privileged Docker-in-Docker on exclusive team-dedicated
-nodes. Default-deny network enforcement and complete teardown require deployment
+Cloud Jobs run rootful Docker-in-Docker inside a user-namespaced pod, never
+privileged, on exclusive team-dedicated nodes. Default-deny network enforcement and complete teardown require deployment
 proof. Aggregate scratch includes DinD and remains bounded by the shared limit.
 
 A database has one active controller. PostgreSQL standbys wait on a dedicated

@@ -14,8 +14,9 @@ import (
 // safety: bounds the kill of what a cleanup left behind once it exits or times out.
 const cleanupSettleTimeout = 30 * time.Second
 
-// safety: the cleanup leads its own session, so every process it starts,
-// backgrounded or not, ends with it instead of outliving its time limit.
+// safety: the cleanup leads its own session, so a process it starts that
+// stays in that session, backgrounded or not, ends with it instead of
+// outliving its time limit. A process that starts a new session escapes.
 func runCleanupProcess(ctx context.Context, cmd *exec.Cmd) error {
 	if err := context.Cause(ctx); err != nil {
 		return err

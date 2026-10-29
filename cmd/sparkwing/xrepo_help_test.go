@@ -72,10 +72,10 @@ func TestXrepoRegistryDescribesRuntimeInputs(t *testing.T) {
 		t.Errorf("%s is missing --%s", command.Path, name)
 	}
 
-	assertFlag(t, cmdReposList, "output", "o")
-	assertFlag(t, cmdReposList, "pipelines", "")
+	assertFlag(t, surfaceCommand("sparkwing repos list"), "output", "o")
+	assertFlag(t, surfaceCommand("sparkwing repos list"), "pipelines", "")
 
-	for _, command := range []Command{cmdReposAdd, cmdReposRemove, cmdReposInfo} {
+	for _, command := range []Command{surfaceCommand("sparkwing repos add"), surfaceCommand("sparkwing repos remove"), surfaceCommand("sparkwing repos info")} {
 		if len(command.PosArgs) != 0 {
 			t.Errorf("%s advertises positional arguments", command.Path)
 		}

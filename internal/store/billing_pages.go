@@ -185,7 +185,8 @@ func (t *Tenant) RecordAuthorizedBillingPageFailure(ctx context.Context, a capab
 	})
 }
 
-// safety: this outlives the 31-minute Checkout session a page opens, after which the session can no longer be paid.
+// safety: a page's Checkout session is asked to expire with the page, and Stripe refuses a session that lives under
+// 30 minutes.
 const billingPageLife = 35 * time.Minute
 
 // SetAuthorizedRefill commits the team's automatic refill settings under current team administration.

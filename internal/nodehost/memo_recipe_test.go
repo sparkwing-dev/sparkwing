@@ -135,7 +135,7 @@ func TestMemoCallbackCanonicalJSONAndKeyInvalidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Previous SDK callback keys were hashed without a memo version domain.
+	// safety: the memo version domain separates these keys from a bare canonical hash.
 	old, _ := runspec.CanonicalHash("key")
 	if key == string(old) {
 		t.Fatal("old memo namespace was reused")

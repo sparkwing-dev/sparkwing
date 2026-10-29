@@ -72,30 +72,22 @@ checks before it grants artifact access.
 Artifact reads are limited to the output, manifest, member and depcache digests
 of accepted cache lookups.
 
-The dependency archive backend lives in `internal/blob/depcache`. Hosts construct
-it with their bound clients and install it through `depcache.WithBackend`.
-The executor cache layer uses the artifact binding for signed-data restores and
-refreshes it after successful execution before saving. A refused binding runs
-cold or skips the save. A download is verified before archive extraction publishes
-files. Without an injected backend, dependency caches use local files.
-The SDK and host share `internal/depcachekey` for workspace-contained lockfile
-reads and full SHA-256 keys. The common executor hashes captured lockfile bytes
-through that same key function. Candidate inputs outside the workspace, including
-escaping symlinks, disable caching. The protocol's Go resolver is `go-modules`.
-`ExtractArchiveStaged(ctx, reader, dir)` consumes the gzip trailer before
-publishing, so checksum errors and truncated trailers preserve the destination.
-Cancellation during extraction also preserves it. The common executor restores
-through `depcacheblob.RestoreArchive`, sharing verification and staged extraction
-with local and remote archive backends. A failed restore runs cold
-and can replace the failed archive after successful work.
+The executor cache layer, `nodehost.DepcacheRecords`, restores and saves
+declared directories through the job's storage binding. A refused binding runs
+cold or skips the save. The SDK and host share `internal/depcachekey` for
+workspace-contained lockfile reads and full SHA-256 keys. Candidate inputs
+outside the workspace, including escaping symlinks, disable caching. The
+protocol's Go resolver is `go-modules`. `depcacheblob.RestoreArchiveIn`
+consumes the gzip trailer and verifies the download before staged extraction
+publishes files, so checksum errors, truncated trailers and cancellation
+preserve the destination. A failed restore runs cold and can replace the failed
+archive after successful work.
 
-The archive acceptance checks join signed filesystem and S3 transfers to SQLite
-upload reservations, receipt settlement and record transactions. They reopen the
-store before restoring, reject forged repository/ref/attempt selectors, and
-preserve destination files after equal-length corruption or missing objects.
-A failed body leaves its cache record unchanged. A successful cold execution
-can publish a replacement archive. Authentication and host construction remain
-contract fixtures in these checks.
+The archive acceptance checks drive `nodehost.DepcacheRecords` over signed
+filesystem and S3 transfers, SQLite upload reservations, receipt settlement and
+record transactions. They reopen the store before restoring, reject forged
+repository/ref/attempt selectors, and run cold after equal-length corruption.
+Authentication remains a contract fixture in these checks.
 
 Record transactions, read-set construction, unique-byte accounting, GC and
 retention belong to `internal/store`. Controller authorization and upload tickets belong
@@ -148,7 +140,7 @@ Publication component checks exercise output and artifact writes through signed
 filesystem and S3 transfers with imported attempt identities. Forged uploader
 selectors fail before upload. Refused record updates return errors and preserve
 the preceding records, readable output and local files. Record authority is a
-contract fake. Controller intake, local provenance, `trust_local_builds` and
+contract fake. Controller intake, local provenance and
 the CLI's separate publication result still require their owning integrations.
 
 Memo hits are materialized by the store's `ReconcileNode` transaction, which
@@ -158,16 +150,10 @@ A host cannot turn a failed record copy into successful execution.
 The host resolves a fresh storage binding after execution before publishing
 artifacts, because an application retry advances the upload attempt.
 
-`depcacheblob.NewRemoteReader` adapts an opted-in `RemoteCache` to dependency
-archive restores under an explicit repository and lookup budget. It uses
-`RemoteCache.Depcache` to resolve verified default-branch records and
-`RemoteCache.Artifact` to read only the accepted digest. The download must reach
-verified EOF and close successfully before extraction replaces local files.
-`depcache.WithRemoteReader` checks local archives first and uses that reader
-after a local miss. Saves remain on local disk because the remote reader has no
-write method. W3/W9 still need to install this binding from the selected cache
-profile. Cloud and hosted-job writes continue through the separate signed-data
-backend.
+After a miss in the job's own records, `nodehost.DepcacheRecords` reads an
+opted-in `RemoteCache`: `RemoteCache.Depcache` resolves verified default-branch
+records and `RemoteCache.Artifact` reads only the accepted digest. Saves go
+through the job's own storage binding.
 
 The remote archive acceptance checks drive signed filesystem and S3 uploads,
 default-ref lookup, verified downloads and local restore/save. Generated cases
@@ -224,7 +210,7 @@ Rules limited by tags or object size cannot establish expiry for the whole
 class. The backend reads the rules and leaves their configuration to the operator.
 
 `Filesystem.ExpireLogs` removes log objects whose file age reaches their stored
-class. The controller calls it after renewing its maintenance lease when this
+class. The controller calls it from its retained-data pass when this
 backend is configured. Identical uploads preserve the file age.
 The sweep includes retired classes, ignores upload temporary files and leaves
 CAS bytes to their separate reachability rules. Cancellation and filesystem
@@ -240,20 +226,18 @@ and tombstone decision. Provenance stays on records because identical bytes may
 be uploaded by principals with different trust.
 
 Both backends implement `store.BlobDeleter` through `DeleteBlob`. The collector
-passes a tenant and digest after rechecking reachability under its maintenance
-lease. Before each physical delete it rechecks the live lease and the same
-collecting tombstone. S3 observes the object's ETag and deletes with `If-Match`.
+passes a tenant and digest after rechecking reachability. Before each physical
+delete it rechecks the same collecting tombstone. S3 observes the object's ETag and deletes with `If-Match`.
 A changed ETag or failed conditional delete preserves the tombstone for retry.
 The backend derives that tenant's CAS key, and an absent object succeeds
 on replay. A process paused after the last check can still race publication,
 including identical S3 bytes with the same ETag. Required reads refuse missing
 objects, and verified readers refuse incomplete bytes. The old controller output pruner and bucket-measurement expiry
 callback are removed. The controller supplies its configured backend to the
-shared leased maintenance pass. Standalone S3 construction installs this backend.
+shared retained-data pass. Standalone S3 construction installs this backend.
 Standalone controllers install either backend through `Server.WithDataObjects`.
 That constructor also installs physical manifest verification for terminal results.
-Authenticated data bindings use the controller's configured replica identity for
-upload settlement. Local-controller host construction remains separate.
+Local-controller host construction remains separate.
 
 The obsolete `internal/teamblob` object-key builder is removed. Log team validation
 lives beside the tagged log keys. Tenant records own usage and reachability.
@@ -395,8 +379,8 @@ bytes and revoked-reader refusal. Authentication and award issuance are seeded
 fixtures. Native placement and transport acceptance remain separate.
 
 The controller's retained-data pass now marks and collects blob tombstones through
-real operator APIs and its configured `ObjectBackend`. It renews the maintenance
-lease before physical work. Filesystem log expiry follows the same pass. The
+real operator APIs and its configured `ObjectBackend`. Filesystem log expiry
+follows the same pass. The
 bucket-reconciliation worker, its free-share log pruning, listing-based counters
 and `storage_pass` health projection are removed. Read-only deployment bucket
 measurement remains separate from authoritative tenant accounting.

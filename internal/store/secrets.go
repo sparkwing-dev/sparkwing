@@ -70,27 +70,6 @@ func boolInt(b bool) int {
 	return 0
 }
 
-// GetSecretRow returns t's row stored under exactly this name, repository
-// and pipeline, and ErrNotFound when there is none.
-func (t *Tenant) GetSecretRow(name, repo, pipeline string) (*Secret, error) {
-	if name == "" {
-		return nil, errors.New("secrets: name required")
-	}
-	rows, err := t.s.queryNoCtx(`SELECT `+secretCols+` FROM secrets WHERE team = ? AND name = ? AND repo = ? AND pipeline = ?`, string(t.team), name, repo, pipeline)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	out, err := scanSecretRows(rows)
-	if err != nil {
-		return nil, err
-	}
-	if len(out) == 0 {
-		return nil, notFound("secret", name)
-	}
-	return &out[0], nil
-}
-
 // ListSecrets returns t's rows ordered by name, repository and pipeline. HTTP
 // handlers must blank Value before serializing.
 func (t *Tenant) ListSecrets() ([]Secret, error) {

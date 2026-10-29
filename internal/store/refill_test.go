@@ -649,9 +649,9 @@ func TestDueRefillsKeepsSuccessfulTeamsAroundFailure(t *testing.T) {
 	}
 }
 
-// A refill in flight holds the team's single refill slot until the transaction that grants it closes it, so no pass
-// within its 23-hour key life opens a second one before its webhook; a webhook later than that is the runbook case. After the grant, another refill opens only while the balance is still below
-// the threshold: $10 of Add funds and a $10 refill reach $20, which a $25 threshold refills again to $30.
+// An open refill whose eligibility holds keeps the team's single refill slot until the transaction that grants it
+// closes it, so no pass within its 23-hour key life opens a second one before its webhook. After the grant, another
+// refill opens only while the balance is still below the threshold: $10 of Add funds and a $10 refill reach $20, which a $25 threshold refills again to $30.
 func TestARefillInFlightBlocksASecondUntilItsGrantLands(t *testing.T) {
 	for _, tc := range []struct {
 		thresholdCents int64

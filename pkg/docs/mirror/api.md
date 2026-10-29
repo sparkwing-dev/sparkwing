@@ -225,8 +225,8 @@ The server compares observations with this launcher's stored awards.
 
 The default store adapter reads ancestry, current claims and execution inputs in
 one snapshot. It checks the root and service identity, holder, generation,
-expiry and cancellation. Eval awards also require the current controller lease
-and unresolved source expansion. Exchange preserves the original award shown
+expiry and cancellation. Eval awards also require unresolved source expansion,
+and for a controller-dispatched run, that the controller still owns the run. Exchange preserves the original award shown
 by synchronization. Sync never changes a claim or returns its bearer.
 
 The response contains held `awards` without bearer material and a `remove` list
@@ -293,18 +293,10 @@ Logs use controller-proxied reads, separate from byte-storage downloads.
 
 ## Concurrency groups
 
-Concurrency operations use `/api/v1/queue/groups/{group}`. The former
-`/api/v1/concurrency/{key}` routes are removed. Requests and responses use
-`job_id`, `leader_job_id` and `origin_job_id`. A group read returns `QueueGroup`
-with one-based waiter positions.
-
-Acquire and waiter resolution require a live claim bound to the declared group.
-After cancellation, the holder can still heartbeat, release and cancel its
-waiter while its reporting authority remains live. Force release requires
-`runs.control`. The transaction checks the current authority, holder generation,
-sealed declaration and reference edges before reading or changing state.
-Embedded controllers provide `WithConcurrencyStore`. A missing transaction
-adapter refuses the operation with `policy_missing`.
+`GET /api/v1/queue/groups/{group}` reads one concurrency group as `QueueGroup`,
+with one-based waiter positions, under a live claim. No route acquires,
+heartbeats, releases or cancels a group directly: every acquisition goes
+through the admission owner.
 
 ## Version policy
 

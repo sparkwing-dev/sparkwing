@@ -136,7 +136,7 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitRunsPerHour: 1}); err != nil {
+	if _, err := s.store.AsOperator().WriteComputeLimits(t.Context(), teststore.OperatorAuthorized(t, s.store, ""), map[string]int64{store.ComputeLimitRunsPerHour: 1}); err != nil {
 		t.Fatal(err)
 	}
 	input := controllerwire.RetryRequest{Mode: controllerwire.RetryFailed, IdempotencyKey: "first"}
@@ -154,7 +154,7 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 	if !errors.As(err, &failure) || failure.Code != apierr.RateLimited {
 		t.Fatalf("retry past retrier's cap: %v", err)
 	}
-	runs, err := s.store.AsOperator().ListRuns(t.Context(), store.RunFilter{Limit: 10})
+	runs, err := teststore.ForTeam(t, s.store, "a").ListRuns(t.Context(), store.RunFilter{Limit: 10})
 	if err != nil || len(runs) != 2 {
 		t.Fatalf("refused retry left an execution: %d %v", len(runs), err)
 	}

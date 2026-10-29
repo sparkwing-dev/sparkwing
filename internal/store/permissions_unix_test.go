@@ -3,7 +3,6 @@
 package store_test
 
 import (
-	"crypto/sha256"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -84,59 +83,4 @@ func TestOpenTightensExistingSQLiteFiles(t *testing.T) {
 	if _, err := teststore.ForTeam(t, second, store.DefaultTeam).GetRun(t.Context(), "run-before"); err != nil {
 		t.Fatalf("reopened store lost its run: %v", err)
 	}
-}
-
-func copySQLiteTestFile(t *testing.T, source, destination string) {
-	t.Helper()
-	body, err := os.ReadFile(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(destination, body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func snapshotSQLitePair(t *testing.T, path string) map[string]sqliteSourceState {
-	t.Helper()
-	state := map[string]sqliteSourceState{}
-	for _, candidate := range []string{path, path + "-wal"} {
-		info, err := os.Stat(candidate)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := os.ReadFile(candidate)
-		if err != nil {
-			t.Fatal(err)
-		}
-		state[candidate] = sqliteSourceState{
-			Mode: info.Mode(), Size: info.Size(), Digest: sha256.Sum256(body),
-		}
-	}
-	return state
-}
-
-type sqliteSourceState struct {
-	Mode   os.FileMode
-	Size   int64
-	Digest [sha256.Size]byte
-}
-
-func snapshotSQLiteSource(t *testing.T, path string) map[string]sqliteSourceState {
-	t.Helper()
-	state := map[string]sqliteSourceState{}
-	for _, candidate := range []string{path, path + "-wal", path + "-shm"} {
-		info, err := os.Stat(candidate)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := os.ReadFile(candidate)
-		if err != nil {
-			t.Fatal(err)
-		}
-		state[candidate] = sqliteSourceState{
-			Mode: info.Mode(), Size: info.Size(), Digest: sha256.Sum256(body),
-		}
-	}
-	return state
 }

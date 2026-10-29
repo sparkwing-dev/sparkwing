@@ -218,9 +218,9 @@ func run(args []string) error {
 			"served, so the controller exposes none of it. Empty counts only the writes "+
 			"this process makes")
 	cacheBlobStore := fs.String("cache-blob-store", "",
-		"the cache's --blob-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile what each "+
-			"team stores there and deletes a team's objects 30 days after they were last written; the operator's "+
-			"team keeps its own. Empty leaves the cache's counts to its writes alone")
+		"the controller's data store, as s3://bucket/prefix: blobs, artifacts, source bundles, pipeline binaries, "+
+			"staged uploads and logs. The controller deletes objects by its own records. Empty keeps data under the "+
+			"controller's home directory")
 	logRetention := fs.String("log-retention", "",
 		"teams whose node log segments keep for a set number of days instead of 90 (with credits) or 30 "+
 			"(without), as team=days[,team=days...]. Each distinct number is a retention class under "+

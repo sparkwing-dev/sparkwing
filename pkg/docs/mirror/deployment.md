@@ -40,7 +40,8 @@ through the controller's signed storage binding before admitting the run.
 Source acquisition ignores Git replacement objects, so a selected commit ID
 keeps its original contents.
 Sparkwing Cloud uses the launcher for plan, evaluation and work Jobs. Every Job
-runs as root with a privileged DinD sidecar on its own team-dedicated node, with
+runs a rootful DinD sidecar inside its user-namespaced pod, never privileged and
+with namespaced capabilities only, on a team-dedicated node, with
 fixed 20 GiB aggregate scratch. Jobs keep their exact team-node reservation,
 tolerate the CPU-band taint and carry `karpenter.sh/do-not-disrupt`.
 The launcher's Kubernetes identity is separate from the customer Job identity.

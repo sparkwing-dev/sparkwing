@@ -108,8 +108,8 @@ func (g *Git) IsDirty(ctx context.Context) (bool, error) {
 	return git.IsDirty(ctx, g.dir())
 }
 
-// FilesetHash returns a deterministic hash of every tracked file's
-// content. Untracked files don't contribute.
+// FilesetHash returns a deterministic hash of the build context: tracked
+// files and untracked files Git does not ignore, less .dockerignore matches.
 func (g *Git) FilesetHash(ctx context.Context) (string, error) {
 	return git.FilesetHash(ctx, g.dir())
 }

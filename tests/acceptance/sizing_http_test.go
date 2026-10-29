@@ -22,15 +22,10 @@ import (
 )
 
 type sizingStore struct {
-	authorization            capability.Authorized
-	profile                  *store.PipelineProfile
-	err                      error
-	reads, writes            int
-	pipeline, job, operation string
-	cores                    float64
-	memory                   int64
-	observation              store.ProfileObservation
-	wait                     time.Duration
+	profile       *store.PipelineProfile
+	err           error
+	reads         int
+	pipeline, job string
 }
 
 func (f *sizingStore) GetPipelineProfile(_ context.Context, pipeline, job string) (*store.PipelineProfile, error) {
@@ -39,42 +34,10 @@ func (f *sizingStore) GetPipelineProfile(_ context.Context, pipeline, job string
 	return f.profile, f.err
 }
 
-func (f *sizingStore) SetProfilePin(_ context.Context, a capability.Authorized, cores float64, memory int64) error {
-	f.authorization = a
-	f.operation = "pin"
-	if cores == 0 && memory == 0 {
-		f.operation = "clear"
-	}
-	f.pipeline, f.job, f.cores, f.memory = a.Target.Pipeline, a.Target.NodeID, cores, memory
-	f.writes++
-	return f.err
-}
-
-func (f *sizingStore) RecordProfileObservation(_ context.Context, a capability.Authorized, observation store.ProfileObservation) error {
-	f.authorization = a
-	f.operation, f.pipeline, f.job, f.observation = "observations", a.Target.Pipeline, a.Target.NodeID, observation
-	f.writes++
-	return f.err
-}
-
-func (f *sizingStore) RecordContention(_ context.Context, a capability.Authorized) error {
-	f.authorization = a
-	f.operation, f.pipeline = "contention", a.Target.Pipeline
-	f.writes++
-	return f.err
-}
-
-func (f *sizingStore) RecordWaitObservation(_ context.Context, a capability.Authorized, wait time.Duration) error {
-	f.authorization = a
-	f.operation, f.pipeline, f.wait = "waits", a.Target.Pipeline, wait
-	f.writes++
-	return f.err
-}
-
 func sizingServer(t *testing.T, b *credentialBoundary, f *sizingStore) http.Handler {
 	t.Helper()
 	s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
-	bindTenantPort[controller.SizingStore](s, func(_ context.Context, team store.Team) (controller.SizingStore, error) {
+	bindTenantPort[*sizingStore](s, func(_ context.Context, team store.Team) (*sizingStore, error) {
 		if team != "team" {
 			t.Fatalf("sizing team = %q", team)
 		}
@@ -126,7 +89,7 @@ func TestSizingHTTPReads(t *testing.T) {
 						t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 					}
 				}
-				if f.reads != 1 || f.writes != 0 || f.pipeline != pipeline || f.job != "job" || w.Header().Get("Cache-Control") != "no-store" {
+				if f.reads != 1 || f.pipeline != pipeline || f.job != "job" || w.Header().Get("Cache-Control") != "no-store" {
 					t.Fatalf("read = %+v; headers=%v", f, w.Header())
 				}
 				if class != "member" && (b.bindingRule != capability.BindPipelineOfBoundRun || b.bindingTarget.Pipeline != pipeline || b.bindingTarget.NodeID != "job") {
@@ -134,44 +97,6 @@ func TestSizingHTTPReads(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestSizingHTTPWrites(t *testing.T) {
-	for _, tc := range []struct{ method, leaf, body, operation string }{
-		{"PUT", "pin", `{"cores":1.5,"memory_bytes":2048}`, "pin"},
-		{"PUT", "pin", `{"cores":0,"memory_bytes":0}`, "clear"},
-		{"POST", "observations", `{"peak_cores":2.5,"peak_memory_bytes":4096,"duration_nanos":10,"cpu_measured":true,"partial":true,"plan_hash":"hash"}`, "observations"},
-		{"POST", "contention", `{}`, "contention"},
-		{"POST", "waits", `{"wait_nanos":23}`, "waits"},
-	} {
-		t.Run(tc.operation, func(t *testing.T) {
-			b, f := newCredentialBoundary(), &sizingStore{}
-			w := sizingRequest(sizingServer(t, b, f), b, tc.method, "/api/v1/pipelines/ci%2Fbuild/sizing/"+tc.leaf+"?job=job&team=forged", tc.body)
-			if w.Code != 204 || f.writes != 1 || f.reads != 0 || f.pipeline != "ci/build" || f.operation != tc.operation {
-				t.Fatalf("HTTP %d %s; write=%+v", w.Code, w.Body.String(), f)
-			}
-			if f.authorization.Principal.Authority != b.snapshot.Authorities[0].Principal.Authority || f.authorization.Binding.Generation != 4 {
-				t.Fatalf("write authority=%+v", f.authorization)
-			}
-			if b.bindingRule != capability.BindPipelineOfBoundRun || b.bindingTarget.Pipeline != "ci/build" {
-				t.Fatalf("binding=%+v", b.bindingTarget)
-			}
-			switch tc.operation {
-			case "pin":
-				if f.cores != 1.5 || f.memory != 2048 || f.job != "job" {
-					t.Fatalf("pin=%+v", f)
-				}
-			case "observations":
-				if f.observation.PeakCores != 2.5 || f.observation.Duration != 10 || !f.observation.Partial || f.job != "job" {
-					t.Fatalf("observation=%+v", f)
-				}
-			case "waits":
-				if f.wait != 23 {
-					t.Fatalf("wait=%s", f.wait)
-				}
-			}
-		})
 	}
 }
 
@@ -245,78 +170,8 @@ func TestSizingHTTPRefusals(t *testing.T) {
 			if state == "private store" {
 				reads = 1
 			}
-			if f.reads != reads || f.writes != 0 || strings.Contains(w.Body.String(), "private") {
-				t.Fatalf("reads=%d writes=%d body=%s", f.reads, f.writes, w.Body.String())
-			}
-		})
-	}
-}
-
-func TestSizingHTTPWriteRefusals(t *testing.T) {
-	for _, leaf := range []string{"pin", "observations", "contention", "waits"} {
-		for _, state := range []string{"member", "admin", "revoked", "binding", "transaction race", "private store"} {
-			t.Run(leaf+"/"+state, func(t *testing.T) {
-				b, f := newCredentialBoundary(), &sizingStore{}
-				status, code, writes := 403, apierr.Forbidden, 0
-				switch state {
-				case "member":
-					b = authorityMember()
-				case "admin":
-					b = authorityMember()
-					b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.TeamAdmin, capability.NodeReport}
-				case "revoked":
-					b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &b.snapshot.Now
-					status, code = 401, apierr.Unauthenticated
-				case "binding":
-					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "wrong sealed pipeline"}
-				case "transaction race":
-					f.err = &store.ErrIllegalTransition{Reason: store.ReasonStaleGeneration}
-					status, code, writes = 409, apierr.LockHeld, 1
-				case "private store":
-					f.err = errors.New("private write failed")
-					status, code, writes = 500, apierr.Internal, 1
-				}
-				method := "POST"
-				if leaf == "pin" {
-					method = "PUT"
-				}
-				w := sizingRequest(sizingServer(t, b, f), b, method, "/api/v1/pipelines/build/sizing/"+leaf, `{}`)
-				assertEngineError(t, w, status, code)
-				if f.writes != writes || f.reads != 0 || strings.Contains(w.Body.String(), "private") {
-					t.Fatalf("writes=%d reads=%d body=%s", f.writes, f.reads, w.Body.String())
-				}
-			})
-		}
-	}
-}
-
-func TestSizingHTTPInvalidMeasurements(t *testing.T) {
-	for _, tc := range []struct{ method, leaf, body string }{
-		{"PUT", "pin", `{"cores":-1}`},
-		{"PUT", "pin", `{"cores":1e9}`},
-		{"PUT", "pin", `{"memory_bytes":-1}`},
-		{"PUT", "pin", `{"actor":"forged"}`},
-		{"PUT", "pin", `{"generation":999}`},
-		{"PUT", "pin", `{}` + `{}`},
-		{"PUT", "pin", `null`},
-		{"POST", "observations", `{"peak_cores":-1}`},
-		{"POST", "observations", `{"peak_memory_bytes":-1}`},
-		{"POST", "observations", `{"duration_nanos":-1}`},
-		{"POST", "observations", `{"floor_cores":-1}`},
-		{"POST", "observations", `{"floor_memory_bytes":-1}`},
-		{"POST", "observations", `{"sustained_cores":-1}`},
-		{"POST", "observations", `{"peak_cores":1e100}`},
-		{"POST", "observations", `{"holder":"other"}`},
-		{"POST", "waits", `{"wait_nanos":-1}`},
-		{"POST", "waits", `{"wait_nanos":9223372036854775807}`},
-		{"POST", "waits", `[]`},
-	} {
-		t.Run(tc.leaf+"/"+tc.body, func(t *testing.T) {
-			b, f := newCredentialBoundary(), &sizingStore{}
-			w := sizingRequest(sizingServer(t, b, f), b, tc.method, "/api/v1/pipelines/build/sizing/"+tc.leaf, tc.body)
-			assertEngineError(t, w, 400, apierr.BadRequest)
-			if f.writes != 0 || f.reads != 0 {
-				t.Fatalf("store reached: %+v", f)
+			if f.reads != reads || strings.Contains(w.Body.String(), "private") {
+				t.Fatalf("reads=%d body=%s", f.reads, w.Body.String())
 			}
 		})
 	}
@@ -330,55 +185,38 @@ func TestSizingHTTPMissingStoreAndMethods(t *testing.T) {
 			code := apierr.PolicyMissing
 			switch state {
 			case "nil store":
-				bindTenantPort[controller.SizingStore](s, func(context.Context, store.Team) (controller.SizingStore, error) { return nil, nil })
+				bindTenantPort[controller.TenantHandle](s, func(context.Context, store.Team) (controller.TenantHandle, error) { return nil, nil })
 			case "store error":
-				bindTenantPort[controller.SizingStore](s, func(context.Context, store.Team) (controller.SizingStore, error) {
+				bindTenantPort[controller.TenantHandle](s, func(context.Context, store.Team) (controller.TenantHandle, error) {
 					return nil, errors.New("private resolver")
 				})
 				code = apierr.Internal
 			case "no policy":
 				s.WithAuthorization(routepolicy.Authorization{})
 			}
-			for _, method := range []string{"GET", "PUT"} {
-				path := "/api/v1/pipelines/build/sizing"
-				if method == "PUT" {
-					path += "/pin"
-				}
-				w := sizingRequest(s.Handler(), b, method, path, `{}`)
-				assertEngineError(t, w, apierr.Status(code), code)
-				if strings.Contains(w.Body.String(), "private") {
-					t.Fatal(w.Body.String())
-				}
+			w := sizingRequest(s.Handler(), b, "GET", "/api/v1/pipelines/build/sizing", `{}`)
+			assertEngineError(t, w, apierr.Status(code), code)
+			if strings.Contains(w.Body.String(), "private") {
+				t.Fatal(w.Body.String())
 			}
 		})
 	}
-	for _, leaf := range []string{"", "/pin", "/observations", "/contention", "/waits"} {
-		b, f := newCredentialBoundary(), &sizingStore{}
-		h := sizingServer(t, b, f)
-		allow := "POST"
-		if leaf == "" {
-			allow = "GET"
+	b, f := newCredentialBoundary(), &sizingStore{}
+	h := sizingServer(t, b, f)
+	for _, method := range []string{"HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
+		w := sizingRequest(h, b, method, "/api/v1/pipelines/build/sizing", `{}`)
+		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		if w.Header().Get("Allow") != "GET" {
+			t.Fatalf("Allow=%q want GET", w.Header().Get("Allow"))
 		}
-		if leaf == "/pin" {
-			allow = "PUT"
+	}
+	for _, leaf := range []string{"/pin", "/observations", "/contention", "/waits"} {
+		if w := sizingRequest(h, b, "POST", "/api/v1/pipelines/build/sizing"+leaf, `{}`); w.Code != 404 {
+			t.Fatalf("unregistered sizing write %s HTTP %d %s", leaf, w.Code, w.Body.String())
 		}
-		for _, method := range []string{"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
-			if method == allow {
-				continue
-			}
-			w := sizingRequest(h, b, method, "/api/v1/pipelines/build/sizing"+leaf, `{}`)
-			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
-			if w.Header().Get("Allow") != allow {
-				t.Fatalf("Allow=%q want %s", w.Header().Get("Allow"), allow)
-			}
-		}
-		w := sizingRequest(h, b, allow, "/api/v1/pipelines/build/profile"+leaf, `{}`)
-		if w.Code != 404 {
-			t.Fatalf("removed route HTTP %d %s", w.Code, w.Body.String())
-		}
-		if f.writes != 0 || f.reads != 0 {
-			t.Fatalf("store reached: %+v", f)
-		}
+	}
+	if f.reads != 0 {
+		t.Fatalf("store reached: %+v", f)
 	}
 }
 

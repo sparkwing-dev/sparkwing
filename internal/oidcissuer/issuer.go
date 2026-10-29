@@ -139,9 +139,10 @@ func (i *Issuer) KeyIDs() []string {
 func (i *Issuer) TTL() time.Duration { return i.ttl }
 
 // runnerEnvironment spells the runner_environment claim, like GitHub's: fresh
-// for a host no earlier job touched (a launcher pod, a Cloud pod or a
-// GitHub-hosted Actions runner), persistent for any other host, where an
-// earlier job may have left something behind.
+// for a host no job of another run touched (a launcher pod or a Cloud pod,
+// whose warm node serves only its own run, or a GitHub-hosted Actions runner),
+// persistent for any other host, where another run may have left something
+// behind.
 func runnerEnvironment(fresh bool) string {
 	if fresh {
 		return "fresh"
@@ -157,7 +158,7 @@ type Claims struct {
 	Pipeline   string
 	Trigger    string
 	RunnerKind string
-	// FreshHost is a host no earlier job touched.
+	// FreshHost is a host no job of another run touched.
 	FreshHost  bool
 	Ref        string
 	SHA        string

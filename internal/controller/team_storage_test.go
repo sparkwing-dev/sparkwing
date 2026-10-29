@@ -65,7 +65,7 @@ func TestASingleTeamControllerKeepsItsOperatorsRetention(t *testing.T) {
 
 func TestAStorageRetentionPassReleasesRunsPastOperatorRetention(t *testing.T) {
 	s, srv := storageRetentionServer(t, false)
-	if err := s.AsOperator().SetStorageSettings(t.Context(), store.StorageSettings{RunRetentionDays: 1}); err != nil {
+	if err := s.AsOperator().WriteStorageSettings(t.Context(), teststore.OperatorAuthorized(t, s, ""), store.StorageSettings{RunRetentionDays: 1}); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {

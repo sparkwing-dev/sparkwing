@@ -464,7 +464,7 @@ func RunLogsSearchHandler(b backend.Backend, bounds SearchBounds) http.HandlerFu
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		// perf: fan out per-node reads; each ReadNodeLog is a separate HTTP hop in cluster mode.
+		// perf: fan out per-node reads; each ReadNodeLog is an independent storage read.
 		type nodeResult struct {
 			matches   []match
 			count     int

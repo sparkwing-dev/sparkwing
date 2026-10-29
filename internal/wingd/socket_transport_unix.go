@@ -42,8 +42,8 @@ func socketPresent(path string) bool {
 	return err == nil && info.Mode()&os.ModeSocket != 0
 }
 
-// safety: only this account's directories that hold nothing but sockets no
-// daemon answers on are removed, so a live daemon or stray data is never lost.
+// safety: only this account's directories older than staleSocketAge that held
+// nothing but sockets no daemon answered on when inspected are removed.
 func removeStaleSocketDirs(keep string) {
 	base := filepath.Dir(keep)
 	entries, err := os.ReadDir(base)

@@ -48,8 +48,8 @@ func teamTolerations(namespace, team string) []corev1.Toleration {
 	return []corev1.Toleration{{Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}, {Key: TeamNodeLabel, Value: TeamNodeValue(namespace, team), Operator: corev1.TolerationOpEqual, Effect: corev1.TaintEffectNoSchedule}}
 }
 
-// safety: the pod pends until Karpenter adds a node from the team's own pool,
-// and carries nothing from the award beyond its unit fence, size and deadline.
+// safety: the pod lands on an unused node of the team's own pool or this run's
+// warm node, never another run's, and carries nothing from the award beyond its unit fence, size and deadline.
 func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 	budget, err := cloudBudget(cfg, CloudJobAward{CPUCores: d.CPUCores, Memory: d.Memory})
 	if err != nil {

@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -230,9 +229,6 @@ func keepNode(parent context.Context, keeper lease.Keeper, state interface {
 	RenewNodeClaim(context.Context, runspec.NodeRef, runstate.Actor) (runstate.LeaseBeat, error)
 }, ref runspec.NodeRef, actor runstate.Actor,
 ) (context.Context, func()) {
-	if lease.Adopt(parent, lease.Identity{Kind: capability.UnitNode, RunID: string(ref.RunID), NodeID: string(ref.NodeID), Holder: actor.Holder, Generation: int64(actor.Generation)}, func() bool { return true }) {
-		return parent, func() {}
-	}
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
 		beat, err := state.RenewNodeClaim(ctx, ref, actor)
 		return lease.Beat{ExpiresAt: beat.ExpiresAt, CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err

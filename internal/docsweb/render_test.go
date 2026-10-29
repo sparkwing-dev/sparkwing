@@ -249,9 +249,8 @@ func TestShippedPagesCloseEveryBlockTheyOpen(t *testing.T) {
 }
 
 // TestShippedPagesKeepEveryTableRow counts the table rows the shipped sources
-// declare and the rows the renderer emits for them. The defect that first put
-// a guard on this corpus dropped rows silently, so equality is the assertion
-// and the corpus, not a fixture, is what it reads.
+// declare and the rows the renderer emits for them. A dropped row is silent,
+// so equality is the assertion and the corpus, not a fixture, is what it reads.
 func TestShippedPagesKeepEveryTableRow(t *testing.T) {
 	pages := docs.List()
 	if len(pages) == 0 {

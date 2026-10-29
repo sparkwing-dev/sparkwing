@@ -100,10 +100,6 @@ func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, er
 	return result, err
 }
 
-func (s *Store) execNoCtx(q string, args ...any) (sql.Result, error) {
-	return s.exec(context.Background(), q, args...)
-}
-
 func (s *Store) query(ctx context.Context, q string, args ...any) (rowCursor, error) {
 	if err := refuseLedgerWrite(q); err != nil {
 		return nil, err
@@ -120,10 +116,6 @@ func (s *Store) queryRow(ctx context.Context, q string, args ...any) rowScanner 
 		return refusedLedgerRow{err}
 	}
 	return s.sqlRunner().QueryRowContext(ctx, rewritePh(s.dialect, q), args...)
-}
-
-func (s *Store) queryRowNoCtx(q string, args ...any) rowScanner {
-	return s.queryRow(context.Background(), q, args...)
 }
 
 type storeTx struct {
@@ -322,10 +314,6 @@ func (t *storeTx) execContext(ctx context.Context, q string, args ...any) (sql.R
 	return t.tx.ExecContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
-func (t *storeTx) query(q string, args ...any) (rowCursor, error) {
-	return t.queryContext(context.Background(), q, args...)
-}
-
 func (t *storeTx) queryContext(ctx context.Context, q string, args ...any) (rowCursor, error) {
 	if err := t.checkSQL(q); err != nil {
 		return nil, err
@@ -336,10 +324,6 @@ func (t *storeTx) queryContext(ctx context.Context, q string, args ...any) (rowC
 	}
 	t.rowsOpen = true
 	return &storeRows{Rows: rows, tx: t}, nil
-}
-
-func (t *storeTx) queryRow(q string, args ...any) rowScanner {
-	return t.QueryRowContext(context.Background(), q, args...)
 }
 
 func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) rowScanner {

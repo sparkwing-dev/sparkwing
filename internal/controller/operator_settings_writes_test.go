@@ -69,32 +69,30 @@ func TestOperatorSettingsHTTPCommitAuthorityProperty(t *testing.T) {
 	}
 }
 
-type storeSettingsWriterFake struct {
+// hack: commits through the store's authorized writes under fixture deployment
+// authority, whatever the route authenticated.
+type storeSettingsWriter struct {
 	OperatorSettingsWriter
-	store *store.Store
+	store     *store.Store
+	authority capability.Authorized
 }
 
-func (f storeSettingsWriterFake) WriteStorageSettings(ctx context.Context, _ capability.Authorized, value store.StorageSettings) error {
-	return f.store.AsOperator().SetStorageSettings(ctx, value)
+func newStoreSettingsWriter(t *testing.T, s *store.Store) storeSettingsWriter {
+	return storeSettingsWriter{store: s, authority: teststore.OperatorAuthorized(t, s, "")}
 }
 
-func (f storeSettingsWriterFake) WriteStorageQuota(ctx context.Context, a capability.Authorized, value store.StorageQuota) (store.StorageQuota, error) {
-	tenant, err := f.store.ForTeam(ctx, store.Team(a.Target.Team))
-	if err != nil {
-		return store.StorageQuota{}, err
-	}
-	if err := tenant.SetStorageQuota(ctx, value); err != nil {
-		return store.StorageQuota{}, err
-	}
-	return tenant.StorageQuota(ctx)
+func (f storeSettingsWriter) WriteStorageSettings(ctx context.Context, _ capability.Authorized, value store.StorageSettings) error {
+	return f.store.AsOperator().WriteStorageSettings(ctx, f.authority, value)
 }
 
-func (f storeSettingsWriterFake) WriteStorageAllowance(ctx context.Context, a capability.Authorized, value int64) (store.StorageQuota, error) {
-	tenant, err := f.store.ForTeam(ctx, store.Team(a.Target.Team))
-	if err != nil {
-		return store.StorageQuota{}, err
-	}
-	return tenant.SetStorageAllowance(ctx, value)
+func (f storeSettingsWriter) WriteStorageQuota(ctx context.Context, a capability.Authorized, value store.StorageQuota) (store.StorageQuota, error) {
+	f.authority.Target.Team = a.Target.Team
+	return f.store.AsOperator().WriteStorageQuota(ctx, f.authority, value)
+}
+
+func (f storeSettingsWriter) WriteStorageAllowance(ctx context.Context, a capability.Authorized, value int64) (store.StorageQuota, error) {
+	f.authority.Target.Team = a.Target.Team
+	return f.store.AsOperator().WriteStorageAllowance(ctx, f.authority, value)
 }
 
 func TestOperatorSettingsConsoleCommitsThroughHTTP(t *testing.T) {

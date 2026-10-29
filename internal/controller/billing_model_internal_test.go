@@ -88,9 +88,7 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 			engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,queue_started_at,spec_json,execution_json) SELECT 'b','later','job','pending',1,queue_started_at,?,execution_json FROM nodes WHERE team='a' AND node_id='one'`, []byte(`{"id":"job"}`))
 			engineAcceptedFixturePlan(t, e, "b", "later", "job")
 			rates := store.CreditRateTable{{Cores: 4, MicroPerSecond: 1}, {Cores: 16, MicroPerSecond: 4}}
-			if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
-				t.Fatal(err)
-			}
+			teststore.SeedCreditRates(t, e.Store, rates)
 			e.claimProfiles = billingCloudProfile{}
 			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 			root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
@@ -130,9 +128,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	}
 	engineAcceptedFixturePlan(t, e, "a", "run", "one", "two")
 	rates := store.CreditRateTable{{Cores: 16, MicroPerSecond: 1}}
-	if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SeedCreditRates(t, e.Store, rates)
 	e.claimProfiles = billingCloudProfile{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
@@ -277,7 +273,8 @@ func TestBillingModelControllerWaitlistsThe101stAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	e, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
-	if _, err := e.Store.SetSignUpLimits(t.Context(), store.SignUpLimits{}); err != nil {
+	zero := 0
+	if err := e.Store.AsOperator().WriteSignUpSettings(t.Context(), teststore.OperatorAuthorized(t, e.Store, ""), store.SignUpSettingsChange{HourlyLimit: &zero, DailyLimit: &zero, HourlyWarn: &zero, GitHubMinAccountDays: &zero, FreeTeamMembers: &zero}); err != nil {
 		t.Fatal(err)
 	}
 	s := e.Server.withProvider(store.ProviderGoogle, billingIdentityProvider{}, []string{"https://app.test/callback"})
@@ -286,7 +283,11 @@ func TestBillingModelControllerWaitlistsThe101stAccount(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account, err := e.Store.AccountByEmail(t.Context(), fmt.Sprint("signup", i, "@example.test"))
+		var id string
+		if err := teststore.SQL(t, e.Store).QueryRowContext(t.Context(), `SELECT id FROM accounts WHERE email=?`, fmt.Sprint("signup", i, "@example.test")).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		account, err := e.Store.AsOperator().Account(t.Context(), id)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -11,8 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-// Rows written before the zero start time was substituted read back as
-// an unset time rather than a 1754 date, the way created_at already does.
 func TestScanRun_UndefinedStartedAtReadsBackUnset(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

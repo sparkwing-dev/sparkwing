@@ -89,13 +89,6 @@ func scopedNamespace(kind Kind, repo string, ref RefScope, rest ...string) (stri
 	return prefix + "/" + r + "/" + suffix, nil
 }
 
-func memoNamespace(key MemoKey) (string, error) {
-	if !validDigest(Digest(key.Hash)) {
-		return "", fmt.Errorf("invalid memo hash")
-	}
-	return scopedNamespace(KindMemo, string(key.Repo), key.Ref, key.Pipeline, key.Job, string(key.Hash))
-}
-
 // DepcacheNamespace encodes a dependency cache scope.
 func DepcacheNamespace(key DepcacheKey) (string, error) {
 	return scopedNamespace(KindDepcache, string(key.Repo), key.Ref, key.Name, key.Key)

@@ -16,7 +16,7 @@ never does. Runs whose code Sparkwing fetched from the repository get its
 pipeline secrets; uploaded and local runs get shared secrets only. Sparkwing
 fetches the code itself, through the team's GitHub App installation, for App
 pushes and pull requests, schedule fires and run-now, and dashboard or CLI runs
-of a connected repository at a branch or commit; a GitHub Actions job proves its
+of a connected repository at a branch or tag head; a GitHub Actions job proves its
 repository with GitHub's token. A run whose code or repository the submitter
 supplies (an uploaded working tree or bundle, a local checkout, `--runner here`,
 or a controller without the GitHub App) reads only `--shared` secrets, like
@@ -25,8 +25,10 @@ GitHub, where a local run never receives repository secrets.
 Only a branch or tag head counts: a run that names a commit the branch does not
 point at (GitHub may serve it from a fork), a pull request ref, or a schedule
 locked to a commit reads only `--shared` secrets. Fetching proves the repository
-for secrets only. A run-now or dashboard run
-keeps its manual trust class for reserved pools, OIDC claims and cache scopes.
+for secrets and OIDC claims: a run-now or dashboard run's token claims the
+repository and the branch or tag head it ran, with `trigger:manual`. It keeps its
+manual trust class for reserved pools, and its cache records stay in its own
+fetched scope.
 
 `--shared` secrets are team-wide, like a GitHub organization secret with no
 repository allow-list: every pipeline of every repository in the team reads
@@ -59,8 +61,8 @@ called without `secrets: inherit`.
 ## `source:` branch pins are demoted but keep pipeline secrets
 
 A `source:` pin that names a branch or tag runs code that whoever can push that
-ref chooses. Such a run is demoted to asserted: its OIDC token carries no
-`repository_id`, `ref` or `sha`, it receives no reserved pool, and its cache
+ref chooses. Such a run is demoted to asserted: its OIDC token carries
+`repository_id` but no `ref` or `sha`, it receives no reserved pool, and its cache
 records stay in its own scope, so it never writes cache entries that builds of
 `main` read. Sparkwing still fetches its code from the repository, so it reads
 the repository's pipeline secrets.

@@ -24,9 +24,9 @@ type ImageTag struct {
 }
 
 // DeployTag is the canonical content-addressed tag applied to every
-// build. Format: commit-<sha>-files-<hash>[-dirty]. Two trees with
-// identical content produce identical tags even on different commits;
-// a clean commit always produces the same tag across re-runs.
+// build. Format: commit-<sha>-files-<hash>[-dirty], so a tag names the
+// commit, the content hash and whether the tree was dirty; a clean commit
+// always produces the same tag across re-runs.
 func (t ImageTag) DeployTag() string {
 	tag := "commit-" + t.Commit + "-files-" + t.Content
 	if t.Dirty {

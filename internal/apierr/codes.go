@@ -135,7 +135,7 @@ const (
 	ReasonNoOutput               Reason = "no_output"
 )
 
-// Error contains only safe, masked text. Details must never include registered secret values.
+// Error emits Message, Hint and Details as given, so callers must supply safe, masked values.
 // For secret_in_identifier, identify the identifier's field/path, never echo its value.
 type Error struct {
 	Code    Code           `json:"code"`

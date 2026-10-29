@@ -38,7 +38,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 	iteration := 0
 	property := func(value []byte) bool {
 		iteration++
-		if _, err := st.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitRunSeconds: 3600}); err != nil {
+		if _, err := st.AsOperator().WriteComputeLimits(t.Context(), teststore.OperatorAuthorized(t, st, ""), map[string]int64{store.ComputeLimitRunSeconds: 3600}); err != nil {
 			t.Fatal(err)
 		}
 		peer := capability.Subject{Kind: capability.SubjectLocal, ID: "uid:" + strconv.Itoa(iteration) + ":" + hex.EncodeToString(value)}
@@ -85,7 +85,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 			t.Logf("unresolved request or missing ceiling: %+v", run.Request)
 			return false
 		}
-		if _, err := st.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitRunSeconds: 7200}); err != nil {
+		if _, err := st.AsOperator().WriteComputeLimits(t.Context(), teststore.OperatorAuthorized(t, st, ""), map[string]int64{store.ComputeLimitRunSeconds: 7200}); err != nil {
 			t.Fatal(err)
 		}
 		replay := serve(true)

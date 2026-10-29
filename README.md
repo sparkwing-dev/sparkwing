@@ -165,13 +165,15 @@ cadence.
 
 The controller's HTTP API (served by `sparkwing-controller` in
 cluster mode and embedded in the `sparkwing` CLI for laptop mode
-via `sparkwing dashboard start`) is documented as an OpenAPI 3.0
+via `sparkwing dashboard start`) is documented as an OpenAPI 3.1
 spec at
-[`api/openapi.yaml`](./api/openapi.yaml). Every route, request
-shape, response shape, and security requirement is described there.
-The route inventory and each route's `x-sparkwing-scope` are written
-from `internal/controller/server.go` by `bash bin/gen-api-docs.sh`, and
-`bash bin/check-api-spec.sh` fails when the file and the router
+[`api/openapi.yaml`](./api/openapi.yaml). Every route and its
+authorization policy (`x-sparkwing-policy`) is listed there; routes with
+a shared wire type also describe their request and response shapes, and
+the rest are marked `x-sparkwing-wire: undocumented`.
+`bash bin/gen-api-docs.sh` writes the file from the route policy table
+(`capability.Routes()`) and the shared wire types, and
+`bash bin/check-api-spec.sh` fails when the file and that table
 disagree.
 
 To view it: paste the file into [editor.swagger.io](https://editor.swagger.io)

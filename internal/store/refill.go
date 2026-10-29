@@ -158,8 +158,9 @@ func refillCaps(b BillingStanding, now time.Time) RefillCaps {
 	return RefillCaps{AmountCents: row.refillCents, PerDay: row.refillsPerDay, WeekCents: row.refillWeekCents}
 }
 
-// safety: a refill that would pass any limit is not made at all, so a card is never charged past what its team
-// allowed or its standing caps; the team's credits then run down and Cloud work stops at zero.
+// safety: a refill that would pass any limit, counting recorded payments and open reservations, is not made; the
+// team's credits then run down and Cloud work stops at zero. A charge whose answer was lost counts only once its
+// webhook lands (see RecordRefillCharged).
 func (s RefillState) limit() string {
 	next := s.AmountCents
 	switch {

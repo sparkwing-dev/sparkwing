@@ -181,7 +181,8 @@ func resolvesToDirectory(p string) bool {
 	return err == nil && info.IsDir()
 }
 
-// safety: one open serves both the hash and the upload so the stored bytes are the bytes the digest names
+// safety: one descriptor serves the hash and the upload so a path replaced in
+// between cannot switch files; the upload verifies size and digest.
 func storeArtifactFile(ctx context.Context, data Data, root *os.Root, name string) (blob.Digest, int64, error) {
 	f, err := root.Open(name)
 	if err != nil {

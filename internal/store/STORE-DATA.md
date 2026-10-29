@@ -746,7 +746,7 @@ that order with shuffled authority and unit inputs.
 
 1. Global advisories, in fixed order: settings, compute and free
    tier, bootstrap and service enrollment, capacity admission.
-2. Singleton lease rows (maintenance, controller owner and reaper).
+2. The controller epoch fence.
 3. Settings and signup gate rows.
 4. Teams, sorted. Financial writers take `FOR UPDATE` before any ledger lock.
 5. Accounts, sorted.
@@ -775,14 +775,14 @@ Hot transaction families:
 
 | Family | Order |
 |---|---|
-| Claim, self-claim, reconcile | controller lease KS, authority set, owner, run, node, billing |
-| Renewal | controller lease KS, authority set, owner, run, node, entries, billing |
+| Claim, self-claim, reconcile | controller epoch (shared), authority set, owner, run, node, billing |
+| Renewal | controller epoch (shared), authority set, owner, run, node, entries, billing |
 | Exchange | bootstrap authority at write strength, owner, run, node |
-| Launcher preparation | controller lease KS, launcher, bootstrap and current unit authority, all owners, all runs, all nodes |
+| Launcher preparation | controller epoch (shared), launcher, bootstrap and current unit authority, all owners, all runs, all nodes |
 | Release and reporting | authority, owner, run, node, attempt and metadata rows |
 | GitHub source release | installation, then subscription |
 | Blob and source upload | authority, ticket, digest advisory, quota |
-| Blob collection | lease KS, digest advisory; deletion runs between transactions |
+| Blob collection | digest advisory; deletion runs between transactions |
 
 Launcher preparation and rejection discover bootstrap and current unit
 capability prefixes before authority locking. After locking the units, they

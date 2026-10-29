@@ -75,8 +75,8 @@ func writingJobController(t *testing.T, kube *fake.Clientset) {
 	})
 }
 
-// Staging qa.8: the Job controller's status write between create and the
-// launcher's patches made activation and teardown fail with 409 forever.
+// The Job controller writes status between create and the launcher's
+// patches; activation and teardown must survive that conflict.
 func TestLaunchSurvivesJobControllerWrites(t *testing.T) {
 	l, kube, boundary, control := fixture()
 	writingJobController(t, kube)

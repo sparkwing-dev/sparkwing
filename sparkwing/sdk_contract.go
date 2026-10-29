@@ -401,7 +401,7 @@ func (p *Plan) Checkout(config Checkout) *Plan {
 	return p
 }
 
-// SkipIf runs on the run's coordinator before requesting approval, holding no
+// SkipIf runs in a separate evaluation job before requesting approval, holding no
 // concurrency capacity. A true predicate settles the gate as skipped.
 func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval {
 	a.node.SkipIf(predicate, opts...)

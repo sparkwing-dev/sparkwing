@@ -29,7 +29,7 @@ func storeDataServer(t *testing.T) *serverFixture {
 	for _, team := range []store.Team{"a", "b"} {
 		teststore.SeedTeam(t, s, team)
 	}
-	return &serverFixture{Server: New(s, nil).WithOperatorSettingsWriter(storeSettingsWriterFake{store: s}), store: s}
+	return &serverFixture{Server: New(s, nil).WithOperatorSettingsWriter(newStoreSettingsWriter(t, s)), store: s}
 }
 
 func storeDataRequest(t *testing.T, s *serverFixture, method, path, body string, operator bool) *http.Request {

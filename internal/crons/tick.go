@@ -49,8 +49,9 @@ type Decision struct {
 // armed repositories declare, evaluates every declared unpaused schedule
 // against its cursor, and resolves each due instant: a launch, a skip when the schedule's
 // previous run is still active and its policy is skip, or a miss when the
-// instant fell outside the catch-up window. Every outcome moves the cursor, so
-// no instant is ever considered twice. Paused and undeclared rows fire
+// instant fell outside the catch-up window. A persisted outcome moves the
+// cursor; one that fails to persist leaves the instant due for a later tick,
+// which may launch it again. Paused and undeclared rows fire
 // nothing; their cursor and next due instant still move, so neither is
 // replayed when the schedule comes back.
 //

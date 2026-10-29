@@ -6,7 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func capacityPlan(policy string, timeout int64, ids ...string) nodeproto.PlanDoc {
@@ -24,11 +23,4 @@ func capacityRow(t *testing.T, fixture *storeHostFixture, id string) runstate.No
 		t.Fatal(err)
 	}
 	return row
-}
-
-func cancelCapacityNode(t *testing.T, fixture *storeHostFixture, row runstate.NodeRow) {
-	t.Helper()
-	if _, err := fixture.Tenant.TransitionNode(t.Context(), store.CancelNode{Ref: row.Ref, Actor: fixture.Actor}); err != nil {
-		t.Fatal(err)
-	}
 }

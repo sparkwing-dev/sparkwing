@@ -71,7 +71,7 @@ func TestRunFiltersTreatSQLMetacharactersAsLiteral(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if count, err := teamA.CountRuns(ctx, filter); err != nil || count != want {
+				if count, err := countRuns(ctx, teamA, filter); err != nil || count != want {
 					t.Fatalf("%s=%q count = %d, %v; want %d", key, value, count, err, want)
 				}
 			}
@@ -244,7 +244,7 @@ func TestRunFilterTenantLiteralsProperty(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if count, err := teamA.CountRuns(t.Context(), filter); err != nil || count != 1 {
+				if count, err := countRuns(t.Context(), teamA, filter); err != nil || count != 1 {
 					return false
 				}
 			}
@@ -254,4 +254,10 @@ func TestRunFilterTenantLiteralsProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func countRuns(ctx context.Context, tenant *store.Tenant, filter store.RunFilter) (int, error) {
+	filter.Limit = store.MaxRunListLimit
+	runs, err := tenant.ListRuns(ctx, filter)
+	return len(runs), err
 }

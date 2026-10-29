@@ -11,9 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-// Every row is a misdeclared deployment that used to start in some weaker
-// mode, or to write global settings before failing. Each must refuse before
-// the store is opened, so nothing is created or changed.
+// Every row is a misdeclared deployment. Each must refuse before the store is
+// opened, so it neither starts in a weaker mode nor creates or changes anything.
 func TestStartupMatrixRefusesBeforeTouchingTheStore(t *testing.T) {
 	taken, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

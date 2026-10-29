@@ -48,9 +48,7 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 		}
 	}
 	rate := int64(store.CloudStorageRateMicroPerGBDay)
-	if _, err := s.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SetCreditSettings(t, s, store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate})
 	var logs bytes.Buffer
 	server := NewDeployment(s, deploymenttest.Metered(t), slog.New(slog.NewJSONHandler(&logs, nil)))
 	server.MaintainStorage(t.Context())

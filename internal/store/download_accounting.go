@@ -44,16 +44,6 @@ func (e *DownloadCapError) Error() string {
 // Unwrap reports ErrDownloadCap.
 func (e *DownloadCapError) Unwrap() error { return ErrDownloadCap }
 
-// ChargeDownload admits under the shared quota lock and records the day's usage atomically.
-func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (DownloadCharged, error) {
-	if c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
-		return DownloadCharged{}, fmt.Errorf("%w: invalid download charge", ErrInvalidInput)
-	}
-	return inTxResult(ctx, t.s, func(tx *storeTx) (DownloadCharged, error) {
-		return t.chargeDownloadTx(ctx, tx, c)
-	})
-}
-
 func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCharge) (DownloadCharged, error) {
 	if c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
 		return DownloadCharged{}, fmt.Errorf("%w: invalid download charge", ErrInvalidInput)

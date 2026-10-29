@@ -1,20 +1,18 @@
 package controller_test
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 // An unknown role names itself and the roles that exist, because "member" is a
 // natural guess and a bare "invalid request" leaves the caller to find the list.
 func TestUnknownRoleRefusalNamesTheRoleAndTheValidOnes(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		carol, err := f.st.AccountByEmail(context.Background(), "carol@example.test")
-		if err != nil {
-			t.Fatal(err)
-		}
+		carol := teststore.AccountByEmail(t, f.st, "carol@example.test")
 		for _, c := range []struct {
 			method, path string
 			body         map[string]string

@@ -11,8 +11,7 @@ requires a valid subject. Flat run, node, attempt and generation fields are
 removed. `CommittedReader` checks the store-selected subject and object keys
 before opening bytes. Physical manifests and object listings grant no read
 authority. The object-side reader and abandoned-log sealer are removed.
-`Operator.SealAbandonedLogStreams` owns abandoned seals under the maintenance
-lease and preserves every committed segment. `AttemptPrefix` is removed. Slot
+`Operator.SealAbandonedLogStreams` owns abandoned seals and preserves every committed segment. `AttemptPrefix` is removed. Slot
 sizes, upload deadlines and deletion follow [log slot accounting](../../store/STORE-DATA.md#log-slot-accounting).
 
 Dashboard completeness uses the selected attempt's persisted finish time and
@@ -51,7 +50,7 @@ It returns no bytes or read URL and creates no reference edge. `RecordSegments`
 rechecks the writer before committing that edge. The verifier works with both
 object backends; the controller's final log commit uses it for the manifest.
 Signing never reads bucket lifecycle rules; the controller checks S3 rules once
-at startup and warns. The controller runs filesystem expiry after renewing its maintenance lease. Both
+at startup and warns. The controller runs filesystem expiry in its retained-data pass. Both
 are backstops: Sparkwing deletes log objects itself under [log slot accounting](../../store/STORE-DATA.md#log-slot-accounting).
 
 `CommittedReader` calls `ReadLogSegments` before each segment. It checks the returned

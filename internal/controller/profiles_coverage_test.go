@@ -52,7 +52,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				}
 			}
 			if mode == "memoized" {
-				n, err := teststore.ForTeam(t, st, store.DefaultTeam).GetNode(t.Context(), "r", "c")
+				n, err := teststore.Node(t.Context(), teststore.ForTeam(t, st, store.DefaultTeam), "r", "c")
 				if err != nil || n.Outcome != "memoized" {
 					t.Fatalf("cache fixture=%+v, %v", n, err)
 				}

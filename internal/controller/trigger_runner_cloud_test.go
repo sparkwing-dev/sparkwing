@@ -12,9 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// Staging qa.9: `pipeline trigger --runner cloud` sealed the class=cloud label,
-// intake dispatched the run to one host, and the Cloud launcher, which never
-// claims a whole-run trigger, left it unclaimed.
+// The Cloud launcher never claims a whole-run trigger, so `--runner cloud` must
+// leave plan units claimable by it.
 func TestTriggerRunnerCloudReachesTheCloudLauncher(t *testing.T) {
 	for name, flags := range map[string]runspec.Options{
 		"no runner flag": {},

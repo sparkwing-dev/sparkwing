@@ -122,9 +122,8 @@ func buildOverlay(rawGoMod []byte, goModPath string, resolved map[string]string)
 	return formatted, nil
 }
 
-// bug: a materialization that failed leaves the overlay on disk with no sum, and
-// an unchanged overlay never reaches materializeSum again, so the consumer has
-// to run go mod download by hand before it can build.
+// safety: an unchanged overlay still gets a missing sum materialized, because
+// an earlier materialization may have failed after writing the overlay.
 func repairSum(ctx context.Context, workDir, overlayPath, sumPath string) error {
 	if _, present := goWorkInScope(workDir); present {
 		return nil

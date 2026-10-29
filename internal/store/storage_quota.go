@@ -24,12 +24,6 @@ func validateStorageQuota(q StorageQuota) error {
 	return nil
 }
 
-// SetStorageQuota replaces this team's write limits and preserves its retained allowance.
-// A named tier with zero write limits selects that tier's limits.
-func (t *Tenant) SetStorageQuota(ctx context.Context, q StorageQuota) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error { return setStorageQuotaTx(ctx, tx, t.team, q) })
-}
-
 func setStorageQuotaTx(ctx context.Context, tx *storeTx, team Team, q StorageQuota) error {
 	if q.Team != "" && q.Team != team {
 		return fmt.Errorf("%w: quota belongs to another team", ErrInvalidInput)
@@ -102,18 +96,6 @@ func scanStorageQuota(row rowScanner, extra ...any) (StorageQuota, error) {
 		return StorageQuota{}, err
 	}
 	return q, validateStorageQuota(q)
-}
-
-// SetStorageAllowance changes retained bytes without replacing this team's write limits.
-// Zero leaves retained bytes uncapped. The returned quota is from the write transaction.
-func (t *Tenant) SetStorageAllowance(ctx context.Context, bytes int64) (StorageQuota, error) {
-	var q StorageQuota
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		q, err = setStorageAllowanceTx(ctx, tx, t.team, bytes)
-		return err
-	})
-	return q, err
 }
 
 func setStorageAllowanceTx(ctx context.Context, tx *storeTx, team Team, bytes int64) (StorageQuota, error) {

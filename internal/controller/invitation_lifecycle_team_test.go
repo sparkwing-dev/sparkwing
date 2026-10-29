@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 // Every invitation requires the inviter's current team.admin grant at acceptance.
@@ -33,10 +34,7 @@ func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
 		t.Run(c.change+"/"+c.invitedRole, func(t *testing.T) {
 			tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 				ctx := context.Background()
-				alice, err := f.st.AccountByEmail(ctx, "alice@example.test")
-				if err != nil {
-					t.Fatal(err)
-				}
+				alice := teststore.AccountByEmail(t, f.st, "alice@example.test")
 				erin, _ := signUp(t, f.st, "erin")
 				inv, err := fixtureInvitation(t, f.st, f.teamA, alice.ID, erin.Email, store.RoleOwner)
 				if err != nil {
@@ -70,7 +68,11 @@ func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
 					code, raw = f.do(http.MethodPatch, "/api/v1/team/members/"+erin.ID, f.ownerA, map[string]string{"role": "editor"})
 				case "deleted":
 					code = http.StatusNoContent
-					if _, err := f.st.DeleteAccount(ctx, erin.ID); err != nil {
+					f.srv.WithOperatorAccounts([]string{"operator"})
+					teststore.SeedTeam(t, f.st, "ops")
+					console, operator := teststore.Console(t, f.st, "ops", "operator")
+					operator.Target.AccountID = erin.ID
+					if _, err := console.ConsoleDeleteAccount(ctx, operator); err != nil {
 						t.Fatal(err)
 					}
 				}

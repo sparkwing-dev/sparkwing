@@ -3,8 +3,7 @@
 // pkg/projectconfig). The field set, yaml keys, types, and per-field
 // godoc are read straight from source, so the config reference is
 // derived from the same structs the strict parser enforces and cannot
-// claim a field that doesn't exist (the exact rot that produced the
-// runs_on / tags / env / secrets fiction).
+// claim a field that doesn't exist.
 //
 // Usage: go run . <repo-root>   (writes markdown to stdout)
 package main

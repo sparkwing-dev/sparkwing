@@ -21,7 +21,8 @@ const agentTokenCredential = "agent-token"
 type LauncherFactory func(context.Context, launcher.CloudJobConfig, func(context.Context) (string, error)) (*launcher.Launcher, error)
 
 // RunLaunchCLI accepts the final Job configuration and refuses to start without
-// both an award transport and a boundary that establishes isolation at runtime.
+// an authenticated award transport and a node-reservation boundary. Network
+// isolation is the cluster's NetworkPolicy enforcement, which the operator verifies.
 func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) error {
 	fs, err := commandFlags("launch", args)
 	if err != nil {

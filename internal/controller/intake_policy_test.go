@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestControllerIntakeSealsPersistedPolicyOnce(t *testing.T) {
@@ -33,7 +34,7 @@ func TestControllerIntakeSealsPersistedPolicyOnce(t *testing.T) {
 	}}
 	setSeconds := func(seconds int64) {
 		t.Helper()
-		if _, err := st.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitRunSeconds: seconds}); err != nil {
+		if _, err := st.AsOperator().WriteComputeLimits(t.Context(), teststore.OperatorAuthorized(t, st, ""), map[string]int64{store.ComputeLimitRunSeconds: seconds}); err != nil {
 			t.Fatal(err)
 		}
 	}

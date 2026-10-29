@@ -69,7 +69,7 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := resumeHTTP(s, session, "/api/v1/runs", string(body))
-		triggers, err := tenant.ListTriggers(t.Context(), store.TriggerFilter{Pipelines: []string{"p"}})
+		triggers, err := teststore.Triggers(t.Context(), tenant, "p")
 		if err != nil {
 			t.Fatal(err)
 		}

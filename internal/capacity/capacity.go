@@ -41,16 +41,14 @@ type Resolution struct {
 	ExpectedDuration time.Duration
 }
 
-// Resolve applies the resolution order. A non-empty pin wins verbatim; a
-// measured profile of the run's own version (matching plan hash) with at
-// least MinSamples clean samples supplies the measured charge, sustained
-// cores and peak memory (the split [store.PipelineProfile] explains); a
-// version that changed structurally or has not yet graduated is priced by
-// measurement -- a warm start at what its predecessor was charged or a
-// safety multiple of its contended-run demand floor, whichever is larger;
-// otherwise the cold-start default is charged.
-// ExpectedDuration is filled from the profile whenever one exists, even when
-// a pin sets the cost, so ETA still has a duration to simulate with.
+// Resolve computes the capacity view's resource estimate for a pipeline.
+// A non-empty pin wins verbatim; a measured profile of the run's own version
+// (matching plan hash) with at least MinSamples clean samples supplies
+// sustained cores and peak memory (the split [store.PipelineProfile]
+// explains); a version that changed structurally or has not yet graduated
+// takes the larger of a warm start at its predecessor's estimate and a
+// safety multiple of its contended-run demand floor; otherwise the
+// cold-start default applies. Admission and billing do not read it.
 func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
 	var cores, previous float64
 	if profile != nil {

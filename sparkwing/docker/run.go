@@ -126,8 +126,8 @@ func Run(ctx context.Context, opts RunOptions) error {
 		return fmt.Errorf("docker create: %w", err)
 	}
 	// safety: if this node is killed before the rm below runs, a later
-	// sweep runs this same command; docker rm -f is registered, not the
-	// step's own cleanup, so the container never outlives the run.
+	// sweep runs this same registered command, so a killed step's container
+	// is still removed when the host's cleanup succeeds.
 	release, _ := cleanup.Register(ctx, cleanup.Spec{
 		Argv:        []string{"docker", "rm", "-f", name},
 		Description: "docker run " + opts.Image,

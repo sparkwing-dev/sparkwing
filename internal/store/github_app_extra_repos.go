@@ -93,23 +93,3 @@ func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]str
 	}
 	return out, rows.Err()
 }
-
-// GitHubAppExtraRepos returns approved extras for a numeric source repository ID.
-func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repositoryID int64) (_ []string, err error) {
-	rows, err := t.s.query(ctx, `
-		SELECT extra_repo FROM github_app_extra_repos WHERE team = ? AND repository_id = ? ORDER BY extra_repo`,
-		string(t.team), repositoryID)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := []string{}
-	for rows.Next() {
-		var x string
-		if err := rows.Scan(&x); err != nil {
-			return nil, err
-		}
-		out = append(out, x)
-	}
-	return out, rows.Err()
-}

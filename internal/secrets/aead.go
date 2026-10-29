@@ -97,8 +97,9 @@ func (c *Cipher) Seal(plain string) (string, error) {
 
 // SealBound seals plain with the row fields that decide access to the
 // secret as additional authenticated data: the kind of row, the team that
-// owns it, its name, its owning scope (the owning pipeline, empty for an
-// unscoped secret), whether an unscoped row answers every run, and whether
+// owns it, its name, its scope (the row's canonical scope, which names the
+// repository and pipeline of a pipeline secret, empty for an unscoped
+// secret), whether an unscoped row answers every run, and whether
 // the value is redacted in run output. The envelope opens only under that
 // same combination, so an envelope copied onto another team's row or onto a
 // row of another kind does not open.
@@ -205,8 +206,8 @@ func IsEncrypted(v string) bool {
 	return strings.HasPrefix(v, envelopePrefix) || IsBound(v)
 }
 
-// IsBound reports whether v is an envelope sealed to the team and row it
-// belongs to.
+// IsBound reports whether v carries the bound-envelope prefix; only
+// OpenBound authenticates its row binding.
 func IsBound(v string) bool {
 	return strings.HasPrefix(v, BoundPrefix)
 }
