@@ -10,9 +10,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -82,9 +82,6 @@ func TestScheduledIntakeCommitsOneSealedRunAndHistoryPerDueInstant(t *testing.T)
 }
 
 func TestScheduleConsentAndReplayRequireCurrentAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
-	}
 	property := func(variant uint8, seed uint32) bool {
 		tenant, a, body, now := consentedScheduleFixture(t)
 		body.Schedules[0].Args = map[string]string{"input": fmt.Sprintf("value-%x", seed)}
@@ -125,7 +122,7 @@ func TestScheduleConsentAndReplayRequireCurrentAuthorityProperty(t *testing.T) {
 		stored, err := tenant.ReadRun(t.Context(), admitted.RunID)
 		return replayErr != nil && nextErr != nil && err == nil && reflect.DeepEqual(stored.Request, admitted.Request)
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -260,9 +257,6 @@ func (p scheduleResolutionRace) ResolveScheduleSource(ctx context.Context, row C
 }
 
 func TestScheduledSourceResolutionCannotOutliveConsentProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
-	}
 	property := func(variant uint8) bool {
 		tenant, a, body, now := consentedScheduleFixture(t)
 		ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
@@ -294,7 +288,7 @@ func TestScheduledSourceResolutionCannotOutliveConsentProperty(t *testing.T) {
 		rewriteSchemaCount(t, tenant.s.db, "cron_fires", 0)
 		return err != nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 18}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 18})); err != nil {
 		t.Fatal(err)
 	}
 }

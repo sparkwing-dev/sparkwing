@@ -96,9 +96,6 @@ func TestAcceptedPlanUsesSharedStrictValidator(t *testing.T) {
 }
 
 func TestAcceptedPlanIdentifierSecretsProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
-	}
 	random := rand.New(rand.NewPCG(81, 2009))
 	for range 32 {
 		secret := fmt.Sprintf("%s-%x", []string{"s", "\"", "\\", "\n", "é", "😀", ":"}[random.IntN(7)], random.Uint64())
@@ -138,9 +135,6 @@ func TestAcceptedPlanIdentifierSecretsProperty(t *testing.T) {
 }
 
 func TestPreflightDiagnosticCannotOutlivePlanOwnerProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
-	}
 	for remaining := 1; remaining <= 64; remaining++ {
 		tenant, request, now := planFixture(t, runspec.DispatchHost)
 		request.Seal.Resolved.SecretNames = []string{"ABSENT"}

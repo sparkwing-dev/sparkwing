@@ -8,15 +8,12 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestGitHubCommitReportingUsesSealedIdentityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.5s measured in the short class; the full suite runs it")
-	}
 	property := func(raw uint32, name, sha string) bool {
 		tenant, input, _ := intakeFixture(t)
 		repoID := int64(raw) + 1
@@ -79,7 +76,7 @@ func TestGitHubCommitReportingUsesSealedIdentityProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 }

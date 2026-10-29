@@ -8,9 +8,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func readRunnerInventory(t *testing.T, s *Store, team Team) capability.RunnerSnapshot {
@@ -53,9 +53,6 @@ func TestRunnerInventoryKeepsLabelObservationsAcrossRenewal(t *testing.T) {
 }
 
 func TestRunnerInventoryAttributesOnlyCurrentSameTenantAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
-	}
 	property := func(seed uint64, mutation uint8) bool {
 		s, demand, claim, now := renewalFixture(t, capability.UnitNode)
 		twin := authorityRoot(fmt.Sprintf("twin-%x", seed), "a")
@@ -107,7 +104,7 @@ func TestRunnerInventoryAttributesOnlyCurrentSameTenantAuthorityProperty(t *test
 		other := readRunnerInventory(t, s, "b")
 		return active == expectedActive && len(other.Runners) == 1 && other.Runners[0].Team == "b" && len(other.Runners[0].ActiveJobs) == 0
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 56}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 56})); err != nil {
 		t.Fatal(err)
 	}
 }

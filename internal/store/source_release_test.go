@@ -8,10 +8,10 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -120,9 +120,6 @@ func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
 }
 
 func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
-	}
 	for _, problem := range []string{"team", "revoked", "parent_revoked", "lease", "generation", "holder", "started", "cancelled", "finished", "deadline", "personal", "unregistered", "unconfirmed_ssh", "credential_host", "repository", "enrollment", "audit", "commit"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, auth := sourceReleaseFixture(t)
@@ -231,9 +228,6 @@ func TestSourceReleaseCannotSubstituteCloudForAPersonalMachine(t *testing.T) {
 }
 
 func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.8s measured in the short class; the full suite runs it")
-	}
 	property := func(personal, registered, ssh bool) bool {
 		tenant, auth := sourceReleaseFixture(t)
 		s := tenant.s
@@ -256,7 +250,7 @@ func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
 		var failure *apierr.Error
 		return errors.As(err, &failure) && failure.Details["reason"] == apierr.ReasonPersonalMachine && credential.Secret == "" && audit.ID == "" && released == 0
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 		t.Fatal(err)
 	}
 }

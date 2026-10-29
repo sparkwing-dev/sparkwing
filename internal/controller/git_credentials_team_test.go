@@ -74,9 +74,6 @@ func (f *credFixture) releases(who signedIn) []releaseRow {
 }
 
 func TestTeamGitCredentialLosesToTheAppWhenTheAppCovers(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
-	}
 	f := newCredFixture(t)
 	f.connect(f.olga, 501, 7, acmeAdmin)
 	if _, code := f.put(f.olga, map[string]any{"host_wide": true, "host": "github.com", "kind": "https", "token": "github_pat_x"}); code != http.StatusOK {
@@ -98,9 +95,6 @@ func TestTeamGitCredentialLosesToTheAppWhenTheAppCovers(t *testing.T) {
 }
 
 func TestTeamGitCredentialsNeverReachAPersonalMachine(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.6s measured in the short class; the full suite runs it")
-	}
 	f := newCredFixture(t)
 	f.connect(f.olga, 501, 7, acmeAdmin)
 	if _, code := f.put(f.olga, map[string]any{"host_wide": true, "host": "github.com", "kind": "https", "token": "github_pat_x"}); code != http.StatusOK {

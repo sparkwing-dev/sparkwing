@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -143,9 +144,6 @@ func TestLogPersistenceAttemptByteLimitPreservesCommittedBytes(t *testing.T) {
 }
 
 func TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.8s measured in the short class; the full suite runs it")
-	}
 	property := func(offset int16, later uint8) bool {
 		s, tenant, actor, attempt := resultFixture(t)
 		commit := logCommit(actor, attempt)
@@ -203,7 +201,7 @@ func TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace(t *testing.T) {
 			t.Fatalf("attempt grace boundary at %d ns", offset)
 		}
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(92076))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(92076))})); err != nil {
 		t.Fatal(err)
 	}
 }

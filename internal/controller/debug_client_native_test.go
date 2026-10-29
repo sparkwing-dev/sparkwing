@@ -14,9 +14,6 @@ import (
 )
 
 func FuzzDebugResumeClientRequiresCurrentAuthority(f *testing.F) {
-	if testing.Short() {
-		f.Skip("slow: 1.2s measured in the short class; the full suite runs it")
-	}
 	for state := range byte(5) {
 		f.Add(state, "other-run", "other-job")
 	}

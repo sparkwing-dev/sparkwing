@@ -8,10 +8,10 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func launcherSnapshotFixture(t *testing.T, kind capability.UnitKind, previousAttempts ...int64) (*Store, UnitDemand, UnitClaim, *time.Time) {
@@ -90,9 +90,6 @@ func TestLauncherSnapshotRetainsCurrentAwardThroughExchange(t *testing.T) {
 }
 
 func TestLauncherSnapshotFencingProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.5s measured in the short class; the full suite runs it")
-	}
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand, claim, now := launcherSnapshotFixture(t, kind)
@@ -160,7 +157,7 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 				}
 				return true
 			}
-			if err := quick.Check(check, &quick.Config{MaxCount: 100}); err != nil {
+			if err := quick.Check(check, quicktest.Config(&quick.Config{MaxCount: 100})); err != nil {
 				t.Fatal(err)
 			}
 			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil, nil)
@@ -252,9 +249,6 @@ func TestLauncherSnapshotIsolatesIntegrityButRejectsStorageFailures(t *testing.T
 }
 
 func TestLauncherReservationOwnershipProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 4.3s measured in the short class; the full suite runs it")
-	}
 	check := func(kindIndex, mode uint8, offset uint16, delegated bool) bool {
 		kind := []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kindIndex%3]
 		s, demand, claim, now := launcherSnapshotFixture(t, kind)
@@ -324,7 +318,7 @@ func TestLauncherReservationOwnershipProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(check, &quick.Config{MaxCount: 90}); err != nil {
+	if err := quick.Check(check, quicktest.Config(&quick.Config{MaxCount: 90})); err != nil {
 		t.Fatal(err)
 	}
 }

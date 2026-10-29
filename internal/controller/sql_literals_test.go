@@ -14,10 +14,10 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -221,9 +221,6 @@ func TestSecretMutationsInvalidNamesCannotChangeRowsProperty(t *testing.T) {
 }
 
 func TestRunFilterTenantLiteralsProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 5.7s measured in the short class; the full suite runs it")
-	}
 	sqlLiteralDialects(t, func(t *testing.T, f *cronsFixture, teamA, teamB *store.Tenant) {
 		index := 0
 		property := func(value []byte) bool {
@@ -253,7 +250,7 @@ func TestRunFilterTenantLiteralsProperty(t *testing.T) {
 			}
 			return true
 		}
-		if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+		if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 			t.Fatal(err)
 		}
 	})

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func providerPaymentFixture(t *testing.T) (*Store, *Tenant, time.Time) {
@@ -334,9 +335,6 @@ func TestProviderSetupReplayCannotRestoreAnOlderCard(t *testing.T) {
 }
 
 func TestProviderWarningProtectionIsMonotonicProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.3s measured in the short class; the full suite runs it")
-	}
 	s, _, now := providerPaymentFixture(t)
 	providerCheckoutPaid(t, s)
 	index := 0
@@ -364,7 +362,7 @@ func TestProviderWarningProtectionIsMonotonicProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(742))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(742))})); err != nil {
 		t.Fatal(err)
 	}
 }

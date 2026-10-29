@@ -6,13 +6,11 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestBlobMetadataRequiresCurrentTenantAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 8.3s measured in the short class; the full suite runs it")
-	}
 	property := func(n uint64) bool {
 		for _, mutation := range []string{"team", "principal", "repo", "attempt", "upload", "digest", "revoked", "edge", "tombstone"} {
 			s, records, intent := blobRecordFixture(t)
@@ -52,7 +50,7 @@ func TestBlobMetadataRequiresCurrentTenantAuthorityProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 16})); err != nil {
 		t.Fatal(err)
 	}
 }

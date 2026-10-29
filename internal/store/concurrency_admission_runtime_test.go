@@ -69,9 +69,6 @@ func admissionExpiry(t *testing.T, f *storeRecoveryFixture, table, run string, u
 }
 
 func TestAdmissionClaimOrOwnerLossRetainsLiveFIFO(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
-	}
 	for name, target := range map[string]func(*testing.T) *storetest.Target{"sqlite": storetest.NewSQLite, "postgres": storetest.NewPostgres} {
 		t.Run(name, func(t *testing.T) {
 			for _, loss := range []string{"claim", "owner", "both"} {

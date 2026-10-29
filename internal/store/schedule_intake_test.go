@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -82,9 +83,6 @@ func TestScheduleAdmissionSealsReplaysAndRollsBack(t *testing.T) {
 }
 
 func TestScheduleAdmissionRequiresCurrentTenantAndDeclarationProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.9s measured in the short class; the full suite runs it")
-	}
 	property := func(seed uint32) bool {
 		for mode := range 18 {
 			if !t.Run(fmt.Sprintf("%d/%d", seed, mode), func(t *testing.T) {
@@ -148,7 +146,7 @@ func TestScheduleAdmissionRequiresCurrentTenantAndDeclarationProperty(t *testing
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 6}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 6})); err != nil {
 		t.Fatal(err)
 	}
 }

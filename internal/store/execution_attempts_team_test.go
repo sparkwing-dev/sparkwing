@@ -12,9 +12,6 @@ import (
 )
 
 func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 4.0s measured in the short class; the full suite runs it")
-	}
 	for i := range 24 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			s, demand, _ := meteredUnitFixture(t, i&1 != 0)

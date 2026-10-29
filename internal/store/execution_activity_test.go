@@ -7,9 +7,6 @@ import (
 )
 
 func TestExecutionActivityKeepsTenantAndStoreClockProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.6s measured in the short class; the full suite runs it")
-	}
 	random := rand.New(rand.NewPCG(471, 896))
 	for range 24 {
 		s, demand := unitClaimFixture(t)

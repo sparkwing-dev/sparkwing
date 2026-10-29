@@ -13,9 +13,6 @@ import (
 
 // Every invitation requires the inviter's current team.admin grant at acceptance.
 func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.6s measured in the short class; the full suite runs it")
-	}
 	cases := []struct {
 		change      string
 		invitedRole string

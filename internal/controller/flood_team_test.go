@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -74,9 +75,6 @@ func TestFloodPolicy_ShedsOnlyTheTeamWhoseQueueIsDeep(t *testing.T) {
 }
 
 func TestFloodPolicyTeamBucketsRemainIndependentProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 4.3s measured in the short class; the full suite runs it")
-	}
 	f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 1})
 	i := 0
 	property := func(seed uint32) bool {
@@ -93,7 +91,7 @@ func TestFloodPolicyTeamBucketsRemainIndependentProperty(t *testing.T) {
 		second := floodRun(t, f.submit(b, "build", fortyHex(1)), 201)
 		return first.RunID != second.RunID && f.submit(a, "build", fortyHex(2)).Code == 429 && f.submit(b, "build", fortyHex(2)).Code == 429
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 12})); err != nil {
 		t.Fatal(err)
 	}
 }

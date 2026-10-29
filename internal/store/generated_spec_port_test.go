@@ -11,9 +11,6 @@ import (
 )
 
 func TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
-	}
 	random := rand.New(rand.NewPCG(871, 197))
 	for range 16 {
 		tenant, request := successfulExpansionFixture(t)

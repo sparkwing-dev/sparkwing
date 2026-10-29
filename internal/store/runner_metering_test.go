@@ -87,9 +87,6 @@ func TestRunnerMeteringChangesOnlyFutureAwards(t *testing.T) {
 }
 
 func TestRunnerMeteringRequiresCurrentConsoleAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
-	}
 	random := rand.New(rand.NewPCG(519, 804))
 	for i := range 64 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

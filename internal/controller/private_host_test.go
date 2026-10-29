@@ -35,9 +35,6 @@ func (t localHostRoundTripper) RoundTrip(r *http.Request) (*http.Response, error
 }
 
 func FuzzLocalHostCloseRetiresProcessClients(f *testing.F) {
-	if testing.Short() {
-		f.Skip("slow: 1.8s measured in the short class; the full suite runs it")
-	}
 	for operation := range uint8(8) {
 		f.Add(operation, "closed host")
 	}

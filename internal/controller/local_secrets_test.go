@@ -24,18 +24,12 @@ import (
 )
 
 func TestRequesterLocalSecretRealIntakeClaimAndRelease(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
-	}
 	for _, value := range []string{"requester-local-secret-value", "", "abc", "value***suffix"} {
 		t.Run(fmt.Sprintf("value=%q", value), func(t *testing.T) { requesterLocalSecretRelease(t, value) })
 	}
 }
 
 func FuzzRequesterLocalSecretNeverPersistsOrFallsBackOnAnotherProcess(f *testing.F) {
-	if testing.Short() {
-		f.Skip("slow: 1.4s measured in the short class; the full suite runs it")
-	}
 	f.Add([]byte("private-value"))
 	f.Add([]byte{0, 255, 34, 10})
 	f.Fuzz(func(t *testing.T, data []byte) {

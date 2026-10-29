@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -96,9 +97,6 @@ func githubSourceFixture(t *testing.T, extra int64) (*Tenant, capability.Authori
 }
 
 func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 6.9s measured in the short class; the full suite runs it")
-	}
 	property := func(mode uint8, value uint16) bool {
 		extra := int64(value) + 10
 		tenant, auth, provider := githubSourceFixture(t, extra)
@@ -154,7 +152,7 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 		}
 		return err == nil && token.Kind == "github_app" && token.Host == "github.com" && reflect.DeepEqual(token.ExtraRepositories, []string{approved}) && token.Secret == provider.token.Token && count == 1 && provider.calls == 1 && reflect.DeepEqual(provider.ids, []int64{1, extra}) && reflect.DeepEqual(provider.permissions, map[string]string{"contents": "read"})
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 96}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 96})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -174,9 +172,6 @@ func TestGitHubSourceReleaseAuditPrecedesReturn(t *testing.T) {
 }
 
 func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
-	}
 	property := func(value uint16) bool {
 		for mode := range 8 {
 			extra := int64(value) + 10
@@ -241,15 +236,12 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 6}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 6})); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestGitHubSourceReleaseRequiresMatchingSameTeamMachineProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.9s measured in the short class; the full suite runs it")
-	}
 	property := func(value uint16) bool {
 		for mode := range 3 {
 			tenant, auth, provider := githubSourceFixture(t, int64(value)+10)
@@ -270,7 +262,7 @@ func TestGitHubSourceReleaseRequiresMatchingSameTeamMachineProperty(t *testing.T
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 8})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -285,9 +277,6 @@ func deniedSource(t *testing.T) match.RepoFilter {
 }
 
 func TestGitHubSourceReleaseMintsOutsideTransactionsAndRechecksProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 4.5s measured in the short class; the full suite runs it")
-	}
 	property := func(value uint16) bool {
 		for mode := range 6 {
 			tenant, auth, provider := githubSourceFixture(t, int64(value)+10)
@@ -344,7 +333,7 @@ func TestGitHubSourceReleaseMintsOutsideTransactionsAndRechecksProperty(t *testi
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 6}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 6})); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -23,9 +23,6 @@ import (
 
 // A plan compile failure must reach run detail, with secret values masked, so `runs status` says why the run failed.
 func TestCloudPlanCompileFailureShowsMaskedCompilerOutput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
-	}
 	modules, err := exec.CommandContext(t.Context(), "go", "env", "GOMODCACHE").Output()
 	if err != nil {
 		t.Fatal(err)

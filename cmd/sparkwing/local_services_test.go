@@ -18,8 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -30,6 +28,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestLocalServicesRejectInvalidAdmissionBeforeConstruction(t *testing.T) {
@@ -375,9 +374,6 @@ func TestProductionLocalQueueReportsTheMachineAdmissionDaemon(t *testing.T) {
 // A daemon that holds its socket and goes quiet, before or after its hello, still gets the public refusal back
 // well inside the browser's ten-second abort.
 func TestProductionLocalQueueRefusesASilentDaemonPromptly(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 6.3s measured in the short class; the full suite runs it")
-	}
 	for _, silence := range []string{"before hello", "after hello"} {
 		t.Run(silence, func(t *testing.T) {
 			home := t.TempDir()

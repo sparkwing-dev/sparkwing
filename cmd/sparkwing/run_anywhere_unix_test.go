@@ -80,9 +80,6 @@ func runAnywhereComplete(t *testing.T, f cloudDispatch, unit *controllerwire.Cla
 }
 
 func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.6s measured in the short class; the full suite runs it")
-	}
 	f := cloudDispatchTrigger(t)
 	builder := cloudDispatchMachine(t, f, "builder")
 	if runAnywherePoll(t, f, builder, 1) != nil {
@@ -123,9 +120,6 @@ func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing
 }
 
 func TestTeamAdminRanksCloudFirstFromTheCLI(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 6.2s measured in the short class; the full suite runs it")
-	}
 	f := cloudDispatchTrigger(t)
 	admin := runAnywhereAdmin(t, f)
 	config, err := os.ReadFile(os.Getenv("SPARKWING_CONFIG"))

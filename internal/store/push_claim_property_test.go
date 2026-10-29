@@ -13,9 +13,6 @@ import (
 )
 
 func TestPushClaimsCannotEscapeSealedScopeProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.6s measured in the short class; the full suite runs it")
-	}
 	random := rand.New(rand.NewPCG(76, 321))
 	for _, kind := range []capability.UnitKind{capability.UnitNode, capability.UnitTrigger} {
 		for _, named := range []bool{false, true} {
@@ -106,9 +103,6 @@ func TestPushAwardRefusesScopeEscape(t *testing.T) {
 }
 
 func TestPushAwardedHostRetainsAncestorScopeProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
-	}
 	random := rand.New(rand.NewPCG(436, 182))
 	for range 16 {
 		s, demand := unitClaimFixture(t)

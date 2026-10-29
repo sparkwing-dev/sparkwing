@@ -198,9 +198,6 @@ func TestRetryAliasesReplayCommittedMode(t *testing.T) {
 }
 
 func FuzzRetryActionCannotCrossAuthorityOrChangeSource(f *testing.F) {
-	if testing.Short() {
-		f.Skip("slow: 2.3s measured in the short class; the full suite runs it")
-	}
 	for _, selector := range []string{"run", "1", "2", "foreign", "01", "../foreign", "' OR 1=1 --"} {
 		for state := range byte(3) {
 			f.Add(selector, []byte("private-value"), state)

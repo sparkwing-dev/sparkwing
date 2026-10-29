@@ -6,13 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -91,9 +90,6 @@ func githubClaimBody(kind capability.UnitKind, run, job string) controllerwire.C
 func githubFixtureKey(id int64) string { return fmt.Sprintf("gh:%d", id) }
 
 func TestSourceClaimsFollowSeededReadiness(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
-	}
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			e, _, _ := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})

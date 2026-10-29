@@ -14,9 +14,6 @@ import (
 )
 
 func TestUnitClaimRenewReleaseContentionProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
-	}
 	for _, dialect := range []string{"sqlite", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
 			target := storetest.NewSQLite(t)

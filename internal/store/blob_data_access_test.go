@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func dataAccessChecker(t *testing.T, tx *storeTx) capability.DataAccessChecker {
@@ -104,9 +105,6 @@ func TestBlobDataAccessTransactionSeesReadEdgeWrites(t *testing.T) {
 }
 
 func TestBlobDataAccessTransactionAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 4.0s measured in the short class; the full suite runs it")
-	}
 	s, tenant, actor, attempt := resultFixture(t)
 	intent := blobIntent(actor, attempt)
 	if _, err := commitTestBlob(t, tenant, intent); err != nil {
@@ -155,7 +153,7 @@ func TestBlobDataAccessTransactionAuthorityProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(4817))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(4817))})); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.CheckDataAccess(t.Context(), authority, capability.DataTarget{Operation: capability.DataDownload, Digest: string(intent.Digest)}); err != nil {

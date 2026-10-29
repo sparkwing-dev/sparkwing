@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -54,9 +54,6 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 }
 
 func TestAppAdmissionRequiresCurrentOriginProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
-	}
 	property := func(automatic bool, mode uint8, salt uint64) bool {
 		s, tenant, in := appAdmissionFixture(t, automatic, fmt.Sprintf("digest-%x", salt))
 		defer s.Close()
@@ -102,7 +99,7 @@ func TestAppAdmissionRequiresCurrentOriginProperty(t *testing.T) {
 		}
 		return number == 2
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -162,9 +159,6 @@ func TestAppAdmissionRefusesUntypedOriginAndRollsBack(t *testing.T) {
 }
 
 func TestAppFullRefRetainsExactDefaultBranchDataTrustProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
-	}
 	property := func(suffix uint32, mode uint8) bool {
 		s, records, intent := blobRecordFixture(t)
 		defer s.Close()
@@ -219,7 +213,7 @@ func TestAppFullRefRetainsExactDefaultBranchDataTrustProperty(t *testing.T) {
 		}
 		return !got.Ref.DefaultBranchVerified
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 30})); err != nil {
 		t.Fatal(err)
 	}
 }

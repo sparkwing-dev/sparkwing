@@ -17,9 +17,6 @@ func sourceAttempt[T ~int | ~int64](attempt T) *runspec.AttemptOrdinal {
 }
 
 func TestHolderReportsAffectOnlyTheirSourceAttemptProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
-	}
 	random := rand.New(rand.NewPCG(761, 109))
 	for range 32 {
 		tenant, _, actor := liveHolderFixture(t)

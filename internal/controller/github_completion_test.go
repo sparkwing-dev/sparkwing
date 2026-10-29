@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -333,9 +334,6 @@ func TestGitHubCompletionUsesCurrentNumericRepository(t *testing.T) {
 }
 
 func TestGitHubCompletionAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 8.9s measured in the short class; the full suite runs it")
-	}
 	property := func(scenario uint8, display string) bool {
 		f := newGitHubCompletion(t)
 		// The App facts only route the report to an installation, so a run whose facts name
@@ -396,15 +394,12 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 			t.Fatalf("invalid completion handling in authority scenario %d", scenario)
 		}
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 20}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 20})); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestGitHubCompletionStalePhasesNeverRegressProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 4.8s measured in the short class; the full suite runs it")
-	}
 	property := func(outcome uint8, phase, statuses bool) bool {
 		f := newGitHubCompletion(t)
 		f.api.checksGranted = !statuses
@@ -426,15 +421,12 @@ func TestGitHubCompletionStalePhasesNeverRegressProperty(t *testing.T) {
 		}
 		return len(f.api.checks) == currentChecks && len(f.api.statuses) == currentStatuses
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 16})); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestGitHubCompletionSummaryPrivacyProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 6.0s measured in the short class; the full suite runs it")
-	}
 	property := func(raw []byte) bool {
 		f := newGitHubCompletion(t)
 		private := "private-" + hex.EncodeToString(raw)
@@ -466,7 +458,7 @@ func TestGitHubCompletionSummaryPrivacyProperty(t *testing.T) {
 		output := f.api.checks[0].Output
 		return !strings.Contains(string(encoded), private) && utf8.Valid(encoded) && len(output.Summary) <= 65535 && strings.Contains(output.Summary, "2 failed")
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 12})); err != nil {
 		t.Fatal(err)
 	}
 }

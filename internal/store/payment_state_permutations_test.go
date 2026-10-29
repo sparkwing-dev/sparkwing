@@ -10,9 +10,6 @@ import (
 )
 
 func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 6.9s measured in the short class; the full suite runs it")
-	}
 	for _, refill := range []bool{false, true} {
 		for _, outcome := range []string{cardRefundSucceeded, "failed", "canceled"} {
 			for _, order := range deliveryOrders("pay", "pending", "terminal", "warning") {
@@ -69,9 +66,6 @@ func TestPaymentStateEveryRefundDeliveryPermutation(t *testing.T) {
 }
 
 func TestPaymentStateEveryRefundResponseDeliveryPermutation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.8s measured in the short class; the full suite runs it")
-	}
 	for _, outcome := range []string{cardRefundSucceeded, "failed", "canceled"} {
 		for _, order := range deliveryOrders("response", "pending", "terminal") {
 			t.Run(outcome+"/"+strings.Join(order, "-"), func(t *testing.T) {

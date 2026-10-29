@@ -66,9 +66,6 @@ func countClaimVisits(t *testing.T, s *Store, nodeVisit, runVisit func(string), 
 }
 
 func TestClaimSearchCappedBacklogDoesNotExamineNodes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 5.0s measured in the short class; the full suite runs it")
-	}
 	var baseline, baselineRuns [2]int64
 	for _, tc := range []struct{ nodes, runs int }{{1, 1}, {4000, 1}, {1, 4000}, {4000, 2}} {
 		t.Run(fmt.Sprintf("nodes=%d/runs=%d", tc.nodes, tc.runs), func(t *testing.T) {
@@ -452,9 +449,6 @@ func TestClaimSearchLoadsOverflowUsageOnlyForExaminedTeams(t *testing.T) {
 }
 
 func TestClaimLockWorkDoesNotGrowWithBacklogOrHistory(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.3s measured in the short class; the full suite runs it")
-	}
 	for _, scenario := range []string{"bound run", "retained contexts"} {
 		t.Run(scenario, func(t *testing.T) {
 			var baseline [3]int64

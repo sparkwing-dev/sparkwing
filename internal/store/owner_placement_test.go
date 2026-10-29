@@ -70,9 +70,6 @@ func TestOwnerSnapshotPlanAndEvalUseTheirOwnLease(t *testing.T) {
 }
 
 func TestOwnerSnapshotRechecksLabelsAndLivePreferences(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
-	}
 	for _, change := range []string{"labels", "preferred", "stale_preferred", "revoked_preferred"} {
 		t.Run(change, func(t *testing.T) {
 			tenant, actor := ownerPlacementFixture(t)
@@ -229,9 +226,6 @@ func TestLiveOwnerKeepsCapturedPlacementWhileRootDoesNotPoll(t *testing.T) {
 }
 
 func TestOwnerSnapshotSelfExecutionUsesCanonicalMatcherProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
-	}
 	random := rand.New(rand.NewPCG(971, 382))
 	for i := range 32 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

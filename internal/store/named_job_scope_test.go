@@ -18,9 +18,6 @@ import (
 )
 
 func TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.2s measured in the short class; the full suite runs it")
-	}
 	random := rand.New(rand.NewPCG(719, 331))
 	for trial := range 12 {
 		t.Run(fmt.Sprint(trial), func(t *testing.T) {

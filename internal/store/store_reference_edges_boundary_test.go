@@ -117,9 +117,6 @@ func seedStoreReferenceBoundary(t *testing.T) (*Store, *Tenant, blob.Authority, 
 }
 
 func TestStoreReferenceEdges(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
-	}
 	if err := checkStoreReferenceBoundary(t); err != nil {
 		t.Fatal(err)
 	}

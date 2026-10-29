@@ -8,6 +8,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
@@ -32,9 +33,6 @@ func planWithJobs(t *testing.T, tenant *Tenant, request PlanAcceptance, count in
 }
 
 func TestPlanInsertionLimitsAreAtomicProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.6s measured in the short class; the full suite runs it")
-	}
 	property := func(rawCap, rawCount uint8, metered, unrelated bool) bool {
 		tenant, request, _ := planFixture(t, runspec.DispatchHost)
 		cap, count := int64(rawCap%5), int(rawCount%7)
@@ -92,7 +90,7 @@ func TestPlanInsertionLimitsAreAtomicProperty(t *testing.T) {
 		replay, err := tenant.AcceptPlan(t.Context(), request)
 		return err == nil && replay.Replayed
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48})); err != nil {
 		t.Fatal(err)
 	}
 }

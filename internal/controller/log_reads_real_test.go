@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
@@ -85,9 +86,6 @@ func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLog
 }
 
 func TestCommittedDashboardLogsReadRealRecords(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
-	}
 	property := func(seed [16]byte, ordinal uint8) bool {
 		payload := []byte(fmt.Sprintf("%x\nsecond\n", seed))
 		logs, subject, st := committedDashboardLogs(t, payload)
@@ -120,15 +118,12 @@ func TestCommittedDashboardLogsReadRealRecords(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(71))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(71))})); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestCommittedDashboardLogsNeverEmitForForeignOrRevokedActors(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
-	}
 	property := func(seed [16]byte) bool {
 		logs, subject, st := committedDashboardLogs(t, []byte(fmt.Sprintf("%x\n", seed)))
 		foreign := logs.actor
@@ -151,7 +146,7 @@ func TestCommittedDashboardLogsNeverEmitForForeignOrRevokedActors(t *testing.T) 
 		body, err := logs.Read(t.Context(), "run", "job", storage.ReadOpts{})
 		return err != nil && len(body) == 0
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(72))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(72))})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -192,9 +187,6 @@ func (w *revokeLogWriter) Write(body []byte) (int, error) {
 }
 
 func TestCommittedDashboardLogsRecheckAuthorityBetweenSegments(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
-	}
 	property := func(seed [16]byte) bool {
 		first := []byte(fmt.Sprintf("%x first\n", seed))
 		second := []byte(fmt.Sprintf("%x second\n", seed))
@@ -212,7 +204,7 @@ func TestCommittedDashboardLogsRecheckAuthorityBetweenSegments(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 8, Rand: rand.New(rand.NewSource(73))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 8, Rand: rand.New(rand.NewSource(73))})); err != nil {
 		t.Fatal(err)
 	}
 }

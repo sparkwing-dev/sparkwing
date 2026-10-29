@@ -148,9 +148,6 @@ func TestRetryHistoryOrdersEqualTimestampsByRunNumber(t *testing.T) {
 }
 
 func FuzzRetryHistoryKeepsPrivateInputsAndTeams(f *testing.F) {
-	if testing.Short() {
-		f.Skip("slow: 7.6s measured in the short class; the full suite runs it")
-	}
 	for _, selector := range []string{"run", "1", "second", "2", "foreign", "5", "01", "../foreign", "' OR 1=1 --"} {
 		for state := range byte(4) {
 			f.Add(selector, []byte("private-value"), state)

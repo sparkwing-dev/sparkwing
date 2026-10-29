@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestStoreDataEventsUseFinalReplicaRows(t *testing.T) {
@@ -183,9 +185,6 @@ func TestStoreDataEventsFailuresLeaveNoPartialCharge(t *testing.T) {
 }
 
 func TestStoreDataEventsTenantIsolationAndConservation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 5.5s measured in the short class; the full suite runs it")
-	}
 	property := func(first, second uint8) bool {
 		s, tenant, _, _ := resultFixture(t)
 		path := blobAccountingDiskStore(t, s)
@@ -227,7 +226,7 @@ func TestStoreDataEventsTenantIsolationAndConservation(t *testing.T) {
 		}
 		return retained == want && charged == want
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(13711))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(13711))})); err != nil {
 		t.Fatal(err)
 	}
 }

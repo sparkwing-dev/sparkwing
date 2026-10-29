@@ -11,9 +11,6 @@ import (
 )
 
 func TestAttemptExecutorComesFromClaimAncestryProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.4s measured in the short class; the full suite runs it")
-	}
 	random := rand.New(rand.NewPCG(218, 603))
 	for _, hosted := range []bool{false, true} {
 		for _, actions := range []bool{false, true} {

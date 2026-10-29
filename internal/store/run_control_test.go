@@ -12,14 +12,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
-	}
 	property := func(selector uint8, suffix uint64) bool {
 		tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
@@ -62,15 +60,12 @@ func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
 		rewriteSchemaCount(t, tenant.s.db, "run_control_requests", map[bool]int{true: 2, false: 0}[allowed])
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 30})); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
-	}
 	property := func(seed uint64) bool {
 		tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
@@ -131,7 +126,7 @@ func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *test
 		rewriteSchemaCount(t, tenant.s.db, "run_control_requests", 2)
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 15}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 15})); err != nil {
 		t.Fatal(err)
 	}
 }

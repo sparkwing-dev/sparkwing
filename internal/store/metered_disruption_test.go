@@ -12,12 +12,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestStoreDataMeteredDisruptionReplayUsesAwardedTerms(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 22.1s measured in the short class; the full suite runs it")
-	}
 	property := func(unitIndex, elapsed, tariff uint8, atAward, started bool) bool {
 		name := fmt.Sprintf("unit=%d/at_award=%t/started=%t/elapsed=%d/rate=%d", unitIndex%4, atAward, started, elapsed, tariff)
 		return t.Run(name, func(t *testing.T) {
@@ -35,7 +33,7 @@ func TestStoreDataMeteredDisruptionReplayUsesAwardedTerms(t *testing.T) {
 			}
 		}
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(420738))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(420738))})); err != nil {
 		t.Fatal(err)
 	}
 }

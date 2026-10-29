@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -34,9 +35,6 @@ type intakeGitHubTransport func(*http.Request) (*http.Response, error)
 func (f intakeGitHubTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
-	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +95,7 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 		}
 		return run.Request.AuthorityRef.Kind == "session" && triggers[0].IdempotencyKey == "request"
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 }

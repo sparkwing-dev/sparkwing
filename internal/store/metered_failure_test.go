@@ -7,14 +7,12 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestMeteredFailureReportSettlesAndReleasesClaimProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 5.3s measured in the short class; the full suite runs it")
-	}
 	property := func(seed uint32, cloud, started bool) bool {
 		s, demand, now := meteredUnitFixture(t, cloud)
 		_, actor := meteredUnitClaim(t, s, demand)
@@ -86,7 +84,7 @@ func TestMeteredFailureReportSettlesAndReleasesClaimProperty(t *testing.T) {
 			}
 		}
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(744))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(744))})); err != nil {
 		t.Fatal(err)
 	}
 }

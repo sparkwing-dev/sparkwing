@@ -15,9 +15,6 @@ import (
 )
 
 func TestIdentityLinkRechecksExpiryAfterLockWait(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
-	}
 	for _, operation := range []string{"consume", "link"} {
 		for _, bound := range []string{"link_expiry", "recent_sign_in"} {
 			t.Run(operation+"/"+bound, func(t *testing.T) {

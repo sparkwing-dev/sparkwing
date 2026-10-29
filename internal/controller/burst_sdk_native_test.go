@@ -46,9 +46,6 @@ func TestBurstNativeSDKExecutesHerePersonalAndCloudAwards(t *testing.T) {
 }
 
 func FuzzRequesterSecretsMaskedThroughNativeExecution(f *testing.F) {
-	if testing.Short() {
-		f.Skip("slow: 3.2s measured in the short class; the full suite runs it")
-	}
 	f.Add([]byte("multi\nline\r\nvalue"))
 	f.Add([]byte("quoted\"\\+/%= value"))
 	f.Add([]byte{0, 255, 128, 1})

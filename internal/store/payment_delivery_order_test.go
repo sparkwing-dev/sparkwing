@@ -26,9 +26,6 @@ func deliveryOrders(events ...string) [][]string {
 // credit gone, at most one refund owed, and the team held exactly when a warning arrived; replaying every event
 // changes nothing.
 func TestPaymentConsequencesSurviveEveryDeliveryOrder(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
-	}
 	type fixture struct {
 		s      *Store
 		tenant *Tenant

@@ -37,9 +37,6 @@ import (
 )
 
 func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 5.3s measured in the short class; the full suite runs it")
-	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)

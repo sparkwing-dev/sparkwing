@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
@@ -64,9 +65,6 @@ func accountMutationRows(t *testing.T, s *Store) []string {
 }
 
 func TestAccountMutationsRequireTheSameLiveDirectSessionProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
-	}
 	property := func(choice uint8, suffix uint32) bool {
 		s, a, _, now := accountMutationFixture(t)
 		id := a.Principal.Capability.Subject.ID
@@ -103,7 +101,7 @@ func TestAccountMutationsRequireTheSameLiveDirectSessionProperty(t *testing.T) {
 		_, unlinkErr := s.AsOperator().UnlinkAccountIdentity(t.Context(), a, ProviderGoogle)
 		return selectErr != nil && createErr != nil && acceptErr != nil && unlinkErr != nil && reflect.DeepEqual(before, accountMutationRows(t, s))
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 36}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 36})); err != nil {
 		t.Fatal(err)
 	}
 }

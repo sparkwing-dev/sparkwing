@@ -24,9 +24,6 @@ func TestBlobSourceSetupReadRemainsFencedWithoutAnAttempt(t *testing.T) {
 }
 
 func FuzzBlobSourceSetupReadRemainsFenced(f *testing.F) {
-	if testing.Short() {
-		f.Skip("slow: 1.1s measured in the short class; the full suite runs it")
-	}
 	for selector := range 8 {
 		f.Add(uint8(selector), uint16(0), "first acquisition")
 		f.Add(uint8(selector), uint16(2), "retry acquisition")

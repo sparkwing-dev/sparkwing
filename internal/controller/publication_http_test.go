@@ -34,9 +34,6 @@ func (publicationLogReader) ReadLogs(_ context.Context, run string, _ controller
 }
 
 func TestProfilePublicationImportsRecordsAndLogsWithoutClaims(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
-	}
 	for _, outcome := range []string{"success", "failed"} {
 		t.Run(outcome, func(t *testing.T) {
 			profilePublication(t, outcome, "CLAUDE_CODE_MESSAGING_TOKEN", "AWS_PAGER", "KUBECONFIG", "WSL_DISTRO_NAME")

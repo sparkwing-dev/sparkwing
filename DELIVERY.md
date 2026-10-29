@@ -304,9 +304,12 @@ file. Other syntax and workflow checks remain active.
   still judged. On 2026-10-29, with the cut's `GOMAXPROCS=7 -p 7` on a shared
   16-core host at load 9 to 15, `cmd/sparkwing`, `internal/controller` and
   `internal/store` took 241 s, 832 s and 617 s under `-short`, two of them past
-  Go's ten-minute package limit. Guarding every test that measured 1 s or more
-  there (and keeping the tests that switch to PostgreSQL) brought them to 41 s,
-  155 s and 189 s.
+  Go's ten-minute package limit. The tests that measured 1 s or more there
+  now split by what they guard. A `testing/quick` property keeps running under
+  `-short`, checking three fixed-seed cases through `internal/quicktest`; a
+  test whose name or file names an authorization, fence, expiry, masking,
+  tenant or secret boundary keeps running whole; the rest skip as slow. That
+  brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
 - **What the two hooks cost:** measured on this 16-core Linux host. `pre-push`
   retains a ten-second target when the compiler cache is warm. Run records
   expose total and per-step durations, but they carry no compiler-cache

@@ -14,8 +14,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 
@@ -28,20 +41,6 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/settings"
-	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
 	ktesting "k8s.io/client-go/testing"
 )
@@ -217,9 +216,6 @@ func TestCloudTriggerWithRunnerSelectorStaysOnTheRunner(t *testing.T) {
 }
 
 func TestCloudTriggerNoticesWorkNobodyHasClaimed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 7.0s measured in the short class; the full suite runs it")
-	}
 	for _, runner := range []string{"", "--runner=builder"} {
 		t.Run(map[string]string{"": "launcher", "--runner=builder": "runner"}[runner], func(t *testing.T) {
 			var args []string

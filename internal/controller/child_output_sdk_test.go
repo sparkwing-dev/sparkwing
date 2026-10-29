@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -86,9 +87,6 @@ func (s childAwaitServices) RunPipeline(ctx context.Context, request sdkserve.Ch
 }
 
 func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
-	}
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	objectDirectory := t.TempDir()
@@ -211,7 +209,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 			object, err := tenant.ReadChildOutput(ctx, changed)
 			return err != nil && object == (blob.Blob{})
 		}
-		if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64})); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -308,9 +306,6 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 }
 
 func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
-	}
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
 	if err != nil {
 		t.Fatal(err)
@@ -401,7 +396,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 		got, err := tenant.ReadJobOutput(t.Context(), changed)
 		return err != nil && got == (blob.Blob{})
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64})); err != nil {
 		t.Fatal(err)
 	}
 	childOutputSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('output-reader','output-reader@example.test',1,1)`)

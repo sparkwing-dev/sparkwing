@@ -7,13 +7,11 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestTenantEventAppendIsolationProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
-	}
 	property := func(input string, offset int32, count uint8) bool {
 		tenant, now, _ := stateFixture(t)
 		other := &Tenant{s: tenant.s, team: "b"}
@@ -51,7 +49,7 @@ func TestTenantEventAppendIsolationProperty(t *testing.T) {
 		}
 		return foreignCount == 0 && foreignBytes == 0
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 25}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 25})); err != nil {
 		t.Fatal(err)
 	}
 }

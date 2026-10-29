@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func githubMutationFixture(t *testing.T) (*Store, *Tenant, capability.Authorized, *time.Time) {
@@ -25,9 +26,6 @@ func githubMutationFixture(t *testing.T) (*Store, *Tenant, capability.Authorized
 }
 
 func TestGitHubAppMutationsRequireCurrentAdministrationProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.3s measured in the short class; the full suite runs it")
-	}
 	property := func(mode uint8, delegated bool) bool {
 		s, tenant, a, _ := githubMutationFixture(t)
 		defer s.Close()
@@ -73,7 +71,7 @@ func TestGitHubAppMutationsRequireCurrentAdministrationProperty(t *testing.T) {
 		unbind := tenant.UnbindAuthorizedGitHubInstallation(t.Context(), a, 7)
 		return put != nil && auto != nil && extra != nil && del != nil && revoke != nil && unbind != nil && reflect.DeepEqual(out, GitHubAppTrigger{}) && extras == nil && reflect.DeepEqual(before, purgeRows(t, s, "a", true))
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 40})); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -158,9 +159,6 @@ func TestMachineEnrollmentRollbackDoesNotReserveName(t *testing.T) {
 }
 
 func TestMachineEnrollmentNameReuseProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 4.1s measured in the short class; the full suite runs it")
-	}
 	check := func(revoked bool, offset int16) bool {
 		s, spec := machineEnrollment(t)
 		now := s.now()
@@ -186,7 +184,7 @@ func TestMachineEnrollmentNameReuseProperty(t *testing.T) {
 		}
 		return errors.Is(err, ErrAgentNameTaken) && issued.Raw == ""
 	}
-	if err := quick.Check(check, &quick.Config{MaxCount: 64}); err != nil {
+	if err := quick.Check(check, quicktest.Config(&quick.Config{MaxCount: 64})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -204,9 +202,6 @@ func TestMachineEnrollmentNamesAreTeamScoped(t *testing.T) {
 }
 
 func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
-	}
 	s, spec := machineEnrollment(t)
 	_, demand := unitClaimFixtureStore(t, s)
 	spec.ReservedPools = nil
@@ -243,7 +238,7 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=1`)
 		return true
 	}
-	if err := quick.Check(check, &quick.Config{MaxCount: 80}); err != nil {
+	if err := quick.Check(check, quicktest.Config(&quick.Config{MaxCount: 80})); err != nil {
 		t.Fatal(err)
 	}
 }

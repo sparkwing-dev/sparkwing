@@ -12,9 +12,6 @@ import (
 )
 
 func TestStorePresenceReadSet(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.9s measured in the short class; the full suite runs it")
-	}
 	s, tenant, actor, attempt := resultFixture(t)
 	first := blobIntent(actor, attempt)
 	second := addBlobJob(t, s, first, "b")

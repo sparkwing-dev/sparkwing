@@ -75,9 +75,6 @@ func TestPrivatePlanFailureClosesPlanAndRunWithItsMaskedError(t *testing.T) {
 }
 
 func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
-	if testing.Short() {
-		f.Skip("slow: 1.0s measured in the short class; the full suite runs it")
-	}
 	for mutation := range uint8(6) {
 		f.Add(mutation, "unmasked-stage")
 	}

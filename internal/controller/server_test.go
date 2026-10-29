@@ -13,11 +13,11 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -187,9 +187,6 @@ func seedReportRun(t *testing.T, f *cronsFixture, id string, jobs []string) {
 }
 
 func TestControllerPublicHealthHidesWorkloadProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 17.7s measured in the short class; the full suite runs it")
-	}
 	property := func(value []byte, failed bool) bool {
 		f := newCronsFixture(t)
 		secret := "private-workload-" + hex.EncodeToString(value)
@@ -208,7 +205,7 @@ func TestControllerPublicHealthHidesWorkloadProperty(t *testing.T) {
 		}
 		return w.Code == http.StatusOK && json.Unmarshal(w.Body.Bytes(), &body) == nil && body.Status == "ok" && !strings.Contains(w.Body.String(), secret) && !strings.Contains(w.Body.String(), "private-run")
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 20}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 20})); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -79,9 +80,6 @@ func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
 }
 
 func TestTeamBoundaryRunPrivacyProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.1s measured in the short class; the full suite runs it")
-	}
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		serial := 0
 		property := func(value uint64) bool {
@@ -125,16 +123,13 @@ func TestTeamBoundaryRunPrivacyProperty(t *testing.T) {
 			own, err := f.teamB.ListRuns(t.Context(), store.RunFilter{Limit: 100})
 			return err == nil && len(own) == 0
 		}
-		if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 			t.Fatal(err)
 		}
 	})
 }
 
 func TestTeamBoundaryOutputHidesRunExistenceProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.5s measured in the short class; the full suite runs it")
-	}
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		serial := 0
 		property := func(value uint64) bool {
@@ -153,7 +148,7 @@ func TestTeamBoundaryOutputHidesRunExistenceProperty(t *testing.T) {
 			}
 			return true
 		}
-		if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 			t.Fatal(err)
 		}
 	})

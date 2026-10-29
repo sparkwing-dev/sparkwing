@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func cardFixture(t *testing.T) (*Store, *Tenant, time.Time) {
@@ -188,9 +189,6 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 }
 
 func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
-	}
 	property := func(seed uint32, outcome uint8) bool {
 		s, _, now := queuedRefundFixture(t, false)
 		ctx := t.Context()
@@ -249,7 +247,7 @@ func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
 		}
 		return status == cardRefundPending && id == "bound-refund"
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(42))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(42))})); err != nil {
 		t.Fatal(err)
 	}
 }

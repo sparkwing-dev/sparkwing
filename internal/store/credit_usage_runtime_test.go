@@ -7,12 +7,11 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestStoreDataCreditUsageStaysInTenantWithoutOperationalRows(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
-	}
 	s := authorityStore(t)
 	path := blobAccountingDiskStore(t, s)
 	iteration := 0
@@ -83,7 +82,7 @@ func TestStoreDataCreditUsageStaysInTenantWithoutOperationalRows(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(63012))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(63012))})); err != nil {
 		t.Fatal(err)
 	}
 }

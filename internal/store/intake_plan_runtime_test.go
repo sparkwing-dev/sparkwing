@@ -153,9 +153,6 @@ func TestAdmissionPublishHasNoOwnerAndStillDeduplicates(t *testing.T) {
 }
 
 func TestAdmissionRefusalsCommitNothing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.0s measured in the short class; the full suite runs it")
-	}
 	for _, problem := range []string{"no_grant", "revoked", "wrong_team", "fork", "missing_policy", "policy_error", "missing_retention", "policy_expires_authority", "push_mismatch"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, request, now := intakeFixture(t)
@@ -326,9 +323,6 @@ func TestAcceptedPlanAndSnapshotReturnIndependentValues(t *testing.T) {
 }
 
 func TestPlanSealRefusalRollsBackBothSealAndJobs(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
-	}
 	for _, problem := range []string{"request", "argument", "environment", "unclassified", "settings_drift", "missing_job_settings", "duplicate_job", "invalid_graph", "missing_secret", "secret_identifier", "expired", "revoked_parent", "cancelled"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, request, now := planFixture(t, runspec.DispatchHost)

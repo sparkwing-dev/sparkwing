@@ -42,16 +42,10 @@ import (
 const burstIntakeSecret = "requester-only-credential-7c5d1f"
 
 func TestBurstLocalFallbackRetainsRequesterSecretsOutsideEnvironmentSnapshot(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 4.6s measured in the short class; the full suite runs it")
-	}
 	burstLocalFallbackSecrets(t, burstIntakeSecret)
 }
 
 func FuzzBurstLocalFallbackSecretsNeverEnterEnvironmentSnapshots(f *testing.F) {
-	if testing.Short() {
-		f.Skip("slow: 6.1s measured in the short class; the full suite runs it")
-	}
 	f.Add([]byte("private credential"))
 	f.Add([]byte{0, 255, 39, 10})
 	f.Fuzz(func(t *testing.T, value []byte) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
@@ -89,9 +90,6 @@ func TestChildCeilingDatabaseRange(t *testing.T) {
 }
 
 func TestMachineEnrollmentTeamSettingProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
-	}
 	property := func(enabled, personal bool, roleIndex uint8) bool {
 		s, spec := machineEnrollment(t)
 		role := []Role{RoleOwner, RoleEditor, RoleReader}[roleIndex%3]
@@ -110,7 +108,7 @@ func TestMachineEnrollmentTeamSettingProperty(t *testing.T) {
 		}
 		return (err == nil) == allowed && (issued.Raw != "") == allowed
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -179,9 +177,6 @@ func TestTeamSettingAuditsOnlyCommittedChanges(t *testing.T) {
 }
 
 func TestTeamSettingRechecksAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
-	}
 	property := func(change uint8, suffix uint32) bool {
 		s, spec := machineEnrollment(t)
 		a := teamAuthorization(t, s, runstate.Actor{Authority: *spec.Authority}, "a", "PUT", "/api/v1/team/settings")
@@ -202,7 +197,7 @@ func TestTeamSettingRechecksAuthorityProperty(t *testing.T) {
 		events, auditErr := tenant.BusinessEvents(t.Context(), "team.settings_changed", 1000, "")
 		return err != nil && readErr == nil && current.MembersCanAddMachines && current.MaxChildrenPerRoot == 50 && auditErr == nil && len(events) == 0
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 }

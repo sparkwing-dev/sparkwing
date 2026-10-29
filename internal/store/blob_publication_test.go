@@ -9,13 +9,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestBlobPublicationRequiresTerminalImportedAttempt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.5s measured in the short class; the full suite runs it")
-	}
 	s, tenant, logs := publishedLogFixture(t)
 	rewriteSchemaExec(t, s.db, "DELETE FROM log_streams")
 	authority := dataAccessAuthority(t, s, logs.Actor.CapabilityPrefix)
@@ -75,7 +73,7 @@ func TestBlobPublicationRequiresTerminalImportedAttempt(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(2943))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(2943))})); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -10,11 +10,11 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -59,9 +59,6 @@ func (f *runControlWriterFake) ResolveAuthorizedApproval(_ context.Context, a ca
 }
 
 func TestRunControlHTTPAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
-	}
 	property := func(input string, fail bool) bool {
 		f := newScheduleHTTPFixture(t)
 		f.facts.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl, capability.ApprovalsWrite}
@@ -108,7 +105,7 @@ func TestRunControlHTTPAuthorityProperty(t *testing.T) {
 		}
 		return writer.calls == 2
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 }

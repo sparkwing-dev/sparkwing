@@ -9,13 +9,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestBlobRecordsManifestIOCannotOutliveAuthority(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.8s measured in the short class; the full suite runs it")
-	}
 	for _, operation := range []string{"commit", "record", "memo", "depcache", "copy"} {
 		t.Run(operation, func(t *testing.T) {
 			s, records, intent := blobRecordFixture(t)
@@ -108,7 +106,7 @@ func TestBlobRecordsManifestIOCannotOutliveAuthority(t *testing.T) {
 				}
 				return count == 0
 			}
-			if err := quick.Check(property, &quick.Config{MaxCount: 144, Rand: rand.New(rand.NewSource(29))}); err != nil {
+			if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 144, Rand: rand.New(rand.NewSource(29))})); err != nil {
 				t.Fatal(err)
 			}
 		})

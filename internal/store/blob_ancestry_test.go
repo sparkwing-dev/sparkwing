@@ -9,9 +9,6 @@ import (
 )
 
 func FuzzBlobAncestryStaysWithinTenantAndSealedDependencies(f *testing.F) {
-	if testing.Short() {
-		f.Skip("slow: 1.0s measured in the short class; the full suite runs it")
-	}
 	for _, graph := range []uint64{0, 1, 42, 0x1234, 0x7fff} {
 		for kind := uint8(0); kind < 4; kind++ {
 			f.Add(graph, kind)

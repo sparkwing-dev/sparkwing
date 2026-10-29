@@ -69,9 +69,6 @@ func TestFundingStoppedEvalNeverRequeues(t *testing.T) {
 }
 
 func TestFundingStoppedOwnerCancelsWholeRun(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
-	}
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan} {
 		for _, refusal := range []string{"balance", "hold"} {
 			t.Run(string(kind)+"/"+refusal, func(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
@@ -117,9 +118,6 @@ func TestInspectionAcquiresSelectedCodeAndEngine(t *testing.T) {
 }
 
 func TestInspectionPolicyRefusalPreventsInstallationProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.0s measured in the short class; the full suite runs it")
-	}
 	dir, _ := inspectionSourceRepo(t)
 	home := t.TempDir()
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
@@ -142,7 +140,7 @@ func TestInspectionPolicyRefusalPreventsInstallationProperty(t *testing.T) {
 		err := withLocalPipelineEntry(t.Context(), home, dir, "demo", runFlags{}, os.Environ(), options, func(context.Context, pipelineInspection, string) error { t.Fatal("executed revoked code"); return nil })
 		return errors.Is(err, denied) && pin.SDK == engineid.GoSDK && pin.Version == "v1.2.3"
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 16})); err != nil {
 		t.Fatal(err)
 	}
 }

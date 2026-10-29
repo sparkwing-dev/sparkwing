@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -234,9 +235,6 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 }
 
 func TestEngineCancellationIntentPreservesHolderProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 4.0s measured in the short class; the full suite runs it")
-	}
 	property := func(reason string) bool {
 		server, tenant := engineRuntimeStore(t)
 		owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
@@ -260,7 +258,7 @@ func TestEngineCancellationIntentPreservesHolderProperty(t *testing.T) {
 		replay, err := server.cancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: reason})
 		return err == nil && replay.Replayed && replay.StateSeq == first.StateSeq
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 		t.Fatal(err)
 	}
 }

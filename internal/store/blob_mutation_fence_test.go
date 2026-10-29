@@ -9,13 +9,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestBlobRecordsMutationCannotOutliveAuthority(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 17.3s measured in the short class; the full suite runs it")
-	}
 	for _, operation := range []string{"commit", "copy"} {
 		for _, fence := range []string{"lease", "leaf", "ancestor"} {
 			t.Run(operation+"/"+fence, func(t *testing.T) {
@@ -109,7 +107,7 @@ func TestBlobRecordsMutationCannotOutliveAuthority(t *testing.T) {
 				if !property(1, 0, true) {
 					t.Error("mutation accepted at exact expiry")
 				}
-				if err := quick.Check(func(remaining, elapsed uint8) bool { return property(remaining, elapsed, true) }, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(625020))}); err != nil {
+				if err := quick.Check(func(remaining, elapsed uint8) bool { return property(remaining, elapsed, true) }, quicktest.Config(&quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(625020))})); err != nil {
 					t.Fatal(err)
 				}
 			})

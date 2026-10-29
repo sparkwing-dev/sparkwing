@@ -16,15 +16,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.7s measured in the short class; the full suite runs it")
-	}
 	property := func(roleIndex, selection uint8) bool {
 		s, session := credentialSessionServer(t)
 		role := []store.Role{store.RoleReader, store.RoleEditor, store.RoleOwner}[roleIndex%3]
@@ -60,7 +58,7 @@ func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
 		principal, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(issued.Capability)))
 		return err == nil && principal.Capability.Parent != nil && principal.Capability.Parent.Kind == capability.AuthoritySession && principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) && principal.Capability.Team == "a"
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 42}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 42})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -106,9 +104,6 @@ func TestCredentialMemberHTTPMembershipAndSessionLifecycle(t *testing.T) {
 }
 
 func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 11.2s measured in the short class; the full suite runs it")
-	}
 	property := func(mutation uint8, header []byte, trigger bool) bool {
 		e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 		body := `{"runner_version":"v1","kinds":["node"]}`
@@ -172,15 +167,12 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48})); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestCredentialMachineHTTPCannotBecomeAMemberProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
-	}
 	property := func(grantIndex uint8, selector []byte) bool {
 		e, _ := engineRuntimeStore(t)
 		grant := []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.RunsWrite, capability.RunsControl}[grantIndex%4]
@@ -211,7 +203,7 @@ func TestCredentialMachineHTTPCannotBecomeAMemberProperty(t *testing.T) {
 		}
 		return runs == 1 && cancelled == nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 		t.Fatal(err)
 	}
 }

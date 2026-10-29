@@ -13,16 +13,15 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc/githuboidctest"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth/googletest"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -125,9 +124,6 @@ func (f *ghFixture) workAt(team, runID, slug, branch, sha string) {
 }
 
 func TestGitHubRunnerCredentialClaimsOnlyItsRepository(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
-	}
 	f := newGHFixture(t)
 	owner, stranger := f.user("o", "olga@example.com"), f.user("s", "sam@example.com")
 	f.bind(owner, widgetsJob)
@@ -198,9 +194,6 @@ func TestGitHubRunnerCredentialsPerTeamAreBounded(t *testing.T) {
 }
 
 func TestGitHubRunnerCredentialClaimsOnlyItsOwnPush(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
-	}
 	f := newGHFixture(t)
 	owner := f.user("o", "olga@example.com")
 	f.bind(owner, widgetsJob)

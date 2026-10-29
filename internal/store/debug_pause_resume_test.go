@@ -6,14 +6,12 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestResumeDebugPauseCurrentAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
-	}
 	property := func(selector uint8, suffix string) bool {
 		tenant, now, _ := liveHolderFixture(t)
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
@@ -54,7 +52,7 @@ func TestResumeDebugPauseCurrentAuthorityProperty(t *testing.T) {
 		}
 		return (released == 1) == allowed && (before.StatusDetail == "") == allowed
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 40})); err != nil {
 		t.Fatal(err)
 	}
 }

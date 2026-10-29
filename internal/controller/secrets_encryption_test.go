@@ -10,12 +10,12 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -255,9 +255,6 @@ func TestSecrets_EnvelopeIsBoundToAccessFields(t *testing.T) {
 }
 
 func TestSecretsEnvelopeBindingProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 6.1s measured in the short class; the full suite runs it")
-	}
 	fields := []string{"team", "name", "pipeline", "unscoped", "shared", "masked"}
 	for _, field := range fields {
 		t.Run(field, func(t *testing.T) {
@@ -265,7 +262,7 @@ func TestSecretsEnvelopeBindingProperty(t *testing.T) {
 				checkSecretBindingMutation(t, field, "private-envelope-"+hex.EncodeToString(value))
 				return true
 			}
-			if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+			if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 8})); err != nil {
 				t.Fatal(err)
 			}
 		})

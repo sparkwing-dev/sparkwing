@@ -10,14 +10,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestNativeChildIntakeInheritsCapturedEnvironment(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.3s measured in the short class; the full suite runs it")
-	}
 	property := func(seed uint32, descendant bool) bool {
 		e, handler, claim := childIntakeFixture(t)
 		tenant, err := e.Store.ForTeam(t.Context(), "a")
@@ -97,7 +95,7 @@ func TestNativeChildIntakeInheritsCapturedEnvironment(t *testing.T) {
 		engineClaimHTTP(t, handler, claim, "POST", "/api/v1/runs/run/children", string(attack), 409)
 		return encrypted == ""
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 8})); err != nil {
 		t.Fatal(err)
 	}
 }

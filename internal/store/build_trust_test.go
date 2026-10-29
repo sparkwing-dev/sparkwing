@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestStoreDataBuildTrustDefaultsAndTenantIsolation(t *testing.T) {
@@ -40,9 +41,6 @@ func TestStoreDataBuildTrustDefaultsAndTenantIsolation(t *testing.T) {
 }
 
 func TestStoreDataBuildTrustPersistsOnlyTheSelectedTenantProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 7.0s measured in the short class; the full suite runs it")
-	}
 	s := authorityStore(t)
 	_ = authorityMember(t, s, "owner", RoleOwner)
 	path := blobAccountingDiskStore(t, s)
@@ -91,7 +89,7 @@ func TestStoreDataBuildTrustPersistsOnlyTheSelectedTenantProperty(t *testing.T) 
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(73))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(73))})); err != nil {
 		t.Fatal(err)
 	}
 }

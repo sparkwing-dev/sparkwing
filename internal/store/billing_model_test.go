@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -114,9 +115,6 @@ func TestBillingModelPrepayImmediatelyLiftsCloudStanding(t *testing.T) {
 }
 
 func TestBillingModelDisputeOutcomePreservesStandingProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
-	}
 	property := func(seed uint32) bool {
 		s, tenant, now := providerPaymentFixture(t)
 		providerCheckoutPaid(t, s)
@@ -160,15 +158,12 @@ func TestBillingModelDisputeOutcomePreservesStandingProperty(t *testing.T) {
 			t.Fatalf("dispute changed standing: seed=%d", seed)
 		}
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(1122))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(1122))})); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestBillingModelCloudAdmissionCapacityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 4.6s measured in the short class; the full suite runs it")
-	}
 	property := func(seed uint32) bool {
 		s, demand, _ := billingModelFixture(t)
 		rates := CreditRateTable{{Cores: 1, MicroPerSecond: 1}, {Cores: 2, MicroPerSecond: 2}, {Cores: 4, MicroPerSecond: 4}, {Cores: 8, MicroPerSecond: 8}, {Cores: 16, MicroPerSecond: 16}}
@@ -197,7 +192,7 @@ func TestBillingModelCloudAdmissionCapacityProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(112))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(112))})); err != nil {
 		t.Fatal(err)
 	}
 }

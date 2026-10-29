@@ -8,12 +8,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestBlobDataBindingUsesTransactionalReadSet(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
-	}
 	s, tenant, actor, attempt := resultFixture(t)
 	intent := blobIntent(actor, attempt)
 	if _, err := commitTestBlob(t, tenant, intent); err != nil {
@@ -61,7 +59,7 @@ func TestBlobDataBindingUsesTransactionalReadSet(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(47))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(47))})); err != nil {
 		t.Fatal(err)
 	}
 }

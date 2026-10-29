@@ -14,14 +14,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestEngineClaimHTTPRemovedSelectorsNeverAwardProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 5.6s measured in the short class; the full suite runs it")
-	}
 	property := func(selection uint8, value string) bool {
 		e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 		fields := []string{"pipelines", "sources", "allow_repos", "repos", "holder_id", "lease_secs", "capacity", "available_cores", "available_memory_bytes"}
@@ -42,15 +40,12 @@ func TestEngineClaimHTTPRemovedSelectorsNeverAwardProperty(t *testing.T) {
 		var got controllerwire.ClaimResponse
 		return json.Unmarshal(w.Body.Bytes(), &got) == nil && got.Claim != nil && got.Claim.RunID == "run" && got.Claim.JobID == "job"
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 28}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 28})); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestEngineClaimHTTPRepositorySelectionUsesEnrollment(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
-	}
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
 		for _, named := range []bool{false, true} {
 			for _, scope := range []string{"unrestricted", "empty", "other", "accepted"} {
@@ -205,9 +200,6 @@ func TestEngineTriggerClaimHTTPConsumesContractReplay(t *testing.T) {
 }
 
 func TestEngineNamedClaimHTTPRequiresReadyMatchingWork(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
-	}
 	for _, state := range []string{"ready", "held", "missing", "wrong grant", "unready", "finished", "missing label", "matching label"} {
 		t.Run(state, func(t *testing.T) {
 			e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})

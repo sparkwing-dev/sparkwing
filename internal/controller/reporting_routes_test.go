@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
@@ -40,9 +41,6 @@ func (f *reportingFacts) CheckBinding(context.Context, capability.Principal, cap
 }
 
 func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
-	}
 	s := New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(&EngineController{
 		ResolveTenant: selectorTenant("a", nil),
 	})
@@ -109,7 +107,7 @@ func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 				var failure apierr.Envelope
 				return json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == code
 			}
-			if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
+			if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 40})); err != nil {
 				t.Fatal(err)
 			}
 		})

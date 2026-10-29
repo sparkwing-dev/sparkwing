@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
@@ -126,9 +127,6 @@ func paymentMutationSnapshot(t *testing.T, s *Store) map[string][]string {
 }
 
 func TestPaymentMutationRefundConservationProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
-	}
 	for _, mode := range []capability.PaymentMode{capability.PaymentTest, capability.PaymentLive} {
 		t.Run(string(mode), func(t *testing.T) {
 			property := func(seed uint64) bool {
@@ -177,7 +175,7 @@ func TestPaymentMutationRefundConservationProperty(t *testing.T) {
 				}
 				return true
 			}
-			if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(42))}); err != nil {
+			if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(42))})); err != nil {
 				t.Fatal(err)
 			}
 		})

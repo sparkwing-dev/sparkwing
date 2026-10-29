@@ -14,12 +14,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 type sourceAnswer struct {
@@ -257,9 +256,6 @@ func TestSourceCredential_TypedRepositoryNeedsASubscription(t *testing.T) {
 // With nothing that covers the run, the route answers the code a runner reads
 // as "no credential", and a message naming what the team can do about it.
 func TestSourceCredential_NamesTheRemedy(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
-	}
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
@@ -385,9 +381,6 @@ func TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos(t *testing.T) {
 }
 
 func TestSourceCredential_ExtraConsentStaysWithSourceIDProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 6.7s measured in the short class; the full suite runs it")
-	}
 	property := func(value uint16) bool {
 		f := newAppFixture(t)
 		owner := f.ghUser(501, "olga")
@@ -407,15 +400,12 @@ func TestSourceCredential_ExtraConsentStaysWithSourceIDProperty(t *testing.T) {
 		got, code = f.sourceCredential(original, "original")
 		return code == http.StatusOK && f.app.TokenCovers(got.Token, renamed) && f.app.TokenCovers(got.Token, "acme/plans") && !f.app.TokenCovers(got.Token, "acme/widgets")
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 12})); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestSourceCredential_RenamedRepositoryClearsExtraConsentProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.2s measured in the short class; the full suite runs it")
-	}
 	property := func(value uint16) bool {
 		f := newAppFixture(t)
 		owner := f.ghUser(501, "olga")
@@ -432,7 +422,7 @@ func TestSourceCredential_RenamedRepositoryClearsExtraConsentProperty(t *testing
 		got, code := f.sourceCredential(original, "original")
 		return code == http.StatusOK && f.app.TokenCovers(got.Token, renamed) && !f.app.TokenCovers(got.Token, "acme/plans") && !f.app.TokenCovers(got.Token, "acme/widgets")
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 8})); err != nil {
 		t.Fatal(err)
 	}
 }

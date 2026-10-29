@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
@@ -24,9 +25,6 @@ import (
 )
 
 func TestPeerIntakeNativeCommitProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
-	}
 	st := newStoreForAuth(t)
 	tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
@@ -124,7 +122,7 @@ func TestPeerIntakeNativeCommitProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 		t.Fatal(err)
 	}
 }

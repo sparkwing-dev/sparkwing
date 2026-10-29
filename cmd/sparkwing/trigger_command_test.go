@@ -71,9 +71,6 @@ func TestTriggerCommandPreparationFailureCannotSubmit(t *testing.T) {
 }
 
 func TestNativeTriggerRefusesIncompleteSourceBeforeIntake(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.1s measured in the short class; the full suite runs it")
-	}
 	for _, flags := range []triggerFlags{{workingTree: true}, {allowSecretFiles: []string{"private.env"}}} {
 		request, err := prepareNativeTrigger(t.Context(), flags)
 		if err == nil || request.IdempotencyKey != "" || request.Request.Pipeline != "" || strings.Contains(err.Error(), "private.env") {

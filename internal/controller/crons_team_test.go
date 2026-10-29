@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -42,9 +41,6 @@ func teamToken(t *testing.T, st *store.Store, tenant *store.Tenant, scopes ...st
 // leaves it armed, and arming the same repository from another team arms that
 // team's own schedules rather than taking the row over or learning it exists.
 func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.8s measured in the short class; the full suite runs it")
-	}
 	f := newCronsFixture(t)
 	tenantB := teamTenant(t, f.store, teamB)
 	writerB := teamToken(t, f.store, tenantB, "runs.read", "runs.control")
@@ -135,9 +131,6 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 // A run a team B schedule launches is team B's, and the default team cannot
 // read it.
 func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
-	}
 	f := newCronsFixture(t)
 	tenantB := teamTenant(t, f.store, teamB)
 	writerB := teamToken(t, f.store, tenantB, "runs.read", "runs.control")
@@ -160,9 +153,6 @@ func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
 }
 
 func TestControllerCrons_ATeamsSchedulesAreCapped(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
-	}
 	f := newCronsFixture(t)
 	writerB := teamToken(t, f.store, teamTenant(t, f.store, teamB), "runs.read", "runs.control")
 

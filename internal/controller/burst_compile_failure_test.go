@@ -31,9 +31,6 @@ import (
 // A Cloud job whose pipeline fails to compile has no attempt, so its compiler output reaches the requester only as
 // the job's masked error in the run detail that `sparkwing runs status` reads.
 func TestBurstCloudCompileFailureShowsMaskedCompilerOutput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
-	}
 	modules, err := exec.CommandContext(t.Context(), "go", "env", "GOMODCACHE").Output()
 	if err != nil {
 		t.Fatal(err)

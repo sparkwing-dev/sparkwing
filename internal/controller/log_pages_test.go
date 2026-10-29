@@ -19,12 +19,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 94.3s measured in the short class; the full suite runs it")
-	}
 	property := func(size uint8, order uint32) bool {
 		engine, _ := engineRuntimeStore(t)
 		st := engine.Store
@@ -62,7 +60,7 @@ func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) {
 		}
 		return len(want) == 0
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 8})); err != nil {
 		t.Fatal(err)
 	}
 }

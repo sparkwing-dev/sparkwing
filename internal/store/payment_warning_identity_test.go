@@ -9,12 +9,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestPaymentWarningCannotChangePaymentProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.9s measured in the short class; the full suite runs it")
-	}
 	s, event := paymentFixture(t, capability.PaymentTest)
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)
@@ -58,7 +56,7 @@ func TestPaymentWarningCannotChangePaymentProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(42))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(42))})); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -58,9 +59,6 @@ func TestLogPersistenceMaintenanceRespectsFinalTailGrace(t *testing.T) {
 }
 
 func TestLogPersistenceMaintenancePreservesWritableSubjects(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
-	}
 	// safety: any subject writable before maintenance remains writable after it.
 	property := func(kind uint8, elapsed int16) bool {
 		return t.Run(fmt.Sprintf("%d/%d", kind, elapsed), func(t *testing.T) {
@@ -106,7 +104,7 @@ func TestLogPersistenceMaintenancePreservesWritableSubjects(t *testing.T) {
 			}
 		})
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64})); err != nil {
 		t.Fatal(err)
 	}
 }

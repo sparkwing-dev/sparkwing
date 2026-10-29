@@ -6,12 +6,10 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestCloudAllocationKeepsCommittedClassAcrossExchangeAndPriceChanges(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.8s measured in the short class; the full suite runs it")
-	}
 	property := func(rate uint16, additional uint8) bool {
 		s, demand, _ := meteredUnitFixture(t, true)
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
@@ -45,7 +43,7 @@ func TestCloudAllocationKeepsCommittedClassAcrossExchangeAndPriceChanges(t *test
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 }

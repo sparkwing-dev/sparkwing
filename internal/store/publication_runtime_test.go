@@ -69,9 +69,6 @@ func TestPublicationUsesNoControllerExecution(t *testing.T) {
 }
 
 func TestPublicationRequiresScopedAuthorityForJobsAndRun(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
-	}
 	for _, boundary := range []string{"job", "run"} {
 		for _, problem := range []string{"grant", "binding", "scope", "data_run", "repository", "team", "audience", "revoked", "expired", "execute"} {
 			t.Run(boundary+"/"+problem, func(t *testing.T) {

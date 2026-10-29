@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
@@ -33,9 +34,6 @@ func teamAuthorization(t *testing.T, s *Store, actor runstate.Actor, team Team, 
 }
 
 func TestTeamMutationsRequireCurrentAuthorityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
-	}
 	property := func(caseID uint8, suffix uint32) bool {
 		s := authorityStore(t)
 		actor := authorityMember(t, s, "owner", RoleOwner)
@@ -79,7 +77,7 @@ func TestTeamMutationsRequireCurrentAuthorityProperty(t *testing.T) {
 		prune := tenant.DeleteAuthorizedRun(t.Context(), a, nil)
 		return rename != nil && deletion != nil && invite != nil && withdraw != nil && trust != nil && prune != nil && reflect.DeepEqual(before, purgeRows(t, s, "a", true))
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 36}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 36})); err != nil {
 		t.Fatal(err)
 	}
 }

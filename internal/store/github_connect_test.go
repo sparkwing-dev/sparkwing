@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
@@ -27,9 +28,6 @@ func githubConnectFixture(t *testing.T) (*Store, *Tenant, capability.Authorized,
 }
 
 func TestGitHubConnectRechecksSessionAndIdentityProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.4s measured in the short class; the full suite runs it")
-	}
 	property := func(choice uint8, suffix uint32) bool {
 		s, tenant, a, now := githubConnectFixture(t)
 		id := a.Principal.Capability.Subject.ID
@@ -76,7 +74,7 @@ func TestGitHubConnectRechecksSessionAndIdentityProperty(t *testing.T) {
 		}
 		return read != nil && subject == "" && consume != nil && bind != nil && reflect.DeepEqual(row, GitHubAppInstallation{}) && nonces == 0 && installations == 0
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -139,9 +137,6 @@ func githubConnectionFixture(t *testing.T) (*Store, *Tenant, capability.Authoriz
 }
 
 func TestGitHubConnectionRequiresSameLiveOwnerSessionProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.4s measured in the short class; the full suite runs it")
-	}
 	property := func(mode uint8, suffix uint32) bool {
 		s, tenant, a, now := githubConnectionFixture(t)
 		defer s.Close()
@@ -191,7 +186,7 @@ func TestGitHubConnectionRequiresSameLiveOwnerSessionProperty(t *testing.T) {
 		}
 		return read != nil && consume != nil && bind != nil && subject == "" && out == (GitHubAppInstallation{}) && nonces == 0 && reflect.DeepEqual(before, purgeRows(t, s, "a", true))
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 52}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 52})); err != nil {
 		t.Fatal(err)
 	}
 }

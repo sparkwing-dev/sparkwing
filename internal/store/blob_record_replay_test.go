@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -27,9 +28,6 @@ func TestBlobRecordsReplayKeepsEquivalentExpiry(t *testing.T) {
 }
 
 func TestBlobRecordsReplayNormalizesOptionalMetadata(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 13.1s measured in the short class; the full suite runs it")
-	}
 	for _, kind := range []blob.Kind{blob.KindOutput, blob.KindManifest} {
 		t.Run(string(kind), func(t *testing.T) {
 			property := func(offset int32, nanos uint32, expires bool, unused string) bool {
@@ -88,7 +86,7 @@ func TestBlobRecordsReplayNormalizesOptionalMetadata(t *testing.T) {
 				rewriteSchemaCount(t, s.db, "blob_records", 1)
 				return true
 			}
-			if err := quick.Check(property, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(625019))}); err != nil {
+			if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(625019))})); err != nil {
 				t.Fatal(err)
 			}
 		})

@@ -7,6 +7,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -46,9 +47,6 @@ func TestMeteredUnpricedClaimFailsWorkWithoutBilling(t *testing.T) {
 }
 
 func TestUnpricedFailureRequiresCurrentClaimScopeProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
-	}
 	property := func(seed uint32, variant uint8) bool {
 		s, demand, _ := meteredUnitFixture(t, true)
 		table := CreditRateTable{{Cores: 1, MicroPerSecond: 2}}
@@ -80,7 +78,7 @@ func TestUnpricedFailureRequiresCurrentClaimScopeProperty(t *testing.T) {
 		row, readErr := tenant.ReadNode(t.Context(), change.Ref)
 		return err != nil && readErr == nil && row.Status == runstate.StatusPending && row.Outcome == "" && row.StateSeq == 0 && row.FinishedAt == nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 }

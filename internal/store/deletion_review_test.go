@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -47,9 +46,6 @@ func TestDeletedSlugIsNeverRegisteredAgain(t *testing.T) {
 // Two co-owners deleting their accounts at once must not both count the
 // other as the owner who stays.
 func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
-	}
 	for _, withEditor := range []bool{true, false} {
 		t.Run(fmt.Sprintf("editor=%v", withEditor), func(t *testing.T) {
 			for i := range 20 {

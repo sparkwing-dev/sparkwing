@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -48,9 +49,6 @@ func evalUploadFixture(t *testing.T) (*Store, *Tenant, UploadReservationRequest)
 }
 
 func TestBlobEvalReceiptBindsBothUnitAndSourceFences(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
-	}
 	s, tenant, request := evalUploadFixture(t)
 	path := blobAccountingDiskStore(t, s)
 	ticket, err := tenant.ReserveBlobUpload(t.Context(), request)
@@ -102,7 +100,7 @@ func TestBlobEvalReceiptBindsBothUnitAndSourceFences(t *testing.T) {
 		}
 		return tenant.AbortBlobUpload(t.Context(), authority, ticket.ID) != nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 128, Rand: rand.New(rand.NewSource(732))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 128, Rand: rand.New(rand.NewSource(732))})); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "uploads", 1)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -86,9 +87,6 @@ func TestBlobResultRecordsCommitAndReplayWithTerminalState(t *testing.T) {
 }
 
 func TestBlobResultRecordsRejectForgedResultKeys(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
-	}
 	_, records, change := blobResultFixture(t)
 	property := func(value uint32, dimension, part uint8) bool {
 		key := *change.Extra.Result.OutputRecord
@@ -134,7 +132,7 @@ func TestBlobResultRecordsRejectForgedResultKeys(t *testing.T) {
 		assertBlobResultUnchanged(t, records, change)
 		return err != nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 240, Rand: rand.New(rand.NewSource(43))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 240, Rand: rand.New(rand.NewSource(43))})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
@@ -260,9 +258,6 @@ func TestBlobResultRecordsUseTheOwningTransaction(t *testing.T) {
 }
 
 func TestBlobResultRecordsManifestReadCannotOutliveHolder(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
-	}
 	s, records, change := blobResultFixture(t)
 	reader := records.manifests
 	base := s.now()
@@ -279,7 +274,7 @@ func TestBlobResultRecordsManifestReadCannotOutliveHolder(t *testing.T) {
 		assertBlobResultUnchanged(t, records, change)
 		return err != nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(47))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(47))})); err != nil {
 		t.Fatal(err)
 	}
 }

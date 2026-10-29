@@ -28,9 +28,6 @@ import (
 const signingMaterial = "signing-material-4f1c9e"
 
 func TestBurstPreparationWithholdsConfiguredLocalSecretFromInstallAndPlan(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 3.5s measured in the short class; the full suite runs it")
-	}
 	home := t.TempDir()
 	t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
 	t.Setenv("HOME", t.TempDir())
@@ -132,9 +129,6 @@ func FuzzWithholdLocalSecretsLeavesNoConfiguredName(f *testing.F) {
 }
 
 func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 21.2s measured in the short class; the full suite runs it")
-	}
 	for _, entry := range []string{"help", "describe", "plan", "preparation", "trigger", "trigger-working-tree"} {
 		t.Run(entry, func(t *testing.T) {
 			home := t.TempDir()

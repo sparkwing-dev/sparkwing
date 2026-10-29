@@ -10,10 +10,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -245,9 +244,6 @@ func TestAuthenticatedResponsesAreNoStoreAndPublicOnesAreNot(t *testing.T) {
 }
 
 func TestSecretsDashboardMaskedValuesProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.5s measured in the short class; the full suite runs it")
-	}
 	property := func(value []byte, shared bool, role uint8) bool {
 		owner := newBrowserFixture(t, nil)
 		viewer := owner
@@ -273,7 +269,7 @@ func TestSecretsDashboardMaskedValuesProperty(t *testing.T) {
 		code, body, _ = secretsRequest(t, viewer, "GET", path, "", nil)
 		return code == http.StatusForbidden && !strings.Contains(body, private) && !strings.Contains(owner.logs.String(), private)
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 }

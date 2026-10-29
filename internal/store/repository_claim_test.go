@@ -9,9 +9,6 @@ import (
 )
 
 func TestRepositoryClaimScopeProperty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 7.0s measured in the short class; the full suite runs it")
-	}
 	for i := range 20 {
 		for _, outside := range []bool{false, true} {
 			for _, scope := range [][]string{nil, {}, {"github.com/acme/*"}, {"gh:1"}} {

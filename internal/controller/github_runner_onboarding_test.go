@@ -36,9 +36,6 @@ func TestGitHubRunnerOnboardingResolvesCoveredIdentityBeyondTenPages(t *testing.
 }
 
 func TestGitHubRunnerOnboardingRefusesUnverifiedIdentity(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
-	}
 	for _, scenario := range []string{"unbound", "uncovered", "forged ids", "transferred", "missing owner", "unavailable"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newAppFixture(t)
