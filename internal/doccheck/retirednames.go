@@ -12,6 +12,7 @@ import (
 // surfaces as history, so the scan covers only text describing the shipped product.
 var retiredNames = []struct{ name, use string }{
 	{"--free-team-slots", "automatic free and paid storage tiers"},
+	{"ErrNoProject", "nothing; WorkDir() is the process working directory"},
 	{"max_global_runs_per_hour", "per-principal hourly limits and prepaid credits"},
 	{"--trigger-dedupe-window", "an explicit idempotency key"},
 	{"triggerDedupeWindow", "an explicit idempotency key"},

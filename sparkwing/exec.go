@@ -349,37 +349,20 @@ func isSilent(ctx context.Context) bool {
 
 func execCmd(ctx context.Context, name string, args []string, dir string, extraEnv map[string]string) (ExecResult, error) {
 	display := renderCommand(name, args)
-	if dir == "" {
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(WorkDir(), dir)
+	}
+	if info, statErr := os.Stat(dir); statErr != nil {
 		return ExecResult{Command: display}, &ExecError{
 			Command:  display,
 			ExitCode: ExitNotStarted,
-			Cause:    fmt.Errorf("%w (cannot run %q without a project root)", ErrNoProject, name),
+			Cause:    fmt.Errorf("dir %q: %w", dir, statErr),
 		}
-	}
-	if !filepath.IsAbs(dir) {
-		wd := WorkDir()
-		if wd == "" {
-			return ExecResult{Command: display}, &ExecError{
-				Command:  display,
-				ExitCode: ExitNotStarted,
-				Cause:    fmt.Errorf("%w (cannot resolve relative dir %q)", ErrNoProject, dir),
-			}
-		}
-		dir = filepath.Join(wd, dir)
-	}
-	if dir != "" {
-		if info, statErr := os.Stat(dir); statErr != nil {
-			return ExecResult{Command: display}, &ExecError{
-				Command:  display,
-				ExitCode: ExitNotStarted,
-				Cause:    fmt.Errorf("dir %q: %w", dir, statErr),
-			}
-		} else if !info.IsDir() {
-			return ExecResult{Command: display}, &ExecError{
-				Command:  display,
-				ExitCode: ExitNotStarted,
-				Cause:    fmt.Errorf("dir %q: not a directory", dir),
-			}
+	} else if !info.IsDir() {
+		return ExecResult{Command: display}, &ExecError{
+			Command:  display,
+			ExitCode: ExitNotStarted,
+			Cause:    fmt.Errorf("dir %q: not a directory", dir),
 		}
 	}
 

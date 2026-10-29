@@ -1141,10 +1141,6 @@ const NoMemo memoBypass = true
 ## Variables
 
 ```
-var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
-```
-
-```
 var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 ```
 

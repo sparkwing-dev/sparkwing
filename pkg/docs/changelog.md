@@ -855,6 +855,7 @@ unlock.
 
 ### Removed
 
+- **sdk (Breaking):** `sparkwing.ErrNoProject` is removed. No helper could return it: `WorkDir()` is the process working directory, so `Path`, `ReadFile`, `WriteFile`, `Glob`, `Bash` and `Exec` always resolve relative paths against it, and `WorkDir()` panics only when `os.Getwd` fails. Delete `errors.Is(err, sparkwing.ErrNoProject)` checks.
 - **api + wingwire (Breaking):** The HTTP API and the daemon protocol drop or reshape routes, OpenAPI components and message members since v0.67.0. The migration guide lists each one. See [migration guide](docs/migrations/_unreleased.md#wire-surface-changes-since-v0670).
 - **store (Breaking):** Deployment card collection, settlement, fraud warnings and queued refunds move from Store to Operator. See [migration guide](docs/migrations/_unreleased.md#card-workers-use-operator).
 - **storage (Breaking):** Remove the separate raw S3 log store and local log-file fallback
