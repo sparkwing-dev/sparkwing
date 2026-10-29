@@ -150,7 +150,7 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 			Admission:    nodehost.ComposeStartGate(state, machineAdmission, false),
 			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: submitted,
 			Home: home, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
-			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engineid.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: procenv.Base{OwnerMachine: unit.OwnerMachine, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},
+			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engineid.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: runnerInstallBase(unit.OwnerMachine, modules)},
 			Renew: func(ctx context.Context, _ string, computing bool) (runstate.LeaseBeat, error) {
 				return state.RenewOwner(ctx, runstate.Actor{}, computing)
 			},
@@ -195,6 +195,13 @@ func ownerGitAccess(owner bool) source.GitAccess {
 		return source.GitAccessOwner
 	}
 	return source.GitAccessTeam
+}
+
+// runnerInstallBase passes the runner's Go build and module caches to the
+// pipeline compiles it runs, as a local run does, so a chart runner's cache
+// volume serves them instead of a cold $HOME/.cache after every restart.
+func runnerInstallBase(owner bool, modules string) procenv.Base {
+	return procenv.Base{OwnerMachine: owner, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: secrets.NewMasker()}
 }
 
 func runnerToolEnvironment(modules string) []string {
