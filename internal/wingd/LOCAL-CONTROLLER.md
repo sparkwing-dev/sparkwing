@@ -372,7 +372,21 @@ The local dashboard accepts non-loopback addresses through `dashboard start
 --allow-remote`. Every data request requires the bearer session minted through
 `api.sock`, including remote requests. `--read-only` rejects authenticated browser
 requests other than GET, HEAD and OPTIONS before controller dispatch; sign-in and
-sign-out remain available. The local socket retains its normal authority.
+sign-out remain available. It blocks writes but still allows reading decrypted
+secrets, so a read-only session is not safe to share. The local socket retains
+its normal authority.
+
+`--allow-remote` serves cleartext HTTP. The one-time login token and 24-hour
+session bearer cross the network unencrypted, and a session can read decrypted
+secrets. Use it only on a trusted network or through an SSH tunnel. For a tunnel,
+keep the remote dashboard bound to `127.0.0.1:4343` and run this on your machine:
+
+```sh
+ssh -N -L 4343:127.0.0.1:4343 user@host
+```
+
+Open the dashboard through `http://127.0.0.1:4343` on your machine.
+
 The dashboard owner acknowledges the requested read-only policy so a client
 refuses an owner that cannot confirm it. Browser origins must match the bound
 host and port; wildcard binds need a loopback origin or a concrete bind address.
