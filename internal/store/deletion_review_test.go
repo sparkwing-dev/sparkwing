@@ -78,14 +78,35 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 				}
 				st.SetTestClock(t, func() time.Time { return now })
 				var wg sync.WaitGroup
-				for _, id := range []string{a.Account.ID, b.Account.ID} {
+				ids := []string{a.Account.ID, b.Account.ID}
+				errs := make([]error, len(ids))
+				for n, id := range ids {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						_, _ = st.DeleteAccount(ctx, id)
+						_, errs[n] = st.DeleteAccount(ctx, id)
 					}()
 				}
 				wg.Wait()
+				deleted, lastOwner := 0, 0
+				for n, err := range errs {
+					switch {
+					case err == nil:
+						deleted++
+						if left := countWhere(t, st, "accounts", "id = '"+ids[n]+"'"); left != 0 {
+							t.Fatalf("iteration %d: deletion of %s succeeded but the account remains", i, ids[n])
+						}
+					case errors.Is(err, store.ErrLastOwner):
+						lastOwner++
+					default:
+						t.Fatalf("iteration %d: deleting %s: %v", i, ids[n], err)
+					}
+				}
+				// With an editor the second deletion is the last owner of a team with members; without one it
+				// empties the team, which is queued for deletion.
+				if withEditor && (deleted != 1 || lastOwner != 1) || !withEditor && deleted != 2 {
+					t.Fatalf("iteration %d editor=%v: %d deletions succeeded and %d were refused as last owner", i, withEditor, deleted, lastOwner)
+				}
 				owners := countWhere(t, st, "memberships", "team = 'shared' AND role = 'owner'")
 				members := countWhere(t, st, "memberships", "team = 'shared'")
 				deleting := countWhere(t, st, "team_deletions", "slug = 'shared' AND state = 'pending'")
