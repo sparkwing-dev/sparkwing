@@ -278,6 +278,9 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 	if err != nil {
 		return err
 	}
+	if snapshot.Run.CancelRequestedAt != nil || snapshot.Run.FinishedAt != nil {
+		return nil
+	}
 	if selection := snapshot.Run.Retry; selection != nil {
 		if selected, ok := selection.Results[string(row.Ref.NodeID)]; ok {
 			probe := request

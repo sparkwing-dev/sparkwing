@@ -200,12 +200,16 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		return processes.Session.Environments.cacheDirectory(ctx, input, cache)
 	}}
 	follower := stateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
+	var debug DebugBoundaryWaiter
+	if pauses, ok := cfg.Store.(ownerDebugStore); ok {
+		debug = storeDebugBoundary{store: pauses, follower: follower}
+	}
 	config := NativeHostConfig{
 		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs, unit: cfg.Principal.Capability.Unit}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
 		Validation: nodeproto.ValidationContext{Placement: store.RequestPlacement(run.Run.Request.Request)},
 		Admission:  cfg.Admission,
-		Owner:      OwnerOperations{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Wait: follower.wait, WaitNode: follower.waitNode, AdoptClaim: claims.adopt, ExpansionActor: cfg.ExpansionActor},
+		Owner:      OwnerOperations{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Debug: debug, Wait: follower.wait, WaitNode: follower.waitNode, AdoptClaim: claims.adopt, ExpansionActor: cfg.ExpansionActor},
 		PlanningLog: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		},
