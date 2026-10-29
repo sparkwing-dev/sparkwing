@@ -37,21 +37,6 @@ func (f *storeRecoveryFixture) claimOwner(ctx context.Context, runID, name strin
 	return runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}, nil
 }
 
-func (f *storeRecoveryFixture) capacityCompetitor(ctx context.Context) (string, error) {
-	admitted, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request})
-	if err != nil {
-		return "", err
-	}
-	owner, err := f.claimOwner(ctx, admitted.RunID, "competitor")
-	if err != nil {
-		return "", err
-	}
-	plan := f.plan
-	plan.RunID, plan.Actor, plan.Seal.Request = admitted.RunID, owner, admitted.Request
-	_, err = f.tenant.AcceptPlan(ctx, plan)
-	return admitted.RunID, err
-}
-
 func TestClaimedCapacityWaiterFollowsNodeRenewal(t *testing.T) {
 	f := newRecoveryCapacityFixture(t)
 	ctx := t.Context()

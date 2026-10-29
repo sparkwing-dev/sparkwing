@@ -31,19 +31,6 @@ func tenantFor(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	return tn
 }
 
-func runTeam(ctx context.Context, t *testing.T, st *store.Store, runID string) *store.Tenant {
-	t.Helper()
-	team, err := st.AsOperator().RunTeam(ctx, runID)
-	if err != nil {
-		t.Fatalf("RunTeam(%s): %v", runID, err)
-	}
-	tn, err := st.ForTeam(ctx, team)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tn
-}
-
 func seedTenantRun(t *testing.T, tn *store.Tenant, id, pipeline string) {
 	t.Helper()
 	if err := tn.TestOnlySeedRun(context.Background(), store.Run{RunSummary: runstate.RunSummary{ID: id, Pipeline: pipeline, Status: "running", StartedAt: time.Now()}}); err != nil {

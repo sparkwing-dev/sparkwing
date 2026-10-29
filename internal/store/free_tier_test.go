@@ -14,15 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func setFreeAllowance(t *testing.T, st *store.Store, bytes int64) {
-	t.Helper()
-	if _, err := st.AsOperator().SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
-		StorageFreeAllowanceBytes: &bytes,
-	}); err != nil {
-		t.Fatalf("set the free allowance: %v", err)
-	}
-}
-
 func startRun(tenant *store.Tenant, id string) error {
 	return tenant.TestOnlySeedTrigger(context.Background(), store.Trigger{ID: id, Pipeline: "p", CreatedAt: time.Now()})
 }

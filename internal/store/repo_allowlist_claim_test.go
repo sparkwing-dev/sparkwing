@@ -19,21 +19,3 @@ func seedRepoTrigger(t *testing.T, st *store.Store, id, repoURL string, at time.
 		t.Fatalf("CreateTriggerWithRun(%s): %v", id, err)
 	}
 }
-
-func seedRepoNode(t *testing.T, st *store.Store, runID, repoURL string) {
-	t.Helper()
-	ctx := context.Background()
-	if repoURL == "" {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
-			t.Fatal(err)
-		}
-	} else {
-		seedRepoTrigger(t, st, runID, repoURL, time.Now())
-	}
-	if err := teststore.SeedNode(st, ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := teststore.SeedNodeReady(st, ctx, runID, "build"); err != nil {
-		t.Fatal(err)
-	}
-}

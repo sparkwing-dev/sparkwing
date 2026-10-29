@@ -12,15 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
-func ageReadyNode(t *testing.T, s *store.Store, runID string, age time.Duration) {
-	t.Helper()
-	if _, err := s.DB().ExecContext(context.Background(), storetest.Rebind(s,
-		`UPDATE nodes SET ready_at = ?, placement_hold_from = ? WHERE run_id = ?`),
-		time.Now().Add(-age).UnixNano(), time.Now().Add(-age).UnixNano(), runID); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // The sweep writes one row per statement: while another transaction holds one
 // node's lock, the reason for a different node is already committed rather
 // than held behind it.

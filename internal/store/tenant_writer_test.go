@@ -62,21 +62,3 @@ func TestCreatedTriggerCarriesItsTeam(t *testing.T) {
 		t.Errorf("stored trigger row carries team %q, want acme", got)
 	}
 }
-
-// safety: an empty table would pass a check of every row's team, so the
-// count has to be nonzero before the team says anything.
-func requireRunRowsInTeam(t *testing.T, st *store.Store, table, runID string, team store.Team) {
-	t.Helper()
-	var total, wrong int
-	if err := st.DB().QueryRowContext(context.Background(), storetest.Rebind(st,
-		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN team = ? THEN 0 ELSE 1 END), 0) FROM `+table+` WHERE run_id = ?`),
-		string(team), runID).Scan(&total, &wrong); err != nil {
-		t.Fatalf("read %s rows: %v", table, err)
-	}
-	if total == 0 {
-		t.Errorf("%s holds no row for %s, so its team was never proven", table, runID)
-	}
-	if wrong != 0 {
-		t.Errorf("%d of %d %s rows for %s carry a team other than %s", wrong, total, table, runID, team)
-	}
-}
