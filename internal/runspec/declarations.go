@@ -177,7 +177,7 @@ func (g *DeclarationGate) refuseUnregistered(entrypoint string) error {
 
 // Error withholds unclassified author errors and sanitizes classified payloads.
 func (g *DeclarationGate) Error(err error) error {
-	if g.unregistered != nil && errors.Is(err, g.unregistered) {
+	if g != nil && g.unregistered != nil && errors.Is(err, g.unregistered) {
 		return g.unregistered
 	}
 	if !g.Complete() {
