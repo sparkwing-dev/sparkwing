@@ -3217,6 +3217,7 @@ stores observed capacity and labels with store time. Configured local-first
 preferences, hold and liveness now apply to shared named and queued job claims.
 Only a recent eligible runner with live authority and enough advertised capacity
 can hold work. No new flag, deadline or customer limit is added.
+
 ## Egress accounting uses tenant and replica counters
 
 `Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`

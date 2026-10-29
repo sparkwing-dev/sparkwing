@@ -538,6 +538,7 @@ The `security-scan` pipeline runs four local scanners. The Security GitHub
 Actions workflow runs it on every pull request, on pushes to `main`, and
 weekly. The release workflow calls none of it: a tag builds and publishes the
 commit those runs already covered on `main`.
+
 - **gosec** over the public module and the `.sparkwing` pipeline module,
   with the rules that describe how a CI tool works (file inclusion and
   subprocess arguments named by its inputs, cache directory permissions)

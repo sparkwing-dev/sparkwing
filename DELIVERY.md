@@ -111,6 +111,7 @@ GONOSUMDB=github.com/sparkwing-dev/sparkwing go mod tidy`). The TypeScript SDK h
 no QA package: packing it requires the Windows native bridges.
 
 Accepted QA-only risks:
+
 - A qatrust build also trusts the production key. It reads only the QA origin, but
   a production index cached in the same engine cache makes it fail closed; use a
   separate HOME for QA.
