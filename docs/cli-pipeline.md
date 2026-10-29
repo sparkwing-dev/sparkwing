@@ -320,7 +320,7 @@ Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repos
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. (required) |
+| `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
 | `--detach` | Return once the controller accepts the run instead of following its logs to the end; refused with --runner here. |
 | `--working-tree` | Run an uploaded snapshot of this checkout, with uncommitted edits, deletions and untracked files that .gitignore does not exclude, instead of a pushed commit; the upload is refused if it holds secret-shaped files or values, submodules, unsafe symlinks, more than 100,000 files or more than 500 MiB. |
 | `--allow-secret-file PATH` | Include this repository-relative file in a --working-tree snapshot even though its name or content looks like a secret; the trigger fails if no snapshot file has that path, the secret-value scan still applies, and it is refused without --working-tree. Repeatable; comma-separated values are accepted. |

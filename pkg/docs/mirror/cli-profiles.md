@@ -68,7 +68,7 @@ Remove a controller connection profile
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. (required) |
+| `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
 | `--keep-token` | Remove only the local connection, without revoking its token at the controller. |
 
 ## `sparkwing profiles set`
@@ -83,7 +83,7 @@ Update a connection or select the default profile
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. (required) |
+| `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
 | `--controller URL` | Controller URL for this connection profile. |
 | `--token-stdin` | Read the controller credential from standard input. |
 | `--default` | Use this profile when an optional --profile is omitted. --default=false restores local selection if this is the default. |
@@ -100,4 +100,4 @@ Print one controller connection profile
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. (required) |
+| `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |

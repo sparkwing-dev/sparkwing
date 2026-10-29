@@ -20,7 +20,7 @@ unlock.
 
 ## [Unreleased]
 
-- **CLI:** `profiles set --profile NAME --default` switches the saved default for optional-profile controller commands. Explicit profiles override it, `--profile=` selects local for one command, and `--default=false` clears it. Profile list/show report the selection. Local runs, internal local clients and `schedules --all-repos` stay local.
+- **CLI:** `profiles set --profile NAME --default` switches the saved default for optional-profile controller commands. Explicit profiles override it, `--profile=` selects local for one command, and `--default=false` clears it. Profile list/show report the selection. Commands requiring `--profile` say it must be supplied explicitly in help. Local runs, internal local clients and `schedules --all-repos` stay local.
 
 - **CLI:** `pipeline new --template typescript` scaffolds a minimal TypeScript SDK project and adds further pipelines to its entry. `repos list` includes SDK kind and TypeScript pins resolved from npm lockfiles in JSON, plain and pretty output.
 

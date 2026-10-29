@@ -37,7 +37,7 @@ Show the team's automatic refill: whether it is on, the threshold and amount, th
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. (required) |
+| `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
 | `--enable` | Turn automatic refill on; the team needs a saved card. |
 | `--disable` | Turn automatic refill off, keeping its settings. |
 | `--threshold DOLLARS` | Refill when the balance falls below this many dollars. |
@@ -59,7 +59,7 @@ Contact the Sparkwing operators for High standing, higher limits or payments abo
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. (required) |
+| `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
 | `--tier TIER` | Standing tier to request. Values: high. (required) |
 | `--message TEXT` | What you need, sent to the operators with the team's standing and payment history. (required) |
 
@@ -77,4 +77,4 @@ Report the team's Cloud standing, the tier its payment history earns, the highes
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. (required) |
+| `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |

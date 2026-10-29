@@ -67,6 +67,9 @@ func surfaceFlag(path string, flag clisurface.Flag) FlagSpec {
 	}
 	if spec.Desc == "" {
 		spec.Desc = flagDescriptions[flag.Name]
+		if flag.Name == "profile" && flag.Required {
+			spec.Desc = "Controller connection profile from your config. Must be supplied explicitly."
+		}
 	}
 	if len(flag.Values) > 0 {
 		spec.Desc += " Values: " + strings.Join(flag.Values, ", ") + "."
