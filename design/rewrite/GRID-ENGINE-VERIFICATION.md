@@ -132,3 +132,33 @@ The lead must coordinate dashboard recognition of `dry_run` in
 `web/src/lib/runEventKinds.json` for `run_dry_run`. Those files belong to the
 other lane. Temporary homes, binaries and test processes are removed after
 verification; this file retains the measured results and regression commands. Schema baseline 26 is a hard cut, documented in the migration guide.
+
+## Gate follow-up
+
+The lead's first gate passed the full CLI, nodehost, store and controller-wire
+packages. It found one additional engine acceptance fixture failure:
+`TestSurfaceSnapshotPreservesGuardRefusal` returned
+`controller response is missing dry_run`. A focused rerun reproduced that error.
+The hand-written snapshot now supplies the required field and verifies its value
+for both preview and applied runs, both cancellation states and both transport
+URLs. The production wire contract remains unchanged.
+
+The following focused acceptance selection passes with `-count=1`:
+
+```bash
+go test ./tests/acceptance -run '^Test(SurfaceSnapshotPreservesGuardRefusal|SurfaceMaterializedResultTransport|EngineSnapshotHTTP)$' -count=1
+```
+
+The grid regression tests listed above also pass with `-count=1` across
+`cmd/sparkwing`, `internal/nodehost`, `internal/controller` and `internal/store`.
+The CLI builds successfully and its discovery command runs under the private
+HOME and SPARKWING_HOME. These commands used Go 1.27.0, `GOWORK=off`,
+`GOFLAGS=-buildvcs=false`, `GOCACHE=/tmp/sw-gocache` and a temporary directory
+under the isolated engine root. The Go shim lacks a selected version in this
+checkout, so verification used the installed compiler directly.
+
+The remaining first-gate failures need the other lanes or lead: the dashboard's
+event-kind fixture lacks `run_dry_run`, Helm has no selected version, and the
+dashboard and TypeScript SDK dependency installs lack `tsx` and `tsc`.
+The full gate remains with the lead. This follow-up changes only acceptance
+coverage and this evidence; it adds no customer behavior or limits.

@@ -61,26 +61,29 @@ func TestSurfaceMaterializedResultTransport(t *testing.T) {
 func TestSurfaceSnapshotPreservesGuardRefusal(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		for _, cancelled := range []bool{false, true} {
-			body, err := json.Marshal(map[string]any{
-				"run_id": "run", "store_now": "2026-10-15T00:00:00Z", "cancel_requested": cancelled,
-				"guard_refusal": "branch guard refused", "jobs": []any{}, "generators": []any{}, "expansions": []any{},
-				"selection_skips": map[string]string{},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			controller, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
-				if req.Method != http.MethodGet || req.URL.Path != "/api/v1/runs/run/snapshot" {
-					t.Fatalf("unexpected snapshot: %s %s", req.Method, req.URL)
+			for _, dryRun := range []bool{false, true} {
+				body, err := json.Marshal(map[string]any{
+					"run_id": "run", "store_now": "2026-10-15T00:00:00Z", "cancel_requested": cancelled,
+					"dry_run":       dryRun,
+					"guard_refusal": "branch guard refused", "jobs": []any{}, "generators": []any{}, "expansions": []any{},
+					"selection_skips": map[string]string{},
+				})
+				if err != nil {
+					t.Fatal(err)
 				}
-				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
-			})}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err := controller.ReadSnapshot(t.Context(), "run")
-			if err != nil || got.GuardRefusal != "branch guard refused" || got.CancelRequested != cancelled {
-				t.Fatalf("sealed decision changed: %+v, %v", got, err)
+				controller, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
+					if req.Method != http.MethodGet || req.URL.Path != "/api/v1/runs/run/snapshot" {
+						t.Fatalf("unexpected snapshot: %s %s", req.Method, req.URL)
+					}
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+				})}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := controller.ReadSnapshot(t.Context(), "run")
+				if err != nil || got.GuardRefusal != "branch guard refused" || got.CancelRequested != cancelled || got.DryRun != dryRun {
+					t.Fatalf("sealed decision changed: %+v, %v", got, err)
+				}
 			}
 		}
 	}
