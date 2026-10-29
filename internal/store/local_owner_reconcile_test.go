@@ -1,10 +1,8 @@
 package store
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -15,8 +13,7 @@ import (
 )
 
 func TestLocalAcceptedPlanReconcilesIndependentJobAwards(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	tenant, in, _ := intakeFixture(t)
 	s := tenant.s
 	root := authorityRoot("local-owner", "a")

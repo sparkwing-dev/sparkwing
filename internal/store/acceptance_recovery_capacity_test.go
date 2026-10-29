@@ -66,9 +66,9 @@ func TestClaimedCapacityWaiterFollowsNodeRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, live := range []bool{true, false} {
-		until := time.Now().Add(time.Second).UnixNano()
+		until := f.now.Add(time.Second).UnixNano()
 		if !live {
-			until = time.Now().Add(-time.Second).UnixNano()
+			until = f.now.Add(-time.Second).UnixNano()
 		}
 		if _, err := f.s.DB().ExecContext(ctx, `UPDATE concurrency_waiters SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=?`, until, f.tenant.Team(), f.ref.RunID, f.ref.NodeID); err != nil {
 			t.Fatal(err)
