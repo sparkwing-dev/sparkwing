@@ -112,3 +112,57 @@ Binary SHA256 receipts before temporary cleanup:
 
 - `sparkwing-before`: `5c52634139ba2df897d719bd652325ed766124217f4bc2995e527af48827b09b`
 - `sparkwing-after`: `1eaf8559a2ba73554a7e8e9db82e8e927309b4d33fe599c85f20675989f7d2d5`
+
+## Gate follow-up
+
+Continued from `53f3ba436` after reading the lead's full gate output. The
+per-cell reproductions above remain the evidence for the completed grid work.
+This follow-up addresses the gate failures without repeating those scenarios.
+All new CLI and Go invocations used the same private-home and Go environment
+described above. Xwing reported no installed candidate for this environment.
+The supplied lane contract selects direct worktree builds under its temporary
+directory, so no candidate installer or global launcher was changed.
+
+Before changes, this focused command reproduced three failing tests:
+
+```bash
+go -C "$W" test ./cmd/sparkwing ./internal/nodehost \
+  ./sparkwing/sparkwingtest ./internal/wingd \
+  -run 'TestRequiredProfileFlagsDoNotAdvertiseDefault|TestHostArgumentRulesAgreeForBothSDKs|TestHostPreparesArguments|TestJournalRecordsChildLineageAndCancelScope' \
+  -count=1
+```
+
+- `TestHostArgumentRulesAgreeForBothSDKs` still expected enum errors without
+  choices in three cases. `TestHostPreparesArguments` had the same stale
+  expectation. Commit `7787c9508` updates those assertions to check the public
+  choices through both SDK host paths, including generated arguments. Both
+  tests pass after the update (`internal/nodehost`: 1.161 seconds,
+  `sparkwing/sparkwingtest`: 0.054 seconds).
+- `TestRequiredProfileFlagsDoNotAdvertiseDefault` found optional-profile
+  default guidance on 11 required-profile routes. A freshly built baseline CLI
+  reproduced it through `profiles show --help`. Commit `926bc5ae0` gives
+  required-profile flags explicit-selection guidance. A rebuilt CLI passed
+  assertions on all 11 routes and retained saved-default guidance for optional
+  `runs list --profile`. Generated references and the embedded mirror were
+  regenerated, and the changelog describes the correction.
+- `TestJournalRecordsChildLineageAndCancelScope` passed unchanged in isolation
+  (0.202 seconds). The lead's gate failure is not claimed fixed. Admission and
+  journal behavior were left untouched because they are outside this lane's
+  CLI usability scope.
+
+Additional checks passed:
+
+- The focused CLI/profile/timing/argument/scaffold regressions (5.555 seconds).
+- Complete `internal/nodeproto` and `sparkwing/sparkwingtest` package tests.
+- CLI rebuild and `go vet ./cmd/sparkwing`.
+- CLI reference drift check, embedded-docs/changelog drift check, and
+  `git diff --check`.
+
+The full gate remains with the lead. No new mechanisms, limits, runtime
+settings or routing changes were added in this follow-up. The help correction
+uses the existing regression test, which failed before the change.
+
+Follow-up binary SHA256 receipts before cleanup:
+
+- Before: `c354d2a4e300c0152b392da9d58482b4397928e12828cbb187c159afc0bcb171`
+- After: `89b313fb01f5d15bd2db8fb047b1f667a12be4280f83dfa7e4752e9ca167eea7`
