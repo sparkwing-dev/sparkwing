@@ -482,11 +482,11 @@ func TestAccountDeletionTouchesOnlyRowsNamingTheAccount(t *testing.T) {
 	if n := countWhere(t, st, "invitations", "accepted_by = 'deleted user' AND email = ''"); n != 1 {
 		t.Fatalf("the accepted invitation kept the account or its address (%d anonymised)", n)
 	}
-	var payload string
-	if err := st.DB().QueryRowContext(ctx, `SELECT CAST(payload AS TEXT) FROM events WHERE run_id='run-e' AND kind='approved'`).Scan(&payload); err != nil {
+	var payload []byte
+	if err := st.DB().QueryRowContext(ctx, `SELECT payload FROM events WHERE run_id='run-e' AND kind='approved'`).Scan(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload != `{"approver":"deleted user","note":"kjo@example.com"}` {
+	if string(payload) != `{"approver":"deleted user","note":"kjo@example.com"}` {
 		t.Fatalf("event payload after deletion = %s", payload)
 	}
 }
