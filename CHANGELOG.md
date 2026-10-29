@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **controller (Breaking):** `--billing-url` without `--payment-mode` refuses to start, naming both. The controller used to open payment pages and charge refills it could never settle: every Stripe webhook answered 503 and the payer got no credits.
 - **billing:** A metered job admitted with between one and two slices left in the balance runs. Its first renewal charged the job minimum and then asked for a second slice on top of it, so the job was cancelled for credits before it started and kept one slice; a renewal now reserves one slice past the compute used, and at least the minimum.
 - **claims:** On PostgreSQL a metered team's job that names a Cloud size such as `sparkwing-8cpu` is checked for funding at that size. The claim query read the size suffix with a negative `substr` start, which PostgreSQL treats differently from SQLite, so the job passed the funding check at the smallest size, then failed its award on every poll.
 - **limits:** A controller without metering, such as a licensed self-hosted team controller, no longer holds its teams to free-tier limits: the free daily download cap, the 100-secret and 20-Actions-binding counts, the unfunded log retention class and the storage brake apply only where usage is metered, to teams without credits.
