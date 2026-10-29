@@ -735,9 +735,8 @@ func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ 
 	return names, rows.Err()
 }
 
-// relabelPrincipalTx replaces the account's name where a row names it: whole
-// principal columns, and whole JSON string values in event payloads, never a
-// substring of a longer value.
+// safety: event payloads are relabelled only where a whole JSON string value is the name,
+// never a substring of a longer value.
 func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, name string) error {
 	label := deletedUserLabel
 	args := []any{label, name}

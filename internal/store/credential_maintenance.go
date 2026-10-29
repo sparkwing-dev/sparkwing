@@ -23,8 +23,7 @@ func (t *Tenant) credentialAdminTx(ctx context.Context, tx *storeTx, a capabilit
 	return nil
 }
 
-// teamAdministrator reports a current team administrator: an account holding
-// team.admin, or the verified local peer, which owns its local controller's team.
+// safety: the verified local peer owns its local controller's team, so it administers it.
 func teamAdministrator(c capability.Capability) bool {
 	return c.Binding.Kind == capability.BindingNone && c.Audience == capability.Controller && (c.Subject.Kind == capability.SubjectAccount || c.Subject.Kind == capability.SubjectLocal) && slices.Contains(c.Grants, capability.TeamAdmin)
 }

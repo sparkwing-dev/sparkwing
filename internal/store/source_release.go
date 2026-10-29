@@ -121,11 +121,8 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 	return capability.SourceReleaseRequest{Authorization: authorized, Executor: executor, RepositoryKey: string(run.Request.Request.Git.Repository.Key), Host: host, RepositoryProven: sourceRepositoryProven(run.Request)}, nil
 }
 
-// sourceRepositoryProven reports whether a credential scoped to the run's
-// repository may fetch its code: only when the host fetches that code from the
-// repository itself, which intake bound to the repository key. Code the
-// submitter supplied as an upload, working tree or local checkout proves no
-// repository, so that run gets only a host-wide credential.
+// safety: code the submitter supplied (an upload, working tree or local checkout) proves no
+// repository, so it gets only a host-wide credential; intake bound the remote to the key.
 func sourceRepositoryProven(sealed runspec.SealedRequest) bool {
 	return sealed.Request.Git.Repository.Key != "" && sealed.Request.Source.FetchedFromRemote()
 }

@@ -27,8 +27,6 @@ func (t *Tenant) Reauthorize(ctx context.Context, a capability.Authorized, metho
 	return tx.Commit()
 }
 
-// reauthorizeTx authenticates a's authority from the store and authorizes it
-// for route under the access rule a was admitted with.
 func (t *Tenant) reauthorizeTx(ctx context.Context, tx *storeTx, a capability.Authorized, route capability.RoutePolicy, lock bool) (capability.Authorized, capability.AuthenticationSnapshot, error) {
 	if a.Target.Team != string(t.team) {
 		return capability.Authorized{}, capability.AuthenticationSnapshot{}, bindingRefusal()

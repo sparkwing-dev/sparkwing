@@ -20,12 +20,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// localSmokeGroups are the command groups served by the local controller. Every
-// leaf in them is either driven below or named in localSmokeSkipped, so a new
-// command cannot ship without meeting a real controller.
+// safety: every leaf in these groups is driven below or named in localSmokeSkipped,
+// so a new command cannot ship without meeting a real controller.
 var localSmokeGroups = []string{"secrets", "tokens", "runners", "pools", "queue", "schedules", "runs"}
 
-// localSmokeSkipped names the leaves the smoke test does not drive, with why.
 var localSmokeSkipped = map[string]string{
 	"sparkwing tokens create":        "a local peer mints only scope-less member tokens; covered by its own tests",
 	"sparkwing tokens revoke":        "needs a token; covered by its own tests",
@@ -46,9 +44,8 @@ var localSmokeSkipped = map[string]string{
 	"sparkwing runs approvals deny":  "the same route and authority as approve",
 }
 
-// localSmokeStep is one command against the fresh local controller. A step
-// with a want code must fail with exactly that code, which proves the request
-// got past authorization to the resource it names.
+// safety: a step with a want code must fail with exactly that code, which proves the
+// request got past authorization to the resource it names.
 type localSmokeStep struct {
 	args  []string
 	stdin string
@@ -149,7 +146,6 @@ func TestLocalControllerSmoke(t *testing.T) {
 	}
 }
 
-// localSmokeErrorCode returns the first error envelope's code in NDJSON output.
 func localSmokeErrorCode(output string) string {
 	for line := range strings.SplitSeq(output, "\n") {
 		var envelope struct {
