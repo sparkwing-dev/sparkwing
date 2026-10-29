@@ -1831,9 +1831,8 @@ this tenant method into DataController.ReadBlob.
 local binary execution opt-in. Their raw Store methods are removed. An absent
 row means false. Read errors or invalid stored flags cannot enable trust.
 Enabling trust does not change upload or record provenance. The controller's
-membership checks own who may read or change this policy. W7's
-`blob.CheckBinaryExecution` and W3's execution adapter must enforce the policy
-against the committed binary and digest.
+membership checks own who may read or change this policy. No execution path
+reads it.
 
 `blob.Authority.Upload` contains C2's resolved tagged uploader. W1 rechecks it
 against the exact job/attempt/generation, owner lease or imported terminal
@@ -3204,16 +3203,12 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `MemoKey` | MemoKey cannot share an unclaimed result across pipelines. |
 | `MemoRecordName` | Names the persisted memo output consistently for writers and exact-key readers. |
 | `ResultRecordKey` | Names output and manifest records for an exact persisted attempt. |
-| `MemoNamespace` | MemoNamespace reserves manual:<ref> for submitter-vouched writes. |
 | `MemoLookup` | MemoLookup uses the authority's server-derived scope and verified default fallback. |
 | `CopyMemoRequest` | CopyMemoRequest creates output and manifest edges atomically with the hit. |
 | `MemoHit` | MemoHit carries digests and authorized edges rather than relying on the source run's survival. |
 | `DepcacheKey` | DepcacheKey shares repo/ref isolation with memo while naming a file cache. |
 | `RestoreSource` | RestoreSource orders own-ref, PR-base and verified-default cache lookups. |
 | `DepcacheLookup` | DepcacheLookup never accepts a caller-selected repo outside its data grant. |
-| `BuildTrust` | BuildTrust preserves the team-owned opt-in for local binary provenance. |
-| `BinaryExecution` | BinaryExecution binds cloud execution to the committed digest and provenance. |
-| `CheckBinaryExecution` | CheckBinaryExecution permits local provenance only with trust_local_builds. |
 | `RemoteCacheOptions` | RemoteCacheOptions uses the user's existing repo-bound read authority. |
 | `RemoteCache` | RemoteCache exposes reads only, with no binary fetch or shared-cache write method. Every returned record must originate in a verified default-branch run. |
 | `OpenRemoteCache` | OpenRemoteCache is opt-in by profile and never borrows a runner credential. |

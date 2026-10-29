@@ -1181,7 +1181,6 @@ All capability names below are in `internal/capability`.
 | [`routepolicy.New`](../../../internal/routepolicy/router.go), [`routepolicy.Router.Register`](../../../internal/routepolicy/router.go), [`routepolicy.Router.Validate`](../../../internal/routepolicy/router.go), [`routepolicy.Router.Registrations`](../../../internal/routepolicy/router.go) | Register handlers independently of the policy table and check their proof wiring. Combine controller and node-host registrations for the complete inventory check. |
 | `controller.AuthorityRevoker`, `EngineController.ResolveOperator` | Reuse C1's existing RevokeAuthority transaction through the tenant or deployment scope. The optional resolver supports embedded controllers and fakes without another issuer or persistence owner. |
 | `controller.RunTransactions`, `EngineController.ResolveTenant`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
-| `controller.SizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
 | `controller.CredentialInventoryReader` | Supply the existing tenant secret/git inventory reads with an authenticated-team check. |
 | `controller.CredentialRotator` | Supply one tenant's authority-bearing atomic secret/git rotation. |
 | `capability.OIDCFacts`, `controller.OIDCMinter` | Supply authority-rechecked sealed OIDC identity and its complete ancestry expiry ceiling. |
@@ -2177,31 +2176,16 @@ A red HTTP case demonstrated that bootstrap `source.read` reached sizing.
 The shared `pipelineOfBoundRun` shape check now excludes bootstrap delivery.
 Source acquisition retains its separate binding. No route table grant changed.
 
-The local C2 extension is the private `sizingReader` port and `SizingStore`,
-injected by `Server.WithSizingStore`. The reader matches C1's existing tenant read.
-The writer carries the complete `Authorized` decision to each operation.
-Selections come from `Authorized.Target`; callers cannot pass a second pipeline
-or job alongside it. Pin zero clears and positive values set the pin through
-one writer operation. Numeric ceilings remain unchanged. Unknown JSON fields,
-negative/out-of-range measurements and malformed objects fail before storage.
+The local C2 extension is the private `sizingReader` port, which matches C1's
+existing tenant read. Selections come from `Authorized.Target`. The controller
+registers no sizing write route.
 
-C1's existing measurement methods accept no authority and do not establish
-exact-retry identity. They are not used as a write fallback. An absent sizing
-writer returns `policy_missing`. C1 must expose an implementation that resolves
-ancestry/membership and rechecks the live claim, exact sealed repo/pipeline,
-selected job and replay identity in the measurement transaction. No C1
-signature or file was changed here. This is an open production-integration
-point, not a completed SQL fence or idempotency proof.
-
-`TestSizingHTTPReads`, `Writes`, `Refusals`, `WriteRefusals`,
-`InvalidMeasurements` and `MissingStoreAndMethods` cover the actual server
-with committed-fact/store fakes. Cases cover full names (`build`, `ci/build`,
-`3:abcbuild`), missing records, bare machine/Actions roots, bootstrap/eval,
-ancestry, current membership, expiry/fences, audience, grants, relational
-refusals, validation, missing dependencies, typed transaction conflicts,
-private-error masking, exact methods and removal of all five old paths.
-The tests prove propagation of a relational refusal and the authorized fence.
-They do not implement C1's exact repo-key comparison inside the fake.
+`TestSizingHTTPReads`, `Refusals` and `MissingStoreAndMethods` cover the actual
+server with committed-fact/store fakes, including full names (`build`,
+`ci/build`, `3:abcbuild`), missing records, bare machine/Actions roots,
+bootstrap/eval, ancestry, current membership, expiry/fences, audience, grants,
+relational refusals, missing dependencies, private-error masking and exact
+methods.
 
 The old scoped-profile and pin-validation tests are replaced at this HTTP
 boundary, and the old profile round-trip fixture is retired. The parked
@@ -2467,13 +2451,6 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
 
 8. **Local recovery.** The retired orphan-reconciliation HTTP endpoint and its
    client are deleted. Local maintenance uses the internal store boundary.
-
-9. **Sizing transactions.** C1 must supply the authority-bearing sizing writer
-   described above, including transactional revocation, membership, exact
-   sealed repo/pipeline/job binding and retry identity. Existing unfenced
-   measurement methods cannot satisfy `controller.SizingStore`. The controller
-   refuses writes until the adapter is installed. Real sizing reads also need
-   C1's relational checker to resolve scoped keys without bare-key ambiguity.
 
 ## Cross-area assumptions
 
