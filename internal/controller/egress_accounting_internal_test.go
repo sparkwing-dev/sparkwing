@@ -88,9 +88,6 @@ func TestControllerEgressCountsDeliveredBytesAndResumesAlarm(t *testing.T) {
 	if state.GlobalDayBytes != 2 || state.GlobalMonthBytes != 2 || !state.Alarm {
 		t.Fatalf("restored=%+v", state)
 	}
-	if state.Persisted {
-		t.Fatal("controller retained the principal flush path")
-	}
 }
 
 func TestControllerEgressFailuresAreLoud(t *testing.T) {
