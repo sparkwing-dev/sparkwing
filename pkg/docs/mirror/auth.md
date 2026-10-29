@@ -219,7 +219,9 @@ before checking whether credit billing is enabled. An authorized caller gets
 and returns empty grants and charges as arrays.
 
 `PATCH /api/v1/team/members/{account}` accepts a role of `owner`, `editor` or
-`reader`. `DELETE` on that path removes the membership. The store rechecks the
+`reader`. `DELETE` on that path removes the membership; it needs `team.admin`,
+except that a member may remove themselves from a signed-in session (not with a
+token). The store rechecks the
 authenticated authority and commits the role change or removal in the same
 transaction. Removal ends the member's existing authority for that team,
 including delegated data credentials. Rejoining does not reactivate it; sign in

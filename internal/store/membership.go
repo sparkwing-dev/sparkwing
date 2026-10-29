@@ -40,9 +40,10 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor runstate.Actor, cha
 		if p.Capability.Binding.Kind != capability.BindingNone || p.Capability.Subject.Kind != capability.SubjectAccount {
 			return authorityError(apierr.Forbidden, "membership changes require an account")
 		}
-		selfRemoval := change.Role == nil && p.Capability.Subject.ID == change.AccountID
+		// safety: leaving is the member's own act, so a token they hold cannot do it for them.
+		selfRemoval := change.Role == nil && p.Capability.Subject.ID == change.AccountID && p.DirectAccountSession()
 		if !selfRemoval && !slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
-			return authorityError(apierr.Forbidden, "membership changes require team administration")
+			return authorityError(apierr.Forbidden, "membership changes require team administration; to leave a team, sign in and leave from the console")
 		}
 		actorRole, err := t.roleTx(ctx, tx, p.Capability.Subject.ID)
 		if err != nil {
