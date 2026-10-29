@@ -775,10 +775,10 @@ Hot transaction families:
 
 | Family | Order |
 |---|---|
-| Claim, self-claim, reconcile | controller lease KS, authority set, owner, run, node, billing |
-| Renewal | controller lease KS, authority set, owner, run, node, entries, billing |
+| Claim, self-claim, reconcile | controller epoch (shared), authority set, owner, run, node, billing |
+| Renewal | controller epoch (shared), authority set, owner, run, node, entries, billing |
 | Exchange | bootstrap authority at write strength, owner, run, node |
-| Launcher preparation | controller lease KS, launcher, bootstrap and current unit authority, all owners, all runs, all nodes |
+| Launcher preparation | controller epoch (shared), launcher, bootstrap and current unit authority, all owners, all runs, all nodes |
 | Release and reporting | authority, owner, run, node, attempt and metadata rows |
 | GitHub source release | installation, then subscription |
 | Blob and source upload | authority, ticket, digest advisory, quota |

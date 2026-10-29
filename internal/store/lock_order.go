@@ -50,7 +50,7 @@ func compareLockTiers(a, b storeLockTier) int {
 	return cmp.Compare(slices.Index(storeLockOrder[:], a), slices.Index(storeLockOrder[:], b))
 }
 
-// Claims take the controller lease, queue arbitration, authority and unit rows,
+// Claims take the controller epoch fence, queue arbitration, authority and unit rows,
 // then the ledger. Arbitration serializes awards without unit ranking locks.
 func lockClaimQueueTx(ctx context.Context, tx *storeTx) error {
 	if tx.claimQueueLocked {
@@ -70,7 +70,7 @@ func lockClaimQueueTx(ctx context.Context, tx *storeTx) error {
 
 // lockAuthorityThenRunTx takes a writer's authority chain, then its run.
 // Renewal holds authority while it waits for the run, so taking the run first
-// deadlocks against it (B15).
+// deadlocks against it.
 func lockAuthorityThenRunTx(ctx context.Context, tx *storeTx, team Team, runID string, actor runstate.Actor) error {
 	if _, err := resolveTeamActorTx(ctx, tx, team, actor, claimantAccepts(actor)); err != nil {
 		return err

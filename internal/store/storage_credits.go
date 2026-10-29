@@ -17,7 +17,7 @@ const (
 	// CloudStorageRateMicroPerGBDay prices a gibibyte-day at the published 0.10 dollars a GB-month over a thirty-day month, which is 100 credits a month and about 3.33 credits a day.
 	CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
 
-	// maxStorageRateMicroPerGBDay is the highest price an operator may put on a gibibyte-day, ten thousand dollars, which is the ceiling that keeps the charge arithmetic inside int64 for any byte count a database can hold.
+	// maxStorageRateMicroPerGBDay is the highest price an operator may put on a gibibyte-day, ten thousand dollars.
 	maxStorageRateMicroPerGBDay = 1_000_000_000_000
 )
 

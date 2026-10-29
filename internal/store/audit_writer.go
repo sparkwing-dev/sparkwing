@@ -244,8 +244,7 @@ type auditSecretRelease struct {
 
 // safety: audiences are relying-party identifiers a pipeline names, not people, so
 // the audience is kept plain while the job is a digest like other release events.
-// The token id, subject and expiry trace a leaked token to its mint; the subject
-// names the team, repository id, pipeline, trigger, runner kind and ref only.
+// The token id, subject and expiry trace a leaked token to its mint.
 type auditOIDCMint struct {
 	RunID     string      `json:"-"`
 	Node      auditDigest `json:"node_digest"`
