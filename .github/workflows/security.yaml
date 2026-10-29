@@ -56,7 +56,7 @@ jobs:
       - name: Run the security-scan pipeline
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
-        run: '"$RUNNER_TEMP/sparkwing" run security-scan --report-dir="$RUNNER_TEMP/security"'
+        run: '"$RUNNER_TEMP/sparkwing" run security-scan -- --report-dir="$RUNNER_TEMP/security"'
 
       # Fork tokens cannot write code-scanning alerts; scanners still run.
       - name: Upload gosec findings to code scanning
