@@ -23,6 +23,7 @@ func TestUserMistakesAreNotReportedAsInternal(t *testing.T) {
 		{"docs", "read", "--topic", "nosuch"},
 		{"profiles", "show", "--profile", "nosuch"},
 		{"profiles", "remove", "--profile", "nosuch"},
+		{"profiles", "set", "--profile", "nosuch", "--controller", "https://ci.example.com"},
 		{"examples", "--example", "nosuch"},
 	} {
 		err := runSparkwing(append(args, "-o", "json"))
@@ -39,6 +40,9 @@ func TestUserMistakesAreNotReportedAsInternal(t *testing.T) {
 		}
 		if jerr := json.Unmarshal(out.Bytes(), &doc); jerr != nil {
 			t.Fatalf("%v: %v: %s", args, jerr, &out)
+		}
+		if args[0] == "profiles" && doc.Error.Code != apierr.NotFound {
+			t.Errorf("sparkwing %s reports a missing profile as %q, want not_found", strings.Join(args, " "), doc.Error.Code)
 		}
 		if doc.Error.Code == apierr.Internal || doc.Error.Code == "" {
 			t.Errorf("sparkwing %s reports a user mistake as %q: %s", strings.Join(args, " "), doc.Error.Code, doc.Error.Message)
