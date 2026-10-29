@@ -128,15 +128,15 @@ oidc_trigger                                       manual
 oidc_repository                                    7 acme/repo
 oidc_ref                                           -
 oidc_sha                                           -
-cache_reads                                        manual:run/run-app-push-branch-source-pin:refs/heads/main refs/heads/main
+cache_reads                                        manual:fetched/run/run-app-push-branch-source-pin:refs/heads/main refs/heads/main
 default_branch_work_go                             no
-cache_write_fresh_host                             manual:run/run-app-push-branch-source-pin:refs/heads/main
+cache_write_fresh_host                             manual:fetched/run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
-cache_write_long_lived                             manual:host-<machine>/run/run-app-push-branch-source-pin:refs/heads/main
+cache_write_long_lived                             manual:host-<machine>/fetched/run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:run/run-app-push-branch-source-pin:refs/heads/main
+cache_write_long_lived_high_trust                  manual:fetched/run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
@@ -186,15 +186,15 @@ oidc_trigger                                       manual
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
-cache_reads                                        manual:account/alice:refs/heads/main refs/heads/main
+cache_reads                                        manual:fetched/account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
-cache_write_fresh_host                             manual:account/alice:refs/heads/main
+cache_write_fresh_host                             manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
-cache_write_long_lived                             manual:host-<machine>/account/alice:refs/heads/main
+cache_write_long_lived                             manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:account/alice:refs/heads/main
+cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
@@ -215,15 +215,15 @@ oidc_trigger                                       manual
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
-cache_reads                                        manual:run/run-schedule-overridden:refs/heads/main refs/heads/main
+cache_reads                                        manual:fetched/run/run-schedule-overridden:refs/heads/main refs/heads/main
 default_branch_work_go                             no
-cache_write_fresh_host                             manual:run/run-schedule-overridden:refs/heads/main
+cache_write_fresh_host                             manual:fetched/run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
-cache_write_long_lived                             manual:host-<machine>/run/run-schedule-overridden:refs/heads/main
+cache_write_long_lived                             manual:host-<machine>/fetched/run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:run/run-schedule-overridden:refs/heads/main
+cache_write_long_lived_high_trust                  manual:fetched/run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
@@ -302,15 +302,15 @@ oidc_trigger                                       manual
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
-cache_reads                                        manual:account/alice:refs/heads/main refs/heads/main
+cache_reads                                        manual:fetched/account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
-cache_write_fresh_host                             manual:account/alice:refs/heads/main
+cache_write_fresh_host                             manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
-cache_write_long_lived                             manual:host-<machine>/account/alice:refs/heads/main
+cache_write_long_lived                             manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:account/alice:refs/heads/main
+cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes
@@ -536,15 +536,15 @@ oidc_trigger                                       manual
 oidc_repository                                    7 acme/repo
 oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
-cache_reads                                        manual:account/alice:refs/heads/main refs/heads/main
+cache_reads                                        manual:fetched/account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
-cache_write_fresh_host                             manual:account/alice:refs/heads/main
+cache_write_fresh_host                             manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
-cache_write_long_lived                             manual:host-<machine>/account/alice:refs/heads/main
+cache_write_long_lived                             manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:account/alice:refs/heads/main
+cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
 host_fresh_pod               yes

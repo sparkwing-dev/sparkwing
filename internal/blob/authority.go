@@ -9,12 +9,12 @@ import (
 )
 
 // ScopeFor is the scope a run's records are written under: the verified ref for a
-// signed App delivery, and the writer's own scope for every other trust class.
+// signed App delivery, and the data writer's own scope for every other trust class.
 func ScopeFor(p runspec.Provenance) RefScope {
 	if p.Verified() {
 		return RefScope{Ref: p.Ref(), Verified: true}
 	}
-	return RefScope{Ref: p.Ref(), Writer: string(p.Writer())}
+	return RefScope{Ref: p.Ref(), Writer: string(p.DataWriter())}
 }
 
 // CapabilityScope renders the scope as sealed data grants name it: the bare ref when

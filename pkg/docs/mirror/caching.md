@@ -151,6 +151,13 @@ run writes under its own scope, `manual:<writer>:<ref>`:
 | Run bound to a GitHub Actions push | `actions`, shared per ref |
 | Retry in full or failed mode | The source run's writer |
 
+A run whose code Sparkwing fetched from its GitHub repository (a console or CLI
+branch run, "run now", an App schedule override, or a branch or tag `source:`
+pin) puts `fetched/` before its writer, for example
+`manual:fetched/account/<id>:<ref>`. It reads its repository's pipeline secrets
+and claims its repository in OIDC, so it never restores what the same member's
+uploads, local runs or `publish` wrote, and they never restore what it wrote.
+
 A child at its parent's exact revision, and every retry, write under the scope
 of the run they inherit from. Retries preserve the sealed writer, code and
 inputs in full and failed modes. The retrier is recorded separately as an actor.
