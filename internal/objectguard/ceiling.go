@@ -213,8 +213,7 @@ func (c *Ceiling) Configure(cfg CeilingConfig) {
 	c.evaluateLocked()
 }
 
-// Enforced reports whether either ceiling is set.
-func (c *Ceiling) Enforced() bool {
+func (c *Ceiling) enforced() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.limit.enforced()
@@ -384,7 +383,7 @@ type UsageSource func(context.Context) (Usage, error)
 // still over its ceiling. The ceiling then reports itself incomplete
 // and keeps counting writes.
 func (c *Ceiling) ReconcileWith(ctx context.Context, src UsageSource) error {
-	if !c.Enforced() {
+	if !c.enforced() {
 		return nil
 	}
 	return c.Measure(ctx, src)
