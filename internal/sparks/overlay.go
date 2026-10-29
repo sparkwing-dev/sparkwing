@@ -122,8 +122,8 @@ func buildOverlay(rawGoMod []byte, goModPath string, resolved map[string]string)
 	return formatted, nil
 }
 
-// repairSum materializes a missing sum for an unchanged overlay, because an
-// earlier materialization may have failed after writing the overlay.
+// safety: an unchanged overlay still gets a missing sum materialized, because
+// an earlier materialization may have failed after writing the overlay.
 func repairSum(ctx context.Context, workDir, overlayPath, sumPath string) error {
 	if _, present := goWorkInScope(workDir); present {
 		return nil

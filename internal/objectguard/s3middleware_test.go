@@ -152,8 +152,8 @@ func TestBudgetBoundsAHotLoopAgainstAFailingBucket(t *testing.T) {
 	const budget = 20
 	endpoint, hits := bucketThatFails(t, 1<<30)
 	l := New(testConfig(budget, 0))
-	// A pinned clock keeps the loop inside one minute window, where a minute
-	// boundary would hand it a fresh budget.
+	// safety: a pinned clock keeps the loop inside one minute window, where a
+	// minute boundary would hand it a fresh budget.
 	clock := time.Date(2031, 3, 4, 10, 0, 30, 0, time.UTC)
 	setClock(l, func() time.Time { return clock })
 	client := guardedClient(t, endpoint, l, 1)
