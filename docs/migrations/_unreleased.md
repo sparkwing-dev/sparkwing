@@ -178,11 +178,11 @@ After the upgrade, delete the old logs PVC and the cache deployment, as
 
 Every repository's `.sparkwing` module moves to the v0.68 SDK, because the
 CLI runs each repository with the engine its pin names. Go pipelines pin `github.com/sparkwing-dev/sparkwing` in `.sparkwing/go.mod`.
-`sparkwing upgrade` changes a pin only after the new SDK compiles and plans
-the pipeline, so move the pin by hand, fix the code, then check it:
+`sparkwing upgrade --version v0.68.0` moves the pin and then reports the
+pipeline code that no longer builds against it. Fix the code, then check it:
 
 ```sh
-go -C .sparkwing get github.com/sparkwing-dev/sparkwing@v0.68.0
+sparkwing upgrade --version v0.68.0
 go -C .sparkwing mod tidy
 go -C .sparkwing build ./...
 sparkwing pipeline plan --pipeline build

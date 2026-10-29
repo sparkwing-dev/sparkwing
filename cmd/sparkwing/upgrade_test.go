@@ -145,6 +145,22 @@ func TestUpgradeVerifiedResult(t *testing.T) {
 	}
 }
 
+func TestUpgradeAppliedPinWithFailingCodeNamesTheMigrationGuides(t *testing.T) {
+	root := upgradeFixture(t, engineid.GoSDK)
+	fake := &fakeUpgradeResolver{result: engine.UpgradeResult{Applied: true, Unverified: errors.New("undefined: runner.Main"), Plan: engine.UpgradePlan{Before: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.67.0"}, After: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}}}}
+	var out bytes.Buffer
+	command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, verifier: &upgradeVerifier{}, out: &out}
+	err := command.runArgs(t.Context(), []string{"--checkout", root, "--output=pretty"})
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Message, "moved to v0.68.0") || !strings.Contains(failure.Message, "undefined: runner.Main") ||
+		!strings.Contains(failure.Hint, "docs migrations --from v0.67.0 --to v0.68.0") {
+		t.Fatalf("error = %v", err)
+	}
+	if !strings.Contains(out.String(), "Applied, pipeline code needs changes") {
+		t.Fatalf("report: %s", &out)
+	}
+}
+
 func TestUpgradePlainReportsTargetVersion(t *testing.T) {
 	for _, dryRun := range []bool{false, true} {
 		for _, version := range []string{"v1.2.3", "1.2.3"} {
