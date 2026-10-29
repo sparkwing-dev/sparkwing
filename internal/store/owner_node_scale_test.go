@@ -23,7 +23,7 @@ func TestOwnerNodeReadDoesNotLoadUnrelatedJobs(t *testing.T) {
 	if node.Ref.NodeID != "job" || node.OwnerExecution != nil {
 		t.Fatalf("selected node: %+v", node)
 	}
-	reads, placement := 0, 0
+	reads, placement, runReads := 0, 0, 0
 	for _, statement := range trace.statements {
 		if strings.HasPrefix(statement.query, "SELECT "+nodeReadColumns+" FROM nodes ") {
 			reads++
@@ -31,11 +31,17 @@ func TestOwnerNodeReadDoesNotLoadUnrelatedJobs(t *testing.T) {
 		if strings.Contains(statement.query, "work_input AS MATERIALIZED") {
 			placement++
 		}
+		if strings.HasPrefix(statement.query, "SELECT number,pipeline,status,request_json,spec_json") {
+			runReads++
+		}
 	}
 	if reads != 1 {
 		t.Errorf("single-node lookup read %d job rows, want 1", reads)
 	}
 	if placement != 0 {
 		t.Errorf("single-node lookup made %d placement queries, want 0", placement)
+	}
+	if runReads != 0 {
+		t.Errorf("single-node lookup loaded %d whole run declarations, want 0", runReads)
 	}
 }

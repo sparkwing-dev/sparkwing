@@ -119,8 +119,7 @@ func (s *Server) localHostNode(w http.ResponseWriter, r *http.Request, a capabil
 		return err
 	}
 	if a.Principal.Capability.Unit == capability.UnitTrigger {
-		ctx := s.placementContext(r.Context())
-		node, err := tenant.ReadOwnerNode(ctx, a.Principal.Authority, runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
+		node, err := tenant.ReadOwnerNode(r.Context(), a.Principal.Authority, runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
 		if err != nil {
 			return engineLookupError(err)
 		}

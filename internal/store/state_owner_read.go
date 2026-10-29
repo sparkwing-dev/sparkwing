@@ -65,12 +65,9 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 		snapshot, err = readSnapshotTx(ctx, tx, t.team, runID)
 	} else {
 		snapshot.StoreNow = tx.now(ctx)
-		snapshot.Run, err = readRunTx(ctx, tx, t.team, runID)
-		if err == nil {
-			var node runstate.NodeRow
-			node, err = readNodeTx(ctx, tx, t.team, *target)
-			snapshot.Nodes = []runstate.NodeRow{node}
-		}
+		var node runstate.NodeRow
+		node, err = readNodeTx(ctx, tx, t.team, *target)
+		snapshot.Nodes = []runstate.NodeRow{node}
 	}
 	if err != nil {
 		return RunSnapshot{}, err
