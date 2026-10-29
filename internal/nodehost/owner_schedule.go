@@ -32,6 +32,21 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 	var workers sync.WaitGroup
 	defer func() { cancel(context.Canceled); workers.Wait() }()
 	completed := make(chan ownerExecution)
+	var slots chan struct{}
+	if limit := spec.Resolved.Settings.Options.Workers.Value; limit > 0 {
+		slots = make(chan struct{}, limit)
+	}
+	execute := func(ctx context.Context, request store.ReconcileRequest) error {
+		if slots != nil {
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			}
+		}
+		return h.execute(ctx, input, accepted, entry, request)
+	}
 	active := map[string]context.CancelCauseFunc{}
 	releasing := map[string]*atomic.Bool{}
 	debugged := map[string]int64{}
@@ -160,7 +175,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				launch(action.NodeID, func(ctx context.Context) error {
 					return h.release(ctx, input, accepted, entry, row, action.Kind, func(ctx context.Context, request store.ReconcileRequest) error {
 						releasePending.Store(false)
-						return h.execute(ctx, input, accepted, entry, request)
+						return execute(ctx, request)
 					})
 				})
 				continue
@@ -193,7 +208,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			}
 			if row.ReadyAt != nil || row.ClaimedBy != "" {
 				launch(string(row.Ref.NodeID), func(ctx context.Context) error {
-					return h.execute(ctx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: runstate.SourceNone})
+					return execute(ctx, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: runstate.SourceNone})
 				})
 			}
 		}
