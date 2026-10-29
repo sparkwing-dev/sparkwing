@@ -265,6 +265,7 @@ body and fails the job when it returns an error. `AfterRun` receives the final
 error, with nil for success. `OnFailure(id, body)` declares a separate recovery
 job and returns that job, so chained modifiers configure the recovery.
 Recovery callbacks can accept `sw.Failure` to inspect `Stage` and `Err`.
+Local and runner hosts load this failure from the persisted source job.
 Calling `OnFailure` on the returned job declares the next recovery in the chain.
 
 ## Approvals
