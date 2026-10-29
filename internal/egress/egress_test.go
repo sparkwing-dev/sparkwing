@@ -30,18 +30,6 @@ func meterAt(t *testing.T, cfg Config, stamp string) (*Meter, *time.Time) {
 	return m, &clock
 }
 
-func flushUsages(t *testing.T, m *Meter) []Usage {
-	t.Helper()
-	var flushed []Usage
-	if err := m.flush(func(usages []Usage) error {
-		flushed = append(flushed, usages...)
-		return nil
-	}); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
-	return flushed
-}
-
 func monthBytes(m *Meter, principal string) int64 {
 	for _, p := range m.State().Top {
 		if p.Principal == principal {
@@ -209,22 +197,7 @@ func TestServeKeepsTheStreamControlsAHandlerAsksFor(t *testing.T) {
 	}
 }
 
-func TestFlushReportsMovedTotalsOnceAndRestoreResumesThem(t *testing.T) {
-	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
-	m.record("alice", ClassArtifact, 400)
-	m.record("bob", ClassLog, 100)
-	dirty := flushUsages(t, m)
-	if len(dirty) != 2 || dirty[0].Principal != "alice" || dirty[0].Bytes != 400 || dirty[0].Month != "2026-09" {
-		t.Fatalf("Flush = %+v, want alice at 400 and bob at 100 for 2026-09", dirty)
-	}
-	if again := flushUsages(t, m); len(again) != 0 {
-		t.Fatalf("Flush with nothing moved = %+v, want empty", again)
-	}
-	m.record("alice", ClassArtifact, 1)
-	if moved := flushUsages(t, m); len(moved) != 1 || moved[0].Principal != "alice" || moved[0].Bytes != 401 {
-		t.Fatalf("Flush after one more byte = %+v, want alice at 401", moved)
-	}
-
+func TestRestoreResumesTheCurrentMonth(t *testing.T) {
 	restarted, _ := meterAt(t, Config{}, "2026-09-13T11:00:00Z")
 	restarted.Restore([]Usage{
 		{Principal: "alice", Month: "2026-09", Bytes: 401},
@@ -236,51 +209,6 @@ func TestFlushReportsMovedTotalsOnceAndRestoreResumesThem(t *testing.T) {
 	}
 	if len(state.Top) != 1 || state.Top[0].Principal != "alice" || state.Top[0].MonthBytes != 401 {
 		t.Fatalf("top consumers after Restore = %+v, want alice at 401", state.Top)
-	}
-}
-
-func TestFlushRetriesUsageAfterPersistenceFails(t *testing.T) {
-	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
-	m.record("alice", ClassArtifact, 400)
-	wantErr := errors.New("persistence failed")
-	if err := m.flush(func(usages []Usage) error {
-		if len(usages) != 1 || usages[0].Principal != "alice" || usages[0].Bytes != 400 {
-			t.Fatalf("first attempt = %+v, want alice at 400", usages)
-		}
-		return wantErr
-	}); !errors.Is(err, wantErr) {
-		t.Fatalf("Flush error = %v, want %v", err, wantErr)
-	}
-	if retried := flushUsages(t, m); len(retried) != 1 || retried[0].Bytes != 400 {
-		t.Fatalf("retry = %+v, want the unacknowledged 400 bytes", retried)
-	}
-	if again := flushUsages(t, m); len(again) != 0 {
-		t.Fatalf("flush after acknowledgement = %+v, want empty", again)
-	}
-}
-
-func TestFlushDoesNotAcknowledgeBytesRecordedDuringPersistence(t *testing.T) {
-	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
-	m.record("alice", ClassArtifact, 100)
-	persisting := make(chan struct{})
-	recorded := make(chan struct{})
-	go func() {
-		<-persisting
-		m.record("alice", ClassArtifact, 50)
-		close(recorded)
-	}()
-	if err := m.flush(func(usages []Usage) error {
-		close(persisting)
-		<-recorded
-		if len(usages) != 1 || usages[0].Bytes != 100 {
-			t.Fatalf("first flush = %+v, want alice at 100", usages)
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
-	if next := flushUsages(t, m); len(next) != 1 || next[0].Bytes != 150 {
-		t.Fatalf("next flush = %+v, want the newer 150-byte total", next)
 	}
 }
 
@@ -454,72 +382,6 @@ func TestPrincipalsPastTheCapShareTheOverflowCount(t *testing.T) {
 	}
 }
 
-func TestAMonthsClosingBytesSurviveTheRoll(t *testing.T) {
-	m, clock := meterAt(t, Config{}, "2026-09-30T23:59:59Z")
-	m.withPersistence()
-	m.record("alice", ClassArtifact, 400)
-
-	// safety: the flush that would have persisted September lands after
-	// the roll, so the closing total must still be offered under September.
-	*clock = at(t, "2026-10-01T00:00:01Z")
-	m.record("alice", ClassArtifact, 5)
-
-	wantErr := errors.New("persistence failed")
-	var dirty []Usage
-	if err := m.flush(func(usages []Usage) error {
-		dirty = append(dirty, usages...)
-		return wantErr
-	}); !errors.Is(err, wantErr) {
-		t.Fatalf("Flush error = %v, want %v", err, wantErr)
-	}
-	if len(dirty) != 2 {
-		t.Fatalf("failed flush = %+v, want the closing September row and the October one", dirty)
-	}
-	if dirty[0].Month != "2026-09" || dirty[0].Bytes != 400 {
-		t.Fatalf("first usage = %+v, want September at 400", dirty[0])
-	}
-	if dirty[1].Month != "2026-10" || dirty[1].Bytes != 5 {
-		t.Fatalf("second usage = %+v, want October at 5", dirty[1])
-	}
-	if state := m.State(); state.Pending != 1 {
-		t.Fatalf("pending after failed flush = %d, want the closing month retained", state.Pending)
-	}
-	if retried := flushUsages(t, m); len(retried) != 2 {
-		t.Fatalf("retry = %+v, want both month totals", retried)
-	}
-	if again := flushUsages(t, m); len(again) != 0 {
-		t.Fatalf("flush after acknowledgement = %+v, want empty", again)
-	}
-}
-
-func TestFlushKeepsAMonthRolledDuringPersistence(t *testing.T) {
-	m, clock := meterAt(t, Config{}, "2026-09-30T23:59:59Z")
-	m.withPersistence()
-	m.record("alice", ClassArtifact, 400)
-	if err := m.flush(func(usages []Usage) error {
-		if len(usages) != 1 || usages[0].Month != "2026-09" || usages[0].Bytes != 400 {
-			t.Fatalf("first flush = %+v, want September at 400", usages)
-		}
-		*clock = at(t, "2026-10-01T00:00:01Z")
-		m.record("alice", ClassArtifact, 5)
-		return nil
-	}); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
-
-	next := flushUsages(t, m)
-	if len(next) != 2 || next[0].Month != "2026-09" || next[0].Bytes != 400 ||
-		next[1].Month != "2026-10" || next[1].Bytes != 5 {
-		t.Fatalf("next flush = %+v, want the closing September total and current October total", next)
-	}
-}
-
-// safety: the alarm clears when the day rolls, so a clock that advances a
-// day per reading makes Record take its alarm branch on almost every
-// call. That is what puts the branch's own map access next to every other
-// goroutine's write; with the branch reading the principal map after the
-// unlock this is a "concurrent map read and map write" under -race, and
-// with one alarm per run it is a window the detector can miss.
 func TestConcurrentRecordsRunTheAlarmBranchUnderContention(t *testing.T) {
 	m := New(Config{GlobalDailyAlarmBytes: 1})
 	var ticks atomic.Int64
@@ -541,59 +403,6 @@ func TestConcurrentRecordsRunTheAlarmBranchUnderContention(t *testing.T) {
 	wg.Wait()
 	if m.State().Refused != 0 {
 		t.Error("the daily alarm refused a request")
-	}
-}
-
-// safety: only the controller drains a meter, so a logs or cache meter
-// that parked a closing total per principal per month would grow for the
-// life of the process.
-func TestAnUndrainedMeterParksNothingAcrossManyMonths(t *testing.T) {
-	m, clock := meterAt(t, Config{}, "2026-01-15T10:00:00Z")
-	for month := 1; month <= 36; month++ {
-		*clock = at(t, fmt.Sprintf("%04d-%02d-15T10:00:00Z", 2026+(month-1)/12, (month-1)%12+1))
-		for p := range 20 {
-			m.record(fmt.Sprintf("p%d", p), ClassLog, 100)
-		}
-	}
-	state := m.State()
-	if state.Pending != 0 {
-		t.Fatalf("an undrained meter parked %d usages across 36 month rolls, want 0", state.Pending)
-	}
-	if got := flushUsages(t, m); len(got) != 20 {
-		t.Fatalf("Flush = %d usages, want only the live month's 20", len(got))
-	}
-}
-
-func TestADrainedMeterParksClosingMonthsAndCapsTheBacklog(t *testing.T) {
-	m, clock := meterAt(t, Config{}, "2026-01-15T10:00:00Z")
-	m.withPersistence()
-
-	*clock = at(t, "2026-01-15T10:00:00Z")
-	m.record("alice", ClassLog, 100)
-	*clock = at(t, "2026-02-15T10:00:00Z")
-	m.record("alice", ClassLog, 5)
-	if state := m.State(); state.Pending != 1 {
-		t.Fatalf("Pending = %d, want January parked for the next drain", state.Pending)
-	}
-	if got := flushUsages(t, m); len(got) != 2 || got[0].Month != "2026-01" {
-		t.Fatalf("Flush = %+v, want January then February", got)
-	}
-	if state := m.State(); state.Pending != 0 {
-		t.Fatalf("Pending after a drain = %d, want 0", state.Pending)
-	}
-
-	// safety: a drain that has stopped must cap rather than grow; the store
-	// keeps a high-water mark, so a dropped entry costs history alone.
-	for i := range maxPendingUsages + 100 {
-		*clock = at(t, fmt.Sprintf("2026-%02d-15T10:00:00Z", i%12+1))
-		m.record(fmt.Sprintf("p%d", i), ClassLog, 1)
-	}
-	state := m.State()
-	if state.Pending > maxPendingUsages {
-		t.Fatalf("Pending = %d, want at most the cap of %d", state.Pending, maxPendingUsages)
-	}
-	if state.PendingDropped == 0 {
-		t.Fatal("the backlog filled without reporting a drop")
 	}
 }
 
@@ -624,63 +433,31 @@ func TestStateRollsEachPrincipalsDayWithTheProcesss(t *testing.T) {
 // day, while that day's own total no longer counts; another month's total is
 // ignored.
 func TestRestoreDayResumesTheMonthOnALaterDay(t *testing.T) {
-	m, _ := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
-	m.record("alice", ClassArtifact, 700)
-	var saved DayUsage
-	if err := m.flushDay(func(u DayUsage) error { saved = u; return nil }); err != nil {
-		t.Fatal(err)
-	}
 	restarted, _ := meterAt(t, Config{}, "2026-09-20T08:00:00Z")
 	restarted.RestoreDay(DayUsage{Day: "2026-08-31", Bytes: 9000, Month: "2026-08", MonthBytes: 9000})
-	restarted.RestoreDay(saved)
+	restarted.RestoreDay(DayUsage{Day: "2026-09-13", Bytes: 700, Month: "2026-09", MonthBytes: 700})
 	state := restarted.State()
 	if state.GlobalMonthBytes != 700 || state.GlobalDayBytes != 0 {
 		t.Fatalf("after a restart a week later = month %d, day %d; want the month's 700 and a fresh day",
 			state.GlobalMonthBytes, state.GlobalDayBytes)
 	}
 	restarted.record("bob", ClassArtifact, 50)
-	var again DayUsage
-	if err := restarted.flushDay(func(u DayUsage) error { again = u; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if again.MonthBytes != 750 || again.Bytes != 50 {
-		t.Fatalf("the next save = %+v, want the month carried forward to 750 and the day at 50", again)
+	if state := restarted.State(); state.GlobalMonthBytes != 750 || state.GlobalDayBytes != 50 {
+		t.Fatalf("after one more charge = month %d, day %d; want the month carried forward to 750 and the day at 50",
+			state.GlobalMonthBytes, state.GlobalDayBytes)
 	}
 }
 
-func TestFlushDayHandsOverTodaysTotalAndRestoreDayResumesIt(t *testing.T) {
-	m, clock := meterAt(t, Config{}, "2026-09-13T10:00:00Z")
-	m.record("alice", ClassArtifact, 600)
-	m.record("bob", ClassLog, 400)
-	var got []DayUsage
-	persist := func(u DayUsage) error { got = append(got, u); return nil }
-	if err := m.flushDay(persist); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.flushDay(persist); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].Day != "2026-09-13" || got[0].Bytes != 1000 || got[0].Month != "2026-09" || got[0].MonthBytes != 1000 {
-		t.Fatalf("FlushDay = %+v, want one 2026-09-13 total of 1000 in a 2026-09 total of 1000", got)
-	}
-
+func TestRestoreDayResumesTodaysTotal(t *testing.T) {
 	restarted, _ := meterAt(t, Config{}, "2026-09-13T11:00:00Z")
 	restarted.RestoreDay(DayUsage{Day: "2026-09-12", Bytes: 5000})
 	if state := restarted.State(); state.GlobalDayBytes != 0 {
 		t.Fatalf("GlobalDayBytes after restoring yesterday = %d, want 0", state.GlobalDayBytes)
 	}
-	restarted.RestoreDay(got[0])
+	restarted.RestoreDay(DayUsage{Day: "2026-09-13", Bytes: 1000, Month: "2026-09", MonthBytes: 1000})
 	restarted.RestoreDay(DayUsage{Day: "2026-09-13", Bytes: 10})
 	if state := restarted.State(); state.GlobalDayBytes != 1000 {
 		t.Fatalf("GlobalDayBytes after RestoreDay = %d, want 1000 and never lowered", state.GlobalDayBytes)
-	}
-
-	*clock = at(t, "2026-09-14T00:00:01Z")
-	if err := m.flushDay(func(u DayUsage) error {
-		t.Fatalf("FlushDay after the day rolled with nothing sent = %+v, want no write", u)
-		return nil
-	}); err != nil {
-		t.Fatal(err)
 	}
 }
 

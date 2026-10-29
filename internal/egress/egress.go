@@ -48,12 +48,6 @@ func TeamPrincipal(team, name string) string {
 // meter drops the principals that spent nothing.
 const overflowPrincipal = "(overflow)"
 
-// maxPendingUsages bounds the closing-month totals a meter parks for a
-// drain it is still waiting on. It sits above one month roll at the
-// principal cap, so a drain that runs monthly never reaches it and one
-// that has stopped entirely is capped rather than unbounded.
-const maxPendingUsages = 2 * MaxPrincipals
-
 // MaxPrincipals bounds how many principals one meter tracks, which bounds
 // memory against a fleet that invents identities (each GitHub Actions run
 // exchanges its own). Past it each team's new principals fold into that
@@ -125,10 +119,6 @@ type Config struct {
 	// refusal tells the operator which one to raise. The zero value uses
 	// the unprefixed names.
 	Flags FlagNames
-	// Persisted marks a meter whose owner drains it with [Meter.flush].
-	// Only such a meter parks a month's closing totals; see
-	// [Meter.withPersistence], which sets the same thing after the fact.
-	Persisted bool
 }
 
 // budgeted reports whether any budget in this configuration applies.
@@ -171,25 +161,18 @@ type PrincipalState struct {
 // State is the whole meter at a point in time, as the health route and
 // the top-consumers view report it.
 type State struct {
-	DailyAlarmBytes          int64     `json:"daily_alarm_bytes"`
-	MaxStreamsPerPrincipal   int       `json:"max_streams_per_principal"`
-	MaxDownloadsPerPrincipal int       `json:"max_downloads_per_principal"`
-	Month                    string    `json:"month"`
-	Day                      string    `json:"day"`
-	GlobalMonthBytes         int64     `json:"global_month_bytes"`
-	GlobalDayBytes           int64     `json:"global_day_bytes"`
-	Alarm                    bool      `json:"alarm"`
-	AlarmSince               time.Time `json:"alarm_since,omitzero"`
-	Refused                  uint64    `json:"refused_total"`
-	Principals               int       `json:"principals"`
-	// Persisted reports whether this meter's owner drains it, which is what
-	// decides whether a closing month is parked or dropped.
-	Persisted bool `json:"persisted"`
-	// Pending is the closing-month totals waiting for the next drain, and
-	// PendingDropped how many the backlog cap has discarded.
-	Pending        int              `json:"pending,omitempty"`
-	PendingDropped uint64           `json:"pending_dropped,omitempty"`
-	Top            []PrincipalState `json:"top,omitempty"`
+	DailyAlarmBytes          int64            `json:"daily_alarm_bytes"`
+	MaxStreamsPerPrincipal   int              `json:"max_streams_per_principal"`
+	MaxDownloadsPerPrincipal int              `json:"max_downloads_per_principal"`
+	Month                    string           `json:"month"`
+	Day                      string           `json:"day"`
+	GlobalMonthBytes         int64            `json:"global_month_bytes"`
+	GlobalDayBytes           int64            `json:"global_day_bytes"`
+	Alarm                    bool             `json:"alarm"`
+	AlarmSince               time.Time        `json:"alarm_since,omitzero"`
+	Refused                  uint64           `json:"refused_total"`
+	Principals               int              `json:"principals"`
+	Top                      []PrincipalState `json:"top,omitempty"`
 }
 
 // topConsumers is how many principals [Meter.State] reports.
@@ -202,17 +185,11 @@ type principalCounters struct {
 	dayBytes   int64
 	streams    int
 	downloads  int
-	dirty      bool
-}
-
-type pendingUsage struct {
-	id uint64
-	Usage
 }
 
 func (st *principalCounters) idle() bool {
 	return st.monthBytes == 0 && st.dayBytes == 0 &&
-		st.streams == 0 && st.downloads == 0 && !st.dirty
+		st.streams == 0 && st.downloads == 0
 }
 
 func (st *principalCounters) slots(slot Slot) int {
@@ -239,24 +216,14 @@ type Meter struct {
 	mu         sync.Mutex
 	now        func() time.Time
 	principals map[string]*principalCounters
-	// safety: a month roll zeroes a principal's counter, so the closing
-	// total is parked here for the next flush rather than lost between
-	// the roll and the flush that would have persisted it. Only a meter
-	// whose owner drains it parks anything; see [Meter.withPersistence].
-	persists       bool
-	pending        []pendingUsage
-	nextPendingID  uint64
-	pendingDropped uint64
-	pendingWarned  bool
-	month          string
-	monthBytes     int64
-	day            string
-	dayBytes       int64
-	dayDirty       bool
-	alarm          bool
-	alarmSince     time.Time
-	refused        uint64
-	overflowed     bool
+	month      string
+	monthBytes int64
+	day        string
+	dayBytes   int64
+	alarm      bool
+	alarmSince time.Time
+	refused    uint64
+	overflowed bool
 }
 
 // New builds a Meter on cfg. A zero Config counts every byte and
@@ -265,7 +232,6 @@ type Meter struct {
 func New(cfg Config) *Meter {
 	return &Meter{
 		cfg:        cfg,
-		persists:   cfg.Persisted,
 		logger:     slog.Default(),
 		now:        time.Now,
 		principals: make(map[string]*principalCounters),
@@ -281,17 +247,6 @@ func (m *Meter) WithLogger(l *slog.Logger) *Meter {
 	return m
 }
 
-// withPersistence marks this meter as one whose owner drains it with
-// [Meter.flush] and persists what comes out. Only such a meter parks a
-// month's closing totals for the next drain; a meter nobody drains would
-// otherwise accumulate one entry per principal per month roll forever.
-func (m *Meter) withPersistence() *Meter {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.persists = true
-	return m
-}
-
 // record adds n bytes served to principal through class, whatever the
 // budgets say.
 func (m *Meter) record(principal string, class Class, n int64) {
@@ -303,10 +258,8 @@ func (m *Meter) record(principal string, class Class, n int64) {
 	key, st := m.counters(principal, now)
 	st.monthBytes += n
 	st.dayBytes += n
-	st.dirty = true
 	m.monthBytes += n
 	m.dayBytes += n
-	m.dayDirty = true
 	raised := m.raiseAlarmLocked(now)
 	// safety: every value the log line needs is copied under the lock,
 	// because reading the principal map again after the unlock races the
@@ -415,71 +368,6 @@ func (m *Meter) Open(principal string, slot Slot) (func(), error) {
 	}, nil
 }
 
-// flush gives persist the usages whose byte totals moved and acknowledges
-// only the exact snapshot that persist commits. A failed persistence keeps
-// every usage eligible for the next flush, while bytes recorded during a
-// successful persistence remain eligible as a newer total.
-func (m *Meter) flush(persist func([]Usage) error) error {
-	if m == nil {
-		return nil
-	}
-	m.mu.Lock()
-	pending := append([]pendingUsage(nil), m.pending...)
-	out := make([]Usage, 0, len(pending)+len(m.principals))
-	for _, usage := range pending {
-		out = append(out, usage.Usage)
-	}
-	for name, st := range m.principals {
-		if !st.dirty {
-			continue
-		}
-		out = append(out, Usage{Principal: name, Month: st.month, Bytes: st.monthBytes})
-	}
-	m.mu.Unlock()
-	if len(out) == 0 {
-		return nil
-	}
-	slices.SortFunc(out, func(a, b Usage) int {
-		if c := compareStrings(a.Month, b.Month); c != 0 {
-			return c
-		}
-		return compareStrings(a.Principal, b.Principal)
-	})
-	if err := persist(append([]Usage(nil), out...)); err != nil {
-		return err
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, usage := range out {
-		st := m.principals[usage.Principal]
-		if st != nil && st.dirty && st.month == usage.Month && st.monthBytes == usage.Bytes {
-			st.dirty = false
-		}
-	}
-	if len(pending) == 0 {
-		return nil
-	}
-	acknowledged := make(map[uint64]struct{}, len(pending))
-	for _, usage := range pending {
-		acknowledged[usage.id] = struct{}{}
-	}
-	kept := m.pending[:0]
-	removed := false
-	for _, usage := range m.pending {
-		if _, ok := acknowledged[usage.id]; ok {
-			removed = true
-		} else {
-			kept = append(kept, usage)
-		}
-	}
-	m.pending = kept
-	if removed {
-		m.pendingWarned = false
-	}
-	return nil
-}
-
 func compareStrings(a, b string) int {
 	switch {
 	case a < b:
@@ -527,32 +415,6 @@ type DayUsage struct {
 	// total for it, so a restart later in the month resumes it too.
 	Month      string `json:",omitempty"`
 	MonthBytes int64  `json:",omitempty"`
-}
-
-// flushDay gives persist today's process total when it moved since the
-// last successful flushDay, and acknowledges it only when persist
-// succeeds and nothing was charged meanwhile.
-func (m *Meter) flushDay(persist func(DayUsage) error) error {
-	if m == nil {
-		return nil
-	}
-	m.mu.Lock()
-	m.rollGlobal(m.now().UTC())
-	if !m.dayDirty {
-		m.mu.Unlock()
-		return nil
-	}
-	usage := DayUsage{Day: m.day, Bytes: m.dayBytes, Month: m.month, MonthBytes: m.monthBytes}
-	m.mu.Unlock()
-	if err := persist(usage); err != nil {
-		return err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.day == usage.Day && m.dayBytes == usage.Bytes && m.monthBytes == usage.MonthBytes {
-		m.dayDirty = false
-	}
-	return nil
 }
 
 // RestoreDay loads a persisted process total, so a restarted service
@@ -603,14 +465,12 @@ func (m *Meter) State() State {
 		AlarmSince:               m.alarmSince,
 		Refused:                  m.refused,
 		Principals:               len(m.principals),
-		Persisted:                m.persists,
-		PendingDropped:           m.pendingDropped,
 	}
 	for name, st := range m.principals {
 		// safety: the view puts a principal's day beside the process's, so
 		// this rolls each one to now; without it a read after midnight
 		// showed yesterday's per-principal bytes against a zeroed global.
-		m.rollPrincipal(name, st, now)
+		m.rollPrincipal(st, now)
 		if st.monthBytes == 0 && st.dayBytes == 0 && st.streams == 0 && st.downloads == 0 {
 			continue
 		}
@@ -631,7 +491,6 @@ func (m *Meter) State() State {
 	if len(out.Top) > topConsumers {
 		out.Top = out.Top[:topConsumers]
 	}
-	out.Pending = len(m.pending)
 	return out
 }
 
@@ -690,17 +549,13 @@ func (m *Meter) counters(principal string, now time.Time) (string, *principalCou
 		st = &principalCounters{month: m.month, day: m.day}
 		m.principals[key] = st
 	}
-	m.rollPrincipal(key, st, now)
+	m.rollPrincipal(st, now)
 	return key, st
 }
 
-func (m *Meter) rollPrincipal(name string, st *principalCounters, now time.Time) {
+func (m *Meter) rollPrincipal(st *principalCounters, now time.Time) {
 	month, day := now.Format("2006-01"), now.Format("2006-01-02")
 	if st.month != month {
-		if st.dirty {
-			m.park(Usage{Principal: name, Month: st.month, Bytes: st.monthBytes})
-			st.dirty = false
-		}
 		st.month = month
 		st.monthBytes = 0
 	}
@@ -723,36 +578,14 @@ func (m *Meter) rollGlobal(now time.Time) {
 	if m.day != day {
 		m.day = day
 		m.dayBytes = 0
-		m.dayDirty = false
 		m.alarm = false
 		m.alarmSince = time.Time{}
 	}
 }
 
-// safety: a meter nobody drains parks nothing, and one whose drain has
-// stopped drops its oldest entry rather than growing without bound; the
-// store keeps a high-water mark, so a dropped entry costs history and
-// never hands back spend.
-func (m *Meter) park(u Usage) {
-	if !m.persists {
-		return
-	}
-	if len(m.pending) >= maxPendingUsages {
-		m.pending = m.pending[1:]
-		m.pendingDropped++
-		if !m.pendingWarned {
-			m.pendingWarned = true
-			m.logger.Warn("egress usage backlog full",
-				"pending", len(m.pending), "limit", maxPendingUsages)
-		}
-	}
-	m.nextPendingID++
-	m.pending = append(m.pending, pendingUsage{id: m.nextPendingID, Usage: u})
-}
-
 func (m *Meter) evictIdle(now time.Time) {
 	for name, st := range m.principals {
-		m.rollPrincipal(name, st, now)
+		m.rollPrincipal(st, now)
 		if st.idle() {
 			delete(m.principals, name)
 		}
