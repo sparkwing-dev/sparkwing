@@ -6,7 +6,8 @@ import (
 	"testing"
 )
 
-// Set redirects both shell and native home lookups so tests cannot read or write the owner's configuration.
+// Set redirects HOME, and USERPROFILE on Windows, to home. Callers must clear
+// XDG_CONFIG_HOME and SPARKWING_CONFIG themselves when they could point elsewhere.
 func Set(t testing.TB, home string) {
 	t.Helper()
 	t.Setenv("HOME", home)
