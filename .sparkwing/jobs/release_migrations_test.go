@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -136,10 +137,8 @@ func TestReleaseCutRollsTheGuideForTwoBreakingEntries(t *testing.T) {
 	if !strings.Contains(row, "2026-03-04") {
 		t.Errorf("index row %q carries no release date", row)
 	}
-	for _, want := range []string{"`Needs(...any)` becomes `Needs(...Dep)`", "`CacheOptions.Namespace` splits into"} {
-		if !strings.Contains(row, want) {
-			t.Errorf("index row %q does not summarize %q", row, want)
-		}
+	if !strings.Contains(row, "| Two breaking changes, both mechanical. |") {
+		t.Errorf("index row %q does not carry the guide's lead sentence", row)
 	}
 	if !strings.Contains(index, "[v0.8.0](v0.8.0.md)") {
 		t.Errorf("index dropped the older row:\n%s", index)
@@ -469,5 +468,42 @@ func TestRepositoryUnreleasedSectionRollsForTheNextRelease(t *testing.T) {
 	}
 	if _, err := planMigrationRollIn(root, rewrite.newBody, next, "2026-01-01"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The cut's wire gate diffs the API and daemon protocol against the previous
+// tag, so this names a removal while the change that made it is still open.
+func TestRepositoryUnreleasedSectionDeclaresEveryWireCut(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("git", "-C", root, "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "HEAD").Output()
+	if err != nil {
+		t.Skipf("no release tag in this checkout's history: %v", err)
+	}
+	prev := strings.TrimSpace(string(out))
+	cuts, err := wireCutsSince(t.Context(), root, prev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, "CHANGELOG.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := LintWireBreak(string(body), "v0.999.0", cuts, migrationsFS(root)); len(issues) > 0 {
+		t.Fatalf("the cut refuses these wire cuts since %s:\n%s", prev, formatAllIssues(issues))
+	}
+}
+
+func TestMigrationIndexSummaryIsTheGuidesLeadSentence(t *testing.T) {
+	guide := "# Migrating to v0.9.0\n\nv0.9 rewrites the store. Read on.\n\n## Foo\n"
+	if got := guideLead(guide); got != "v0.9 rewrites the store." {
+		t.Fatalf("lead = %q", got)
+	}
+	for _, empty := range []string{freshUnreleasedGuide, "# Migrating to v0.9.0\n\n## Foo\n"} {
+		if got := guideLead(empty); got != "" {
+			t.Errorf("lead of %q = %q, want the per-entry fallback", empty, got)
+		}
 	}
 }

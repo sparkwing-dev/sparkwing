@@ -91,7 +91,10 @@ func planMigrationRoll(changelogBody, guideSource, indexBody, version, date stri
 	if err := refuseUnrolledBreaking(rolledSec, guideName, guideBody); err != nil {
 		return migrationRoll{}, err
 	}
-	summary := breakingSummary(breaking)
+	summary := guideLead(guideBody)
+	if summary == "" {
+		summary = breakingSummary(breaking)
+	}
 	index, err := insertMigrationIndexRow(indexBody, version, date, summary)
 	if err != nil {
 		return migrationRoll{}, err
@@ -179,9 +182,32 @@ func insertMigrationIndexRow(indexBody, version, date, summary string) (string, 
 	return indexBody[:loc[1]] + "\n" + row + indexBody[loc[1]:], nil
 }
 
-// safety: the index summary has to describe this release, and _unreleased.md's
-// title is a fixed placeholder, so the sentences the breaking entries already
-// carry are the only per-release prose available at cut time.
+// safety: a guide that opens with prose already says what the release is, so
+// its first sentence is the index summary; one sentence per breaking entry is
+// the fallback, and a release with hundreds of them would make an unreadable row.
+func guideLead(guide string) string {
+	loc := guideTitleRe.FindStringIndex(guide)
+	if loc == nil {
+		return ""
+	}
+	var para []string
+	for _, line := range strings.Split(guide[loc[1]:], "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" && len(para) == 0 {
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "#") {
+			break
+		}
+		para = append(para, line)
+	}
+	lead := firstSentence(strings.Join(para, " "))
+	if lead == "" || strings.HasPrefix(freshUnreleasedGuide, "# Migrating to the next release\n\n"+lead) {
+		return ""
+	}
+	return lead
+}
+
 func breakingSummary(breaking []changelogEntry) string {
 	parts := make([]string, 0, len(breaking))
 	for _, e := range breaking {

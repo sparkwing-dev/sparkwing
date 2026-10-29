@@ -830,15 +830,21 @@ func checkSchemaBreak(ctx context.Context, repoDir, version string) error {
 	if err != nil {
 		return fmt.Errorf("release: current schema: %w", err)
 	}
-	prevSrc, err := runGitIn(ctx, repoDir, "show", prevTag+":"+storeSchemaSourcePath)
+	prevSrc, present, err := fileAtTag(ctx, repoDir, prevTag, storeSchemaSourcePath)
 	if err != nil {
 		return fmt.Errorf("release: read %s at %s: %w", storeSchemaSourcePath, prevTag, err)
 	}
-	prevSchema, err := parseStoreSchemaVersion(prevSrc)
-	if err != nil {
-		return fmt.Errorf("release: schema at %s: %w", prevTag, err)
+	// safety: a tag that kept its store elsewhere has no schema this one can
+	// open, so it counts as a change the changelog must mark.
+	prevSchema := 0
+	if present {
+		if prevSchema, err = parseStoreSchemaVersion(prevSrc); err != nil {
+			return fmt.Errorf("release: schema at %s: %w", prevTag, err)
+		}
+	} else {
+		sparkwing.Info(ctx, "%s does not exist at %s, so the store at schema %d is new", storeSchemaSourcePath, prevTag, curSchema)
 	}
-	if prevSchema == curSchema {
+	if present && prevSchema == curSchema {
 		prevSQL, curSQL := map[string]string{}, map[string]string{}
 		for _, path := range storeSchemaSQLPaths {
 			cur, err := os.ReadFile(filepath.Join(repoDir, filepath.FromSlash(path)))
