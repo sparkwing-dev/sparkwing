@@ -157,8 +157,7 @@ func TestARefusedRefillStopsRefillsAndNotifiesTheOwners(t *testing.T) {
 		{"authentication required", `{"payment_intent":"pi_refused","status":"requires_payment_method","failure":"authentication_required"}`, "", "authentication_required", http.StatusOK},
 		{"signed decline", `{"payment_intent":"pi_refused","status":"processing"}`, "payment_intent.payment_failed", "insufficient_funds", http.StatusOK},
 		{"signed authentication", `{"payment_intent":"pi_refused","status":"processing"}`, "payment_intent.requires_action", "authentication_required", http.StatusOK},
-		{"wrong deployment", `{"error":"deployment must name this service's deployment"}`, "", refillCheckoutRefused, http.StatusBadRequest},
-		{"wrong token", `{"error":"checkout token rejected"}`, "", refillCheckoutRefused, http.StatusUnauthorized},
+		{"amount out of bounds", `{"error":"a refill is between $10.00 and $1000.00"}`, "", refillCheckoutRefused, http.StatusBadRequest},
 		{"foreign customer", `{"error":"the customer belongs to another deployment"}`, "", refillCheckoutRefused, http.StatusForbidden},
 		{"stripe refused the request", `{"error":"stripe refused the payment"}`, "", refillCheckoutRefused, http.StatusUnprocessableEntity},
 	} {
@@ -260,6 +259,48 @@ func TestAnUnansweredRefillBacksOffThenFailsForGood(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), `"alert":"`+checkoutFailedAlert+`"`) || len(mail.sent) != 1 || !strings.Contains(mail.sent[0].Text, refillCheckoutUnavailable) {
 		t.Fatalf("no alert or owner mail for a refill the service never answered: mail %+v", mail.sent)
+	}
+}
+
+// A refusal about how the controller and the checkout service are paired, such as a rotated token, a wrong route or
+// another deployment, is an operator slip, not a fact about any team: it is retried like an outage, alerts the operator
+// once with the likely cause, and stops nobody's refills until checkoutRetryLimit passes.
+func TestAMisconfiguredCheckoutServiceIsRetriedAndAlertsOnce(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusNotFound, http.StatusMisdirectedRequest} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			e, tenant := refillFixture(t)
+			refillOwner(t, e)
+			var logs bytes.Buffer
+			mail := &refillMail{}
+			worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential").WithMailer(mail)
+			worker.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			now := time.Unix(1_800_000_000, 0)
+			worker.checkout.now = func() time.Time { return now }
+			calls := 0
+			worker.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+				calls++
+				return refillReply(status, `{"error":"misconfigured"}`), nil
+			})
+			for range 4 {
+				worker.refillPass(t.Context())
+				now = now.Add(time.Hour)
+			}
+			standing, err := tenant.SpendStanding(t.Context())
+			if err != nil || !standing.Refill.Open || !standing.Refill.FailedAt.IsZero() || len(mail.sent) != 0 || calls != 4 {
+				t.Fatalf("a misconfigured pairing stopped the refill: %+v, %v, mail %d, calls %d", standing.Refill, err, len(mail.sent), calls)
+			}
+			if n := strings.Count(logs.String(), `"alert":"`+checkoutMisconfiguredAlert+`"`); n != 1 {
+				t.Fatalf("misconfiguration alerts %d; want one: %s", n, logs.String())
+			}
+			if !strings.Contains(logs.String(), checkoutMisconfigurations[status]) {
+				t.Fatalf("the alert does not name the likely cause: %s", logs.String())
+			}
+			now = now.Add(checkoutRetryLimit)
+			worker.refillPass(t.Context())
+			if standing, err := tenant.SpendStanding(t.Context()); err != nil || standing.Refill.Failure != refillCheckoutUnavailable || len(mail.sent) != 1 {
+				t.Fatalf("after the retry limit: %+v, %v, mail %d", standing.Refill, err, len(mail.sent))
+			}
+		})
 	}
 }
 

@@ -1,5 +1,5 @@
 {
-  "about": "The controller and the checkout service each test their real code against a byte-for-byte copy of this file: sparkwing internal/controller/testdata and sparkwing-platform internal/billing/testdata. Change both copies together. Each route's request is the whole body the controller sends with the bearer token; each response is the service's whole answer. refill_cases are the service's answers to each Stripe outcome of the refill request. refusals are answers the controller must classify: final ones close the refill or refund for the owners and operator, the others are retried with backoff.",
+  "about": "The controller and the checkout service each test their real code against a byte-for-byte copy of this file: sparkwing internal/controller/testdata and sparkwing-platform internal/billing/testdata. Change both copies together. Each route's request is the whole body the controller sends with the bearer token; each response is the service's whole answer. refill_cases are the service's answers to each Stripe outcome of the refill request. refusals are answers the controller must classify: final ones are about the request and close the refill or refund for the owners and operator; the others, outages and a misconfigured pairing (wrong token, route or deployment), are retried with backoff.",
   "token": "bct_contract_token",
   "deployment": "dep-0123456789abcdef01234567",
   "min_cents": 1000,
@@ -29,7 +29,7 @@
     },
     "refund": {
       "path": "/internal/refund",
-      "request": {"deployment": "dep-0123456789abcdef01234567", "payment_intent": "pi_contract", "key": "pi_contract", "reason": "warning"},
+      "request": {"team": "acme", "deployment": "dep-0123456789abcdef01234567", "payment_intent": "pi_contract", "key": "pi_contract", "reason": "warning"},
       "response": {"refund": "re_contract", "status": "pending"}
     },
     "refill": {
@@ -45,8 +45,9 @@
     {"name": "no_card", "http_status": 409}
   ],
   "refusals": [
-    {"name": "wrong_token", "http_status": 401, "final": true},
-    {"name": "wrong_deployment", "http_status": 400, "final": true},
+    {"name": "wrong_token", "http_status": 401, "final": false},
+    {"name": "wrong_deployment", "http_status": 421, "final": false},
+    {"name": "no_route", "http_status": 404, "final": false},
     {"name": "below_minimum", "http_status": 400, "final": true},
     {"name": "above_maximum", "http_status": 400, "final": true},
     {"name": "another_teams_customer", "http_status": 403, "final": true},

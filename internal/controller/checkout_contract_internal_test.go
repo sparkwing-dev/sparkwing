@@ -125,7 +125,7 @@ func TestEveryCheckoutCallMatchesTheSharedContract(t *testing.T) {
 		t.Fatalf("portal %q: %v", url, err)
 	}
 	in, out = contractFields(t, c.Routes["refund"].Request), contractFields(t, c.Routes["refund"].Response)
-	if refund, status, err := c.client(t, c.Token, "refund", http.StatusOK, c.Routes["refund"].Response).refund(ctx, c.Deployment, in["payment_intent"].(string), in["reason"].(string)); err != nil ||
+	if refund, status, err := c.client(t, c.Token, "refund", http.StatusOK, c.Routes["refund"].Response).refund(ctx, c.Deployment, store.Team(in["team"].(string)), in["payment_intent"].(string), in["reason"].(string)); err != nil ||
 		refund != out["refund"] || status != out["status"] {
 		t.Fatalf("refund %q %q: %v", refund, status, err)
 	}

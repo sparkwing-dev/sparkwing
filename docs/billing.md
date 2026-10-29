@@ -175,11 +175,18 @@ key, so a crash or a lost answer never charges twice. A call the checkout
 service does not answer, or answers with a 5xx or 429, is repeated on the next
 pass, then after waits that double from 30 seconds up to 30 minutes; one it
 still cannot answer 6 hours after the first failure closes as
-`checkout_unavailable`. Any other refusal, such as a 400 for a deployment the
-service does not serve or a 401 for a rotated token, closes the refill as
-`checkout_refused` without another call. Either one logs
-`alert=checkout_failed` for the operator and stops refills the way a decline
-does, and the owners get one email saying automatic refills stopped. A refill
+`checkout_unavailable`. A refusal about how the two services are paired is
+retried the same way, because it is an operator slip rather than a fact about
+the team: a 401 (the `billing-token` credential and the service's
+`BILLING_CHECKOUT_TOKEN` differ), a 404 (`--billing-url` does not name the
+service) or a 421 (the service's `BILLING_DEPLOYMENT` is another deployment).
+The first one logs `alert=checkout_misconfigured` naming the likely cause, once
+until a call is answered again, and fixing the pairing within 6 hours affects no
+team. Any other refusal is about the request itself, such as an amount outside
+the bounds, another team's Stripe customer (403) or a request Stripe refused
+(422), and closes the refill as `checkout_refused` without another call. Either
+failure logs `alert=checkout_failed` for the operator and stops refills the way
+a decline does, and the owners get one email saying automatic refills stopped. A refill
 the team is no longer eligible for, for example because refills were turned off
 or the team's Stripe customer changed, is withdrawn without another call; a payment an earlier call made is
 still credited. A refill that nothing settles within 23 hours is closed
@@ -351,9 +358,12 @@ refill. A refund Stripe reports failed or canceled is not retried, and neither
 is one the checkout service refuses or still cannot answer 6 hours after the
 first failure, which also logs `alert=checkout_failed`: the operator console
 lists it on the team under Refunds Stripe did not make, and the operator
-returns the money in Stripe.
+returns the money in Stripe. Runbook: a refund marked failed this way may still
+have been made, if Stripe refunded before an answer was lost, so check the
+payment's refunds in Stripe before refunding by hand; a second refund of the
+same payment fails with `charge_already_refunded` and moves no money.
 The team's owners get one email saying the refund of that amount for the payment
-on its date could not be completed by Stripe and that Sparkwing will follow up. A
+on its date could not be completed and that Sparkwing will follow up. A
 terminal refund outcome survives a later pending delivery, and a conflicting
 terminal outcome is refused.
 
