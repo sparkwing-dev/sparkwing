@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -30,7 +31,7 @@ func ReadPin(checkout string, sdk engineid.SDKKind) (engineid.Pin, error) {
 		return engineid.Pin{}, invalid("unknown SDK kind", "Select go or typescript.")
 	}
 	if err != nil {
-		return engineid.Pin{}, invalid(err.Error(), "Pin a published SDK release in the manifest and update its native lockfile.")
+		return engineid.Pin{}, invalid(err.Error(), "Pin an exact SDK release or a version-stamped local TypeScript package and update its native lockfile.")
 	}
 	if _, err = VersionForPin(pin); err != nil {
 		return engineid.Pin{}, err
@@ -157,10 +158,13 @@ func readNpmPin(dir string) (engineid.Pin, error) {
 		LockfileVersion int `json:"lockfileVersion"`
 		Packages        map[string]struct {
 			Version                                         string `json:"version"`
+			Resolved                                        string `json:"resolved"`
+			Link                                            bool   `json:"link"`
 			Dependencies, DevDependencies, PeerDependencies map[string]string
 		} `json:"packages"`
 		Dependencies map[string]struct {
-			Version string `json:"version"`
+			Version  string `json:"version"`
+			Resolved string `json:"resolved"`
 		} `json:"dependencies"`
 	}
 	if err := decodeUniqueJSON(lockBody, &lock); err != nil {
@@ -182,11 +186,43 @@ func readNpmPin(dir string) (engineid.Pin, error) {
 		if err != nil || rootSpec != spec {
 			return engineid.Pin{}, fmt.Errorf("package manifest and npm lockfile disagree")
 		}
-		if legacy := lock.Dependencies[typeScriptPackage].Version; legacy != "" && legacy != pin.Version {
+		if legacy := lock.Dependencies[typeScriptPackage].Version; localNpmPath(spec) == "" && legacy != "" && legacy != pin.Version {
 			return engineid.Pin{}, fmt.Errorf("conflicting SDK lockfile resolutions")
 		}
 	}
-	if !npmSatisfies(spec, pin.Version) {
+	if source := localNpmPath(spec); source != "" {
+		entry := lock.Packages["node_modules/"+typeScriptPackage]
+		resolved := entry.Resolved
+		if lock.LockfileVersion == 1 {
+			resolved = lock.Dependencies[typeScriptPackage].Resolved
+			if resolved == "" {
+				resolved = pin.Version
+			}
+		} else if entry.Link {
+			pin.Version = lock.Packages[entry.Resolved].Version
+		}
+		if localNpmPath(resolved) == "" && !entry.Link {
+			return engineid.Pin{}, fmt.Errorf("local SDK lockfile must resolve the manifest source")
+		}
+		resolved = strings.TrimPrefix(resolved, "file:")
+		if localNpmFile(dir, resolved) != localNpmFile(dir, source) {
+			return engineid.Pin{}, fmt.Errorf("local SDK lockfile resolves a different source")
+		}
+		if legacy := lock.Dependencies[typeScriptPackage].Resolved; legacy != "" && localNpmFile(dir, strings.TrimPrefix(legacy, "file:")) != localNpmFile(dir, source) {
+			return engineid.Pin{}, fmt.Errorf("conflicting local SDK lockfile sources")
+		}
+		version, _, err := localNpmPackage(dir, source)
+		if err != nil {
+			return engineid.Pin{}, err
+		}
+		if lock.LockfileVersion != 1 && pin.Version != version {
+			return engineid.Pin{}, fmt.Errorf("local SDK package version differs from its lockfile")
+		}
+		if legacy := lock.Dependencies[typeScriptPackage].Version; legacy != "" && legacy != version && localNpmFile(dir, localNpmPath(legacy)) != localNpmFile(dir, source) {
+			return engineid.Pin{}, fmt.Errorf("conflicting local SDK lockfile resolutions")
+		}
+		pin.Version = version
+	} else if !npmSatisfies(spec, pin.Version) {
 		return engineid.Pin{}, fmt.Errorf("SDK lockfile resolution does not satisfy its manifest requirement")
 	}
 	return pin, nil
@@ -194,11 +230,33 @@ func readNpmPin(dir string) (engineid.Pin, error) {
 
 func pinInputsDigest(dir string, pin engineid.Pin) (string, error) {
 	var buf bytes.Buffer
-	for _, path := range []string{pin.Manifest, pin.Lockfile} {
+	paths := []string{pin.Manifest, pin.Lockfile}
+	if pin.SDK == engineid.TypeScriptSDK {
+		body, err := readPinFile(filepath.Join(dir, pin.Manifest))
+		if err != nil {
+			return "", err
+		}
+		spec, err := sdkRequirement(body)
+		if err != nil {
+			return "", err
+		}
+		if source := localNpmPath(spec); source != "" {
+			_, path, err := localNpmPackage(dir, source)
+			if err != nil {
+				return "", err
+			}
+			paths = append(paths, path)
+		}
+	}
+	for _, path := range paths {
 		if path == "" {
 			continue
 		}
-		body, err := readPinFile(filepath.Join(dir, path))
+		input := path
+		if !filepath.IsAbs(input) {
+			input = filepath.Join(dir, input)
+		}
+		body, err := readPinFile(input)
 		if err != nil {
 			return "", err
 		}
