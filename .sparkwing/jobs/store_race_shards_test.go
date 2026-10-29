@@ -94,3 +94,9 @@ func TestStoreRaceExecIsolatesProductStateAndGoWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreRaceShardsRunTheShortClass(t *testing.T) {
+	if args := storeRaceShardArgs([]string{"TestA"}); !slices.Contains(args, "-test.short") || !slices.Contains(args, "-test.timeout=80m") {
+		t.Fatalf("store race shard args = %q, want the short class under the 80-minute bound", args)
+	}
+}

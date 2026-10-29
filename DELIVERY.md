@@ -253,7 +253,10 @@ file. Other syntax and workflow checks remain active.
   and 18 minutes in another. All four shards reached the former 55-minute
   timeout with different active tests running for 1s to 6s. The new 80-minute
   shard timeout is a hypothesis to verify on hosted runners, not a measured
-  passing budget. Later checks remain under the 120-minute node deadline and a
+  passing budget. Hosted run 40856721261 still ran all four shards past it,
+  with TestRefillModel alone at over a minute under race, so the shards run
+  the short class (`-test.short`); the tests that guard themselves as slow keep
+  running without race in `gate` and on PostgreSQL in `store-postgres`. Later checks remain under the 120-minute node deadline and a
   130-minute hosted job deadline. The hosted `gate` job keeps its 60-minute
   deadline.
   A Go step's own parallelism depends on who else holds the
