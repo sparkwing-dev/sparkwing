@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -55,11 +56,12 @@ type githubExchangeReq struct {
 }
 
 type githubExchangeResp struct {
-	Token      string   `json:"token"`
-	Team       string   `json:"team"`
-	Repository string   `json:"repository"`
-	ExpiresAt  int64    `json:"expires_at"`
-	Labels     []string `json:"labels"`
+	Binding    capability.Binding `json:"binding"`
+	Token      string             `json:"token"`
+	Team       string             `json:"team"`
+	Repository string             `json:"repository"`
+	ExpiresAt  int64              `json:"expires_at"`
+	Labels     []string           `json:"labels"`
 }
 
 type githubBindingReq struct {

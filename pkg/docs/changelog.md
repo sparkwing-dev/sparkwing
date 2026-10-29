@@ -760,6 +760,7 @@ unlock.
 
 ### Fixed
 
+- **runner:** `warm --github-actions` exchanges the workflow's ID token for controller access and uses the returned verified repository, ref, commit and expiry. The exchange response includes its push binding. The default repository allowlist uses the verified GitHub path instead of the internal repository key.
 - **dashboard (Breaking):** `--allow-remote` starts a non-loopback dashboard with mandatory browser-session authentication, and `--read-only` refuses browser mutations. `--allow-origin` is removed because the controller requires same-origin requests. Changing a running dashboard's address or read-only policy requires stopping it first.
 - **controller:** Startup flag discovery now includes all 61 flags the controller parses. A regression compares the shared help registry with the real controller parser's names and argument requirements.
 - **TypeScript SDK:** Local `file:` directory and tarball pins select the package's exact engine version and validate their npm lockfile source. Tarball bytes or the directory manifest participate in pin identity.
@@ -868,6 +869,7 @@ unlock.
 
 ### Removed
 
+- **runner + cli (Breaking):** Removed inert warm-runner flags `--heartbeat`, `--lease`, `--holder-prefix`, `--trigger-source`, `--accept-working-tree`, `--cpu-ceiling`, `--memory-ceiling`, `--deadline` and `--warm-module`, plus the runner chart's `warmModules` setting. Leases come from the controller; resource ceilings belong to the launcher and timeouts to pipeline jobs. `pipeline lint --static` is removed because lint always analyzes source.
 - **sdk (Breaking):** `sparkwing.ErrNoProject` is removed. No helper could return it: `WorkDir()` is the process working directory, so `Path`, `ReadFile`, `WriteFile`, `Glob`, `Bash` and `Exec` always resolve relative paths against it, and `WorkDir()` panics only when `os.Getwd` fails. Delete `errors.Is(err, sparkwing.ErrNoProject)` checks.
 - **api + wingwire (Breaking):** The HTTP API and the daemon protocol drop or reshape routes, OpenAPI components and message members since v0.67.0. The migration guide lists each one. See [migration guide](docs/migrations/_unreleased.md#wire-surface-changes-since-v0670).
 - **store (Breaking):** Deployment card collection, settlement, fraud warnings and queued refunds move from Store to Operator. See [migration guide](docs/migrations/_unreleased.md#card-workers-use-operator).

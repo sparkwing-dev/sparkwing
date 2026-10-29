@@ -120,7 +120,6 @@ Check pipeline source for idiomatic anti-patterns (enforced gate)
 | `--pipeline NAME` | Pipeline name. |
 | `--rules` | Print the lint rules with what each forbids and why, without analyzing any source. |
 | `--dir DIR` | Analyze Go pipeline source in this directory instead of .sparkwing/jobs, or .sparkwing when there is no jobs directory. |
-| `--static` | Accepted but ignored; lint always analyzes source without running pipelines. |
 
 ## `sparkwing pipeline list`
 

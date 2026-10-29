@@ -225,7 +225,6 @@ func Registry() []Command {
 			{Name: "pipeline", Argument: "NAME"},
 			{Name: "rules"},
 			{Name: "dir", Argument: "DIR"},
-			{Name: "static"},
 		}},
 		{Path: "sparkwing pipeline list", Flags: []Flag{
 			{Name: "all"},
@@ -866,23 +865,14 @@ func Registry() []Command {
 		{Path: "sparkwing-runner version", Flags: []Flag{
 			{Name: "offline"},
 		}},
-		{Path: "sparkwing-runner warm", Rules: []string{"Validate heartbeat and lease with limits.CheckRenewal. GitHub Actions exchange scopes work to the authorized push."}, Flags: []Flag{
+		{Path: "sparkwing-runner warm", Rules: []string{"Claim triggers and jobs with controller-awarded leases. GitHub Actions exchange scopes work to the authorized push."}, Flags: []Flag{
 			{Name: "controller", Argument: "VALUE"},
 			{Name: "poll", Argument: "DURATION"},
-			{Name: "heartbeat", Argument: "DURATION"},
 			{Name: "max-concurrent", Argument: "N"},
-			{Name: "lease", Argument: "DURATION"},
-			{Name: "holder-prefix", Argument: "VALUE"},
 			{Name: "metrics-addr", Argument: "VALUE"},
 			{Name: "max-claims-before-restart", Argument: "N"},
 			{Name: "also-claim-triggers"},
 			{Name: "claim-jobs"},
-			{Name: "accept-working-tree"},
-			{Name: "trigger-source", Argument: "VALUE", Repeatable: true, CommaList: true},
-			{Name: "cpu-ceiling", Argument: "VALUE"},
-			{Name: "memory-ceiling", Argument: "VALUE"},
-			{Name: "deadline", Argument: "DURATION"},
-			{Name: "warm-module", Argument: "VALUE", Repeatable: true, CommaList: true},
 			{Name: "local-admission"},
 			{Name: "github-actions"},
 			{Name: "team", Argument: "VALUE"},
