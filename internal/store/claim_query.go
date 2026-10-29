@@ -238,6 +238,14 @@ type claimSQL struct {
 	overflow        []claimOverflowFacts
 }
 
+// cloudSizeLabelSQL is match.IsCloudSizeLabel in SQL. The suffix is read from a start counted by length because
+// SQLite and PostgreSQL disagree on substr with a negative start.
+func cloudSizeLabelSQL(alt string) string {
+	prefix, suffix := match.CloudSizeLabelPrefix, match.CloudSizeLabelSuffix
+	return `(substr(` + alt + `,1,` + fmt.Sprint(len(prefix)) + `)='` + prefix + `' AND substr(` + alt + `,length(` + alt + `)-` +
+		fmt.Sprint(len(suffix)-1) + `)='` + suffix + `')`
+}
+
 func (q *claimSQL) param(v any) string { q.args = append(q.args, v); return "?" }
 func (q *claimSQL) jsonParam(v any) (string, error) {
 	raw, err := json.Marshal(v)
@@ -681,7 +689,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 			sizes = append(sizes, `SELECT '`+size.Label+`' AS label,`+fmt.Sprint(size.CreditClass)+` AS cpu_class,`+fmt.Sprint(ordinal)+` AS ordinal`)
 		}
 		class = `(SELECT size.cpu_class FROM (` + strings.Join(sizes, ` UNION ALL `) + `) size WHERE ` + q.terms("unfunded.selectors", func(alt string) string {
-			return `(` + alt + `=size.label OR (NOT (substr(` + alt + `,1,10)='sparkwing-' AND substr(` + alt + `,-3)='cpu') AND ` + q.contains(q.at("unfunded.facts", "labels"), alt) + `))`
+			return `(` + alt + `=size.label OR (NOT ` + cloudSizeLabelSQL(alt) + ` AND ` + q.contains(q.at("unfunded.facts", "labels"), alt) + `))`
 		}) + ` ORDER BY size.ordinal LIMIT 1)`
 	}
 	writer := q.at(request, "provenance", "writer")
