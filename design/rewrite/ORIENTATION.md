@@ -44,6 +44,11 @@ credential model in `docs/auth.md`, and the decision log
 | Ranking and preference holds (decision 52) | `claim_query.go`: `rankingHold`, `firstPreferenceHold`, `placementCTEs` | `claim_ranking_test.go` |
 | Team holds (operator, fraud) | `credit_reversals.go`: `teamHoldTx`, `Tenant.HoldByOperator` | `hold_stop_test.go` |
 | Concurrency admission (decision 45) | `capacity_admission.go`: `Tenant.MayStart`, `admitWorkTx`; `capacity_owner.go`: `tryAdmissionLockTx` | `admission_concurrent_test.go`; `capacity_order_postgres_test.go`: `TestPostgresAdmissionLocksFollowTheirStoreSchema` |
+| Owner placement uses one shared eligibility read for a run snapshot | `state_owner_read.go`: `readOwnerSnapshot`; `owner_placement.go`: `ownerEligibleNodesTx` | `owner_snapshot_scale_test.go`: `TestOwnerSnapshotPlacementWorkDoesNotMultiplyByJobCount` |
+| Whole snapshots load node rows and retry counts together | `state_read.go`: `readSnapshotTx`, `scanNode` | `state_snapshot_batch_test.go`: `TestReadSnapshotLoadsNodeRowsTogether` |
+| Private owner-job reads select only the requested job | `state_owner_read.go`: `Tenant.ReadOwnerNode` | `owner_node_scale_test.go`: `TestOwnerNodeReadDoesNotLoadUnrelatedJobs` |
+| Ready jobs reuse the scheduling snapshot until a debug pause needs a fresh cancellation check | `internal/nodehost/owner_schedule.go`: `OwnerHost.release` | `internal/nodehost/owner_release_scale_test.go`: `TestOwnerReleaseDoesNotReadThePlanAgainForEachJob` |
+| Local queue priority follows a node participant's owning run | `internal/wingd/server.go`: `runConnsLocked`; `internal/admission/ledger.go`: `specBelongsToRun` | `internal/wingd/set_priority_node_test.go`: `TestSetPriority_NodeParticipantRecognizesOwningRun`; `internal/admission/ledger_node_priority_test.go`: `TestNodeParticipantPrioritySurvivesOtherParticipantRelease` |
 
 ### Secrets
 
@@ -113,6 +118,14 @@ credential model in `docs/auth.md`, and the decision log
 | Route table | `internal/capability/tables.go`: `Routes`; dispatch in `internal/routepolicy` | `internal/capability/policy_test.go` |
 | OpenAPI | `internal/apispec` writes `api/openapi.yaml`; regenerate with `bin/gen-api-docs.sh` | `bin/check-api-spec.sh`; `internal/apispec/final_contract_test.go` |
 | Docs mirror and drift | `docs/` is the source; `bin/sync-docs.sh` copies it to `pkg/docs/mirror/`; `bin/regen-all.sh` reruns every generator | `bin/sync-docs.sh --check`; `internal/doccheck/cliverbs_test.go`, `internal/doccheck/apiroutes_test.go` |
+| Local readiness probes do not wait for the database writer | `internal/wingd/localcontroller/state.go`: `localState.Ready`; `admission.go`: `localController.Ready` | `internal/wingd/localcontroller/state_readiness_test.go`: `TestStateReadinessDoesNotWaitForStoreWriter` |
+| Private child authentication resolves the requested identity | `internal/controller/private_host.go`: `localHostAuthority` | `internal/controller/private_host_authority_test.go`: `TestLocalHostChildAuthorityDoesNotReadUnrelatedJobs` |
+| Jobs that never started keep their terminal explanation | `state_read.go`: `readNodeTx`; `internal/controller/engine_run_detail.go`: `fillJobDeclarations`; `internal/controller/engine_snapshot.go`: `snapshotJob` | `internal/controller/unstarted_status_test.go`: `TestRunDetailExplainsJobsThatNeverStarted` |
+| Local approval deadlines and pending listings | `internal/wingd/localcontroller/controller.go`: `maintain`; `tenant_reads.go`: `ListPendingApprovals` | `internal/wingd/localcontroller/approval_deadline_test.go`: `TestMaintenanceSettlesTenSecondApprovalWithinOneSecond`; `approval_reaper_runtime_test.go`: `TestCancelledApprovalLeavesPendingListAndKeepsHistory` |
+| Local owner-selected debug boundaries persist and follow release | `debug_pause_owner.go`: `Tenant.OwnerDebugPause`; `internal/nodehost/native_assembly.go` binds `storeDebugBoundary` | `internal/nodehost/native_debug_test.go`: `TestNativeOwnerPersistsDebugPauseUntilReleased` |
+| Run statistics include nearest-rank P50 | `cmd/sparkwing/runs_stats.go`: `aggregateRunDetails` | `cmd/sparkwing/runs_stats_median_test.go`: `TestRunStatisticsReportsNearestRankP50` |
+| Compiled pipeline reuse emits a cache-hit diagnostic | `internal/bincache/materialize.go`: `MaterializePipeline` | `internal/bincache/materialize_test.go`: `TestMaterializePipelineReusesBinaryWithoutGo` |
+| Missing local secrets carry local repair commands | `secret_preflight.go`: `secretPreflightTx`, `secretPreflightError.detail` | `secret_preflight_local_test.go`: `TestLocalSecretPreflightGivesLocalSetCommand` |
 
 ## Test and gate workflow
 

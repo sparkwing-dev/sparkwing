@@ -20,6 +20,17 @@ unlock.
 
 ## [Unreleased]
 
+- **local controller:** Large plans batch placement and node reads, reuse run facts when releasing jobs, and resolve private job and child-authority reads directly. Readiness probes no longer wait behind the database writer or label a busy controller as unresponsive.
+
+- **runs:** Status names the failed dependency that blocked a job and explains `queue_timeout` even when the job never started.
+- **debug:** Local runs persist before/after/failure pauses so `sparkwing debug env` can inspect them and `debug resume` can release them. Cancellation while paused stops dispatch, and resuming after failure preserves the failed outcome.
+
+- **queue:** A queued local job can be moved with `sparkwing queue priority --run ID --set front`. Jobs waiting for local admission now follow their run's priority.
+- **runs:** `sparkwing runs stats` includes nearest-rank P50 duration in JSON and table output alongside the mean and P95.
+- **approvals:** The local controller checks approval deadlines every second. Cancelled runs no longer leave their gates in the pending approvals list. Per-run approval history remains available.
+- **cache:** Reusing a compiled Go pipeline prints `Cache hit: pipeline binary`, including after `sparkwing cache warm`.
+- **secrets:** Missing-secret errors for local runs include `sparkwing secrets set --secret NAME --file <path>` and local status syntax.
+
 - **store:** PostgreSQL admission locks stay within their store schema
   Independent stores sharing a database no longer defer each other's job releases.
 

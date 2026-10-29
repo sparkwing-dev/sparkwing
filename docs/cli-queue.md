@@ -41,6 +41,8 @@ List running and queued work with expected start and finish
 
 Change the priority of queued work
 
+Local jobs follow their run's priority. --set front moves a visible waiting run ahead of the other queued runs.
+
 ### Flags
 
 | Flag | Description |

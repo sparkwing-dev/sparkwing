@@ -8,6 +8,10 @@ secret only when its plan declares it and the secret's scope admits the run. The
 commands are in [cli-secrets](cli-secrets.md); declaration and the preflight
 that refuses a plan missing a secret are in [pipelines](pipelines.md).
 
+For a local run with a missing declared secret, the error names the secret and
+gives its repair command, such as `sparkwing secrets set --secret BAR --file <path>`.
+Run the command against the same local controller, then start the pipeline again.
+
 ## Which runs read which secrets
 
 Pipeline secrets match GitHub repository secrets: one repository's pipeline

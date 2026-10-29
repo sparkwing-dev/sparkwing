@@ -186,6 +186,8 @@ not transfer pipeline executables.
 
 `sparkwing cache warm --checkout /path/to/repo` prepares this local cache. A Go
 checkout compiles its pipeline. A TypeScript checkout installs dependencies.
+When a Go pipeline reuses a compiled binary, the CLI prints
+`Cache hit: pipeline binary`, including on the run after a successful warmup.
 See [Warmup](sparks.md#warmup) for receipts and the process-policy integration.
 
 ### The key
