@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **cli:** Fresh QA Go scaffolds resolve their SDK pin
+  `pipeline new` uses the QA Go proxy and checksum settings during dependency
+  setup. Production builds use a public SDK pin even if stamped with a QA version.
+
 - **store:** PostgreSQL admission locks stay within their store schema
   Independent stores sharing a database no longer defer each other's job releases.
 
