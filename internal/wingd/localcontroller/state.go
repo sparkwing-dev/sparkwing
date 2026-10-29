@@ -31,7 +31,7 @@ func (s *localState) Ready() error {
 	if !ready {
 		return errors.New("wingd: local state has not reconciled")
 	}
-	return s.binding.Store.AsOperator().Ping(context.Background())
+	return nil
 }
 
 func (s *localState) Reconcile(ctx context.Context) (wingd.LocalActivity, error) {
