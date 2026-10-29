@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // ExchangeGitHubActions requests the job's ID token for this controller and exchanges it for push-bound access.
+// Token request and controller URLs require HTTPS except on loopback.
 func ExchangeGitHubActions(ctx context.Context, options EngineOptions, team, requestURL, requestToken string) (capability.Issued, error) {
 	c, err := newEngineClient(options)
 	if err != nil {
@@ -21,6 +24,18 @@ func ExchangeGitHubActions(ctx context.Context, options EngineOptions, team, req
 	endpoint, err := url.Parse(requestURL)
 	if err != nil || endpoint == nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || requestToken == "" {
 		return capability.Issued{}, errors.New("GitHub Actions requires ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN; grant the workflow id-token: write")
+	}
+	for _, rawURL := range []string{c.base, requestURL} {
+		parsed, err := url.Parse(rawURL)
+		if err != nil {
+			return capability.Issued{}, err
+		}
+		host := parsed.Hostname()
+		ip := net.ParseIP(host)
+		loopback := strings.EqualFold(host, "localhost") || ip != nil && ip.IsLoopback()
+		if parsed.Scheme != "https" && !loopback {
+			return capability.Issued{}, errors.New("GitHub Actions token request and controller URLs must use HTTPS unless loopback")
+		}
 	}
 	query := endpoint.Query()
 	query.Set("audience", c.base)
