@@ -54,6 +54,7 @@ type NativeConfig struct {
 	Logs           func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
 	Evaluate       func(context.Context, EvaluationInput) (ProcessGrant, error)
 	ExpansionActor func(context.Context, RunInput, runstate.NodeRow) (runstate.Actor, error)
+	ReadFailure    func(context.Context, runspec.NodeRef, int64) (*nodeproto.JobFailure, error)
 }
 
 // NewNativeServices constructs the shared host services without opening a state store.
@@ -209,7 +210,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		PlanningLog: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		},
-		Executor: ExecutionOperations{PublishOutput: outputs.PublishOutput, Annotate: claims.annotate, PrepareArtifacts: artifacts.Prepare, PrepareCaches: caches.Prepare, BindStorage: func(ctx context.Context, input NodeInput) (StorageBinding, error) {
+		Executor: ExecutionOperations{ReadFailure: cfg.ReadFailure, PublishOutput: outputs.PublishOutput, Annotate: claims.annotate, PrepareArtifacts: artifacts.Prepare, PrepareCaches: caches.Prepare, BindStorage: func(ctx context.Context, input NodeInput) (StorageBinding, error) {
 			principal, err := claims.principal(ctx, input.NodeID, int64(input.Generation), int64(input.Attempt))
 			if err != nil {
 				return StorageBinding{}, err
