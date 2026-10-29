@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **cli:** Before the command word the parser reads only global flags (`-o`, `-C`, `-h`, `--help-all`) and `--profile`. `sparkwing --version` now says to use the `version` command instead of "--version requires VERSION", and a leaf's valued flag such as `--tail` can no longer swallow the next word (`sparkwing --tail runs list`). An unknown flag mentions `--` only on commands that take pipeline arguments.
 - **cli:** Every flag's `--help` text says what it does. About 300 flags described themselves by their own name (`--shared  shared`, `--trust  trust`), and `pipeline new --short` printed the short-flag policy; security switches such as `secrets set --shared` and `--only-on`, `runners add --trust`, `team settings set --high-trust` and the `dashboard start` access flags now say who gains access. A test refuses any flag without its own help text.
 - **examples:** `sparkwing examples -o json` prints one `{name, category, summary}` record per example, the fields the terminal list shows, instead of every full manifest (about 105 KB). `sparkwing examples --example NAME -o json` still returns the full manifest.
 - **sdk (TypeScript):** `docker.login` no longer registers its secret as a mask, matching the Go SDK and the rule that neither SDK sends automatic mask registrations; the host masks declared secrets, and pipeline code calls `ctx.mask` for anything else.
