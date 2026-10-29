@@ -126,3 +126,19 @@ func TestTenantSelectionReportsAGitFailureAsItself(t *testing.T) {
 		t.Fatalf("git failure reported as = %v", err)
 	}
 }
+
+func TestTenantSelectionAcceptsAbsentConfigurationBesideFilteredBlobs(t *testing.T) {
+	repo, _ := sourcetest.Repository(t)
+	sourcetest.Git(t, repo, "config", "uploadpack.allowFilter", "true")
+	sourcetest.Write(t, filepath.Join(repo, "large.bin"), strings.Repeat("x", int(limits.ProjectConfigBytes)+1))
+	sourcetest.Git(t, repo, "add", ".")
+	sourcetest.Git(t, repo, "commit", "-qm", "unrelated oversized blob")
+	execution := sourcetest.Git(t, repo, "rev-parse", "HEAD")
+	remote := "https://8.8.8.8/team/no-config"
+	sourcetest.Remote(t, map[string]string{remote: "file://" + repo})
+	options := source.Options{Workspace: t.TempDir(), Access: &access{}, Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}
+	_, _, cfg, err := source.Select(t.Context(), source.Spec{RemoteURL: remote}, "build", runspec.Git{SHA: execution}, runspec.Source{}, "", options)
+	if err != nil || cfg != nil {
+		t.Fatalf("absent configuration = %v, %v", cfg, err)
+	}
+}
