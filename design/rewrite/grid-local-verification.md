@@ -134,3 +134,97 @@ Remaining observations for the lead:
 - A required-secret refusal can leave an admitted run pending in the synthetic
   fixture. Cancellation then reports a request without reaching a terminal
   state. This lane changed the local repair message only.
+
+## Follow-up verification
+
+This session resumed at `46a35e28b`. The original cell results above remain the
+record for completed work. The fresh baseline CLI reproduced the remaining
+large-plan request pressure and the missing-secret run that stayed pending.
+All runtime commands used private homes under `/tmp/sw-codex-grid-local/`.
+
+### Lead-gate failures
+
+- `TestTeamBoundary_ListsNeverIncludeAnotherTeam` failed because its synthetic
+  node was `pending` while its approval row existed. The fixture now uses
+  `approval_pending`, matching the pending-list contract. All focused
+  `TestTeamBoundary_` checks pass.
+- The ten-second approval regression seeds state after acquiring its fixture
+  binding, so it uses its test context rather than bypassing the constructor's
+  context. The deadline assertion remains unchanged and passes.
+- The placement cursor uses the existing `closeRowsInto` helper. Lint no longer
+  reports its unchecked deferred close.
+- The unused `ReadOwnerNodes` export was removed. Guardcheck reports
+  `every guard matches its allow-list`; the allowance was not enlarged.
+
+### Runtime and negative controls
+
+The large-plan baseline was built at `46a35e28b`. Run
+`run-d758e3f4161f60eec1290c34` reproduced HTTP request deadline failures during
+200-job startup. Its daemon recorded eleven authentication HTTP 500 responses,
+with maximum authentication latency 57.152 seconds. A run-detail request was
+cancelled after 45.043 seconds. The CLI eventually obtained running status
+through retries, but that does not make the timed-out requests successful.
+Cancellation of this synthetic run was requested before replacing its controller.
+
+The remaining work was repeated placement and declaration materialization on
+single-job lookups, including child authority checks and renewals. Scheduling
+uses placement from whole snapshots. Single-job reads now retain the same
+owner authority, relation, holder, generation and lease checks but load only the
+named job. They omit placement and the whole run declaration. The separate
+placement-free export and wrapper were removed. Snapshot placement still
+uses the canonical shared matcher.
+
+Negative controls executed before their changes:
+
+| Regression | Old result | Fixed result |
+| --- | --- | --- |
+| `TestLocalHostChildAuthorityDoesNotReadUnrelatedJobs` | Two child lookups resolved placement four times | Zero placement resolutions |
+| `TestPrivateHostNodeReadsStateWithoutPlacement` | Single-job transport resolved placement twice and returned a placement projection | Zero resolutions and no projection |
+| `TestOwnerNodeReadDoesNotLoadUnrelatedJobs` | Single-job lookup materialized one whole run declaration | One named job read, zero declaration reads, zero placement queries |
+| `TestOwnerHostMissingRequiredSecretFinishesUnacceptedRun` | Real-store run stayed pending after `plan_invalid` | Run failed without accepting a plan and retained the repair command |
+
+Final CLI SHA-256: `3de70596482bb708106ea96e773273f0aac9c68214d5b5528b409257c27da989`.
+Its functional source includes `77d048ae2`. The final default-admission run is
+`run-8920125dd088f31f1625041c`, using the original fixture's `wide`, `n=200`,
+`delay=0s` invocation with no admission overrides.
+
+R06C17 passed: all 200 jobs finished successfully in 9m49.601s. All 93
+status samples succeeded in reading the run, with maximum CLI latency
+16.274 seconds. The controller recorded zero HTTP 5xx responses,
+and no owner loss occurred. This closes the previous session's residual
+large-plan verification observation.
+
+The same CLI submitted missing-secret run
+`run-7449e8e2bd5ac04763189667`. It finished `failed` at
+`2026-10-29T23:41:32.918Z`, with zero jobs and the failure text
+`sparkwing secrets set --secret BAR --file <path>`, without remote-profile
+advice. Deterministic `plan_invalid` acceptance refusals use the existing
+preparation completion path. Transient acceptance errors keep their prior
+handling. This closes the pending-secret observation from the previous session.
+
+### Checks and review
+
+Focused Go checks passed for tenancy boundaries, approval maintenance, owner
+placement and targeted reads, private transport and child authority, owner
+preparation and scheduling, local owner renewal, and release scaling. The
+new negative controls above were observed failing before their fixes. Missing
+nodes and foreign, superseded, revoked and expired owners remain refused.
+Snapshot placement tests still cover matching and nonmatching labels and
+funding.
+
+The final controller/store lint run reports `0 issues`. The broader follow-up
+lint run over controller, store, localcontroller and nodehost also passed.
+
+The documentation/mirror checks, changelog check, guardcheck, final CLI build
+and `go build -o /dev/null ./cmd/...` passed. The lead still owns the full gate.
+Its unrelated Helm-version and missing TypeScript dependency failures were not
+changed in this lane. PostgreSQL, Kubernetes and cloud execution were not run.
+
+Independent read-only correctness reviews covered committed snapshots through
+`77d048ae2` and found no actionable findings. The final simplification removed
+the duplicate API, wrapper, placement flag, unused placement context and
+unused declaration read. There are no new production mechanisms, configuration
+fields, schema changes, compatibility shims or customer-visible limits.
+
+All private controllers were stopped, no owned runtime or monitor process
+remained, and `/tmp/sw-codex-grid-local/` was removed after recording this evidence.
