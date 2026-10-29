@@ -511,8 +511,6 @@ func (n *JobNode) Prefers(labels ...string) *JobNode {
 }
 
 // Inline places the node on the dispatcher's host.
-// Local execution uses a separate process; cluster execution uses the dispatcher's
-// own goroutine pool, where CPU-heavy work delays other nodes.
 // Retry, timeout, and memoization still apply. Requires labels are ignored.
 func (n *JobNode) Inline() *JobNode {
 	if n.approvalSpec != nil {

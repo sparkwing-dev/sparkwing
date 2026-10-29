@@ -213,9 +213,9 @@ func Encode(m Message) ([]byte, error) {
 }
 
 // Decode parses one framed line (with or without its trailing newline)
-// into the concrete message it carries. Unknown message types are an
-// error: within one protocol major the type set only grows, so an
-// unknown type means the peer is from a different major.
+// into the concrete message it carries. An unknown message type is an
+// [UnknownTypeError]: within one protocol major the type set only grows, so
+// the peer is newer or from a different major.
 func Decode(line []byte) (Message, error) {
 	var env Envelope
 	if err := json.Unmarshal(line, &env); err != nil {
