@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -74,7 +73,8 @@ func validatePriorityFlag(v string) (string, error) {
 func runFlagsFromInvocation(inv clisurface.Invocation) (runFlags, []string) {
 	output, outputOrigin := runOutput(inv, os.Getenv("SPARKWING_LOG_FORMAT"), color.IsInteractiveStdout())
 	if output != "pretty" && output != "json" && output != "plain" {
-		return runFlags{parseErr: errors.New("SPARKWING_LOG_FORMAT must be pretty, json or plain")}, nil
+		return runFlags{parseErr: fmt.Errorf("SPARKWING_LOG_FORMAT=%q must be pretty, json or plain; "+
+			"a git hook installed before v0.68 sets quiet, so reinstall it with `sparkwing pipeline hooks install`", output)}, nil
 	}
 	workers, _ := strconv.Atoi(inv.Value("sw-workers"))
 	var pause *bool
