@@ -47,6 +47,7 @@ credential model in `docs/auth.md`, and the decision log
 | Owner placement uses one shared eligibility read for a run snapshot | `state_owner_read.go`: `readOwnerSnapshot`; `owner_placement.go`: `ownerEligibleNodesTx` | `owner_snapshot_scale_test.go`: `TestOwnerSnapshotPlacementWorkDoesNotMultiplyByJobCount` |
 | Whole snapshots load node rows and retry counts together | `state_read.go`: `readSnapshotTx`, `scanNode` | `state_snapshot_batch_test.go`: `TestReadSnapshotLoadsNodeRowsTogether` |
 | Private owner-job reads select only the requested job | `state_owner_read.go`: `Tenant.ReadOwnerNode` | `owner_node_scale_test.go`: `TestOwnerNodeReadDoesNotLoadUnrelatedJobs` |
+| Child authority checks retain live owner fences without recomputing placement | `state_owner_read.go`: `Tenant.ReadOwnerNodeState`; `internal/controller/private_host.go`: `localHostAuthority` | `internal/controller/private_host_authority_test.go`: `TestLocalHostChildAuthorityDoesNotReadUnrelatedJobs` |
 | Ready jobs reuse the scheduling snapshot until a debug pause needs a fresh cancellation check | `internal/nodehost/owner_schedule.go`: `OwnerHost.release` | `internal/nodehost/owner_release_scale_test.go`: `TestOwnerReleaseDoesNotReadThePlanAgainForEachJob` |
 | Local queue priority follows a node participant's owning run | `internal/wingd/server.go`: `runConnsLocked`; `internal/admission/ledger.go`: `specBelongsToRun` | `internal/wingd/set_priority_node_test.go`: `TestSetPriority_NodeParticipantRecognizesOwningRun`; `internal/admission/ledger_node_priority_test.go`: `TestNodeParticipantPrioritySurvivesOtherParticipantRelease` |
 
@@ -126,6 +127,7 @@ credential model in `docs/auth.md`, and the decision log
 | Run statistics include nearest-rank P50 | `cmd/sparkwing/runs_stats.go`: `aggregateRunDetails` | `cmd/sparkwing/runs_stats_median_test.go`: `TestRunStatisticsReportsNearestRankP50` |
 | Compiled pipeline reuse emits a cache-hit diagnostic | `internal/bincache/materialize.go`: `MaterializePipeline` | `internal/bincache/materialize_test.go`: `TestMaterializePipelineReusesBinaryWithoutGo` |
 | Missing local secrets carry local repair commands | `secret_preflight.go`: `secretPreflightTx`, `secretPreflightError.detail` | `secret_preflight_local_test.go`: `TestLocalSecretPreflightGivesLocalSetCommand` |
+| Required-secret plan refusals finish unaccepted runs | `internal/nodehost/owner.go`: `OwnerHost.accept`, `OwnerHost.preparationFailure` | `internal/nodehost/owner_secret_preflight_test.go`: `TestOwnerHostMissingRequiredSecretFinishesUnacceptedRun` |
 
 ## Test and gate workflow
 

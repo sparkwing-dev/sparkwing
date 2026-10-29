@@ -10,6 +10,7 @@ that refuses a plan missing a secret are in [pipelines](pipelines.md).
 
 For a local run with a missing declared secret, the error names the secret and
 gives its repair command, such as `sparkwing secrets set --secret BAR --file <path>`.
+The run finishes as failed before any jobs start, and its status keeps the repair advice.
 Run the command against the same local controller, then start the pipeline again.
 
 ## Which runs read which secrets

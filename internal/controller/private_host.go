@@ -311,7 +311,7 @@ func (s *Server) localHostAuthority(ctx context.Context, a capability.Authorized
 	if binding.Kind != capability.BindingNode || binding.RunID != a.Target.RunID || binding.NodeID == "" {
 		return capability.Principal{}, localHostRefusal()
 	}
-	node, err := tenant.ReadOwnerNode(ctx, owner.Authority, runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
+	node, err := tenant.ReadOwnerNodeState(ctx, owner.Authority, runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
 	if errors.Is(err, store.ErrNotFound) {
 		return capability.Principal{}, localHostRefusal()
 	}

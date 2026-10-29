@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/sha256"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestLocalHostChildAuthorityDoesNotReadUnrelatedJobs(t *testing.T) {
@@ -31,6 +33,11 @@ func TestLocalHostChildAuthorityDoesNotReadUnrelatedJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := capability.Target{Team: "a", RunID: "run", NodeID: "build"}
+	placementReads := 0
+	server.engine.claimProfiles = engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, error) {
+		placementReads++
+		return match.Profile{}, nil
+	})
 	t.Run("digest", func(t *testing.T) {
 		snapshot, err := host.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256(claim.Bearer)}, capability.RequestEvidence{Target: target})
 		if err != nil {
@@ -45,4 +52,7 @@ func TestLocalHostChildAuthorityDoesNotReadUnrelatedJobs(t *testing.T) {
 			t.Fatalf("unrelated job blocked named child binding: %v", err)
 		}
 	})
+	if placementReads != 0 {
+		t.Errorf("child authority lookup resolved placement %d times", placementReads)
+	}
 }

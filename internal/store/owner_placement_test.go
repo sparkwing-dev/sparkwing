@@ -304,19 +304,22 @@ func TestOwnerNodeReadsMatchTheSnapshotPlacementDecision(t *testing.T) {
 	if err != nil || !OwnerCanExecute(owner)(node) {
 		t.Fatalf("one-node read lost the placement decision: %+v %v", node.OwnerExecution, err)
 	}
-	nodes, err := tenant.ReadOwnerNodes(t.Context(), actor.Authority, "run")
-	if err != nil || len(nodes) != len(snapshot.Nodes) || nodes[0].OwnerExecution != nil {
-		t.Fatalf("authority read computed placement decisions: %+v %v", nodes, err)
+	state, err := tenant.ReadOwnerNodeState(t.Context(), actor.Authority, node.Ref)
+	if err != nil || state.Ref != node.Ref || state.OwnerExecution != nil {
+		t.Fatalf("owner state read projected placement: %+v %v", state, err)
 	}
 	if _, err := tenant.ReadOwnerNode(t.Context(), actor.Authority, runspec.NodeRef{RunID: "run", NodeID: "missing"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing node: %v", err)
+	}
+	if _, err := tenant.ReadOwnerNodeState(t.Context(), actor.Authority, runspec.NodeRef{RunID: "run", NodeID: "missing"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing node state: %v", err)
 	}
 }
 
 func TestOwnerNodeReadsRefuseWhatTheSnapshotRefuses(t *testing.T) {
 	read := map[string]func(*Tenant, capability.AuthorityRef) error{
-		"nodes": func(tenant *Tenant, ref capability.AuthorityRef) error {
-			_, err := tenant.ReadOwnerNodes(t.Context(), ref, "run")
+		"state": func(tenant *Tenant, ref capability.AuthorityRef) error {
+			_, err := tenant.ReadOwnerNodeState(t.Context(), ref, runspec.NodeRef{RunID: "run", NodeID: "job"})
 			return err
 		},
 		"node": func(tenant *Tenant, ref capability.AuthorityRef) error {
@@ -325,12 +328,14 @@ func TestOwnerNodeReadsRefuseWhatTheSnapshotRefuses(t *testing.T) {
 		},
 	}
 	for name, readNodes := range read {
-		for _, change := range []string{"other_owner", "superseded_owner", "revoked_owner"} {
+		for _, change := range []string{"other_owner", "superseded_owner", "revoked_owner", "expired_owner"} {
 			t.Run(name+"/"+change, func(t *testing.T) {
 				tenant, actor := ownerPlacementFixture(t)
 				s := tenant.s
 				ref := actor.Authority
 				switch change {
+				case "expired_owner":
+					rewriteSchemaExec(t, s.db, `UPDATE triggers SET lease_expires_at=?`, s.now().Add(-time.Second).UnixNano())
 				case "other_owner":
 					other := authorityRoot("other-owner", "a")
 					authorityPersist(t, s, other)

@@ -17,7 +17,16 @@ func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.Aut
 
 // ReadOwnerNode reads one node of the owner's run with its private placement decision.
 func (t *Tenant) ReadOwnerNode(ctx context.Context, authority capability.AuthorityRef, ref runspec.NodeRef) (runstate.NodeRow, error) {
-	snapshot, err := t.readOwnerSnapshot(ctx, authority, string(ref.RunID), &ref, true)
+	return t.readOwnerNode(ctx, authority, ref, true)
+}
+
+// ReadOwnerNodeState retains the live owner's authority checks without projecting placement.
+func (t *Tenant) ReadOwnerNodeState(ctx context.Context, authority capability.AuthorityRef, ref runspec.NodeRef) (runstate.NodeRow, error) {
+	return t.readOwnerNode(ctx, authority, ref, false)
+}
+
+func (t *Tenant) readOwnerNode(ctx context.Context, authority capability.AuthorityRef, ref runspec.NodeRef, placement bool) (runstate.NodeRow, error) {
+	snapshot, err := t.readOwnerSnapshot(ctx, authority, string(ref.RunID), &ref, placement)
 	if err != nil {
 		return runstate.NodeRow{}, err
 	}
@@ -27,13 +36,6 @@ func (t *Tenant) ReadOwnerNode(ctx context.Context, authority capability.Authori
 		}
 	}
 	return runstate.NodeRow{}, ErrNotFound
-}
-
-// ReadOwnerNodes reads the owner's run under the same authority checks without
-// placement decisions.
-func (t *Tenant) ReadOwnerNodes(ctx context.Context, authority capability.AuthorityRef, runID string) ([]runstate.NodeRow, error) {
-	snapshot, err := t.readOwnerSnapshot(ctx, authority, runID, nil, false)
-	return snapshot.Nodes, err
 }
 
 func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string, target *runspec.NodeRef, placement bool) (RunSnapshot, error) {
