@@ -587,6 +587,12 @@ file. Other syntax and workflow checks remain active.
   isolation. `sparkwing run integration` runs them through its full `./...`
   suite against the local PostgreSQL fixture.
 
+- **Local controller smoke:** `TestLocalControllerSmoke` (`cmd/sparkwing`,
+  part of the full suite) builds the CLI and drives every local controller
+  command against a fresh local controller in a private home. It fails when
+  the host refuses unix sockets; a sandbox that is known to refuse them sets
+  `SPARKWING_TEST_NO_LOCAL_SOCKETS=1` to skip it instead.
+
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is
   set to a database they cannot reach. Start one with `docker run --rm -d

@@ -25,9 +25,8 @@ import (
 var localSmokeGroups = []string{"secrets", "tokens", "runners", "pools", "queue", "schedules", "runs"}
 
 var localSmokeSkipped = map[string]string{
-	"sparkwing tokens create":        "a local peer mints only scope-less member tokens; covered by its own tests",
-	"sparkwing tokens revoke":        "needs a token; covered by its own tests",
-	"sparkwing tokens rotate":        "needs a token; covered by its own tests",
+	"sparkwing tokens revoke":        "a local controller issues no member tokens",
+	"sparkwing tokens rotate":        "a local controller issues no member tokens",
 	"sparkwing runners add":          "enrolls a machine with a remote controller",
 	"sparkwing runners remove":       "needs an enrolled runner",
 	"sparkwing pools allow":          "needs a registered runner and repository",
@@ -60,6 +59,7 @@ var localSmokeSteps = []localSmokeStep{
 	{args: []string{"secrets", "rotate"}},
 	{args: []string{"secrets", "delete", "--secret", "SMOKE_SECRET"}},
 	{args: []string{"tokens", "list"}},
+	{args: []string{"tokens", "create"}, want: "capability_unsupported"},
 	{args: []string{"runners", "list"}},
 	{args: []string{"pools", "list"}},
 	{args: []string{"queue", "list"}},
@@ -102,11 +102,12 @@ func TestLocalControllerSmoke(t *testing.T) {
 		}
 	}
 	probe, err := net.Listen("unix", filepath.Join(t.TempDir(), "probe.sock"))
-	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+	if (errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)) && os.Getenv("SPARKWING_TEST_NO_LOCAL_SOCKETS") == "1" {
 		t.Skipf("sandbox refuses local sockets: %v", err)
 	}
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("local sockets are refused (%v); the local controller smoke test cannot run here. "+
+			"Set SPARKWING_TEST_NO_LOCAL_SOCKETS=1 only where that is expected", err)
 	}
 	if err := probe.Close(); err != nil {
 		t.Fatal(err)
