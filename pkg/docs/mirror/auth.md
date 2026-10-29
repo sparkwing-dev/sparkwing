@@ -317,7 +317,8 @@ with `Allow: POST`.
 
 ## Capability inventory and rotation
 
-Shared runners require current team administration for enrollment, token
+All runner enrollment requires an independent account session. Shared runners
+require current team administration for enrollment, token
 rotation and revocation. Members enroll their own personal machines through
 `sparkwing runners add --personal --session-stdin` with an independent account
 session. The team setting `members_can_add_machines` defaults to true. When it
@@ -685,7 +686,10 @@ operator's direct browser session with its CSRF proof. It creates the team,
 owner account, membership and first credential in one audited transaction.
 The credential is returned once. Existing team administrators issue member
 credentials through the team namespace and enroll machines with
-`sparkwing runners add --profile work --runner build-box --repos 'github.com/acme/*'`.
+`sparkwing runners add --session-stdin --profile work --runner build-box --repos 'github.com/acme/*'`.
+For headless enrollment, an existing team administrator uses the in-pod
+`sparkwing-controller admin session` command. See
+[workstation capacity](self-hosting.md#add-workstation-capacity) for the full pipe.
 
 `profiles add` probes `/api/v1/health` and authenticates through
 `/api/v1/auth/whoami`, which every live credential may call. Passing this probe

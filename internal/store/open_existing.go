@@ -55,6 +55,9 @@ func OpenExisting(ctx context.Context, dialect Dialect, target string, opts ...O
 			opt.apply(st)
 		}
 	}
+	if err := st.configurePolicyOptions(opts); err != nil {
+		return nil, errors.Join(err, st.Close())
+	}
 	return st, nil
 }
 

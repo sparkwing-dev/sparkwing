@@ -199,6 +199,12 @@ func TestRunnerEnrollmentRouteRequiresStoreOriginAuthority(t *testing.T) {
 			if (err == nil) != tc.allowed {
 				t.Fatalf("enrollment allowed=%t, want %t: %v", err == nil, tc.allowed, err)
 			}
+			if tc.class == CredentialBearer {
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || !strings.Contains(failure.Message, "--session-stdin") || !strings.Contains(failure.Message, "sparkwing-controller admin session") {
+					t.Fatalf("enrollment refusal lacks the headless recovery path: %v", err)
+				}
+			}
 		})
 	}
 }

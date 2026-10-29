@@ -67,3 +67,16 @@ func init() {
 func WithCredentialEpoch(epoch string) Option {
 	return Option{apply: func(s *Store) { s.credentialEpoch = epoch }}
 }
+
+func (s *Store) configurePolicyOptions(opts []Option) error {
+	for _, opt := range opts {
+		if opt.policies != nil {
+			policies, err := opt.policies(s)
+			if err != nil {
+				return err
+			}
+			s.configurePolicies(policies)
+		}
+	}
+	return nil
+}

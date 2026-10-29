@@ -79,6 +79,7 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Email address ownership | `identity.go`: `claimEmailTx`, `releaseEmailTx`, `dropUnprovenEmailOwnershipTx` | `identity_test.go`: `TestIdentitySignInRefusesAnUnverifiedEmail`, `TestIdentityRecycledEmailNeverLinksIntoTheOldAccount` |
 | Invitations | `identity.go`: `Tenant.createInvitationTx`, `Operator.acceptAccountInvitationTx` | `identity_test.go`: `TestIdentityInvitationNeedsTheInvitedVerifiedEmail`; `team_mutations_test.go` |
+| Headless runner enrollment preserves independent account authority | `cmd/sparkwing-controller/admin.go`: `admin session`; `internal/capability/policy.go`: enrollment refusal | `cmd/sparkwing-controller/admin_session_test.go`: `TestAdminSessionEnrollsSharedRunnerAndReservedLauncher`, `TestAdminSessionRequiresExistingTeamAdministrator`; `internal/capability/authorization_test.go`: `TestRunnerEnrollmentRouteRequiresStoreOriginAuthority` |
 | Sessions | `auth.go`: `Operator.LookupSession`, `CreateCapabilitySession`; `identity.go`: `createAccountSession` | `session_runtime_test.go`; `internal/controller/session_store_runtime_test.go`: `TestMemberTokenHTTPSessionTimeoutAndLogout` |
 | Tokens and capability issuance | `authority_issue.go`: `Store.issueTx`, `awardCapabilityTx` | `security_audit_test.go`: `TestDelegatedTokenRequiresAudit` |
 

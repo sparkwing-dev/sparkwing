@@ -272,6 +272,9 @@ func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, 
 		return Authorized{}, forbidden(apierr.ReasonAudience)
 	}
 	var refusal error = forbidden(apierr.ReasonMissingGrant)
+	if route.Method == "POST" && route.Path == "/api/v1/runners" && !p.DirectAccountSession() {
+		return Authorized{}, apierr.Authorization(apierr.ReasonMissingGrant, "runner enrollment requires an independent account session; in the controller pod run sparkwing-controller admin session --operator ACCOUNT_ID --team TEAM --reason TEXT --output plain as an existing team administrator, then pipe its output to sparkwing runners add --session-stdin")
+	}
 	for _, live := range authenticated.Live {
 		if live.RuleIndex < 0 || live.RuleIndex >= len(route.Access) {
 			return Authorized{}, policyFailure()
