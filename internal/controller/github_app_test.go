@@ -622,7 +622,7 @@ func (f *appFixture) triggers(team string) []*store.Trigger {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	list, err := tn.ListTriggers(context.Background(), store.TriggerFilter{})
+	list, err := teststore.Triggers(context.Background(), tn)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -734,7 +734,7 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
 		t.Fatalf("subscribe = %d", code)
 	}
-	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitRunsPerHour: 1}); err != nil {
+	if _, err := f.store.AsOperator().WriteComputeLimits(t.Context(), teststore.OperatorAuthorized(f.t, f.store, ""), map[string]int64{store.ComputeLimitRunsPerHour: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if code, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); code != http.StatusAccepted || out["status"] != "dispatched" {
@@ -748,7 +748,7 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 	if got := f.triggers(olga.team); len(got) != 1 {
 		t.Fatalf("triggers = %+v, want only the first push's", got)
 	}
-	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitRunsPerHour: 0}); err != nil {
+	if _, err := f.store.AsOperator().WriteComputeLimits(t.Context(), teststore.OperatorAuthorized(f.t, f.store, ""), map[string]int64{store.ComputeLimitRunsPerHour: 0}); err != nil {
 		t.Fatal(err)
 	}
 	f.processAgain(olga, payload)

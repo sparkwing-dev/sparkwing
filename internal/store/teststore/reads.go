@@ -36,9 +36,10 @@ func SecretRow(tenant *store.Tenant, name, repo, pipeline string) (*store.Secret
 	return nil, store.ErrNotFound
 }
 
-// Triggers returns the triggers of the tenant's runs of pipeline, newest first.
-func Triggers(ctx context.Context, tenant *store.Tenant, pipeline string) ([]*store.Trigger, error) {
-	runs, err := tenant.ListRuns(ctx, store.RunFilter{Pipelines: []string{pipeline}, Limit: store.MaxRunListLimit})
+// Triggers returns the triggers of the tenant's runs, newest first, limited to
+// pipelines when any are named.
+func Triggers(ctx context.Context, tenant *store.Tenant, pipelines ...string) ([]*store.Trigger, error) {
+	runs, err := tenant.ListRuns(ctx, store.RunFilter{Pipelines: pipelines, Limit: store.MaxRunListLimit})
 	if err != nil {
 		return nil, err
 	}
@@ -54,4 +55,19 @@ func Triggers(ctx context.Context, tenant *store.Tenant, pipeline string) ([]*st
 		out = append(out, trigger)
 	}
 	return out, nil
+}
+
+// AccountByEmail returns the account registered under email.
+func AccountByEmail(t T, st *store.Store, email string) store.Account {
+	t.Helper()
+	db := SQL(t, st)
+	var id string
+	if err := db.QueryRowContext(t.Context(), rebind(st, `SELECT id FROM accounts WHERE email=?`), email).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	account, err := st.AsOperator().Account(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return account
 }

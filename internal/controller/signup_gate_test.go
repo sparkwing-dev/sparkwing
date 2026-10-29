@@ -64,7 +64,9 @@ func (f *identityFixture) operatorAuth() string {
 	op := person("g-operator", "korey@example.com", "Korey")
 	out := f.signIn(op)
 	if out.Waitlisted {
-		if _, err := f.store.ApproveWaitlisted(context.Background(), []string{out.User.ID}, "test"); err != nil {
+		teststore.SeedTeam(f.t, f.store, "ops")
+		console, a := teststore.Console(f.t, f.store, "ops", "operator")
+		if _, err := console.ConsoleApproveWaitlist(context.Background(), a, []string{out.User.ID}, 0, "test"); err != nil {
 			f.t.Fatal(err)
 		}
 		out = f.signIn(op)
