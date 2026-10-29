@@ -41,13 +41,12 @@ var prePushLinters = []string{
 
 // perf: the hook holds a push open, so it never queues behind the box-wide
 // golangci-lint lock; the subset over a handful of packages is small enough
-// load to run beside whatever holds it. A minute bounds a hung run, well over
-// the second the subset measures; a push touching many packages adds a second
-// for each, because loading them alone measured over a minute for 200.
+// load to run beside whatever holds it. The timeout only bounds a hung run:
+// in a fresh worktree the lint cache is cold, and loading 17 packages beside
+// vet-touched measured over 77 s.
 func fastLintCommand(cores int, pkgs []string) string {
-	timeout := time.Minute + time.Duration(len(pkgs))*time.Second
-	return fmt.Sprintf("GOMAXPROCS=%d GOLANGCI_LINT_CACHE=%s golangci-lint run --allow-parallel-runners -j %d --timeout %s --enable-only %s %s",
-		cores, shellQuote(pipelineCacheDir("golangci-lint")), cores, timeout, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
+	return fmt.Sprintf("GOMAXPROCS=%d GOLANGCI_LINT_CACHE=%s golangci-lint run --allow-parallel-runners -j %d --timeout 5m --enable-only %s %s",
+		cores, shellQuote(pipelineCacheDir("golangci-lint")), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
 }
 
 func runGolangciLint(ctx context.Context) error {
