@@ -215,3 +215,12 @@ func TestPrivateCapacityRoutesRequireLiveExecutionAward(t *testing.T) {
 		}
 	}
 }
+
+func TestTeamAndRunOwnersRefuseATeamlessLauncherRule(t *testing.T) {
+	p := Principal{Capability: Capability{Team: ""}}
+	for _, owner := range []Owner{OwnerTeam, OwnerRun} {
+		if err := checkOwner(p, owner, launcher(), Target{Team: "victim"}); err == nil {
+			t.Fatalf("a launcher rule on a %s route skipped the team check", owner)
+		}
+	}
+}
