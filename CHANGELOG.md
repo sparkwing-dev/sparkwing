@@ -753,6 +753,7 @@ unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing --version` prints the version, the same as `sparkwing version`; it answered `unknown flag --version`.
 - **cli:** A refused flag names its fix. `sparkwing update --check` answered `unknown flag --check; pipeline arguments follow --`; it now lists the flags `update` takes (`--dry-run` previews an update), and only `run`, `pipeline plan` and `pipeline trigger` point at `--`. A pipeline's `run <pipeline> --help` shows its flags after `--` in the usage line.
 - **cli:** Settings an older install left behind are refused with the fix
   `SPARKWING_LOG_FORMAT=quiet`, which hooks written before v0.68 set, names the value and says to reinstall the hooks with `sparkwing pipeline hooks install`, and a machine config holding a removed `agent`, `logs`, `fleet`, `allow_repos` or `dispatch_wait` key says to delete it and links the migration guide instead of reporting only `unknown key`.

@@ -69,7 +69,8 @@ func (i Invocation) invalid(format string, args ...any) error {
 
 // Parse validates the final command registry without consulting files, environment
 // or credentials. Only global flags and --profile may precede the command word;
-// every other flag follows its command, whose leaf decides its legality.
+// every other flag follows its command, whose leaf decides its legality. A bare
+// --version in place of the command word selects the version command.
 // Pipeline arguments are opaque after --.
 func Parse(binary string, args []string) (Invocation, error) {
 	commands := Registry()
@@ -116,6 +117,10 @@ func Parse(binary string, args []string) (Invocation, error) {
 				known = false
 			}
 			if !known {
+				if version, command := paths[binary+" version"]; command && name == "version" && inv.Command.Path == binary && !explicit {
+					inv.Command = version
+					continue
+				}
 				if _, command := paths[inv.Command.Path+" "+name]; command {
 					return inv, inv.invalid("unknown flag --%s; use the %s command", name, strings.TrimSpace(strings.TrimPrefix(inv.Command.Path, binary)+" "+name))
 				}
