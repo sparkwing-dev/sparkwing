@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability/paymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
@@ -227,6 +228,10 @@ func TestARefusedRefillStopsRefillsAndNotifiesTheOwners(t *testing.T) {
 		{"authentication required", `{"payment_intent":"pi_refused","status":"requires_payment_method","failure":"authentication_required"}`, "", "authentication_required", http.StatusOK},
 		{"signed decline", `{"payment_intent":"pi_refused","status":"processing"}`, "payment_intent.payment_failed", "insufficient_funds", http.StatusOK},
 		{"signed authentication", `{"payment_intent":"pi_refused","status":"processing"}`, "payment_intent.requires_action", "authentication_required", http.StatusOK},
+		{"wrong deployment", `{"error":"deployment must name this service's deployment"}`, "", refillCheckoutRefused, http.StatusBadRequest},
+		{"wrong token", `{"error":"checkout token rejected"}`, "", refillCheckoutRefused, http.StatusUnauthorized},
+		{"foreign customer", `{"error":"the customer belongs to another deployment"}`, "", refillCheckoutRefused, http.StatusForbidden},
+		{"stripe refused the request", `{"error":"stripe refused the payment"}`, "", refillCheckoutRefused, http.StatusUnprocessableEntity},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, tenant := refillFixture(t)
@@ -279,6 +284,53 @@ func TestARefusedRefillStopsRefillsAndNotifiesTheOwners(t *testing.T) {
 				t.Fatalf("owner mail %+v; want one refill failure notice", mail.sent)
 			}
 		})
+	}
+}
+
+// A refill the checkout service cannot answer is retried under its key with a growing wait, and one it still cannot
+// answer checkoutRetryLimit after the first failure stops refills and reaches the owners like a refusal.
+func TestAnUnansweredRefillBacksOffThenFailsForGood(t *testing.T) {
+	e, tenant := refillFixture(t)
+	refillOwner(t, e)
+	var logs bytes.Buffer
+	mail := &refillMail{}
+	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential").WithMailer(mail)
+	worker.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	now := time.Unix(1_800_000_000, 0)
+	worker.checkout.now = func() time.Time { return now }
+	calls := 0
+	worker.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+		calls++
+		if calls%2 == 0 {
+			return nil, errors.New("connection refused")
+		}
+		return refillReply(http.StatusBadGateway, `{"error":"stripe did not answer the payment"}`), nil
+	})
+	pass := func(after time.Duration, want int) {
+		t.Helper()
+		now = now.Add(after)
+		worker.refillPass(t.Context())
+		if calls != want {
+			t.Fatalf("after %s: %d calls; want %d", after, calls, want)
+		}
+	}
+	pass(0, 1)
+	pass(0, 2)
+	pass(0, 2)
+	pass(billingInterval, 3)
+	pass(billingInterval, 3)
+	pass(billingInterval, 4)
+	if standing, err := tenant.SpendStanding(t.Context()); err != nil || !standing.Refill.Open || len(mail.sent) != 0 {
+		t.Fatalf("a refill the service has not answered yet stopped: %+v, %v, mail %d", standing.Refill, err, len(mail.sent))
+	}
+	pass(checkoutRetryLimit, 5)
+	pass(checkoutRetryMaxWait, 5)
+	standing, err := tenant.SpendStanding(t.Context())
+	if err != nil || standing.Refill.Open || standing.Refill.Failure != refillCheckoutUnavailable {
+		t.Fatalf("refill state %+v: %v; want it closed as %s", standing.Refill, err, refillCheckoutUnavailable)
+	}
+	if !strings.Contains(logs.String(), `"alert":"`+checkoutFailedAlert+`"`) || len(mail.sent) != 1 || !strings.Contains(mail.sent[0].Text, refillCheckoutUnavailable) {
+		t.Fatalf("no alert or owner mail for a refill the service never answered: mail %+v", mail.sent)
 	}
 }
 

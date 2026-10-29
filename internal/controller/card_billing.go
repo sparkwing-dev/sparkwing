@@ -100,6 +100,11 @@ func (s *Server) reportPaymentSettlement(ctx context.Context, settled store.Paym
 				"We queued a full refund for an automatic refill because the card issuer reported possible fraud on it ("+settled.Refused+"). "+
 					"This refill did not add credits, and Cloud work is held; see the billing page:", s.billingPageURL())
 		}
+	case settled.RefillFailed == refillCheckoutRefused || settled.RefillFailed == refillCheckoutUnavailable:
+		s.logger.Warn("billing alert: an automatic refill failed", append(attrs, "alert", "refill_failed", "decline_code", settled.RefillFailed)...)
+		s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill failed",
+			"Sparkwing's payment service could not make an automatic refill ("+settled.RefillFailed+"), so automatic refills are stopped and Sparkwing is looking into it. "+
+				"Cloud work stops when the credits run out. Click Add funds to buy credits and resume automatic refills:", s.billingPageURL())
 	case settled.RefillFailed != "":
 		s.logger.Warn("billing alert: an automatic refill failed", append(attrs, "alert", "refill_failed", "decline_code", settled.RefillFailed)...)
 		s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill failed",
@@ -128,20 +133,48 @@ func (s *Server) runBilling(ctx context.Context, every time.Duration) {
 	}
 }
 
+// Failure codes a refill closes with when the checkout service refused it, or could not answer for
+// checkoutRetryLimit.
+const (
+	refillCheckoutRefused     = "checkout_refused"
+	refillCheckoutUnavailable = "checkout_unavailable"
+)
+
+// safety: operator alerting keys on this value, so renaming it silences the alert for a refill or refund the checkout
+// service refused or could not answer for good, which points at the pairing of the two services, not at a card.
+const checkoutFailedAlert = "checkout_failed"
+
 // safety: EachDueRefill authorizes each refill in its own transaction immediately before that refill's call, and
 // every retry sends an open refill's same request under its id as the idempotency key, so a crash or lost answer is
-// retried without a second charge. Only the signed webhook grants credit; a refusal the service reports stops refills.
+// retried without a second charge. Only the signed webhook grants credit. A refusal the service reports, or no answer
+// for checkoutRetryLimit, stops refills and tells the owners.
 func (s *Server) refillPass(ctx context.Context) {
 	if !s.deployment.Metering() {
 		return
 	}
 	err := s.operator.EachDueRefill(ctx, func(r store.Refill) {
+		if !s.checkout.due(r.ID) {
+			return
+		}
 		res, err := s.checkout.refill(ctx, s.paymentDeployment, r)
+		if !errors.Is(err, errCheckoutUnavailable) {
+			s.checkout.settled(r.ID)
+		}
 		switch {
 		case errors.Is(err, errRefillNoCard):
 			s.recordRefillFailure(ctx, r, store.RefillNoCard)
+		case errors.Is(err, errCheckoutUnavailable):
+			if !s.checkout.unavailable(r.ID) {
+				s.logger.Error("charging a refill failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
+				return
+			}
+			s.logger.Error("billing alert: the checkout service did not answer a refill; refills stop", "alert", checkoutFailedAlert,
+				"team", string(r.Team), "refill", r.ID, "err", err)
+			s.recordRefillFailure(ctx, r, refillCheckoutUnavailable)
 		case err != nil:
-			s.logger.Error("charging a refill failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
+			s.logger.Error("billing alert: the checkout service refused a refill; refills stop", "alert", checkoutFailedAlert,
+				"team", string(r.Team), "refill", r.ID, "err", err)
+			s.recordRefillFailure(ctx, r, refillCheckoutRefused)
 		case res.Failure != "":
 			s.recordRefillFailure(ctx, r, res.Failure)
 		default:
@@ -167,8 +200,10 @@ func (s *Server) recordRefillFailure(ctx context.Context, r store.Refill, code s
 }
 
 // safety: a refused payment is refunded under its payment as the key, so a pass
-// after a lost answer repeats the same refund; a refund Stripe fails is listed
-// for the operator, not retried, and the refund's success reverses any grant.
+// after a lost answer repeats the same refund; a refund Stripe fails, the checkout
+// service refuses or cannot answer for checkoutRetryLimit is listed for the
+// operator and announced to the owners, not retried, and the refund's success
+// reverses any grant.
 func (s *Server) refundQueuedPayments(ctx context.Context) {
 	operator := s.operator
 	due, err := operator.DueCardRefunds(ctx)
@@ -177,10 +212,22 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 		return
 	}
 	for _, d := range due {
+		if !s.checkout.due(d.PaymentIntent) {
+			continue
+		}
 		refund, status, err := s.checkout.refund(ctx, s.paymentDeployment, d.PaymentIntent, d.Reason)
-		if err != nil {
+		if errors.Is(err, errCheckoutUnavailable) && !s.checkout.unavailable(d.PaymentIntent) {
 			s.logger.Error("refunding a queued card payment failed; it is retried", "team", string(d.Team),
 				"payment_intent", d.PaymentIntent, "err", err)
+			continue
+		}
+		s.checkout.settled(d.PaymentIntent)
+		if err != nil {
+			s.logger.Error("billing alert: the checkout service did not make a queued refund; it is left to the operator",
+				"alert", checkoutFailedAlert, "team", string(d.Team), "payment_intent", d.PaymentIntent, "err", err)
+			if err := operator.MarkCardRefundFailed(ctx, d.Team, d.PaymentIntent); err != nil {
+				s.logger.Error("recording a failed card refund; it is retried", "payment_intent", d.PaymentIntent, "err", err)
+			}
 			continue
 		}
 		if err := operator.MarkCardRefundMade(ctx, d.Team, d.PaymentIntent, refund); err != nil {

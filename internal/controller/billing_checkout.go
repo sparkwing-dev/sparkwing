@@ -25,6 +25,11 @@ type billingCheckout struct {
 	url   string
 	token string
 	http  *http.Client
+
+	now func() time.Time
+	// retries backs off each refill and refund the service could not answer, keyed by its idempotency key. Only the
+	// billing worker's goroutine reads and writes it; a restart forgets it and starts the backoff again.
+	retries map[string]checkoutRetry
 }
 
 // WithBillingCheckout points the controller at the checkout service that
@@ -40,11 +45,17 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 	s.checkout = &billingCheckout{
 		url: url, token: token,
 		http: &http.Client{Timeout: billingCheckoutTimeout},
+		now:  time.Now, retries: map[string]checkoutRetry{},
 	}
 	return s
 }
 
-var errCheckoutRefused = errors.New("the checkout service refused the session")
+// errCheckoutUnavailable is a checkout service failure a later call may not meet: no answer, a 5xx or a 429.
+var errCheckoutUnavailable = errors.New("the checkout service is unavailable")
+
+// errCheckoutRefused is an answer a repeat of the same request cannot change: any other 4xx, or a reply outside the
+// contract.
+var errCheckoutRefused = errors.New("the checkout service refused the request")
 
 // errRefillNoCard is the checkout service's refusal to charge a refill for a customer with no card in Stripe.
 var errRefillNoCard = errors.New("the customer has no card")
@@ -110,25 +121,68 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("checkout service: %w", err)
+		return fmt.Errorf("%w: %w", errCheckoutUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if err != nil {
-		return fmt.Errorf("checkout service: read: %w", err)
+		return fmt.Errorf("%w: read: %w", errCheckoutUnavailable, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("%w: %d %s", errCheckoutRefused, resp.StatusCode, strings.TrimSpace(string(payload)))
+		class := errCheckoutRefused
+		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout {
+			class = errCheckoutUnavailable
+		}
+		err := fmt.Errorf("%w: %d %s", class, resp.StatusCode, strings.TrimSpace(string(payload)))
 		if path == "/internal/refill" && resp.StatusCode == http.StatusConflict {
 			err = errors.Join(errRefillNoCard, err)
 		}
 		return err
 	}
 	if err := json.Unmarshal(payload, out); err != nil {
-		return fmt.Errorf("checkout service: decode: %w", err)
+		return fmt.Errorf("%w: decode: %w", errCheckoutRefused, err)
 	}
 	return nil
 }
+
+// Backoff for a refill or refund the checkout service could not answer: the first retry is the next billing pass and
+// each later one waits twice as long as the one before, from billingInterval up to checkoutRetryMaxWait.
+// checkoutRetryLimit after the first failure it fails for good, which reaches the owners as a refused one does.
+const (
+	checkoutRetryMaxWait = 30 * time.Minute
+	checkoutRetryLimit   = 6 * time.Hour
+)
+
+type checkoutRetry struct {
+	first, next time.Time
+	wait        time.Duration
+}
+
+// due reports whether the request under key may be sent now.
+func (c *billingCheckout) due(key string) bool {
+	r, ok := c.retries[key]
+	return !ok || !c.now().Before(r.next)
+}
+
+// unavailable records a failed call under key and reports whether it has failed for checkoutRetryLimit.
+func (c *billingCheckout) unavailable(key string) bool {
+	now := c.now()
+	r, ok := c.retries[key]
+	if !ok {
+		r = checkoutRetry{first: now}
+	}
+	r.next = now.Add(r.wait)
+	r.wait = min(max(r.wait*2, billingInterval), checkoutRetryMaxWait)
+	c.retries[key] = r
+	if now.Sub(r.first) < checkoutRetryLimit {
+		return false
+	}
+	delete(c.retries, key)
+	return true
+}
+
+// settled forgets the backoff of a request the service answered.
+func (c *billingCheckout) settled(key string) { delete(c.retries, key) }
 
 // refillRequest and refillResponse are the checkout service's POST /internal/refill contract, which creates and
 // confirms one off-session payment under the refill id. testdata/refill_contract.json holds the example these types

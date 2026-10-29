@@ -76,3 +76,19 @@ func (o *Operator) MarkCardRefundMade(ctx context.Context, team Team, paymentInt
 		return tx.operator.reconcilePaymentStateTx(ctx, tx, mode, paymentIntent, paymentAttribution{})
 	})
 }
+
+// MarkCardRefundFailed closes a queued refund the checkout service refused, or never answered, before Stripe made
+// it. Like a refund Stripe failed, it is listed for the operator, announced to the team's owners and never retried.
+func (o *Operator) MarkCardRefundFailed(ctx context.Context, team Team, paymentIntent string) error {
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		mode, err := paymentModeTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if err := lockFinancialTeamsTx(ctx, tx, team); err != nil {
+			return err
+		}
+		_, err = tx.execContext(ctx, `UPDATE card_refunds SET status='failed' WHERE payment_mode=? AND team=? AND payment_intent=? AND status='due'`, mode, team, paymentIntent)
+		return err
+	})
+}
