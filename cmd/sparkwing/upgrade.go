@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -84,10 +85,17 @@ func (c upgradeCommand) run(ctx context.Context, inv clisurface.Invocation) erro
 		return err
 	}
 	if result.Unverified != nil {
+		files := make([]string, 0, len(result.Plan.Edits))
+		for _, edit := range result.Plan.Edits {
+			files = append(files, edit.Path)
+		}
+		changed := strings.Join(files, " ")
 		return &apierr.Error{
 			Code:    apierr.PlanFailed,
 			Message: fmt.Sprintf("the SDK pin moved to %s, but the pipeline does not build or plan against it yet: %v", result.Plan.After.Version, result.Unverified),
-			Hint:    "Make the code changes the migration guides describe, " + engine.MigrationGuides(result.Plan.Before.Version, result.Plan.After.Version) + ", then rerun the pipeline. `git checkout -- .sparkwing` returns to the old pin.",
+			Hint: "Make the code changes the migration guides describe, " + engine.MigrationGuides(result.Plan.Before.Version, result.Plan.After.Version) +
+				", then rerun the pipeline. This upgrade changed only " + changed + "; to return to the old pin, review `git diff -- " + changed +
+				"` and revert those files, which keeps your other pipeline edits.",
 		}
 	}
 	return nil

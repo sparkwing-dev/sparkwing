@@ -67,6 +67,11 @@ type UpgradeResult struct {
 	Unverified error
 }
 
+// ErrPipelineIncompatible marks a verification failure in the repository's own
+// pipeline code. Only such a failure lets Upgrade apply the pin and report it;
+// any other verification failure leaves the original pins unchanged.
+var ErrPipelineIncompatible = errors.New("the pipeline code needs changes for this SDK")
+
 // MigrationGuides names where the code changes between two pins are documented.
 func MigrationGuides(before, after string) string {
 	return fmt.Sprintf("`sparkwing docs migrations --from %s --to %s`, or https://github.com/sparkwing-dev/sparkwing/tree/%s/docs/migrations", before, after, after)
@@ -107,9 +112,10 @@ func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier
 	if verifier == nil {
 		return result, invalid("upgrade verification is required", "Supply the dependency, build and describe/plan verifier.")
 	}
-	// safety: the pin edits are already resolved against a verified engine, so a
-	// pipeline that fails against them is code to change, not a pin to refuse.
 	unverified := verifier.Verify(ctx, stage, resolved)
+	if unverified != nil && !errors.Is(unverified, ErrPipelineIncompatible) {
+		return result, fmt.Errorf("SDK upgrade verification failed; repository pins are unchanged: %w", unverified)
+	}
 	after, err := ReadPin(stagePipeline, request.SDK)
 	if err != nil {
 		return result, err

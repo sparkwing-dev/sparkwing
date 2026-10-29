@@ -110,8 +110,12 @@ pin moves with `go get` instead. Each original digest is checked again so
 concurrent user edits are not overwritten. When the pipeline then fails to
 compile, describe or plan against the new pin, the pin stays applied and the
 command reports the failure, names the migration guides between the two
-versions and exits non-zero; `git checkout -- .sparkwing` returns to the old
-pin. A dry run reports proposed edits without installing or applying them.
+versions and exits non-zero. Its report names the manifest and lockfile it
+changed (for Go, `.sparkwing/go.mod` and `.sparkwing/go.sum`); reverting
+those files, and only those, returns to the old pin without touching other
+uncommitted pipeline edits. A failure to verify for any other reason, such as
+a failed SDK download, a missing tool or a malformed answer from the engine,
+leaves the original pins unchanged. A dry run reports proposed edits without installing or applying them.
 
 `sparkwing update` owns installed machine software and refreshes managed services
 and timers. Runners check their own signed minimum/revocation policy and prepare

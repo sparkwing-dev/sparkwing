@@ -152,7 +152,7 @@ func TestBreakingUpgradeMovesThePinAndReportsTheCodeThatFails(t *testing.T) {
 	}
 	repo := t.TempDir()
 	createUpgradeRepo(t, repo, engineid.GoSDK)
-	removed := errors.New("undefined: runner.Main")
+	removed := fmt.Errorf("%w: upgrade: go build: main.go:5:2: undefined: runner.Main", ErrPipelineIncompatible)
 	result, err := r.Upgrade(context.Background(), UpgradeRequest{Checkout: repo, SDK: engineid.GoSDK}, verifyFunc(func(context.Context, string, Resolved) error { return removed }))
 	if err != nil || !result.Applied || result.Verified || !errors.Is(result.Unverified, removed) {
 		t.Fatalf("breaking upgrade = %+v, %v; want the pin applied with the failing code reported", result, err)
@@ -166,6 +166,31 @@ func TestBreakingUpgradeMovesThePinAndReportsTheCodeThatFails(t *testing.T) {
 	}
 	if guides := MigrationGuides("v0.10.2", "v0.20.0"); !strings.Contains(guides, "docs migrations --from v0.10.2 --to v0.20.0") || !strings.Contains(guides, "/tree/v0.20.0/docs/migrations") {
 		t.Fatalf("migration guides = %q", guides)
+	}
+}
+
+func TestOperationalVerificationFailureLeavesOriginalPins(t *testing.T) {
+	r, transport, key, _, _ := fixtureResolver(t)
+	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	transport.release(t, "v0.20.0", target, signedBundle(t, key, "v0.20.0", target, fixtureExecutable(t, "v0.20.0", target)))
+	r.command = func(_ context.Context, stage, _ string, _ ...string) error {
+		writeFixture(t, stage, "go.sum", []byte("updated checksums"))
+		return nil
+	}
+	repo := t.TempDir()
+	createUpgradeRepo(t, repo, engineid.GoSDK)
+	download := errors.New(`upgrade: go mod download: exit status 1: dial tcp: lookup proxy.golang.org: no such host`)
+	result, err := r.Upgrade(context.Background(), UpgradeRequest{Checkout: repo, SDK: engineid.GoSDK}, verifyFunc(func(context.Context, string, Resolved) error { return download }))
+	if !errors.Is(err, download) || result.Applied {
+		t.Fatalf("operational failure = %+v, %v; want an error and no applied pin", result, err)
+	}
+	pin, err := ReadPin(filepath.Join(repo, ".sparkwing"), engineid.GoSDK)
+	if err != nil || pin.Version != "v0.10.2" {
+		t.Fatalf("pin = %+v, %v; want the original v0.10.2", pin, err)
+	}
+	lock, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
+	if err != nil || string(lock) != "original native checksums\n" {
+		t.Fatal("operational failure applied the lockfile")
 	}
 }
 
@@ -188,7 +213,7 @@ func TestConcurrentUpgradeLeavesOriginalPins(t *testing.T) {
 			verifier := verifyFunc(func(context.Context, string, Resolved) error {
 				writeFixture(t, filepath.Join(repo, ".sparkwing"), "go.mod", append(original, []byte("// concurrent user edit\n")...))
 				if failing {
-					return errors.New("fixture type-check failed")
+					return fmt.Errorf("%w: fixture type-check failed", ErrPipelineIncompatible)
 				}
 				return nil
 			})

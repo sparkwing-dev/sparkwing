@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -147,7 +148,7 @@ func TestUpgradeVerifiedResult(t *testing.T) {
 
 func TestUpgradeAppliedPinWithFailingCodeNamesTheMigrationGuides(t *testing.T) {
 	root := upgradeFixture(t, engineid.GoSDK)
-	fake := &fakeUpgradeResolver{result: engine.UpgradeResult{Applied: true, Unverified: errors.New("undefined: runner.Main"), Plan: engine.UpgradePlan{Before: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.67.0"}, After: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}}}}
+	fake := &fakeUpgradeResolver{result: engine.UpgradeResult{Applied: true, Unverified: errors.New("undefined: runner.Main"), Plan: engine.UpgradePlan{Before: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.67.0"}, After: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}, Edits: []engine.PinEdit{{Path: ".sparkwing/go.mod"}, {Path: ".sparkwing/go.sum"}}}}}
 	var out bytes.Buffer
 	command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, verifier: &upgradeVerifier{}, out: &out}
 	err := command.runArgs(t.Context(), []string{"--checkout", root, "--output=pretty"})
@@ -155,6 +156,9 @@ func TestUpgradeAppliedPinWithFailingCodeNamesTheMigrationGuides(t *testing.T) {
 	if !errors.As(err, &failure) || !strings.Contains(failure.Message, "moved to v0.68.0") || !strings.Contains(failure.Message, "undefined: runner.Main") ||
 		!strings.Contains(failure.Hint, "docs migrations --from v0.67.0 --to v0.68.0") {
 		t.Fatalf("error = %v", err)
+	}
+	if !strings.Contains(failure.Hint, "changed only .sparkwing/go.mod .sparkwing/go.sum") || strings.Contains(failure.Hint, "checkout -- .sparkwing`") {
+		t.Fatalf("undo hint %q must name only the files the upgrade changed", failure.Hint)
 	}
 	if !strings.Contains(out.String(), "Applied, pipeline code needs changes") {
 		t.Fatalf("report: %s", &out)
@@ -220,16 +224,17 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 			if !reflect.DeepEqual(kinds, []procenv.Kind{procenv.Install, procenv.HostChild}) {
 				t.Fatalf("environment boundaries: %v", kinds)
 			}
-			if installs != 1 || len(commands) != 6 {
-				t.Fatalf("commands: %v", commands)
-			}
-			wantNative := [][]string{{"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}}
+			wantNative := [][]string{{"go", "mod", "download"}, {"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}}
 			if sdk == engineid.TypeScriptSDK {
 				wantNative = [][]string{{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}}
 			}
-			if !reflect.DeepEqual(commands[:1], wantNative) {
-				t.Fatalf("dependency/type checks: %v", commands[:1])
+			if installs != 1 || len(commands) != len(wantNative)+5 {
+				t.Fatalf("commands: %v", commands)
 			}
+			if !reflect.DeepEqual(commands[:len(wantNative)], wantNative) {
+				t.Fatalf("dependency/type checks: %v", commands[:len(wantNative)])
+			}
+			commands = commands[len(wantNative)-1:]
 			for _, command := range commands[1:] {
 				if command[0] != selected.Executable || command[1] != "pipeline" || (command[2] != "list" && command[2] != "describe" && command[2] != "plan") {
 					t.Fatalf("unverified engine or body command: %v", command)
@@ -237,6 +242,52 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 			}
 			if !reflect.DeepEqual(commands[1][1:], []string{"pipeline", "list", "--all", "--output=json"}) {
 				t.Fatalf("hidden pipelines excluded: %v", commands[1])
+			}
+		})
+	}
+}
+
+// Each failure is the text the real tool prints, so the classification is
+// judged on what a user's verification actually returns.
+func TestUpgradeVerifierSeparatesPipelineCodeFromOperationalFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		failCommand string
+		output      string
+		install     error
+		code        bool
+	}{
+		{name: "module download", failCommand: "go mod download", output: "go: github.com/sparkwing-dev/sparkwing@v0.68.0: Get \"https://proxy.golang.org/...\": dial tcp: lookup proxy.golang.org: no such host"},
+		{name: "removed package", failCommand: "go build", output: "main.go:5:2: no required module provides package github.com/sparkwing-dev/sparkwing/pkg/runner", code: true},
+		{name: "SDK install", install: errors.New("selected engine SDK installation: SDK install failed after 1 attempt: exec: \"go\": executable file not found in $PATH")},
+		{name: "unregistered entrypoint", failCommand: "describe", output: `{"error":{"code":"unknown_pipeline","message":"sparkwing.yaml names entrypoint \"Gate\", which the SDK does not register"}}`, code: true},
+		{name: "plan failure", failCommand: "plan", output: `{"error":{"code":"plan_failed","message":"plan: job \"build\" needs an undeclared job"}}`, code: true},
+		{name: "engine unavailable", failCommand: "plan", output: `{"error":{"code":"unavailable","message":"the local admission daemon did not answer"}}`},
+		{name: "malformed discovery", failCommand: "list", output: "not json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := upgradeFixture(t, engineid.GoSDK)
+			verifier := upgradeVerifier{buildEnv: procenv.Build, install: func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error) {
+				return engine.SDKCommand{Directory: filepath.Join(root, ".sparkwing"), Command: []string{filepath.Join(root, "sdk-entry")}}, tc.install
+			}, exec: func(_ context.Context, _ string, _ procenv.Env, program string, args ...string) ([]byte, error) {
+				line := strings.Join(append([]string{program}, args...), " ")
+				if tc.failCommand != "" && strings.Contains(line, tc.failCommand) {
+					if tc.failCommand == "list" {
+						return []byte(tc.output), nil
+					}
+					return nil, fmt.Errorf("exit status 1: %s", tc.output)
+				}
+				if strings.Contains(line, "pipeline list") {
+					return []byte("{\"name\":\"check\"}\n"), nil
+				}
+				return nil, nil
+			}}
+			err := verifier.Verify(t.Context(), root, engine.Resolved{Executable: filepath.Join(root, "engine"), Identity: engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v0.68.0"}}})
+			if err == nil {
+				t.Fatal("verification passed over a failure")
+			}
+			if got := errors.Is(err, engine.ErrPipelineIncompatible); got != tc.code {
+				t.Fatalf("pipeline-code failure = %v, want %v: %v", got, tc.code, err)
 			}
 		})
 	}
@@ -252,7 +303,7 @@ func TestUpgradeVerifierRejectsMalformedPipelineList(t *testing.T) {
 
 func TestUpgradeVerifierStopsAtFailure(t *testing.T) {
 	root := upgradeFixture(t, engineid.GoSDK)
-	for _, failAt := range []int{1, 2, 3, 4, 5} {
+	for _, failAt := range []int{1, 2, 3, 4, 5, 6} {
 		calls := 0
 		failure := errors.New("verification failed")
 		verifier := upgradeVerifier{install: func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error) {
@@ -312,8 +363,10 @@ func TestUpgradeVerifierRequiresSelectedInstallerResult(t *testing.T) {
 			install: func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error) {
 				return command, nil
 			},
-			exec: func(context.Context, string, procenv.Env, string, ...string) ([]byte, error) {
-				t.Fatal("checked after invalid installation")
+			exec: func(_ context.Context, _ string, _ procenv.Env, program string, _ ...string) ([]byte, error) {
+				if program != "go" {
+					t.Fatal("checked after invalid installation")
+				}
 				return nil, nil
 			},
 		}
