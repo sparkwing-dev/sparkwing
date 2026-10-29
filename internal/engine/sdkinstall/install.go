@@ -98,7 +98,7 @@ func GoEnvironment(ctx context.Context, dir string, pin engineid.Pin, environmen
 
 func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
 	if !filepath.IsAbs(request.ExecutableDirectory) {
-		return nil, "", errors.New("Go installation requires an owned executable directory")
+		return nil, "", errors.New("SDK installation requires an owned executable directory")
 	}
 	environment, err := GoEnvironment(ctx, dir, pin, environment)
 	if err != nil {

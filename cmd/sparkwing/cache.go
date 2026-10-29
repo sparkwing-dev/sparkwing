@@ -336,7 +336,10 @@ func runCacheExplain(inv clisurface.Invocation) error {
 	if err != nil {
 		return fmt.Errorf("cache explain: %w", err)
 	}
-	pin, _ := engine.ReadPin(dir, engineid.GoSDK)
+	pin, err := engine.ReadPin(dir, engineid.GoSDK)
+	if err != nil {
+		return fmt.Errorf("cache explain: %w", err)
+	}
 	environment, err = sdkinstall.GoEnvironment(context.Background(), dir, pin, environment)
 	if err != nil {
 		return fmt.Errorf("cache explain: %w", err)

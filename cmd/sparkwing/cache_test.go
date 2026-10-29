@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engine/sdkinstall"
@@ -23,7 +24,7 @@ func TestCacheExplainJSONEmitsReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(root)
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\nrequire "+engine.GoModule+" v0.20.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
@@ -39,6 +40,31 @@ func TestCacheExplainJSONEmitsReport(t *testing.T) {
 	payload := decodeCachePayload(t, out)
 	if payload["dir"] != dir || payload["key"] == "" {
 		t.Fatalf("explain payload = %#v", payload)
+	}
+}
+
+func TestCacheExplainReportsInvalidSDKPin(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	root := t.TempDir()
+	dir := filepath.Join(root, ".sparkwing")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	var runErr error
+	out := captureStdout(t, func() { runErr = runCacheExplainArgs([]string{"-o", "json"}) })
+	var pinErr *apierr.Error
+	if !errors.As(runErr, &pinErr) || pinErr.Code != apierr.InvalidArgs {
+		t.Fatalf("cache explain error = %v, want invalid SDK pin", runErr)
+	}
+	if out != "" {
+		t.Fatalf("failure polluted stdout: %q", out)
 	}
 }
 
@@ -232,7 +258,7 @@ func TestCacheExplainFindsTheModuleFromASubdirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\nrequire "+engine.GoModule+" v0.20.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
