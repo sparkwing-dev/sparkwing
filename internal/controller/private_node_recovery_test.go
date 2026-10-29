@@ -47,16 +47,18 @@ func TestPrivateNodeRecoveryReadsOnlyItsPersistedSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := nodehost.WithClient(nodehost.NativeConfig{Store: state}, host)
-	if cfg.ReadFailure == nil {
-		t.Fatal("native recovery has no failure reader")
-	}
-	failure, err := cfg.ReadFailure(t.Context(), source, int64(row.Generation))
-	if err != nil || failure == nil || failure.Job != "source" || failure.Stage != "verify" || failure.Error == nil || failure.Error.Message != "recorded source failure" {
-		t.Fatalf("persisted source failure: %+v %v", failure, err)
-	}
-	if _, err := cfg.ReadFailure(t.Context(), source, 5); err == nil {
-		t.Fatal("recovery read a different source generation")
+	for _, hostState := range []nodehost.NativeHostStore{tenant, state} {
+		cfg := nodehost.WithClient(nodehost.NativeConfig{Store: hostState}, host)
+		if cfg.ReadFailure == nil {
+			t.Fatalf("native recovery with %T has no failure reader", hostState)
+		}
+		failure, err := cfg.ReadFailure(t.Context(), source, int64(row.Generation))
+		if err != nil || failure == nil || failure.Job != "source" || failure.Stage != "verify" || failure.Error == nil || failure.Error.Message != "recorded source failure" {
+			t.Fatalf("persisted source failure: %+v %v", failure, err)
+		}
+		if _, err := cfg.ReadFailure(t.Context(), source, 5); err == nil {
+			t.Fatal("recovery read a different source generation")
+		}
 	}
 	key := blob.RecordKey{Team: "a", Kind: blob.KindManifest, Scope: blob.Scope{Repo: "gh:1", Job: "source"}, Name: "result"}
 	raw, err := json.Marshal(key)

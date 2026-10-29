@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -159,6 +160,17 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref runspec.NodeRef) (ru
 		return runstate.NodeRow{}, errors.New("local host node names another execution")
 	}
 	return result, nil
+}
+
+// ReadFailure reads the persisted recovery source under the host's current award.
+func (c *LocalHostClient) ReadFailure(ctx context.Context, source runspec.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+	if source.RunID != runspec.RunID(c.run) {
+		return nil, localHostClientRefusal()
+	}
+	if err := c.live(); err != nil {
+		return nil, err
+	}
+	return c.transport.ReadFailure(ctx, c.run, string(source.NodeID), generation)
 }
 
 // TransitionRun submits an edge while the server derives its actor and fence.
