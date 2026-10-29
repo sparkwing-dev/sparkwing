@@ -3,16 +3,56 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
+
+// enrolledRunner is the runner section and credential as a starting runner reads them.
+type enrolledRunner struct {
+	HolderPrefix, CredentialsDir, Token string
+	MaxConcurrent                       int
+	Labels, AllowRepos                  []string
+	LocalAdmission                      *bool
+}
+
+func loadEnrolledRunner(path string) (enrolledRunner, error) {
+	machine, err := userconfig.ReadConfig(path)
+	if err != nil {
+		return enrolledRunner{}, err
+	}
+	r := machine.Runner
+	if r == nil {
+		return enrolledRunner{}, fmt.Errorf("%s has no runner section: %w", path, os.ErrNotExist)
+	}
+	if err := userconfig.ValidateConfig(userconfig.Config{Runner: r}); err != nil {
+		return enrolledRunner{}, err
+	}
+	out := enrolledRunner{Labels: r.Labels, AllowRepos: r.Repos, LocalAdmission: r.LocalAdmission}
+	if r.HolderPrefix != nil {
+		out.HolderPrefix = *r.HolderPrefix
+	}
+	if r.MaxConcurrent != nil {
+		out.MaxConcurrent = *r.MaxConcurrent
+	}
+	if r.CredentialsDir == nil {
+		return out, nil
+	}
+	out.CredentialsDir = *r.CredentialsDir
+	bearer, err := runners.FileBearer(out.CredentialsDir)
+	if err != nil {
+		return out, err
+	}
+	out.Token, err = bearer(context.Background())
+	return out, err
+}
 
 func TestRunnerEnrollmentWritesFinalSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -29,7 +69,7 @@ func TestRunnerEnrollmentWritesFinalSchema(t *testing.T) {
 	if err != nil || final.Runner == nil || final.Runner.CredentialsDir == nil || len(final.Runner.Repos) != 1 {
 		t.Fatalf("invalid runner configuration: %+v %v", final.Runner, err)
 	}
-	runner, err := agentconfig.Load(path)
+	runner, err := loadEnrolledRunner(path)
 	if err != nil || runner.Token != bearer {
 		t.Fatalf("runner could not load minted credential: %v", err)
 	}
@@ -42,14 +82,14 @@ func TestRunnerEnrollmentWritesFinalSchema(t *testing.T) {
 	if _, err := writeRunnerConfig(path, cfg, bearer, false); err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("existing enrollment was not refused: %v", err)
 	}
-	runner, err = agentconfig.Load(path)
+	runner, err = loadEnrolledRunner(path)
 	if err != nil || runner.Token != previous {
 		t.Fatalf("refused replacement changed the credential: %v", err)
 	}
 	if _, err := writeRunnerConfig(path, cfg, bearer, true); err != nil {
 		t.Fatal(err)
 	}
-	runner, err = agentconfig.Load(path)
+	runner, err = loadEnrolledRunner(path)
 	if err != nil || runner.Token != bearer {
 		t.Fatalf("forced replacement did not load the new credential: %v", err)
 	}
@@ -98,7 +138,7 @@ func TestRunnerConfigRollbackPreservesAReplacementEnrollment(t *testing.T) {
 	if err := written.rollback(); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := agentconfig.Load(path)
+	loaded, err := loadEnrolledRunner(path)
 	if err != nil || loaded.Token != bearer {
 		t.Fatalf("rollback changed the replacement enrollment: %v", err)
 	}
@@ -199,7 +239,7 @@ func TestRunnerEnrollmentFailureKeepsAnExistingService(t *testing.T) {
 	if err != nil || string(after) != string(before) {
 		t.Fatalf("cleanup changed the existing service: %v", err)
 	}
-	previous, err := agentconfig.Load(path)
+	previous, err := loadEnrolledRunner(path)
 	if err != nil || previous.Token != "previous-credential" {
 		t.Fatalf("cleanup changed the existing credential: %v", err)
 	}
@@ -251,7 +291,7 @@ func TestRunnerEnrollmentCredentialSurvivesAnotherWorkingDirectory(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Chdir(t.TempDir())
-	loaded, err := agentconfig.Load(absolute)
+	loaded, err := loadEnrolledRunner(absolute)
 	if err != nil || loaded.Token != token {
 		t.Fatalf("enrolled credential depended on the caller's directory: %v", err)
 	}
@@ -303,7 +343,7 @@ func TestRunnerEnrollmentFailurePreservesPriorSettingsAndCredential(t *testing.T
 	if err != nil || current.Runner == nil || *current.Runner.CredentialsDir != *prior.Runner.CredentialsDir || current.Debug == nil || *current.Debug.PauseTimeout != "7m" {
 		t.Fatalf("rollback replaced prior or concurrent settings: %+v %v", current, err)
 	}
-	loaded, err := agentconfig.Load(path)
+	loaded, err := loadEnrolledRunner(path)
 	if err != nil || loaded.Token != previousToken || len(loaded.Labels) != 1 || loaded.Labels[0] != "old" {
 		t.Fatalf("rollback did not restore prior runner: %+v %v", loaded, err)
 	}
@@ -361,7 +401,7 @@ func TestRunnerEnrollmentFailurePreservesPreviousForcedConfigAndCredential(t *te
 			t.Fatal(err)
 		}
 	})
-	previous, err := agentconfig.Load(f.config)
+	previous, err := loadEnrolledRunner(f.config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +414,7 @@ func TestRunnerEnrollmentFailurePreservesPreviousForcedConfigAndCredential(t *te
 	if err == nil {
 		t.Fatal("service failure reported success")
 	}
-	current, err := agentconfig.Load(f.config)
+	current, err := loadEnrolledRunner(f.config)
 	if err != nil || current.HolderPrefix != previous.HolderPrefix || current.Token != previous.Token || current.CredentialsDir != previous.CredentialsDir {
 		t.Fatalf("previous enrollment was changed: %+v %v", current, err)
 	}
@@ -468,7 +508,7 @@ func TestRunnerEnrollmentRollbackPreservesConcurrentReplacement(t *testing.T) {
 	if err := written.rollback(); err != nil {
 		t.Fatal(err)
 	}
-	current, err := agentconfig.Load(path)
+	current, err := loadEnrolledRunner(path)
 	if err != nil || current.CredentialsDir != concurrent.credentialsDir || current.Token != "replacement-private-token" {
 		t.Fatalf("concurrent replacement did not survive rollback: %+v %v", current, err)
 	}
@@ -493,7 +533,7 @@ func TestRunnerEnrollmentRollbackPreservesReferencedCredentialWhenRestoreFails(t
 	if err := written.rollback(); err == nil {
 		t.Fatal("rollback reported success when the config lock was unavailable")
 	}
-	current, err := agentconfig.Load(path)
+	current, err := loadEnrolledRunner(path)
 	if err != nil || current.Token != "original-private-token" {
 		t.Fatalf("failed restoration deleted the referenced credential: %+v %v", current, err)
 	}
