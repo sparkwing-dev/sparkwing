@@ -18,10 +18,7 @@ func stallRecoveryCommand(runID string) string {
 // perf: ETA simulation can outlast a health probe on a deep queue. Only the snapshot
 // holds d.mu. Concurrent readers share the returned slices; callers must leave them unchanged.
 func (d *Daemon) readQueueState() wingwire.QueueState {
-	return d.readQueueStateWithEstimator(func(qs *wingwire.QueueState, snap admission.Snapshot) {
-		annotateETA(qs, snap)
-		annotateSemaphoreETA(qs, snap)
-	})
+	return d.readQueueStateWithEstimator(annotateSemaphoreETA)
 }
 
 func (d *Daemon) readQueueStateWithEstimator(estimate func(*wingwire.QueueState, admission.Snapshot)) wingwire.QueueState {
@@ -387,47 +384,6 @@ func decodeNodeParticipantID(participantID string) (ownerRunID, displayRunID str
 	return "", "", false
 }
 
-func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
-	capCores := float64(min64(snap.TotalMilliCores, snap.HeadroomMilliCores)) / 1000.0
-	capMem := float64(minU64(snap.TotalMemoryBytes, snap.HeadroomMemoryBytes))
-
-	var holders []simRun
-	for _, h := range qs.Holders {
-		if h.Resources.Cores <= 0 && h.Resources.MemoryBytes <= 0 {
-			continue
-		}
-		holders = append(holders, simRun{
-			cores:  h.Resources.Cores,
-			mem:    float64(h.Resources.MemoryBytes),
-			finish: remainingMS(h.ExpectedDurationMS, h.ElapsedMS),
-		})
-	}
-	var waiters []simRun
-	var waiterIdx []int
-	for i, w := range qs.Waiters {
-		if w.Resources.Cores <= 0 && w.Resources.MemoryBytes <= 0 {
-			continue
-		}
-		waiters = append(waiters, simRun{
-			cores:     w.Resources.Cores,
-			softCores: snap.Waiters[i].SoftCores,
-			mem:       float64(w.Resources.MemoryBytes),
-			duration:  durationMS(w.ExpectedDurationMS),
-		})
-		waiterIdx = append(waiterIdx, i)
-	}
-
-	starts, clear := simulateQueue(capCores, capMem, holders, waiters)
-	for j, orig := range waiterIdx {
-		if ms, ok := finiteETA(starts[j]); ok {
-			qs.Waiters[orig].ExpectedStartMS = &ms
-		}
-	}
-	if ms, ok := finiteETA(clear); ok {
-		qs.ExpectedClearMS = &ms
-	}
-}
-
 func annotateSemaphoreETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 	starts, clear := simulateAdmissionETA(qs, snap)
 	for i := range qs.Waiters {
@@ -459,103 +415,6 @@ func semaphoreETAHolderRows(qs *wingwire.QueueState, snap admission.Snapshot) ma
 		}
 	}
 	return rows
-}
-
-type simRun struct {
-	cores     float64
-	softCores bool
-	mem       float64
-	finish    float64
-	duration  float64
-}
-
-type simEvent struct {
-	at    float64
-	cores float64
-	mem   float64
-}
-
-func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts []float64, clear float64) {
-	const eps = 1e-9
-	freeCores := capCores
-	freeMem := capMem
-	var events []simEvent
-	clear = 0
-	for _, h := range holders {
-		freeCores -= h.cores
-		freeMem -= h.mem
-		events = append(events, simEvent{at: h.finish, cores: h.cores, mem: h.mem})
-		clear = math.Max(clear, h.finish)
-	}
-
-	starts = make([]float64, len(waiters))
-	now := 0.0
-	blocked := false
-	for i, w := range waiters {
-		if blocked {
-			starts[i] = math.Inf(1)
-			clear = math.Inf(1)
-			continue
-		}
-		if (!w.softCores && w.cores > capCores+eps) || w.mem > capMem+eps {
-			starts[i] = math.Inf(1)
-			clear = math.Inf(1)
-			blocked = true
-			continue
-		}
-		for !simFits(w, capCores, freeCores, freeMem, eps) {
-			e, ok := popEarliest(&events)
-			if !ok {
-				now = math.Inf(1)
-				break
-			}
-			now = e.at
-			freeCores += e.cores
-			freeMem += e.mem
-		}
-		starts[i] = now
-		if math.IsInf(now, 1) {
-			clear = math.Inf(1)
-			blocked = true
-			continue
-		}
-		freeCores -= w.cores
-		freeMem -= w.mem
-		finish := now + w.duration
-		events = append(events, simEvent{at: finish, cores: w.cores, mem: w.mem})
-		clear = math.Max(clear, finish)
-	}
-	return starts, clear
-}
-
-func simFits(w simRun, capCores, freeCores, freeMem, eps float64) bool {
-	memOK := w.mem <= freeMem+eps
-	if !memOK {
-		return false
-	}
-	if w.cores <= eps {
-		return true
-	}
-	if w.cores <= freeCores+eps {
-		return true
-	}
-	return w.softCores && freeCores >= capCores-eps
-}
-
-func popEarliest(events *[]simEvent) (simEvent, bool) {
-	es := *events
-	if len(es) == 0 {
-		return simEvent{}, false
-	}
-	minIdx := 0
-	for i, e := range es {
-		if e.at < es[minIdx].at {
-			minIdx = i
-		}
-	}
-	e := es[minIdx]
-	*events = append(es[:minIdx], es[minIdx+1:]...)
-	return e, true
 }
 
 func remainingMS(expectedMS, elapsedMS int64) float64 {

@@ -39,7 +39,6 @@ func TestDeepQueueEstimateLeavesDaemonLockAvailable(t *testing.T) {
 		qs := d.readQueueStateWithEstimator(func(qs *wingwire.QueueState, snap admission.Snapshot) {
 			close(entered)
 			<-release
-			annotateETA(qs, snap)
 			annotateSemaphoreETA(qs, snap)
 		})
 		finished <- len(qs.Waiters)
