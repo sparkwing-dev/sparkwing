@@ -8,9 +8,38 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
+
+func TestOIDCWithoutIssuerExplainsControllerSetup(t *testing.T) {
+	noIssuer := &apierr.Error{Code: apierr.NotFound, Message: "this controller holds no OIDC signing key, so it issues no ID tokens"}
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "controller has no issuer", err: noIssuer},
+		{name: "wrapped controller error", err: errors.Join(noIssuer, errors.New("http://ctl.internal/?token="+claimToken))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := start(t)
+			service := newService(t)
+			service.OIDC = func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error) {
+				return ProcessOIDCToken{}, tc.err
+			}
+			got := askRoute(t, s, http.MethodPost, "/node/v1/oidc-token", admitService(t, s, service), `{"audience":"sts.amazonaws.com"}`)
+			wantRefusal(t, got, http.StatusNotFound, "not_found")
+			failure := got.body["error"].(map[string]any)
+			message, _ := failure["message"].(string)
+			for _, part := range []string{"OIDC", "controller", "issuer", "docs/oidc.md"} {
+				if !strings.Contains(message, part) {
+					t.Errorf("OIDC setup error lacks %q: %v", part, failure)
+				}
+			}
+		})
+	}
+}
 
 func TestOIDCTokenIsMaskedBeforeTheNodeGetsIt(t *testing.T) {
 	s := start(t)
