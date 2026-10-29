@@ -120,7 +120,7 @@ func (s *EngineController) handleUpdateMembership(w http.ResponseWriter, r *http
 			return err
 		}
 		if !body.Role.Valid() {
-			return invalidEngineBody("role must be owner, editor, or reader")
+			return unknownRole(body.Role)
 		}
 		change.Role = &body.Role
 	}

@@ -33,6 +33,10 @@ func (s *Server) accountWriter() (AccountWriter, error) {
 	return nil, routepolicy.MissingEndpointPolicy()
 }
 
+func unknownRole(role store.Role) error {
+	return invalidEngineBody(fmt.Sprintf("unknown role %q: use %s, %s, or %s", role, store.RoleOwner, store.RoleEditor, store.RoleReader))
+}
+
 func accountMutationError(err error) error {
 	switch {
 	case errors.Is(err, store.ErrNotMember):
