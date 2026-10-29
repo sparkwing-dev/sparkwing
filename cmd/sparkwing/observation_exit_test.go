@@ -59,7 +59,9 @@ func TestRunListStopsPollersOnARefusalInAnyRead(t *testing.T) {
 				list: func(context.Context, controllerwire.RunQuery) (controllerwire.RunPage, error) {
 					return controllerwire.RunPage{Runs: []controllerwire.RunDetail{failedRun}}, nil
 				},
-				steps: func(context.Context, string) (controllerwire.RunSteps, error) { return controllerwire.RunSteps{}, refused },
+				steps: func(context.Context, string) (controllerwire.RunSteps, error) {
+					return controllerwire.RunSteps{}, refused
+				},
 			},
 		},
 	} {

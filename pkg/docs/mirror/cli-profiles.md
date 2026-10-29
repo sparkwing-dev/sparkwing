@@ -69,7 +69,7 @@ Remove a controller connection profile
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. (required) |
-| `--keep-token` | Retain the credential when removing the profile. |
+| `--keep-token` | Remove only the local connection, without revoking its token at the controller. |
 
 ## `sparkwing profiles set`
 

@@ -28,7 +28,7 @@ Manage team credentials
 
 Mint a new API token
 
-Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. Member tokens expire within 90 days and end with their minting session. team.admin requires --allow-team-admin and expires within 30 days.
+Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. A token minted with a profile token is delegated from it: it gets at most the minting token's scopes, including team.admin, and never outlives it.
 
 ### Flags
 
@@ -41,8 +41,8 @@ Create a member credential through the team token route. Enroll runners with run
 | `--type KIND` | Kind of token to create, member by default; runners get credentials from runners add instead. Values: member. |
 | `--principal NAME` | Not used for member tokens, which always belong to the signed-in account that mints them; the value is ignored. |
 | `--scope SCOPE` | Credential scope. Repeatable; comma-separated values are accepted. |
-| `--ttl DURATION` | Lifetime of the new token in whole seconds or a duration such as 7d; omitted or zero uses the longest allowed, 90 days, or 30 days with team.admin. |
-| `--allow-team-admin` | Allow the team.admin scope on the new token, which then expires within 30 days; without it a team.admin request is refused. |
+| `--ttl DURATION` | Lifetime of the new token in whole seconds or a duration such as 7d; omitted or zero gives it the remaining lifetime of the token that mints it, which it can never outlive. |
+| `--allow-team-admin` | Ask for team.admin on a token minted from a signed-in account session, which then expires within 30 days; a token minted with a profile token gets team.admin whenever that token holds it, and ignores this flag. |
 | `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing tokens list`

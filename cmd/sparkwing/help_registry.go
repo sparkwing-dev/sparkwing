@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -33,6 +34,13 @@ func surfaceHelp(surface clisurface.Command) Command {
 	}
 	for _, flag := range append(clisurface.GlobalFlags(), surface.Flags...) {
 		spec := surfaceFlag(surface.Path, flag)
+		if flag.Name == "limit" && spec.Desc == flagDescriptions["limit"] {
+			if slices.ContainsFunc(surface.Flags, func(other clisurface.Flag) bool { return other.Name == "cursor" }) {
+				spec.Desc += " Continue with --cursor when more exist."
+			} else {
+				spec.Desc += " Raise it to include older records."
+			}
+		}
 		if surface.Path == "sparkwing commands" && flag.Name == "path" {
 			spec.Desc = "Command path prefix, with or without the sparkwing binary name."
 		}
@@ -178,10 +186,10 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing pipeline trigger --resume":                     "Host an interrupted --runner here run again in this CLI, using the credential this machine saved and the run's original pipeline and arguments.",
 	"sparkwing pipeline trigger --runner":                     "Where the run executes: here in this CLI, cloud on Sparkwing Cloud, a self-hosted runner by name, or matching self-hosted runners with label=<label>; without it, the team's routing decides.",
 	"sparkwing pipeline trigger --working-tree":               "Run an uploaded snapshot of this checkout, with uncommitted edits, deletions and untracked files that .gitignore does not exclude, instead of a pushed commit; the upload is refused if it holds secret-shaped files or values, submodules, unsafe symlinks, more than 100,000 files or more than 500 MiB.",
-	"sparkwing pools allow --branch":                          "Branch name patterns the rule admits, with * and ? wildcards that do not cross a slash; omitted, every branch of the repositories qualifies.",
+	"sparkwing pools allow --branch":                          "Branch name patterns the rule admits, with * and ? wildcards that do not cross a slash; omitted, every ref of the repositories qualifies, tags included.",
 	"sparkwing pools allow --repo":                            "GitHub repositories the rule admits, as owner/name; each must be reachable through the team's GitHub App, and naming one grants nothing on its own.",
 	"sparkwing pools allow --route":                           "Also keep runs from the matching repositories and branches that select no runner on this pool's self-hosted runners instead of Sparkwing Cloud.",
-	"sparkwing pools allow --source":                          "Admit only runs that a GitHub App webhook delivery started; omitted, any run whose repository was verified qualifies.",
+	"sparkwing pools allow --source":                          "Admit only runs that a GitHub App webhook delivery started; omitted, schedules whose commit the GitHub App resolved also qualify, while runs proved by GitHub Actions or fetched by the controller never do.",
 	"sparkwing pools disallow --rule":                         "ID of the pool rule to delete, as pools list shows it.",
 	"sparkwing queue list --group":                            "Show only this concurrency group's capacity, lease holders and waiting runs instead of the whole queue.",
 	"sparkwing queue priority --set":                          "New admission priority for the run on this machine: an integer, where higher is admitted sooner, or front or back to place it ahead of or behind every other waiting run; refused with --profile.",
@@ -196,8 +204,8 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing runners add --max-concurrent":                  "Most jobs this runner holds at once, written to its config.",
 	"sparkwing runners add --no-service":                      "Write the runner config and credential without installing or starting the runner service.",
 	"sparkwing runners add --repos":                           "Repository patterns this runner takes jobs for; a job on a runner serving several repositories can claim the others' jobs and their secrets, so scope it to repositories that trust each other.",
-	"sparkwing runners add --reserved-for":                    "Reserved pools this shared runner holds, which lets it take work and secrets restricted to those pools; requires team administration.",
-	"sparkwing runners add --trust":                           "Which runs this shared runner takes: verified-default takes only verified default-branch pushes, and any takes every run; unset, a runner holding a pool with a reserved secret takes only verified default-branch pushes.",
+	"sparkwing runners add --reserved-for":                    "Reserved pools this shared runner holds, which lets a --launcher runner take work and secrets restricted to those pools; a persistent runner holding a pool that a reserved secret names takes no work, and it requires team administration.",
+	"sparkwing runners add --trust":                           "Which runs this shared runner takes: verified-default takes only verified default-branch work (signed pushes to the default branch and unmodified fires of admin-armed default-branch schedules), and any takes every run; a runner holding a pool with a reserved secret, or a verified-default runner with any pool, takes nothing unless enrolled with --launcher, and unset such a launcher takes only verified default-branch work.",
 	"sparkwing runners list --quiet":                          "Print only runner names.",
 	"sparkwing runners remove --config":                       "Machine config file holding the runner section to remove, the standard Sparkwing config file by default.",
 	"sparkwing runners remove --no-service":                   "Revoke the runner credential without stopping the installed runner service.",
@@ -281,9 +289,9 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing team settings set --claim-ranking":             "Comma-separated tiers, best first, that take runs selecting no runner; a tier left out takes none of them, none means first come among every tier, and default restores the standard ranking.",
 	"sparkwing team settings set --high-trust":                "Let verified runs on plain-machine, persistent and self-hosted Actions runners write the shared verified cache; leave it false unless every job those runners take is trusted, since an earlier job on the same host could tamper with what they archive.",
 	"sparkwing team settings set --members-can-add-machines":  "Whether members without administration may enroll their own personal machines; false also ends personal machines such members already enrolled, and true does not revive them.",
-	"sparkwing tokens create --allow-team-admin":              "Allow the team.admin scope on the new token, which then expires within 30 days; without it a team.admin request is refused.",
+	"sparkwing tokens create --allow-team-admin":              "Ask for team.admin on a token minted from a signed-in account session, which then expires within 30 days; a token minted with a profile token gets team.admin whenever that token holds it, and ignores this flag.",
 	"sparkwing tokens create --principal":                     "Not used for member tokens, which always belong to the signed-in account that mints them; the value is ignored.",
-	"sparkwing tokens create --ttl":                           "Lifetime of the new token in whole seconds or a duration such as 7d; omitted or zero uses the longest allowed, 90 days, or 30 days with team.admin.",
+	"sparkwing tokens create --ttl":                           "Lifetime of the new token in whole seconds or a duration such as 7d; omitted or zero gives it the remaining lifetime of the token that mints it, which it can never outlive.",
 	"sparkwing tokens create --type":                          "Kind of token to create, member by default; runners get credentials from runners add instead.",
 	"sparkwing tokens list --include-revoked":                 "Also list tokens that have been revoked.",
 	"sparkwing tokens list --type":                            "List only tokens of this kind.",
@@ -303,7 +311,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing wingd run --version":                           "Version the foreground controller reports, the installed CLI version by default.",
 	"sparkwing-controller --addr":                             "Address the controller API listens on, 127.0.0.1:4344 by default.",
 	"sparkwing-controller --billing-url":                      "Base URL of the hosted checkout service that sells credits through Stripe Checkout; empty sells no credits.",
-	"sparkwing-controller --blob-store":                       "The cache's blob store as s3://bucket/prefix, listed hourly to reconcile each team's usage and to delete a team's objects 30 days after their last write; empty leaves usage to write counts alone.",
+	"sparkwing-controller --cache-blob-store":                 "The cache's blob store as s3://bucket/prefix, listed hourly to reconcile each team's usage and to delete a team's objects 30 days after their last write; empty leaves usage to write counts alone.",
 	"sparkwing-controller --bucket-measure-pages":             "Most thousand-object listings one bucket measurement may make before it stops and reports itself incomplete.",
 	"sparkwing-controller --bucket-reconcile":                 "How often the controller measures the whole bucket and replaces its running count; zero measures once at startup.",
 	"sparkwing-controller --bucket-store":                     "Object store URL, such as s3://bucket/prefix, that the bucket ceilings measure; it is only read, and empty counts only this process's own writes.",
@@ -327,21 +335,21 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing-controller --insecure-cookies":                 "Drop Secure and the __Host- prefix from dashboard session cookies so sessions work over plain HTTP; only for a single-team self-hosted dashboard without TLS, since the cookies then travel readable to every hop.",
 	"sparkwing-controller --limits-profile":                   "Named set of abuse guards that fills each guard the command line and environment leave unset; empty, the default, applies none.",
 	"sparkwing-controller --live-log-idle":                    "How long a job that stopped writing without reporting that it finished keeps its live log buffer.",
-	"sparkwing-controller --live-log-job-kb":                  "Kilobytes of each running job's log kept in memory for live readers; the stored copy is unaffected.",
-	"sparkwing-controller --live-log-max-jobs":                "Most jobs that may hold a live log buffer at once; past it the controller releases the buffer written least recently.",
+	"sparkwing-controller --live-log-node-kb":                 "Kilobytes of each running job's log kept in memory for live readers; the stored copy is unaffected.",
+	"sparkwing-controller --live-log-max-nodes":               "Most jobs that may hold a live log buffer at once; past it the controller releases the buffer written least recently.",
 	"sparkwing-controller --live-log-total-mb":                "Megabytes of live log buffers across every running job; past it the controller drops the oldest bytes of the largest buffer.",
 	"sparkwing-controller --log-retention":                    "Per-team log retention as team=days[,team=days...], replacing the default of 90 days with credits or 30 without; each distinct day count needs its own lifecycle rule in the cache bucket.",
 	"sparkwing-controller --max-bucket-bytes":                 "Stored bytes across the object store at which the controller freezes new object writes while existing runs finish; zero, the default, is unlimited.",
 	"sparkwing-controller --max-bucket-objects":               "Object count across the object store at which the controller freezes new object writes; zero is unlimited.",
 	"sparkwing-controller --max-runs-per-principal-hour":      "Most runs one principal may create in a rolling hour, with GitHub App deliveries counted against the installation's team; past it requests get 429, a restart resets the counts, and zero is unlimited.",
 	"sparkwing-controller --metrics-addr":                     "Separate address for the Prometheus /metrics endpoint, which keeps it off the API listener and any ingress in front of it; empty serves /metrics on --addr.",
-	"sparkwing-controller --oauth-redirect-uri":               "Dashboard callback URLs a sign-in may return to, such as https://app.example.com/auth/google/callback.",
+	"sparkwing-controller --oauth-redirect-uris":              "Dashboard callback URLs a sign-in may return to, such as https://app.example.com/auth/google/callback.",
 	"sparkwing-controller --object-store-budget":              "Per-process object-store request budgets as class:window=count entries such as put:minute=600,get:day=0, where 0 leaves that window unlimited and an unnamed entry keeps its built-in budget.",
 	"sparkwing-controller --oidc-token-ttl":                   "Lifetime of each OIDC ID token the controller issues, from 1m to 1h.",
-	"sparkwing-controller --operator-account":                 "Account IDs whose signed-in dashboard sessions may use the operator console and skip the sign-up waitlist; no token reaches the console, and empty leaves it off.",
+	"sparkwing-controller --operator-accounts":                "Account IDs whose signed-in dashboard sessions may use the operator console and skip the sign-up waitlist; no token reaches the console, and empty leaves it off.",
 	"sparkwing-controller --placement-hold":                   "How long a ready job is held back from runners lacking its preferred labels while a live runner that has them has a free slot, 20s by default; zero claims first in, first out.",
 	"sparkwing-controller --placement-liveness":               "How recently a runner must have polled to count as live for --placement-hold, 30s by default.",
-	"sparkwing-controller --prefers":                          "Label terms that a job with no preferences of its own prefers its runner to advertise; empty leaves such a job to the first claimant.",
+	"sparkwing-controller --default-prefer-labels":            "Label terms that a job with no preferences of its own prefers its runner to advertise; empty leaves such a job to the first claimant.",
 	"sparkwing-controller --requests-per-minute-alarm":        "Total request rate per minute past which the controller logs a warning and counts sparkwing_request_rate_alarm_total, refusing nothing; zero raises no alarm.",
 	"sparkwing-controller --requests-per-token-minute":        "Requests one credential may make per rolling minute across every route, which bounds a caller that keeps changing its runner name; past it requests get 429, and zero is unlimited.",
 	"sparkwing-controller --require-auth":                     "Refuse to start until a live deployment administrator credential exists; private routes require credentials either way.",
@@ -350,6 +358,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing-controller --signup-gate":                      "Sign-up policy for new accounts: waitlist puts every new account on the waitlist, and open, the default, follows the operator's stored setting; existing accounts are unaffected.",
 	"sparkwing-controller --team-daily-download-free-bytes":   "Bytes a team without credits may download per UTC day through the cache or controller, log reads excluded; past it new downloads get 429 until midnight UTC, and zero turns the cap off.",
 	"sparkwing-controller --team-daily-download-funded-bytes": "Daily download cap in bytes for a team with credits; zero turns it off.",
+	"sparkwing-controller --trusted-proxy-cidrs":              "Proxy CIDRs whose X-Forwarded-For header the controller believes for request logs and per-IP limits; list only proxies that overwrite that header, and empty ignores it.",
 	"sparkwing-controller --trusted-proxy-addr":               "Second address serving the same API whose requests key login throttling, the failed-credential budget and the request log on X-Real-IP; only a proxy that overwrites X-Real-IP may reach it, and empty serves only --addr.",
 	"sparkwing-controller --warn-bucket-bytes":                "Stored bytes at which health reports the bucket as warning without refusing anything; zero disables the warning.",
 	"sparkwing-controller --warn-bucket-objects":              "Object count at which health reports the bucket as warning without refusing anything; zero disables the warning.",
@@ -376,9 +385,9 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing-runner run-node --module-cache":                "Absolute path used as GOMODCACHE for the job's tools, replacing any inherited value.",
 	"sparkwing-runner run-node --source-dir":                  "Absolute path of the checkout fetch-source prepared, which the job runs from.",
 	"sparkwing-runner start --config":                         "Machine config file whose runner section configures this runner, the standard Sparkwing config file or SPARKWING_CONFIG by default.",
-	"sparkwing-runner start --repos":                          "Repository patterns such as github.com/acme/* that replace runner.repos from the config; the runner refuses work from any other repository.",
+	"sparkwing-runner start --repos":                          "Repository patterns such as github.com/acme/* that replace runner.repos from the config; the runner runs work whose sealed source remote matches, including uploaded working trees that record a matching remote, and refuses all other work.",
 	"sparkwing-runner version --offline":                      "Has no effect, because the runner version report never contacts the network.",
-	"sparkwing-runner warm --accept-working-tree":             "Has no effect, because this runner always refuses runs whose source is an uploaded working tree.",
+	"sparkwing-runner warm --accept-working-tree":             "Has no effect: the runner admits a run by its source's remote alone, so an uploaded working tree whose recorded remote matches --repos runs from its uploaded bundle whether or not this is set.",
 	"sparkwing-runner warm --also-claim-triggers":             "Claim trigger and plan work, on by default; pass --also-claim-triggers=false to run only jobs.",
 	"sparkwing-runner warm --claim-jobs":                      "Claim job work, on by default; pass --claim-jobs=false to run only triggers.",
 	"sparkwing-runner warm --controller":                      "Controller URL to claim work from; required.",
@@ -389,7 +398,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing-runner warm --heartbeat":                       "Lease renewal interval, checked against --lease at startup but not otherwise used yet; a third of the lease by default.",
 	"sparkwing-runner warm --holder-prefix":                   "Not supported, because the controller assigns holder identity; setting it is an error.",
 	"sparkwing-runner warm --idle-exit":                       "Exit after holding no work for this long; by default the runner never exits for being idle.",
-	"sparkwing-runner warm --label":                           "Pool labels this runner offers when claiming, so only work routed to these labels reaches it.",
+	"sparkwing-runner warm --label":                           "Labels this runner offers when claiming, matched against the labels work asks for; work that asks for no label can still reach it.",
 	"sparkwing-runner warm --lease":                           "Work lease length, checked against --heartbeat at startup but not otherwise used yet; 3m by default.",
 	"sparkwing-runner warm --local-admission":                 "Make each job also wait for capacity from this machine's running Sparkwing daemon, so local runs and runner work share the machine; a job fails if no daemon is running.",
 	"sparkwing-runner warm --max-claims-before-restart":       "Stop claiming after this many claims, finish held work and exit so a supervisor restarts the runner; zero means no limit.",
@@ -397,7 +406,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing-runner warm --memory-ceiling":                  "Checked as a positive Kubernetes quantity but not yet applied to claimed work.",
 	"sparkwing-runner warm --metrics-addr":                    "TCP address to serve Prometheus /metrics and /healthz on; unset runs no metrics server.",
 	"sparkwing-runner warm --poll":                            "How long the runner waits between claim attempts, 500ms by default.",
-	"sparkwing-runner warm --repos":                           "Repository patterns such as github.com/acme/* whose sealed remote source this runner will run; work from any other repository is refused, and an empty list refuses everything.",
+	"sparkwing-runner warm --repos":                           "Repository patterns such as github.com/acme/* whose sealed source remote this runner will run, including uploaded working trees that record a matching remote; work from any other repository is refused, and an empty list refuses everything.",
 	"sparkwing-runner warm --submit-env-allow":                "Requester-submitted environment variable names, exact or ending in _*, that jobs from other machines may receive; others are dropped, none pass by default, and variables this host sets keep the host's value.",
 	"sparkwing-runner warm --team":                            "Team whose GitHub Actions registration --github-actions exchanges against; required with --github-actions and ignored without it.",
 	"sparkwing-runner warm --trigger-source":                  "Not supported, because the controller cannot filter claims by source; setting it is an error.",
@@ -411,7 +420,7 @@ var flagDescriptions = map[string]string{
 	"run":                 "Run ID or per-team run number.",
 	"search":              "Text to match against record names and summaries; log text is not searched.",
 	"grep":                "Show only log lines matching this text.",
-	"limit":               "Maximum number of records to print, at least one; continue with --cursor when more exist.",
+	"limit":               "Maximum number of records to print, at least one.",
 	"follow":              "Keep streaming until the observed work finishes.",
 	"all":                 "Include entries that are hidden by default.",
 	"dry-run":             "Show what would change without changing anything.",
@@ -465,7 +474,7 @@ var flagDescriptions = map[string]string{
 	"token-stdin":         "Read the controller credential from standard input.",
 	"scope":               "Credential scope.",
 	"no-probe":            "Skip checking the controller connection.",
-	"keep-token":          "Retain the credential when removing the profile.",
+	"keep-token":          "Remove only the local connection, without revoking its token at the controller.",
 }
 
 var commandSynopses = map[string]string{
