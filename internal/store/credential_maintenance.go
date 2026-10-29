@@ -16,16 +16,19 @@ func (t *Tenant) credentialAdminTx(ctx context.Context, tx *storeTx, a capabilit
 		return err
 	}
 	c := p.Capability
-	if a.Target.Team != string(t.team) || !teamAdministrator(c) || c.Unit != "" || c.Purpose != "" ||
+	if a.Target.Team != string(t.team) || !teamAdministrator(p) || c.Unit != "" || c.Purpose != "" ||
 		a.Access.Credential != capability.CredentialMember || a.Access.Binding != capability.BindNone || a.Access.Liveness != capability.LiveCredential || !slices.Equal(a.Access.Grants, []capability.Grant{capability.TeamAdmin}) {
 		return bindingRefusal()
 	}
 	return nil
 }
 
-// safety: the verified local peer owns its local controller's team, so it administers it.
-func teamAdministrator(c capability.Capability) bool {
-	return c.Binding.Kind == capability.BindingNone && c.Audience == capability.Controller && (c.Subject.Kind == capability.SubjectAccount || c.Subject.Kind == capability.SubjectLocal) && slices.Contains(c.Grants, capability.TeamAdmin)
+// safety: the verified local peer owns its local controller's team, so it administers it;
+// a local subject in any other class or team administers nothing.
+func teamAdministrator(p capability.Principal) bool {
+	c := p.Capability
+	subject := c.Subject.Kind == capability.SubjectAccount || c.Subject.Kind == capability.SubjectLocal && p.Class == capability.CredentialPeer && c.Team == string(DefaultTeam)
+	return subject && c.Binding.Kind == capability.BindingNone && c.Audience == capability.Controller && slices.Contains(c.Grants, capability.TeamAdmin)
 }
 
 // CredentialRotation describes only the committed credential-maintenance attempt.

@@ -13,7 +13,7 @@ func checkTeamAdministrationTx(ctx context.Context, tx *storeTx, team Team, acto
 	if err != nil {
 		return p, err
 	}
-	if !teamAdministrator(p.Capability) {
+	if !teamAdministrator(p) {
 		return p, authorityError(apierr.Forbidden, "current team administration is required")
 	}
 	return p, nil
