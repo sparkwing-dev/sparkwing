@@ -6,12 +6,10 @@ import (
 )
 
 // SecretsProvider is optionally implemented by a pipeline value to
-// declare its typed secrets struct. The orchestrator reads it at run
-// start, resolves every required entry against the SecretResolver
-// installed on ctx, fails the run loudly if any required entry is
-// missing, and otherwise installs the populated struct on ctx via
-// WithPipelineSecrets. Step bodies read with
-// sparkwing.PipelineSecrets[T](ctx).
+// declare its typed secrets struct. Discovery reports its entries so the
+// host can authorize them; [PipelineSecrets] resolves each entry through
+// [Secret] when a step reads the struct, and panics on a missing required
+// entry. Step bodies read with sparkwing.PipelineSecrets[T](ctx).
 //
 //	type ReleaseSecrets struct {
 //	    DeployToken string `sw:"DEPLOY_TOKEN,required"`
@@ -27,8 +25,8 @@ type SecretsProvider interface {
 	Secrets() any
 }
 
-// PipelineSecrets returns the typed Secrets struct installed on ctx,
-// or nil when the pipeline doesn't implement SecretsProvider.
+// PipelineSecrets returns the typed Secrets struct installed on ctx, resolving
+// it when none is installed, or nil when the pipeline doesn't implement SecretsProvider.
 // Panics when the installed value isn't assignable to *T -- matches
 // the posture of sparkwing.Inputs[T].
 func PipelineSecrets[T any](ctx context.Context) *T {

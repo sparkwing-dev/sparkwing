@@ -7,10 +7,9 @@ import (
 	"path/filepath"
 )
 
-// ErrNoProject is returned by SDK helpers that need a project root
-// when no `.sparkwing/` was found above cwd at init. errors.Is-check
-// to distinguish "we aren't in a sparkwing project" from other I/O
-// errors. Path() panics with the same message.
+// ErrNoProject is returned by SDK helpers that resolve a relative path
+// when no working directory is known. errors.Is-check to distinguish it
+// from other I/O errors. Path() panics with the same message.
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
 
 // Path joins parts onto WorkDir() and returns the absolute path.
@@ -20,10 +19,8 @@ var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd
 //	cfg := sparkwing.Path("backend", "config.yaml")
 //	// "/repo/root/backend/config.yaml"
 //
-// Panics with ErrNoProject if no `.sparkwing/` was discoverable
-// above cwd at init AND the resulting path would be relative
-// (i.e. the first part is not absolute). Pure-absolute joins are
-// safe to call from any context.
+// Relative parts resolve against the process working directory whether or
+// not it sits inside a Sparkwing project.
 func Path(parts ...string) string {
 	if len(parts) == 0 {
 		return requireWorkDir()
@@ -40,8 +37,7 @@ func Path(parts ...string) string {
 //
 //	data, err := sparkwing.ReadFile("backend/config.yaml")
 //
-// Returns ErrNoProject (wrapped) if the path is relative and no
-// `.sparkwing/` was found above cwd. Wraps os.ReadFile.
+// Wraps os.ReadFile.
 func ReadFile(path string) ([]byte, error) {
 	resolved, err := resolvePath(path)
 	if err != nil {
@@ -56,8 +52,7 @@ func ReadFile(path string) ([]byte, error) {
 //
 //	err := sparkwing.WriteFile("dist/version.txt", []byte("v1.2.3"))
 //
-// Returns ErrNoProject (wrapped) if the path is relative and no
-// `.sparkwing/` was found above cwd. Use os.WriteFile directly for
+// Use os.WriteFile directly for
 // non-default permissions.
 func WriteFile(path string, data []byte) error {
 	resolved, err := resolvePath(path)
@@ -74,8 +69,7 @@ func WriteFile(path string, data []byte) error {
 //
 //	manifests, err := sparkwing.Glob("k8s/*.yaml")
 //
-// Returns ErrNoProject (wrapped) if the pattern is relative and no
-// `.sparkwing/` was found above cwd. Uses filepath.Glob, so `**` is
+// Uses filepath.Glob, so `**` is
 // NOT supported -- only `*`, `?`, and character classes. For
 // repo-aware matching with `**`, use inputs.Files / inputs.RepoFiles
 // in a MemoInput recipe instead.

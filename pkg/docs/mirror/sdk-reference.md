@@ -31,7 +31,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func MustVariable(ctx context.Context, name string) string` -- MustVariable makes a missing required plain value fail the job.
 - `func OIDCToken(ctx context.Context, audience string) (string, error)` -- OIDCToken returns an ID token the controller signed for this run, with aud set to audience.
 - `func Path(parts ...string) string` -- Path joins parts onto WorkDir() and returns the absolute path.
-- `func PipelineSecrets[T any](ctx context.Context) *T` -- PipelineSecrets returns the typed Secrets struct installed on ctx, or nil when the pipeline doesn't implement SecretsProvider.
+- `func PipelineSecrets[T any](ctx context.Context) *T` -- PipelineSecrets returns the typed Secrets struct installed on ctx, resolving it when none is installed, or nil when the pipeline doesn't implement SecretsProvider.
 - `func ReadFile(path string) ([]byte, error)` -- ReadFile reads the named file.
 - `func Register[T any](name string, factory func() Pipeline[T])` -- Register installs a pipeline under the given name.
 - `func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])` -- RegisterEntrypoint declares a named SDK entrypoint.
@@ -468,7 +468,7 @@ type Git struct {
 - `func NewGit(workDir, sha, branch, defaultBranch, repo, repoURL string) *Git` -- NewGit constructs a Git with the supplied data fields and workDir.
 - `func NewGitFromTree(ctx context.Context, workDir string) (*Git, error)` -- NewGitFromTree builds a Git by shelling out to inspect workDir.
 - `func (g *Git) ChangedFiles(ctx context.Context, since string) ([]string, error)` -- ChangedFiles returns repo-relative paths modified between `since` and HEAD.
-- `func (g *Git) FilesetHash(ctx context.Context) (string, error)` -- FilesetHash returns a deterministic hash of every tracked file's content.
+- `func (g *Git) FilesetHash(ctx context.Context) (string, error)` -- FilesetHash returns a deterministic hash of the build context: tracked files and untracked files Git does not ignore, less .dockerignore matches.
 - `func (g *Git) IsDirty(ctx context.Context) (bool, error)` -- IsDirty reports whether the working tree has uncommitted changes.
 - `func (g *Git) LatestTag(ctx context.Context, prefix string) (string, error)` -- LatestTag returns the highest semver tag with prefix.
 - `func (g *Git) Name() string` -- Name returns the bare repo name (the part after the last "/" in Repo).

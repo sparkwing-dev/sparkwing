@@ -25,13 +25,13 @@ type Config struct {
 // deployment shape: defaults, guards, dispatch metadata, and triggers.
 // One Go entrypoint can back many pipelines, each with its own policy.
 type Pipeline struct {
-	// Name is the invocable name (`sparkwing run <name>`); must equal
-	// the string passed to the SDK's Register call. It must match
+	// Name is the invocable name (`sparkwing run <name>`), independent of
+	// the SDK registration key. It must match
 	// `^[A-Za-z0-9][A-Za-z0-9._-]*$`.
 	Name string `yaml:"name"`
 
-	// Entrypoint is the Go pipeline struct type that implements this
-	// entry (equals the struct name). Required.
+	// Entrypoint is the key the SDK's RegisterEntrypoint call registered
+	// this entry's pipeline under. Required.
 	Entrypoint string `yaml:"entrypoint"`
 
 	// Source selects the Git ref to compile; jobs still execute in the submitted checkout.
@@ -51,7 +51,7 @@ type Pipeline struct {
 	// Guards gate dispatch on where the run is dispatched, args, and git
 	// branch. Reject fires before any step runs when any token
 	// matches; Require fires when not every token matches. Token
-	// vocabulary: `profile:local`, `profile:controller`,
+	// vocabulary: `where:local`, `where:controller`,
 	// `arg:<flag>=<value>`, `git:branch=<name>`, `git:branch=default`. A literal branch matches
 	// the checked-out head. The default token matches the repository's
 	// default branch: a GitHub App trigger records it, and any other run
