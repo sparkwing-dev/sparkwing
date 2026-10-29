@@ -66,13 +66,13 @@ func TestDebugResumeUsesConfiguredController(t *testing.T) {
 		}
 		switch calls {
 		case 1:
-			if r.Method != "GET" || r.URL.Path != "/api/v1/runs/412/jobs/build/debug-pause" {
+			if r.Method != http.MethodGet || r.URL.Path != "/api/v1/runs/412/jobs/build/debug-pause" {
 				t.Fatalf("observation: %s %s", r.Method, r.URL)
 			}
 			return 200, `{"run_id":"run-1","number":412,"job_id":"build","pause":null}`
 		case 2:
 			body, err := io.ReadAll(r.Body)
-			if err != nil || r.Method != "POST" || r.URL.Path != "/api/v1/runs/run-1/jobs/build/resume" || string(body) != "{}" {
+			if err != nil || r.Method != http.MethodPost || r.URL.Path != "/api/v1/runs/run-1/jobs/build/resume" || string(body) != "{}" {
 				t.Fatalf("release: %s %s %s %v", r.Method, r.URL, body, err)
 			}
 			return http.StatusNoContent, ""

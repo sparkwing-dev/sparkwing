@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func TestEveryDataEndpointDecodesBinding(t *testing.T) {
 	for _, endpoint := range s.dataEndpoints() {
 		t.Run(endpoint.Method+" "+endpoint.Pattern, func(t *testing.T) {
 			path := endpoint.Pattern
-			if endpoint.Method == "GET" {
+			if endpoint.Method == http.MethodGet {
 				path += "?kind=memo&name=hash"
 			}
 			r := httptest.NewRequest(endpoint.Method, path, strings.NewReader(bodies[endpoint.Method+" "+endpoint.Pattern]))
@@ -95,7 +96,7 @@ func TestNativeDataReaderRoutesAndSelectorIsolation(t *testing.T) {
 	}
 	property := func(input []byte) bool {
 		body, _ := json.Marshal(map[string]any{"pipeline": "ci", "job": "build", "hash": "absent", "repo": base64.RawURLEncoding.EncodeToString(input)})
-		r := httptest.NewRequest("POST", "/api/v1/data/memo/lookup", strings.NewReader(string(body)))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/data/memo/lookup", strings.NewReader(string(body)))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
@@ -108,7 +109,7 @@ func TestNativeDataReaderRoutesAndSelectorIsolation(t *testing.T) {
 	engineSQL(t, st, `DELETE FROM memberships WHERE team='a' AND account_id='data-reader'`)
 	if err := quick.Check(func(input []byte) bool {
 		body := fmt.Sprintf(`{"pipeline":"ci","job":"build","hash":"%x"}`, sha256.Sum256(input))
-		r := httptest.NewRequest("POST", "/api/v1/data/memo/lookup", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/data/memo/lookup", strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
@@ -149,7 +150,7 @@ func TestNativeDataWritesBindTicketsAndRecords(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &ticket); err != nil {
 		t.Fatal(err)
 	}
-	put := httptest.NewRequest("PUT", ticket.URL, strings.NewReader(""))
+	put := httptest.NewRequest(http.MethodPut, ticket.URL, strings.NewReader(""))
 	for key, value := range ticket.Headers {
 		put.Header.Set(key, value)
 	}

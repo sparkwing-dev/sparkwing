@@ -46,7 +46,7 @@ func TestOperatorTeamsCreateCLIThroughStore(t *testing.T) {
 					calls++
 					w := httptest.NewRecorder()
 					h.ServeHTTP(w, r)
-					if r.Method == "GET" && strings.Contains(r.URL.Path, "/operator/teams/") {
+					if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/operator/teams/") {
 						for _, field := range []string{"balance_micro", "billing", "events", "owners"} {
 							if strings.Contains(w.Body.String(), field) {
 								t.Fatalf("deployment team read exposed %s", field)
@@ -76,7 +76,7 @@ func TestOperatorTeamsCreateCLIThroughStore(t *testing.T) {
 			if !strings.HasPrefix(credential, "swk_") || strings.ContainsAny(credential, "\n\t ") {
 				t.Fatalf("credential output=%q", out.String())
 			}
-			r := httptest.NewRequest("GET", "https://controller.test/api/v1/team/members", nil)
+			r := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/team/members", nil)
 			r.Header.Set("Authorization", "Bearer "+credential)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)

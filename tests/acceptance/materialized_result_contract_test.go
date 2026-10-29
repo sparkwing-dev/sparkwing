@@ -25,7 +25,7 @@ func TestSurfaceMaterializedResultTransport(t *testing.T) {
 			calls := 0
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
 				calls++
-				if req.Method != "POST" || req.URL.Path != "/api/v1/runs/retry/jobs/build/reconcile" {
+				if req.Method != http.MethodPost || req.URL.Path != "/api/v1/runs/retry/jobs/build/reconcile" {
 					t.Fatalf("unexpected reconciliation: %s %s", req.Method, req.URL)
 				}
 				var body struct {
@@ -45,7 +45,7 @@ func TestSurfaceMaterializedResultTransport(t *testing.T) {
 				if body.Policy != "manual_retry" || body.Source.Policy != "manual_retry" || body.Source.Result.Run != "memo-run" || body.Source.Result.Job != "generated/build" || body.Source.Result.State != 9007199254740993 {
 					t.Fatalf("materialized identity changed: %+v", body)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(response)))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(response)))}, nil
 			})}})
 			if err != nil {
 				t.Fatal(err)
@@ -70,10 +70,10 @@ func TestSurfaceSnapshotPreservesGuardRefusal(t *testing.T) {
 				t.Fatal(err)
 			}
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
-				if req.Method != "GET" || req.URL.Path != "/api/v1/runs/run/snapshot" {
+				if req.Method != http.MethodGet || req.URL.Path != "/api/v1/runs/run/snapshot" {
 					t.Fatalf("unexpected snapshot: %s %s", req.Method, req.URL)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
 			})}})
 			if err != nil {
 				t.Fatal(err)

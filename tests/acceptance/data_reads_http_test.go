@@ -453,7 +453,7 @@ func TestDataReadHTTPDiscovery(t *testing.T) {
 	f := newDataHTTPFixture()
 	for _, forwarded := range []bool{false, true} {
 		h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(f.boundary)).WithDataController(f.data).Handler()
-		r := httptest.NewRequest("GET", "/api/v1/services", nil)
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/services", nil)
 		r.Header.Set("Authorization", "Bearer "+f.boundary.raw)
 		if forwarded {
 			r.Header.Set("X-Forwarded-For", "192.0.2.1")
@@ -498,7 +498,7 @@ func TestDataReadHTTPChoosesCloudFrontOnlyForIngress(t *testing.T) {
 	for _, header := range []string{"", "X-Forwarded-For", "X-Forwarded-Host"} {
 		f := newDataHTTPFixture()
 		f.data.Objects = backend
-		request := httptest.NewRequest("POST", "https://controller.test/api/v1/data/download", strings.NewReader(`{"digest":"`+string(dataDigest())+`"}`))
+		request := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/data/download", strings.NewReader(`{"digest":"`+string(dataDigest())+`"}`))
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Authorization", "Bearer "+f.boundary.raw)
 		if header != "" {

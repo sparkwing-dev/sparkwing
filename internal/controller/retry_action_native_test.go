@@ -290,7 +290,7 @@ func TestRetryActionUnknownRunAndRemovedRequestShapes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, body := range []string{"", `{}`, `{"full":true}`, `{"mode":"unknown"}`} {
-		r := httptest.NewRequest("POST", "/api/v1/runs/"+url.PathEscape("run")+"/retry", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runs/"+url.PathEscape("run")+"/retry", strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+raw)
 		r.Header.Set("Idempotency-Key", "invalid")
@@ -321,7 +321,7 @@ func FuzzRetryActionValidatesBeforeAdmission(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := httptest.NewRequest("POST", "/api/v1/runs/run/retry", bytes.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run/retry", bytes.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()

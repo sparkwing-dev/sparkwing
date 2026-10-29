@@ -63,7 +63,7 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 			return nil, authorityError(apierr.PlanInvalid, err.Error())
 		}
 	}
-	expansions, err := readAcceptedExpansionsTx(ctx, tx, team, string(spec.Request.RunID))
+	expansions, err := readAcceptedExpansionsTx(ctx, tx, team, spec.Request.RunID)
 	if err != nil {
 		return nil, err
 	}

@@ -32,7 +32,7 @@ func TestOIDCDiscoveryHTTPPublicPolicy(t *testing.T) {
 	for _, path := range []string{oidcissuer.DiscoveryPath, oidcissuer.JWKSPath} {
 		for _, auth := range []string{"", "Bearer malformed", "Session untrusted"} {
 			t.Run(path+"/"+auth, func(t *testing.T) {
-				r := httptest.NewRequest("GET", "http://forged.example"+path, nil)
+				r := httptest.NewRequest(http.MethodGet, "http://forged.example"+path, nil)
 				r.Header.Set("Authorization", auth)
 				r.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: "untrusted"})
 				w := httptest.NewRecorder()
@@ -79,7 +79,7 @@ func TestOIDCDiscoveryHTTPDisabledAndMethods(t *testing.T) {
 	h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
 	for _, path := range []string{oidcissuer.DiscoveryPath, oidcissuer.JWKSPath} {
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 		assertEngineError(t, w, 404, apierr.NotFound)
 		for _, method := range []string{"HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"} {
 			w := httptest.NewRecorder()

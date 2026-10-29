@@ -46,7 +46,7 @@ func TestPlanTopologyStrangerLearnsNothingProperty(t *testing.T) {
 			id, want = "absent", http.StatusNotFound
 			code = apierr.NotFound
 		}
-		r := httptest.NewRequest("POST", "/api/v1/runs/"+id+"/plan", strings.NewReader(`{"plan":{"jobs":[{"id":"injected"}]},"declarations":{"version":1,"file":"sparkwing.yaml"}}`))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runs/"+id+"/plan", strings.NewReader(`{"plan":{"jobs":[{"id":"injected"}]},"declarations":{"version":1,"file":"sparkwing.yaml"}}`))
 		r.Header.Set("Authorization", "Bearer "+raw)
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()

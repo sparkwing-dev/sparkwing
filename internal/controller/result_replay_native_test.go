@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -51,7 +52,7 @@ func TestNativeTerminalResultReplayUsesCommittedProof(t *testing.T) {
 	}
 	property := func(input []byte) bool {
 		changed := body + " " + base64.RawURLEncoding.EncodeToString(input)
-		r := httptest.NewRequest("POST", path, strings.NewReader(changed))
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(changed))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
@@ -94,7 +95,7 @@ func TestNativeTerminalResultReplayUsesCommittedProof(t *testing.T) {
 			t.Fatal(err)
 		}
 		engineSQL(t, e.Store, `UPDATE nodes SET state_actor=? WHERE team='a' AND run_id='run' AND node_id='job'`, encoded)
-		r := httptest.NewRequest("POST", path, strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
@@ -107,7 +108,7 @@ func TestNativeTerminalResultReplayUsesCommittedProof(t *testing.T) {
 	engineClaimHTTP(t, h, raw, "POST", path, body, 200)
 	if err := quick.Check(func(input []byte) bool {
 		engineSQL(t, e.Store, `UPDATE node_attempts SET holder=? WHERE team='a' AND run_id='run' AND node_id='job' AND attempt=1`, "other-"+base64.RawURLEncoding.EncodeToString(input))
-		r := httptest.NewRequest("POST", path, strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()

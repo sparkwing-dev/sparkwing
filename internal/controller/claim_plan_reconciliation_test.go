@@ -80,7 +80,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 		if delegated {
 			token = child.Raw
 		}
-		request := httptest.NewRequest("GET", "/api/v1/runs/"+selector+path+"?include=secret_values", nil)
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/runs/"+selector+path+"?include=secret_values", nil)
 		request.Header.Set("Authorization", "Bearer "+token)
 		request.Header.Set("X-Sparkwing-Scopes", "runs.read,team.admin")
 		response := httptest.NewRecorder()

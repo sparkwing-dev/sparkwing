@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -70,7 +71,7 @@ func TestPrivilegedRouteBoundaries(t *testing.T) {
 		}
 	}
 	for _, route := range Routes() {
-		if strings.Contains(route.Path, "/jobs/") && route.Method == "POST" {
+		if strings.Contains(route.Path, "/jobs/") && route.Method == http.MethodPost {
 			for _, access := range route.Access {
 				if slices.Contains(access.Grants, DataWrite) && access.Credential != CredentialPublisher {
 					t.Errorf("%s permits a general data writer to report", route.Path)

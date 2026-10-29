@@ -382,7 +382,7 @@ func TestCredentialRotationHTTPBodyCipherAndCSRF(t *testing.T) {
 			p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 			code = apierr.Forbidden
 		}
-		r := httptest.NewRequest("POST", "/api/v1/secrets/rotate", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/secrets/rotate", strings.NewReader(body))
 		if invalid == "csrf" {
 			r.AddCookie(&http.Cookie{Name: "console-session", Value: b.raw})
 		} else {

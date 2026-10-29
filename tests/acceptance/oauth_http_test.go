@@ -111,7 +111,7 @@ func newOAuthHTTP(t *testing.T) oauthHTTP {
 	p := &oauthProvider{code: "private-provider-code", diagnostic: "private-provider-diagnostic"}
 	h := withOAuthGitHub(f.server, p).Handler()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/github/start?next=%2Fruns%3Frun%3Dr1", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, oauthOrigin+"/auth/github/start?next=%2Fruns%3Frun%3Dr1", nil))
 	authorize, err := url.Parse(w.Header().Get("Location"))
 	flow := oauthCookie(w, "__Host-sw_oauth")
 	if w.Code != 303 || err != nil || flow == nil {
@@ -153,7 +153,7 @@ func assertRefusedFlow(t *testing.T, w *httptest.ResponseRecorder, location stri
 }
 
 func (f *oauthHTTP) callback(query url.Values, cookies ...*http.Cookie) *httptest.ResponseRecorder {
-	r := httptest.NewRequest("GET", oauthOrigin+"/auth/github/callback?"+query.Encode(), nil)
+	r := httptest.NewRequest(http.MethodGet, oauthOrigin+"/auth/github/callback?"+query.Encode(), nil)
 	f.requests++
 	r.RemoteAddr = "192.0.2." + strconv.Itoa(f.requests%254+1) + ":1234"
 	for _, cookie := range cookies {
@@ -178,7 +178,7 @@ func TestOAuthHTTPSessionAndReplay(t *testing.T) {
 	if _, err := f.store.AsOperator().LookupSession(t.Context(), f.raw); err == nil {
 		t.Fatal("replaced session remains live")
 	}
-	r := httptest.NewRequest("GET", oauthOrigin+"/api/v1/auth/whoami", nil)
+	r := httptest.NewRequest(http.MethodGet, oauthOrigin+"/api/v1/auth/whoami", nil)
 	r.AddCookie(session)
 	w = httptest.NewRecorder()
 	f.handler.ServeHTTP(w, r)
@@ -250,7 +250,7 @@ func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
 			case "unverified":
 				f.provider.failure, reason = state, "email_unverified"
 			case "redirect":
-				r := httptest.NewRequest("GET", "https://foreign.test/auth/github/callback?"+url.Values{"state": {f.oauthState}, "code": {f.provider.code}}.Encode(), nil)
+				r := httptest.NewRequest(http.MethodGet, "https://foreign.test/auth/github/callback?"+url.Values{"state": {f.oauthState}, "code": {f.provider.code}}.Encode(), nil)
 				r.AddCookie(f.flow)
 				w := httptest.NewRecorder()
 				f.handler.ServeHTTP(w, r)
@@ -292,7 +292,7 @@ func TestOAuthHTTPWaitlistedSessionHasNoTeamAuthority(t *testing.T) {
 		t.Fatalf("waitlisted session gained authority: %+v %v", session, err)
 	}
 	for _, path := range []string{"/api/v1/runs", "/api/v1/tokens", "/api/v1/operator/teams"} {
-		r := httptest.NewRequest("GET", oauthOrigin+path, nil)
+		r := httptest.NewRequest(http.MethodGet, oauthOrigin+path, nil)
 		r.Header.Set("Authorization", "Session "+cookie.Value)
 		denied := httptest.NewRecorder()
 		f.handler.ServeHTTP(denied, r)
@@ -402,13 +402,13 @@ func TestOAuthHTTPRateLimit(t *testing.T) {
 	f := newOAuthHTTP(t)
 	for range 29 {
 		w := httptest.NewRecorder()
-		f.handler.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/github/start", nil))
+		f.handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, oauthOrigin+"/auth/github/start", nil))
 		if w.Code != 303 {
 			t.Fatalf("start HTTP %d %s", w.Code, w.Body.String())
 		}
 	}
 	w := httptest.NewRecorder()
-	f.handler.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/github/start", nil))
+	f.handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, oauthOrigin+"/auth/github/start", nil))
 	assertRefusedFlow(t, w, "/login?refused=rate_limited")
 	if w.Header().Get("Retry-After") != "60" || f.provider.calls != 0 {
 		t.Fatal("invalid rate-limit response")
@@ -425,7 +425,7 @@ func TestOAuthHTTPMethodsAndUnknownProvider(t *testing.T) {
 		}
 	}
 	w := httptest.NewRecorder()
-	f.handler.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/unknown/start", nil))
+	f.handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, oauthOrigin+"/auth/unknown/start", nil))
 	assertRefusedFlow(t, w, "/login?refused=unavailable")
 	if f.provider.calls != 0 {
 		t.Fatal("invalid route reached provider")

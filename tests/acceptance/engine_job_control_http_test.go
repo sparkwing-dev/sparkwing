@@ -3,6 +3,7 @@ package acceptance_test
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -167,7 +168,7 @@ func TestEngineJobCancelBodyRace(t *testing.T) {
 		b.snapshot.Binding.Current.Generation++
 		f.err = &store.ErrIllegalTransition{Reason: store.ReasonStaleGeneration}
 	}}
-	r := httptest.NewRequest("POST", "/api/v1/runs/run/jobs/job/cancel", body)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run/jobs/job/cancel", body)
 	r.Header.Set("Authorization", "Bearer "+b.raw)
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

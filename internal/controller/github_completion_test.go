@@ -257,7 +257,7 @@ func TestGitHubCompletionAcknowledgesOnlyRevisionSent(t *testing.T) {
 	engineSQL(t, f.server.store, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES ('a','run','github_check','running',1,1)`)
 	sent := false
 	f.api.before = func(r *http.Request) {
-		if !sent && r.Method == "POST" && r.URL.Path == "/repos/acme/app/check-runs" {
+		if !sent && r.Method == http.MethodPost && r.URL.Path == "/repos/acme/app/check-runs" {
 			sent = true
 			f.finish(runstate.RunFailed)
 		}

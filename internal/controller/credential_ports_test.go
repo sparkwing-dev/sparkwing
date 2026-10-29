@@ -212,10 +212,10 @@ func TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, session := credentialSessionServer(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+	s, _ := credentialSessionServer(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{SessionKeys: cipher}, nil
 	}))
-	session, _, _, err = s.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	session, _, _, err := s.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

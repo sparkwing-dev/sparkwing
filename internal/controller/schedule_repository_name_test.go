@@ -40,7 +40,7 @@ func TestScheduleRepositoryNameIsGitHubsCanonicalName(t *testing.T) {
 		default:
 			return nil, fmt.Errorf("unexpected GitHub request %s", r.URL)
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
 	})}})
 	got, err := s.githubScheduleRepository(t.Context(), store.CronSchedule{Team: "a", RepoPath: "https://github.com/ACME/app.git"})
 	if err != nil {

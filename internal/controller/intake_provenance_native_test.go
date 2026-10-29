@@ -35,7 +35,7 @@ func FuzzRunIntakeRejectsLegacyEnvironmentProvenance(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r := httptest.NewRequest("POST", "/api/v1/runs", bytes.NewReader(body))
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/runs", bytes.NewReader(body))
 			r.Header.Set("Content-Type", "application/json")
 			r.Header.Set("Authorization", "Bearer "+raw)
 			w := httptest.NewRecorder()

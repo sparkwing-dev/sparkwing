@@ -51,7 +51,7 @@ func awaitStart(ctx context.Context, state CapacityStore, binding runstate.Capac
 			if response.FailureReason == store.FailureQueueTimeout {
 				failure = errQueueTimeout
 			}
-			return &admissionFailure{Outcome: runstate.NodeFailed, Reason: string(response.FailureReason), Err: failure, committed: true}
+			return &admissionFailure{Outcome: runstate.NodeFailed, Reason: response.FailureReason, Err: failure, committed: true}
 		case runstate.AcquireQueued:
 			if queued != nil {
 				if err := queued(response); err != nil {

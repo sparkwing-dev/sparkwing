@@ -54,7 +54,7 @@ func TestLocalPublicationSnapshotRequiresVerifiedPeer(t *testing.T) {
 		t.Fatalf("local publication export: %+v %v", state, err)
 	}
 	property := func(value []byte) bool {
-		request, err := http.NewRequestWithContext(t.Context(), "GET", "http://local/api/v1/runs/local-history/local-host/snapshot", nil)
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://local/api/v1/runs/local-history/local-host/snapshot", nil)
 		if err != nil {
 			return false
 		}
@@ -70,7 +70,7 @@ func TestLocalPublicationSnapshotRequiresVerifiedPeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	ordinary := httptest.NewRecorder()
-	s.Handler().ServeHTTP(ordinary, httptest.NewRequest("GET", "/api/v1/runs/local-history/local-host/snapshot", nil))
+	s.Handler().ServeHTTP(ordinary, httptest.NewRequest(http.MethodGet, "/api/v1/runs/local-history/local-host/snapshot", nil))
 	if ordinary.Code < 400 || strings.Contains(ordinary.Body.String(), "publication_records") {
 		t.Fatalf("unverified request exported local state: %d %s", ordinary.Code, ordinary.Body.String())
 	}

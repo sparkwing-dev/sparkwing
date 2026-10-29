@@ -44,7 +44,7 @@ func TestLocalServerAcceptsBearerWithSessionAncestry(t *testing.T) {
 	}
 	h := New(s.store, nil).Handler()
 	engineClaimHTTP(t, h, issued.Raw, "GET", "/api/v1/runs/run/jobs", "", http.StatusOK)
-	r := httptest.NewRequest("GET", "/api/v1/runs/run/jobs", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run/jobs", nil)
 	r.Header.Set("Authorization", "Session "+raw)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -77,7 +77,7 @@ func TestServerPolicyUsesCurrentPersistedAuthority(t *testing.T) {
 	engineSQL(t, s, `INSERT INTO capabilities(digest,prefix,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,repo_scope,created_at,created_by) VALUES (?,'member','a','account','member','controller',?,'delegate',1,?,'none',?,?,1,'member')`, hex.EncodeToString(digest[:]), []byte(`["runs.read"]`), envelope, []byte(`[]`), []byte(`[]`))
 	h := New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
 	request := func(token string) int {
-		r := httptest.NewRequest("GET", "/api/v1/runs/run/jobs", nil)
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run/jobs", nil)
 		if token != "" {
 			r.Header.Set("Authorization", "Bearer "+token)
 		}
@@ -114,7 +114,7 @@ func TestServerPolicyNeverInfersAuthorityFromRequestHints(t *testing.T) {
 	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
 	property := func(input []byte, includeBearer bool) bool {
 		hint := base64.RawURLEncoding.EncodeToString(input)
-		r := httptest.NewRequest("GET", "/api/v1/runs/run/jobs?team=a&generation=1", nil)
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run/jobs?team=a&generation=1", nil)
 		r.RemoteAddr = "127.0.0.1:1234"
 		r.Header.Set("X-Sparkwing-Principal", hint)
 		r.Header.Set("X-Sparkwing-Holder", hint)
@@ -251,7 +251,7 @@ func TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate(t *testing.T) {
 	property := func(input []byte, phase uint8) bool {
 		s.WithOperatorAccounts([]string{"operator"})
 		writer.calls = 0
-		r := httptest.NewRequest("POST", "https://controller.test/api/v1/operator/teams/a/grants?actor="+hex.EncodeToString(input), strings.NewReader(`{"amount_cents":10,"reason":"test","key":"once"}`))
+		r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/operator/teams/a/grants?actor="+hex.EncodeToString(input), strings.NewReader(`{"amount_cents":10,"reason":"test","key":"once"}`))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", "https://controller.test")
 		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})

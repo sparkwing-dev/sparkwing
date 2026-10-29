@@ -76,7 +76,7 @@ func TestCloudFrontDataBackendSignedObjectProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		object := capability.ObjectToSign{Method: "GET", Key: path, Size: int64(size), SHA256: hash, ExpiresAt: time.Now().Add(45 * time.Second)}
-		request := httptest.NewRequest("POST", "https://controller.test/api/v1/data/download", nil)
+		request := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/data/download", nil)
 		request.Header.Set("X-Forwarded-Host", "controller.test")
 		signed, err := backend.Sign(dataDownloadContext(request), object)
 		if err != nil {

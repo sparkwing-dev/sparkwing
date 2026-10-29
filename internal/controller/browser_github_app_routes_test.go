@@ -106,7 +106,7 @@ func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 			t.Errorf("unexpected provider request %s %s", r.Method, r.URL)
 			return nil, errors.New("unexpected provider request")
 		}
-		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 	})}}
 	client := githubapp.New(cfg)
 	s.githubApp = &githubAppState{client: client, stateKey: client.StateKey()}

@@ -295,7 +295,7 @@ func TestSecretManagementCommandUsesFinalControllerAPI(t *testing.T) {
 	calls := 0
 	profileHTTPFixture(t, func(req *http.Request) (int, string) {
 		calls++
-		if req.Method != "POST" || req.URL.Path != "/api/v1/secrets" || req.Header.Get("Authorization") != "Bearer private-credential" || req.Header.Get("Idempotency-Key") == "" {
+		if req.Method != http.MethodPost || req.URL.Path != "/api/v1/secrets" || req.Header.Get("Authorization") != "Bearer private-credential" || req.Header.Get("Idempotency-Key") == "" {
 			t.Fatalf("request: %s %s", req.Method, req.URL)
 		}
 		var input controllerwire.SecretWrite

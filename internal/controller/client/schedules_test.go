@@ -125,7 +125,7 @@ func TestScheduleRepositoryManagement(t *testing.T) {
 		calls++
 		switch calls {
 		case 1:
-			if req.Method != "PUT" || req.URL.Path != "/api/v1/schedules/repos" {
+			if req.Method != http.MethodPut || req.URL.Path != "/api/v1/schedules/repos" {
 				t.Fatalf("replace: %s %s", req.Method, req.URL)
 			}
 			data, err := io.ReadAll(req.Body)
@@ -137,7 +137,7 @@ func TestScheduleRepositoryManagement(t *testing.T) {
 			}
 			return scheduleTestResponse(t, controllerwire.ScheduleRepoWritten{Schedules: []controllerwire.ScheduleView{row}, Withdrawn: []string{"check/old"}}), nil
 		case 2:
-			if req.Method != "DELETE" || req.URL.Path != "/api/v1/schedules/repos" || req.URL.Query().Get("repo_url") != row.RepoPath {
+			if req.Method != http.MethodDelete || req.URL.Path != "/api/v1/schedules/repos" || req.URL.Query().Get("repo_url") != row.RepoPath {
 				t.Fatalf("withdraw: %s %s", req.Method, req.URL)
 			}
 			return scheduleTestResponse(t, controllerwire.ScheduleRepoDeletion{RepoURL: row.RepoPath, Removed: 1}), nil
@@ -194,7 +194,7 @@ func TestScheduleManagerPreservesCanonicalResolutionAndConfirmsOverrides(t *test
 	row := scheduleTestRow()
 	row.ScheduleName = "nightly"
 	c := testEngine(t, func(req *http.Request) (*http.Response, error) {
-		if req.Method == "GET" {
+		if req.Method == http.MethodGet {
 			return scheduleTestResponse(t, controllerwire.DetailView{Schedule: row}), nil
 		}
 		return scheduleTestResponse(t, controllerwire.ScheduleEnvelope{Schedule: row}), nil

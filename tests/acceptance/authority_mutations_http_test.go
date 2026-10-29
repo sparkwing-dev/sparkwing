@@ -313,7 +313,7 @@ func TestAuthorityMutationHTTPKeepsAuthenticatedActorDuringBodyRace(t *testing.T
 		b.snapshot.Authorities[0].Principal.Authority.ID = "replacement"
 		f.err = &apierr.Error{Code: apierr.Unauthenticated, Message: "actor revoked before commit"}
 	}}
-	r := httptest.NewRequest("PATCH", "/api/v1/team/members/member", body)
+	r := httptest.NewRequest(http.MethodPatch, "/api/v1/team/members/member", body)
 	r.Header.Set("Authorization", "Bearer "+b.raw)
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -326,7 +326,7 @@ func TestAuthorityMutationHTTPKeepsAuthenticatedActorDuringBodyRace(t *testing.T
 
 func TestAuthorityMutationHTTPRemovesLegacyTeamRevoke(t *testing.T) {
 	s := controller.New(nil, nil)
-	if s.RegisteredRoute(httptest.NewRequest("DELETE", "/api/v1/team/tokens/target", nil)) {
+	if s.RegisteredRoute(httptest.NewRequest(http.MethodDelete, "/api/v1/team/tokens/target", nil)) {
 		t.Fatal("legacy team token revocation remains registered")
 	}
 }

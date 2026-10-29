@@ -8,7 +8,7 @@ import (
 
 func TestRunPrunerUsesAuthorizedDelete(t *testing.T) {
 	c := testEngine(t, func(req *http.Request) (*http.Response, error) {
-		if req.Method != "DELETE" || req.URL.Path != "/api/v1/runs/412" {
+		if req.Method != http.MethodDelete || req.URL.Path != "/api/v1/runs/412" {
 			t.Fatalf("request: %s %s", req.Method, req.URL)
 		}
 		return engineResponse(204, ""), nil

@@ -41,7 +41,7 @@ func TestRunnerSessionEnrollmentNeverReplaysLostCredential(t *testing.T) {
 			if r.URL.Path == "/api/v1/auth/session" {
 				return engineResponse(200, `{"csrf_token":"csrf"}`), nil
 			}
-			if r.Method != "POST" || r.URL.Path != "/api/v1/runners" || r.GetBody != nil {
+			if r.Method != http.MethodPost || r.URL.Path != "/api/v1/runners" || r.GetBody != nil {
 				t.Fatal("session enrollment can replay")
 			}
 			if redirect {

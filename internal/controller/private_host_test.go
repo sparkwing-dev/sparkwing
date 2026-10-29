@@ -290,7 +290,7 @@ func TestLocalHostPrivateTransportRejectsForeignCredentialProbesAndUnauthenticat
 		t.Fatal("owner queried a foreign root binding")
 	}
 	w := httptest.NewRecorder()
-	server.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/runs/run/local-host/snapshot", nil))
+	server.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/runs/run/local-host/snapshot", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("hosted private route status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -365,7 +365,7 @@ func TestLocalHostChildIntakeResolvesCapturedDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest("POST", "/api/v1/runs/run/children", bytes.NewReader(encoded))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run/children", bytes.NewReader(encoded))
 	request.Header.Set("Authorization", "Bearer "+string(claim.Bearer))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -435,7 +435,7 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 				cancel()
 				wantStatus, wantCause = 503, "context canceled"
 			}
-			r := httptest.NewRequest("GET", "/api/v1/runs/run/local-host/snapshot", nil).WithContext(ctx)
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run/local-host/snapshot", nil).WithContext(ctx)
 			r.Header.Set("Authorization", "Bearer "+string(award.Bearer))
 			r.Header.Set(RequestIDHeader, "snapshot-request")
 			w := httptest.NewRecorder()

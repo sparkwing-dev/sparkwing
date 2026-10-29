@@ -52,7 +52,7 @@ func FuzzHostRouteIdentifiers(f *testing.F) {
 				binding: &nodeproto.ProcessBinding{Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1", Bearer: "delegated-fixture"}},
 				transport: routeTransport(func(r *http.Request) (*http.Response, error) {
 					w := httptest.NewRecorder()
-					if r.Method == "POST" && r.URL.Path == "/node/v1/children" {
+					if r.Method == http.MethodPost && r.URL.Path == "/node/v1/children" {
 						_ = json.NewEncoder(w).Encode(map[string]string{"run_id": id})
 						return w.Result(), nil
 					}

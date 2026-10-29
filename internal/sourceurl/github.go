@@ -43,13 +43,13 @@ func GitHubRepositoryID(ctx context.Context, remote, token string) (int64, error
 	if response.StatusCode != http.StatusOK {
 		code := apierr.Unavailable
 		switch response.StatusCode {
-		case 401:
+		case http.StatusUnauthorized:
 			code = apierr.Unauthenticated
-		case 403:
+		case http.StatusForbidden:
 			code = apierr.Forbidden
-		case 404:
+		case http.StatusNotFound:
 			code = apierr.NotFound
-		case 429:
+		case http.StatusTooManyRequests:
 			code = apierr.RateLimited
 		}
 		return 0, &apierr.Error{Code: code, Message: fmt.Sprintf("GitHub repository identity lookup returned HTTP %d", response.StatusCode), Hint: "Private repositories require repository read access through a token or the controller GitHub App."}

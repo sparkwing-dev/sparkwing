@@ -16,12 +16,12 @@ func TestPoolManagementUsesFinalRoutes(t *testing.T) {
 		calls++
 		switch calls {
 		case 1:
-			if req.Method != "GET" || req.URL.Path != "/api/v1/pools" {
+			if req.Method != http.MethodGet || req.URL.Path != "/api/v1/pools" {
 				t.Fatalf("list: %s %s", req.Method, req.URL)
 			}
 			return engineResponse(200, `{"pools":[{"name":"prod","runners":["runner-1"],"rules":[{"id":"rule-1","repos":["acme/api"],"branches":["main"],"source":"github","route":true}]}]}`), nil
 		case 2:
-			if req.Method != "POST" || req.URL.Path != "/api/v1/pools/prod/rules" || req.Header.Get("Idempotency-Key") != "stable" {
+			if req.Method != http.MethodPost || req.URL.Path != "/api/v1/pools/prod/rules" || req.Header.Get("Idempotency-Key") != "stable" {
 				t.Fatalf("allow: %s %s %v", req.Method, req.URL, req.Header)
 			}
 			var body controllerwire.PoolRuleWrite
@@ -33,7 +33,7 @@ func TestPoolManagementUsesFinalRoutes(t *testing.T) {
 			}
 			return engineResponse(200, `{"pool":"prod","rule":{"id":"rule-2","repos":["acme/api","acme/web"],"branches":["main","release/*"],"source":"github","route":true},"replayed":true}`), nil
 		case 3:
-			if req.Method != "DELETE" || req.URL.Path != "/api/v1/pools/prod/rules/rule-2" {
+			if req.Method != http.MethodDelete || req.URL.Path != "/api/v1/pools/prod/rules/rule-2" {
 				t.Fatalf("disallow: %s %s", req.Method, req.URL)
 			}
 			return engineResponse(200, `{"pool":"prod","rule_id":"rule-2","deleted":false}`), nil

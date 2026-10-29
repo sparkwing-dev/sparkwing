@@ -3,6 +3,7 @@ package nodehost
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -36,7 +37,7 @@ func TestNativeProcessMasksApplyOnlyToItsOwnOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest("POST", "/node/v1/masks", strings.NewReader(`{"value":"other-job-log-text"}`))
+	request := httptest.NewRequest(http.MethodPost, "/node/v1/masks", strings.NewReader(`{"value":"other-job-log-text"}`))
 	if err := one.write(request, capability.Authorized{}, "/node/v1/masks"); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,7 @@ func TestNativeProcessMasksApplyOnlyToItsOwnOutput(t *testing.T) {
 	if err := processes.Masks.acceptPlan(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "generated-job"}}}, func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	request = httptest.NewRequest("POST", "/node/v1/masks", strings.NewReader(`{"value":"generated-job"}`))
+	request = httptest.NewRequest(http.MethodPost, "/node/v1/masks", strings.NewReader(`{"value":"generated-job"}`))
 	if err := one.write(request, capability.Authorized{}, "/node/v1/masks"); err == nil {
 		t.Fatal("job mask ignored an identifier accepted after delegation")
 	}
@@ -82,7 +83,7 @@ func TestNativeProcessMasksApplyOnlyToItsOwnOutput(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		child := httptest.NewRequest("POST", "/node/v1/children", strings.NewReader(`{"pipeline":"build","args":{"value":"other-job-log-text"}}`))
+		child := httptest.NewRequest(http.MethodPost, "/node/v1/children", strings.NewReader(`{"pipeline":"build","args":{"value":"other-job-log-text"}}`))
 		_, _, err = bound.read(child, capability.Authorized{}, "/node/v1/children")
 		if (err != nil) != (grant.Binding.JobID == first.Binding.JobID) {
 			t.Fatalf("child argument masking crossed its job scope: job=%s error=%v", grant.Binding.JobID, err)
@@ -212,7 +213,7 @@ func TestNativeProcessChildAwaitPausesItsAttemptIdleBudget(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		request := httptest.NewRequest("GET", "/node/v1/children/child/await?wait_ms=3000", nil).WithContext(ctx)
+		request := httptest.NewRequest(http.MethodGet, "/node/v1/children/child/await?wait_ms=3000", nil).WithContext(ctx)
 		request.SetPathValue("run", "child")
 		if _, err := bound.awaitChild(request, capability.Authorized{}); err != nil || ctx.Err() != nil {
 			t.Fatal("child wait consumed the idle budget:", err)
@@ -258,12 +259,12 @@ func TestNativeProcessRuntimeCredentialsUseHostMasker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secret := httptest.NewRequest("GET", "/node/v1/secrets/TOKEN", nil)
+	secret := httptest.NewRequest(http.MethodGet, "/node/v1/secrets/TOKEN", nil)
 	secret.SetPathValue("name", "TOKEN")
 	if _, err := one.secret(secret, capability.Authorized{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := one.oidc(httptest.NewRequest("POST", "/node/v1/oidc-token", strings.NewReader(`{"audience":"cloud"}`)), capability.Authorized{}); err != nil {
+	if _, err := one.oidc(httptest.NewRequest(http.MethodPost, "/node/v1/oidc-token", strings.NewReader(`{"audience":"cloud"}`)), capability.Authorized{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := processes.Masks.mask("runtime-secret runtime-token"); got != "*** ***" {

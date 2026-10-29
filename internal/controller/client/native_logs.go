@@ -92,7 +92,7 @@ func (u *nativeLogUploader) put(ctx context.Context, target string, headers map[
 	if err := validateDataTransfer(controllerwire.DataSignedTransfer{URL: target, Headers: headers, ExpiresAt: expiry}); err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, "PUT", target, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPut, target, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

@@ -64,7 +64,7 @@ func decodeDataTarget(r *http.Request) (capability.RequestEvidence, error) {
 	default:
 		err = invalidEngineBody("unknown data operation")
 	}
-	if err == nil && r.Method == "POST" {
+	if err == nil && r.Method == http.MethodPost {
 		query, e := url.ParseQuery(r.URL.RawQuery)
 		if e != nil {
 			return capability.RequestEvidence{Target: capability.Target{Data: &target}}, invalidEngineBody("invalid data query")

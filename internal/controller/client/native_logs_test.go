@@ -28,7 +28,7 @@ func TestNativeLogCommitRequiresAcknowledgement(t *testing.T) {
 			called := false
 			transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
 				called = true
-				if request.Method != "POST" || request.URL.Path != "/api/v1/claims/plan/log-manifest" {
+				if request.Method != http.MethodPost || request.URL.Path != "/api/v1/claims/plan/log-manifest" {
 					t.Fatalf("unexpected commit route: %s %s", request.Method, request.URL.Path)
 				}
 				var body struct {
@@ -82,7 +82,7 @@ func TestNativeLogUploaderUsesCommittedBearerWithoutMetadataReads(t *testing.T) 
 			calls := 0
 			transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
 				calls++
-				if request.Method != "POST" || request.URL.Path != path || request.Header.Get("Authorization") != "Bearer "+raw {
+				if request.Method != http.MethodPost || request.URL.Path != path || request.Header.Get("Authorization") != "Bearer "+raw {
 					t.Errorf("log upload performed an unrelated metadata read or lost authority: %s %s", request.Method, request.URL.Path)
 					return engineResponse(503, `{}`), nil
 				}
@@ -116,7 +116,7 @@ func TestNativeLogUploaderRecoversALostCommitAcknowledgement(t *testing.T) {
 	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "team", RunID: "run", Unit: &blob.LogUnit{Kind: "plan", Generation: 1}}
 	signs := 0
 	transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
-		if request.Method != "POST" || request.URL.Path != "/api/v1/claims/plan/log-segments" {
+		if request.Method != http.MethodPost || request.URL.Path != "/api/v1/claims/plan/log-segments" {
 			t.Fatalf("a committed slot was uploaded or committed again: %s %s", request.Method, request.URL.Path)
 		}
 		signs++
@@ -152,7 +152,7 @@ type fakeLogStore struct {
 
 func (f *fakeLogStore) handle(request *http.Request) (*http.Response, error) {
 	switch {
-	case request.Method == "POST" && strings.HasSuffix(request.URL.Path, "/log-segments"):
+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/log-segments"):
 		var body blob.LogSigningRequest
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			f.t.Fatal(err)
@@ -181,7 +181,7 @@ func (f *fakeLogStore) handle(request *http.Request) (*http.Response, error) {
 			return nil, errors.New("connection reset after the object was stored")
 		}
 		return engineResponse(200, ""), nil
-	case request.Method == "POST" && strings.HasSuffix(request.URL.Path, "/log-manifest"):
+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/log-manifest"):
 		var body struct {
 			Segments []runstate.Segment   `json:"segments"`
 			Final    bool                 `json:"final"`

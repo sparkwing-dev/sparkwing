@@ -385,7 +385,7 @@ func TestEngineExpansionHTTP(t *testing.T) {
 				f.expanded.Nodes = []runstate.NodeRow{{Spec: json.RawMessage(`null`)}}
 				status, code = 500, apierr.Internal
 			}
-			r := httptest.NewRequest("POST", path, strings.NewReader(body))
+			r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 			r.Header.Set("Authorization", "Bearer "+b.raw)
 			r.Header.Set("Content-Type", "application/json")
 			r.Header.Set("X-Sparkwing-Generation", "999")

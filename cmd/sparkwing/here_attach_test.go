@@ -152,7 +152,7 @@ func TestHereAttachmentUsesPublicLogTransportAndSelectedOutput(t *testing.T) {
 			calls := 0
 			options := client.EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return "member-token", nil }, HTTP: &http.Client{Transport: logRoundTrip(func(req *http.Request) (*http.Response, error) {
 				calls++
-				if req.Header.Get("Authorization") != "Bearer member-token" || req.Method != "GET" || req.URL.Path != "/api/v1/runs/run/logs" {
+				if req.Header.Get("Authorization") != "Bearer member-token" || req.Method != http.MethodGet || req.URL.Path != "/api/v1/runs/run/logs" {
 					t.Errorf("public log request: %s %s", req.Method, req.URL)
 				}
 				body, err := json.Marshal(controllerwire.LogPage{Complete: true, Records: []controllerwire.LogRecord{jobLogRecord("run", "final line")}})

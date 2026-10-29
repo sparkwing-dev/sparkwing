@@ -38,14 +38,14 @@ func TestTriggerCommandSubmitsPreparedSealThroughFinalRoute(t *testing.T) {
 			}
 			return client.EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: profileTransport(func(req *http.Request) (*http.Response, error) {
 				calls++
-				if req.Method != "POST" || req.URL.Path != "/api/v1/runs" || req.Header.Get("Idempotency-Key") != "one-intake" {
+				if req.Method != http.MethodPost || req.URL.Path != "/api/v1/runs" || req.Header.Get("Idempotency-Key") != "one-intake" {
 					t.Fatalf("intake: %s %s", req.Method, req.URL)
 				}
 				var got controllerwire.CreateRunRequest
 				if err := json.NewDecoder(req.Body).Decode(&got); err != nil || !reflect.DeepEqual(got, prepared) {
 					t.Fatalf("request=%+v err=%v", got, err)
 				}
-				return &http.Response{StatusCode: 201, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{}}, nil
+				return &http.Response{StatusCode: http.StatusCreated, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{}}, nil
 			})}}, func() { closed = true }, nil
 		})
 	if err != nil || calls != 1 || !closed || out.String() != "{\"run_id\":\"initial-run\",\"number\":17,\"replayed\":false}\n" {
