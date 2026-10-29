@@ -235,3 +235,16 @@ func TestTouchedStepsPassAPackageOnlyTheQATrustFlavourBuilds(t *testing.T) {
 		t.Errorf("lint-touched refused a package the default build excludes: %v", err)
 	}
 }
+
+func TestFastLintTimeoutGrowsWithTheTouchedPackages(t *testing.T) {
+	if got := fastLintCommand(3, []string{"./internal/x"}); !strings.Contains(got, " --timeout 1m1s ") {
+		t.Errorf("one package: %q, want a timeout of 1m1s", got)
+	}
+	wide := make([]string, 200)
+	for i := range wide {
+		wide[i] = fmt.Sprintf("./internal/p%d", i)
+	}
+	if got := fastLintCommand(3, wide); !strings.Contains(got, " --timeout 4m20s ") {
+		t.Errorf("200 packages: timeout in %.200q, want 4m20s", got)
+	}
+}
