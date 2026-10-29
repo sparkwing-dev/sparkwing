@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"debug/buildinfo"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
@@ -83,6 +85,10 @@ func (r *Resolver) fetchRelease(ctx context.Context, version string, target rele
 		body *[]byte
 	}{{"SHA256SUMS", &bundle.Manifest}, {"SHA256SUMS.sig", &bundle.ManifestSignature}, {name, &bundle.Asset}, {name + ".sig", &bundle.AssetSignature}} {
 		body, err := r.fetch(ctx, base+item.name, true)
+		var status downloadStatus
+		if errors.As(err, &status) && (status == http.StatusNotFound || status == http.StatusForbidden) {
+			return VerifiedRelease{}, unpublishedRelease(version, int(status))
+		}
 		if err != nil {
 			return VerifiedRelease{}, err
 		}
@@ -126,9 +132,25 @@ func (r *Resolver) fetch(ctx context.Context, address string, release bool) ([]b
 		return nil, closeErr
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("official download returned HTTP %d", response.StatusCode)
+		return nil, downloadStatus(response.StatusCode)
 	}
 	return body, nil
+}
+
+// downloadStatus is an official origin's non-200 answer.
+type downloadStatus int
+
+func (s downloadStatus) Error() string { return fmt.Sprintf("official download returned HTTP %d", int(s)) }
+
+// safety: both origins answer a version they never published with 403 or 404, so
+// the fix the hint names is the pin rather than the network.
+func unpublishedRelease(version string, status int) error {
+	hint := "Pin the pipeline to a published release: `sparkwing upgrade --version <release>` in the repository, or `go -C .sparkwing get " + GoModule + "@<release>`."
+	if QATrust {
+		hint = "This is a QA build, which installs engines only from " + indexHost + ", and that origin holds only -qa.N versions. " +
+			"Pin the pipeline to one, for example `sparkwing upgrade --version vX.Y.Z-qa.N`, or run a production sparkwing build for released pins."
+	}
+	return &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("engine %s is not published at %s (HTTP %d)", version, ReleaseBase, status), Hint: hint}
 }
 
 func allowedURL(u *url.URL, release bool) bool {

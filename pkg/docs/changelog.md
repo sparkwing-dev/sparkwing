@@ -753,6 +753,7 @@ unlock.
 
 ### Fixed
 
+- **engine:** A pipeline pinned to an SDK version its engine origin never published fails with `engine vX.Y.Z is not published at <origin>` and says to move the pin with `sparkwing upgrade --version`; a QA build adds that it installs only `-qa.N` versions. It reported only `official download returned HTTP 403`.
 - **cli:** `sparkwing --version` prints the version, the same as `sparkwing version`; it answered `unknown flag --version`.
 - **cli:** A refused flag names its fix. `sparkwing update --check` answered `unknown flag --check; pipeline arguments follow --`; it now lists the flags `update` takes (`--dry-run` previews an update), and only `run`, `pipeline plan` and `pipeline trigger` point at `--`. A pipeline's `run <pipeline> --help` shows its flags after `--` in the usage line.
 - **cli:** Settings an older install left behind are refused with the fix

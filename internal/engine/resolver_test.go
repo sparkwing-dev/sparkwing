@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -419,5 +420,22 @@ func TestResolverOwnsTrustAfterConstruction(t *testing.T) {
 	}
 	if _, err := other.Index(t.Context(), now); err == nil {
 		t.Fatal("resolver accepted network or cached policy signed by another trust root")
+	}
+}
+
+func TestUnpublishedEngineNamesThePinAsTheFix(t *testing.T) {
+	r, _, _, _, _ := fixtureResolver(t)
+	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	_, err := r.Resolve(t.Context(), engineid.Pin{SDK: engineid.GoSDK, Version: "v0.10.2"}, target)
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.NotFound || !strings.Contains(failure.Message, "v0.10.2 is not published") {
+		t.Fatalf("unpublished engine error = %v", err)
+	}
+	want := "Pin the pipeline to a published release"
+	if QATrust {
+		want = "only -qa.N versions"
+	}
+	if !strings.Contains(failure.Hint, want) || !strings.Contains(failure.Hint, "sparkwing upgrade --version") {
+		t.Fatalf("hint %q does not name the pin fix %q", failure.Hint, want)
 	}
 }
