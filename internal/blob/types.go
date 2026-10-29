@@ -291,9 +291,6 @@ type MemoKey struct {
 	Hash     runspec.Hash
 }
 
-// safety: MemoNamespace reserves manual:<ref> for submitter-vouched writes.
-func MemoNamespace(key MemoKey) (string, error) { return memoNamespace(key) }
-
 // safety: MemoLookup uses the authority's server-derived scope and verified default fallback.
 type MemoLookup struct {
 	Authority Authority
@@ -338,19 +335,6 @@ type DepcacheLookup struct {
 	Authority Authority
 	Key       DepcacheKey
 	Budget    Budget
-}
-
-// safety: BuildTrust preserves the team-owned opt-in for local binary provenance.
-type BuildTrust struct {
-	Team             string
-	TrustLocalBuilds bool
-}
-
-// safety: BinaryExecution binds cloud execution to the committed digest and provenance.
-type BinaryExecution struct {
-	Record Record
-	Trust  BuildTrust
-	Digest Digest
 }
 
 // safety: RemoteCacheOptions retains the authenticated tenant and complete repo-bound read authority.

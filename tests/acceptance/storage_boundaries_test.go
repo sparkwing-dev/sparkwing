@@ -135,6 +135,10 @@ func checkStorageOwnerReceipts(t *testing.T) {
 	checkStorageStreams(t)
 }
 
+func memoRecordNamespace(key blob.MemoKey) (string, error) {
+	return blob.RecordNamespace(blob.RecordKey{Kind: blob.KindMemo, Scope: blob.Scope{Repo: key.Repo, Ref: key.Ref, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}})
+}
+
 func checkStorageNamespaces(t *testing.T) {
 	recordLeaf(t)
 	// safety: component boundaries and the verified-ref tag cannot alias another cache namespace.
@@ -148,27 +152,27 @@ func checkStorageNamespaces(t *testing.T) {
 			}, part)
 		}
 		key := blob.MemoKey{Repo: runspec.RepoKey(parts[0]), Ref: blob.RefScope{Ref: parts[1], Writer: "account/fixture"}, Pipeline: parts[2], Job: parts[3], Hash: runspec.Hash(storageDigest([]byte(parts[4])))}
-		manual, err := blob.MemoNamespace(key)
+		manual, err := memoRecordNamespace(key)
 		if err != nil {
 			return false
 		}
 		key.Ref.Verified, key.Ref.Writer = true, ""
-		verified, err := blob.MemoNamespace(key)
+		verified, err := memoRecordNamespace(key)
 		if err != nil || manual == verified {
 			return false
 		}
 		key.Ref.Ref = "manual:" + parts[1]
-		literal, err := blob.MemoNamespace(key)
+		literal, err := memoRecordNamespace(key)
 		if err != nil || literal == manual {
 			return false
 		}
 		key.Pipeline, key.Job = parts[2]+"/"+parts[3], parts[4]
-		left, err := blob.MemoNamespace(key)
+		left, err := memoRecordNamespace(key)
 		if err != nil {
 			return false
 		}
 		key.Pipeline, key.Job = parts[2], parts[3]+"/"+parts[4]
-		right, err := blob.MemoNamespace(key)
+		right, err := memoRecordNamespace(key)
 		if err != nil || left == right {
 			return false
 		}
@@ -180,32 +184,6 @@ func checkStorageNamespaces(t *testing.T) {
 		dep.Name, dep.Key = parts[2], parts[3]+"/"+parts[4]
 		right, err = blob.DepcacheNamespace(dep)
 		return err == nil && left != right
-	})
-}
-
-func checkStorageBinaryTrust(t *testing.T) {
-	recordLeaf(t)
-	// safety: executable trust requires the exact committed digest, tenant and server provenance.
-	storageProperty(t, func(seed [16]byte, optIn bool) bool {
-		digest := storageDigest(seed[:])
-		for _, provenance := range []blob.Provenance{blob.ProvenanceCloud, blob.ProvenanceLocal, "", "caller-selected"} {
-			record := blob.Record{Key: blob.RecordKey{Team: "team", Kind: blob.KindBinary}, Digest: digest, Provenance: provenance}
-			execution := blob.BinaryExecution{Record: record, Digest: digest, Trust: blob.BuildTrust{Team: "team", TrustLocalBuilds: optIn}}
-			allowed := provenance == blob.ProvenanceCloud || (provenance == blob.ProvenanceLocal && optIn)
-			if (blob.CheckBinaryExecution(execution) == nil) != allowed {
-				return false
-			}
-			execution.Trust.Team = "foreign-team"
-			if !errors.Is(blob.CheckBinaryExecution(execution), blob.ErrDigestNotReadable) {
-				return false
-			}
-			execution.Trust.Team = "team"
-			execution.Digest = storageDigest(append(seed[:], 0))
-			if !errors.Is(blob.CheckBinaryExecution(execution), blob.ErrIntegrity) {
-				return false
-			}
-		}
-		return true
 	})
 }
 

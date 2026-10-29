@@ -1,7 +1,6 @@
 package blob
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 
@@ -129,23 +128,4 @@ func AuthorizeEdge(r EdgeRequest) error {
 
 func cacheReadKind(kind Kind) bool {
 	return kind == KindOutput || kind == KindManifest || kind == KindMemo || kind == KindDepcache
-}
-
-// CheckBinaryExecution requires trusted provenance for executable bytes.
-func CheckBinaryExecution(e BinaryExecution) error {
-	if !validDigest(e.Digest) || e.Digest != e.Record.Digest {
-		return ErrIntegrity
-	}
-	if e.Trust.Team == "" || e.Trust.Team != e.Record.Key.Team || e.Record.Key.Kind != KindBinary {
-		return ErrDigestNotReadable
-	}
-	switch e.Record.Provenance {
-	case ProvenanceCloud:
-		return nil
-	case ProvenanceLocal:
-		if e.Trust.TrustLocalBuilds {
-			return nil
-		}
-	}
-	return fmt.Errorf("%w: binary provenance requires trust_local_builds", ErrDigestNotReadable)
 }

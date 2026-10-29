@@ -15,12 +15,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -70,7 +72,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err != nil {
 		return err
 	}
-	data := depcacheblob.Data{Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: binding.Signer, HTTPClient: transfers}), Records: binding.Records, Authority: authority, Identity: identity, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}
+	data := artifacts.Data{Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: binding.Signer, HTTPClient: transfers}), Records: binding.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}
 	output := blob.OutputData{Bytes: data.Bytes, Records: data.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: data.Budget}
 	attempt := identity.Attempt.Value
 	accepted := runspec.Spec{Hash: "spec", PlanHash: "plan", Request: runspec.SealedRequest{Request: runspec.Request{Team: identity.Team, Pipeline: "fixture", Git: runspec.Git{Repository: runspec.Repository{Key: authority.Repo}}}}}
@@ -78,7 +80,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err != nil {
 		return err
 	}
-	input := nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: identity.RunID, Spec: raw, SpecHash: string(accepted.Hash), PlanHash: string(accepted.PlanHash)}, NodeID: attempt.NodeID, Attempt: runspec.AttemptOrdinal(attempt.Attempt), Generation: runspec.ClaimGeneration(attempt.Generation), Authority: nodehost.ClaimAuthority{Holder: "logger", CapabilityPrefix: identity.CapabilityRef}, Storage: nodehost.StorageBinding{Bytes: data.Bytes, Records: data.Records, Authority: authority}}
+	input := nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: identity.RunID, Spec: raw, SpecHash: string(accepted.Hash), PlanHash: string(accepted.PlanHash)}, NodeID: attempt.NodeID, Attempt: runspec.AttemptOrdinal(attempt.Attempt), Generation: runspec.ClaimGeneration(attempt.Generation), Authority: nodehost.ClaimAuthority{Holder: "logger", CapabilityPrefix: identity.CapabilityRef}, Storage: nodehost.StorageBinding{Bytes: data.Bytes, Records: data.Records, Authority: authority}, Entry: &source.Entry{Directory: root}}
 	body := seed[:]
 	if seed[0]%2 == 0 {
 		body = nil
@@ -114,19 +116,19 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err != nil {
 		return err
 	}
-	source := filepath.Join(root, "producer")
-	if err := os.Mkdir(source, 0o700); err != nil {
+	producer := filepath.Join(root, "producer")
+	if err := os.Mkdir(producer, 0o700); err != nil {
 		return err
 	}
 	payload := bytes.Repeat(seed[:], 1+int(seed[0]))
-	if err := os.WriteFile(filepath.Join(source, "module"), payload, 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(producer, "module"), payload, 0o640); err != nil {
 		return err
 	}
-	artifactData := artifacts.Data{Bytes: data.Bytes, Records: data.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: data.Budget}
+	artifactData := data
 	publisher := nodehost.ArtifactRecords{Bind: func(context.Context, nodehost.NodeInput) (nodehost.JobUpload, error) {
 		return nodehost.JobUpload{Identity: identity, Authority: authority, Key: blob.ResultRecordKey(attempt, authority.Repo, authority.Ref.Scope, "fixture", blob.KindManifest)}, nil
 	}}
-	manifestKey, err := publisher.Publish(ctx, input, source, []string{"module"}, func(string) {})
+	manifestKey, err := publisher.Publish(ctx, input, producer, []string{"module"}, func(string) {})
 	if err != nil {
 		return fmt.Errorf("store host artifacts: %w", err)
 	}
@@ -135,9 +137,21 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 		return fmt.Errorf("read physical artifact manifest: %v", err)
 	}
 	manifest := manifestHit.Record
-	backend := depcacheblob.New(data)
-	if _, err := backend.Store(ctx, key, source); err != nil {
-		return fmt.Errorf("save physical archive: %w", err)
+	var warnings []string
+	cache := nodehost.DepcacheRecords{Budget: data.Budget, Warn: func(warning string) { warnings = append(warnings, warning) }, Bind: func(_ context.Context, _ nodehost.NodeInput, k blob.DepcacheKey) (nodehost.JobUpload, error) {
+		return nodehost.JobUpload{Identity: identity, Authority: authority, Key: blob.RecordKey{Team: identity.Team, Kind: blob.KindDepcache, Scope: blob.Scope{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "fixture", Job: attempt.NodeID, Key: k.Key}, Name: k.Name}}, nil
+	}}
+	job := nodeproto.JobSpec{ID: attempt.NodeID, Caches: []nodeproto.CacheSpec{{Name: "modules", Path: "deps", KeyFiles: []string{"lockfile"}}}}
+	destination := filepath.Join(root, "deps")
+	finish, err := cache.Prepare(ctx, input, job)
+	if err != nil || finish == nil {
+		return fmt.Errorf("prepare cold archive: %v", err)
+	}
+	if err := os.CopyFS(destination, os.DirFS(producer)); err != nil {
+		return err
+	}
+	if err := finish(ctx, input, &runstate.NodeResult{Outcome: runstate.NodeSuccess}); err != nil || len(warnings) != 0 {
+		return fmt.Errorf("save physical archive: %v: %v", warnings, err)
 	}
 	if err := s.Close(); err != nil {
 		return err
@@ -156,6 +170,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	}
 	data.Bytes = blob.NewSignedStore(blob.SignedStoreOptions{Signer: binding.Signer, HTTPClient: transfers})
 	data.Records = binding.Records
+	input.Storage.Bytes, input.Storage.Records = data.Bytes, data.Records
 	output.Bytes = data.Bytes
 	output.Records = data.Records
 	if got, err := output.Read(ctx, result.Key); err != nil || !bytes.Equal(got, body) {
@@ -171,18 +186,16 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if got, err := os.ReadFile(filepath.Join(root, "staged", "module")); err != nil || !bytes.Equal(got, payload) {
 		return fmt.Errorf("staged physical artifact differs: %v", err)
 	}
-	backend = depcacheblob.New(data)
-	destination := filepath.Join(root, "deps")
-	if _, err := backend.Fetch(ctx, key, destination); err != nil {
-		return fmt.Errorf("restore reopened archive: %w", err)
+	if restored, warned, err := restoreDepcache(ctx, cache, input, job, destination); err != nil || !restored || warned {
+		return fmt.Errorf("restore reopened archive: restored=%t warned=%t: %v", restored, warned, err)
 	}
 	if body, err := os.ReadFile(filepath.Join(destination, "module")); err != nil || !bytes.Equal(body, payload) {
 		return fmt.Errorf("reopened archive differs: %v", err)
 	}
-	if err := checkDepcacheScopes(ctx, data, key, destination, seed); err != nil {
+	if err := checkDepcacheScopes(ctx, cache, input, job, destination, seed); err != nil {
 		return err
 	}
-	lookup := blob.DepcacheLookup{Authority: authority, Key: blob.DepcacheKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Name: key, Key: key}, Budget: data.Budget}
+	lookup := blob.DepcacheLookup{Authority: authority, Key: blob.DepcacheKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Name: "modules", Key: key}, Budget: data.Budget}
 	hit, err := data.Records.LookupDepcache(ctx, lookup)
 	if err != nil || !hit.Found {
 		return fmt.Errorf("saved archive record missing: %v", err)
@@ -194,11 +207,8 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err := corrupt(objectKey); err != nil {
 		return err
 	}
-	if _, err := backend.Fetch(ctx, key, destination); err == nil {
-		return errors.New("corrupt archive restored")
-	}
-	if body, err := os.ReadFile(filepath.Join(destination, "module")); err != nil || !bytes.Equal(body, payload) {
-		return fmt.Errorf("failed archive read replaced destination: %v", err)
+	if restored, warned, err := restoreDepcache(ctx, cache, input, job, destination); err != nil || restored || !warned {
+		return fmt.Errorf("corrupt archive: restored=%t warned=%t: %v", restored, warned, err)
 	}
 	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET revoked_at=? WHERE prefix=?", teststore.Now(s).UnixNano(), identity.CapabilityRef); err != nil {
 		return err
@@ -212,19 +222,33 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	return nil
 }
 
-func checkDepcacheScopes(ctx context.Context, data depcacheblob.Data, key, destination string, seed [16]byte) error {
+// restoreDepcache prepares the job's cache on an empty directory, as the host
+// does before a job runs, and reports whether the archive landed.
+func restoreDepcache(ctx context.Context, cache nodehost.DepcacheRecords, input nodehost.NodeInput, job nodeproto.JobSpec, destination string) (restored, warned bool, err error) {
+	if err := os.RemoveAll(destination); err != nil {
+		return false, false, err
+	}
+	cache.Warn = func(string) { warned = true }
+	if _, err := cache.Prepare(ctx, input, job); err != nil {
+		return false, warned, err
+	}
+	_, statErr := os.Stat(filepath.Join(destination, "module"))
+	return statErr == nil, warned, nil
+}
+
+func checkDepcacheScopes(ctx context.Context, cache nodehost.DepcacheRecords, input nodehost.NodeInput, job nodeproto.JobSpec, destination string, seed [16]byte) error {
 	for _, field := range []string{"repo", "attempt", "ref"} {
-		bad := data
+		bad := input
 		switch field {
 		case "repo":
-			bad.Authority.Repo += runspec.RepoKey(fmt.Sprintf("-%x", seed))
+			bad.Storage.Authority.Repo += runspec.RepoKey(fmt.Sprintf("-%x", seed))
 		case "attempt":
-			bad.Authority.Attempt.Value.Generation++
+			bad.Storage.Authority.Attempt.Value.Generation++
 		case "ref":
-			bad.Authority.Ref.Scope.Verified = true
+			bad.Storage.Authority.Ref.Scope.Verified = true
 		}
-		if _, err := depcacheblob.New(bad).Fetch(ctx, key, destination); err == nil {
-			return fmt.Errorf("forged %s restored an archive", field)
+		if restored, _, err := restoreDepcache(ctx, cache, bad, job, destination); err != nil || restored {
+			return fmt.Errorf("forged %s restored an archive: %v", field, err)
 		}
 	}
 	return nil

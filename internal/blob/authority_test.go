@@ -101,38 +101,42 @@ func TestRemoteCacheReferenceEdges(t *testing.T) {
 	}
 }
 
+func memoRecordNamespace(key MemoKey) (string, error) {
+	return RecordNamespace(RecordKey{Kind: KindMemo, Scope: Scope{Repo: key.Repo, Ref: key.Ref, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}})
+}
+
 func TestNamespacesAndKeys(t *testing.T) {
 	key := MemoKey{Repo: "gh:123", Ref: RefScope{Ref: "main", Verified: true}, Pipeline: "build", Job: "compile", Hash: runspec.Hash(digest("key"))}
-	trusted, err := MemoNamespace(key)
+	trusted, err := memoRecordNamespace(key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	key.Ref = RefScope{Ref: "main", Writer: "account/a"}
-	manual, err := MemoNamespace(key)
+	manual, err := memoRecordNamespace(key)
 	if err != nil || manual == trusted {
 		t.Fatalf("manual/trusted collision: %s, %v", manual, err)
 	}
 	key.Ref.Writer = "account/b"
-	other, err := MemoNamespace(key)
+	other, err := memoRecordNamespace(key)
 	if err != nil || other == manual {
 		t.Fatalf("one writer's scope reached another's: %s, %v", other, err)
 	}
 	key.Ref.Writer = ""
-	if _, err := MemoNamespace(key); err == nil {
+	if _, err := memoRecordNamespace(key); err == nil {
 		t.Fatal("an unverified scope with no writer is the shared bucket")
 	}
 	key.Ref.Writer = "account/a"
 	key.Ref = RefScope{Ref: "manual:main", Verified: true}
-	literal, err := MemoNamespace(key)
+	literal, err := memoRecordNamespace(key)
 	if err != nil || literal == manual {
 		t.Fatalf("manual prefix collision: %s, %v", literal, err)
 	}
 	key.Pipeline = "build/compile"
 	key.Job = "job"
-	x, _ := MemoNamespace(key)
+	x, _ := memoRecordNamespace(key)
 	key.Pipeline = "build"
 	key.Job = "compile/job"
-	y, _ := MemoNamespace(key)
+	y, _ := memoRecordNamespace(key)
 	if x == y {
 		t.Fatal("namespace separator collision")
 	}
@@ -144,26 +148,6 @@ func TestNamespacesAndKeys(t *testing.T) {
 	got, err := ObjectKey("team", digest("a"))
 	if err != nil || got != "teams/team/cas/"+string(digest("a")) {
 		t.Fatalf("ObjectKey=%q %v", got, err)
-	}
-}
-
-func TestBinaryProvenance(t *testing.T) {
-	record := Record{Key: RecordKey{Team: "team", Kind: KindBinary}, Digest: digest("bin"), Provenance: ProvenanceCloud}
-	exec := BinaryExecution{Record: record, Digest: record.Digest, Trust: BuildTrust{Team: "team"}}
-	if err := CheckBinaryExecution(exec); err != nil {
-		t.Fatal(err)
-	}
-	exec.Record.Provenance = ProvenanceLocal
-	if err := CheckBinaryExecution(exec); err == nil {
-		t.Fatal("local binary trusted without opt-in")
-	}
-	exec.Trust.TrustLocalBuilds = true
-	if err := CheckBinaryExecution(exec); err != nil {
-		t.Fatal(err)
-	}
-	exec.Digest = digest("changed")
-	if err := CheckBinaryExecution(exec); !errors.Is(err, ErrIntegrity) {
-		t.Fatalf("changed binary: %v", err)
 	}
 }
 

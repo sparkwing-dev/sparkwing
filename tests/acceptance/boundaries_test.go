@@ -99,7 +99,6 @@ func TestStorageBoundaries(t *testing.T) {
 	runCell(t, "checkStorageCAS", "in-process", checkStorageCAS)
 	runCell(t, "checkStorageReceipts", "in-process", checkStorageReceipts)
 	runCell(t, "checkStorageNamespaces", "in-process", checkStorageNamespaces)
-	runCell(t, "checkStorageBinaryTrust", "in-process", checkStorageBinaryTrust)
 	runCell(t, "checkStorageOwnerReceipts", "in-process", checkStorageOwnerReceipts)
 	runCell(t, "checkStoragePresence", "in-process", checkStoragePresence)
 	runCell(t, "checkStorageRemoteCache", "in-process", checkStorageRemoteCache)
