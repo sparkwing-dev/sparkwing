@@ -50,8 +50,8 @@ under current authority. Staging cleanup follows settlement.
 Blob collection uses the store's live reference graph and a 24-hour tombstone
 grace period. References added after marking protect their bytes at collection.
 Object age alone cannot delete a live blob. Both physical backends implement the
-leased collector's deletion interface. Replaying a deletion of absent bytes
-succeeds. The controller supplies its configured backend to the leased
+collector's deletion interface. Replaying a deletion of absent bytes
+succeeds. The controller supplies its configured backend to the
 retained-data pass. Standalone controllers install S3 or, without a bucket,
 filesystem storage under their home directory's `data` directory. Filesystem
 transfers use signed data upload, object download and log upload routes.
@@ -131,11 +131,11 @@ log object once its class has passed since its upload was signed, so set the
 rule longer than the class (for example the class plus seven days) as a
 backstop. Tag and size conditions cannot establish expiry for all objects. The
 backend reads the rules and leaves their configuration to the operator.
-The filesystem backend provides an expiry pass for the controller's maintenance
-lease. It expires objects by their stored class, including retired classes.
+The filesystem backend provides an expiry pass for the controller's hourly
+maintenance. It expires objects by their stored class, including retired classes.
 An identical upload retry preserves the original age. The pass leaves CAS data
-to its separate reachability rules. The controller runs this pass after renewing
-its maintenance lease when its physical backend is configured. Standalone
+to its separate reachability rules. The controller runs this pass in its
+retained-data pass when its physical backend is configured. Standalone
 controllers construct this backend at startup. Host log bindings remain pending.
 
 The reader uses authorized segment records, verifies each segment before sending

@@ -107,7 +107,7 @@ type Approval struct {
 - `func (a *Approval) NeedsIfPresent(deps ...Dep) *Approval` -- NeedsIfPresent permits plans whose optional prerequisite is absent.
 - `func (a *Approval) OnFailure(id string, body any) *JobNode` -- OnFailure declares and returns a recovery job for a failed gate.
 - `func (a *Approval) Optional() *Approval` -- Optional excludes a denied or expired gate from required run success.
-- `func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval` -- SkipIf runs on the run's coordinator before requesting approval, holding no concurrency capacity.
+- `func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval` -- SkipIf runs in a separate evaluation job before requesting approval, holding no concurrency capacity.
 
 ### type ApprovalConfig
 
