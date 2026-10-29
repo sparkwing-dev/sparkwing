@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -14,8 +13,7 @@ func checkTeamAdministrationTx(ctx context.Context, tx *storeTx, team Team, acto
 	if err != nil {
 		return p, err
 	}
-	c := p.Capability
-	if c.Binding.Kind != capability.BindingNone || c.Audience != capability.Controller || (c.Subject.Kind != capability.SubjectAccount && c.Subject.Kind != capability.SubjectLocal) || !slices.Contains(c.Grants, capability.TeamAdmin) {
+	if !teamAdministrator(p.Capability) {
 		return p, authorityError(apierr.Forbidden, "current team administration is required")
 	}
 	return p, nil

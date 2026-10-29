@@ -79,7 +79,7 @@ func (c *engineClient) RotateSecrets(ctx context.Context, input controllerwire.S
 	if !validSelector(input.IdempotencyKey) {
 		return result, &apierr.Error{Code: apierr.BadRequest, Message: "secret rotation requires an idempotency key"}
 	}
-	err := c.request(ctx, "POST", "/api/v1/secrets/rotate", "/api/v1/secrets/rotate", input.IdempotencyKey, input, &result)
+	err := c.request(ctx, "POST", "/api/v1/secrets/rotate", "/api/v1/secrets/rotate", input.IdempotencyKey, nil, &result)
 	if err != nil {
 		return result, err
 	}

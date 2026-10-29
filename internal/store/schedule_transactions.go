@@ -64,9 +64,6 @@ func (t *Tenant) scheduleAuthorityTx(ctx context.Context, tx *storeTx, ref capab
 	if err != nil {
 		return p, err
 	}
-	if p.Capability.Subject.Kind == capability.SubjectLocal && p.Capability.Parent == nil && p.Capability.Binding.Kind == capability.BindingNone && t.team == DefaultTeam {
-		p.Class = capability.CredentialPeer
-	}
 	route, ok := capability.LookupRoute("PUT", "/api/v1/schedules/repos")
 	if !ok {
 		return p, authorityError(apierr.PolicyMissing, "schedule policy is unavailable")

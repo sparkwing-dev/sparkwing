@@ -67,7 +67,7 @@ func TestSecretManagementRetriesExactWriteAndRotation(t *testing.T) {
 					return nil, io.EOF
 				}
 				if rotation {
-					return engineResponse(200, `{"rotated":1,"skipped":[],"replayed":true}`), nil
+					return engineResponse(200, `{"rotated":1,"skipped":[],"git_credentials":0,"replayed":true}`), nil
 				}
 				return engineResponse(200, `{"secret":{"name":"REGION","principal":"alice","masked":false,"shared":false,"bound":true,"created_at":1,"updated_at":1},"replayed":true}`), nil
 			})
@@ -79,6 +79,9 @@ func TestSecretManagementRetriesExactWriteAndRotation(t *testing.T) {
 			}
 			if err != nil || len(bodies) != 2 || bodies[0] != bodies[1] || !reflect.DeepEqual(keys, []string{"stable", "stable"}) {
 				t.Fatalf("retry changed: %v %v %v", bodies, keys, err)
+			}
+			if rotation && bodies[0] != "" {
+				t.Fatalf("rotation sent a body the controller refuses: %q", bodies[0])
 			}
 			if !rotation && (!strings.Contains(bodies[0], `"value":""`) || !strings.Contains(bodies[0], `"masked":false`)) {
 				t.Fatalf("explicit zero lost: %s", bodies[0])
@@ -120,7 +123,7 @@ func TestSecretManagementRejectsMissingOrConflictingResponses(t *testing.T) {
 }
 
 func TestSecretManagementRejectsInvalidRotationAndDeletion(t *testing.T) {
-	for _, body := range []string{`{}`, `{"rotated":-1,"skipped":[],"replayed":false}`, `{"rotated":1,"skipped":[{}],"replayed":false}`, `{"rotated":1,"skipped":[{"name":"TOKEN"},{"name":"TOKEN"}],"replayed":false}`} {
+	for _, body := range []string{`{}`, `{"rotated":-1,"skipped":[],"git_credentials":0,"replayed":false}`, `{"rotated":1,"skipped":[{}],"git_credentials":0,"replayed":false}`, `{"rotated":1,"skipped":[{"name":"TOKEN"},{"name":"TOKEN"}],"git_credentials":0,"replayed":false}`} {
 		c := testEngine(t, func(*http.Request) (*http.Response, error) { return engineResponse(200, body), nil })
 		if _, err := c.RotateSecrets(t.Context(), controllerwire.SecretRotationRequest{IdempotencyKey: "key"}); err == nil {
 			t.Fatalf("invalid rotation accepted: %s", body)
