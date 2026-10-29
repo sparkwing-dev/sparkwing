@@ -142,7 +142,11 @@ func runVetTouched(ctx context.Context) error {
 // price to pay, not the push boundary's.
 func runFastLintTouched(ctx context.Context) error {
 	return overTouchedPackages(ctx, "lint-touched", "lint", "Go file(s)", existingGoFiles,
-		func(_ string, pkgs []string) string {
+		func(module string, pkgs []string) string {
+			pkgs = defaultBuildPackages(module, pkgs, true)
+			if len(pkgs) == 0 {
+				return "true"
+			}
 			return fastLintCommand(prePushTaskCores(runtime.NumCPU()), pkgs)
 		})
 }
@@ -209,9 +213,9 @@ func buildableGoFiles(all []string) []string {
 	return out
 }
 
-// safety: go build and go vet refuse a package whose every file the default
-// build excludes, such as the qatrust-only bin/qaindex, so the default pass
-// drops it; vet's qatrust pass still judges it.
+// safety: go build, go vet and golangci-lint refuse a package whose every file
+// the default build excludes, such as the qatrust-only bin/qaindex, so the
+// default pass drops it; vet's qatrust pass still judges it.
 func defaultBuildPackages(module string, pkgs []string, withTests bool) []string {
 	out := make([]string, 0, len(pkgs))
 	for _, pkg := range pkgs {

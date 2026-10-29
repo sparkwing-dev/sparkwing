@@ -230,4 +230,8 @@ func TestTouchedStepsPassAPackageOnlyTheQATrustFlavourBuilds(t *testing.T) {
 	if err := runVetTouched(context.Background()); err != nil {
 		t.Errorf("vet-touched refused a package the default build excludes: %v", err)
 	}
+	requireGolangciLint(t)
+	if err := runFastLintTouched(context.Background()); err != nil {
+		t.Errorf("lint-touched refused a package the default build excludes: %v", err)
+	}
 }
