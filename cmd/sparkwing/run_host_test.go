@@ -199,7 +199,7 @@ func TestLocalForegroundRunReportsCommittedOutcome(t *testing.T) {
 			var out bytes.Buffer
 			flags, args := parseRunFlagsArgs([]string{"--sw-output=json", "--", "--password=private-value"})
 			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
-			if (err == nil) != (outcome == "success") {
+			if (err == nil) != (outcome == "success" || outcome == "dry_run") {
 				t.Fatalf("outcome=%s error=%v", outcome, err)
 			}
 			var terminal struct {
