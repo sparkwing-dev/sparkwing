@@ -45,7 +45,7 @@ JSON emits event records followed by a page record with truncated. Plain and pre
 | `--since DURATION` | Show only events recorded within this lookback, such as 30m, 12h, 7d or 2w. |
 | `--kind KIND` | Show only events of this kind. Repeatable; comma-separated values are accepted. |
 | `--incarnation N` | Show only events from this numbered controller start, the N in the #N.seq column; zero shows every start. Must be at least 0. |
-| `--limit N` | Maximum number of records to print, at least one; continue with --cursor when more exist. |
+| `--limit N` | Maximum number of records to print, at least one. Raise it to include older records. |
 | `--explain` | Print the complete admission timeline for the --run run and all its descendant runs, without pagination. |
 
 ## `sparkwing daemon recover-state`

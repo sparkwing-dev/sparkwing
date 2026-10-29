@@ -203,7 +203,7 @@ JSON emits matching records and a page record with next_cursor and truncated. Qu
 | `--sha PREFIX` | Search only runs whose commit SHA starts with this prefix, ignoring case; prefix with ! to exclude. |
 | `--started-after DATE` | Search only runs that started at or after this time: today, yesterday, a lookback such as 7d, YYYY-MM-DD, YYYY-MM-DD HH:MM:SS or RFC 3339, in local time. |
 | `--started-before DATE` | Search only runs that started at or before this time, in the same formats as --started-after. |
-| `--limit N` | Maximum number of records to print, at least one; continue with --cursor when more exist. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
 | `--max-matches N` | Most matching lines returned from each job or owner log, 5 by default; zero removes the cap. |
 | `-q, --quiet` | Print each matching run ID once instead of the matching lines. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
@@ -239,7 +239,7 @@ JSON emits compact run records and a page record with next_cursor and truncated.
 | `--started-before DATE` | List only runs that started at or before this time, in the same formats as --started-after. |
 | `--finished-after DATE` | List only runs that finished at or after this time, in the same formats as --started-after; unfinished runs are left out. |
 | `--finished-before DATE` | List only runs that finished at or before this time, in the same formats as --started-after; unfinished runs are left out. |
-| `--limit N` | Maximum number of records to print, at least one; continue with --cursor when more exist. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 | `-q, --quiet` | Print only run IDs, or only pipeline names or group keys with --by-pipeline or --group-by. |
 | `--by-pipeline` | Print one row per pipeline with run and failure totals, the last run and recent statuses, read across every matching page. |
@@ -289,7 +289,7 @@ JSON emits tagged log records. Plain emits log lines. Use --grep without --run t
 | `--sha PREFIX` | When searching with --grep and no --run, search only runs whose commit SHA starts with this prefix, ignoring case. |
 | `--started-after DATE` | When searching with --grep and no --run, search only runs that started at or after this time: today, yesterday, a lookback such as 7d, YYYY-MM-DD or RFC 3339. |
 | `--started-before DATE` | When searching with --grep and no --run, search only runs that started at or before this time, in the same formats as --started-after. |
-| `--limit N` | Maximum number of records to print, at least one; continue with --cursor when more exist. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
 | `--max-matches N` | When searching with --grep and no --run, the most matching lines returned from each log, 5 by default; zero removes the cap. |
 | `-q, --quiet` | When searching with --grep and no --run, print each matching run ID once instead of the matching lines. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |

@@ -56,4 +56,3 @@ type ExitCode int
 const (
 	ExitUsage ExitCode = 2
 )
-

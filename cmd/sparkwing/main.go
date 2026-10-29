@@ -88,6 +88,11 @@ func exitError(code int, err error) error {
 const exitRefused = 4
 
 func observationError(err error) error {
+	var classified *cliError
+	var usage *clisurface.UsageError
+	if err == nil || errors.As(err, &classified) || errors.As(err, &usage) {
+		return err
+	}
 	var failure *apierr.Error
 	if errors.As(err, &failure) {
 		switch failure.Code {

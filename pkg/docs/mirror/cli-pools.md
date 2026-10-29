@@ -41,8 +41,8 @@ Create a rule through the team-admin route with an idempotency key. JSON preserv
 | `--help-all` | Include uncommon flags in command help. |
 | `--pool POOL` | Runner pool name. (required) |
 | `--repo REPO` | GitHub repositories the rule admits, as owner/name; each must be reachable through the team's GitHub App, and naming one grants nothing on its own. Repeatable; comma-separated values are accepted. (required) |
-| `--branch BRANCH` | Branch name patterns the rule admits, with * and ? wildcards that do not cross a slash; omitted, every branch of the repositories qualifies. Repeatable; comma-separated values are accepted. |
-| `--source SOURCE` | Admit only runs that a GitHub App webhook delivery started; omitted, any run whose repository was verified qualifies. Values: github. |
+| `--branch BRANCH` | Branch name patterns the rule admits, with * and ? wildcards that do not cross a slash; omitted, every ref of the repositories qualifies, tags included. Repeatable; comma-separated values are accepted. |
+| `--source SOURCE` | Admit only runs that a GitHub App webhook delivery started; omitted, schedules whose commit the GitHub App resolved also qualify, while runs proved by GitHub Actions or fetched by the controller never do. Values: github. |
 | `--route` | Also keep runs from the matching repositories and branches that select no runner on this pool's self-hosted runners instead of Sparkwing Cloud. |
 | `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
 

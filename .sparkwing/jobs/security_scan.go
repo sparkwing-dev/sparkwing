@@ -44,7 +44,7 @@ func (SecurityScan) Help() string {
 func (SecurityScan) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Run every scanner and print the gosec summary", Command: "sparkwing run security-scan"},
-		{Comment: "Write the SARIF where a workflow can upload it", Command: "sparkwing run security-scan --report-dir=/tmp/security"},
+		{Comment: "Write the SARIF where a workflow can upload it", Command: "sparkwing run security-scan -- --report-dir=/tmp/security"},
 		{Comment: "List every gosec suppression the tree carries", Command: "grep -rn '#nosec' --include='*.go' ."},
 	}
 }

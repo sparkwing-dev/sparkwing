@@ -39,7 +39,7 @@ Enumerate every doc topic
 | `--guides` | List the embedded reading guides and the topics each covers instead of topic pages. |
 | `--versions` | List the docs versions embedded in this CLI, adding the ones published on sparkwing.dev with --web. |
 | `--search TEXT` | Text to match against record names and summaries; log text is not searched. |
-| `--limit N` | Maximum number of records to print, at least one; continue with --cursor when more exist. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 | `--web` | List topics from sparkwing.dev for the selected version instead of the docs embedded in this CLI. |
 | `--version vX.Y.Z` | Docs version to list; without --web it must match this CLI's embedded version or latest. |
@@ -95,7 +95,7 @@ Find the section that answers a question
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--limit N` | Maximum number of records to print, at least one; continue with --cursor when more exist. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 | `--search TEXT` | Text to match against record names and summaries; log text is not searched. |
 | `--body` | Include document bodies in search results. |

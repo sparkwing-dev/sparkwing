@@ -50,9 +50,9 @@ func (JevSweeper) Help() string {
 
 func (JevSweeper) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Preview the whole-codebase audit without using the API", Command: "sparkwing run jev-sweeper --dry-run"},
-		{Comment: "Run a wider manual audit", Command: "sparkwing run jev-sweeper --max-functions 32 --max-pairs 24"},
-		{Comment: "Reproduce shuffled coverage from an earlier run", Command: "sparkwing run jev-sweeper --shuffle-seed 2026-09-19"},
+		{Comment: "Preview the whole-codebase audit without using the API", Command: "sparkwing run jev-sweeper -- --dry-run"},
+		{Comment: "Run a wider manual audit", Command: "sparkwing run jev-sweeper -- --max-functions 32 --max-pairs 24"},
+		{Comment: "Reproduce shuffled coverage from an earlier run", Command: "sparkwing run jev-sweeper -- --shuffle-seed 2026-09-19"},
 	}
 }
 

@@ -55,8 +55,8 @@ func (AdmissionStress) Help() string {
 func (AdmissionStress) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Run every workload phase as batch pressure", Command: "sparkwing run admission-stress"},
-		{Comment: "Model a short latency-sensitive run", Command: "sparkwing run admission-stress-light-sequential --class interactive"},
-		{Comment: "Saturate CPU and memory while testing another run", Command: "sparkwing run admission-stress-heavy --class batch"},
+		{Comment: "Model a short latency-sensitive run", Command: "sparkwing run admission-stress-light-sequential -- --class interactive"},
+		{Comment: "Saturate CPU and memory while testing another run", Command: "sparkwing run admission-stress-heavy -- --class batch"},
 	}
 }
 
