@@ -21,6 +21,11 @@ export default function StatusLabel({ status }: { status: string }) {
       text: "text-green-400",
       label: "success",
     },
+    dry_run: {
+      bg: "bg-violet-500/15",
+      text: "text-violet-400",
+      label: "dry run",
+    },
     failed: { bg: "bg-red-500/15", text: "text-red-400", label: "failed" },
     memoized: { bg: "bg-cyan-500/15", text: "text-cyan-400", label: "memoized" },
     paused: {

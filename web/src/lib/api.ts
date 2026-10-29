@@ -301,7 +301,7 @@ export interface RunDetailWire {
   id: string;
   number: number;
   team: string;
-  status: string;
+  status: "pending" | "running" | "success" | "dry_run" | "failed" | "cancelled";
   failure?: string;
   state_seq: number;
   inputs: {
