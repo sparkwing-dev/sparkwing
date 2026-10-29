@@ -70,8 +70,8 @@ func (TemplateVerify) Help() string {
 func (TemplateVerify) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Verify the whole template registry", Command: "sparkwing run template-verify"},
-		{Comment: "Render the fan-out DAG without running", Command: "sparkwing pipeline plan --static --name template-verify"},
-		{Comment: "Re-verify every template, ignoring recorded proofs", Command: "sparkwing run template-verify --exhaustive"},
+		{Comment: "Render the fan-out DAG without running", Command: "sparkwing pipeline plan --pipeline template-verify"},
+		{Comment: "Re-verify every template, ignoring recorded proofs", Command: "sparkwing run template-verify -- --exhaustive"},
 	}
 }
 

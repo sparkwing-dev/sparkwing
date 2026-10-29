@@ -37,7 +37,7 @@ func (ReleaseVerify) Help() string {
 
 func (ReleaseVerify) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Judge the tag before it builds", Command: "sparkwing run release-verify --version v0.50.4"},
+		{Comment: "Judge the tag before it builds", Command: "sparkwing run release-verify -- --version v0.50.4"},
 	}
 }
 
